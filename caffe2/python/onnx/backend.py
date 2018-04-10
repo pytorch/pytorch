@@ -345,7 +345,7 @@ class Caffe2Backend(Backend):
         pred_mh = ModelHelper()
 
         def make_rnn(direction_offset):
-            name = _dummy_name()
+            name = cls._dummy_name()
 
             # input and recurrence biases are squashed together in
             # onnx but not in caffe2
@@ -412,9 +412,9 @@ class Caffe2Backend(Backend):
             hidden_t_all_f, hidden_t_last_f = make_rnn(0)
             hidden_t_all_b, hidden_t_last_b = make_rnn(1)
             pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
-                               [n.outputs[0], _dummy_name()], axis=2)
+                               [n.outputs[0], cls._dummy_name()], axis=2)
             pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], _dummy_name()], axis=0)
+                               [n.outputs[1], cls._dummy_name()], axis=0)
 
         if sequence_lens is not None:
             pred_mh.net.VariableLengthSequencePadding(
@@ -448,7 +448,7 @@ class Caffe2Backend(Backend):
         pred_mh = ModelHelper()
 
         def make_lstm(direction_offset):
-            name = _dummy_name()
+            name = cls._dummy_name()
 
             # input and recurrence biases are squashed together in
             # onnx but not in caffe2
@@ -481,7 +481,7 @@ class Caffe2Backend(Backend):
                     dim0 = i * hidden_size, (i+1) * hidden_size
                     starts, ends = zip(dim0, *extra_dims)
                     init_net.Slice(name_from, x, starts=starts, ends=ends)
-                init_net.Concat([xi, xf, xo, xc], ['%s/%s' % (name, name_to), _dummy_name()], axis=0)
+                init_net.Concat([xi, xf, xo, xc], ['%s/%s' % (name, name_to), cls._dummy_name()], axis=0)
 
             initial_h_sliced = name + '/initial_h'
             init_net.Slice(initial_h, initial_h_sliced,
@@ -534,11 +534,11 @@ class Caffe2Backend(Backend):
             hidden_t_all_f, hidden_t_last_f, cell_last_f = make_lstm(0)
             hidden_t_all_b, hidden_t_last_b, cell_last_b = make_lstm(1)
             pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
-                               [n.outputs[0], _dummy_name()], axis=2)
+                               [n.outputs[0], cls._dummy_name()], axis=2)
             pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], _dummy_name()], axis=0)
+                               [n.outputs[1], cls._dummy_name()], axis=0)
             pred_mh.net.Concat([cell_last_f, cell_last_b],
-                               [n.outputs[2], _dummy_name()], axis=0)
+                               [n.outputs[2], cls._dummy_name()], axis=0)
 
         if sequence_lens is not None:
             pred_mh.net.VariableLengthSequencePadding(
@@ -573,7 +573,7 @@ class Caffe2Backend(Backend):
         pred_mh = ModelHelper()
 
         def make_gru(direction_offset):
-            name = _dummy_name()
+            name = cls._dummy_name()
 
             # input and recurrence biases are squashed together in
             # onnx but not in caffe2
@@ -607,7 +607,7 @@ class Caffe2Backend(Backend):
                     starts, ends = zip(dim0, *extra_dims)
                     init_net.Slice(name_from, x, starts=starts, ends=ends)
                 if do_concat:
-                    init_net.Concat([xr, xz, xh], ['%s/%s' % (name, name_to), _dummy_name()], axis=0)
+                    init_net.Concat([xr, xz, xh], ['%s/%s' % (name, name_to), cls._dummy_name()], axis=0)
 
             initial_h_sliced = name + '/initial_h'
             init_net.Slice(initial_h, initial_h_sliced,
@@ -655,9 +655,9 @@ class Caffe2Backend(Backend):
             hidden_t_all_f, hidden_t_last_f = make_gru(0)
             hidden_t_all_b, hidden_t_last_b = make_gru(1)
             pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
-                               [n.outputs[0], _dummy_name()], axis=2)
+                               [n.outputs[0], cls._dummy_name()], axis=2)
             pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], _dummy_name()], axis=0)
+                               [n.outputs[1], cls._dummy_name()], axis=0)
 
         if sequence_lens is not None:
             pred_mh.net.VariableLengthSequencePadding(
@@ -947,6 +947,8 @@ class Caffe2Backend(Backend):
 
     @classmethod
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
+
+
         device_option = get_device_option(Device(device))
 
         init_model = cls.optimize_onnx(onnx_model, init=True)
