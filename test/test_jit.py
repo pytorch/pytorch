@@ -2340,6 +2340,49 @@ class TestScript(TestCase):
             m = M2()
             m(torch.zeros(4, 3))
 
+    def test_rnn_trace_override(self):
+        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+        T, B, C = 3, 5, 7
+
+        class PadPackedWrapper(torch.nn.Module):
+            def __init__(self):
+                super(PadPackedWrapper, self).__init__()
+
+            def forward(self, x, seq_lens):
+                x = pack_padded_sequence(x, seq_lens)
+                x, _ = pad_packed_sequence(x)
+                return x
+
+        x = np.ones((T, B, C))
+        seq_lens = np.array([3, 3, 2, 2, 1], dtype=np.int32)
+        # set padding value so we can test equivalence
+        for b in range(B):
+            if seq_lens[b] < T:
+                x[seq_lens[b]:, b, :] = 0
+        seq_lens = torch.from_numpy(seq_lens)
+        x = torch.autograd.Variable(torch.from_numpy(x), requires_grad=True)
+
+        m = PadPackedWrapper()
+        m_traced = torch.jit.trace(x, seq_lens)(m)
+
+        y = m(x, seq_lens)
+        loss = torch.sum(y)
+        loss.backward()
+        grad = x.grad.clone()
+        x.grad.zero_()
+
+        y_traced = m_traced(x, seq_lens)
+        loss_traced = torch.sum(y_traced)
+        loss_traced.backward()
+        grad_traced = x.grad.clone()
+
+        self.assertEqual(y_traced, x)
+        self.assertEqual(y_traced, y)
+        self.assertEqual(grad, grad_traced)
+
+        f = io.BytesIO()
+        torch.onnx._export(m, (x, seq_lens), f, verbose=False)
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
