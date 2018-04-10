@@ -54,7 +54,7 @@ public:
       output << "subgraph cluster" << i << " {\n";
       output << "style=dotted;\n";
       for (const auto &node : subgraph->getNodes()) {
-        output << static_cast<uint64_t>(node);
+        output << node;
         output << ";\n";
       }
       output << "}\n";
