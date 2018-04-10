@@ -24,16 +24,16 @@ class TestIndexing(TestCase):
     def test_step(self):
         v = torch.arange(10)
         self.assertEqual(v[::1], v)
-        self.assertEqual(v[::2].data.tolist(), [0, 2, 4, 6, 8])
-        self.assertEqual(v[::3].data.tolist(), [0, 3, 6, 9])
-        self.assertEqual(v[::11].data.tolist(), [0])
-        self.assertEqual(v[1:6:2].data.tolist(), [1, 3, 5])
+        self.assertEqual(v[::2].tolist(), [0, 2, 4, 6, 8])
+        self.assertEqual(v[::3].tolist(), [0, 3, 6, 9])
+        self.assertEqual(v[::11].tolist(), [0])
+        self.assertEqual(v[1:6:2].tolist(), [1, 3, 5])
 
     def test_step_assignment(self):
         v = torch.zeros(4, 4)
-        v[0, 1::2] = torch.Tensor([3, 4])
-        self.assertEqual(v[0].data.tolist(), [0, 3, 0, 4])
-        self.assertEqual(v[1:].data.sum(), 0)
+        v[0, 1::2] = torch.tensor([3., 4.])
+        self.assertEqual(v[0].tolist(), [0, 3, 0, 4])
+        self.assertEqual(v[1:].sum(), 0)
 
     def test_byte_mask(self):
         v = torch.randn(5, 7, 3)
@@ -41,8 +41,8 @@ class TestIndexing(TestCase):
         self.assertEqual(v[mask].shape, (3, 7, 3))
         self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
 
-        v = torch.Tensor([1])
-        self.assertEqual(v[v == 0], torch.Tensor())
+        v = torch.tensor([1.])
+        self.assertEqual(v[v == 0], torch.tensor([]))
 
     def test_multiple_byte_mask(self):
         v = torch.randn(5, 7, 3)
@@ -54,7 +54,7 @@ class TestIndexing(TestCase):
     def test_byte_mask2d(self):
         v = torch.randn(5, 7, 3)
         c = torch.randn(5, 7)
-        num_ones = (c > 0).data.sum()
+        num_ones = (c > 0).sum()
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
 
@@ -67,21 +67,21 @@ class TestIndexing(TestCase):
     def test_int_indices2d(self):
         # From the NumPy indexing example
         x = torch.arange(0, 12).view(4, 3)
-        rows = torch.LongTensor([[0, 0], [3, 3]])
-        columns = torch.LongTensor([[0, 2], [0, 2]])
-        self.assertEqual(x[rows, columns].data.tolist(), [[0, 2], [9, 11]])
+        rows = torch.tensor([[0, 0], [3, 3]])
+        columns = torch.tensor([[0, 2], [0, 2]])
+        self.assertEqual(x[rows, columns].tolist(), [[0, 2], [9, 11]])
 
     def test_int_indices_broadcast(self):
         # From the NumPy indexing example
         x = torch.arange(0, 12).view(4, 3)
-        rows = torch.LongTensor([0, 3])
-        columns = torch.LongTensor([0, 2])
+        rows = torch.tensor([0, 3])
+        columns = torch.tensor([0, 2])
         result = x[rows[:, None], columns]
-        self.assertEqual(result.data.tolist(), [[0, 2], [9, 11]])
+        self.assertEqual(result.tolist(), [[0, 2], [9, 11]])
 
     def test_empty_index(self):
         x = torch.arange(0, 12).view(4, 3)
-        idx = torch.LongTensor()
+        idx = torch.tensor([], dtype=torch.long)
         self.assertEqual(x[idx].numel(), 0)
 
         # empty assignment should have no effect but not throw an exception
@@ -191,7 +191,7 @@ class TestIndexing(TestCase):
         # From the NumPy indexing example
         x = torch.arange(0, 12).view(4, 3)
         self.assertEqual(x[1:2, 1:3], x[1:2, [1, 2]])
-        self.assertEqual(x[1:2, 1:3].data.tolist(), [[4, 5]])
+        self.assertEqual(x[1:2, 1:3].tolist(), [[4, 5]])
 
         # Check that it is a copy
         unmodified = x.clone()
@@ -206,21 +206,21 @@ class TestIndexing(TestCase):
     def test_int_assignment(self):
         x = torch.arange(0, 4).view(2, 2)
         x[1] = 5
-        self.assertEqual(x.data.tolist(), [[0, 1], [5, 5]])
+        self.assertEqual(x.tolist(), [[0, 1], [5, 5]])
 
         x = torch.arange(0, 4).view(2, 2)
         x[1] = torch.arange(5, 7)
-        self.assertEqual(x.data.tolist(), [[0, 1], [5, 6]])
+        self.assertEqual(x.tolist(), [[0, 1], [5, 6]])
 
     def test_byte_tensor_assignment(self):
         x = torch.arange(0, 16).view(4, 4)
         b = torch.ByteTensor([True, False, True, False])
-        value = torch.Tensor([3, 4, 5, 6])
+        value = torch.tensor([3., 4., 5., 6.])
         x[b] = value
         self.assertEqual(x[0], value)
-        self.assertEqual(x[1].data, torch.arange(4, 8))
+        self.assertEqual(x[1], torch.arange(4, 8))
         self.assertEqual(x[2], value)
-        self.assertEqual(x[3].data, torch.arange(12, 16))
+        self.assertEqual(x[3], torch.arange(12, 16))
 
     def test_variable_slicing(self):
         x = torch.arange(0, 16).view(4, 4)
@@ -230,7 +230,7 @@ class TestIndexing(TestCase):
 
     def test_ellipsis_tensor(self):
         x = torch.arange(0, 9).view(3, 3)
-        idx = torch.LongTensor([0, 2])
+        idx = torch.tensor([0, 2])
         self.assertEqual(x[..., idx].tolist(), [[0, 2],
                                                 [3, 5],
                                                 [6, 8]])
@@ -287,7 +287,7 @@ class TestIndexing(TestCase):
 
 class NumpyTests(TestCase):
     def test_index_no_floats(self):
-        a = torch.Tensor([[[5]]])
+        a = torch.tensor([[[5.]]])
 
         self.assertRaises(IndexError, lambda: a[0.0])
         self.assertRaises(IndexError, lambda: a[0, 0.0])
@@ -326,10 +326,10 @@ class NumpyTests(TestCase):
     def test_empty_fancy_index(self):
         # Empty list index creates an empty array
         a = tensor([1, 2, 3])
-        self.assertEqual(a[[]], torch.Tensor())
+        self.assertEqual(a[[]], torch.tensor([]))
 
         b = tensor([]).long()
-        self.assertEqual(a[[]], torch.LongTensor())
+        self.assertEqual(a[[]], torch.tensor([], dtype=torch.long))
 
         b = tensor([]).float()
         self.assertRaises(RuntimeError, lambda: a[b])
@@ -364,8 +364,8 @@ class NumpyTests(TestCase):
                     [4, 5, 6],
                     [7, 8, 9]])
 
-        self.assertEqual(a[0].data, [1, 2, 3])
-        self.assertEqual(a[-1].data, [7, 8, 9])
+        self.assertEqual(a[0], [1, 2, 3])
+        self.assertEqual(a[-1], [7, 8, 9])
 
         # Index out of bounds produces IndexError
         self.assertRaises(IndexError, a.__getitem__, 1 << 30)
