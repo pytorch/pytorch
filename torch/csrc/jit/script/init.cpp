@@ -30,9 +30,15 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   : self(std::move(self)) {}
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::vector<Value*> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
+  virtual std::vector<Value*> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
     if (attributes.size() > 0)
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
+    // TODO: remove when we support tuple packing for PythonOp
+    if (cd.allow_varargs && cd.n_outputs == 1) {
+      cd.allow_varargs = false;
+    }
+    if (cd.allow_varargs)
+      throw ErrorReport(loc) << "Vararg outputs are currently not supported for PythonOp.";
     // Release the function object so we can wrap it in a PythonOp
     Graph& g = *m.graph();
     py::object func = self;
@@ -43,7 +49,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     for(auto i : inputs)
       new_node->addInput(i);
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < n_outputs; ++i)
+    for(size_t i = 0; i < cd.n_outputs; ++i)
       outputs.push_back(new_node->addOutput());
     return outputs;
   }
@@ -105,9 +111,9 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     }
     return PythonValue::asValue(loc, m);
   }
-  virtual std::vector<std::shared_ptr<SugaredValue>> unrolledFor(SourceRange loc, Method& m) override {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
     if(!py::isinstance<py::tuple>(self))
-      return PythonValue::unrolledFor(loc, m);
+      return PythonValue::asTuple(loc, m);
 
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
@@ -150,13 +156,16 @@ struct MethodValue : public SugaredValue {
   std::string kind() const override {
     return "method";
   }
-  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
+  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
     if(attributes.size() != 0) {
       throw ErrorReport(loc) << "not yet implemented - calls to python functions using keyword arguments";
     }
     ensureSizeMatches(loc, method.num_inputs(), inputs.size(), "inputs");
     auto outputs = caller.emit_call_to(method, inputs);
-    ensureSizeMatches(loc, outputs.size(), n_outputs, "outputs");
+    // Allow for tuples. TODO: starred exprs?
+    if (!cd.allow_varargs) {
+      ensureSizeMatches(loc, outputs.size(), cd.n_outputs, "outputs");
+    }
     return outputs;
   }
 private:
@@ -199,14 +208,14 @@ struct ModuleValue : public SugaredValue {
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
   // call module.forward
-  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
-    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_outputs);
+  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
+    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, cd);
   }
 
-  virtual std::vector<std::shared_ptr<SugaredValue>> unrolledFor(SourceRange loc, Method& m) override {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
     py::object py_module = py::cast(module);
     if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
-      return SugaredValue::unrolledFor(loc, m);
+      return SugaredValue::asTuple(loc, m);
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(py::handle module : py_module) {
       py::object obj = py::reinterpret_borrow<py::object>(module);
