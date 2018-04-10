@@ -250,6 +250,16 @@
       name: grad_grid
   variants: function
 
+- func: cumsum(Tensor self, int64_t dim, *, optional<ScalarType> dtype=nullopt) -> Tensor
+
+- func: cumsum_out(Tensor result, Tensor self, int64_t dim, *, optional<ScalarType> dtype=nullopt) -> Tensor
+  variants: function
+
+- func: cumprod(Tensor self, int64_t dim, *, optional<ScalarType> dtype=nullopt) -> Tensor
+
+- func: cumprod_out(Tensor result, Tensor self, int64_t dim, *, optional<ScalarType> dtype=nullopt) -> Tensor
+  variants: function
+
 - func: det(Tensor self) -> Tensor
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
@@ -653,14 +663,21 @@
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
-- func: sum(Tensor self) -> Tensor
+- func: sum(Tensor self, optional<ScalarType> dtype=nullopt) -> Tensor
+
+- func: _sum(Tensor self) -> Tensor
   dispatch:
     CPU: _sum_cpu
     CUDA: _sum_cuda
 
-- func: sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: sum(Tensor self, int64_t dim, bool keepdim=False, optional<ScalarType> dtype=nullopt) -> Tensor
 
-- func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: _sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False, optional<ScalarType> dtype=nullopt) -> Tensor
+  variants: function
+
+- func: _sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
   dispatch:
     CPU: _sum_out_cpu
@@ -676,14 +693,21 @@
     CPU: _sqrt_out_cpu
     CUDA: _sqrt_out_cuda
 
-- func: prod(Tensor self) -> Tensor
+- func: prod(Tensor self, *, optional<ScalarType> dtype=nullopt) -> Tensor
+
+- func: _prod(Tensor self) -> Tensor
   dispatch:
     CPU: _prod_cpu
     CUDA: _prod_cuda
 
-- func: prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: prod(Tensor self, int64_t dim, bool keepdim=False, *, optional<ScalarType> dtype=nullopt) -> Tensor
 
-- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: _prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False, *, optional<ScalarType> dtype=nullopt) -> Tensor
+  variants: function
+
+- func: _prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
   dispatch:
     CPU: _prod_out_cpu

@@ -15,7 +15,36 @@
 namespace at {
 namespace native {
 
+static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
+  ScalarType scalarType = self.type().scalarType();
+  ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType) ? ScalarType::Long : scalarType);
+  return self.toType(upcast_scalarType);
+}
+
+Tensor cumsum(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
+  return at::_cumsum(integer_upcast(self, dtype), dim);
+}
+
+Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
+  // result type is favored over dtype
+  return at::_cumsum_out(result, self.toType(result.type().scalarType()), dim);
+}
+
+Tensor cumprod(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
+  return at::_cumprod(integer_upcast(self, dtype), dim);
+}
+
+Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
+  // result type is favored over dtype
+  return at::_cumprod_out(result, self.toType(result.type().scalarType()), dim);
+}
+
 // ALL REDUCE #################################################################
+
+Tensor sum(const Tensor &self, optional<ScalarType> dtype) {
+  return at::_sum(integer_upcast(self, dtype));
+}
+
 
 Tensor _sum_cpu(const Tensor& self) {
   if (self.is_contiguous()) {
@@ -24,6 +53,10 @@ Tensor _sum_cpu(const Tensor& self) {
     return result;
   }
   return self._sumall();
+}
+
+Tensor prod(const Tensor &self, optional<ScalarType> dtype) {
+  return at::_prod(integer_upcast(self, dtype));
 }
 
 Tensor _prod_cpu(const Tensor &self) {
@@ -69,6 +102,12 @@ static Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
   return result;
 }
 
+Tensor& sum_out(Tensor& result, const Tensor& self, int64_t dim,
+                bool keepdim, optional<ScalarType> dtype) {
+  // result type is favored over dtype
+  return at::_sum_out(result, self.toType(result.type().scalarType()), dim, keepdim);
+}
+
 Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
                      bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
@@ -80,7 +119,13 @@ Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
     if (!keepdim) result.squeeze_(dim);
     return result;
   }
-  return at::_sum_out(result, self, dim, keepdim);
+  return at::_th_sum_out(result, self, dim, keepdim);
+}
+
+Tensor &prod_out(Tensor &result, const Tensor &self, int64_t dim,
+                 bool keepdim, optional<ScalarType> dtype) {
+  // result type is favored over dtype
+  return at::_prod_out(result, self.toType(result.type().scalarType()), dim);
 }
 
 Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
@@ -94,29 +139,37 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
     if (!keepdim) result.squeeze_(dim);
     return result;
   }
-  return at::_prod_out(result, self, dim, keepdim);
+  return at::_th_prod_out(result, self, dim, keepdim);
 }
 
 Tensor &_sum_out_cuda(Tensor &result, const Tensor &self, int64_t dim,
                       bool keepdim) {
-  return at::_sum_out(result, self, dim, keepdim);
+  return at::_th_sum_out(result, self, dim, keepdim);
 }
 
 Tensor &_prod_out_cuda(Tensor &result, const Tensor &self, int64_t dim,
                        bool keepdim) {
+  return at::_th_prod_out(result, self, dim, keepdim);
+}
+
+Tensor sum(const Tensor &self, int64_t dim_, bool keepdim, optional<ScalarType> dtype) {
+  return at::_sum(integer_upcast(self, dtype), dim_, keepdim);
+}
+
+Tensor _sum(const Tensor &self, int64_t dim_, bool keepdim) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+  Tensor result = self.type().tensor();
+  return at::_sum_out(result, self, dim, keepdim);
+}
+
+Tensor prod(const Tensor &self, int64_t dim_, bool keepdim, optional<ScalarType> dtype) {
+  return at::_prod(integer_upcast(self, dtype), dim_, keepdim);
+}
+
+Tensor _prod(const Tensor &self, int64_t dim_, bool keepdim) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+  Tensor result = self.type().tensor();
   return at::_prod_out(result, self, dim, keepdim);
-}
-
-Tensor sum(const Tensor &self, int64_t dim_, bool keepdim) {
-  int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  Tensor result = self.type().tensor();
-  return at::sum_out(result, self, dim, keepdim);
-}
-
-Tensor prod(const Tensor &self, int64_t dim_, bool keepdim) {
-  int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  Tensor result = self.type().tensor();
-  return at::prod_out(result, self, dim, keepdim);
 }
 
 // \DIM REDUCE ################################################################

@@ -69,6 +69,7 @@ def is_jit_op(decl):
             not any(arg['simple_type'] == 'SparseTensor' for arg in decl['arguments']) and
             not any(arg['simple_type'] == 'Storage' for arg in decl['arguments']) and
             not any(arg['simple_type'] == 'ScalarType' for arg in decl['arguments']) and
+            not any(arg['simple_type'] == 'optional<ScalarType>' for arg in decl['arguments']) and
             not any(arg['simple_type'] == 'Type' for arg in decl['arguments']) and
             uses_tensors)
 

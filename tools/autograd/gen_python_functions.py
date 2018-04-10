@@ -18,7 +18,8 @@ SKIP_PYTHON_BINDINGS = [
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', 'sparse_raw_resize_', '_unsafe_view', 'tensor',
     'sparse_coo_tensor', '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
-    '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin'
+    '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
+    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*',
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
@@ -211,6 +212,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const Type &': 'scalartype',
         'const THPLayout &': 'layout',
         'const Device &': 'device',
+        'optional<ScalarType>': 'scalartypeOptional',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -607,8 +609,12 @@ def get_python_signature(declaration, include_out):
     positional = True
 
     def get_py_formal_arg(arg):
-        typename = arg['simple_type'] if arg['simple_type'] != 'Type' else 'ScalarType'
-        if arg.get('is_nullable'):
+        typename = arg['simple_type']
+        opt_match = re.match(r'optional<(.+)>', typename)
+        if opt_match:
+            typename = opt_match.group(1)
+        typename = typename if typename != 'Type' else 'ScalarType'
+        if arg.get('is_nullable') or opt_match:
             typename = '{}?'.format(typename)
         if arg.get('size') is not None:
             typename = '{}[{}]'.format(typename, arg['size'])
@@ -616,7 +622,7 @@ def get_python_signature(declaration, include_out):
         default = None
         if arg.get('default') is not None:
             default = arg['default']
-            if default == 'nullptr' or default == '{}':
+            if default == 'nullptr' or default == 'nullopt' or default == '{}':
                 default = 'None'
         if arg.get('python_default_init') is not None:
             default = 'None'
