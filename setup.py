@@ -533,9 +533,9 @@ else:
         '-Wno-missing-field-initializers',
         '-Wno-write-strings',
         '-Wno-zero-length-array',
-        '-Wno-return-type-c-linkage',
         # Python 2.6 requires -fno-strict-aliasing, see
         # http://legacy.python.org/dev/peps/pep-3123/
+        # We also depend on it in our code (even Python 3).
         '-fno-strict-aliasing',
         # Clang has an unfixed bug leading to spurious missing
         # braces warnings, see
