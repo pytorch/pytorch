@@ -381,7 +381,7 @@ class DataLoader(object):
               by main process using its RNG. However, seeds for other libraies
               may be duplicated upon initializing workers (w.g., NumPy), causing
               each worker to return identical random numbers. (See
-              :ref:`this FAQ section <dataloader-workers-random-seed>`.) You may
+              :ref:`dataloader-workers-random-seed` section in FAQ.) You may
               use ``torch.initial_seed()`` to access the PyTorch seed for each
               worker in :attr:`worker_init_fn`, and use it to set other seeds
               before data loading.
