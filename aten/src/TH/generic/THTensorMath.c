@@ -448,9 +448,9 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
   int isContiguous = THTensor_(isContiguous)(src);
 
   // Exceptions must not be thrown across OpenMP parallel sections, so we
-  // record the value of the invalid index and throw the exception after the
+  // record the position of the invalid index and throw the exception after the
   // loop.
-  int64_t invalidIdxDim = -1;
+  int64_t invalidIdxPos = -1;
 
   ptrdiff_t i;
   #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD) private(i)
@@ -464,12 +464,12 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
         dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
       }
     } else {
-      THAtomicCompareAndSwapLong(&invalidIdxDim, -1, i);
+      THAtomicCompareAndSwapLong(&invalidIdxPos, -1, i);
     }
   }
 
-  if (invalidIdxDim >= 0) {
-    THTensor_(checkLinearIndex)(index_data[invalidIdxDim], srcElements);
+  if (invalidIdxPos >= 0) {
+    THTensor_(checkLinearIndex)(index_data[invalidIdxPos], srcElements);
   }
 
   THLongTensor_free(index);
