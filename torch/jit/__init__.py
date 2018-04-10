@@ -16,7 +16,8 @@ import functools
 import inspect
 import copy
 import numbers
-
+import collections
+import re
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
