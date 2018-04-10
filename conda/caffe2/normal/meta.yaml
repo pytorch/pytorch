@@ -14,7 +14,7 @@ build:
   script_env:
     - CONDA_CAFFE2_CMAKE_ARGS
     - BUILD_WITH_CUDA
-  # feature section here
+  # features section here
 
 requirements:
   build:

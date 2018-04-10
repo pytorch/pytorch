@@ -41,11 +41,11 @@ set -ex
 #   portable_sed <full regex string> <file>
 if [ "$(uname)" == 'Darwin' ]; then
   portable_sed () {
-    sed -i '' "$1" "$2"
+    sed --regexp-extended -i '' "$1" "$2"
   }
 else
   portable_sed () {
-    sed -i "$1" "$2"
+    sed --regexp-extended -i "$1" "$2"
   }
 fi
 
@@ -65,21 +65,18 @@ remove_lines_with () {
 #    <some insertion>
 #    <some marker>
 #
-# ( *)     captured whitespace before match == the indentation in the meta.yaml
+# (\s*)     captured whitespace before match == the indentation in the meta.yaml
 # ${1}     the marker to insert before
 # '\1'     captured whitespace == correct indentation
 # ${2}     the string to insert
 # \\"$'\n' escaped newline
-# \1'      captured whitespace == correct indentation
+# '\1'      captured whitespace == correct indentation
 # ${1}     put the marker back
-add_before () {
-  portable_sed "s/${1}/i \
-${2}\
-${1}" $3
-  #portable_sed "s/( *)${1}/"'\1'"${2}\\"$'\n\1'"${1}/" $3
+add_before() {
+  portable_sed 's@(\s*)'"${1}@"'\1'"${2}\\"$'\n''\1'"${1}@" $3
 }
 append_to_section () {
-  add_before "# ${1} section here" "- ${2} ${3}" $META_YAML
+  add_before "# ${1} section here" "$2" $META_YAML
 }
 # add_package <package_name> <optional package version specifier>
 # Takes a package name and version and finagles the meta.yaml to specify that
@@ -191,7 +188,7 @@ else
   CONDA_BUILD_DIR="${CONDA_BUILD_DIR}/caffe2/normal"
 fi
 META_YAML="${CONDA_BUILD_DIR}/meta.yaml"
-portable_sed 's#path:  \.\..*#path: $PYTORCH_ROOT#'
+portable_sed 's#path:  \.\..*#path: $PYTORCH_ROOT#' $META_YAML
 
 
 ###########################################################
@@ -259,19 +256,19 @@ add_package opencv
 # Add packages required for pytorch
 if [[ -n $BUILD_INTEGRATED ]]; then
   remove_lines_with 'numpy'
-  append_to_section 'build' numpy 1.11.*
-  append_to_section 'run' numpy >=1.11
+  append_to_section 'build' '- numpy 1.11.*'
+  append_to_section 'run' '- numpy >=1.11'
   add_package cffi
-  append_to_section 'build' pyyaml
-  append_to_section 'build' setuptools
-  append_to_section 'build' mkl
-  append_to_section 'build' mkl-include
-  append_to_section 'run' mkl >=2018
+  append_to_section 'build' '- pyyaml'
+  append_to_section 'build' '- setuptools'
+  append_to_section 'build' '- mkl'
+  append_to_section 'build' '- mkl-include'
+  append_to_section 'run' '- mkl >=2018'
   CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
   if [[ -n $CUDA_VERSION ]]; then
-    append_to_section 'feature' feature:
-    append_to_section '  $CUDA_FEATURE_NAME'
-    append_to_section '  nccl2'
+    append_to_section 'features' features:
+    append_to_section 'features' "  - $CUDA_FEATURE_NAME" 
+    append_to_section 'features' '  - nccl2'
     add_package $CUDA_FEATURE_NAME
     CONDA_CHANNEL+=('-c pytorch')
   fi
