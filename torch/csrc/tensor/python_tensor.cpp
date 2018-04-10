@@ -30,6 +30,7 @@ struct PyTensorType {
   at::Type* aten_type;
   THPDtype* dtype;
   THPLayout* layout;
+  bool is_cuda;
   char name[64];
 };
 
@@ -79,7 +80,7 @@ PyObject *Tensor_layout(PyTensorType* self) {
 }
 
 PyObject *Tensor_is_cuda(PyTensorType* self) {
-  if (self->aten_type->is_cuda()) {
+  if (self->is_cuda) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -179,6 +180,7 @@ static void set_type(PyTensorType& type_obj, Backend backend, ScalarType scalarT
   type_obj.aten_type = baseType ? torch::autograd::VariableType::getType(*baseType) : nullptr;
   type_obj.layout = torch::getLayout(backend);
   type_obj.dtype = torch::getDtype(scalarType);
+  type_obj.is_cuda = (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
 }
 
 static void set_name(PyTensorType& type_obj, const std::string& name) {
