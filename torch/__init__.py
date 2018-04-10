@@ -159,10 +159,6 @@ def set_default_dtype(d):
         >>> torch.set_default_tensor_type(torch.double)
         >>> torch.tensor([1.2, 3], device='cpu')
         tensor([ 1.2000, 3.0000], dtype=torch.float64)
-
-        >>> torch.set_default_tensor_type(torch.cuda.double)
-        >>> torch.Tensor([2, 3])
-        tensor([ 2, 3], dtype=torch.cuda.float64)
     """
     _C._set_default_dtype(d)
 
