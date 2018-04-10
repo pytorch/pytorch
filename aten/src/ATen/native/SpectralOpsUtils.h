@@ -6,7 +6,7 @@
 
 namespace at { namespace native {
 
-// [ NOTE ] Fourier Transform Congjugate Symmetry
+// NOTE [ Fourier Transform Conjugate Symmetry ]
 //
 // Real-to-complex Fourier transform satisfies the conjugate symmetry. That is,
 // assuming X is the transformed K-dimensionsal signal, we have
