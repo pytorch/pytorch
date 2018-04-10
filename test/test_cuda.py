@@ -1563,6 +1563,9 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
 
+    def test_random_neg_values(self):
+        TestTorch._test_random_neg_values(self, use_cuda=True)
+
 
 def load_ignore_file():
     from os.path import join, dirname

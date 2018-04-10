@@ -33,11 +33,11 @@ void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, int64_t m
   uint64_t range = max - min;
 #if defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     if (range >= 1ULL << 32) {
-      TH_TENSOR_APPLY(real, self, *self_data = (real)((THRandom_random64(_generator) % range) + min);)
+      TH_TENSOR_APPLY(real, self, *self_data = static_cast<real>(static_cast<int64_t>((THRandom_random64(_generator) % range) + min));)
       return;
     }
 #endif
-    TH_TENSOR_APPLY(real, self, *self_data = (real)((THRandom_random(_generator) % range) + min);)
+    TH_TENSOR_APPLY(real, self, *self_data = static_cast<real>(static_cast<int64_t>((THRandom_random(_generator) % range) + min));)
 }
 
 void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, int64_t max) {
