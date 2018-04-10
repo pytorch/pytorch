@@ -139,9 +139,8 @@ def _number_format(tensor, min_sz=-1):
     return format, scale, sz
 
 
-def _scalar_str(self):
-    fmt, _, _ = _number_format(self)
-    scalar_str = fmt.format(self.item())
+def _scalar_str(self, fmt, scale):
+    scalar_str = fmt.format(self.item() / scale)
     # The leading space for positives is ugly on scalars, so we strip it
     if scalar_str[0] == ' ':
         return scalar_str[1:]
@@ -169,7 +168,7 @@ def _tensor_str(self, indent, fmt, scale, sz):
     dim = self.dim()
 
     if dim == 0:
-        return _scalar_str(self)
+        return _scalar_str(self, fmt, scale)
     if dim == 1:
         return _vector_str(self, indent, fmt, scale, sz)
 
