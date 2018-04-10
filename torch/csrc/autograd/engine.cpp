@@ -116,6 +116,10 @@ struct GraphTask {
 
   int owner;
 
+  bool can_checkpoint() {
+    return exec_info.empty();
+  }
+
   GraphTask(bool keep_graph, bool grad_mode)
     : exception()
     , has_error(false)
@@ -235,9 +239,7 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, variab
 
 static variable_list call_function(FunctionTask& task) {
   bool prev_checkpoint_valid_state = checkpoint_valid;
-  auto & exec_info = task.base->exec_info;
-  // exec_info.empty() means it's .backward(), otherwise it's .grad()
-  checkpoint_valid = exec_info.empty() && prev_checkpoint_valid_state;
+  checkpoint_valid = task.base->can_checkpoint() && prev_checkpoint_valid_state;
   auto& fn = *task.fn;
   auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
 
@@ -524,6 +526,5 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
     }
   }
 }
-
 
 }} // namespace torch::autograd

@@ -26,21 +26,17 @@ class CheckpointFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *args):
-        if not torch.autograd.is_checkpoint_valid():
+        if not torch.autograd._is_checkpoint_valid():
             raise RuntimeError("Checkpointing is not compatible with .grad(), please use .backward() if possible")
         inputs = ctx.saved_tensors
-        inputs_list = detach_variable(inputs)
+        detached_inputs = detach_variable(inputs)
         with torch.enable_grad():
-            outputs = ctx.run_function(*inputs_list)
+            outputs = ctx.run_function(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
             outputs = (outputs,)
         torch.autograd.backward(outputs, args)
-
-        input_grads = None
-        if isinstance(inputs_list, tuple):
-            input_grads = tuple(inp.grad for inp in inputs_list)
-            return (None,) + input_grads
+        return (None,) + tuple(inp.grad for inp in detached_inputs)
 
 
 def checkpoint(run_function, *args):
@@ -84,18 +80,22 @@ def checkpoint_sequential(functions, segments, *inputs):
     of each checkpointed segment will be saved for re-running the segment in the
     backward pass.
 
+    .. warning::
+
+        checkpointing doesn't work with torch.autograd.grad(), but only with
+        torch.autograd.backward()
+
     Args:
-        functions: The list of modules or functions (comprising the model) to run in order.
+        functions: A sequential or the list of modules or functions (comprising the model) to run in order.
         segments: Number of chunks to create in the model
-        inputs: tuple containing the inputs to run_function
+        inputs: tuple of Tensors that are inputs to run_function
 
     Returns:
         Output of running the modules/functions on *inputs
 
     Example:
-        >>> if isinstance(model, nn.Sequential):
-        >>>     functions = list(model.children())
-        >>> input_var = checkpoint_sequential(functions, chunks, input_var)
+        >>> model = nn.Sequential(...)
+        >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """
 
     def run_function(start, end, functions):
@@ -105,6 +105,9 @@ def checkpoint_sequential(functions, segments, *inputs):
                 input = functions[j](input)
             return input
         return forward
+
+    if isinstance(functions, torch.nn.Sequential):
+        functions = list(functions.children())
 
     segment_size = len(functions) // segments
     # the last chunk has to be non-volatile

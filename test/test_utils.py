@@ -124,21 +124,25 @@ class TestCheckpoint(TestCase):
 
             def __init__(self):
                 super(Net, self).__init__()
-                self.count = 0
+                self.counter = 0
 
             def forward(self, input_var):
-                self.count += 1
+                self.counter += 1
                 return input_var
 
         # checkpointed
-        chunks = 2
-        module1, module2 = Net(), Net()
-        assert(module1.count == 0)
-        modules = [module1, module2]
+        modules = [Net() for _ in range(10)]
+        for m in modules:
+            self.assertEqual(m.counter, 0)
         input_var = torch.randn(3, 4, requires_grad=True)
-        out = checkpoint_sequential(modules, chunks, input_var)
+        out = checkpoint_sequential(modules, 2, input_var)
+        for m in modules:
+            self.assertEqual(m.counter, 1)
         out.sum().backward()
-        assert (module1.count == 2)
+        for m in modules[:(len(modules) // 2)]:
+            self.assertEqual(m.counter, 2)
+        for m in modules[(len(modules) // 2):]:
+            self.assertEqual(m.counter, 1)
 
     def test_checkpoint_valid(self):
         model = nn.Sequential(
@@ -183,11 +187,12 @@ class TestCheckpoint(TestCase):
             grad_not_checkpointed[name] = param.grad.data.clone()
         input_grad = x.grad.data.clone()
 
-        # checkpointed
+        # checkpointed model by passing list of modules
         chunks = 2
         modules = list(model.children())
         input_var = x.detach()
         input_var.requires_grad = True
+        # pass list of modules to checkpoint
         out = checkpoint_sequential(modules, chunks, input_var)
         out_checkpointed = out.data.clone()
         model.zero_grad()
@@ -196,7 +201,24 @@ class TestCheckpoint(TestCase):
         for name, param in model.named_parameters():
             grad_checkpointed[name] = param.grad.data.clone()
         checkpoint_input_grad = input_var.grad.data.clone()
+        # compare the output, input and parameters gradients
+        self.assertEqual(out_checkpointed, out_not_checkpointed)
+        self.assertEqual(input_grad, checkpoint_input_grad)
+        for name in grad_checkpointed:
+            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
+        # checkpointed by passing sequential directly
+        input_var1 = x.detach()
+        input_var1.requires_grad = True
+        # pass the sequential itself
+        out = checkpoint_sequential(model, 2, input_var1)
+        out_checkpointed = out.data.clone()
+        model.zero_grad()
+        out.sum().backward()
+        grad_checkpointed = {}
+        for name, param in model.named_parameters():
+            grad_checkpointed[name] = param.grad.data.clone()
+        checkpoint_input_grad = input_var1.grad.data.clone()
         # compare the output, input and parameters gradients
         self.assertEqual(out_checkpointed, out_not_checkpointed)
         self.assertEqual(input_grad, checkpoint_input_grad)
