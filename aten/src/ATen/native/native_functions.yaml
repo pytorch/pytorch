@@ -500,6 +500,30 @@
     dtype: self.type()
 
 
+- func: randint(Type dtype, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randint(Type dtype, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randint_out(Tensor result, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randint_out(Tensor result, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function  
+
+- func: randint_like(Tensor self, int64_t high) -> Tensor
+  variants: function
+
+- func: randint_like(Tensor self, int64_t low, int64_t high) -> Tensor
+  variants: function  
+
+- func: randint_like(Tensor self, int64_t high, *, Type dtype) -> Tensor
+  variants: function
+
+- func: randint_like(Tensor self, int64_t low, int64_t high, *, Type dtype) -> Tensor
+  variants: function
+
 - func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
   variants: function
 

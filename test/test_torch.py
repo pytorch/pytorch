@@ -1161,17 +1161,27 @@ class TestTorch(TestCase):
             res2[i] = max(min_val, min(max_val, res2[i]))
         self.assertEqual(res1, res2)
 
+        out = m1.clone()
+        torch.clamp(m1, min=min_val, max=max_val, out=out)
+        self.assertEqual(out, res1)
+
         res1 = torch.clamp(m1, min=min_val)
         res2 = m1.clone()
         for i in iter_indices(res2):
             res2[i] = max(min_val, res2[i])
         self.assertEqual(res1, res2)
 
+        torch.clamp(m1, min=min_val, out=out)
+        self.assertEqual(out, res1)
+
         res1 = torch.clamp(m1, max=max_val)
         res2 = m1.clone()
         for i in iter_indices(res2):
             res2[i] = min(max_val, res2[i])
         self.assertEqual(res1, res2)
+
+        torch.clamp(m1, max=max_val, out=out)
+        self.assertEqual(out, res1)
 
     def test_pow(self):
         # [res] torch.pow([res,] x)
@@ -2349,6 +2359,21 @@ class TestTorch(TestCase):
         self.assertEqual(t.min(), 0)
         self.assertEqual(t.max(), ub - 1)
 
+    @staticmethod
+    def _test_random_neg_values(self, use_cuda=False):
+        signed_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor',
+                        'torch.IntTensor', 'torch.ShortTensor']
+        for tname in signed_types:
+            res = torch.rand(SIZE, SIZE).type(tname)
+            if use_cuda:
+                res = res.cuda()
+            res.random_(-10, -1)
+            self.assertLessEqual(res.max().item(), 9)
+            self.assertGreaterEqual(res.min().item(), -10)
+
+    def test_random_neg_values(self):
+        self._test_random_neg_values(self)
+
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = 4
         if order == 'descending':
@@ -2757,6 +2782,30 @@ class TestTorch(TestCase):
         torch.manual_seed(123456)
         torch.rand(SIZE, SIZE, out=res2)
         self.assertEqual(res1, res2)
+
+    def test_randint(self):
+        torch.manual_seed(123456)
+        res1 = torch.randint(0, 6, (SIZE, SIZE))
+        res2 = torch.Tensor()
+        torch.manual_seed(123456)
+        torch.randint(0, 6, (SIZE, SIZE), out=res2)
+        torch.manual_seed(123456)
+        res3 = torch.randint(6, (SIZE, SIZE))
+        res4 = torch.Tensor()
+        torch.manual_seed(123456)
+        torch.randint(6, (SIZE, SIZE), out=res4)
+        self.assertEqual(res1, res2)
+        self.assertEqual(res1, res3)
+        self.assertEqual(res1, res4)
+        self.assertEqual(res2, res3)
+        self.assertEqual(res2, res4)
+        self.assertEqual(res3, res4)
+        res1 = res1.view(-1)
+        high = (res1 < 6).type(torch.LongTensor)
+        low = (res1 >= 0).type(torch.LongTensor)
+        tensorSize = res1.size()[0]
+        assert(tensorSize == high.sum())
+        assert(tensorSize == low.sum())
 
     def test_randn(self):
         torch.manual_seed(123456)

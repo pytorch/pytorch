@@ -1923,6 +1923,13 @@ class TestNN(NNTestCase):
         inputs = Variable(torch.randn(1, 2, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
 
+        # assert that relfection padding errors when pad >= input size
+        expected_err_msg = r"Padding size should be less than the corresponding input dimension"
+        self.assertRaisesRegex(RuntimeError, expected_err_msg,
+                               lambda: F.pad(torch.randn(1, 1, 2, 3), (1, 1, 3, 0), mode='reflect'))
+        self.assertRaisesRegex(RuntimeError, expected_err_msg,
+                               lambda: F.pad(torch.randn(1, 1, 2), (2, 1), mode='reflect'))
+
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0, requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
@@ -3817,7 +3824,7 @@ class TestNN(NNTestCase):
         input.grad.data.zero_()
 
         output.backward(grad.contiguous())
-        self.assertEqual(result, input.grad.data)
+        self.assertEqual(result, input.grad.data, type2prec[dtype.__name__])
 
     def test_pixel_shuffle(self):
         batch_size = random.randint(1, 3)

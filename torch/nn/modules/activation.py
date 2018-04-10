@@ -229,7 +229,7 @@ class Sigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activationscripts/activation_images/Sigmoid.png
+    .. image:: scripts/activation_images/Sigmoid.png
 
     Examples::
 
