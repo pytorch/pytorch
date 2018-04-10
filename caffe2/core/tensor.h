@@ -90,7 +90,7 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
  * assumption that the memory is always contiguous.
  */
 template <class Context>
-class Tensor {
+class Tensor final {
  public:
   /**
    * Initializes an empty tensor.
