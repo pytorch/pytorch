@@ -40,9 +40,20 @@ def _find_cuda_home():
 MINIMUM_GCC_VERSION = (4, 9)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 ABI_INCOMPATIBILITY_WARNING = '''
-Your compiler ({}) may be ABI-incompatible with PyTorch.
+
+                               !! WARNING !!
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Your compiler ({}) may be ABI-incompatible with PyTorch!
 Please use a compiler that is ABI-compatible with GCC 4.9 and above.
-See https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html.'''
+See https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html.
+
+See https://gist.github.com/goldsborough/d466f43e8ffc948ff92de7486c5216d6
+for instructions on how to install GCC 4.9 or higher.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+                              !! WARNING !!
+'''
 CUDA_HOME = _find_cuda_home() if torch.cuda.is_available() else None
 
 
