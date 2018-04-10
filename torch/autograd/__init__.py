@@ -140,6 +140,24 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
         inputs)
 
 
+# This function applies in case of gradient checkpointing for memory
+# optimization. Currently, for gradient checkpointing, we only support imperative
+# backwards call i.e. torch.autograd.backward() and the torch.autograd.grad() won't
+# work. The reason being that: torch.autograd.grad() only calculates the grads
+# for the inputs that are passed by user but it doesn't calculate grad for
+# anything else e.g. model parameters like weights, bias etc. However, for
+# torch.autograd.backward(), we would actually compute the grad for the weights as well.
+#
+# This function returns whether the checkpointing is valid i.e. torch.autograd.backward
+# or not i.e. torch.autograd.grad. The implementation works by maintaining a thread
+# local variable in torch/csrc/autograd/engine.cpp which looks at the FunctionTask
+# in the stack and before a FunctionTask is executed in evaluate_function, it
+# checks for whether reentrant backwards is imperative or not.
+# See https://github.com/pytorch/pytorch/pull/4594 for more discussion/context
+def _is_checkpoint_valid():
+    return Variable._execution_engine.is_checkpoint_valid()
+
+
 def variable(*args, **kwargs):
     warnings.warn("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")
     return torch.tensor(*args, **kwargs)
