@@ -18,6 +18,7 @@ namespace caffe2 {
 class GLNet : public NetBase {
  private:
   bool first_run_ = true;
+  bool second_run_ = true;
   Workspace* ws_;
   // record output blob for sync step in operator level benchmarking
   std::vector<string> output_blobs_;
