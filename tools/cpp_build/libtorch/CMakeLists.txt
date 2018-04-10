@@ -153,8 +153,9 @@ SET(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter_autograd_function.cpp
   ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
-  ${TORCH_SRC_DIR}/csrc/api/src/module.cpp
   ${TORCH_SRC_DIR}/csrc/api/src/tensor.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/nn/cursor.cpp
   )
 
 ADD_LIBRARY(torch SHARED ${TORCH_SRCS})

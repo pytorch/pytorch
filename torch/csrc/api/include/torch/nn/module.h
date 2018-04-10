@@ -1,7 +1,8 @@
 #pragma once
 
-#include <torch/tensor.h>
 #include <torch/detail/ordered_dict.h>
+#include <torch/nn/cursor.h>
+#include <torch/tensor.h>
 
 #include <memory>
 #include <string>
@@ -16,9 +17,6 @@ enum class ScalarType;
 namespace torch { namespace nn {
 
 struct Archive;
-struct BufferCursor;
-struct ModuleCursor;
-struct ParameterCursor;
 
 /// The base class for all torch modules.
 class Module {
@@ -65,16 +63,20 @@ class Module {
 
   /// Provides a means to traverse the `Module` tree.
   ModuleCursor modules();
+  ConstModuleCursor modules() const;
 
   /// Traverses the (immediate) children of the `Module`.
   ModuleCursor children();
+  ConstModuleCursor children() const;
 
   /// Provides a means to recursively access the parameters of the `Module`
   /// tree.
   ParameterCursor parameters();
+  ConstParameterCursor parameters() const;
 
   /// Provides a means to recursively access the buffers of the `Module` tree.
   BufferCursor buffers();
+  ConstBufferCursor buffers() const;
 
   /// Serializes this `Module`. The default implementation serializes the
   /// submodules, parameters and buffers registered with the base class. The
@@ -91,24 +93,34 @@ class Module {
 
  protected:
   /// Inserts the parameters into the parameters_ map.
-  void register_parameters(detail::OrderedDict<Tensor>&& parameters);
+  void register_parameters(torch::detail::OrderedDict<Tensor>&& parameters);
 
   /// Inserts the buffers into the buffers_ map.
-  void register_buffers(detail::OrderedDict<Tensor>&& buffers);
+  void register_buffers(torch::detail::OrderedDict<Tensor>&& buffers);
 
   /// Inserts the modules into the modules_ map.
-  void register_modules(detail::OrderedDict<Module*>&& modules);
+  void register_modules(
+      torch::detail::OrderedDict<std::shared_ptr<Module>>&& modules);
 
  private:
+  template <typename T, typename Items>
+  friend void collect_children(T&, Items&, size_t);
+
+  template <typename T, typename Items>
+  friend void collect_parameters(T&, Items&);
+
+  template <typename T, typename Items>
+  friend void collect_buffers(T&, Items&);
+
   /// The module's name (e.g. "LSTM").
   std::string name_;
 
   /// Whether the module is in training mode.
   bool is_training_;
 
-  detail::OrderedDict<Module*> children_;
-  detail::OrderedDict<Tensor> parameters_;
-  detail::OrderedDict<Tensor> buffers_;
+  torch::detail::OrderedDict<std::shared_ptr<Module>> children_;
+  torch::detail::OrderedDict<Tensor> parameters_;
+  torch::detail::OrderedDict<Tensor> buffers_;
 };
 
 /// The `clone()` method in the base `Module` class does not have knowledge of
@@ -131,5 +143,8 @@ class CloneableModule : public Module {
 /// A type trait whose `::value` member is true if `M` derives from `Module`.
 template <typename M>
 using is_module = std::is_base_of<Module, typename std::decay<M>::type>;
+
+template <typename M>
+using enable_if_module = typename std::enable_if<is_module<M>::value>::type;
 
 }} // namespace torch::nn

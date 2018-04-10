@@ -54,19 +54,35 @@ void Module::zero_grad() {}
 
 // Recursive Accessors
 ModuleCursor Module::modules() {
-  return {};
+  return ModuleCursor(*this);
 }
 
-// ModuleCursor with a different policy
+ConstModuleCursor Module::modules() const {
+  return ConstModuleCursor(*this);
+}
+
 ModuleCursor Module::children() {
-  return {};
+  return ModuleCursor(*this, /*maximum_depth=*/1);
+}
+
+ConstModuleCursor Module::children() const {
+  return ConstModuleCursor(*this, /*maximum_depth=*/1);
 }
 
 ParameterCursor Module::parameters() {
-  return {};
+  return ParameterCursor(*this);
 }
+
+ConstParameterCursor Module::parameters() const {
+  return ConstParameterCursor(*this);
+}
+
 BufferCursor Module::buffers() {
-  return {};
+  return BufferCursor(*this);
+}
+
+ConstBufferCursor Module::buffers() const {
+  return ConstBufferCursor(*this);
 }
 
 // Serialization/Deserialization
@@ -85,7 +101,9 @@ void Module::register_buffers(detail::OrderedDict<Tensor>&& buffers) {
   buffers_.update(std::move(buffers));
 }
 
-void Module::register_modules(detail::OrderedDict<Module*>&& modules) {
+void Module::register_modules(
+    detail::OrderedDict<std::shared_ptr<Module>>&& modules) {
   children_.update(std::move(modules));
 }
+
 }} // namespace torch::nn
