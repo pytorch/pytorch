@@ -19,13 +19,14 @@ class TensorRTOp final : public Operator<CUDAContext> {
  private:
   void MaybeAdjustOutputShape(int output_idx, std::vector<TIndex>* dims);
 
-  TrtLogger logger_;
+  tensorrt::TrtLogger logger_;
   int max_batch_size_;
   std::vector<nvinfer1::Dims> nv_dims_;
   std::vector<bool> is_input_;
   std::unordered_map<int, std::vector<TIndex>> output_size_hints_;
   std::shared_ptr<nvinfer1::ICudaEngine> trt_engine_{nullptr};
-  std::shared_ptr<nvinfer1::IExecutionContext > trt_executor_{nullptr};
+  std::shared_ptr<nvinfer1::IExecutionContext> trt_executor_{nullptr};
+  bool batch_warning_issued_{false};
 };
 
 } // namespace caffe2

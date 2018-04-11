@@ -4,7 +4,7 @@
 #include <NvInfer.h>
 #include <iostream>
 
-namespace caffe2 {
+namespace caffe2 { namespace tensorrt {
 
   // Logger for GIE info/warning/errors
 class TrtLogger : public nvinfer1::ILogger {
@@ -28,7 +28,7 @@ class TrtLogger : public nvinfer1::ILogger {
   Severity _verbosity;
 };
 
-struct InferDeleter {
+struct TrtDeleter {
   template <typename T>
   void operator()(T* obj) const {
     if (obj) {
@@ -38,11 +38,11 @@ struct InferDeleter {
 };
 
 template <typename T>
-inline std::shared_ptr<T> InferObject(T* obj) {
+inline std::shared_ptr<T> TrtObject(T* obj) {
   CAFFE_ENFORCE(obj, "Failed to create TensorRt object");
-  return std::shared_ptr<T>(obj, InferDeleter());
+  return std::shared_ptr<T>(obj, TrtDeleter());
 }
 
-
+}
 }
 

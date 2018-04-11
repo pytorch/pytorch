@@ -530,13 +530,14 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   if (has_axis) {
     axis = it->second->i();
   }
-  if (x_shape.dims().size() > 2) {
+  if ((legacy_mode_ && has_axis) ||
+      (!legacy_mode_ && x_shape.dims().size() > 2)) {
     // we need to reshape only when dimension is higher than 2
     auto outer = DimProd(x_shape, 0, axis);
     auto inner = DimProd(x_shape, axis, x_shape.dims().size());
     std::vector<int64_t> dims = {outer, inner};
-    auto reshaped_x = DummyName::NewDummyName();
     const_tensors.emplace_back(CreateOnnxShapeTensor(dims));
+    auto reshaped_x = DummyName::NewDummyName();
     nodes.emplace_back(
         MakeNode("Reshape", {x, const_tensors.back().name()}, {reshaped_x}));
     x = reshaped_x;
@@ -547,13 +548,14 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   if (it != args.end()) {
     axis_w = it->second->i();
   }
-  if (w_shape.dims().size() > 2) {
+  if ((legacy_mode_ && it != args.end()) ||
+      (!legacy_mode_ && w_shape.dims().size() > 2)) {
     // we need to reshape only when dimension is higher than 2
     auto outer = DimProd(w_shape, 0, axis_w);
     auto inner = DimProd(w_shape, axis_w, w_shape.dims().size());
     std::vector<int64_t> dims = {outer, inner};
-    auto reshaped_w = DummyName::NewDummyName();
     const_tensors.emplace_back(CreateOnnxShapeTensor(dims));
+    auto reshaped_w = DummyName::NewDummyName();
     nodes.emplace_back(
         MakeNode("Reshape", {w, const_tensors.back().name()}, {reshaped_w}));
     w = reshaped_w;

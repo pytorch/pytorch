@@ -1,10 +1,10 @@
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
+#include <NvInfer.h>
+#include <onnx2trt.hpp>
 #include "caffe2/contrib/tensorrt/trt_utils.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/onnx/onnx_exporter.h"
-#include <onnx2trt.hpp>
-#include <NvInfer.h>
 
 #include <google/protobuf/text_format.h>
 #include <iostream>
@@ -23,13 +23,10 @@ std::unordered_map<std::string, TensorShape> InferShapes(
   for (const auto& kv : input_shape_hints) {
     shape_hints_ordered.emplace(kv.first, kv.second);
   }
-  std::vector<std::unique_ptr<NetDef>> nets;
+  std::vector<NetDef*> nets;
   nets.emplace_back(init_net);
   nets.emplace_back(pred_net);
   InferBlobShapesAndTypes(shape_hints_ordered, nets);
-  for (auto& net : nets) {
-    net.release();
-  }
   std::unordered_map<std::string, TensorShape> shape_hints;
   for (const auto& kv : shape_hints_ordered) {
     shape_hints.emplace(kv.first, kv.second);
@@ -51,6 +48,7 @@ std::vector<std::string> FigureInputs(
     int end,
     const std::vector<OperatorDef>& new_ops,
     const std::unordered_set<std::string>& weights,
+    const std::unordered_set<std::string>& extra_weights,
     std::unordered_set<std::string>* initialization_list) {
   // TODO: cache this
   std::unordered_set<std::string> boundary_inputs;
@@ -59,16 +57,16 @@ std::vector<std::string> FigureInputs(
   }
 
   for (const auto& op : new_ops) {
-    for (const auto& output: op.output()) {
+    for (const auto& output : op.output()) {
       boundary_inputs.emplace(output);
     }
   }
 
   std::unordered_set<std::string> total_inputs;
   std::vector<std::string> total_inputs_vec;
-  for(int i = start; i < end; ++i) {
+  for (int i = start; i < end; ++i) {
     const auto& op = pred_net.op(i);
-    for (const auto& input: op.input()) {
+    for (const auto& input : op.input()) {
       auto rt = total_inputs.emplace(input);
       if (rt.second) {
         if (weights.count(input)) {
@@ -82,23 +80,29 @@ std::vector<std::string> FigureInputs(
       }
     }
   }
+  for (const auto& i : extra_weights) {
+    if (!total_inputs.count(i)) {
+      LOG(INFO) << "Adding extra weights: " << i;
+      total_inputs_vec.emplace_back(i);
+    }
+  }
   return total_inputs_vec;
 }
 
 // Outputs of the tensorrt runnable subgraph are computed as outputs from the
 // ops of the subgraph that is
-  // 1. referred by the subsequent ops
-  // 2. in the external ouput of the net
+// 1. referred by the subsequent ops
+// 2. in the external ouput of the net
 std::vector<std::string>
 FigureOutputs(const NetDef& pred_net, int start, int end) {
   std::unordered_set<std::string> ext_outputs;
-  for (const auto& e: pred_net.external_output()) {
+  for (const auto& e : pred_net.external_output()) {
     ext_outputs.emplace(e);
   }
   std::unordered_set<std::string> referred_inputs;
   for (int i = end; i < pred_net.op_size(); ++i) {
     const auto& op = pred_net.op(i);
-    for (const auto& input: op.input()) {
+    for (const auto& input : op.input()) {
       referred_inputs.emplace(input);
     }
   }
@@ -107,9 +111,9 @@ FigureOutputs(const NetDef& pred_net, int start, int end) {
   std::vector<std::string> all_outputs_vec;
   for (int i = start; i < end; ++i) {
     const auto& op = pred_net.op(i);
-    for (const auto& output: op.output()) {
+    for (const auto& output : op.output()) {
       if (referred_inputs.count(output) || ext_outputs.count(output)) {
-        if(all_outputs.emplace(output).second) {
+        if (all_outputs.emplace(output).second) {
           all_outputs_vec.emplace_back(output);
         }
       }
@@ -123,7 +127,7 @@ std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
     const std::vector<std::string>& names,
     const std::unordered_map<std::string, TensorShape>& shape_hints) {
   std::vector<::ONNX_NAMESPACE::ValueInfoProto> r;
-  for (const auto& s: names) {
+  for (const auto& s : names) {
     r.emplace_back();
     auto& value_info = r.back();
     value_info.set_name(s);
@@ -135,7 +139,7 @@ std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
       tensor_type->set_elem_type(
           ::ONNX_NAMESPACE::TensorProto_DataType::TensorProto_DataType_FLOAT);
       auto* shape = tensor_type->mutable_shape();
-      for (int i = 0 ; i < it->second.dims().size(); ++i) {
+      for (int i = 0; i < it->second.dims().size(); ++i) {
         auto* dim = shape->add_dim();
         dim->set_dim_value(it->second.dims(i));
       }
@@ -146,8 +150,8 @@ std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
 
 void PruneUsedWeights(const NetDef& pred_net, NetDef* init_net) {
   std::unordered_set<std::string> used_weights;
-  for (const auto& op: pred_net.op()) {
-    for (const auto& i: op.input()) {
+  for (const auto& op : pred_net.op()) {
+    for (const auto& i : op.input()) {
       used_weights.emplace(i);
     }
   }
@@ -169,8 +173,6 @@ void PruneUsedWeights(const NetDef& pred_net, NetDef* init_net) {
   if (last < init_net->op_size()) {
     init_net->mutable_op()->DeleteSubrange(last, init_net->op_size() - last);
   }
-
-  LOG(INFO) << "New init_net op size: " << init_net->op_size();
 }
 
 void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
@@ -189,11 +191,13 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
   OperatorDef op;
   op.set_type("TensorRT");
 
-  TrtLogger logger;
-  auto trt_builder = InferObject(nvinfer1::createInferBuilder(logger));
-  auto trt_network = InferObject(trt_builder->createNetwork());
-  auto importer = InferObject(onnx2trt::createImporter(trt_network.get()));
-  auto status = importer->import(onnx_model_str.data(), onnx_model_str.size(), false);
+  tensorrt::TrtLogger logger;
+  auto trt_builder = tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
+  auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
+  auto importer =
+      tensorrt::TrtObject(onnx2trt::createImporter(trt_network.get()));
+  auto status =
+      importer->import(onnx_model_str.data(), onnx_model_str.size(), false);
   if (status.is_error()) {
     CAFFE_THROW(
         "TensorRTTransformer ERROR: ",
@@ -212,7 +216,7 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
   trt_builder->setMaxWorkspaceSize(max_workspace_size_);
   trt_builder->setDebugSync(debug_builder_);
   auto trt_engine =
-      InferObject(trt_builder->buildCudaEngine(*trt_network.get()));
+      tensorrt::TrtObject(trt_builder->buildCudaEngine(*trt_network.get()));
 
   // Set up inputs/outputs in the order of they appearnce in getNbBindings
   int num_bindings = trt_engine->getNbBindings();
@@ -225,7 +229,7 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
     }
   }
 
-  auto engine_plan = InferObject(trt_engine->serialize());
+  auto engine_plan = tensorrt::TrtObject(trt_engine->serialize());
 
   auto* serialized_engine_arg = op.add_arg();
   serialized_engine_arg->set_s("");
@@ -273,17 +277,20 @@ void TensorRTTransformer::ClusterToTrtOp(
   }
   model->mutable_graph()->clear_input();
   model->mutable_graph()->clear_output();
-  model->mutable_graph()->clear_initializer();
 
   // Figure out the boundary outputs
-  auto outputs = ConvertToValueInfo(FigureOutputs(pred_net, start, end), shape_hints);
+  auto outputs =
+      ConvertToValueInfo(FigureOutputs(pred_net, start, end), shape_hints);
   std::unordered_map<std::string, std::vector<int>> output_shape_hints;
-  for (const auto& i: outputs) {
+  for (const auto& i : outputs) {
     model->mutable_graph()->add_output()->CopyFrom(i);
     auto ret = output_shape_hints.emplace(i.name(), std::vector<int>());
     auto& vec = ret.first->second;
     const auto it = shape_hints.find(i.name());
-    CAFFE_ENFORCE(it != shape_hints.end(), "Cannot find shape info for output ", i.name());
+    CAFFE_ENFORCE(
+        it != shape_hints.end(),
+        "Cannot find shape info for output ",
+        i.name());
     const auto& shape = it->second;
     for (int k = 0; k < shape.dims().size(); ++k) {
       vec.push_back(shape.dims(k));
@@ -292,16 +299,27 @@ void TensorRTTransformer::ClusterToTrtOp(
 
   // Figure out the boundary inputs
   std::unordered_set<std::string> initialization_list;
-  auto total_inputs_vec = FigureInputs(pred_net, start, end, *new_ops, weights, &initialization_list);
+  // Extra intermediate weights created during conversion
+  std::unordered_set<std::string> extra_weights;
+  for (const auto& i : model->graph().initializer()) {
+    extra_weights.emplace(i.name());
+  }
+  auto total_inputs_vec = FigureInputs(
+      pred_net,
+      start,
+      end,
+      *new_ops,
+      weights,
+      extra_weights,
+      &initialization_list);
   auto inputs = ConvertToValueInfo(total_inputs_vec, shape_hints);
-  for (const auto& i: inputs) {
-    LOG(INFO) << "Added input: " << i.name();
+  for (const auto& i : inputs) {
     model->mutable_graph()->add_input()->CopyFrom(i);
   }
 
   // Convert weights to initializing tensors
   onnx::OnnxExporter exporter;
-  for (const auto& op: init_net.op()) {
+  for (const auto& op : init_net.op()) {
     CAFFE_ENFORCE_EQ(op.output_size(), 1);
     auto it = initialization_list.find(op.output(0));
     if (it != initialization_list.end()) {
@@ -311,8 +329,8 @@ void TensorRTTransformer::ClusterToTrtOp(
     }
   }
   CAFFE_ENFORCE(initialization_list.empty(), "Unfulfilled initialization list");
-  for (const auto& t: model->graph().initializer()) {
-    LOG(INFO) << "Initializer: " << t.name();
+  for (const auto& t : model->graph().initializer()) {
+    VLOG(1) << "Initializer: " << t.name();
   }
 
   // Onnx model is ready. Call onnx-trt to convert to one trt c2 op
@@ -321,6 +339,7 @@ void TensorRTTransformer::ClusterToTrtOp(
   new_ops->emplace_back(BuildTrtOp(model_str, output_shape_hints));
 
   model->mutable_graph()->clear_node();
+  model->mutable_graph()->clear_initializer();
 }
 
 // Cutting off the runnable part and replace with tensor ops. Asssume the nets
@@ -329,7 +348,7 @@ void TensorRTTransformer::Transform(
     NetDef* init_net,
     NetDef* pred_net,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
-  const auto shape_hints = InferShapes(init_net, pred_net, input_shape_hints);
+  auto shape_hints = InferShapes(init_net, pred_net, input_shape_hints);
 
   std::unordered_set<std::string> weights;
   if (init_net) {
@@ -349,10 +368,11 @@ void TensorRTTransformer::Transform(
 
   std::vector<OperatorDef> new_ops;
   bool trt_group = false;
-  auto importer = InferObject(onnx2trt::createImporter(nullptr));
+  auto importer = tensorrt::TrtObject(onnx2trt::createImporter(nullptr));
   int op_idx = 0;
   int start = 0;
   int end = 0;
+  onnx::OnnxExporter exporter(true);
   for (const OperatorDef& op : pred_net->op()) {
     bool support_trt = true;
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
@@ -363,7 +383,7 @@ void TensorRTTransformer::Transform(
     } else {
       // One c2 op can be converted into multiple onnx nodes. For simplicity, we
       // enforce all or nothing here
-      results = onnx::OnnxExporter().Caffe2OpToOnnxNodes(op, shape_hints);
+      results = exporter.Caffe2OpToOnnxNodes(op, shape_hints);
       for (const auto& n : results.first) {
         if (!importer->supports(n)) {
           LOG(INFO) << "TRT does not support ONNX node " << n.op_type();
@@ -380,8 +400,30 @@ void TensorRTTransformer::Transform(
         start = op_idx;
       }
       for (const auto& n : node_protos) {
-        auto* node = onnx_model.mutable_graph()->add_node();
-        node->CopyFrom(n);
+        onnx_model.mutable_graph()->add_node()->CopyFrom(n);
+      }
+
+      for (const auto& t : results.second) {
+        VLOG(2) << "Adding extra init tensor: " << t.name();
+        TensorShape shape;
+        shape.mutable_dims()->CopyFrom(t.dims());
+        shape_hints.emplace(t.name(), std::move(shape));
+        ::ONNX_NAMESPACE::TensorProto tf;
+        tf.set_name(t.name());
+        tf.mutable_dims()->CopyFrom(t.dims());
+        tf.set_data_type(::ONNX_NAMESPACE::TensorProto::FLOAT);
+        std::vector<int64_t> v;
+        v.resize(t.raw_data().size() / sizeof(int64_t));
+        memcpy(v.data(), t.raw_data().data(), t.raw_data().size());
+        std::vector<float> vf;
+        for (auto i : v) {
+          vf.push_back(static_cast<float>(i));
+        }
+        tf.mutable_raw_data()->assign(
+            reinterpret_cast<const char*>(vf.data()),
+            sizeof(float) * vf.size());
+
+        onnx_model.mutable_graph()->add_initializer()->CopyFrom(tf);
       }
     } else {
       end = op_idx;
@@ -420,4 +462,4 @@ void TensorRTTransformer::Transform(
   PruneUsedWeights(*pred_net, init_net);
 }
 
-}
+} // namespace caffe2

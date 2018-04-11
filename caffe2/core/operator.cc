@@ -544,9 +544,9 @@ TensorShapes InferBlobShapesAndTypesFromWorkspace(
   return InferBlobShapesAndTypes(blob_desc, nets);
 }
 
-TensorShapes InferBlobShapesAndTypesFromMap(const CaffeMap<std::string,
-    std::vector<TIndex>>& blob_dimensions,
-    const vector<NetDef *> &nets) {
+TensorShapes InferBlobShapesAndTypesFromMap(
+    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const vector<NetDef*>& nets) {
   CaffeMap<string, TensorShape> blob_desc;
   // Populate shapes from known blobs
   for (const auto& blob : blob_dimensions) {

@@ -19,7 +19,7 @@ int64_t CheckDims(
   int64_t chw = 1;
   for (int i = 0; i < nv_dims.nbDims; ++i) {
     if (nv_dims.d[i] != c2_dims[i + 1]) {
-      return -1;
+      CAFFE_THROW("Mismatched dimensions between TRT input and C2 input");
     }
     chw *= nv_dims.d[i];
   }
@@ -33,16 +33,19 @@ int64_t CheckDims(
 // binding here too.
 TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
     : Operator<CUDAContext>(operator_def, ws),
-      logger_((nvinfer1::ILogger::Severity)(
-          OperatorBase::GetSingleArgument<int>("log_verbosity", FLAGS_minloglevel))),
-      max_batch_size_(OperatorBase::GetSingleArgument<int>("max_batch_size", 1)) {
+      logger_(
+          (nvinfer1::ILogger::Severity)(OperatorBase::GetSingleArgument<int>(
+              "log_verbosity",
+              FLAGS_minloglevel))),
+      max_batch_size_(
+          OperatorBase::GetSingleArgument<int>("max_batch_size", 1)) {
   {
     auto engine_string =
         OperatorBase::GetSingleArgument<std::string>("serialized_engine", "");
     CAFFE_ENFORCE(!engine_string.empty(), "Empty serialized TensorRT engine!");
-    auto trt_runtime = InferObject(nvinfer1::createInferRuntime(logger_));
+    auto trt_runtime = tensorrt::TrtObject(nvinfer1::createInferRuntime(logger_));
     // TODO(support trt plugin factory)
-    trt_engine_ = InferObject(trt_runtime->deserializeCudaEngine(
+    trt_engine_ = tensorrt::TrtObject(trt_runtime->deserializeCudaEngine(
         engine_string.data(), engine_string.size(), nullptr));
   }
 
@@ -61,7 +64,7 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
       auto output_size_hint = OperatorBase::GetRepeatedArgument<int>(key);
       if (!output_size_hint.empty()) {
         std::vector<TIndex> dims;
-        for (const auto v: output_size_hint) {
+        for (const auto v : output_size_hint) {
           dims.push_back(v);
         }
         output_size_hints_.emplace(output_idx, std::move(dims));
@@ -70,25 +73,33 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
     }
   }
 
-  trt_executor_ = InferObject(trt_engine_->createExecutionContext());
+  trt_executor_ = tensorrt::TrtObject(trt_engine_->createExecutionContext());
 }
 
-void TensorRTOp::MaybeAdjustOutputShape(int output_idx, std::vector<TIndex>* dims) {
+void TensorRTOp::MaybeAdjustOutputShape(
+    int output_idx,
+    std::vector<TIndex>* dims) {
   const auto it = output_size_hints_.find(output_idx);
   if (it != output_size_hints_.end()) {
     const auto& dims_hint = it->second;
-    auto total_trt = std::accumulate(dims->begin(), dims->end(), (TIndex)(1), std::multiplies<TIndex>());
-    auto total_c2 = std::accumulate(dims_hint.begin(), dims_hint.end(), (TIndex)(1), std::multiplies<TIndex>());
-    if (total_c2 != total_trt) {
-      LOG(WARNING) << "The total size of TensorRT op output and hint don't match: " << total_trt << " vs " << total_c2;
-      return;
-    }
+    auto total_trt = std::accumulate(
+        dims->begin(), dims->end(), (TIndex)(1), std::multiplies<TIndex>());
+    auto total_c2 = std::accumulate(
+        dims_hint.begin(),
+        dims_hint.end(),
+        (TIndex)(1),
+        std::multiplies<TIndex>());
+    CAFFE_ENFORCE_EQ(
+        total_trt,
+        total_c2,
+        "The total size of TensorRT op output and hint don't match: ",
+        total_trt,
+        " vs ",
+        total_c2);
 
-    bool identical_shape = std::equal(dims->cbegin(), dims->cend(), dims_hint.cbegin());
-    // We conform to the output shape hints. NB: We might need an explicit reshape op for this
-    if (!identical_shape) {
-      *dims = dims_hint;
-    }
+    // We conform to the output shape hints. NB: We might need an explicit
+    // reshape op for this
+    *dims = dims_hint;
   }
 }
 
@@ -99,17 +110,19 @@ bool TensorRTOp::RunOnDevice() {
   for (int i = 0; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
     const auto& tensor_dims = input_tensor.dims();
-    if (i == 0 && !tensor_dims.empty()) {
+    CAFFE_ENFORCE(!tensor_dims.empty(), "Input tensor cannot be empty");
+    if (i == 0) {
       N = tensor_dims.front();
     } else {
       CAFFE_ENFORCE_EQ(
           N, tensor_dims.front(), "Mismatched batch size in input tensors");
     }
   }
-  if (N > max_batch_size_) {
+  if (N > max_batch_size_ && !batch_warning_issued_) {
     LOG(WARNING) << "Batch size (" << N << ") is larger than max_batch_size ("
                  << max_batch_size_ << ") optimized for TensorRT operator. "
                  << "Performance may be sub-optimal.";
+    batch_warning_issued_ = true;
   }
 
   // We need to do the binding at RunOnDevice time because we only know the
@@ -122,9 +135,9 @@ bool TensorRTOp::RunOnDevice() {
   auto batch_size = max_batch_size_;
   for (size_t offset = 0; offset < N; offset += batch_size) {
     bindings.clear();
-    batch_size =
-        offset + max_batch_size_ > N ? N - offset : max_batch_size_;
-    VLOG(2) << "Offset: " << offset << ", batch_size: " << batch_size << ", N: " << N;
+    batch_size = std::min<size_t>(N - offset, max_batch_size_);
+    VLOG(2) << "Offset: " << offset << ", batch_size: " << batch_size
+            << ", N: " << N;
     int input_idx = 0;
     int output_idx = 0;
     for (auto i = 0; i < is_input_.size(); ++i) {
@@ -158,7 +171,7 @@ bool TensorRTOp::RunOnDevice() {
     }
 
     CAFFE_ENFORCE_EQ(bindings.size(), InputSize() + OutputSize());
-    if(!trt_executor_->execute(batch_size, bindings.data())){
+    if (!trt_executor_->execute(batch_size, bindings.data())) {
       CAFFE_THROW("Error running the TensorRT executor");
     }
   }
@@ -177,14 +190,12 @@ This is a GPU only operator.
 )DOC")
     .Arg(
         "log_verbosity",
-        "(int default 0) verbosity of the TensorRt engine log."
-        )
+        "(int default 0) verbosity of the TensorRt engine log.")
     .Arg(
         "serialized_engine",
         "(string default=\"\" blob for serialized TensorRT engine."
         "Note that serialized engine is not compatible across platform and "
-        "different TensorRT version."
-        )
+        "different TensorRT version.")
     .Arg(
         "batch_size",
         "(int default 0) Batch size set by the TensorRT engine builder."

@@ -28,6 +28,8 @@ class OnnxExporter {
       const std::unordered_map<std::string, caffe2::TensorShape>&);
 
  public:
+  OnnxExporter(bool legacy_mode = false):legacy_mode_(legacy_mode) {}
+
   ConvertedResult Caffe2OpToOnnxNodes(
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
@@ -83,6 +85,8 @@ class OnnxExporter {
       get_per_op_renamed_attrs() const;
   const std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>&
   get_special_operators() const;
+
+  bool legacy_mode_{false};
 };
 } // namespace onnx
 } // namespace caffe2
