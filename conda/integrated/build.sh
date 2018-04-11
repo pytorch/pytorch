@@ -117,14 +117,40 @@ DEPS_SONAME=(
   "libcudnn.so.${CUDNN_VERSION:0:1}"
   "libnccl.so.2"
 )
+DEPS_SO_PATHS=()
+NOT_IN_LDD=()
 
 # Find which CUDA libraries the Pytorch binaries built against
 # This should probably be done by writing these to a file in cmake when the
 # files are found, and then reading that file here.
 # This is needed to handle libcuda and libcudnn on CI machines, and will also
 # allow this script to work for any user as well
+LDD_OUTPUT="$(ldd $PREFIX/lib/libcaffe2_gpu.so)"
+for ((i=0;i<${#DEPS_SONAME[@]};++i));
+do
+  filename=${DEPS_SONAME[i]}
+  FULL_PATH=$(echo "$LDD_OUTPUT" | grep -oP '(?<='$filename' => )\S+(?='$filename')')
+  if [[ -n $FULL_PATH ]]; then
+    echo "Found $filename in ldd output"
+    DEPS_SO_PATHS+=("$FULL_PATH/$filename")
+  else
+    echo "$filename not found"
+    NOT_IN_LDD+=(i)
+  fi
+  if [[ $filename == libcudart* ]]; then
+    SO_GUESSED_LOC=$FULL_PATH
+  fi
+done
 
-# Loop through .so, renaming and moving all of them
+# If the .so wasn't in the libcaffe2_gpu dependencies, then we just guess that
+# it's where libcudart is
+echo "${NOT_IN_LDD[@]}"
+for i in "${NOT_IN_LDD[@]}"
+do
+  DEPS_SO_PATHS+=("$SO_GUESSED_LOC/${DEPS_SONAME[i]})
+done
+
+# Loop through .so, adding hashes and copying them to site-packages
 patched=()
 for filename in "${DEPS_SONAME[@]}"
 do
