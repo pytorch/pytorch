@@ -401,6 +401,9 @@ class ReduceTensorGPUTest : public testing::Test {
 };
 
 TEST_F(ReduceTensorGPUTest, ReduceSumGPUTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
   // Test for 1D tensor.
   RunRedcueTensorTest(
       math::ReduceSum<float, CUDAContext>,
@@ -458,6 +461,9 @@ TEST_F(ReduceTensorGPUTest, ReduceSumGPUTest) {
 }
 
 TEST_F(ReduceTensorGPUTest, ReduceMeanGPUTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
   // Test for 1D tensor.
   RunRedcueTensorTest(
       math::ReduceMean<float, CUDAContext>,
