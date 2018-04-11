@@ -79,7 +79,7 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
   self->nDimensionV = 0;
   self->coalesced = 0;
   self->nnz = 0;
-  self->csr = THCudaIntTensor_new(state);
+  self->csr = NULL;
   // self->flag = TH_TENSOR_REFCOUNTED;
   self->refcount = 1;
 }
@@ -379,7 +379,7 @@ int THCSTensor_(isCoalesced)(THCState *state, const THCSTensor *self) {
 }
 
 int THCSTensor_(hasCSR)(THCState *state, const THCSTensor *self) {
-  return THCudaIntTensor_nDimension(state, self->csr) != 0;
+  return (self->csr != NULL);
 }
 
 void THCSTensor_(uncoalesce)(THCState *state, THCSTensor *self) {
@@ -389,7 +389,7 @@ void THCSTensor_(uncoalesce)(THCState *state, THCSTensor *self) {
 
 void THCSTensor_(invalidateCSR)(THCState *state, THCSTensor *self) {
   THCudaIntTensor_free(state, self->csr);
-  self->csr = THCudaIntTensor_new(state);
+  self->csr = NULL;
 }
 
 void THCSTensor_(free)(THCState *state, THCSTensor *self)
@@ -401,7 +401,9 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
     THFree(self->size);
     THCIndexTensor_(free)(state, self->indices);
     THCTensor_(free)(state, self->values);
-    THCudaIntTensor_free(state, self->csr);
+    if(self->csr != NULL) {
+      THCudaIntTensor_free(state, self->csr);
+    }
     THFree(self);
   }
 }

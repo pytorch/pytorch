@@ -81,7 +81,7 @@ static void THSTensor_(rawInit)(THSTensor *self)
   self->nDimensionV = 0;
   self->coalesced = 0;
   self->nnz = 0;
-  self->csr = THLongTensor_new();
+  self->csr = NULL;
   // self->flag = TH_TENSOR_REFCOUNTED;
 }
 
@@ -432,7 +432,7 @@ int THSTensor_(isCoalesced)(const THSTensor *self) {
 }
 
 int THSTensor_(hasCSR)(const THSTensor *self) {
-  return THLongTensor_nDimension(self->csr) != 0;
+  return (self->csr != NULL);
 }
 /* Internal slice operations. Buffers can be reused across calls to avoid
 allocating tensors every time */
@@ -556,19 +556,16 @@ void THSTensor_(uncoalesce)(THSTensor *self) {
 
 void THSTensor_(invalidateCSR)(THSTensor *self) {
   THLongTensor_free(self->csr);
-  self->csr = THLongTensor_new();
+  self->csr = NULL;
 }
 
 THSTensor* THSTensor_(newCSR)(THSTensor *self) {
   THSTensor* c = THSTensor_(newCoalesce)(self);
-  if (THLongTensor_nDimension(c->csr)!=0) {
+  if (c->csr != NULL) {
     return self;
   }
-  THLongTensor_free(c->csr);
   c->csr = THSTensor_(toCSR)(THLongTensor_data(c->indices), c->size[0], c->nnz);
-
   return c;
-
 }
 
 void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
@@ -626,7 +623,9 @@ void THSTensor_(free)(THSTensor *self)
     THFree(self->size);
     THLongTensor_free(self->indices);
     THTensor_(free)(self->values);
-    THLongTensor_free(self->csr);
+    if(self->csr != NULL) {
+      THLongTensor_free(self->csr);
+    }
     THFree(self);
   }
 }

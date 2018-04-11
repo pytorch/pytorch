@@ -183,7 +183,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
 
 THCSTensor* THCSTensor_(newCSR)(THCState *state, THCSTensor *self) {
   THCSTensor *c = THCSTensor_(newCoalesce)(state, self);
-  if (THCudaIntTensor_nDimension(state, c->csr) != 0) {
+  if (c->csr != NULL) {
     return self;
   }
   THCudaIntTensor_free(state, c->csr);

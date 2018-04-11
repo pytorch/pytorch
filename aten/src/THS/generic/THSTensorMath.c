@@ -373,7 +373,7 @@ void THSTensor_(spaddmm)(THTensor *r_,
   THLongTensor_free(csr);
   THLongTensor_free(indices);
   THTensor_(free)(values);
-  THSTensor_(free)(sparse);
+  THSTensor_(free)(sparse); // this frees csr anyway if refcount of the sparse hits zero
 }
 
 void THSTensor_(sspaddmm)(THSTensor *r_,
