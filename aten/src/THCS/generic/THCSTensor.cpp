@@ -59,8 +59,7 @@ THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self) {
 }
 
 THCudaIntTensor *THCSTensor_(newCsr)(THCState *state, const THCSTensor *self) {
-  if (THCudaIntTensor_nDimension(state, self->csr) == 0) {
-    THCudaIntTensor_retain(state, self->csr);
+  if (self->csr == NULL) {
     return self->csr;
   }
   return THCudaIntTensor_newNarrow(state, self->csr, 0, 0, self->size[0] + 1); 
@@ -128,7 +127,7 @@ THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor 
 }
 
 THCSTensor* THCSTensor_(_move_csr)(THCState *state, THCSTensor *self, THCudaIntTensor *csr) {
-  int empty = THCudaIntTensor_nDimension(state, csr) == 0;
+  int empty = (csr == NULL);
   if (!empty) {
     THArgCheck(self->size[0] + 1 == THCudaIntTensor_size(state, csr, 0), 1, 
         "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1,
@@ -141,7 +140,12 @@ THCSTensor* THCSTensor_(_move_csr)(THCState *state, THCSTensor *self, THCudaIntT
 }
 
 THCSTensor* THCSTensor_(_set_csr)(THCState *state, THCSTensor *self, THCudaIntTensor * csr) {
-  return THCSTensor_(_move_csr)(state, self, THCudaIntTensor_newClone(state, csr));
+  if (csr != NULL) {
+    return THCSTensor_(_move_csr)(state, self, THCudaIntTensor_newClone(state, csr));
+  }
+  else {
+    return THCSTensor_(_move_csr)(state, self, NULL);
+  }
 }
 /*** end helper methods ***/
 

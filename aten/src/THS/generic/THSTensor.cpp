@@ -58,9 +58,7 @@ THTensor *THSTensor_(newValues)(const THSTensor *self) {
 }
 
 THLongTensor *THSTensor_(newCsr)(const THSTensor *self) {
-  if (THLongTensor_nDimension(self->csr) == 0) {
-    // Narrows don't work on 0-length tensors
-    THLongTensor_retain(self->csr);
+  if (self->csr == NULL) {
     return self->csr;
   }
   return THLongTensor_newNarrow(self->csr, 0, 0, self->size[0] + 1);
@@ -131,7 +129,7 @@ THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *va
 }
 
 THSTensor* THSTensor_(_move_csr)(THSTensor *self, THLongTensor *csr) {
-  int empty = THLongTensor_nDimension(csr) == 0;
+  int empty = (self->csr == NULL);
   if (!empty) {
     THArgCheck(self->size[0] + 1 == THLongTensor_size(csr, 0), 1, 
         "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1, THLongTensor_size(csr, 0));
@@ -143,8 +141,13 @@ THSTensor* THSTensor_(_move_csr)(THSTensor *self, THLongTensor *csr) {
 }
 
 THSTensor* THSTensor_(_set_csr)(THSTensor *self, THLongTensor *csr) {
-  return THSTensor_(_move_csr)(
-    self, THLongTensor_newClone(csr));
+  if (csr != NULL) {
+    return THSTensor_(_move_csr)(
+      self, THLongTensor_newClone(csr));
+  }
+  else {
+    return THSTensor_(_move_csr)(self, NULL);
+  }
 }
 
 /*** end helper methods ***/
