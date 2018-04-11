@@ -1267,8 +1267,10 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       if(r_ == t) {
+        printf("@");
         THBlas_(axpy)(THTensor_(nElement)(t), value, THTensor_(data)(src), 1, THTensor_(data)(r_), 1);
       } else {
+        printf("#");
         TH_TENSOR_APPLY3_CONTIG(real, r_, real, t, real, src, THVector_(cadd)(r__data, t_data, src_data, value, r__len););
       }
     } else {
@@ -1277,6 +1279,7 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
       if (inOMP) {
         serial_path = 1;
       } else {
+        printf("&");
         TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;);
       }
 #else
@@ -1287,6 +1290,7 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
     serial_path = 1;
   }
   if (serial_path) {
+    printf("$");
     TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;);
   }
 }
