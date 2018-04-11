@@ -134,7 +134,9 @@ THSTensor* THSTensor_(_move_csr)(THSTensor *self, THLongTensor *csr) {
     THArgCheck(self->size[0] + 1 == THLongTensor_size(csr, 0), 1, 
         "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1, THLongTensor_size(csr, 0));
   }
-  THLongTensor_free(self->csr);
+  if (self->csr != NULL) {
+    THLongTensor_free(self->csr);
+  }
   self->csr = csr;
 
   return self;

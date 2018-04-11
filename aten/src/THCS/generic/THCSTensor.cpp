@@ -133,7 +133,9 @@ THCSTensor* THCSTensor_(_move_csr)(THCState *state, THCSTensor *self, THCudaIntT
         "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1,
         THCudaIntTensor_size(state, csr, 0));
   }
-  THCudaIntTensor_free(state, self->csr);
+  if (self->csr != NULL) {
+    THCudaIntTensor_free(state, self->csr);
+  }
   self->csr = csr;
 
   return self;
