@@ -106,15 +106,15 @@ def get_analytical_jacobian(input, output):
             zero_gradients(input)
             output.backward(grad_output, create_graph=True)
             for jacobian_x, (d_x, x) in zip(jacobian_c, iter_variables(input)):
-                if jacobian_x.numel() != 0:
+                if d_x is not None and d_x.size() != x.size():
+                    correct_grad_sizes = False
+                elif jacobian_x.numel() != 0:
                     if d_x is None:
                         jacobian_x[:, i].zero_()
                     else:
                         d_x_dense = d_x.to_dense() if d_x.is_sparse else d_x
                         assert jacobian_x[:, i].numel() == d_x_dense.numel()
                         jacobian_x[:, i] = d_x_dense.contiguous().view(-1)
-                if d_x is not None and d_x.size() != x.size():
-                    correct_grad_sizes = False
 
     for jacobian_x, jacobian_reentrant_x in zip(jacobian, jacobian_reentrant):
         if jacobian_x.numel() != 0 and (jacobian_x - jacobian_reentrant_x).abs().max() != 0:
@@ -176,6 +176,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(_as_tuple(inputs), o)
         numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
 
+        if not correct_grad_sizes:
+            return fail_test('Analytical gradient has incorrect size')
+
         for j, (a, n) in enumerate(zip(analytical, numerical)):
             if a.numel() != 0 or n.numel() != 0:
                 if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
@@ -183,10 +186,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                                      'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
 
         if not reentrant:
-            return fail_test('not reentrant')
-
-        if not correct_grad_sizes:
-            return fail_test('not correct_grad_sizes')
+            return fail_test('Backward is not reentrant, i.e., running backward with same '
+                             'input and grad_output multiple times gives different values, '
+                             'although analytical gradient matches numerical gradient')
 
     # check if the backward multiplies by grad_output
     zero_gradients(inputs)

@@ -166,7 +166,7 @@ def hann_window(window_length, periodic=True, dtype=torch.float32):
 
     .. math::
         w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] =
-                \sin^2 \left( \frac{\pi n}{N - 1} \right)
+                \sin^2 \left( \frac{\pi n}{N - 1} \right),
 
     where :math:`N` is the full window size.
 
@@ -175,12 +175,12 @@ def hann_window(window_length, periodic=True, dtype=torch.float32):
     window trims off the last duplicate value from the symmetric window and is
     ready to be used as a periodic window with functions like
     :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`\textt{window_length} + 1`. Also, we always have
+    above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
     ``torch.hann_window(L, periodic=True)`` equal to
     ``torch.hann_window(L + 1, periodic=False)[:-1])``.
 
     .. note::
-        If :attr:`window_length` :math:`\leq 2`, the returned window contains a single value 1.
+        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
 
     Arguments:
         window_length (int): the size of returned window
@@ -190,7 +190,7 @@ def hann_window(window_length, periodic=True, dtype=torch.float32):
             Default: `torch.float32`
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(\text{window_length})` containing the window
+        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
     """
     if not dtype.is_floating_point:
         raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
@@ -205,7 +205,7 @@ def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=to
     This method computes the Hamming window function:
 
     .. math::
-        w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right)
+        w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right),
 
     where :math:`N` is the full window size.
 
@@ -219,7 +219,7 @@ def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=to
     ``torch.hamming_window(L + 1, periodic=False)[:-1])``.
 
     .. note::
-        If :attr:`window_length` :math:`\leq 2`, the returned window contains a single value 1.
+        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
 
     .. note::
         This is a generalized version of :meth:`torch.hann_window`.
@@ -232,7 +232,7 @@ def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=to
             Default: `torch.float32`
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(window\_length)` containing the window
+        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
     """
     if not dtype.is_floating_point:
         raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
@@ -258,9 +258,9 @@ def bartlett_window(window_length, periodic=True, dtype=torch.float32):
         w[n] = 1 - \left| \frac{2n}{N-1} - 1 \right| = \begin{cases}
             \frac{2n}{N - 1} & \text{if } 0 \leq n \leq \frac{N - 1}{2} \\
             2 - \frac{2n}{N - 1} & \text{if } \frac{N - 1}{2} < n < N \\
-        \end{cases}
+        \end{cases},
 
-    , where :math:`N` is the full window size.
+    where :math:`N` is the full window size.
 
     The input :attr:`window_length` is a positive integer controlling the
     returned window size. :attr:`periodic` flag determines whether the returned
@@ -272,7 +272,7 @@ def bartlett_window(window_length, periodic=True, dtype=torch.float32):
     ``torch.bartlett_window(L + 1, periodic=False)[:-1])``.
 
     .. note::
-        If :attr:`window_length` :math:`\leq 2`, the returned window contains a single value 1.
+        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
 
     Arguments:
         window_length (int): the size of returned window
@@ -282,7 +282,7 @@ def bartlett_window(window_length, periodic=True, dtype=torch.float32):
             Default: `torch.float32`
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(window\_length)` containing the window
+        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
     """
     if not dtype.is_floating_point:
         raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
