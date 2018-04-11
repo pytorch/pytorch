@@ -107,7 +107,6 @@ PACKAGE_CUDA_DIR="/usr/local/cuda/lib64/"
 # deep inside these libs.
 # hence for CUDA9, use e.g. '.9.0', and don't use hashed names
 DEPS_SONAME=(
-  "libcuda.so.1"
   "libcudart.so.${CUDA_VERSION:0:3}"
   "libnvToolsExt.so.1"
   "libcublas.so.${CUDA_VERSION:0:3}"
@@ -116,10 +115,14 @@ DEPS_SONAME=(
   "libnvrtc.so.${CUDA_VERSION:0:3}"
   "libnvrtc-builtins.so"
   "libcudnn.so.${CUDNN_VERSION:0:1}"
+  "libnccl.so.2"
 )
-if [[ -n $PYTORCH_USE_NCCL ]]; then
-  DEPS_SONAME+=("libnccl.so.$NCCL_VERSION:0:1")
-fi
+
+# Find which CUDA libraries the Pytorch binaries built against
+# This should probably be done by writing these to a file in cmake when the
+# files are found, and then reading that file here.
+# This is needed to handle libcuda and libcudnn on CI machines, and will also
+# allow this script to work for any user as well
 
 # Loop through .so, renaming and moving all of them
 patched=()
