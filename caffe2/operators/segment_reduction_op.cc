@@ -70,25 +70,12 @@ constexpr bool equal(
     char const* rhs1,
     char const* rhs2,
     char const* rhs3 = "") {
-  while (*rhs1) {
-    if (*lhs++ != *rhs1++) {
-      return false;
-    }
-  }
-
-  while (*rhs2) {
-    if (*lhs++ != *rhs2++) {
-      return false;
-    }
-  }
-
-  while (*rhs3 || *lhs) {
-    if (*lhs++ != *rhs3++) {
-      return false;
-    }
-  }
-
-  return true;
+  return (*lhs == 0 && *rhs1 == 0 && *rhs2 == 0 && *rhs3 == 0) ||
+      (*rhs1 != 0 && *lhs == *rhs1 && equal(lhs + 1, rhs1 + 1, rhs2, rhs3)) ||
+      (*rhs1 == 0 && *rhs2 != 0 && *lhs == *rhs2 &&
+       equal(lhs + 1, rhs1, rhs2 + 1, rhs3)) ||
+      (*rhs1 == 0 && *rhs2 == 0 && *rhs3 != 0 && *lhs == *rhs3 &&
+       equal(lhs + 1, rhs1, rhs2, rhs3 + 1));
 }
 
 // Helper macro when the main op is defined elsewhere, and we only need to
