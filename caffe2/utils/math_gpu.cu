@@ -16,7 +16,6 @@
 #include <thrust/find.h>
 #include <thrust/functional.h>
 #include <thrust/partition.h>
-#include <thrust/reduce.h>
 #include <thrust/sequence.h>
 
 #include "caffe2/core/context_gpu.h"
@@ -2310,7 +2309,6 @@ void ReduceTensorCUDA(
         return thrust::find(thrust::device, axes, axes + num_axes, x) ==
             axes + num_axes;
       });
-  thrust::host_vector<int> host_axes(transpose_axes);
   const int outer_size = Y_size;
   const int inner_size = X_size / Y_size;
   scratch_ptr->Resize(std::vector<int>{outer_size, inner_size});
