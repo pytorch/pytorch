@@ -163,6 +163,7 @@ If you want to compile with CUDA support, install
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v6.x or above
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
+Other potentially useful environment variables may be found in `setup.py`.
 
 If you want to build on Windows, Visual Studio 2017 and NVTX are also needed.
 
@@ -208,8 +209,6 @@ MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 
 On Windows
 ```cmd
-xcopy /Y aten\src\ATen\common_with_cwrap.py tools\shared\cwrap_common.py
-
 set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
 set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 set DISTUTILS_USE_SDK=1

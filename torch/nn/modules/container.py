@@ -267,13 +267,12 @@ class ParameterList(Module):
             self.register_parameter(str(offset + i), param)
         return self
 
-    def __repr__(self):
-        tmpstr = self.__class__.__name__ + '(\n'
+    def extra_repr(self):
+        tmpstr = ''
         for k, p in self._parameters.items():
             size_str = 'x'.join(str(size) for size in p.size())
             device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
             parastr = 'Parameter containing: [{} of size {}{}]'.format(
                 torch.typename(p.data), size_str, device_str)
             tmpstr = tmpstr + '  (' + k + '): ' + parastr + '\n'
-        tmpstr = tmpstr + ')'
         return tmpstr

@@ -46,8 +46,8 @@ class _ConvNd(Module):
         if self.bias is not None:
             self.bias.data.uniform_(-stdv, stdv)
 
-    def __repr__(self):
-        s = ('{name}({in_channels}, {out_channels}, kernel_size={kernel_size}'
+    def extra_repr(self):
+        s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
              ', stride={stride}')
         if self.padding != (0,) * len(self.padding):
             s += ', padding={padding}'
@@ -59,8 +59,7 @@ class _ConvNd(Module):
             s += ', groups={groups}'
         if self.bias is None:
             s += ', bias=False'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
 
 class Conv1d(_ConvNd):

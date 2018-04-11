@@ -308,7 +308,6 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   // TODO: gradOutput shape check
   // Resize and initialize result tensor.
   THCTensor_(resizeAs)(state, gradInput, input);
-  THCTensor_(newContiguous)(state, gradInput);
   THCTensor_(zero)(state, gradInput);
 
   int batchSize;

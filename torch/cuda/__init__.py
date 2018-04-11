@@ -269,8 +269,7 @@ def get_device_name(device):
         device (int): device for which to return the name. This function is a
             no-op if this argument is negative.
     """
-    if device >= 0:
-        return torch._C._cuda_getDeviceName(device)
+    return get_device_properties(device).name
 
 
 def get_device_capability(device):
@@ -282,8 +281,8 @@ def get_device_capability(device):
     Returns:
         tuple(int, int): the major and minor cuda capability of the device
     """
-    if device >= 0:
-        return torch._C._cuda_getDeviceCapability(device)
+    prop = get_device_properties(device)
+    return prop.major, prop.minor
 
 
 def get_device_properties(device):

@@ -11,7 +11,7 @@ PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
 
 
 class PackedSequence(PackedSequence_):
-    r"""Holds the data and list of batch_sizes of a packed sequence.
+    r"""Holds the data and list of :attr:`batch_sizes` of a packed sequence.
 
     All RNN modules accept packed sequences as inputs.
 
@@ -21,8 +21,9 @@ class PackedSequence(PackedSequence_):
 
         Batch sizes represent the number elements at each sequence step in
         the batch, not the varying sequence lengths passed to
-        :func:`pack_padded_sequence`.  For instance, given data  ``abc`` and `d`
-        the ``PackedSequence`` would be ``adbc`` with ``batch_sizes=[2,1,1]``.
+        :func:`pack_padded_sequence`.  For instance, given data  ``abc`` and `x`
+        the :class:`PackedSequence` would contain data ``axbc`` with
+        ``batch_sizes=[2,1,1]``.
 
     Attributes:
         data (Variable): Variable containing packed sequence
@@ -91,16 +92,6 @@ class PackedSequence(PackedSequence_):
         return self.data.is_cuda
 
 
-def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False):
-    if batch_first:
-        input = g.op('Transpose', input, perm_i=[1, 0, 2])
-    # There currently is no PackPadded operator in ONNX. We rely on an
-    # optimization pass to remove this later. It is an error if all
-    # PackPadded operators cannot be optimized out.
-    return g.op("prim::PackPadded", input, lengths, outputs=2)
-
-
-@torch.onnx.symbolic_override_first_arg_based(_symbolic_pack_padded_sequence)
 def pack_padded_sequence(input, lengths, batch_first=False):
     r"""Packs a Variable containing padded sequences of variable length.
 
@@ -114,7 +105,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     shortest one.
 
     Note:
-        This function accept any input that has at least two dimensions. You
+        This function accepts any input that has at least two dimensions. You
         can apply it to pack the labels, and use the output of the RNN with
         them to compute the loss directly. A Variable can be retrieved from
         a :class:`PackedSequence` object by accessing its ``.data`` attribute.
@@ -136,16 +127,32 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     return PackedSequence(data, batch_sizes)
 
 
-def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0):
-    # See comment on _symbolic_pack_padded_sequence
-    data, lengths = g.op("prim::PadPacked", input.data, input.batch_sizes, outputs=2)
-    if batch_first:
-        data = g.op('Transpose', data, perm_i=[1, 0, 2])
-    return data, lengths
+def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding_value=0.0, total_length=None):
+    if total_length is not None:
+        raise ValueError("_symbolic_pad_packed_sequence only supports total_length=None")
+    # There currently is no PackPadded operator in ONNX. We rely on an
+    # optimization pass to remove this later. It is an error if all
+    # PackPadded operators cannot be optimized out.
+
+    def _onnx_symbolic_pack_padded_sequence(g, input, lengths):
+        if batch_first:
+            input = g.op('Transpose', input, perm_i=[1, 0, 2])
+        return g.op("prim::PackPadded", input, lengths, outputs=2)
+
+    def pack_padded_sequence_trace_wrapper(input, lengths):
+        return pack_padded_sequence(input, lengths, batch_first=batch_first)
+
+    outputs = g.wrapPyFuncWithSymbolic(
+        pack_padded_sequence_trace_wrapper, [input, lengths], 2,
+        _onnx_symbolic_pack_padded_sequence)
+    return tuple(o for o in outputs)
 
 
-@torch.onnx.symbolic_override_packed_sequence_based(_symbolic_pad_packed_sequence)
-def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
+pack_padded_sequence = torch.onnx.symbolic_override_first_arg_based(
+    _symbolic_pack_padded_sequence)(pack_padded_sequence)
+
+
+def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_length=None):
     r"""Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
@@ -156,11 +163,22 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
 
     Batch elements will be ordered decreasingly by their length.
 
+    .. note::
+        :attr:`total_length` is useful to implement the
+        ``pack sequence -> recurrent network -> unpack sequence`` pattern in a
+        :class:`~torch.nn.Module` wrapped in :class:`~torch.nn.DataParallel`.
+        See :ref:`this FAQ section <pack-rnn-unpack-with-data-parallelism>` for
+        details.
+
     Arguments:
         sequence (PackedSequence): batch to pad
         batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
             format.
         padding_value (float, optional): values for padded elements.
+        total_length (int, optional): if not ``None``, the output will be padded to
+            have length :attr:`total_length`. This method will throw :class:`ValueError`
+            if :attr:`total_length` is less than the max sequence length in
+            :attr:`sequence`.
 
     Returns:
         Tuple of Variable containing the padded sequence, and Variable
@@ -169,7 +187,15 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
     """
     var_data, batch_sizes = sequence
     max_batch_size = int(batch_sizes[0])
-    output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
+    max_seq_length = batch_sizes.size(0)
+    if total_length is not None:
+        if total_length < max_seq_length:
+            raise ValueError("Expected total_length to be at least the length "
+                             "of the longest sequence in input, but got "
+                             "total_length={} and max sequence length being {}"
+                             .format(total_length, max_seq_length))
+        max_seq_length = total_length
+    output = var_data.data.new(max_seq_length, max_batch_size, *var_data.size()[1:]).fill_(padding_value)
     output = Variable(output)
 
     lengths = []
@@ -197,6 +223,27 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
     # make ONNX export easier. That is to say, from an autodiff
     # standpoint this doesn't make any sense.
     return output, Variable(torch.LongTensor(lengths))
+
+
+def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0):
+    def _onnx_symbolic_pad_packed_sequence(g, data, batch_sizes):
+        data, lengths = g.op("prim::PadPacked", data, batch_sizes, outputs=2)
+        if batch_first:
+            data = g.op('Transpose', data, perm_i=[1, 0, 2])
+        return data, lengths
+
+    def pad_packed_sequence_trace_wrapper(data, batch_sizes):
+        return pad_packed_sequence(PackedSequence(data, batch_sizes),
+                                   batch_first=batch_first, padding_value=padding_value)
+
+    data, lengths = g.wrapPyFuncWithSymbolic(
+        pad_packed_sequence_trace_wrapper, [input.data, input.batch_sizes], 2,
+        _onnx_symbolic_pad_packed_sequence)
+    return data, lengths
+
+
+pad_packed_sequence = torch.onnx.symbolic_override_packed_sequence_based(
+    _symbolic_pad_packed_sequence)(pad_packed_sequence)
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):

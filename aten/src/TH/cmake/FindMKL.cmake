@@ -39,7 +39,7 @@ SET(INTEL_MKL_SEQUENTIAL OFF CACHE BOOL
 # Checks
 CHECK_TYPE_SIZE("void*" SIZE_OF_VOIDP)
 IF ("${SIZE_OF_VOIDP}" EQUAL 8)
-  SET(mklvers "em64t")
+  SET(mklvers "intel64")
   SET(iccvers "intel64")
   SET(mkl64s "_lp64")
 ELSE ("${SIZE_OF_VOIDP}" EQUAL 8)
@@ -63,7 +63,6 @@ ENDIF (CMAKE_COMPILER_IS_GNUCC)
 # Kernel libraries dynamically loaded
 SET(mklkerlibs "mc" "mc3" "nc" "p4n" "p4m" "p4m3" "p4p" "def")
 SET(mklseq)
-
 
 
 # Paths

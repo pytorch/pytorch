@@ -57,7 +57,7 @@
 - func: adaptive_max_pool1d(Tensor self, IntList[1] output_size) -> (Tensor, Tensor)
   variants: function
 
-- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8) -> bool
+- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> bool
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
@@ -85,6 +85,19 @@
 
 - func: arange_out(Tensor result, Scalar end) -> Tensor
   variants: function
+
+# `argmin` and `argmax` are exposed in C++ but not in Python, where we only
+# expose `_argmin` and `_argmax` (which call the first versions). In Python, we
+# then define our own `argmax` and `argmin` that handle passing `dim=None`,
+# which gets the argmax/argmin of the flattened array.
+
+- func: argmax(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+- func: argmax(Tensor self) -> Tensor
+- func: _argmax(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
+- func: argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+- func: argmin(Tensor self) -> Tensor
+- func: _argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
@@ -164,7 +177,7 @@
     CPU: _cos_out_cpu
     CUDA: _cos_out_cuda
 
-- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
@@ -345,7 +358,7 @@
 - func: full_like(Tensor self, Scalar fill_value, *, Type dtype) -> Tensor
   variants: function
 
-- func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+- func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
@@ -353,7 +366,7 @@
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
   variants: function
 
-- func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5) -> Tensor
+- func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enabled=True) -> Tensor
   variants: function
 
 # FFT
@@ -364,7 +377,7 @@
 
 - func: rfft(Tensor self, int64_t signal_ndim, bool normalized=false, bool onesided=true) -> Tensor
 
-- func: irfft(Tensor self, int64_t signal_ndim, IntList signal_sizes={}, bool normalized=false, bool onesided=true) -> Tensor
+- func: irfft(Tensor self, int64_t signal_ndim, bool normalized=false, bool onesided=true, IntList signal_sizes={}) -> Tensor
 
 - func: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes) -> Tensor
   dispatch:
@@ -379,6 +392,8 @@
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 
+- func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
+
 - func: is_cuda(Tensor self) -> bool
 
 - func: is_distributed(Tensor self) -> bool
@@ -392,6 +407,9 @@
 - func: is_signed(Tensor self) -> bool
 
 - func: is_sparse(Tensor self) -> bool
+
+- func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
+  variants: function
 
 - func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
@@ -417,13 +435,17 @@
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
 
-- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
+- func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
+
+- func: min_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
 
@@ -436,20 +458,6 @@
   variants: function
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
-
-# TODO: Why does kW come before kH?  Hella confusing, because it
-# doesn't match the input layout.
-- func: nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
-  variants: function
-
-- func: nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
-  variants: function
-
-- func: nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
-  variants: function
-
-- func: nnpack_spatial_convolution_backward_weight(Tensor input, IntList weight_size, Tensor grad_output, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
-  variants: function
 
 - func: ones(Type dtype, IntList size) -> Tensor
   variants: function

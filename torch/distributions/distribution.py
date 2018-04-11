@@ -164,6 +164,15 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    def perplexity(self):
+        """
+        Returns perplexity of distribution, batched over batch_shape.
+
+        Returns:
+            Tensor of shape batch_shape.
+        """
+        return torch.exp(self.entropy())
+
     def _extended_shape(self, sample_shape=torch.Size()):
         """
         Returns the size of the sample returned by the distribution, given

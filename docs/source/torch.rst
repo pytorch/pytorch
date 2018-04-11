@@ -115,7 +115,9 @@ Pointwise Ops
 .. autofunction:: frac
 .. autofunction:: lerp
 .. autofunction:: log
+.. autofunction:: log10
 .. autofunction:: log1p
+.. autofunction:: log2
 .. autofunction:: mul
 .. autofunction:: neg
 .. autofunction:: pow
@@ -135,6 +137,8 @@ Pointwise Ops
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: argmax
+.. autofunction:: argmin
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: dist
@@ -168,6 +172,10 @@ Comparison Ops
 
 Spectral Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: fft
+.. autofunction:: ifft
+.. autofunction:: rfft
+.. autofunction:: irfft
 .. autofunction:: stft
 .. autofunction:: hann_window
 .. autofunction:: hamming_window
@@ -178,6 +186,8 @@ Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: cross
 .. autofunction:: diag
+.. autofunction:: diagflat
+.. autofunction:: diagonal
 .. autofunction:: histc
 .. autofunction:: renorm
 .. autofunction:: trace

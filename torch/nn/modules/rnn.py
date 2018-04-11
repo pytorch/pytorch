@@ -29,7 +29,7 @@ class RNNBase(Module):
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
                 isinstance(dropout, bool):
             raise ValueError("dropout should be a number in range [0, 1] "
-                             "representing the probablity of an element being "
+                             "representing the probability of an element being "
                              "zeroed")
         if dropout > 0 and num_layers == 1:
             warnings.warn("dropout option adds dropout after all but last "
@@ -195,8 +195,8 @@ class RNNBase(Module):
             output = PackedSequence(output, batch_sizes)
         return output, hidden
 
-    def __repr__(self):
-        s = '{name}({input_size}, {hidden_size}'
+    def extra_repr(self):
+        s = '{input_size}, {hidden_size}'
         if self.num_layers != 1:
             s += ', num_layers={num_layers}'
         if self.bias is not True:
@@ -207,8 +207,7 @@ class RNNBase(Module):
             s += ', dropout={dropout}'
         if self.bidirectional is not False:
             s += ', bidirectional={bidirectional}'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
     def __setstate__(self, d):
         super(RNNBase, self).__setstate__(d)
@@ -265,7 +264,7 @@ class RNN(RNNBase):
         batch_first: If ``True``, then the input and output tensors are provided
             as `(batch, seq, feature)`
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
-            RNN layer except the last layer, with dropout probablity equal to
+            RNN layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
@@ -359,7 +358,7 @@ class LSTM(RNNBase):
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
-            LSTM layer except the last layer, with dropout probablity equal to
+            LSTM layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional LSTM. Default: ``False``
 
@@ -443,7 +442,7 @@ class GRU(RNNBase):
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
-            GRU layer except the last layer, with dropout probablity equal to
+            GRU layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``
 
@@ -487,14 +486,13 @@ class GRU(RNNBase):
 
 class RNNCellBase(Module):
 
-    def __repr__(self):
-        s = '{name}({input_size}, {hidden_size}'
+    def extra_repr(self):
+        s = '{input_size}, {hidden_size}'
         if 'bias' in self.__dict__ and self.bias is not True:
             s += ', bias={bias}'
         if 'nonlinearity' in self.__dict__ and self.nonlinearity != "tanh":
             s += ', nonlinearity={nonlinearity}'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
     def check_forward_input(self, input):
         if input.size(1) != self.input_size:

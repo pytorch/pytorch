@@ -1,6 +1,15 @@
 import functools
 import types
 
+ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
+
+
+class ExportTypes:
+    PROTOBUF_FILE = 1
+    ZIP_ARCHIVE = 2
+    COMPRESSED_ZIP_ARCHIVE = 3
+    DIRECTORY = 4
+
 
 def _export(*args, **kwargs):
     from torch.onnx import utils
@@ -115,7 +124,12 @@ def symbolic_override_first_arg_based(symbolic_fn):
 
     def might_trace(args):
         import torch
-        return torch._C._jit_is_tracing(args[0])
+        first_arg = args[0]
+        if not torch.is_tensor(first_arg):
+            raise ValueError('First argument of {} is expected to be a tensor, '
+                             'but got an object of type {}'
+                             .format(symbolic_fn.__name__, type(first_arg)))
+        return torch._C._jit_is_tracing(first_arg)
 
     return functools.partial(_symbolic_override_wrapper_maker, symbolic_fn, might_trace)
 
@@ -131,6 +145,11 @@ def symbolic_override_packed_sequence_based(symbolic_fn):
 
     def might_trace(args):
         import torch
-        return torch._C._jit_is_tracing(args[0][0])
+        first_arg = args[0]
+        if not isinstance(first_arg, torch.nn.utils.rnn.PackedSequence):
+            raise ValueError('pad_packed_sequence expects sequence to be a '
+                             'PackedSequence, but got an object of type {}'
+                             .format(type(first_arg)))
+        return torch._C._jit_is_tracing(first_arg[0])
 
     return functools.partial(_symbolic_override_wrapper_maker, symbolic_fn, might_trace)

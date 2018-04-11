@@ -625,7 +625,7 @@ def relu(input, inplace=False):
 relu_ = _add_docstr(torch.relu_, r"""
 relu_(input) -> Tensor
 
-In-place verison of :func:`~relu`.
+In-place version of :func:`~relu`.
 """)
 
 
@@ -695,7 +695,7 @@ def elu(input, alpha=1., inplace=False):
 elu_ = _add_docstr(torch._C._nn.elu_, r"""
 elu_(input, alpha=1.) -> Tensor
 
-In-place verison of :func:`~elu`.
+In-place version of :func:`~elu`.
 """)
 
 
@@ -716,7 +716,7 @@ def selu(input, inplace=False):
 selu_ = _add_docstr(torch.selu_, r"""
 selu_(input) -> Tensor
 
-In-place verison of :func:`~selu`.
+In-place version of :func:`~selu`.
 """)
 
 
@@ -1257,66 +1257,13 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
                           eps=eps)
 
 
-def layer_norm(input, normalized_shape, running_mean=None, running_var=None,
-               weight=None, bias=None, use_input_stats=True,
-               momentum=0.1, eps=1e-5):
+def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
     r"""Applies Layer Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
-    if not use_input_stats and (running_mean is None or running_var is None):
-        raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
-
-    if weight is not None and weight.size() != normalized_shape:
-        raise ValueError('Expected weight to be of same shape as '
-                         'normalized_shape, but got {} weight and '
-                         'normalized_shape={}'.format(weight.size(), normalized_shape))
-
-    if bias is not None and bias.size() != normalized_shape:
-        raise ValueError('Expected bias to be of same shape as '
-                         'normalized_shape, but got {} bias and '
-                         'normalized_shape={}'.format(bias.size(), normalized_shape))
-
-    normalized_ndim = len(normalized_shape)
-    input_shape = input.size()
-
-    if input_shape[-normalized_ndim:] != torch.Size(normalized_shape):
-        raise ValueError('Expected input with shape [*, {}], but got {} input'
-                         .format(', '.join(normalized_shape), list(input_shape)))
-
-    n = reduce(mul, input_shape[:-normalized_ndim], 1)
-
-    # Repeat stored stats if necessary
-    if running_mean is not None:
-        running_mean_orig = running_mean
-        running_mean = running_mean_orig.repeat(n)
-    if running_var is not None:
-        running_var_orig = running_var
-        running_var = running_var_orig.repeat(n)
-
-    # Apply layer norm
-    input_reshaped = input.contiguous().view(1, n, -1)
-
-    out = batch_norm(
-        input_reshaped, running_mean, running_var, None, None,
-        use_input_stats, momentum, eps)
-
-    # Copy back
-    if running_mean is not None:
-        running_mean_orig.fill_(running_mean.mean())
-    if running_var is not None:
-        running_var_orig.fill_(running_var.mean())
-
-    out = out.view(*input_shape)
-
-    if weight is not None and bias is not None:
-        return torch.addcmul(bias, 1, out, weight)
-    elif weight is not None:
-        return torch.mul(out, weight)
-    elif bias is not None:
-        return torch.add(out, bias)
-    else:
-        return out
+    return torch.layer_norm(input, normalized_shape, weight, bias, eps,
+                            torch.backends.cudnn.enabled)
 
 
 def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
@@ -1324,7 +1271,8 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
-    return torch.group_norm(input, num_groups, weight, bias, eps)
+    return torch.group_norm(input, num_groups, weight, bias, eps,
+                            torch.backends.cudnn.enabled)
 
 
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
@@ -1895,7 +1843,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
 
     For each output location, :attr:`grid` has `x`, `y`
     input pixel locations which are used to compute output.
-    In the case of 5D inputes, :attr:`grid` has `x`, `y`, `z` pixel locations.
+    In the case of 5D inputs, :attr:`grid` has `x`, `y`, `z` pixel locations.
 
     .. Note::
         To avoid confusion in notation, let's note that `x` corresponds to the `width` dimension `IW`,
@@ -1947,7 +1895,7 @@ def pad(input, pad, mode='constant', value=0):
     r"""Pads tensor.
 
     `Nd` constant padding:  The number of dimensions to pad is
-        :math:`\left\lfloor\frac{len(padding)}{2}\right\rfloor` and the dimensions that gets padded begins with the
+        :math:`\left\lfloor\frac{len(padding)}{2}\right\rfloor` and the dimensions that get padded begins with the
         last dimension and moves forward. See below for examples.
 
     `1D`, `2D` and `3D` "reflect" / "replicate" padding:
@@ -1959,6 +1907,10 @@ def pad(input, pad, mode='constant', value=0):
                 5D input tensor with padding of the form
                 `(padLeft, padRight, padTop, padBottom, padFront, padBack)`. No "reflect" implementation.
 
+    See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
+    :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
+    padding modes works.
+
     Args:
         input (Variable): `Nd` tensor
         pad (tuple): m-elem tuple, where :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
@@ -1969,7 +1921,7 @@ def pad(input, pad, mode='constant', value=0):
 
         >>> t4d = torch.Tensor(3, 3, 4, 2)
         >>> p1d = (1, 1) # pad last dim by 1 on each side
-        >>> out = F.pad(t4d, p1d, "constant", 0)
+        >>> out = F.pad(t4d, p1d, "constant", 0)  # effectively zero padding
         >>> print(out.data.size())
         torch.Size([3, 3, 4, 4])
         >>> p2d = (1, 1, 2, 2) # pad last dim by (1, 1) and 2nd to last by (2, 2)
@@ -1981,31 +1933,34 @@ def pad(input, pad, mode='constant', value=0):
         >>> out = F.pad(t4d, p3d, "constant", 0)
         >>> print(out.data.size())
         torch.Size([3, 9, 7, 3])
+
     """
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
         return ConstantPadNd.apply(input, pad, value)
-    elif input.dim() == 3:
-        assert len(pad) == 2, '3D tensors expect 2 values for padding'
-        if mode == 'reflect':
-            return torch._C._nn.reflection_pad1d(input, pad)
-        elif mode == 'replicate':
-            return torch._C._nn.replication_pad1d(input, pad)
-    elif input.dim() == 4:
-        assert len(pad) == 4, '4D tensors expect 4 values for padding'
-        if mode == 'reflect':
-            return torch._C._nn.reflection_pad2d(input, pad)
-        elif mode == 'replicate':
-            return torch._C._nn.replication_pad2d(input, pad)
-    elif input.dim() == 5:
-        assert len(pad) == 6, '5D tensors expect 6 values for padding'
-        if mode == 'reflect':
-            raise NotImplementedError
-        elif mode == 'replicate':
-            return torch._C._nn.replication_pad3d(input, pad)
     else:
-        raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
+        assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
+        if input.dim() == 3:
+            assert len(pad) == 2, '3D tensors expect 2 values for padding'
+            if mode == 'reflect':
+                return torch._C._nn.reflection_pad1d(input, pad)
+            elif mode == 'replicate':
+                return torch._C._nn.replication_pad1d(input, pad)
+        elif input.dim() == 4:
+            assert len(pad) == 4, '4D tensors expect 4 values for padding'
+            if mode == 'reflect':
+                return torch._C._nn.reflection_pad2d(input, pad)
+            elif mode == 'replicate':
+                return torch._C._nn.replication_pad2d(input, pad)
+        elif input.dim() == 5:
+            assert len(pad) == 6, '5D tensors expect 6 values for padding'
+            if mode == 'reflect':
+                raise NotImplementedError
+            elif mode == 'replicate':
+                return torch._C._nn.replication_pad3d(input, pad)
+        else:
+            raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
 
 
 # distance

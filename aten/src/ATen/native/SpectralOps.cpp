@@ -140,14 +140,14 @@ Tensor ifft(const Tensor& self, const int64_t signal_ndim, const bool normalized
 }
 
 Tensor rfft(const Tensor& self, const int64_t signal_ndim, const bool normalized,
-           const bool onesided) {
+            const bool onesided) {
   return _fft(self, signal_ndim, /* complex_input */ false,
               /* complex_output */ true, /* inverse */ false, {}, normalized,
               onesided);
 }
 
-Tensor irfft(const Tensor& self, const int64_t signal_ndim,  IntList signal_sizes,
-            const bool normalized, const bool onesided) {
+Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalized,
+             const bool onesided,  IntList signal_sizes) {
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ false, /* inverse */ true, signal_sizes,
               normalized, onesided);

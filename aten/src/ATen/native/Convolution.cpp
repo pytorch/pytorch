@@ -7,10 +7,6 @@
 #include "ATen/cudnn/cudnn-wrapper.h"
 #endif
 
-#if AT_NNPACK_ENABLED()
-#include "nnpack.h"
-#endif
-
 namespace at { namespace native {
 
 struct ConvParams {
@@ -33,7 +29,6 @@ struct ConvParams {
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
   bool use_mkldnn(const at::Tensor& input) const;
-  bool use_nnpack(const at::Tensor& input) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -139,18 +134,6 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
          !transposed && // or transposed tensors
          input.ndimension() == 4 && // must be in NCHW format
          groups == 1;
-#endif
-  return false;
-}
-auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
-#if AT_NNPACK_ENABLED()
-  return input.type().backend() == kCPU &&
-         input.type().scalarType() == kFloat && // only on CPU Float Tensors
-         !is_strided() && // doesn't support strides
-         !is_dilated() && // or dilation
-         !transposed &&   // or transposed tensors
-         input.ndimension() == 4 && // must be in NCHW format
-         input.size(0) >= 16; // ensure large enough batch size to ensure perf, tuneable
 #endif
   return false;
 }
@@ -304,7 +287,7 @@ static inline std::vector<int64_t> convolution_expand_param_if_needed(
     std::ostringstream ss;
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
-       << "dimensions, but got " << param_name << "=" << list_param.size();
+       << "dimensions, but got " << param_name << "=" << list_param;
     throw std::runtime_error(ss.str());
   } else {
     return list_param.vec();
@@ -461,20 +444,11 @@ at::Tensor _convolution_nogroup(
             input, weight, kernel_size, bias,
             stride, padding, dilation);
       } else {  /* dim == 4, non-dilated */
-        if (params.use_nnpack(input)) {
-#if AT_NNPACK_ENABLED()
-          return at::nnpack_spatial_convolution(
-              input, weight, bias,
-              kernel_size[1], kernel_size[0],
-              params.padding[1], params.padding[0]);
-#endif
-        } else {
-          /* CPU implementation has specialized MM kernels
-             for non-dilated case here */
-          return at::thnn_conv2d(
-              input, weight, kernel_size, bias,
-              stride, padding);
-        }
+        /* CPU implementation has specialized MM kernels
+           for non-dilated case here */
+        return at::thnn_conv2d(
+            input, weight, kernel_size, bias,
+            stride, padding);
       }
     } else if (dim == 5 && (input.type().is_cuda() || dilated)) {
       return at::thnn_conv_dilated3d(

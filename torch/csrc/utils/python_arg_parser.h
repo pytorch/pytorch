@@ -26,22 +26,25 @@
 #include <vector>
 #include <ATen/ATen.h>
 
-#include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Device.h"
 #include "torch/csrc/Dtype.h"
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Generator.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/tensor/python_tensor.h"
+#include "torch/csrc/utils/device.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/numpy_stub.h"
 
 namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, TYPE
+  BOOL, STORAGE, PYOBJECT, DTYPE, LAYOUT, DEVICE, STRING
 };
 
 struct FunctionParameter;
@@ -90,8 +93,12 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
   inline std::unique_ptr<at::Storage> storage(int i);
-  inline const at::Type& type(int i);
-  inline const at::Type& typeWithDefault(int i, const at::Type& default_type);
+  inline const THPDtype& dtype(int i);
+  inline const THPDtype& dtypeWithDefault(int i, const THPDtype& default_dtype);
+  inline const THPLayout& layout(int i);
+  inline Device device(int i);
+  inline int64_t deviceInt64(int i);
+  inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -139,7 +146,8 @@ struct FunctionParameter {
     bool default_bool;
     int64_t default_int;
     double default_double;
-    at::Type* default_type;
+    THPDtype* default_dtype;
+    THPLayout* default_layout;
   };
 };
 
@@ -248,53 +256,96 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   return res;
 }
 
-inline const at::Type& PythonArgs::type(int i) {
-  if (!args[i]) {
-    auto type = signature.params[i].default_type;
-    return type ? *type : torch::tensor::get_default_tensor_type();
-  }
-  THPDtype* dtype = reinterpret_cast<THPDtype*>(args[i]);
-  if (dtype->cdata == nullptr) {
-    std::ostringstream oss;
-    oss << "Error attempting to use dtype " << dtype->name << ".";
-    if (dtype->is_cuda) {
-      oss << "  Torch not compiled with CUDA enabled." << std::endl;
-    }
-    throw std::runtime_error(oss.str());
-  }
-  return *(dtype->cdata);
+inline const THPDtype& PythonArgs::dtypeWithDefault(int i, const THPDtype& default_dtype) {
+  if (!args[i]) return default_dtype;
+  return dtype(i);
 }
 
-inline const at::Type& PythonArgs::typeWithDefault(int i, const at::Type& default_type) {
-  if (!args[i]) return default_type;
-  return type(i);
+inline const THPDtype& PythonArgs::dtype(int i) {
+  if (!args[i]) {
+    auto dtype = signature.params[i].default_dtype;
+    if (!dtype) {
+      const auto& type = torch::tensor::get_default_tensor_type();
+      dtype = torch::getDtype(type.scalarType(), type.is_cuda());
+    }
+    return *dtype;
+  }
+  return *reinterpret_cast<THPDtype*>(args[i]);
+}
+
+inline const THPLayout& PythonArgs::layout(int i) {
+  if (!args[i]) return *signature.params[i].default_layout;
+  return *reinterpret_cast<THPLayout*>(args[i]);
+}
+
+static std::string cuda_str = "cuda";
+static std::string cpu_str = "cpu";
+static std::string cuda_prefix = "cuda:";
+static std::string cpu_prefix = "cpu:";
+
+inline Device PythonArgs::device(int i) {
+  if (!args[i]) return Device(DeviceType::CPU, -1, true);  // TODO: use CUDA if default type is a cuda type.
+  if (THPDevice_Check(args[i])) {
+    auto device = reinterpret_cast<THPDevice*>(args[i]);
+    return device->device;
+  }
+  if (THPUtils_checkLong(args[i])) {
+    auto index = THPUtils_unpackLong(args[i]);
+    return Device(DeviceType::CUDA, index, index == -1);
+  }
+  std::string device_str = THPUtils_unpackString(args[i]);
+  if (device_str == cpu_str) {
+    return Device(DeviceType::CPU, -1, true);
+  } else if (device_str == cuda_str) {
+    return Device(DeviceType::CUDA, -1, true);
+  } else if (device_str.compare(0, cpu_prefix.length(), cpu_prefix) == 0) {
+    auto device_index = std::stoi(device_str.substr(cpu_prefix.length()));
+    return Device(DeviceType::CPU, device_index, false);
+  } else if (device_str.compare(0, cuda_prefix.length(), cuda_prefix) == 0) {
+    auto device_index = std::stoi(device_str.substr(cuda_prefix.length()));
+    return Device(DeviceType::CUDA, device_index, false);
+  }
+  throw torch::TypeError("only \"cuda\" and \"cpu\" are valid device types, got %s", device_str.c_str());
+}
+
+inline int64_t PythonArgs::deviceInt64(int i) {
+  auto dev = device(i);
+  return (dev.is_default || dev.type == DeviceType::CPU) ? -1 : dev.index;
+}
+
+inline std::string PythonArgs::string(int i) {
+  if (!args[i]) return "";
+  return THPUtils_unpackString(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64(int i) {
-  return toInt64WithDefault(i, signature.params[i].default_int);
+  if (!args[i]) return signature.params[i].default_int;
+  return THPUtils_unpackLong(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
   if (!args[i]) return default_int;
-  return THPUtils_unpackLong(args[i]);
+  return toInt64(i);
 }
 
 inline double PythonArgs::toDouble(int i) {
-  return toDoubleWithDefault(i, signature.params[i].default_double);
+  if (!args[i]) return signature.params[i].default_double;
+  return THPUtils_unpackDouble(args[i]);
 }
 
 inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
   if (!args[i]) return default_double;
-  return THPUtils_unpackDouble(args[i]);
+  return toDouble(i);
 }
 
 inline bool PythonArgs::toBool(int i) {
-  return toBoolWithDefault(i, signature.params[i].default_bool);
+  if (!args[i]) return signature.params[i].default_bool;
+  return args[i] == Py_True;
 }
 
 inline bool PythonArgs::toBoolWithDefault(int i, bool default_bool) {
   if (!args[i]) return default_bool;
-  return args[i] == Py_True;
+  return toBool(i);
 }
 
 inline bool PythonArgs::isNone(int i) {

@@ -297,8 +297,22 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
 
 } // anonymous namespace
 
-InitMethod::Config initTCP(std::string argument, rank_type world_size,
+InitMethod::Config initTCP(std::string argument, int world_size_r,
                            std::string group_name, int rank) {
+
+  group_name.append("#"); // To make sure it's not empty
+  argument.erase(0, 6); // chop "tcp://"
+  rank_type world_size;
+  try {
+    world_size = convertToRank(world_size_r);
+  } catch(std::exception& e) {
+    if (world_size_r == -1) {
+      throw std::invalid_argument("world_size is not set - it is required for "
+                                  "`tcp://` init methods with this backend");
+    }
+    throw std::invalid_argument("invalid world_size");
+  }
+
   // Parse arguments
   std::string address, str_port;
   std::tie(address, str_port) = splitAddress(argument);

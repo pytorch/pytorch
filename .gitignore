@@ -1,7 +1,18 @@
+# READ THIS BEFORE YOU REFACTOR ME
+#
+# setup.py uses the list of patterns in this file to decide
+# what to delete, but it's not 100% sound.  So, for example,
+# if you delete aten/build/ because it's redundant with build/,
+# aten/build/ will stop being cleaned.  So be careful when
+# refactoring this file!
+
+## PyTorch
+
 build/
 dist/
 torch.egg-info/
 */**/__pycache__
+aten/build/
 torch/version.py
 torch/csrc/generic/TensorMethods.cpp
 torch/lib/*.so*
@@ -38,6 +49,7 @@ test/.coverage
 */*.so*
 */**/*.so*
 */**/*.dylib*
+*/**/*.pyd
 test/data/legacy_serialized.pt
 test/data/linear.pt
 .mypy_cache
@@ -54,9 +66,122 @@ test/data/linear.pt
 # macOS dir files
 .DS_Store
 
+# Symbolic files
+tools/shared/cwrap_common.py
+
 # Ninja files
 .ninja_deps
 .ninja_log
 compile_commands.json
 *.egg-info/
-docs/source/_static/img/activation/
+docs/source/scripts/activation_images/
+
+## General
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.cuo
+*.obj
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Compiled protocol buffers
+*.pb.h
+*.pb.cc
+*_pb2.py
+
+# Compiled python
+*.pyc
+*.pyd
+
+# Compiled MATLAB
+*.mex*
+
+# IPython notebook checkpoints
+.ipynb_checkpoints
+
+# Editor temporaries
+*.swn
+*.swo
+*.swp
+*~
+
+# Sublime Text settings
+*.sublime-workspace
+*.sublime-project
+
+# Eclipse Project settings
+*.*project
+.settings
+
+# QtCreator files
+*.user
+
+# PyCharm files
+.idea
+
+# Visual Studio Code files
+.vscode
+.vs
+
+# OSX dir files
+.DS_Store
+
+## Caffe2
+
+# build, distribute, and bins (+ python proto bindings)
+build
+build_host_protoc
+build_android
+build_ios
+build_*
+.build_debug/*
+.build_release/*
+distribute/*
+*.testbin
+*.bin
+cmake_build
+.cmake_build
+gen
+.setuptools-cmake-build
+.pytest_cache
+aten/build/*
+
+# Bram
+plsdontbreak
+
+# Generated documentation
+docs/_site
+docs/gathered
+_site
+doxygen
+docs/dev
+
+# LevelDB files
+*.sst
+*.ldb
+LOCK
+LOG*
+CURRENT
+MANIFEST-*
+
+# generated version file
+caffe2/version.py
+
+# setup.py intermediates
+.eggs
+caffe2.egg-info
+
+# Atom/Watchman required file
+.watchmanconfig

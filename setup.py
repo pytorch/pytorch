@@ -52,6 +52,10 @@
 #     specify the version of PyTorch, rather than the hard-coded version
 #     in this file; used when we're building binaries for distribution
 #
+#   TORCH_CUDA_ARCH_LIST
+#     specify which CUDA architectures to build for.
+#     ie `TORCH_CUDA_ARCH_LIST="6.0;7.0"`
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -289,6 +293,15 @@ class build_deps(Command):
             libs += ['THD']
         build_libs(libs)
 
+        # Use copies instead of symbolic files.
+        # Windows has very poor support for them.
+        sym_files = ['tools/shared/cwrap_common.py']
+        orig_files = ['aten/src/ATen/common_with_cwrap.py']
+        for sym_file, orig_file in zip(sym_files, orig_files):
+            if os.path.exists(sym_file):
+                os.remove(sym_file)
+            shutil.copyfile(orig_file, sym_file)
+
         # Copy headers necessary to compile C++ extensions.
         #
         # This is not perfect solution as build does not depend on any of
@@ -439,6 +452,23 @@ class build_ext(build_ext_parent):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
+        # Copy the essential export library to compile C++ extensions.
+        if IS_WINDOWS:
+            build_temp = self.build_temp
+
+            ext_filename = self.get_ext_filename('_C')
+            lib_filename = '.'.join(ext_filename.split('.')[:-1]) + '.lib'
+
+            export_lib = os.path.join(
+                build_temp, 'torch', 'csrc', lib_filename).replace('\\', '/')
+
+            build_lib = self.build_lib
+
+            target_lib = os.path.join(
+                build_lib, 'torch', 'lib', '_C.lib').replace('\\', '/')
+
+            self.copy_file(export_lib, target_lib)
+
 
 class build(distutils.command.build.build):
     sub_commands = [
@@ -495,14 +525,25 @@ if IS_WINDOWS:
         # against libaries in Python 2.7 under Windows
         extra_compile_args.append('/bigobj')
 else:
-    extra_compile_args = ['-std=c++11', '-Wno-write-strings',
-                          # Python 2.6 requires -fno-strict-aliasing, see
-                          # http://legacy.python.org/dev/peps/pep-3123/
-                          '-fno-strict-aliasing',
-                          # Clang has an unfixed bug leading to spurious missing
-                          # braces warnings, see
-                          # https://bugs.llvm.org/show_bug.cgi?id=21629
-                          '-Wno-missing-braces']
+    extra_compile_args = [
+        '-std=c++11',
+        '-Wall',
+        '-Wextra',
+        '-Wno-unused-parameter',
+        '-Wno-missing-field-initializers',
+        '-Wno-write-strings',
+        '-Wno-zero-length-array',
+        # Python 2.6 requires -fno-strict-aliasing, see
+        # http://legacy.python.org/dev/peps/pep-3123/
+        # We also depend on it in our code (even Python 3).
+        '-fno-strict-aliasing',
+        # Clang has an unfixed bug leading to spurious missing
+        # braces warnings, see
+        # https://bugs.llvm.org/show_bug.cgi?id=21629
+        '-Wno-missing-braces'
+    ]
+    if check_env_flag('WERROR'):
+        extra_compile_args.append('-Werror')
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
@@ -523,7 +564,7 @@ include_dirs += [
 library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
-ATEN_LIB = os.path.join(lib_path, 'libATen.so.1')
+ATEN_LIB = os.path.join(lib_path, 'libATen.so')
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 
@@ -531,7 +572,7 @@ NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if IS_DARWIN:
-    ATEN_LIB = os.path.join(lib_path, 'libATen.1.dylib')
+    ATEN_LIB = os.path.join(lib_path, 'libATen.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
@@ -550,7 +591,9 @@ main_sources = [
     "torch/csrc/Generator.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Dtype.cpp",
+    "torch/csrc/Device.cpp",
     "torch/csrc/Exceptions.cpp",
+    "torch/csrc/Layout.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/DataLoader.cpp",
     "torch/csrc/DynamicTypes.cpp",
@@ -559,6 +602,7 @@ main_sources = [
     "torch/csrc/torch.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
+    "torch/csrc/utils/device.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
@@ -566,6 +610,7 @@ main_sources = [
     "torch/csrc/utils/tensor_new.cpp",
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_dtypes.cpp",
+    "torch/csrc/utils/tensor_layouts.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
@@ -621,6 +666,7 @@ main_sources = [
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
+    "torch/csrc/autograd/python_legacy_variable.cpp",
     "torch/csrc/autograd/python_engine.cpp",
     "torch/csrc/autograd/python_hook.cpp",
     "torch/csrc/autograd/generated/VariableType.cpp",
@@ -643,8 +689,8 @@ main_sources = [
 
 try:
     import numpy as np
-    include_dirs += [np.get_include()]
-    extra_compile_args += ['-DWITH_NUMPY']
+    include_dirs.append(np.get_include())
+    extra_compile_args.append('-DWITH_NUMPY')
     WITH_NUMPY = True
 except ImportError:
     WITH_NUMPY = False
@@ -759,7 +805,7 @@ def make_relative_rpath(path):
 ################################################################################
 
 extensions = []
-packages = find_packages(exclude=('tools', 'tools.*',))
+packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe'))
 C = Extension("torch._C",
               libraries=main_libraries,
               sources=main_sources,
@@ -862,6 +908,7 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/autograd/*.h',
                 'lib/include/torch/csrc/jit/*.h',
                 'lib/include/torch/csrc/utils/*.h',
+                'lib/include/torch/csrc/cuda/*.h',
                 'lib/include/torch/torch.h',
             ]
         })

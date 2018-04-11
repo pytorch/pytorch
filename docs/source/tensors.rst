@@ -102,6 +102,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addr
    .. automethod:: addr_
    .. automethod:: apply_
+   .. automethod:: argmax
+   .. automethod:: argmin
    .. automethod:: asin
    .. automethod:: asin_
    .. automethod:: atan
@@ -200,10 +202,14 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lerp
    .. automethod:: lerp_
    .. automethod:: log
+   .. automethod:: log_
    .. automethod:: logdet
+   .. automethod:: log10
+   .. automethod:: log10_
    .. automethod:: log1p
    .. automethod:: log1p_
-   .. automethod:: log_
+   .. automethod:: log2
+   .. automethod:: log2_
    .. automethod:: log_normal_
    .. automethod:: long
    .. automethod:: lt

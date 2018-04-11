@@ -152,16 +152,13 @@ class MultivariateNormal(Distribution):
 
     @lazy_property
     def covariance_matrix(self):
-        # To use torch.bmm, we first squash the batch_shape into a single dimension
-        flat_scale_tril = self.scale_tril.reshape((-1,) + self._event_shape * 2)
-        return torch.bmm(flat_scale_tril, flat_scale_tril.transpose(-1, -2)).view(self.scale_tril.shape)
+        return torch.matmul(self.scale_tril, self.scale_tril.transpose(-1, -2))
 
     @lazy_property
     def precision_matrix(self):
         # TODO: use `torch.potri` on `scale_tril` once a backwards pass is implemented.
-        flat_conv = self.covariance_matrix.reshape((-1,) + self._event_shape * 2)
-        flat_precision = torch.stack([C.inverse() for C in flat_conv], 0)
-        return flat_precision.view(self.scale_tril.shape)
+        scale_tril_inv = _batch_inverse(self.scale_tril)
+        return torch.matmul(scale_tril_inv.transpose(-1, -2), scale_tril_inv)
 
     @property
     def mean(self):

@@ -18,13 +18,18 @@
 
 #include "THP.h"
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Device.h"
+#include "torch/csrc/Dtype.h"
 #include "torch/csrc/DataLoader.h"
 #include "torch/csrc/Generator.h"
+#include "torch/csrc/Layout.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
-#include "torch/csrc/utils/tensor_dtypes.h"
+#include "torch/csrc/autograd/python_legacy_variable.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/tensor/python_tensor.h"
+#include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/tensor_layouts.h"
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
@@ -79,6 +84,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
     THPUtils_setError("initialization error - expected bytes/string object as shm_manager_path!");
     return NULL;
   }
+  torch::utils::initializeLayouts();
   torch::utils::initializeDtypes();
   torch::tensor::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
@@ -322,6 +328,16 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
   Py_RETURN_TRUE;
 }
 
+PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  auto& type = torch::tensor::get_default_tensor_type();
+  bool is_cuda = type.backend() == at::kCUDA;
+  auto dtype = (PyObject*)torch::getDtype(type.scalarType(), is_cuda);
+  Py_INCREF(dtype);
+  return dtype;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       NULL},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  NULL},
@@ -346,6 +362,7 @@ static PyMethodDef TorchMethods[] = {
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},
+  {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 
@@ -445,13 +462,16 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
-  ASSERT_TRUE(THPDtype_init(module));
+  THPDtype_init(module);
+  THPLayout_init(module);
+  THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
   torch::autograd::initAutogradClosureBindings(module);
   torch::jit::initJITBindings(module);
   torch::autograd::initNNFunctions(module);
+  torch::autograd::init_legacy_variable(module);
 #ifdef WITH_CUDA
   torch::cuda::initModule(module);
 #endif
@@ -524,6 +544,24 @@ static PyObject* initModule() {
   return module;
   END_HANDLE_TH_ERRORS
 }
+
+// Checks that the _C shared library isn't initialized multiple times. This
+// can happen if the same csrc files are compiled into multiple shared
+// libraries.
+inline void pytorch_duplicate_guard() {
+  static int initialized = 0;
+  if (initialized) {
+    fprintf(stderr, "pytorch: _C shared library re-initialized\n");
+    abort();
+  }
+  initialized = 1;
+;}
+
+struct call_duplicate_guard {
+  call_duplicate_guard() { pytorch_duplicate_guard(); }
+};
+
+static call_duplicate_guard _call_duplicate_guard;
 
 #if PY_MAJOR_VERSION == 2
 PyMODINIT_FUNC init_C()

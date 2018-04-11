@@ -11,7 +11,8 @@ except ModuleNotFoundError:
 
 import common
 
-TEST_CUDA = torch.cuda.is_available()
+from torch.utils.cpp_extension import CUDA_HOME
+TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
 
 
 class TestCppExtension(common.TestCase):

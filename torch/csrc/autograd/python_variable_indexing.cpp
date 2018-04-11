@@ -147,7 +147,13 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       result = result.unsqueeze(dim);
       dim++;
     } else if (THPVariable_Check(obj)) {
-      handle_var(reinterpret_cast<THPVariable*>(obj)->cdata);
+      auto& var = THPVariable_Unpack(obj);
+      auto scalar_type = var.type().scalarType();
+      if (var.dim() == 0 && at::isIntegralType(scalar_type) && scalar_type != at::kByte) {
+        result = applySelect(result, dim, THPUtils_unpackLong(obj));
+      } else {
+        handle_var(var);
+      }
     } else if (PySequence_Check(obj)) {
       handle_var(sequenceToVariable(self.type(), obj));
     } else {

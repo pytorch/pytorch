@@ -128,6 +128,39 @@ class PackedSequenceTest(TestCase):
         unpacked, _ = rnn_utils.pad_packed_sequence(packed)
         self.assertEqual(unpacked.type(), cuda_type_str)
 
+    def test_total_length(self):
+        padded, lengths = self._padded_sequence(torch.FloatTensor)
+        max_length = max(lengths)
+        packed = rnn_utils.pack_padded_sequence(padded, lengths)
+        # test ValueError if total_length < max_length
+        for total_length in (-1, 0, max_length - 1):
+            for batch_first in (True, False):
+                def err_fn():
+                    rnn_utils.pad_packed_sequence(packed, batch_first=batch_first,
+                                                  total_length=total_length)
+            self.assertRaisesRegex(ValueError,
+                                   r'Expected total_length to be at least the '
+                                   r'length of the longest sequence in input',
+                                   err_fn)
+        # test that pad_packed_sequence returns results of correct length
+        for batch_first in (True, False):
+            no_extra_pad, _ = rnn_utils.pad_packed_sequence(packed, batch_first=batch_first)
+            for total_length_delta in (0, 1, 8):
+                total_length = max_length + total_length_delta
+                unpacked, lengths_out = rnn_utils.pad_packed_sequence(packed, batch_first=batch_first,
+                                                                      total_length=total_length)
+                self.assertEqual(lengths, lengths_out)
+                self.assertEqual(unpacked.size(1 if batch_first else 0), total_length)
+                if total_length_delta == 0:
+                    ref_output = no_extra_pad
+                elif batch_first:
+                    extra_pad = no_extra_pad.new_zeros(self.batch_size, total_length_delta)
+                    ref_output = torch.cat([no_extra_pad, extra_pad], 1)
+                else:
+                    extra_pad = no_extra_pad.new_zeros(total_length_delta, self.batch_size)
+                    ref_output = torch.cat([no_extra_pad, extra_pad], 0)
+                self.assertEqual(unpacked, ref_output)
+
 
 def default_tensor_type(type):
     type_str = torch.typename(type)
@@ -768,6 +801,24 @@ class TestNN(NNTestCase):
         for key in keys:
             self.assertTrue(hasattr(linear, key))
 
+    def test_repr(self):
+        # no extra information or sub-modules
+        empty_sequential = nn.Sequential()
+        expected_repr_empty = 'Sequential()'
+        self.assertEqual(repr(empty_sequential), expected_repr_empty)
+
+        # one liner extra information
+        linear = nn.Linear(1, 1)
+        expected_repr_linear = 'Linear(in_features=1, out_features=1, bias=True)'
+        self.assertEqual(repr(linear), expected_repr_linear)
+
+        # sub-modules repr
+        sequential = nn.Sequential(linear)
+        expected_repr_sequential = 'Sequential(\n' \
+            '  (0): Linear(in_features=1, out_features=1, bias=True)\n' \
+            ')'
+        self.assertEqual(repr(sequential), expected_repr_sequential)
+
     def test_dir_digit(self):
         model = nn.Sequential(nn.Linear(2, 2))
         keys = dir(model)
@@ -1273,6 +1324,18 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=-25)
 
+        # test backward when input contains padding_idx
+        padding_idx = 0
+        embedding = nn.Embedding(5, 2, padding_idx=padding_idx)
+        for n in (1, 2):
+            for other_indices in ([], [1, 3], [2]):
+                indices = torch.LongTensor(other_indices + [padding_idx] * n)
+                pre = embedding.weight[padding_idx].clone()
+                embedding(indices).sum().backward()
+                after = (embedding.weight + embedding.weight.grad)[padding_idx]
+                embedding.zero_grad()
+                self.assertEqual(after, pre)
+
     def test_embedding_max_norm(self):
         embedding = nn.Embedding(22, 5, max_norm=1.0)
         input = Variable(torch.LongTensor([2, 8, 8, 6]))
@@ -1759,24 +1822,17 @@ class TestNN(NNTestCase):
             self.assertAlmostEqual(torch.abs(mean.data).mean(), bias, delta=1e-5)
             self.assertAlmostEqual(torch.abs(var.data).mean(), scale ** 2, delta=1e-5)
 
-            # test that LN with track_running_stats=True
-            ln = nn.LayerNorm(normalized_shape, momentum=1, eps=0,
-                              elementwise_affine=False, track_running_stats=True).type(type)
-            output_ref = ln(x).data.clone()
-            input_reshaped = x.view(*(unnormalized_shape + [-1]))
-            # make sure that running mean and var update correctly when training
-            mean = input_reshaped.mean(-1).mean()
-            var = input_reshaped.var(-1, unbiased=True).mean()
-            self.assertAlmostEqual(torch.abs(mean.data - ln.running_mean).mean(), 0, delta=1e-5)
-            self.assertAlmostEqual(torch.abs(var.data - ln.running_var).mean(), 0, delta=1e-5)
-            ln.eval()
-            old_running_mean = ln.running_mean.clone()
-            old_running_var = ln.running_var.clone()
-            output_new = ln(x + ln.running_var.sqrt()[0] * scale).data
-            self.assertAlmostEqual((output_new - output_ref).mean(), scale, delta=1e-5)
-            # make sure that running mean and var don't change in eval
-            self.assertEqual(old_running_mean, ln.running_mean)
-            self.assertEqual(old_running_var, ln.running_var)
+        bad_norm_shape_input_shape = {
+            (): (),
+            (2, 3): (3,),
+            (2,): (1, 2, 3),
+            (10,): (2, 3),
+            10: (2, 3),
+        }
+        for norm_shape, input_shape in bad_norm_shape_input_shape.items():
+            ln = nn.LayerNorm(norm_shape)
+            input = type(*input_shape).uniform_(0, 10)
+            self.assertRaises(RuntimeError, lambda: ln(input))
 
     def _test_LayerNorm_cuda_half(self):
         input = torch.zeros(2, 3, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
@@ -1866,6 +1922,13 @@ class TestNN(NNTestCase):
 
         inputs = Variable(torch.randn(1, 2, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
+
+        # assert that relfection padding errors when pad >= input size
+        expected_err_msg = r"Padding size should be less than the corresponding input dimension"
+        self.assertRaisesRegex(RuntimeError, expected_err_msg,
+                               lambda: F.pad(torch.randn(1, 1, 2, 3), (1, 1, 3, 0), mode='reflect'))
+        self.assertRaisesRegex(RuntimeError, expected_err_msg,
+                               lambda: F.pad(torch.randn(1, 1, 2), (2, 1), mode='reflect'))
 
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0, requires_grad=True)
@@ -2053,6 +2116,18 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_gpu(self):
         self._test_gather(0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_gather_different_len_dicts(self):
+        inputs = (
+            {'a': Variable(torch.randn(1, 2).cuda(0), requires_grad=True)},
+            {
+                'b': Variable(torch.randn(1, 2).cuda(1), requires_grad=True),
+                'a': Variable(torch.randn(1, 2).cuda(1), requires_grad=True)
+            }
+        )
+        with self.assertRaises(ValueError):
+            _ = dp.gather(inputs, target_device=0)
 
     def _test_broadcast_double_backwards(self, *tensors):
         variables = tuple(Variable(t, requires_grad=True) for t in tensors)
@@ -2297,7 +2372,10 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_nested_output(self):
         def fn(input):
-            return [input, (input.sin(), input.cos(), [input.add(1)]), input]
+            return [
+                input, (input.sin(), input.cos(), [input.add(1)]), input,
+                {'a': input, 'b': [input.sin()]}
+            ]
 
         class Net(nn.Module):
             def forward(self, input):
@@ -2314,6 +2392,13 @@ class TestNN(NNTestCase):
         self.assertIsInstance(output[1][2], list)
         self.assertIsInstance(output[1][2][0], Variable)
         self.assertIsInstance(output[2], Variable)
+        self.assertIsInstance(output[3], dict)
+        self.assertEqual(len(output[3]), 2)
+        self.assertIn('a', output[3])
+        self.assertIn('b', output[3])
+        self.assertIsInstance(output[3]['a'], Variable)
+        self.assertIsInstance(output[3]['b'], list)
+        self.assertIsInstance(output[3]['b'][0], Variable)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_nested_input(self):
@@ -3739,7 +3824,7 @@ class TestNN(NNTestCase):
         input.grad.data.zero_()
 
         output.backward(grad.contiguous())
-        self.assertEqual(result, input.grad.data)
+        self.assertEqual(result, input.grad.data, type2prec[dtype.__name__])
 
     def test_pixel_shuffle(self):
         batch_size = random.randint(1, 3)
@@ -5963,7 +6048,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([5], 1e-3, 0.3),
+        constructor_args=([5], 1e-3),
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
@@ -5971,7 +6056,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([5], 1e-3, 0.3, False),
+        constructor_args=([5], 1e-3, False),
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
@@ -5979,15 +6064,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([5], 1e-3, 0.3, True, True),
-        input_size=(4, 5, 5),
-        cudnn=True,
-        check_eval=True,
-        desc='1d_elementwise_affine_tracking_stats',
-    ),
-    dict(
-        module_name='LayerNorm',
-        constructor_args=([2, 2, 5], 1e-3, 0.3),
+        constructor_args=([2, 2, 5], 1e-3),
         input_size=(4, 2, 2, 5),
         cudnn=True,
         check_eval=True,
@@ -5995,19 +6072,11 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([2, 2, 5], 1e-3, 0.3, False),
+        constructor_args=([2, 2, 5], 1e-3, False),
         input_size=(4, 2, 2, 5),
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
-    ),
-    dict(
-        module_name='LayerNorm',
-        constructor_args=([2, 2, 5], 1e-3, 0.3, True, True),
-        input_size=(4, 2, 2, 5),
-        cudnn=True,
-        check_eval=True,
-        desc='3d_elementwise_affine_tracking_stats',
     ),
     dict(
         module_name='GroupNorm',
