@@ -259,6 +259,7 @@ if [[ -n $BUILD_INTEGRATED ]]; then
   add_package 'mkl' '>=2018'
   add_package 'mkl-include'
   add_package 'numpy' '>=1.11'
+  add_package 'typing'
   append_to_section 'build' '- pyyaml'
   append_to_section 'build' '- setuptools'
   CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
