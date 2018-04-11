@@ -614,7 +614,7 @@ void addObjectMethods(py::module& m) {
           "reset",
           [](caffe2::onnx::DummyName& instance, const py::object& args) {
             if (args.is(py::none())) {
-              instance.Reset({});
+              instance.Reset(std::unordered_set<std::string>());
             } else {
               instance.Reset(args.cast<std::unordered_set<std::string>>());
             }
