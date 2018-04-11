@@ -773,6 +773,47 @@ class TestLayers(LayersTestCase):
         num_visited = schema.FetchRecord(last_n.num_visited)
         npt.assert_array_equal([5], num_visited())
 
+    @given(
+        X=hu.arrays(dims=[5, 2]),
+        num_to_collect=st.integers(min_value=3, max_value=3),
+    )
+    def testReservoirSamplingWithID(self, X, num_to_collect):
+        ID = np.array([1, 2, 3, 1, 2], dtype=np.int64)
+        input_record = self.new_record(
+            schema.Struct(
+                ('record', schema.Struct(
+                    ('dense', schema.Scalar()),
+                )),
+                ('object_id', schema.Scalar(np.int64)),
+            )
+        )
+        schema.FeedRecord(input_record, [X, ID])
+        packed_record = self.model.PackRecords(
+            input_record.record, 1, fields=input_record.record.field_names())
+        reservoir_input = schema.Struct(
+            ('data', packed_record),
+            ('object_id', input_record.object_id),
+        )
+        reservoir = self.model.ReservoirSampling(
+            reservoir_input, num_to_collect)
+        self.model.output_schema = schema.Struct()
+        train_init_net, train_net = \
+            layer_model_instantiator.generate_training_nets_forward_only(
+                self.model)
+        workspace.RunNetOnce(train_init_net)
+        workspace.CreateNet(train_net)
+        workspace.RunNet(train_net.Proto().name, num_iter=2)
+        num_visited = schema.FetchRecord(reservoir.num_visited)
+        npt.assert_array_equal([3], num_visited())
+        for param in self.model.params:
+            serialized = workspace.SerializeBlob(str(param))
+            workspace.DeserializeBlob(str(param), serialized)
+        ID = np.array([3, 5, 3, 3, 5], dtype=np.int64)
+        schema.FeedRecord(input_record.object_id, [ID])
+        workspace.RunNet(train_net.Proto().name, num_iter=2)
+        num_visited = schema.FetchRecord(reservoir.num_visited)
+        npt.assert_array_equal([2], num_visited())
+
     def testUniformSampling(self):
         input_record = self.new_record(schema.Scalar(np.int32))
         input_array = np.array([3, 10, 11, 15, 20, 99], dtype=np.int32)
@@ -1734,10 +1775,12 @@ class TestLayers(LayersTestCase):
         # ensure: quad_life > 2 * half_life
         half_life = int(np.random.random() * 1e2 + 1)
         quad_life = int(np.random.random() * 1e3 + 2 * half_life + 1)
+        min_weight = np.random.random()
+        max_weight = np.random.random() + min_weight + 1e-5
         result = self.model.HomotopyWeight(
             input_record,
-            min_weight=0.,
-            max_weight=1.,
+            min_weight=min_weight,
+            max_weight=max_weight,
             half_life=half_life,
             quad_life=quad_life,
         )
@@ -1748,8 +1791,13 @@ class TestLayers(LayersTestCase):
         half_life_result = workspace.FetchBlob(result())
         workspace.RunNet(train_net.Name(), num_iter=quad_life - half_life)
         quad_life_result = workspace.FetchBlob(result())
-        expected_half_life_result = 0.5 * data[0] + 0.5 * data[1]
-        expected_quad_life_result = 0.25 * data[0] + 0.75 * data[1]
+
+        alpha = (min_weight + max_weight) / 2.
+        beta = (min_weight + max_weight) / 2.
+        expected_half_life_result = alpha * data[0] + beta * data[1]
+        alpha = (3 * min_weight + max_weight) / 4.
+        beta = (min_weight + 3 * max_weight) / 4.
+        expected_quad_life_result = alpha * data[0] + beta * data[1]
         npt.assert_allclose(
             expected_half_life_result, half_life_result, atol=1e-2, rtol=1e-2
         )

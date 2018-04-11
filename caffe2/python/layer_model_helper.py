@@ -87,6 +87,10 @@ class LayerModelHelper(model_helper.ModelHelper):
         self.param_init_net = self.create_init_net('param_init_net')
         self._initialize_params = True
 
+        # additional (hard-coded) diagnose_options to report based on the model
+        # TODO(xlwang): it's hack!
+        self.ad_hoc_diagnose_blobs_and_operations = []
+
     def clear_output_schema(self):
         self._output_schema = None
 

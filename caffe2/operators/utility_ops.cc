@@ -14,48 +14,6 @@ bool WeightedSumGradientOp<CPUContext>::RunOnDevice() {
   return DoRunWithType<float>();
 }
 
-template <>
-template <typename T>
-void UniqueOp<CPUContext>::DoRun() {
-  auto& inputTensor = Input(0);
-  // use dim32 to enforce that it's fine to have remapping of type int
-  int N = inputTensor.dim32(0);
-  CAFFE_ENFORCE_EQ(inputTensor.ndim(), 1, "Input should be a vector");
-  auto* uniqueTensor = Output(UNIQUE);
-
-  int* remapping = nullptr;
-  if (REMAPPING < OutputSize()) {
-    auto* remappingTensor = Output(REMAPPING);
-    remappingTensor->ResizeLike(inputTensor);
-    remapping = remappingTensor->template mutable_data<int>();
-  }
-
-  const T* input = inputTensor.template data<T>();
-  // TODO(dzhulgakov): if perf becomes an issue consider doing hash table
-  // instead of sorting
-  order_.resize(N);
-  std::iota(order_.begin(), order_.end(), 0);
-  std::sort(order_.begin(), order_.end(), [input](const int x, const int y) {
-    return input[x] < input[y];
-  });
-  int K = N;
-  for (int i = 1; i < N; ++i) {
-    K -= input[order_[i]] == input[order_[i - 1]];
-  }
-  uniqueTensor->Resize(K);
-  T* unique = uniqueTensor->template mutable_data<T>();
-  K = 0;
-  T prev = -1;
-  for (int i = 0; i < N; ++i) {
-    if (i == 0 || prev != input[order_[i]]) {
-      prev = unique[K++] = input[order_[i]];
-    }
-    if (remapping) {
-      remapping[order_[i]] = K - 1;
-    }
-  }
-}
-
 REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Print, PrintOp<CPUContext>);
 REGISTER_CPU_OPERATOR(FlattenToVec, FlattenToVecOp<CPUContext>);
@@ -86,7 +44,6 @@ REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Gather, GatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(GatherRanges, GatherRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsGather, LengthsGatherOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToRanges, LengthsToRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SegmentIdsToLengths, SegmentIdsToLengthsOp<CPUContext>);
@@ -526,43 +483,6 @@ Example:
     .Input(2, "INDICES", "indices into LENGTHS where items should be gathered")
     .Output(0, "OUTPUT", "1-D tensor containing gathered items");
 
-OPERATOR_SCHEMA(Unique)
-    .NumInputs(1)
-    .NumOutputs(1, 2)
-    .SetDoc(R"DOC(
-Deduplicates input indices vector and optionally produces reverse remapping.
-There's no guarantees on the ordering of the output indices.
-)DOC")
-    .Input(0, "indices", "1D tensor of int32 or int64 indices.")
-    .Output(0, "unique_indices", "1D tensor of deduped entries.")
-    .Output(
-        1,
-        "remapping",
-        "(optional) mapping from `indices` to `unique_indices`. This has the "
-        "same shape as `indices`. Its elements are the indices into "
-        "`unique_indices` such that `Gather(['unique_indices', 'remapping'])` "
-        "yields `indices`.")
-    .TensorInferenceFunction([](const OperatorDef& def,
-                                const vector<TensorShape>& in) {
-      std::vector<TensorShape> out(1);
-      out[0].set_data_type(in[0].data_type());
-      CAFFE_ENFORCE_EQ(in[0].dims_size(), 1);
-      if (in[0].dims(0) <= 1) {
-        // This special case is useful in some situation, e.g., when feeding
-        // tensor inference with empty tensor (where the first dim is the batch
-        // size)
-        out[0].add_dims(in[0].dims(0));
-      } else {
-        out[0].set_unknown_shape(true);
-      }
-      if (def.output_size() > 1) {
-        // Remapping has the same shape as the input tensor
-        out.push_back(in[0]);
-        out.back().set_data_type(TensorProto::INT32);
-      }
-      return out;
-    });
-
 OPERATOR_SCHEMA(LengthsToSegmentIds)
     .NumInputs(1)
     .NumOutputs(1)
@@ -881,7 +801,6 @@ struct GetCPUToGPUGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(CopyCPUToGPU, GetCPUToGPUGradient);
 
-SHOULD_NOT_DO_GRADIENT(Unique);
 SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengths);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToRanges);
