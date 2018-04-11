@@ -39,59 +39,60 @@ class CheckpointFunction(torch.autograd.Function):
         return (None,) + tuple(inp.grad for inp in detached_inputs)
 
 
-def checkpoint(run_function, *args):
+def checkpoint(function, *args):
     r"""Checkpoint a model or part of the model
 
     Checkpoint works by trading compute for memory. It can be applied on any
     part of the model. In the forward pass, the model activations are not
-    stored. The forward pass save the inputs tuple and the run_function
-    parameter. In the backwards pass, the saved inputs and run_function is
-    retreived, and the forward pass is done on the model again (non-volatile
+    stored. The forward pass save the inputs tuple and the :attr:`function`
+    parameter. In the backwards pass, the saved inputs and :attr:`function` is
+    retreived, and the forward pass is done on the model again (`non`-volatile
     this time) since we need to get the activations values for calculating the
     gradient and then the gradients are calculated.
 
     .. warning::
 
-        checkpointing doesn't work with torch.autograd.grad(), but only with
-        torch.autograd.backward()
+        Checkpointing doesn't work with :func:`torch.autograd.grad()`, but only
+        with :func:`torch.autograd.backward()`.
 
     Args:
-        run_function: describes what to run in the forward pass of the model or
+        function: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs
-            passed as the tuple. For example, in LSTM, user passes (activation,
-            hidden), run_function should correctly use first input as activation
-            and second input as hidden
-        args: tuple containing inputs to the run_function
+            passed as the tuple. For example, in LSTM, if user passes
+            ``(activation, hidden)``, :attr:`function` should correctly use the
+            first input as ``activation`` and the second input as ``hidden``
+        args: tuple containing inputs to the :attr:`function`
 
     Returns:
-        Output of running the run_function on *args
+        Output of running :attr`function` on *:attr:`args`
     """
-    return CheckpointFunction.apply(run_function, *args)
+    return CheckpointFunction.apply(function, *args)
 
 
 def checkpoint_sequential(functions, segments, *inputs):
     r"""A helper function for checkpointing Sequential based models.
 
-    For models that are constructed using Sequential, they normally are built
-    using various modules/functions. For such models, given a list of modules/functions
-    it executes in order (sequentially), we can divide the model in various
-    segments and checkpoint the segments. All segments except the last will be
-    run in volatile manner i.e. the model activations are not stored. The inputs
-    of each checkpointed segment will be saved for re-running the segment in the
-    backward pass.
+    For models that are constructed using :class:`torch.nn.Sequential`, they
+    normally are built using various modules/functions. For such models, given a
+    list of modules/functions it executes in order (sequentially), we can divide
+    the model in various segments and checkpoint the segments. All segments
+    except the last will be run in `volatile` manner i.e. the model activations
+    are not stored. The inputs of each checkpointed segment will be saved for
+    re-running the segment in the backward pass.
 
     .. warning::
 
-        checkpointing doesn't work with torch.autograd.grad(), but only with
-        torch.autograd.backward()
+        Checkpointing doesn't work with :func:`torch.autograd.grad()`, but only
+        with :func:`torch.autograd.backward()`.
 
     Args:
-        functions: A sequential or the list of modules or functions (comprising the model) to run in order.
+        functions: A :class:`torch.nn.Sequential` or the list of modules or
+            functions (comprising the model) to run sequentially.
         segments: Number of chunks to create in the model
-        inputs: tuple of Tensors that are inputs to run_function
+        inputs: tuple of Tensors that are inputs to :attr:`functions`
 
     Returns:
-        Output of running the modules/functions on *inputs
+        Output of running :attr:`functions` sequentially on *:attr:`inputs`
 
     Example:
         >>> model = nn.Sequential(...)
