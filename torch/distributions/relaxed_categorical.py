@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.utils import clamp_probs, broadcast_all, log_sum_exp
