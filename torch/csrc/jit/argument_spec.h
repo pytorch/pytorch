@@ -194,4 +194,4 @@ namespace std {
       return spec.hashCode();
     }
   };
-};
+}
