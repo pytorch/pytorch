@@ -146,6 +146,17 @@ void ReduceMax(
     Tensor<Context>* scratch_ptr,
     Context* context);
 
+template <typename T, class Context>
+void ReduceMean(
+    const int size,
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
 // Adds batch sub-tensors elementwise to output. Stripe is the stripe length
 // and N is the number of elements to add (size of Y).
 template <typename T, class Context>
