@@ -148,10 +148,16 @@ bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
-void WriteProtoToBinaryFile(
-    const MessageLite& /*proto*/,
-    const char* /*filename*/) {
-  LOG(FATAL) << "Not implemented yet.";
+void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
+  /* Quick and dirty implementation. Rewrite with streams if you need to write
+   * big protobufs. */
+  int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  CAFFE_ENFORCE_NE(
+      fd, -1, "File cannot be created: ", filename, " error number: ", errno);
+  std::string buffer;
+  proto.SerializeToString(&buffer);
+  write(fd, buffer.data(), buffer.size());
+  close(fd);
 }
 
 #else  // CAFFE2_USE_LITE_PROTO

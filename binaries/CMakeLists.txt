@@ -7,7 +7,9 @@ caffe2_binary_target("print_registered_core_operators.cc")
 caffe2_binary_target("run_plan.cc")
 caffe2_binary_target("speed_benchmark.cc")
 caffe2_binary_target("split_db.cc")
-
+if (ANDROID)
+  caffe2_binary_target("autotuner.cc")
+endif()
 caffe2_binary_target("db_throughput.cc")
 
 if (USE_CUDA)
