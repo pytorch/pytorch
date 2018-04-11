@@ -12,6 +12,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/timer.h"
 
 #include "arm_compute/core/GLES_COMPUTE/OpenGLES.h"
 #include "arm_compute/runtime/GLES_COMPUTE/GCFunctions.h"
@@ -29,7 +30,12 @@
 namespace caffe2 {
 
 typedef half_float::half half;
-typedef half DataType;
+//#define ACL_USE_FLOAT32
+#ifdef ACL_USE_FLOAT32
+ typedef float DataType;
+#else
+ typedef half DataType;
+#endif
 
 template <typename T> class GLTensor;
 
@@ -49,14 +55,19 @@ public:
   using deleted_unique_ptr = std::unique_ptr<T, std::function<void(T *)>>;
 
   template <typename T>
-  static deleted_unique_ptr<const GLTensor<T>> getGLTensor(const Blob *b) {
+    static deleted_unique_ptr<const GLTensor<T>> getGLTensor(const Blob *b, const GLTensor<T>* X_old = nullptr) {
     if (b->IsType<TensorCPU>()) {
+
       auto &Xcpu = b->Get<TensorCPU>();
       GLTensor<T> *X_raw_ptr;
-      X_raw_ptr = new GLTensor<T>();
-      X_raw_ptr->ResizeLike(Xcpu);
-      deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(
-          X_raw_ptr, [](const GLTensor<T> *X) { delete X; });
+      if (X_old) {
+        X_raw_ptr = const_cast<GLTensor<T> *>(X_old);
+        X_raw_ptr->ResizeLike(Xcpu);
+      } else {
+        X_raw_ptr = new GLTensor<T>();
+        X_raw_ptr->ResizeLike(Xcpu);
+      }
+      deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(X_raw_ptr, [](const GLTensor<T> *X) { delete X; });
       return X_unique_ptr;
     }
     const GLTensor<T> *X_raw_ptr;
@@ -115,36 +126,50 @@ public:
 };
 
 template <typename T> class GLTensor {
-private:
-  bool allocated_ = false;
 public:
   GLTensor() { tensor_ = make_unique<arm_compute::GCTensor>(); }
   ~GLTensor() { tensor_->allocator()->free(); }
 
-  template <typename TensorType> void ResizeLike(TensorType &X) {
-    tensor_->allocator()->free();
-    SetDims(X.dims());
-    shape_ = arm_compute::TensorShape();
+  template <typename TensorType> bool ResizeLike(TensorType &X, bool free = false) {
+    bool need_allocation = SetDims(X.dims());
     for (int i = 0; i < dims_.size(); i++) {
       shape_.set(dims_.size() - i - 1, dims_[i]);
     }
 
-    tensor_->allocator()->init(
-        arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F16));
+    if (need_allocation) {
+      if (free) {
+        tensor_->allocator()->free();
+      }
+      #ifdef ACL_USE_FLOAT32
+      tensor_->allocator()->init(
+                                 arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F32));
+      #else
+      tensor_->allocator()->init(
+                                 arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F16));
+      #endif
+    } else {
+      tensor_->info()->set_tensor_shape(shape_);
+    }
+    return need_allocation;
   }
 
-  template <typename... Ts> void Resize(Ts... dim_source) {
-    bool size_changed = SetDims(dim_source...);
-    if (size_changed) {
-      // TODO: Make it type generic
-      int64_t new_size = size_ * sizeof(T);
-      tensor_->allocator()->free();
-      for (int i = 0; i < dims_.size(); i++) {
-        shape_.set(dims_.size() - i - 1, dims_[i]);
-      }
-      tensor_->allocator()->init(
-          arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F16));
+  template <typename... Ts> bool Resize(Ts... dim_source) {
+    bool need_allocation = SetDims(dim_source...);
+    for (int i = 0; i < dims_.size(); i++) {
+      shape_.set(dims_.size() - i - 1, dims_[i]);
     }
+    if (need_allocation) {
+      // TODO: Make it type generic
+      tensor_->allocator()->free();
+      #ifdef ACL_USE_FLOAT32
+      tensor_->allocator()->init(arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F32));
+      #else
+      tensor_->allocator()->init(arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F16));
+      #endif
+    } else {
+      tensor_->info()->set_tensor_shape(shape_);
+    }
+    return need_allocation;
   }
 
   // Allocates and copies data if needed
@@ -156,7 +181,10 @@ public:
         if (allocate_tensor) {
           allocate();
         }
+        Timer timer;
         fillGLTensor(b);
+        auto millis = timer.MilliSeconds();
+        VLOG(2) << "[C2DEBUG] fillGLTensor timer: " << millis;
       }
     }
   }
@@ -168,59 +196,40 @@ public:
   void fillGLTensor(const Blob *b) const {
     if (b->IsType<TensorCPU>()) {
       auto &Xcpu = b->Get<TensorCPU>();
-
+      VLOG(2) << "[C2DEBUG] fillGLTensor dims: " << Xcpu.dims();
       T *buffer = map();
       char *byte_buffer = (char *)buffer;
       auto info = tensor_->info();
+      arm_compute::Window it_window;
+      it_window.use_tensor_dimensions(info->tensor_shape(), /* first_dimension =*/arm_compute::Window::DimY); // Iterate through the rows (not each element)
+      arm_compute::Iterator it(get_underlying(), it_window);
       if (Xcpu.ndim() == 4) {
-        auto M = Xcpu.dim32(0);
         auto C = Xcpu.dim32(1);
         auto H = Xcpu.dim32(2);
         auto W = Xcpu.dim32(3);
-        for (auto m = 0; m < M; ++m) {
-          for (auto c = 0; c < C; ++c) {
-            for (auto h = 0; h < H; ++h) {
-              for (auto w = 0; w < W; ++w) {
-                T *b = (T *)(&byte_buffer[info->offset_element_in_bytes(
-                    arm_compute::Coordinates(w, h, c, m))]);
-                // require cpu input blob to be float
-                *b = T(Xcpu.data<float>()[((m * C + c) * H + h) * W + w]);
-              }
-            }
-          }
-        }
+        arm_compute::execute_window_loop(it_window, [&](const arm_compute::Coordinates & id) {
+            std::copy_n(Xcpu.data<float>() + id[3] * (C * W * H) + id.z() * (W * H) + id.y() * W, W, reinterpret_cast<T *>(it.ptr()));
+          },
+          it);
       } else if (Xcpu.ndim() == 3) {
-        auto C = Xcpu.dim32(0);
         auto H = Xcpu.dim32(1);
         auto W = Xcpu.dim32(2);
-        for (auto c = 0; c < C; ++c) {
-          for (auto h = 0; h < H; ++h) {
-            for (auto w = 0; w < W; ++w) {
-              T *b = (T *)(&byte_buffer[info->offset_element_in_bytes(
-                  arm_compute::Coordinates(w, h, c))]);
-              // require cpu input blob to be float
-              *b = T(Xcpu.data<float>()[(c * H + h) * W + w]);
-            }
-          }
-        }
+        arm_compute::execute_window_loop(it_window, [&](const arm_compute::Coordinates & id) {
+            std::copy_n(Xcpu.data<float>() + (id.z() * (W * H) + id.y() * W), W, reinterpret_cast<T *>(it.ptr()));
+        },
+        it);
       } else if (Xcpu.ndim() == 2) {
-        auto H = Xcpu.dim32(0);
         auto W = Xcpu.dim32(1);
-        for (auto h = 0; h < H; ++h) {
-          for (auto w = 0; w < W; ++w) {
-            T *b = (T *)(&byte_buffer[info->offset_element_in_bytes(
-                arm_compute::Coordinates(w, h))]);
-            // require cpu input blob to be float
-            *b = T(Xcpu.data<float>()[h * W + w]);
-          }
-        }
+        arm_compute::execute_window_loop(it_window, [&](const arm_compute::Coordinates & id) {
+            std::copy_n(Xcpu.data<float>() + id.y() * W, W, reinterpret_cast<T *>(it.ptr()));
+        },
+        it);
       } else {
+        arm_compute::Window w;
+        w.use_tensor_dimensions(info->tensor_shape());
+        arm_compute::Iterator i(get_underlying(), w);
         auto size = Xcpu.dim32(0);
-        for (auto i = 0; i < size; ++i) {
-          T *b = (T *)(&byte_buffer[info->offset_element_in_bytes(arm_compute::Coordinates(i))]);
-          // require cpu input blob to be float
-          *b = T(Xcpu.data<float>()[i]);
-        }
+        std::copy_n(Xcpu.data<float>(), size, reinterpret_cast<T *>(i.ptr()));
       }
       unmap();
     }
@@ -269,14 +278,14 @@ private:
       dims_[i] = src[i];
     }
     size_ = new_size;
-    return size_ != old_size;
+    return size_ > old_size;
   }
 
   bool SetDims() {
     auto old_size = size_;
     dims_.resize(0);
     size_ = 1;
-    return size_ != old_size;
+    return size_ > old_size;
   }
 
   bool SetDims(const TIndex d0) {
@@ -284,7 +293,7 @@ private:
     dims_.resize(1);
     dims_[0] = d0;
     size_ = d0;
-    return size_ != old_size;
+    return size_ > old_size;
   }
 
   bool SetDims(const TIndex d0, const TIndex d1) {
@@ -293,7 +302,7 @@ private:
     dims_[0] = d0;
     dims_[1] = d1;
     size_ = d0 * d1;
-    return size_ != old_size;
+    return size_ > old_size;
   }
 
   bool SetDims(const TIndex d0, const TIndex d1, const TIndex d2) {
@@ -303,7 +312,7 @@ private:
     dims_[1] = d1;
     dims_[2] = d2;
     size_ = d0 * d1 * d2;
-    return size_ != old_size;
+    return size_ > old_size;
   }
 
   bool SetDims(const TIndex d0, const TIndex d1, const TIndex d2,
@@ -315,7 +324,7 @@ private:
     dims_[2] = d2;
     dims_[3] = d3;
     size_ = d0 * d1 * d2 * d3;
-    return size_ != old_size;
+    return size_ > old_size;
   }
 
   vector<TIndex> dims_;
@@ -324,14 +333,43 @@ private:
   unique_ptr<arm_compute::GCTensor> tensor_;
 };
 
-template<typename T = half>
+template<typename T = DataType>
 void getTensorCPU(const GLTensor<T>& g_, TensorCPU& g) {
+  VLOG(2) << " [C2DEBUG] getTensorCPU " << g_.dims();
   g.Resize(g_.dims());
-  T *buffer = g_.map();
-
-  for (auto i = 0; i < g.size(); ++i) {
-    auto tmp = buffer[i];
-    g.mutable_data<float>()[i] = tmp;
+  g_.map();
+  auto tensor = g_.get_underlying();
+  auto info = tensor->info();
+  arm_compute::Window it_window;
+  it_window.use_tensor_dimensions(info->tensor_shape(), /* first_dimension =*/arm_compute::Window::DimY); // Iterate through the rows (not each element)
+  arm_compute::Iterator it(tensor, it_window);
+  if (g_.ndim() == 4) {
+    auto C = g_.dim32(1);
+    auto H = g_.dim32(2);
+    auto W = g_.dim32(3);
+    arm_compute::execute_window_loop(it_window, [&](const arm_compute::Coordinates & id) {
+        std::copy_n(reinterpret_cast<T *>(it.ptr()), W, g.mutable_data<float>() + id[3] * (C * W * H) + id.z() * (W * H) + id.y() * W);
+      },
+      it);
+  } else if (g_.ndim() == 3) {
+    auto H = g_.dim32(1);
+    auto W = g_.dim32(2);
+    arm_compute::execute_window_loop(it_window, [&](const arm_compute::Coordinates & id) {
+        std::copy_n(reinterpret_cast<T *>(it.ptr()), W, g.mutable_data<float>() + (id.z() * (W * H) + id.y() * W));
+      },
+      it);
+  } else if (g_.ndim() == 2) {
+    auto W = g_.dim32(1);
+    arm_compute::execute_window_loop(it_window, [&](const arm_compute::Coordinates & id) {
+        std::copy_n(reinterpret_cast<T *>(it.ptr()), W, g.mutable_data<float>() + id.y() * W);
+      },
+      it);
+  } else {
+    arm_compute::Window w;
+    w.use_tensor_dimensions(info->tensor_shape());
+    arm_compute::Iterator i(tensor, w);
+    auto size = g_.dim32(0);
+    std::copy_n(reinterpret_cast<T *>(i.ptr()), size, g.mutable_data<float>());
   }
   g_.unmap();
 }

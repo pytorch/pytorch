@@ -21,22 +21,34 @@ bool GLReluOp<T>::RunOnDevice() {
     first_run_ = false;
     if (Y->get_underlying() != X_->get_underlying())
     {
-        Y->ResizeLike(*X_);
+      Y->ResizeLike(*X_);
     }
     relu_layer_.configure(
         X_->get_underlying(), Y->get_underlying(),
         arm_compute::ActivationLayerInfo(
           arm_compute::ActivationLayerInfo::ActivationFunction::RELU));
 
+  } else if (second_run_) {
+    X_->lazy_allocate(Xblob, second_run_, true);
+    second_run_ = false;
+    // in place activation, do not need to allocate new memory
+    if (Y->get_underlying() != X_->get_underlying()) {
+      Y->ResizeLike(*X_);
+      Y->allocate();
+    }
+    relu_layer_.run();
   } else {
     X_->lazy_allocate(Xblob, second_run_, true);
-    if (second_run_) {
-      second_run_ = false;
-      // in place activation, do not need to allocate new memory
-      if (Y->get_underlying() != X_->get_underlying())
-      {
-          Y->allocate();
-      }
+    bool need_allocation = false;
+    if (Y->get_underlying() != X_->get_underlying()) {
+      need_allocation = Y->ResizeLike(*X_, true);
+    }
+    relu_layer_.configure(
+        X_->get_underlying(), Y->get_underlying(),
+        arm_compute::ActivationLayerInfo(
+          arm_compute::ActivationLayerInfo::ActivationFunction::RELU));
+    if (need_allocation) {
+      Y->allocate();
     }
     relu_layer_.run();
   }
@@ -44,7 +56,7 @@ bool GLReluOp<T>::RunOnDevice() {
   return true;
 }
 
-REGISTER_GL_OPERATOR(Relu, GLReluOp<half>);
+REGISTER_GL_OPERATOR(Relu, GLReluOp<DataType>);
 
 template <typename T>
 bool GLSigmoidOp<T>::RunOnDevice() {
@@ -68,15 +80,28 @@ bool GLSigmoidOp<T>::RunOnDevice() {
       X_->get_underlying(), Y->get_underlying(),
       arm_compute::ActivationLayerInfo(
           arm_compute::ActivationLayerInfo::ActivationFunction::LOGISTIC));
+  } else if (second_run_) {
+    X_->lazy_allocate(Xblob, second_run_, true);
+    second_run_ = false;
+    // in place activation, do not need to allocate new memory
+    if (Y->get_underlying() != X_->get_underlying()) {
+      Y->ResizeLike(*X_);
+      Y->allocate();
+    }
+    sigmoid_layer_.run();
   } else {
     X_->lazy_allocate(Xblob, second_run_, true);
-    if (second_run_) {
-      second_run_ = false;
-      // in place activation, do not need to allocate new memory
-      if (Y->get_underlying() != X_->get_underlying())
-      {
-          Y->allocate();
-      }
+    bool need_allocation = false;
+    if (Y->get_underlying() != X_->get_underlying())
+    {
+      need_allocation = Y->ResizeLike(*X_, true);
+    }
+    sigmoid_layer_.configure(
+      X_->get_underlying(), Y->get_underlying(),
+      arm_compute::ActivationLayerInfo(
+          arm_compute::ActivationLayerInfo::ActivationFunction::LOGISTIC));
+    if (need_allocation) {
+      Y->allocate();
     }
     sigmoid_layer_.run();
   }
