@@ -93,12 +93,14 @@ If your GPU memory isn't freed even after Python quits, it is very likely that
 some Python subprocesses are still alive. You may find them via
 ``ps -elf | grep python`` and manually kill them with ``kill -9 [pid]``.
 
+.. _dataloader-workers-random-seed:
+
 My data loader workers return identical random numbers
 -------------------------------------------------------
 You are likely using other libraries to generate random numbers in the dataset.
 For example, NumPy's RNG is duplicated when worker subprocesses are started via
 ``fork``. See :class:`torch.utils.data.DataLoader`'s document for how to
-properly set up random seeds in workers.
+properly set up random seeds in workers with its :attr:`worker_init_fn` option.
 
 .. _pack-rnn-unpack-with-data-parallelism:
 

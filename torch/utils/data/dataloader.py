@@ -378,9 +378,13 @@ class DataLoader(object):
 
     .. note:: By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
-              by main process using its RNG. You may use ``torch.initial_seed()`` to access
-              this value in :attr:`worker_init_fn`, which can be used to set other seeds
-              (e.g. NumPy) before data loading.
+              by main process using its RNG. However, seeds for other libraies
+              may be duplicated upon initializing workers (w.g., NumPy), causing
+              each worker to return identical random numbers. (See
+              :ref:`dataloader-workers-random-seed` section in FAQ.) You may
+              use ``torch.initial_seed()`` to access the PyTorch seed for each
+              worker in :attr:`worker_init_fn`, and use it to set other seeds
+              before data loading.
 
     .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.
