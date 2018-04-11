@@ -2172,23 +2172,23 @@ void EigenReduceTensorCUDAImpl(
   std::array<int, kNumDims> axes_host;
   context->Copy<int, CUDAContext, CPUContext>(kNumDims, dims, dims_host.data());
   context->Copy<int, CUDAContext, CPUContext>(kNumAxes, axes, axes_host.data());
-  Eigen::array<TIndex, kNumDims> x_dims_array;
-  Eigen::array<TIndex, kNumDims> y_dims_array;
+  Eigen::DSizes<Eigen::DenseIndex, kNumDims> X_dims;
+  Eigen::DSizes<Eigen::DenseIndex, kNumDims> Y_dims;
   Eigen::array<TIndex, kNumAxes> reduce_dims;
   for (int i = 0; i < kNumDims; ++i) {
-    x_dims_array[i] = static_cast<TIndex>(dims_host[i]);
-    y_dims_array[i] = static_cast<TIndex>(dims_host[i]);
+    X_dims[i] = static_cast<Eigen::DenseIndex>(dims_host[i]);
+    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims_host[i]);
   }
   for (int i = 0; i < kNumAxes; ++i) {
-    y_dims_array[axes_host[i]] = static_cast<TIndex>(1);
+    Y_dims[axes_host[i]] = static_cast<Eigen::DenseIndex>(1);
     reduce_dims[i] = axes_host[i];
   }
   const cudaStream_t cuda_stream = context->cuda_stream();
   const Eigen::CudaStreamDevice stream_device(
       &cuda_stream, context->cuda_gpu_id());
   const Eigen::GpuDevice gpu_device(&stream_device);
-  EigenTensorMap<T, kNumDims>(Y, y_dims_array).device(gpu_device) =
-      EigenTensorMap<T, kNumDims>(const_cast<T*>(X), x_dims_array)
+  EigenTensorMap<T, kNumDims>(Y, Y_dims).device(gpu_device) =
+      EigenTensorMap<T, kNumDims>(const_cast<T*>(X), X_dims)
           .reduce(reduce_dims, reducer);
 }
 

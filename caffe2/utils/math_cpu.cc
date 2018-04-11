@@ -699,19 +699,19 @@ void EigenReduceTensorImpl(
     const Reducer& reducer,
     const T* X,
     T* Y) {
-  Eigen::array<TIndex, kNumDims> x_dims_array;
-  Eigen::array<TIndex, kNumDims> y_dims_array;
+  Eigen::DSizes<Eigen::DenseIndex, kNumDims> X_dims;
+  Eigen::DSizes<Eigen::DenseIndex, kNumDims> Y_dims;
   Eigen::array<TIndex, kNumAxes> reduce_dims;
   for (int i = 0; i < kNumDims; ++i) {
-    x_dims_array[i] = static_cast<TIndex>(dims[i]);
-    y_dims_array[i] = static_cast<TIndex>(dims[i]);
+    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
+    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
   }
   for (int i = 0; i < kNumAxes; ++i) {
-    y_dims_array[axes[i]] = static_cast<TIndex>(1);
+    Y_dims[axes[i]] = static_cast<Eigen::DenseIndex>(1);
     reduce_dims[i] = axes[i];
   }
-  EigenTensorMap<T, kNumDims>(Y, y_dims_array) =
-      EigenTensorMap<T, kNumDims>(const_cast<T*>(X), x_dims_array)
+  EigenTensorMap<T, kNumDims>(Y, Y_dims) =
+      EigenTensorMap<T, kNumDims>(const_cast<T*>(X), X_dims)
           .reduce(reduce_dims, reducer);
 }
 
