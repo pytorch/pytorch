@@ -1929,9 +1929,9 @@ class TestAutograd(TestCase):
         _test_real((2, 3, 4), 2)
         _test_real((2, 3, 4, 3), 3)
 
-        _test_complex((2, 10, 2), 1)
-        _test_complex((2, 3, 4, 2), 2)
-        _test_complex((2, 3, 4, 3, 2), 3)
+        _test_complex((2, 2, 10, 2), 1)
+        _test_complex((1, 2, 3, 4, 2), 2)
+        _test_complex((2, 1, 3, 4, 3, 2), 3)
 
     def test_variable_traverse(self):
         def get_out_and_unrefed_cycle():

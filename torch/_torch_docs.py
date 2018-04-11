@@ -6031,7 +6031,7 @@ fft(input, signal_ndim, normalized=False) -> Tensor
 Complex-to-complex Discrete Fourier Transform
 
 This method computes the complex-to-complex discrete Fourier transform.
-Ignoring the batch dimension, it computes the following expression:
+Ignoring the batch dimensions, it computes the following expression:
 
 .. math::
     X[\omega_1, \dots, \omega_d] =
@@ -6044,10 +6044,10 @@ signal, and :math:`N_i` is the size of signal dimension :math:`i`.
 This method supports 1D, 2D and 3D complex-to-complex transforms, indicated
 by :attr:`signal_ndim`. :attr:`input` must be a tensor with last dimension
 of size 2, representing the real and imaginary components of complex
-numbers, and should have ``signal_ndim + 1`` dimensions or ``signal_ndim + 2``
-dimensions with batched data. If :attr:`normalized` is set to ``True``, this
-normalizes the result by dividing it with :math:`\sqrt{\prod_{i=1}^K N_i}` so
-that the operator is unitary.
+numbers, and should have at least ``signal_ndim + 1`` dimensions with optionally
+arbitrary number of leading batch dimensions. If :attr:`normalized` is set to
+``True``, this normalizes the result by dividing it with
+:math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is unitary.
 
 Returns the real and the imaginary parts together as one tensor of the same
 shape of :attr:`input`.
@@ -6059,7 +6059,8 @@ The inverse of this function is :func:`~torch.ifft`.
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
-    input (Tensor): the input tensor
+    input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
+        dimensions
     signal_ndim (int): the number of dimensions in each signal.
         :attr:`signal_ndim` can only be 1, 2 or 3
     normalized (bool, optional): controls whether to return normalized results.
@@ -6119,6 +6120,12 @@ Example::
       0.2740  1.3332
     [torch.FloatTensor of size (4,3,2)]
 
+    >>> # arbitrary number of batch dimensions, 2D FFT
+    >>> x = torch.randn(3, 3, 5, 5, 2)
+    >>> y = torch.fft(x, 2)
+    >>> y.shape
+    torch.Size([3, 3, 5, 5, 2])
+
 """)
 
 add_docstr(torch.ifft,
@@ -6128,7 +6135,7 @@ ifft(input, signal_ndim, normalized=False) -> Tensor
 Complex-to-complex Inverse Discrete Fourier Transform
 
 This method computes the complex-to-complex inverse discrete Fourier
-transform. Ignoring the batch dimension, it computes the following
+transform. Ignoring the batch dimensions, it computes the following
 expression:
 
 .. math::
@@ -6155,7 +6162,8 @@ The inverse of this function is :func:`~torch.fft`.
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
-    input (Tensor): the input tensor
+    input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
+        dimensions
     signal_ndim (int): the number of dimensions in each signal.
         :attr:`signal_ndim` can only be 1, 2 or 3
     normalized (bool, optional): controls whether to return normalized results.
@@ -6217,11 +6225,11 @@ mathematically equivalent with :func:`~torch.fft` with differences only in
 formats of the input and output.
 
 This method supports 1D, 2D and 3D real-to-complex transforms, indicated
-by :attr:`signal_ndim`. :attr:`input` must be a tensor with ``signal_ndim``
-dimensions or ``signal_ndim + 1`` dimensions with batched data. If
-:attr:`normalized` is set to ``True``, this normalizes the result by multiplying
-it with :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is unitary, where
-:math:`N_i` is the size of signal dimension :math:`i`.
+by :attr:`signal_ndim`. :attr:`input` must be a tensor with at least
+``signal_ndim`` dimensions with optionally arbitrary number of leading batch
+dimensions. If :attr:`normalized` is set to ``True``, this normalizes the result
+by multiplying it with :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is
+unitary, where :math:`N_i` is the size of signal dimension :math:`i`.
 
 The real-to-complex Fourier transform results follow conjugate symmetry:
 
@@ -6243,7 +6251,7 @@ The inverse of this function is :func:`~torch.irfft`.
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
-    input (Tensor): the input tensor
+    input (Tensor): the input tensor of at least :attr:`signal_ndim` dimensions
     signal_ndim (int): the number of dimensions in each signal.
         :attr:`signal_ndim` can only be 1, 2 or 3
     normalized (bool, optional): controls whether to return normalized results.
@@ -6287,8 +6295,8 @@ is the case when :attr:`input` is given by :func:`~torch.rfft` with
 ``rfft(signal, onesided=True)``. In such case, set the :attr:`onesided`
 argument of this method to ``True``. Moreover, the original signal shape
 information can sometimes be lost, optionally set :attr:`signal_sizes` to be
-the size of the original signal (without batch dimension if in batched mode) to
-recover it with correct shape.
+the size of the original signal (without the batch dimensions if in batched
+mode) to recover it with correct shape.
 
 Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
 :attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
@@ -6313,7 +6321,8 @@ The inverse of this function is :func:`~torch.rfft`.
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
-    input (Tensor): the input tensor
+    input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
+        dimensions
     signal_ndim (int): the number of dimensions in each signal.
         :attr:`signal_ndim` can only be 1, 2 or 3
     normalized (bool, optional): controls whether to return normalized results.

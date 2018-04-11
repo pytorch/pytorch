@@ -3485,11 +3485,7 @@ class TestTorch(TestCase):
         def _test_real(sizes, signal_ndim, prepro_fn=lambda x: x):
             x = prepro_fn(build_fn(*sizes))
             signal_numel = 1
-            if x.dim() == signal_ndim:
-                start_dim = 0
-            else:
-                start_dim = 1
-            signal_sizes = x.size()[start_dim:start_dim + signal_ndim]
+            signal_sizes = x.size()[-signal_ndim:]
             for normalized, onesided in product((True, False), repeat=2):
                 res = x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
                 if not onesided:  # check Hermitian symmetry
@@ -3504,10 +3500,12 @@ class TestTorch(TestCase):
                     if len(sizes) == signal_ndim:
                         test_one_sample(res)
                     else:
-                        nb = res.size(0)
+                        output_non_batch_shape = res.size()[-(signal_ndim + 1):]
+                        flatten_batch_res = res.view(-1, *output_non_batch_shape)
+                        nb = flatten_batch_res.size(0)
                         test_idxs = torch.LongTensor(min(nb, 4)).random_(nb)
                         for test_idx in test_idxs.tolist():
-                            test_one_sample(res[test_idx])
+                            test_one_sample(flatten_batch_res[test_idx])
                     # compare with C2C
                     xc = torch.stack([x, torch.zeros_like(x)], -1)
                     xc_res = xc.fft(signal_ndim, normalized=normalized)
@@ -3523,18 +3521,18 @@ class TestTorch(TestCase):
 
         # contiguous case
         _test_real((100,), 1)
-        _test_real((100, 100), 1)
+        _test_real((10, 1, 10, 100), 1)
         _test_real((100, 100), 2)
-        _test_real((20, 80, 60), 2)
+        _test_real((2, 2, 5, 80, 60), 2)
         _test_real((50, 40, 70), 3)
-        _test_real((30, 50, 25, 20), 3)
+        _test_real((30, 1, 50, 25, 20), 3)
 
         _test_complex((100, 2), 1)
         _test_complex((100, 100, 2), 1)
         _test_complex((100, 100, 2), 2)
-        _test_complex((20, 80, 60, 2), 2)
+        _test_complex((1, 20, 80, 60, 2), 2)
         _test_complex((50, 40, 70, 2), 3)
-        _test_complex((30, 50, 25, 20, 2), 3)
+        _test_complex((6, 5, 50, 25, 20, 2), 3)
 
         # non-contiguous case
         _test_real((165,), 1, lambda x: x.narrow(0, 25, 100))  # input is not aligned to complex type
