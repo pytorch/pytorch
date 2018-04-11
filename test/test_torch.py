@@ -4353,6 +4353,18 @@ class TestTorch(TestCase):
         with self.assertRaises(IndexError):
             reference[ri([1]), ri([0, 2]), ri([3])]
 
+        # test invalid index fails
+        reference = conv_fn(torch.empty(10))
+        # can't test cuda because it is a device assert
+        if not reference.is_cuda:
+            for err_idx in (10, -11):
+                with self.assertRaisesRegex(IndexError, r'out of'):
+                    reference[err_idx]
+                with self.assertRaisesRegex(RuntimeError, r'out of'):
+                    reference[conv_fn(torch.LongTensor([err_idx]))]
+                with self.assertRaisesRegex(RuntimeError, r'out of'):
+                    reference[[err_idx]]
+
         if TEST_NUMPY:
             # we use numpy to compare against, to verify that our advanced
             # indexing semantics are the same, and also for ease of test
