@@ -33,8 +33,17 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_binders) override {
     if (attributes.size() > 0)
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
-    // Release the function object so we can wrap it in a PythonOp
     Graph& g = *m.graph();
+
+    // this python object might be a @trace or @script stand-alone function
+    // if so, inline the graph rather than calling the python
+    if(py::isinstance<GraphExecutor>(self)) {
+      GraphExecutor& ge = py::cast<GraphExecutor&>(self);
+      ensureSizeMatches(loc, ge.graph()->inputs().size(), inputs.size(), "arguments");
+      return packOutputs(inlineCallTo(*m.graph(), *ge.graph(), inputs));
+    }
+
+    // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
     std::string cconv(inputs.size(), 't');
     Node* new_node = g.insertNode(g.createPythonOp(

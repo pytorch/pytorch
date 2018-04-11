@@ -2400,6 +2400,17 @@ class TestScript(TestCase):
                 c, d = a + a
                 return c + d
 
+        @torch.jit.script
+        def return3():
+            return 1, 2, 3
+
+        with self.assertRaisesRegex(RuntimeError, "too many values to unpack"):
+            @torch.jit.script
+            def bind2():
+                a, b = return3()
+                print(a)
+                print(b)
+
     def test_script_chunk(self):
         @torch.jit.script
         def foo(a):

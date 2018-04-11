@@ -254,6 +254,8 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
   const std::string & name,
   at::ArrayRef<Value*> inputs,
   List<Attribute> attributes,
+  // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
+  // otherwise it will return nullptr if the builtin is not found.
   bool required) {
 
   NodeKind kind(Symbol::aten(name)); // TODO: this is a guess; could it be jit?
@@ -266,9 +268,7 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
     const Expr& value_expr = attr.value();
     if(value_expr.kind() == TK_LIST_LITERAL) {
       auto value_list = ListLiteral(value_expr).inputs();
-      std::vector<Const> values;
-      for (Expr value : value_list)
-        values.push_back(getAttributeValue(value));
+      std::vector<Const> values = fmap(value_list, getAttributeValue);
       bool is_float = std::any_of(values.begin(), values.end(),
                                   [](const Const& c) { return c.isFloatingPoint(); });
       if (is_float) {
@@ -712,7 +712,7 @@ private:
       return;
     }
 
-    auto outputs = output->asTuple(stmt.range(), method);
+    auto outputs = output->asTuple(stmt.rhs().range(), method);
     if(outputs.size() < n_binders) {
       throw ErrorReport(stmt)
         << "need " << (starred_unpack ? "at least " : "")
@@ -1023,6 +1023,27 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
   return std::make_shared<BuiltinFunction>(field, value);
 }
 
+std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
+  std::unordered_map<Value*, Value*> value_map;
+  auto value_map_func = [&](Value* v) { return value_map.at(v); };
+  JIT_ASSERT(callee.inputs().size() == inputs.size());
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    value_map[callee.inputs()[i]] = inputs[i];
+  }
+  for (auto* node : callee.nodes()) {
+    auto* new_node =
+        g.insertNode(g.createClone(node, value_map_func));
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      value_map[node->outputs()[i]] = new_node->outputs()[i];
+    }
+  }
+
+  std::vector<Value*> outputs;
+  for (auto* output : callee.outputs()) {
+    outputs.push_back(value_map_func(output));
+  }
+  return outputs;
+}
 
 void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const Resolver& resolver, SugaredValuePtr self) {
   FunctionTable table;

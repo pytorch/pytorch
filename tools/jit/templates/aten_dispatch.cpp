@@ -88,9 +88,7 @@ std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
 
 
 using operator_constructor = std::function<TensorOp(jit::Node*)>;
-using ConstructorsMap = std::unordered_map<std::string, operator_constructor>;
-
-ConstructorsMap constructors = {
+std::unordered_map<std::string, operator_constructor> constructors = {
   ${constructors}
 };
 

@@ -94,8 +94,6 @@ struct BuiltinFunction : public SugaredValue {
     size_t n_binders) override;
 };
 
-std::shared_ptr<SugaredValue> packOutputs(at::ArrayRef<Value*> values);
-
 using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name)>;
 void defineMethodsInModule(
   Module & m,
@@ -106,8 +104,12 @@ void defineMethodsInModule(
 
 // same as above but parse the definitions from source
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
-
 std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
+
+// pack outputs of a function following python rules. If there is a single value return
+// a SimpleValue, otherwise pack all the values into a Tuple.
+std::shared_ptr<SugaredValue> packOutputs(at::ArrayRef<Value*> values);
+std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 
 
 } // namespace script
