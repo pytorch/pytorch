@@ -14,12 +14,24 @@ int64_t CheckDims(
     const nvinfer1::Dims& nv_dims,
     const std::vector<TIndex>& c2_dims) {
   if (nv_dims.nbDims + 1 != c2_dims.size()) {
-    CAFFE_THROW("Mismatched dimensions between TRT input and C2 input");
+    CAFFE_THROW(
+        "Mismatched dimensions between TRT input (",
+        nv_dims.nbDims + 1,
+        ") and C2 input (",
+        c2_dims.size(),
+        ")");
   }
   int64_t chw = 1;
   for (int i = 0; i < nv_dims.nbDims; ++i) {
     if (nv_dims.d[i] != c2_dims[i + 1]) {
-      CAFFE_THROW("Mismatched dimensions between TRT input and C2 input");
+      CAFFE_THROW(
+          "Mismatched value at dimension ",
+          i,
+          "  between TRT input (",
+          nv_dims.d[i],
+          ") and C2 input (",
+          c2_dims[i + 1],
+          ")");
     }
     chw *= nv_dims.d[i];
   }
