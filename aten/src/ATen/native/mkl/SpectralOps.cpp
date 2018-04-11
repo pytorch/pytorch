@@ -45,7 +45,7 @@ namespace at { namespace native {
 // conjugate symmetry. See native/SpectralUtils.h for more details.
 // The following structs are used to fill in the other half with symmetry in
 // case of real-to-complex transform with onesided=False flag.
-// See [ NOTE ] Fourier Transform Congjugate Symmetry in native/SpectralOpsUtils.h.
+// See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
 
 template <typename scalar_t>
 static inline void _fft_fill_with_conjugate_symmetry_slice(Tensor& output,

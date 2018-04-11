@@ -3513,8 +3513,8 @@ class TestTorch(TestCase):
                     xc_res = xc.fft(signal_ndim, normalized=normalized)
                     self.assertEqual(res, xc_res)
                 test_input_signal_sizes = [signal_sizes]
-                rec = res.irfft(signal_ndim, signal_sizes=signal_sizes,
-                                normalized=normalized, onesided=onesided)
+                rec = res.irfft(signal_ndim, normalized=normalized,
+                                onesided=onesided, signal_sizes=signal_sizes)
                 self.assertEqual(x, rec, 1e-8, 'rfft and irfft')
                 if not onesided:  # check that we can use C2C ifft
                     rec = res.ifft(signal_ndim, normalized=normalized)

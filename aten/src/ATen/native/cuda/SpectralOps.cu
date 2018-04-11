@@ -35,7 +35,7 @@ static bool is_pow_of_two(long long int  x) {
 // conjugate symmetry. See native/SpectralUtils.h for more details.
 // The following structs are used to fill in the other half with symmetry in
 // case of real-to-complex transform with onesided=False flag.
-// See [ NOTE ] Fourier Transform Congjugate Symmetry in native/SpectralOpsUtils.h.
+// See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
 
 // counting_iterator => index to fill
 struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
@@ -136,7 +136,7 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
   });
 }
 
-// [ NOTE ] cuFFT Embedded Strides
+// NOTE [ cuFFT Embedded Strides ]
 //
 // cuFFT supports a subset of arbitrary strides via their "advanced data layout"
 // option (http://docs.nvidia.com/cuda/cufft/index.html#advanced-data-layout).
@@ -146,10 +146,10 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 //
 //     input[x, y, z] = input[((x * inembed[1] + y) * inembed[2] + z)]
 //
-// Above is the simplified the formulate ignoring the batch dimension. In fact,
-// the last dimension of the enclosing tensor doesn't have to be contiguous,
-// i.e., it can be greater than 1. Then one can set the base stride for the
-// enclosing tensor with `istride`. Then we have
+// Above is the simplified formula ignoring the batch dimension. In fact, the
+// last dimension of the enclosing tensor doesn't have to be contiguous, i.e.,
+// it can be greater than 1. Then one can set the base stride for the enclosing
+// tensor with `istride`. Then we have
 //
 //     input[x, y, z] = input[((x * inembed[1] + y) * inembed[2] + z) * istride]
 //
@@ -189,8 +189,8 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // we calculate the inembed. But it will benefit us in certain cases where we
   // clone the input tensor.
   //
-  // See [ NOTE ] cuFFT Embedded Strides.
-  // See [ NOTE ] Fourier Transform Congjugate Symmetry in native/SpectralOpsUtils.h.
+  // See NOTE [ cuFFT Embedded Strides ].
+  // See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
   if (complex_input && !complex_output && !onesided) {
     auto onesided_size = infer_ft_real_to_complex_onesided_size(checked_signal_sizes[signal_ndim - 1]);
     input = input.narrow(signal_ndim, 0, onesided_size);
@@ -252,13 +252,13 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     // type, i.e., multiples of 2. We check the batch dim and last signal dim
     // here. If the input can be viewed as having embedded strides, the other
     // signal dims will also satisfy this.
-    // See [ NOTE ] cuFFT Embedded Strides.
+    // See NOTE [ cuFFT Embedded Strides ].
     clone_input |= (batch > 0 && input.stride(0) % 2 != 0) ||
                     input.stride(signal_ndim) % 2 != 0;
   }
 
   // Checks if input strides can be viewed as embedded.
-  // See [ NOTE ] cuFFT Embedded Strides.
+  // See NOTE [ cuFFT Embedded Strides ].
   //
   // TODO: Figure out why windows fails to compile
   //         at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
@@ -289,7 +289,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // This just needs contiguity in cases except for twosided real-to-complex
   // transform where we won't have simple data layout as output is two sided.
   //
-  // See [ NOTE ] cuFFT Embedded Strides.
+  // See NOTE [ cuFFT Embedded Strides ].
 
   bool simple_layout = !(!complex_input && complex_output && !onesided) &&  // not twosided R2C
                        (clone_input || input.is_contiguous());              // contiguous
@@ -341,7 +341,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     // In such case, cuFFT ignores base_istride, base_ostride, idist, and odist
     // by assuming base_istride = base_ostride = 1.
     //
-    // See [ NOTE ] cuFFT Embedded Strides.
+    // See NOTE [ cuFFT Embedded Strides ].
     CUFFT_CHECK(cufftXtMakePlanMany(plan.get(), signal_ndim, signal_sizes.data(),
       /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1, itype,
       /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1, otype,
