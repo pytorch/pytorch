@@ -65,7 +65,7 @@ class DataParallel(Module):
         There is a subtlety in using the
         ``pack sequence -> recurrent network -> unpack sequence`` pattern in a
         :class:`~torch.nn.Module` wrapped in :class:`~torch.nn.DataParallel`.
-        See :ref:`this FAQ section <pack-rnn-unpack-with-data-parallelism>` for
+        See :ref:`pack-rnn-unpack-with-data-parallelism` section in FAQ for
         details.
 
 
