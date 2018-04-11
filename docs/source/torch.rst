@@ -57,6 +57,7 @@ Random sampling
 .. autofunction:: multinomial
 .. autofunction:: normal
 .. autofunction:: rand
+.. autofunction:: randint
 .. autofunction:: randn
 .. autofunction:: randperm
 
