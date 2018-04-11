@@ -19,13 +19,6 @@ import time
 log = logging.getLogger(__name__)
 
 
-def dummy_name(dummy, used_names=None):
-    if used_names is None:
-        return dummy.new_dummy_name()
-    else:
-        dummy.reset_dummy_name(set(used_names))
-        return None
-
 def c2_native_run_op(op_def, inputs):
     ws = Workspace()
     if isinstance(inputs, dict):

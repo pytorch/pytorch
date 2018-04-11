@@ -24,7 +24,7 @@ from onnx import (defs, checker, helper, numpy_helper, mapping,
 from onnx.helper import make_tensor, make_tensor_value_info, make_attribute, make_model
 import numpy as np
 
-from caffe2.python.onnx.helper import c2_native_run_net, dummy_name
+from caffe2.python.onnx.helper import c2_native_run_net
 from caffe2.python.onnx.error import Unsupported
 
 import caffe2.python._import_c_extension as C
@@ -74,22 +74,13 @@ class Caffe2Frontend(object):
 
     _special_operators = {}
 
-    # DummyName factory
-    @classmethod
-    def __init__(cls):
-        cls._check_dummy_name_factory()
+    # Dummy name generator
+    _dummy_name = C.DummyName()
 
     @classmethod
-    def _check_dummy_name_factory(cls):
-        try:
-            cls._dummy_name_factory
-        except AttributeError:
-            cls._dummy_name_factory = C.DummyName()
+    def dummy_name(cls):
+        return cls._dummy_name.new_dummy_name()
 
-    @classmethod
-    def _dummy_name(cls):
-        dummy_name(cls._dummy_name_factory)
- 
     @classmethod
     def _common_caffe2_arg_to_onnx_attr(cls, op_def, arg):
         # name
@@ -146,7 +137,7 @@ class Caffe2Frontend(object):
     def caffe2_op_to_onnx_node(cls, op_def, shapes):
         if C.support_onnx_export(op_def.type):
             shape_list = list(shapes.values())
-            node_strs, tensor_strs = C.export_to_onnx(op_def.SerializeToString(), shapes)
+            node_strs, tensor_strs = C.export_to_onnx(cls._dummy_name, op_def.SerializeToString(), shapes)
             nodes = []
             for s in node_strs:
                 node = NodeProto()
@@ -195,7 +186,6 @@ class Caffe2Frontend(object):
                                  predict_net,
                                  init_net=None,
                                  value_info=None):
-        cls._check_dummy_name_factory()
         if value_info is None:
             value_info = {}
         if not isinstance(value_info, dict):
@@ -247,8 +237,7 @@ class Caffe2Frontend(object):
                 shape=value_info[name][1])
             for name in predict_net.external_input)
 
-        dummy_name(cls._dummy_name_factory, cls._all_names_in_net(predict_net) |
-                   cls._all_names_in_net(init_net))
+        cls._dummy_name.reset(cls._all_names_in_net(predict_net) | cls._all_names_in_net(init_net))
 
         for op in predict_net.op:
             shapes = {}
@@ -281,7 +270,6 @@ class Caffe2Frontend(object):
 
     @classmethod
     def caffe2_init_net_to_initializer(cls, init_net):
-        cls._check_dummy_name_factory()
         initializer = []
         for op in init_net.op:
             assert not op.input
@@ -362,7 +350,6 @@ class Caffe2Frontend(object):
 
     @classmethod
     def caffe2_net_to_onnx_model(cls, *args, **kwargs):
-        cls._check_dummy_name_factory()
         opset_id = OperatorSetIdProto()
         opset_id.domain = ''  # ONNX default domain
         opset_id.version = cls.target_opset_version

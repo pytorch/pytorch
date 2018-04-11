@@ -24,7 +24,6 @@ import caffe2.python.onnx.backend as c2
 import numpy as np
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 
-from caffe2.python.onnx.helper import dummy_name
 from caffe2.python.onnx.tests.test_utils import TestCase
 
 import caffe2.python._import_c_extension as C
