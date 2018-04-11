@@ -71,8 +71,11 @@ struct SimpleValue : public SugaredValue {
   virtual Value * asValue(SourceRange range, Method & m) override {
     return value;
   }
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override;
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
-
+  Value* getValue() const {
+    return value;
+  }
 private:
   Value* value;
 };
@@ -108,7 +111,7 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
-std::shared_ptr<SugaredValue> packOutputs(at::ArrayRef<Value*> values);
+std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values);
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 
 

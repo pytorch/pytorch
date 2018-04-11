@@ -2475,6 +2475,31 @@ class TestScript(TestCase):
             f = io.BytesIO()
             torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
+    def test_tuples(self):
+        @torch.jit.script
+        def foo(i):
+            a = torch.chunk(i, dim=0, chunks=2)
+            c = a
+            # some nonsense with if-statements and loops to check
+            # that tuple lowering doesn't fail
+            if True:
+                c = torch.chunk(i, dim=0, chunks=2)
+            t0, t1 = c
+            while False:
+                t0, t1 = c
+                c = torch.chunk(i, dim=0, chunks=2)
+            return t0
+
+        v = torch.rand(10, 3)
+        self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
+
+        with self.assertRaisesRegex(RuntimeError, "variable 'a' previously has type"):
+            @torch.jit.script
+            def mixtypes():
+                a = torch.chunk(1, dim=0, chunks=2)
+                if True:
+                    a = 4
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):

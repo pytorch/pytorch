@@ -56,7 +56,9 @@ _(prim, Reverse) \
 _(prim, Return) \
 _(prim, Store) \
 _(prim, Undefined) \
-_(prim, Starred)
+_(prim, Starred) \
+_(prim, TupleConstruct) \
+_(prim, TupleUnpack)
 /* end */
 
 // Workaround for some not-yet-defined ATen symbols, see
