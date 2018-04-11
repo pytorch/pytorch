@@ -213,7 +213,10 @@ static inline double TH_digammaf(float x) {
     if (x_is_integer) {
       return INFINITY;
     }
-    return TH_digammaf(1 - x) - M_PIf / tanf(M_PIf * x);
+    // Avoid rounding errors for `tan`'s input.
+    // Those make a big difference at extreme values.
+    float pi_over_tan_pi_x = (float)(M_PI / tan(M_PI * (double)x));
+    return TH_digammaf(1 - x) - pi_over_tan_pi_x;
   }
 
   // Push x to be >= 10

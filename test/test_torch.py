@@ -315,8 +315,7 @@ class TestTorch(TestCase):
             return math.lgamma(x)
         self._test_math(torch.lgamma, lgamma)
 
-    def _digamma_input(self):
-        # digamma is imprecise when too close to the poles (0, -1, -2, ...)
+    def _digamma_input(self, test_poles=True):
         input = []
         input.append((torch.randn(10).abs() + 1e-4).tolist())
         input.append((torch.randn(10).abs() + 1e6).tolist())
@@ -325,6 +324,11 @@ class TestTorch(TestCase):
         input.append((zeros - 0.49).tolist())
         input.append((zeros + 0.49).tolist())
         input.append((zeros + (torch.rand(10) * 0.99) - 0.5).tolist())
+
+        if test_poles:
+            input.append([-0.999999994, -1.999999994, -2.0000000111,
+                          -100.99999994, -1931.99999994, 0.000000111,
+                          -0.000000111, 0, -2, -329])
         return input
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
@@ -338,7 +342,7 @@ class TestTorch(TestCase):
         for n in [0, 1]:
             self._test_math(lambda x: torch.polygamma(n, x),
                             lambda x: polygamma(n, x).item(),
-                            self._digamma_input())
+                            self._digamma_input(test_poles=False))
 
     def test_asin(self):
         self._test_math(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))

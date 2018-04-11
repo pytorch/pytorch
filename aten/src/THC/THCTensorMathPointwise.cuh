@@ -830,7 +830,7 @@ struct TensorDigammaOp {
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
     using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
-    static const compute_type PI = 3.14159265358979323846;
+    static const double PI_f64 = 3.14159265358979323846;
     static const compute_type PSI_10 = 2.25175258906672110764;
     static const compute_type A[] = {
        8.33333333333333333333E-2,
@@ -855,7 +855,10 @@ struct TensorDigammaOp {
         *out = ScalarConvert<float, real>::to(INFINITY);
         return;
       }
-      result = - PI / tan(PI * x);
+      // Rounding errors in tan's input can really affect the output
+      // for extreme values, so we always perform this computation in double.
+      result = ScalarConvert<double, compute_type>::to(
+          - PI_f64 / tan(PI_f64 * ScalarConvert<compute_type, double>::to(x)));
       x = 1 - x;
     }
 
