@@ -35,12 +35,12 @@ class Unserializable(object):
         self.inner = None
 
 
-def init_dropout_state(ty, dropout, train, dropout_seed, dropout_state):
+def init_dropout_state(ty, device, dropout, train, dropout_seed, dropout_state):
     dropout_desc_name = 'desc_' + str(torch.cuda.current_device())
     dropout_p = dropout if train else 0
     if (dropout_desc_name not in dropout_state) or (dropout_state[dropout_desc_name].get() is None):
         dropout_state[dropout_desc_name] = Unserializable(
-            torch._C._VariableFunctions._cudnn_init_dropout_state(dropout_p, train, dropout_seed, ty=ty)
+            torch._C._VariableFunctions._cudnn_init_dropout_state(dropout_p, train, dropout_seed, ty=ty, device=device)
             if dropout_p != 0 else None
         )
     dropout_ts = dropout_state[dropout_desc_name].get()
