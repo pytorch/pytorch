@@ -65,17 +65,25 @@ bool GLSpatialBNOp<T>::RunOnDevice() {
     bn_layer_.configure(X_->get_underlying(), Y->get_underlying(),
                      mean_->get_underlying(), var_->get_underlying(),
                      bias_->get_underlying(), scale_->get_underlying(), epsilon_);
-  } else {
+  } else if (second_run_) {
     X_->lazy_allocate(XBlob, second_run_, true);
     scale_->lazy_allocate(scaleBlob, second_run_, second_run_);
     bias_->lazy_allocate(biasBlob, second_run_, second_run_);
     mean_->lazy_allocate(meanBlob, second_run_, second_run_);
     var_->lazy_allocate(varBlob, second_run_, second_run_);
-    if (second_run_) {
-      second_run_ = false;
+    second_run_ = false;
+    Y->ResizeLike(*X_);
+    Y->allocate();
+    bn_layer_.run();
+  } else {
+    X_->lazy_allocate(XBlob, second_run_, true);
+    bool need_allocation = Y->ResizeLike(*X_);
+    bn_layer_.configure(X_->get_underlying(), Y->get_underlying(),
+                     mean_->get_underlying(), var_->get_underlying(),
+                     bias_->get_underlying(), scale_->get_underlying(), epsilon_);
+    if (need_allocation) {
       Y->allocate();
     }
-    bn_layer_.run();
   }
   return true;
 }

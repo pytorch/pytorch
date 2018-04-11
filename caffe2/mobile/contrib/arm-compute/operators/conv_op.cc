@@ -33,9 +33,8 @@ bool GLConvOp<T>::RunOnDevice() {
   auto *Xblob = OperatorBase::Inputs()[0];
   auto *filterblob = OperatorBase::Inputs()[1];
   auto *biasblob = OperatorBase::Inputs()[2];
-
+  X_ = GLContext::getGLTensor<T>(Xblob, X_.release());
   if (first_run_) {
-    X_ = GLContext::getGLTensor<T>(Xblob);
     filter_ = GLContext::getGLTensor<T>(filterblob);
     bias_ = GLContext::getGLTensor<T>(biasblob);
   }
@@ -44,7 +43,7 @@ bool GLConvOp<T>::RunOnDevice() {
     OperatorBase::Outputs()[0]->template GetMutable<GLTensor<T>>();
 
   const int N = X_->dim32(0), H = X_->dim32(2), W = X_->dim32(3), C = X_->dim32(1);
-
+  LOG(INFO) << "[C2DEBUG] Conv " << N << " " << H << " " << W << " " << C;
   CAFFE_ENFORCE_EQ(kernel_.size(), 2,
                    "Only 2d convolution is supported with ARM compute backend");
 
@@ -83,19 +82,35 @@ bool GLConvOp<T>::RunOnDevice() {
         Y->get_underlying(),
         arm_compute::PadStrideInfo(stride_[0], stride_[1], pads_[0], pads_[1]));
 
-  } else {
+  } else if (second_run_) {
     // Always attempt to copy the CPU to GPU on input
     X_->lazy_allocate(Xblob, second_run_, true);
     filter_->lazy_allocate(filterblob, second_run_, second_run_);
     bias_->lazy_allocate(biasblob, second_run_, second_run_);
-    if (second_run_) {
-      second_run_ = false;
-      if (Y->get_underlying() != X_->get_underlying()) {
-        Y->allocate();
-      }
-    }
+    second_run_ = false;
+    TensorCPU fakeX;
+    fakeX.Resize(X_->dims());
+    TensorCPU fakeY;
+    ConvPoolOpBase<GLContext>::SetOutputSize(fakeX, &fakeY, filter_->dim32(0));
+    Y->ResizeLike(fakeY);
+    Y->allocate();
     conv_.run();
-  }
+  } else {
+    X_->lazy_allocate(Xblob, second_run_, true);
+    TensorCPU fakeX;
+    fakeX.Resize(X_->dims());
+    TensorCPU fakeY;
+    ConvPoolOpBase<GLContext>::SetOutputSize(fakeX, &fakeY, filter_->dim32(0));
+    bool need_allocation = Y->ResizeLike(fakeY, true);
+    if (need_allocation) {
+      Y->allocate();
+    }
+    conv_.configure(
+                    X_->get_underlying(), filter_->get_underlying(), bias_->get_underlying(),
+                    Y->get_underlying(),
+                    arm_compute::PadStrideInfo(stride_[0], stride_[1], pads_[0], pads_[1]));
+    conv_.run();
+ }
 
   return true;
 }

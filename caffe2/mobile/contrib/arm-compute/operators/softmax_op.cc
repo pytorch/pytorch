@@ -32,10 +32,17 @@ bool GLSoftmaxOp<T>::RunOnDevice() {
     first_run_ = false;
     Y->ResizeLike(*X_);
     softmax_layer_.configure(X_->get_underlying(), Y->get_underlying());
+  } else if (second_run_) {
+    X_->lazy_allocate(Xblob, second_run_, true);
+    second_run_ = false;
+    Y->ResizeLike(*X_);
+    Y->allocate();
+    softmax_layer_.run();
   } else {
     X_->lazy_allocate(Xblob, second_run_, true);
-    if (second_run_) {
-      second_run_ = false;
+    bool need_allocation = Y->ResizeLike(*X_);
+    softmax_layer_.configure(X_->get_underlying(), Y->get_underlying());
+    if (need_allocation) {
       Y->allocate();
     }
     softmax_layer_.run();
