@@ -97,6 +97,7 @@ class TestReaderBuilder(ReaderBuilder):
 
 
 class TestCompositeReader(TestCase):
+    @unittest.skipIf(os.environ.get('JENKINS_URL'), 'Flaky test on Jenkins')
     def test_composite_reader(self):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
@@ -133,6 +134,7 @@ class TestCompositeReader(TestCase):
                 ws.fetch_blob(str(dst_ds.content()[names[i]].label())))
             npt.assert_array_equal(data[i], written_data)
 
+    @unittest.skipIf(os.environ.get('JENKINS_URL'), 'Flaky test on Jenkins')
     def test_composite_reader_builder(self):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
