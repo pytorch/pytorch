@@ -525,14 +525,25 @@ if IS_WINDOWS:
         # against libaries in Python 2.7 under Windows
         extra_compile_args.append('/bigobj')
 else:
-    extra_compile_args = ['-std=c++11', '-Wno-write-strings',
-                          # Python 2.6 requires -fno-strict-aliasing, see
-                          # http://legacy.python.org/dev/peps/pep-3123/
-                          '-fno-strict-aliasing',
-                          # Clang has an unfixed bug leading to spurious missing
-                          # braces warnings, see
-                          # https://bugs.llvm.org/show_bug.cgi?id=21629
-                          '-Wno-missing-braces']
+    extra_compile_args = [
+        '-std=c++11',
+        '-Wall',
+        '-Wextra',
+        '-Wno-unused-parameter',
+        '-Wno-missing-field-initializers',
+        '-Wno-write-strings',
+        '-Wno-zero-length-array',
+        # Python 2.6 requires -fno-strict-aliasing, see
+        # http://legacy.python.org/dev/peps/pep-3123/
+        # We also depend on it in our code (even Python 3).
+        '-fno-strict-aliasing',
+        # Clang has an unfixed bug leading to spurious missing
+        # braces warnings, see
+        # https://bugs.llvm.org/show_bug.cgi?id=21629
+        '-Wno-missing-braces'
+    ]
+    if check_env_flag('WERROR'):
+        extra_compile_args.append('-Werror')
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
@@ -678,8 +689,8 @@ main_sources = [
 
 try:
     import numpy as np
-    include_dirs += [np.get_include()]
-    extra_compile_args += ['-DWITH_NUMPY']
+    include_dirs.append(np.get_include())
+    extra_compile_args.append('-DWITH_NUMPY')
     WITH_NUMPY = True
 except ImportError:
     WITH_NUMPY = False
