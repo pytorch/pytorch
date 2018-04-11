@@ -869,7 +869,6 @@ class TestSparse(TestCase):
                             self.assertEqual(device, sparse_tensor._values().get_device())
                         self.assertEqual(True, sparse_tensor.requires_grad)
 
-
     def test_factory_size_check(self):
         indices = self.IndexTensor([[1, 2], [0, 2]])
         values = self.ValueTensor([.5, .5])
@@ -882,7 +881,6 @@ class TestSparse(TestCase):
         sizes = torch.Size([3, 3, 2])
         with self.assertRaisesRegex(RuntimeError, "values and sizes are inconsistent"):
             self.SparseTensor(indices, values, sizes)
-
 
     @cpu_only
     def test_factory_type_inference(self):
