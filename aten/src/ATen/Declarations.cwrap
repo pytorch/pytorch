@@ -4135,3 +4135,15 @@
     - THTensor* mat1
     - THDenseTensor* mat2
 ]]
+[[
+  name: _uncoalesce_
+  variants:
+    - method
+  cname: uncoalesce
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: self
+  arguments:
+    - THTensor* self
+]]

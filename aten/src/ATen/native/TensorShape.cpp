@@ -381,6 +381,8 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   std::vector<int64_t> sizes(self.sizes());
   std::swap(sizes[dim0], sizes[dim1]);
 
+  self._uncoalesce_();
+
   return self.sparse_raw_resize_(sizes, -1, -1);
 }
 

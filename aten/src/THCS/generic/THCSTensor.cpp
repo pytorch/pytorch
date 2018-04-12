@@ -394,7 +394,7 @@ void THCSTensor_(uncoalesce)(THCState *state, THCSTensor *self) {
 }
 
 void THCSTensor_(invalidateCSR)(THCState *state, THCSTensor *self) {
-  THCSTensor_(_move_csr)(state, self, NULL)
+  THCSTensor_(_move_csr)(state, self, NULL);
 }
 
 void THCSTensor_(free)(THCState *state, THCSTensor *self)
