@@ -211,6 +211,20 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad.data, x_grad + x_hv)
         self.assertEqual(y.grad.data, y_grad + y_hv)
 
+    def test_as_param(self):
+        x = torch.randn(3)
+        self.assertEqual(x.as_param(), x)
+        self.assertTrue(x.as_param().requires_grad)
+
+        y = torch.randn(3, requires_grad=True)
+        z = (x * y).as_param()
+        self.assertTrue(z.requires_grad)
+        self.assertIsNone(z.grad_fn)
+
+        (z * 2).sum().backward()
+        self.assertEqual(z.grad, torch.tensor([2., 2., 2.]))
+        self.assertIsNone(y.grad)
+
     def test_grad(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
         y = Variable(torch.randn(2, 2), requires_grad=True)

@@ -164,6 +164,12 @@ void Variable::detach_() {
   set_gradient_edge(Edge());
 }
 
+Variable Variable::as_param() const {
+  auto res = make_variable(data(), /*requires_grad=*/true);
+  res.set_version_counter(version_counter());
+  return res;
+}
+
 void Variable::set_tracing_state(
     jit::tracer::ValueTracingState* new_tracing_state) {
   get()->tracing_state.reset(new_tracing_state);
