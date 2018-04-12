@@ -12,11 +12,6 @@ namespace torch {
 namespace jit {
 namespace script {
 
-// Value used to indicate that we can accept a variable number of outputs from
-// an expression, for example, when we are packing outputs into a tuple on the
-// lhs of an assignment
-constexpr size_t VARARG_OUTPUTS = std::numeric_limits<size_t>::max();
-
 struct CallsiteDescriptor {
   size_t n_outputs;
   bool allow_varargs;
@@ -49,24 +44,17 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // use it as a vector of values, e.g. a tuple of values as return value from
   // a method invocation
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) {
-    throw ErrorReport(loc) << kind() << " cannot be used as tuple";
+    throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::vector<Value*> call(
+  virtual std::shared_ptr<SugaredValue> call(
     SourceRange loc,
     Method & m,
     at::ArrayRef<Value*> inputs,
     List<Attribute> attributes,
-    CallsiteDescriptor cd) {
+    size_t n_binders) {
     throw ErrorReport(loc) << "cannot call a " << kind();
-  }
-
-  // use it in `for i in this: ...`
-  // in this case we will unroll the loop body by assigning i to each of
-  // the SugaredValues returned from this method.
-  virtual std::vector<std::shared_ptr<SugaredValue>> unrolledFor(SourceRange loc, Method& m) {
-    throw ErrorReport(loc) << kind() << " is not iterable";
   }
 
   virtual ~SugaredValue() {}
@@ -98,12 +86,12 @@ struct BuiltinFunction : public SugaredValue {
   virtual std::string kind() const override {
     return "builtin";
   }
-  virtual std::vector<Value*> call(
+  virtual std::shared_ptr<SugaredValue> call(
     SourceRange loc,
     Method & m,
     at::ArrayRef<Value*> inputs_,
     List<Attribute> attributes,
-    CallsiteDescriptor cd) override;
+    size_t n_binders) override;
 };
 
 using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name)>;
@@ -116,8 +104,12 @@ void defineMethodsInModule(
 
 // same as above but parse the definitions from source
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
-
 std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
+
+// pack outputs of a function following python rules. If there is a single value return
+// a SimpleValue, otherwise pack all the values into a Tuple.
+std::shared_ptr<SugaredValue> packOutputs(at::ArrayRef<Value*> values);
+std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 
 
 } // namespace script

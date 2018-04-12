@@ -116,7 +116,14 @@ struct Parser {
       auto unary_kind = kind == '*' ? TK_STARRED :
                         kind == '-' ? TK_UNARY_MINUS :
                                       kind;
-      prefix = c(unary_kind, pos, {parseExp(unary_prec)});
+      auto subexp = parseExp(unary_prec);
+      // fold '-' into constant numbers, so that attributes can accept
+      // things like -1
+      if(unary_kind == TK_UNARY_MINUS && subexp.kind() == TK_CONST) {
+        prefix = Const::create(subexp.range(), "-" + Const(subexp).text());
+      } else {
+        prefix = c(unary_kind, pos, {subexp});
+      }
     } else {
       prefix = parseBaseExp();
     }
@@ -159,18 +166,19 @@ struct Parser {
   }
   Const parseConst() {
     auto range = L.cur().range;
-    std::string unary_prefix = L.nextIf('-') ? "-" : "";
     auto t = L.expect(TK_NUMBER);
-    return Const::create(t.range, unary_prefix + t.text());
+    return Const::create(t.range, t.text());
   }
-  TreeRef parseAttributeValue() {
+  Expr parseAttributeValue() {
     int kind = L.cur().kind;
     switch (kind) {
       case '[': {
-        auto list = parseList('[', ',', ']', &Parser::parseConst);
+        auto list = parseList('[', ',', ']', &Parser::parseExp);
         return ListLiteral::create(list.range(), List<Expr>(list));
-      } default:
-        return parseConst();
+      }
+      default: {
+        return parseExp();
+      }
     }
   }
   void parseOperatorArguments(TreeList& inputs, TreeList& attributes) {

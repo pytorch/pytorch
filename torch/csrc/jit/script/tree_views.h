@@ -566,6 +566,9 @@ struct Const : public Expr {
   double asFloatingPoint() const {
     return std::stod(subtree(0)->stringValue());
   }
+  const std::string& text() const {
+    return subtree(0)->stringValue();
+  }
   static Const create(const SourceRange& range, const std::string& value) {
     return Const(Compound::create(TK_CONST, range, {String::create(value)}));
   }

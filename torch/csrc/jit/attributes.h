@@ -77,6 +77,22 @@ struct Graph;
 using GraphAttr = ScalarAttributeValue<std::shared_ptr<Graph>,AttributeKind::g>;
 using GraphsAttr = VectorAttributeValue<std::shared_ptr<Graph>,AttributeKind::gs>;
 
+struct AttributeError : public std::exception {
+  AttributeError(Symbol name, bool defined) {
+    std::stringstream ss;
+    if(!defined) {
+      ss << "required keyword attribute '" << name.toUnqualString() << "' is undefined.";
+    } else {
+      ss << "required keyword attribute '" << name.toUnqualString() << "' has the wrong type";
+    }
+    msg = ss.str();
+  }
+  virtual const char* what() const noexcept override  {
+    return msg.c_str();
+  }
+private:
+  std::string msg;
+};
 
 // CRTP so that Node which inherits Attributes can be return for
 // method chaining e.g:
@@ -179,7 +195,9 @@ private:
     JIT_ASSERT(name.is_attr());
     auto it = find(name, true);
     T* child = dynamic_cast<T*>(it->get());
-    JIT_ASSERT(child != nullptr);
+    if(child == nullptr) {
+      throw AttributeError(name, true);
+    }
     return child->value();
   }
   using AVPtr = AttributeValue::Ptr;
@@ -193,6 +211,9 @@ private:
     auto it = std::find_if(values_.begin(), values_.end(),[&](const AVPtr & v) {
       return v->name == name;
     });
+    if(required && it == values_.end()) {
+      throw AttributeError(name, false);
+    }
     JIT_ASSERT(!required || it != values_.end());
     return it;
   }
@@ -203,7 +224,7 @@ private:
       return v->name == name;
     });
     if(required && it == values_.end()) {
-      ::torch::barf("%s:%u: %s: required undefined %s", __FILE__, __LINE__, __func__, name.toDisplayString());
+      throw AttributeError(name, false);
     }
     JIT_ASSERT(!required || it != values_.end());
     return it;
