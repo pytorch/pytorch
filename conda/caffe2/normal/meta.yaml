@@ -13,7 +13,7 @@ build:
   skip: True  # [win]
   script_env:
     - CONDA_CAFFE2_CMAKE_ARGS
-    - BUILD_WITH_CUDA
+    - PACKAGE_CUDA_LIBS
   # features section here
 
 requirements:

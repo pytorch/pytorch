@@ -308,11 +308,15 @@ fi
 if [[ -z $SKIP_CONDA_TESTS && -n $UPLOAD_TO_CONDA ]]; then
   CONDA_BUILD_ARGS+=(" --user ${ANACONDA_USERNAME}")
   CONDA_BUILD_ARGS+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
-fi
 
-# If building a redistributable, then package the CUDA libraries with it
-if [[ -n $CUDA_VERSION && -z $CONDA_INSTALL_LOCALLY ]]; then
-  export PACKAGE_CUDA_LIBS=1
+  # If building a redistributable, then package the CUDA libraries with it
+  if [[ -n $CUDA_VERSION]]; then
+    export PACKAGE_CUDA_LIBS=1
+  fi
+
+  # Show what the final meta.yaml looks like
+  echo "Finalized meta.yaml is"
+  cat $META_YAML
 fi
 
 
