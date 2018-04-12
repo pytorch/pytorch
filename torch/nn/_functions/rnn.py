@@ -4,6 +4,7 @@ import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
 import itertools
+from functools import partial
 
 try:
     import torch.backends.cudnn.rnn
@@ -310,8 +311,13 @@ def RNN(*args, **kwargs):
         import torch
         if torch._C._jit_is_tracing(input):
             import torch.onnx.symbolic
-            decorator = torch.onnx.symbolic_override_first_arg_based(
-                torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs))
+            sym = torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs)
+            cell_type = args[0]
+
+            bound_symbolic = partial(torch.onnx.symbolic.rnn_trace_override_symbolic,
+                                     cell_type, func, sym)
+
+            decorator = torch.onnx.symbolic_override_first_arg_based(bound_symbolic)
             func = decorator(func)
 
         return func(input, *fargs, **fkwargs)
