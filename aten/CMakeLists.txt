@@ -13,6 +13,8 @@ cmake_policy(SET CMP0012 NEW)
 # Polyfill for upstream FindCUDA
 include(CMakeInitializeConfigs)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/utils.cmake)
+
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
 if(APPLE)
@@ -86,6 +88,10 @@ endif()
 # this, but since FindCUDA upstream is subsumed by first-class support
 # for CUDA language, it seemed not worth fixing.
 IF(NOT CUDA_FOUND AND NOT NO_CUDA)
+  # We set this so that we can use new-style keyword based link libraries
+  # with explicit PUBLIC and PRIVATE, so we can control visibility of
+  # static libraries we link against.
+  set(CUDA_LINK_LIBRARIES_KEYWORD PUBLIC)
   FIND_PACKAGE(CUDA 5.5)
 ENDIF()
 
@@ -420,6 +426,51 @@ IF(LAPACK_FOUND)
   SET(USE_LAPACK 1)
 ENDIF(LAPACK_FOUND)
 
+# avoid some cmake warnings
+IF(POLICY CMP0026)
+ CMAKE_POLICY(SET CMP0026 OLD)
+ENDIF()
+
+IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
+  SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
+ELSE()
+  SET(MSVC_OPT_FLAG "")
+ENDIF()
+
+IF(UNIX)
+  SET(CMAKE_EXTRA_INCLUDE_FILES "sys/mman.h")
+  CHECK_FUNCTION_EXISTS(mmap HAVE_MMAP)
+  IF(HAVE_MMAP)
+    ADD_DEFINITIONS(-DHAVE_MMAP=1)
+  ENDIF(HAVE_MMAP)
+  # done for lseek: https://www.gnu.org/software/libc/manual/html_node/File-Position-Primitive.html
+  ADD_DEFINITIONS(-D_FILE_OFFSET_BITS=64)
+  CHECK_FUNCTION_EXISTS(shm_open HAVE_SHM_OPEN)
+  IF(HAVE_SHM_OPEN)
+    ADD_DEFINITIONS(-DHAVE_SHM_OPEN=1)
+  ENDIF(HAVE_SHM_OPEN)
+  CHECK_FUNCTION_EXISTS(shm_unlink HAVE_SHM_UNLINK)
+  IF(HAVE_SHM_UNLINK)
+    ADD_DEFINITIONS(-DHAVE_SHM_UNLINK=1)
+  ENDIF(HAVE_SHM_UNLINK)
+  CHECK_FUNCTION_EXISTS(malloc_usable_size HAVE_MALLOC_USABLE_SIZE)
+  IF(HAVE_MALLOC_USABLE_SIZE)
+    ADD_DEFINITIONS(-DHAVE_MALLOC_USABLE_SIZE=1)
+  ENDIF(HAVE_MALLOC_USABLE_SIZE)
+ENDIF(UNIX)
+
+# Is __thread supported?
+IF(NOT MSVC)
+  CHECK_C_SOURCE_COMPILES("static __thread int x = 1; int main() { return x; }" C_HAS_THREAD)
+ELSE(NOT MSVC)
+  CHECK_C_SOURCE_COMPILES("static __declspec( thread ) int x = 1; int main() { return x; }" C_HAS_THREAD)
+ENDIF(NOT MSVC)
+IF(NOT C_HAS_THREAD)
+  MESSAGE(STATUS "Warning: __thread is not supported, generating thread-unsafe code")
+ELSE(NOT C_HAS_THREAD)
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DTH_HAVE_THREAD")
+ENDIF(NOT C_HAS_THREAD)
+
 #############################################
 
 set(ATen_CPU_SRCS)
@@ -432,6 +483,7 @@ SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdi
 
 add_definitions(-DTH_INDEX_BASE=0)
 set(TH_LINK_STYLE STATIC)
+add_subdirectory(src/avx_mathfun)
 add_subdirectory(src/TH)
 include_directories(
   # dense
