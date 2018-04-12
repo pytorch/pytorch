@@ -335,7 +335,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // create plan
   CufftHandle plan;
   size_t ws_size = 0;
-  auto&& ctx = at::globalContext();
+  auto& ctx = at::globalContext();
 
   // set to current stream
   CUFFT_CHECK(cufftSetStream(plan.get(), ctx.getCurrentCUDAStream()));
