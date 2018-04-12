@@ -554,6 +554,7 @@ tmp_install_path = lib_path + "/tmp_install"
 include_dirs += [
     cwd,
     os.path.join(cwd, "torch", "csrc"),
+    os.path.join(cwd, "torch", "csrc", "api", "include"),
     third_party_path + "/pybind11/include",
     tmp_install_path + "/include",
     tmp_install_path + "/include/TH",
