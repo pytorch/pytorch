@@ -224,11 +224,11 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
     column_buffer_data += column_stride * group_;
   }
   math::Transpose(
+      column_buffer->size(),
       shape.column_dims.size(),
       column_dims_device_.template data<int>(),
       column_transposed_dims_device_.template data<int>(),
       column_axes_device_.template data<int>(),
-      column_buffer->size(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
@@ -260,11 +260,11 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
         &context_);
   }
   math::Transpose(
+      Y_transposed_buffer->size(),
       shape.Y_transposed_dims.size(),
       Y_transposed_dims_device_.template data<int>(),
       Y_dims_device_.template data<int>(),
       Y_transposed_axes_device_.template data<int>(),
-      Y_transposed_buffer->size(),
       Y_transposed_buffer_data,
       Y_data,
       &context_);
@@ -307,11 +307,11 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         &context_);
   }
   math::Transpose(
+      column_buffer->size(),
       shape.column_dims.size(),
       column_dims_device_.template data<int>(),
       column_transposed_dims_device_.template data<int>(),
       column_axes_device_.template data<int>(),
-      column_buffer->size(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
@@ -329,11 +329,11 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       Y_transposed_buffer_data,
       &context_);
   math::Transpose(
+      Y_transposed_buffer->size(),
       shape.Y_transposed_dims.size(),
       Y_transposed_dims_device_.template data<int>(),
       Y_dims_device_.template data<int>(),
       Y_transposed_axes_device_.template data<int>(),
-      Y_transposed_buffer->size(),
       Y_transposed_buffer_data,
       Y_data,
       &context_);
@@ -616,21 +616,21 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
     column_buffer_data += column_stride * group_;
   }
   math::Transpose(
+      column_buffer->size(),
       shape.column_dims.size(),
       column_dims_device_.template data<int>(),
       column_transposed_dims_device_.template data<int>(),
       column_axes_device_.template data<int>(),
-      column_buffer->size(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
 
   math::Transpose(
+      dY_transposed_buffer->size(),
       shape.Y_transposed_dims.size(),
       dY_dims_device_.template data<int>(),
       dY_transposed_dims_device_.template data<int>(),
       dY_axes_device_.template data<int>(),
-      dY_transposed_buffer->size(),
       dY_data,
       dY_transposed_buffer_data,
       &context_);
@@ -680,11 +680,11 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
         column_transposed_buffer->template mutable_data<T>(),
         &context_);
     math::Transpose(
+        column_transposed_buffer->size(),
         shape.column_dims.size(),
         column_transposed_dims_device_.template data<int>(),
         column_dims_device_.template data<int>(),
         column_transposed_axes_device_.template data<int>(),
-        column_transposed_buffer->size(),
         column_transposed_buffer->template data<T>(),
         column_buffer->template mutable_data<T>(),
         &context_);
@@ -771,21 +771,21 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         &context_);
   }
   math::Transpose(
+      column_buffer->size(),
       shape.column_dims.size(),
       column_dims_device_.template data<int>(),
       column_transposed_dims_device_.template data<int>(),
       column_axes_device_.template data<int>(),
-      column_buffer->size(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
 
   math::Transpose(
+      dY_transposed_buffer->size(),
       shape.Y_transposed_dims.size(),
       dY_dims_device_.template data<int>(),
       dY_transposed_dims_device_.template data<int>(),
       dY_axes_device_.template data<int>(),
-      dY_transposed_buffer->size(),
       dY_data,
       dY_transposed_buffer_data,
       &context_);
@@ -835,11 +835,11 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         column_transposed_buffer->template mutable_data<T>(),
         &context_);
     math::Transpose(
+        column_transposed_buffer->size(),
         shape.column_dims.size(),
         column_transposed_dims_device_.template data<int>(),
         column_dims_device_.template data<int>(),
         column_transposed_axes_device_.template data<int>(),
-        column_transposed_buffer->size(),
         column_transposed_buffer->template data<T>(),
         column_buffer->template mutable_data<T>(),
         &context_);

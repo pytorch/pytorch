@@ -4,8 +4,8 @@ namespace caffe2 {
 
 template <>
 bool LpNormOp<float, CPUContext>::RunOnDevice() {
-  auto& X = Input(X_IN);
-  auto* norm = Output(OUT);
+  const auto& X = Input(0);
+  auto* norm = Output(0);
   norm->Resize(1);
   const float* X_data = X.data<float>();
   const float size = average_ ? (float)X.size() : 1.0f;
@@ -26,9 +26,9 @@ bool LpNormOp<float, CPUContext>::RunOnDevice() {
 
 template <>
 bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
-  auto& X = Input(X_IN);
-  auto& dnorm = Input(DER_NORM_IN);
-  auto* dX = Output(DER_X_OUT);
+  const auto& X = Input(0);
+  const auto& dnorm = Input(1);
+  auto* dX = Output(0);
   CAFFE_ENFORCE_EQ(dnorm.ndim(), 1);
   CAFFE_ENFORCE_EQ(dnorm.dim32(0), 1);
   dX->ResizeLike(X);
