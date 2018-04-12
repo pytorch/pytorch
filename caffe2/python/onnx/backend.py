@@ -354,9 +354,21 @@ class Caffe2Backend(Backend):
                            starts=[direction_offset + 0, 0, 0],
                            ends  =[direction_offset + 1,-1,-1])
 
+
+            if direction_offset == 1:
+                if sequence_lens is not None:
+                    seq_lens_for_reverse = sequence_lens
+                else:
+                    input_shape = pred_mh.net.Shape(input_blob, name + '/input_shape')
+                    batch_size = pred_mh.net.Slice(input_shape, name + '/batch_size_slice', starts=[1], ends=[2])
+                    seq_len = pred_mh.net.Slice(input_shape, name + '/seq_len_slice', starts=[0], ends=[1])
+                    dummy_sequence_lens = pred_mh.net.Tile([seq_len, batch_size], name + '/dummy_sequence_lens', axis=0)
+                    pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, dummy_name()], shape=[-1])
+                    seq_lens_for_reverse = dummy_sequence_lens
+
             if direction_offset == 1:
                 input = pred_mh.net.ReversePackedSegs(
-                    [input_blob, sequence_lens], name + "/input-reversed")
+                    [input_blob, seq_lens_for_reverse], name + "/input-reversed")
             else:
                 input = input_blob
 
@@ -375,7 +387,7 @@ class Caffe2Backend(Backend):
 
             if direction_offset == 1:
                 hidden_t_all = pred_mh.net.ReversePackedSegs(
-                    [hidden_t_all, sequence_lens], name + "/output-reversed")
+                    [hidden_t_all, seq_lens_for_reverse], name + "/output-reversed")
 
             return hidden_t_all, hidden_t_last
 
@@ -476,8 +488,19 @@ class Caffe2Backend(Backend):
                            ends  =[direction_offset + 1,-1,-1])
 
             if direction_offset == 1:
+                if sequence_lens is not None:
+                    seq_lens_for_reverse = sequence_lens
+                else:
+                    input_shape = pred_mh.net.Shape(input_blob, name + '/input_shape')
+                    batch_size = pred_mh.net.Slice(input_shape, name + '/batch_size_slice', starts=[1], ends=[2])
+                    seq_len = pred_mh.net.Slice(input_shape, name + '/seq_len_slice', starts=[0], ends=[1])
+                    dummy_sequence_lens = pred_mh.net.Tile([seq_len, batch_size], name + '/dummy_sequence_lens', axis=0)
+                    pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, dummy_name()], shape=[-1])
+                    seq_lens_for_reverse = dummy_sequence_lens
+
+            if direction_offset == 1:
                 input = pred_mh.net.ReversePackedSegs(
-                    [input_blob, sequence_lens], name + "/input-reversed")
+                    [input_blob, seq_lens_for_reverse], name + "/input-reversed")
             else:
                 input = input_blob
 
@@ -496,7 +519,7 @@ class Caffe2Backend(Backend):
 
             if direction_offset == 1:
                 hidden_t_all = pred_mh.net.ReversePackedSegs(
-                    [hidden_t_all, sequence_lens], name + "/output-reversed")
+                    [hidden_t_all, seq_lens_for_reverse], name + "/output-reversed")
 
             return hidden_t_all, hidden_t_last, cell_last
 
@@ -598,8 +621,19 @@ class Caffe2Backend(Backend):
                            ends  =[direction_offset + 1,-1,-1])
 
             if direction_offset == 1:
+                if sequence_lens is not None:
+                    seq_lens_for_reverse = sequence_lens
+                else:
+                    input_shape = pred_mh.net.Shape(input_blob, name + '/input_shape')
+                    batch_size = pred_mh.net.Slice(input_shape, name + '/batch_size_slice', starts=[1], ends=[2])
+                    seq_len = pred_mh.net.Slice(input_shape, name + '/seq_len_slice', starts=[0], ends=[1])
+                    dummy_sequence_lens = pred_mh.net.Tile([seq_len, batch_size], name + '/dummy_sequence_lens', axis=0)
+                    pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, dummy_name()], shape=[-1])
+                    seq_lens_for_reverse = dummy_sequence_lens
+
+            if direction_offset == 1:
                 input = pred_mh.net.ReversePackedSegs(
-                    [input_blob, sequence_lens], name + "/input-reversed")
+                    [input_blob, seq_lens_for_reverse], name + "/input-reversed")
             else:
                 input = input_blob
 
@@ -618,7 +652,7 @@ class Caffe2Backend(Backend):
 
             if direction_offset == 1:
                 hidden_t_all = pred_mh.net.ReversePackedSegs(
-                    [hidden_t_all, sequence_lens], name + "/output-reversed")
+                    [hidden_t_all, seq_lens_for_reverse], name + "/output-reversed")
 
             return hidden_t_all, hidden_t_last
 
