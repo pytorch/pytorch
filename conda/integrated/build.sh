@@ -33,16 +33,6 @@ export PYTORCH_BUILD_VERSION=$PKG_VERSION
 export PYTORCH_BUILD_NUMBER=$PKG_BUILDNUM
 export NCCL_ROOT_DIR=/usr/local/cuda
 
-# Validate some configurations, try to fail as early as possible
-if [[ -n $PACKAGE_CUDA_LIBS ]]; then
-  if [[ -z $CUDA_VERSION || -z $CUDNN_VERSION ]]; then
-    echo "Packaging CUDA libs along with the Pytorch binaries is only allowed"
-    echo "if CUDA_VERSION, and CUDNN_VERSION are all set."
-    echo "This should only be used when building binaries for distribution"
-    exit 1
-  fi
-fi
-
 
 ###########################################################
 # Build Caffe2
