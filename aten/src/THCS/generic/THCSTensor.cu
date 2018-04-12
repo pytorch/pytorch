@@ -181,7 +181,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
 #undef THRUST_EXEC
 }
 
-THCSTensor* THCSTensor_(newCSR)(THCState *state, THCSTensor *self) {
+THCSTensor* THCSTensor_(newWithCSR)(THCState *state, THCSTensor *self) {
   THCSTensor *c = THCSTensor_(newCoalesce)(state, self);
   if (c->csr != NULL) {
     return self;

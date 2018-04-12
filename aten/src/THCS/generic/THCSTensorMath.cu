@@ -82,7 +82,7 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
   THArgCheck(THCTensor_(size)(state, dense, 0) == k, 3,
       "Expected dim 0 size %d, got %d", k, THCTensor_(size)(state, dense, 0));
 
-  THCSTensor *sparse = THCSTensor_(newCSR)(state, sparse_);
+  THCSTensor *sparse = THCSTensor_(newWithCSR)(state, sparse_);
 
   int64_t nnz = THCSTensor_(nnz)(state, sparse);
   indices = THCSTensor_(newIndices)(state, sparse);
@@ -90,7 +90,7 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
 
   THCIndexTensor *rowIndices = THCIndexTensor_(newSelect)(state, indices, 0, 0);
   THCIndexTensor *colIndices = THCIndexTensor_(newSelect)(state, indices, 0, 1);
-  csr = THCSTensor_(newCsr)(state, sparse);
+  csr = THCSTensor_(newCSR)(state, sparse);
   THCudaIntTensor *colIndicesInt = THCudaIntTensor_newWithSize1d(state, colIndices->size[0]);
   THCudaIntTensor_copyCudaLong(state, colIndicesInt, colIndices);
 

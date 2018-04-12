@@ -320,7 +320,7 @@ void THSTensor_(spaddmm)(THTensor *r_,
   THArgCheck(dense->nDimension == 2, 2,
       "matrices expected, got %dD tensor", dense->nDimension);
 
-  THSTensor *sparse = THSTensor_(newCSR)(sparse_);
+  THSTensor *sparse = THSTensor_(newWithCSR)(sparse_);
 
   dim_i = THSTensor_(size)(sparse, 0);
   dim_j = THSTensor_(size)(sparse, 1);
@@ -339,7 +339,7 @@ void THSTensor_(spaddmm)(THTensor *r_,
   indices = THSTensor_(newIndices)(sparse);
   values  = THSTensor_(newValues)(sparse);
 
-  csr = THSTensor_(newCsr)(sparse);
+  csr = THSTensor_(newCSR)(sparse);
 
   // r_ = alpha * sparse * dense
   if (beta == 0) {
@@ -393,7 +393,7 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   THArgCheck(dense->nDimension == 2, 2,
       "matrices expected, got %dD tensor", dense->nDimension);
 
-  THSTensor *sparse = THSTensor_(newCSR)(sparse_);
+  THSTensor *sparse = THSTensor_(newWithCSR)(sparse_);
 
   dim_i = THSTensor_(size)(sparse, 0);
   dim_j = THSTensor_(size)(sparse, 1);
@@ -412,7 +412,7 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   indices = THSTensor_(newIndices)(sparse);
   values  = THSTensor_(newValues)(sparse);
 
-  csr = THSTensor_(newCsr)(sparse);
+  csr = THSTensor_(newCSR)(sparse);
 
   t_nnz = THSTensor_(nnz)(t);
   r_nnz = nnz * dim_k + t_nnz;

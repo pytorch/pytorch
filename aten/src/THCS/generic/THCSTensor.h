@@ -30,7 +30,7 @@ TH_API ptrdiff_t THCSTensor_(nnz)(THCState *state, const THCSTensor *self);
 TH_API THLongStorage *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self);
 TH_API THCIndexTensor *THCSTensor_(newIndices)(THCState *state, const THCSTensor *self);
 TH_API THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self);
-TH_API THCudaIntTensor *THCSTensor_(newCsr)(THCState *state, const THCSTensor *self);
+TH_API THCudaIntTensor *THCSTensor_(newCSR)(THCState *state, const THCSTensor *self);
 
 /**** creation methods ****/
 TH_API THCSTensor *THCSTensor_(new)(THCState *state);
@@ -65,7 +65,7 @@ TH_API int THCSTensor_(hasCSR)(THCState *state, const THCSTensor *self);
 TH_API THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self);
 TH_API void THCSTensor_(uncoalesce)(THCState *state, THCSTensor *self);
 TH_API THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, int64_t dim, int64_t nnz);
-TH_API THCSTensor *THCSTensor_(newCSR)(THCState *state, THCSTensor *self);
+TH_API THCSTensor *THCSTensor_(newWithCSR)(THCState *state, THCSTensor *self);
 TH_API void THCSTensor_(invalidateCSR)(THCState *state, THCSTensor *self);
 
 

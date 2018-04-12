@@ -58,7 +58,7 @@ THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self) {
   return THCTensor_(newNarrow)(state, self->values, 0, 0, self->nnz);
 }
 
-THCudaIntTensor *THCSTensor_(newCsr)(THCState *state, const THCSTensor *self) {
+THCudaIntTensor *THCSTensor_(newCSR)(THCState *state, const THCSTensor *self) {
   if (self->csr == NULL) {
     return self->csr;
   }
@@ -394,8 +394,7 @@ void THCSTensor_(uncoalesce)(THCState *state, THCSTensor *self) {
 }
 
 void THCSTensor_(invalidateCSR)(THCState *state, THCSTensor *self) {
-  THCudaIntTensor_free(state, self->csr);
-  self->csr = NULL;
+  THCSTensor_(_move_csr)(state, self, NULL)
 }
 
 void THCSTensor_(free)(THCState *state, THCSTensor *self)

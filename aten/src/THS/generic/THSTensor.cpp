@@ -57,7 +57,7 @@ THTensor *THSTensor_(newValues)(const THSTensor *self) {
   return THTensor_(newNarrow)(self->values, 0, 0, self->nnz);
 }
 
-THLongTensor *THSTensor_(newCsr)(const THSTensor *self) {
+THLongTensor *THSTensor_(newCSR)(const THSTensor *self) {
   if (self->csr == NULL) {
     return self->csr;
   }
@@ -560,11 +560,10 @@ void THSTensor_(uncoalesce)(THSTensor *self) {
 }
 
 void THSTensor_(invalidateCSR)(THSTensor *self) {
-  THLongTensor_free(self->csr);
-  self->csr = NULL;
+  THSTensor_(_move_csr)(self, NULL);
 }
 
-THSTensor* THSTensor_(newCSR)(THSTensor *self) {
+THSTensor* THSTensor_(newWithCSR)(THSTensor *self) {
   THSTensor* c = THSTensor_(newCoalesce)(self);
   if (c->csr != NULL) {
     return self;

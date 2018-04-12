@@ -33,7 +33,7 @@ TH_API ptrdiff_t THSTensor_(nnz)(const THSTensor *self);
 TH_API THLongStorage *THSTensor_(newSizeOf)(THSTensor *self);
 TH_API THLongTensor *THSTensor_(newIndices)(const THSTensor *self);
 TH_API THTensor *THSTensor_(newValues)(const THSTensor *self);
-TH_API THLongTensor *THSTensor_(newCsr)(const THSTensor *self);
+TH_API THLongTensor *THSTensor_(newCSR)(const THSTensor *self);
 
 /**** creation methods ****/
 TH_API THSTensor *THSTensor_(new)(void);
@@ -67,7 +67,7 @@ TH_API int THSTensor_(hasCSR)(const THSTensor *self);
 TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor *src);
 TH_API THSTensor *THSTensor_(newCoalesce)(THSTensor *self);
 TH_API THLongTensor *THSTensor_(toCSR)(int64_t const *indices, int64_t dim, int64_t nnz);
-TH_API THSTensor *THSTensor_(newCSR)(THSTensor *self);
+TH_API THSTensor *THSTensor_(newWithCSR)(THSTensor *self);
 TH_API void THSTensor_(uncoalesce)(THSTensor *self);
 TH_API void THSTensor_(invalidateCSR)(THSTensor *self);
 
