@@ -100,6 +100,11 @@ class TestCppExtension(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_rng_multithread(self):
+        import torch_test_rng
+        torch_test_rng.cuda_rng_multithread()
+
 
 if __name__ == '__main__':
     common.run_tests()
