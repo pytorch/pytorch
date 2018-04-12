@@ -86,6 +86,10 @@ endif()
 # this, but since FindCUDA upstream is subsumed by first-class support
 # for CUDA language, it seemed not worth fixing.
 IF(NOT CUDA_FOUND AND NOT NO_CUDA)
+  # We set this so that we can use new-style keyword based link libraries
+  # with explicit PUBLIC and PRIVATE, so we can control visibility of
+  # static libraries we link against.
+  set(CUDA_LINK_LIBRARIES_KEYWORD PUBLIC)
   FIND_PACKAGE(CUDA 5.5)
 ENDIF()
 
@@ -432,6 +436,7 @@ SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdi
 
 add_definitions(-DTH_INDEX_BASE=0)
 set(TH_LINK_STYLE STATIC)
+add_subdirectory(src/avx_mathfun)
 add_subdirectory(src/TH)
 include_directories(
   # dense
