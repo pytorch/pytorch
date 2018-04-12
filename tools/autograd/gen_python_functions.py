@@ -18,7 +18,7 @@ SKIP_PYTHON_BINDINGS = [
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', 'sparse_raw_resize_', '_unsafe_view', 'tensor',
     'sparse_coo_tensor', '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
-    '_indexCopy_',
+    '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin'
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
@@ -209,6 +209,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'Storage &': 'storage',
         'const Type &': 'dtype',
         'const THPLayout &': 'layout',
+        'const Device &': 'deviceInt64',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -304,6 +305,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 dispatch_type = 'const Tensor &'
             elif dispatch_type == 'Tensor &':
                 dispatch_type = 'Tensor'
+            elif dispatch_type == 'const Device &':
+                dispatch_type = 'int64_t'
             formal = '{} {}'.format(dispatch_type, name)
             return expr, formal
 
@@ -354,7 +357,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         for arg in python_binding_arguments:
             if arg['name'] == 'dtype' and arg['simple_type'] == 'Type':
                 pass  # already handled by type_dispatched_args
-            elif arg['name'] == 'device' and arg['simple_type'] == 'int64_t':
+            elif arg['name'] == 'device' and arg['simple_type'] == 'Device':
                 if len(outputs) == 0:
                     has_device_bind = True
                     append_actuals_formals(*parse_arg(arg, device_idx))
@@ -369,7 +372,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     formal_args.append(parsed_type_args[1])
             else:
                 raise RuntimeError(("found {} in python_binding_arguments but only "
-                                    "\"bool requires_grad\", \"Dtype dtype\", and \"Layout layout\" "
+                                    "\"bool requires_grad\", \"Dtype dtype\", \"Layout layout\", \"Device device\" "
                                     "are supported".format(arg)))
 
         env['unpack_args'] = []
@@ -471,13 +474,13 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             python_binding_arguments.append(layout_arg)
         if is_factory_or_like_function:
             device_arg = {
-                'default': -1,
-                'default_init': -1,
-                'dynamic_type': 'int64_t',
+                'default': 'None',
+                'default_init': 'None',
+                'dynamic_type': 'Device',
                 'kwarg_only': True,
                 'name': 'device',
-                'type': 'int64_t',
-                'simple_type': 'int64_t'
+                'type': 'const Device &',
+                'simple_type': 'Device'
             }
             python_binding_arguments.append(device_arg)
             requires_grad_arg = {

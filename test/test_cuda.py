@@ -450,7 +450,9 @@ custom_half_precision = {
     'lerp': 1e-2,
     'lgamma': 1e-2,
     'log': 1e-2,
+    'log10': 1e-2,
     'log1p': 1e-3,
+    'log2': 1e-2,
     'mean': 1e-3,
     'mul': 1e-2,
     'norm': 1e-1,
@@ -482,7 +484,9 @@ for fn in simple_pointwise:
 
 simple_pointwise_float = [
     'log',
+    'log10',
     'log1p',
+    'log2',
     'sigmoid',
     'sin',
     'sqrt',
@@ -1559,6 +1563,9 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
 
+    def test_random_neg_values(self):
+        TestTorch._test_random_neg_values(self, use_cuda=True)
+
 
 def load_ignore_file():
     from os.path import join, dirname
@@ -1623,4 +1630,17 @@ if __name__ == '__main__':
     if HAS_CUDA:
         load_ignore_file()
         generate_tests()
+
+    # skip TestTorch tests
+    # hide in __name__ == '__main__' because we don't want this to be run when
+    # someone imports test_cuda
+    def load_tests(loader, tests, pattern):
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                if test.__class__.__name__ == 'TestTorch':
+                    continue
+                test_suite.addTest(test)
+        return test_suite
+
     run_tests()

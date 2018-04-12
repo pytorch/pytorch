@@ -1412,6 +1412,17 @@ class TestJit(TestCase):
 
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
 
+    def test_shape_analysis_broadcast(self):
+        def broadcast(a, b):
+            return a + b
+
+        x = torch.randn(3, 1, 5, requires_grad=True)
+        y = torch.randn(4, 1, 8, 5, requires_grad=True)
+
+        graph = torch.jit._script_graph(broadcast)
+        torch._C._jit_pass_shape_analysis(graph, (x, y), False)
+        self.assertExpected(str(graph))
+
     def test_fuser_multiple_blocks(self):
         cu = torch.jit.CompilationUnit('''
         def test_fuser_multiple_blocks(this, that, theother, meme):
@@ -2060,6 +2071,317 @@ class TestScript(TestCase):
 
         m2 = M2()
         m2(torch.zeros(4, 3))
+
+    def test_script_module_const(self):
+        class M(torch.jit.ScriptModule):
+
+            __constants__ = ['b', 'i', 'c']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.b = False
+                self.i = 1
+                self.c = 3.5
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.b, self.i, self.c
+
+        m = M()
+        o0, o1, o2 = m()
+        self.assertEqual(o0, 0)
+        self.assertEqual(o1, 1)
+        self.assertEqual(o2, 3.5)
+
+    def test_script_module_fail_const(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.b = False
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.b
+        with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
+            M()
+
+    def test_script_module_valid_consts(self):
+        class Foo(torch.jit.ScriptModule):
+            __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
+
+            def __init__(self):
+                super(Foo, self).__init__(False)
+                self.a = 1
+                self.b = 1.2
+                self.c = False
+                self.d = [nn.Linear(3, 4)]
+                self.e = lambda x: x
+                self.f = [3, 4, 5]
+                self.assertTrue(type(self.f) is tuple)
+                self.g = [3, (3, 4), 5]
+                with self.assertRaisesRegex(TypeError, "is not a valid constant"):
+                    self.h = type(1)
+                with self.assertRaisesRegex(TypeError, "is not a valid constant"):
+                    self.i = (3, 4, {})
+
+    def test_script_module_for(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['b']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.b = [1, 2, 3, 4]
+
+            @torch.jit.script_method
+            def forward(self):
+                sum = 0
+                for i in self.b:
+                    sum += i
+                return sum
+
+        m = M()
+        self.assertEqual(m(), 10)
+
+    def test_script_module_for2(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.mods = nn.ModuleList([Sub() for i in range(10)])
+
+            @torch.jit.script_method
+            def forward(self, v):
+                for m in self.mods:
+                    v = m(v)
+                return v
+
+        i = torch.Tensor(2)
+        m = M()
+        o = m(i)
+        v = i
+        for sub in m.mods:
+            v = sub(v)
+        self.assertEqual(o, v)
+
+    def test_script_module_const_submodule_fail(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.mods = [Sub() for _ in range(10)]
+
+            @torch.jit.script_method
+            def forward(self):
+                for _ in self.mods:
+                    print(1)
+                return 4
+
+        with self.assertRaisesRegex(RuntimeError, "did you forget to add it __constants__"):
+            M()
+
+    def test_script_module_not_tuple(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.mods = 1
+
+            @torch.jit.script_method
+            def forward(self, v):
+                for m in self.mods:
+                    print(m)
+                return v
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as tuple"):
+            M()
+
+    class StarTestSumStarred(torch.nn.Module):
+        def __init__(self):
+            super(TestScript.StarTestSumStarred, self).__init__()
+
+        def forward(self, *inputs):
+            output = inputs[0]
+            for i in range(1, len(inputs)):
+                output += inputs[i]
+            return output
+
+    class StarTestReturnThree(torch.nn.Module):
+        def __init__(self):
+            super(TestScript.StarTestReturnThree, self).__init__()
+
+        def forward(self, rep):
+            return rep, rep, rep
+
+    def test_script_star_expr(self):
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(True)
+                self.m = torch.jit.trace(
+                    torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3))(TestScript.StarTestSumStarred())
+                self.g = torch.jit.trace(torch.ones(4, 3))(TestScript.StarTestReturnThree())
+
+            @torch.jit.script_method
+            def forward(self, rep):
+                tup = self.g(rep)
+                return self.m(*tup)
+
+        m = M2()
+        self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+
+    def test_script_star_expr_string(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(True)
+                self.m = torch.jit.trace(
+                    torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3))(TestScript.StarTestSumStarred())
+                self.g = torch.jit.trace(torch.ones(4, 3))(TestScript.StarTestReturnThree())
+
+                self.define('''
+            def forward(self, rep):
+                tup = self.g(rep)
+                return self.m(*tup)
+                ''')
+
+        m = M2()
+        self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+
+    class StarTestSumAndReturnThree(torch.nn.Module):
+        def __init__(self):
+            super(TestScript.StarTestSumAndReturnThree, self).__init__()
+
+        def forward(self, *inputs):
+            output = inputs[0]
+            for i in range(1, len(inputs)):
+                output += inputs[i]
+            return output, output, output
+
+    def test_script_star_assign(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(True)
+                self.g = torch.jit.trace(torch.ones(4, 3))(TestScript.StarTestSumAndReturnThree())
+                self.define('''
+            def forward(self, rep):
+                head, *tail = self.g(rep)
+                return head
+                ''')
+
+        m = M2()
+        self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+
+    def test_script_module_star_assign2(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(True)
+                self.g = torch.jit.trace(
+                    torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)
+                )(
+                    TestScript.StarTestSumAndReturnThree()
+                )
+                self.define('''
+            def forward(self, rep):
+                *head, tail = self.g(rep, rep, rep)
+                return tail
+                ''')
+
+        m = M2()
+        self.assertEqual(m(torch.ones(4, 3)), 3 * torch.ones(4, 3))
+
+    def test_script_module_star_assign_fail_pythonop(self):
+
+        with self.assertRaisesRegex(RuntimeError, "Vararg outputs are currently not supported for PythonOp"):
+            class M2(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M2, self).__init__(True)
+
+                    def myfunc():
+                        return torch.zeros(1, 2, 3), torch.zeros(1, 2, 3)
+
+                    self.define('''
+                def forward(self, rep):
+                    a, *b = myfunc()
+                    return a
+                    ''')
+
+            m = M2()
+            m(torch.zeros(4, 3))
+
+    def test_script_module_star_assign_fail_builtin(self):
+        with self.assertRaisesRegex(RuntimeError, "Starred packing for the output of a builtin is not supported."):
+            class M2(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M2, self).__init__(True)
+
+                    self.define('''
+                def forward(self, rep):
+                    a, *b = torch.neg(rep)
+                    return a
+                    ''')
+
+            m = M2()
+            m(torch.zeros(4, 3))
+
+    def test_rnn_trace_override(self):
+        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+        T, B, C = 3, 5, 7
+
+        class PadPackedWrapper(torch.nn.Module):
+            def __init__(self):
+                super(PadPackedWrapper, self).__init__()
+
+            def forward(self, x, seq_lens):
+                x = pack_padded_sequence(x, seq_lens)
+                x, _ = pad_packed_sequence(x)
+                return x
+
+        x = np.ones((T, B, C))
+        seq_lens = np.array([3, 3, 2, 2, 1], dtype=np.int32)
+        # set padding value so we can test equivalence
+        for b in range(B):
+            if seq_lens[b] < T:
+                x[seq_lens[b]:, b, :] = 0
+        seq_lens = torch.from_numpy(seq_lens)
+        x = torch.autograd.Variable(torch.from_numpy(x), requires_grad=True)
+
+        m = PadPackedWrapper()
+        m_traced = torch.jit.trace(x, seq_lens)(m)
+
+        y = m(x, seq_lens)
+        loss = torch.sum(y)
+        loss.backward()
+        grad = x.grad.clone()
+        x.grad.zero_()
+
+        y_traced = m_traced(x, seq_lens)
+        loss_traced = torch.sum(y_traced)
+        loss_traced.backward()
+        grad_traced = x.grad.clone()
+
+        self.assertEqual(y_traced, x)
+        self.assertEqual(y_traced, y)
+        self.assertEqual(grad, grad_traced)
+
+        f = io.BytesIO()
+        torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
 
 # Smoke tests for export methods

@@ -6,11 +6,13 @@ import argparse
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 
 import torch
+from torch.utils import cpp_extension
 
 TESTS = [
     'autograd',
@@ -48,6 +50,10 @@ DISTRIBUTED_TESTS_CONFIG = {
     'mpi': {},
 }
 
+# https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
+SIGNALS_TO_NAMES_DICT = dict((getattr(signal, n), n) for n in dir(signal)
+                             if n.startswith('SIG') and '_' not in n)
+
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
@@ -57,7 +63,7 @@ def shell(command, cwd):
     sys.stdout.flush()
     sys.stderr.flush()
     return subprocess.call(
-        shlex.split(command), universal_newlines=True, cwd=cwd) == 0
+        shlex.split(command), universal_newlines=True, cwd=cwd)
 
 
 def get_shell_output(command):
@@ -71,9 +77,17 @@ def run_test(python, test_module, test_directory, options):
 
 
 def test_cpp_extensions(python, test_module, test_directory, options):
-    if not shell('{} setup.py install --root ./install'.format(python),
-                 os.path.join(test_directory, 'cpp_extensions')):
-        return False
+    try:
+        cpp_extension.verify_ninja_availability()
+    except RuntimeError:
+        print(
+            'Ninja is not available. Skipping C++ extensions test. '
+            "Install ninja with 'pip install ninja' or 'conda install ninja'.")
+        return 0
+    return_code = shell('{} setup.py install --root ./install'.format(python),
+                        os.path.join(test_directory, 'cpp_extensions'))
+    if return_code != 0:
+        return return_code
 
     python_path = os.environ.get('PYTHONPATH', '')
     try:
@@ -81,7 +95,8 @@ def test_cpp_extensions(python, test_module, test_directory, options):
         if sys.platform == 'win32':
             install_directory = os.path.join(cpp_extensions, 'install')
             install_directories = get_shell_output(
-                "where -r \"{}\" *.pyd".format(install_directory)).split('\r\n')
+                "where -r \"{}\" *.pyd".format(install_directory)).split(
+                    '\r\n')
 
             assert install_directories, 'install_directory must not be empty'
 
@@ -98,8 +113,7 @@ def test_cpp_extensions(python, test_module, test_directory, options):
         assert install_directory, 'install_directory must not be empty'
         install_directory = os.path.join(test_directory, install_directory)
         os.environ['PYTHONPATH'] = '{}{}{}'.format(install_directory,
-                                                   split_char,
-                                                   python_path)
+                                                   split_char, python_path)
         return run_test(python, test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
@@ -132,15 +146,16 @@ def test_distributed(python, test_module, test_directory, options):
                 os.mkdir(os.path.join(tmp_dir, 'test_dir'))
                 if backend == 'mpi':
                     mpiexec = 'mpiexec -n 3 --noprefix {}'.format(python)
-                    if not run_test(mpiexec, test_module, test_directory,
-                                    options):
-                        return False
-                elif not run_test(python, test_module, test_directory,
-                                  options):
-                    return False
+                    return_code = run_test(mpiexec, test_module,
+                                           test_directory, options)
+                else:
+                    return_code = run_test(python, test_module, test_directory,
+                                           options)
+                if return_code != 0:
+                    return return_code
             finally:
                 shutil.rmtree(tmp_dir)
-    return True
+    return 0
 
 
 CUSTOM_HANDLERS = {
@@ -244,8 +259,17 @@ def main():
         test_module = 'test_{}.py'.format(test)
         print_to_stderr('Running {} ...'.format(test_module))
         handler = CUSTOM_HANDLERS.get(test, run_test)
-        if not handler(python, test_module, test_directory, options):
-            raise RuntimeError('{} failed!'.format(test_module))
+        return_code = handler(python, test_module, test_directory, options)
+        assert isinstance(return_code, int) and not isinstance(
+            return_code, bool), 'Return code should be an integer'
+        if return_code != 0:
+            message = '{} failed!'.format(test_module)
+            if return_code < 0:
+                # subprocess.Popen returns the child process' exit signal as
+                # return code -N, where N is the signal number.
+                signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
+                message += ' Received signal: {}'.format(signal_name)
+            raise RuntimeError(message)
 
     if options.coverage:
         shell('coverage combine')

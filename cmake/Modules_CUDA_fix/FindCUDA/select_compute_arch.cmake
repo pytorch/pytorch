@@ -23,6 +23,12 @@ set(CUDA_KNOWN_GPU_ARCHITECTURES  "Fermi" "Kepler" "Maxwell")
 # This list will be used for CUDA_ARCH_NAME = Common option (enabled by default)
 set(CUDA_COMMON_GPU_ARCHITECTURES "3.0" "3.5" "5.0")
 
+if(CMAKE_CUDA_COMPILER_LOADED) # CUDA as a language
+  if(CMAKE_CUDA_COMPILER_ID STREQUAL "NVIDIA")
+    set(CUDA_VERSION "${CMAKE_CUDA_COMPILER_VERSION}")
+  endif()
+endif()
+
 if (CUDA_VERSION VERSION_GREATER "6.5")
   list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Kepler+Tegra" "Kepler+Tesla" "Maxwell+Tegra")
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "5.2")
@@ -49,7 +55,11 @@ endif()
 #
 function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
   if(NOT CUDA_GPU_DETECT_OUTPUT)
-    set(file ${PROJECT_BINARY_DIR}/detect_cuda_compute_capabilities.cpp)
+    if(CMAKE_CUDA_COMPILER_LOADED) # CUDA as a language
+      set(file "${PROJECT_BINARY_DIR}/detect_cuda_compute_capabilities.cu")
+    else()
+      set(file "${PROJECT_BINARY_DIR}/detect_cuda_compute_capabilities.cpp")
+    endif()
 
     file(WRITE ${file} ""
       "#include <cuda_runtime.h>\n"
@@ -68,10 +78,15 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
       "  return 0;\n"
       "}\n")
 
-    try_run(run_result compile_result ${PROJECT_BINARY_DIR} ${file}
-            CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
-            LINK_LIBRARIES ${CUDA_LIBRARIES}
-            RUN_OUTPUT_VARIABLE compute_capabilities)
+    if(CMAKE_CUDA_COMPILER_LOADED) # CUDA as a language
+      try_run(run_result compile_result ${PROJECT_BINARY_DIR} ${file}
+              RUN_OUTPUT_VARIABLE compute_capabilities)
+    else()
+      try_run(run_result compile_result ${PROJECT_BINARY_DIR} ${file}
+              CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
+              LINK_LIBRARIES ${CUDA_LIBRARIES}
+              RUN_OUTPUT_VARIABLE compute_capabilities)
+    endif()
 
     if(run_result EQUAL 0)
       string(REPLACE "2.1" "2.1(2.0)" compute_capabilities "${compute_capabilities}")

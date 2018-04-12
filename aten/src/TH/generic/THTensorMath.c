@@ -426,11 +426,11 @@ static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) 
   return dataOffset;
 }
 
-static void THTensor_(checkLinearIndex)(int64_t linearIndex, int64_t numel) {
+static inline void THTensor_(checkLinearIndex)(int64_t linearIndex, int64_t numel) {
   THArgCheck(linearIndex < numel && linearIndex >= -numel, 2, "out of range: %d out of %d", (int)linearIndex, (int)numel);
 }
 
-static int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
+static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
 }
 
@@ -448,9 +448,9 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
   int isContiguous = THTensor_(isContiguous)(src);
 
   // Exceptions must not be thrown across OpenMP parallel sections, so we
-  // record the value of the invalid index and throw the exception after the
+  // record the position of the invalid index and throw the exception after the
   // loop.
-  int64_t invalidIdx = -1;
+  int64_t invalidIdxPos = -1;
 
   ptrdiff_t i;
   #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD) private(i)
@@ -464,12 +464,12 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
         dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
       }
     } else {
-      THAtomicCompareAndSwapLong(&invalidIdx, -1, idx);
+      THAtomicCompareAndSwapLong(&invalidIdxPos, -1, i);
     }
   }
 
-  if (invalidIdx >= 0) {
-    THTensor_(checkLinearIndex)(invalidIdx, srcElements);
+  if (invalidIdxPos >= 0) {
+    THTensor_(checkLinearIndex)(index_data[invalidIdxPos], srcElements);
   }
 
   THLongTensor_free(index);
@@ -3840,7 +3840,9 @@ LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(log10,TH_MATH_NAME(log10))
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
+LAB_IMPLEMENT_BASIC_FUNCTION(log2,TH_MATH_NAME(log2))
 LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp))
 LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1))
 LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos))

@@ -2,12 +2,10 @@
 
 #include "intrinsics.h"
 #include "vec256_base.h"
-#ifdef __AVX2__
-#include <ATen/native/cpu/avx_mathfun.h>
-#endif
 
 namespace at {
 namespace vec256 {
+namespace {
 
 #ifdef __AVX__
 
@@ -57,32 +55,16 @@ public:
     return _mm256_andnot_ps(mask, values);
   }
   Vec256<float> exp() const {
-#ifdef __AVX2__
-    return exp256_ps(values);
-#else
     return map(std::exp);
-#endif
   }
   Vec256<float> log() const {
-#ifdef __AVX2__
-    return log256_ps(values);
-#else
     return map(std::log);
-#endif
   }
   Vec256<float> sin() const {
-#ifdef __AVX2__
-    return sin256_ps(values);
-#else
     return map(std::sin);
-#endif
   }
   Vec256<float> cos() const {
-#ifdef __AVX2__
-    return cos256_ps(values);
-#else
     return map(std::cos);
-#endif
   }
   Vec256<float> ceil() const {
     return _mm256_ceil_ps(values);
@@ -113,4 +95,4 @@ Vec256<float> inline operator*(const Vec256<float>& a, const Vec256<float>& b) {
 
 #endif
 
-}}
+}}}

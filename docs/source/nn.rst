@@ -196,10 +196,22 @@ Pooling Layers
 Padding Layers
 --------------
 
+:hidden:`ReflectionPad1d`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReflectionPad1d
+    :members:
+
 :hidden:`ReflectionPad2d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ReflectionPad2d
+    :members:
+
+:hidden:`ReplicationPad1d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReplicationPad1d
     :members:
 
 :hidden:`ReplicationPad2d`
@@ -220,10 +232,22 @@ Padding Layers
 .. autoclass:: ZeroPad2d
     :members:
 
+:hidden:`ConstantPad1d`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ConstantPad1d
+    :members:
+
 :hidden:`ConstantPad2d`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ConstantPad2d
+    :members:
+
+:hidden:`ConstantPad3d`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ConstantPad3d
     :members:
 
 

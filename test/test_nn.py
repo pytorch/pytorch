@@ -128,6 +128,39 @@ class PackedSequenceTest(TestCase):
         unpacked, _ = rnn_utils.pad_packed_sequence(packed)
         self.assertEqual(unpacked.type(), cuda_type_str)
 
+    def test_total_length(self):
+        padded, lengths = self._padded_sequence(torch.FloatTensor)
+        max_length = max(lengths)
+        packed = rnn_utils.pack_padded_sequence(padded, lengths)
+        # test ValueError if total_length < max_length
+        for total_length in (-1, 0, max_length - 1):
+            for batch_first in (True, False):
+                def err_fn():
+                    rnn_utils.pad_packed_sequence(packed, batch_first=batch_first,
+                                                  total_length=total_length)
+            self.assertRaisesRegex(ValueError,
+                                   r'Expected total_length to be at least the '
+                                   r'length of the longest sequence in input',
+                                   err_fn)
+        # test that pad_packed_sequence returns results of correct length
+        for batch_first in (True, False):
+            no_extra_pad, _ = rnn_utils.pad_packed_sequence(packed, batch_first=batch_first)
+            for total_length_delta in (0, 1, 8):
+                total_length = max_length + total_length_delta
+                unpacked, lengths_out = rnn_utils.pad_packed_sequence(packed, batch_first=batch_first,
+                                                                      total_length=total_length)
+                self.assertEqual(lengths, lengths_out)
+                self.assertEqual(unpacked.size(1 if batch_first else 0), total_length)
+                if total_length_delta == 0:
+                    ref_output = no_extra_pad
+                elif batch_first:
+                    extra_pad = no_extra_pad.new_zeros(self.batch_size, total_length_delta)
+                    ref_output = torch.cat([no_extra_pad, extra_pad], 1)
+                else:
+                    extra_pad = no_extra_pad.new_zeros(total_length_delta, self.batch_size)
+                    ref_output = torch.cat([no_extra_pad, extra_pad], 0)
+                self.assertEqual(unpacked, ref_output)
+
 
 def default_tensor_type(type):
     type_str = torch.typename(type)
@@ -1291,6 +1324,18 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=-25)
 
+        # test backward when input contains padding_idx
+        padding_idx = 0
+        embedding = nn.Embedding(5, 2, padding_idx=padding_idx)
+        for n in (1, 2):
+            for other_indices in ([], [1, 3], [2]):
+                indices = torch.LongTensor(other_indices + [padding_idx] * n)
+                pre = embedding.weight[padding_idx].clone()
+                embedding(indices).sum().backward()
+                after = (embedding.weight + embedding.weight.grad)[padding_idx]
+                embedding.zero_grad()
+                self.assertEqual(after, pre)
+
     def test_embedding_max_norm(self):
         embedding = nn.Embedding(22, 5, max_norm=1.0)
         input = Variable(torch.LongTensor([2, 8, 8, 6]))
@@ -1877,6 +1922,13 @@ class TestNN(NNTestCase):
 
         inputs = Variable(torch.randn(1, 2, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
+
+        # assert that relfection padding errors when pad >= input size
+        expected_err_msg = r"Padding size should be less than the corresponding input dimension"
+        self.assertRaisesRegex(RuntimeError, expected_err_msg,
+                               lambda: F.pad(torch.randn(1, 1, 2, 3), (1, 1, 3, 0), mode='reflect'))
+        self.assertRaisesRegex(RuntimeError, expected_err_msg,
+                               lambda: F.pad(torch.randn(1, 1, 2), (2, 1), mode='reflect'))
 
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0, requires_grad=True)
@@ -3772,7 +3824,7 @@ class TestNN(NNTestCase):
         input.grad.data.zero_()
 
         output.backward(grad.contiguous())
-        self.assertEqual(result, input.grad.data)
+        self.assertEqual(result, input.grad.data, type2prec[dtype.__name__])
 
     def test_pixel_shuffle(self):
         batch_size = random.randint(1, 3)

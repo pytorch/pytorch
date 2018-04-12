@@ -11,7 +11,20 @@ inline float sigmoid_xent_forward(float lgt, float tgt) {
 inline float sigmoid_xent_backward(float lgt, float tgt) {
   return tgt - 1. / (1. + exp(-lgt));
 }
+
+inline float sigmoid_partition(float lgt) {
+  // computes log(1 + exp(lgt)) with only exp(x) function when x >= 0
+  return lgt * (lgt >= 0) + log(1 + exp(lgt - 2 * lgt * (lgt >= 0)));
 }
+
+inline float sigmoid_xent_forward_with_log_d_trick(float lgt, float tgt) {
+  return (2 * tgt - 1.) * (lgt - sigmoid_partition(lgt));
+}
+
+inline float sigmoid_xent_backward_with_log_d_trick(float lgt, float tgt) {
+  return (2 * tgt - 1.) / (1. + exp(lgt));
+}
+} // namespace
 
 template <>
 bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
@@ -70,7 +83,11 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < outer_size; ++i) {
     float value = 0;
     for (int j = 0; j < inner_size; ++j) {
-      value += sigmoid_xent_forward(logits_ptr[in_idx], targets_ptr[in_idx]);
+      value +=
+          (log_D_trick_
+               ? sigmoid_xent_forward_with_log_d_trick(
+                     logits_ptr[in_idx], targets_ptr[in_idx])
+               : sigmoid_xent_forward(logits_ptr[in_idx], targets_ptr[in_idx]));
       ++in_idx;
     }
     out_ptr[i] = -value / inner_size;
@@ -101,7 +118,10 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
     auto g_factor = -g_ptr[i] / inner_size;
     for (int j = 0; j < inner_size; ++j) {
       out_ptr[in_idx] = g_factor *
-          sigmoid_xent_backward(logits_ptr[in_idx], targets_ptr[in_idx]);
+          (log_D_trick_ ? sigmoid_xent_backward_with_log_d_trick(
+                              logits_ptr[in_idx], targets_ptr[in_idx])
+                        : sigmoid_xent_backward(
+                              logits_ptr[in_idx], targets_ptr[in_idx]));
       ++in_idx;
     }
   }
@@ -413,6 +433,10 @@ OPERATOR_SCHEMA(MakeTwoClassGradient)
   .NumOutputs(1);
 
 OPERATOR_SCHEMA(SigmoidCrossEntropyWithLogits)
+    .Arg("log_D_trick", R"DOC(
+default is false; if enabled, will use the log d trick to avoid the vanishing
+gradients early on; see Goodfellow et. al (2014)
+)DOC")
     .NumInputs(2)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
@@ -465,11 +489,14 @@ REGISTER_GRADIENT(MakeTwoClass, GetMakeTwoClassGradient);
 struct GetSigmoidCrossEntropyWithLogitsGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
+    ArgumentHelper argsHelper(def_);
+    auto log_D_trick = argsHelper.GetSingleArgument<bool>("log_D_trick", false);
     return SingleGradientDef(
         "SigmoidCrossEntropyWithLogitsGradient",
         "",
         vector<string>{GO(0), I(0), I(1)},
-        vector<string>{GI(0)});
+        vector<string>{GI(0)},
+        vector<Argument>{MakeArgument<bool>("log_D_trick", log_D_trick)});
   }
 };
 REGISTER_GRADIENT(

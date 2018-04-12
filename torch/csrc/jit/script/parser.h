@@ -113,7 +113,10 @@ struct Parser {
       auto kind = L.cur().kind;
       auto pos = L.cur().range;
       L.next();
-      prefix = c(kind, pos, {parseExp(unary_prec)});
+      auto unary_kind = kind == '*' ? TK_STARRED :
+                        kind == '-' ? TK_UNARY_MINUS :
+                                      kind;
+      prefix = c(unary_kind, pos, {parseExp(unary_prec)});
     } else {
       prefix = parseBaseExp();
     }
@@ -233,8 +236,7 @@ struct Parser {
   // 'first' has already been parsed since expressions can exist
   // alone on a line:
   // first[,other,lhs] = rhs
-  Assign parseAssign(Ident first) {
-    List<Ident> list = parseOneOrMoreIdents(first);
+  Assign parseAssign(List<Expr> list) {
     auto red = parseOptionalReduction();
     auto rhs = parseExp();
     L.expect(TK_NEWLINE);
@@ -261,12 +263,12 @@ struct Parser {
         return Return::create(range, values);
       }
       default: {
-        Expr r = Expr(parseExp());
-        if (r.kind() == TK_VAR && L.cur().kind != TK_NEWLINE) {
-          return parseAssign(Var(r).name());
+        List<Expr> exprs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+        if (L.cur().kind != TK_NEWLINE) {
+          return parseAssign(exprs);
         } else {
           L.expect(TK_NEWLINE);
-          return ExprStmt::create(r.range(), r);
+          return ExprStmt::create(exprs[0].range(), exprs);
         }
       }
     }
@@ -296,16 +298,6 @@ struct Parser {
   TreeRef parseType() {
     return TensorType::create(SourceRange(std::make_shared<std::string>(""), 0, 0));
   }
-  // 'first' has already been parsed, add the rest
-  // if they exist
-  // first[, the, rest]
-  List<Ident> parseOneOrMoreIdents(Ident first) {
-    std::vector<Ident> idents {first};
-    while (L.nextIf(',')) {
-      idents.push_back(parseIdent());
-    }
-    return List<Ident>::create(idents.back().range(), std::move(idents));
-  }
   TreeRef parseIf() {
     auto r = L.cur().range;
     L.expect(TK_IF);
@@ -330,7 +322,7 @@ struct Parser {
   TreeRef parseFor() {
     auto r = L.cur().range;
     L.expect(TK_FOR);
-    auto targets = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
+    auto targets = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
     L.expect(TK_IN);
     auto itrs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
     L.expect(':');

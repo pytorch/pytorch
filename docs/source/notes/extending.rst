@@ -132,7 +132,7 @@ Since :mod:`~torch.nn` heavily utilizes :mod:`~torch.autograd`, adding a new
 :class:`Module` requires implementing a :class:`~torch.autograd.Function`
 that performs the operation and can compute the gradient. From now on let's
 assume that we want to implement a ``Linear`` module and we have the function
-implementated as in the listing above. There's very little code required to
+implemented as in the listing above. There's very little code required to
 add this. Now, there are two functions that need to be implemented:
 
 - ``__init__`` (*optional*) - takes in arguments such as kernel sizes, numbers

@@ -21,29 +21,40 @@ static void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, c
   }
 }
 
+static std::string typeString(py::handle h) {
+  return py::str(h.get_type().attr("__name__"));
+}
+
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self)
   : self(std::move(self)) {}
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::vector<Value*> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
+  virtual std::vector<Value*> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
     if (attributes.size() > 0)
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
+    // TODO: remove when we support tuple packing for PythonOp
+    if (cd.allow_varargs && cd.n_outputs == 1) {
+      cd.allow_varargs = false;
+    }
+    if (cd.allow_varargs)
+      throw ErrorReport(loc) << "Vararg outputs are currently not supported for PythonOp.";
     // Release the function object so we can wrap it in a PythonOp
     Graph& g = *m.graph();
     py::object func = self;
     std::string cconv(inputs.size(), 't');
     Node* new_node = g.insertNode(g.createPythonOp(
       THPObjectPtr(func.release().ptr()), cconv, false, {}, {}, false));
+    new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for(auto i : inputs)
       new_node->addInput(i);
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < n_outputs; ++i)
+    for(size_t i = 0; i < cd.n_outputs; ++i)
       outputs.push_back(new_node->addOutput());
     return outputs;
   }
 
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) {
+  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
     // We generally don't want to allow traversing arbitrary Python objects, but we
     // make an exception for traversing modules because we want to be access
     // torch, torch.nn.functional, and the functions they expose.
@@ -59,11 +70,11 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   virtual std::string kind() const override {
     std::stringstream ss;
-    ss << "python value'" << py::repr(self) << "'";
+    ss << "python value of type '" << typeString(self) << "'";
     return ss.str();
   }
 
-private:
+protected:
   bool isBuiltinModule() {
     // XXX: these can't be static, or they will be destructed after the Python interpreter
     // exits and that generally sounds like a bad idea
@@ -81,6 +92,42 @@ private:
   }
 
   py::object self;
+};
+
+// by using torch.jit.Const, a user can mark a python value constant
+// we then make that value immutable.
+// once marked constant, we enable additional behavior such as
+// 1. conversion via asValue to a constant Tensor
+// 2. unrolling of for loops
+struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
+  using PythonValue::PythonValue;
+  virtual Value * asValue(SourceRange loc, Method & m) override {
+    if(py::isinstance<py::int_>(self)) {
+      return createConstant(loc, m, at::CPU(at::kInt).scalarTensor(py::cast<int32_t>(self)));
+    } else if(py::isinstance<py::float_>(self)) {
+      return createConstant(loc, m, at::CPU(at::kFloat).scalarTensor(py::cast<float>(self)));
+    } else if(py::isinstance<py::bool_>(self)) {
+      return createConstant(loc, m, at::CPU(at::kByte).scalarTensor(py::cast<bool>(self)));
+    }
+    return PythonValue::asValue(loc, m);
+  }
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
+    if(!py::isinstance<py::tuple>(self))
+      return PythonValue::asTuple(loc, m);
+
+    py::tuple tup = self;
+    std::vector<std::shared_ptr<SugaredValue>> result;
+    for(size_t i = 0; i < tup.size(); ++i) {
+      result.push_back(std::make_shared<ConstantPythonValue>(tup[i]));
+    }
+    return result;
+  }
+private:
+  static Value * createConstant(SourceRange loc, Method& m, const at::Tensor& val) {
+    auto n = m.graph()->createConstant(val);
+    n->setSourceLocation(std::make_shared<SourceRange>(loc));
+    return m.graph()->insertNode(n)->output();
+  }
 };
 
 Resolver pythonResolver(ResolutionCallback rcb) {
@@ -109,13 +156,16 @@ struct MethodValue : public SugaredValue {
   std::string kind() const override {
     return "method";
   }
-  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
+  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
     if(attributes.size() != 0) {
       throw ErrorReport(loc) << "not yet implemented - calls to python functions using keyword arguments";
     }
     ensureSizeMatches(loc, method.num_inputs(), inputs.size(), "inputs");
     auto outputs = caller.emit_call_to(method, inputs);
-    ensureSizeMatches(loc, outputs.size(), n_outputs, "outputs");
+    // Allow for tuples. TODO: starred exprs?
+    if (!cd.allow_varargs) {
+      ensureSizeMatches(loc, outputs.size(), cd.n_outputs, "outputs");
+    }
     return outputs;
   }
 private:
@@ -149,17 +199,40 @@ struct ModuleValue : public SugaredValue {
       if(py::isinstance<py::function>(attr) ||
          py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
         return std::make_shared<PythonValue>(attr);
+      } else if(py_module.attr("_constants_set").contains(field.c_str())) {
+        return std::make_shared<ConstantPythonValue>(attr);
+      } else {
+        throw ErrorReport(loc) << "attribute '" << field << "' of type '" << typeString(attr) << "' is not usable in a script method (did you forget to add it __constants__?)";
       }
     }
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
   // call module.forward
-  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
-    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_outputs);
+  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
+    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, cd);
   }
+
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
+    py::object py_module = py::cast(module);
+    if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
+      return SugaredValue::asTuple(loc, m);
+    std::vector<std::shared_ptr<SugaredValue>> result;
+    for(py::handle module : py_module) {
+      py::object obj = py::reinterpret_borrow<py::object>(module);
+      if(py::isinstance<Module>(obj)) {
+        auto r = py::cast<std::shared_ptr<Module>>(obj);
+        result.push_back(std::make_shared<ModuleValue>(r));
+      } else {
+        result.push_back(std::make_shared<ConstantPythonValue>(obj));
+      }
+    }
+    return result;
+  }
+
 private:
   std::shared_ptr<Module> module;
 };
+
 
 // TODO: dedup with other init
 

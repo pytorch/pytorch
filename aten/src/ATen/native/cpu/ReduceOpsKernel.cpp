@@ -7,8 +7,7 @@
 #include "ATen/optional.h"
 #include "ATen/cpu/vec256/vec256.h"
 
-namespace at {
-namespace native {
+namespace at { namespace native { namespace {
 
 using namespace vec256;
 
@@ -147,8 +146,9 @@ static void prod_kernel_impl(Tensor& result, const Tensor& self, at::optional<in
   });
 }
 
+}  // anonymous namespace
+
 REGISTER_DISPATCH(sum_kernel, &sum_kernel_impl);
 REGISTER_DISPATCH(prod_kernel, &prod_kernel_impl);
 
-}
-}
+}}  // namespace at::native

@@ -23,15 +23,18 @@ bool SparseNormalizeOp<float, CPUContext>::DoRunWithType() {
     auto idx = indices[i];
     auto offsetIdx = idx * block_size;
     ConstEigenVectorMap<float> xVec(paramIn + offsetIdx, block_size);
-    auto norm = xVec.template lpNorm<2>() + kEps;
+    auto norm = xVec.template lpNorm<2>();
 
-    if (use_max_norm_ && norm < norm_) {
+    if (use_max_norm_ && norm <= norm_) {
       continue;
     }
 
-    for (int j = 0; j < block_size; j++) {
-      paramOut[offsetIdx + j] = paramOut[offsetIdx + j] * (norm_ / norm);
-    }
+    math::Scale(
+        block_size,
+        norm_ / (norm + kEps),
+        paramOut + offsetIdx,
+        paramOut + offsetIdx,
+        &context_);
   }
   return true;
 }

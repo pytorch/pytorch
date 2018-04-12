@@ -8,6 +8,7 @@ namespace caffe2 {
 namespace opt {
 
 caffe2::NetDef addNNPACK(caffe2::NetDef net, bool low_memory = false);
+caffe2::NetDef fuseNNPACKConvRelu(caffe2::NetDef net);
 
 } // namespace opt
 } // namespace caffe2

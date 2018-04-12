@@ -49,10 +49,13 @@ if [[ "$COMMIT_SOURCE" == master ]]; then
     export TEST_MODE="compare_and_update"
 fi
 
-run_test test_cpu_speed_mini_sequence_labeler 20 ${TEST_MODE}
-run_test test_cpu_speed_mnist 20 ${TEST_MODE}
+# Operator tests
 run_test test_cpu_speed_torch ${TEST_MODE}
 run_test test_cpu_speed_torch_tensor ${TEST_MODE}
+
+# Sample model tests
+run_test test_cpu_speed_mini_sequence_labeler 20 ${TEST_MODE}
+run_test test_cpu_speed_mnist 20 ${TEST_MODE}
 
 if [[ "$COMMIT_SOURCE" == master ]]; then
     # This could cause race condition if we are testing the same master commit twice,

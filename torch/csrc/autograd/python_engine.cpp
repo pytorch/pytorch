@@ -83,9 +83,6 @@ static void _maybe_reinitialize_engine_after_fork() {
 }
 
 // Implementation of torch._C._EngineBase.run_backward
-//
-// When inputs == nullptr, this is a torch.autograd.backward() call
-// When inputs != nullptr, this is a torch.autograd.grad() call
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
@@ -198,6 +195,16 @@ PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPEngine_is_checkpoint_valid(PyObject *self) {
+  HANDLE_TH_ERRORS
+  if(engine.is_checkpoint_valid()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   return type->tp_alloc(type, 0);
@@ -206,6 +213,7 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward", (PyCFunction)THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, nullptr},
+  {(char*)"is_checkpoint_valid", (PyCFunction)THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
   {nullptr}
 };
 

@@ -142,20 +142,6 @@ class MaxPool2d(_MaxPoolNd):
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
 
-#     def extra_repr(self):
-#         kh, kw = _pair(self.kernel_size)
-#         dh, dw = _pair(self.stride)
-#         padh, padw = _pair(self.padding)
-#         dilh, dilw = _pair(self.dilation)
-#         padding_str = ', padding=(' + str(padh) + ', ' + str(padw) + ')' \
-#             if padh != 0 or padw != 0 else ''
-#         dilation_str = (', dilation=(' + str(dilh) + ', ' + str(dilw) + ')'
-#                         if dilh != 0 and dilw != 0 else '')
-#         ceil_str = ', ceil_mode=' + str(self.ceil_mode)
-#         return 'kernel_size=(' + str(kh) + ', ' + str(kw) + ')' \
-#             + ', stride=(' + str(dh) + ', ' + str(dw) + ')' \
-#             + padding_str + dilation_str + ceil_str
-
 
 class MaxPool3d(_MaxPoolNd):
     r"""Applies a 3D max pooling over an input signal composed of several input
@@ -448,15 +434,6 @@ class MaxUnpool3d(_MaxUnpoolNd):
 
 class _AvgPoolNd(Module):
 
-    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True):
-        super(_AvgPoolNd, self).__init__()
-        self.kernel_size = _single(kernel_size)
-        self.stride = _single(stride if stride is not None else kernel_size)
-        self.padding = _single(padding)
-        self.ceil_mode = ceil_mode
-        self.count_include_pad = count_include_pad
-
     def extra_repr(self):
         return 'kernel_size={}, stride={}, padding={}'.format(
             self.kernel_size, self.stride, self.padding
@@ -509,6 +486,15 @@ class AvgPool1d(_AvgPoolNd):
           2  4  6
         [torch.FloatTensor of size (1,1,3)]
     """
+
+    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
+                 count_include_pad=True):
+        super(AvgPool1d, self).__init__()
+        self.kernel_size = _single(kernel_size)
+        self.stride = _single(stride if stride is not None else kernel_size)
+        self.padding = _single(padding)
+        self.ceil_mode = ceil_mode
+        self.count_include_pad = count_include_pad
 
     def forward(self, input):
         return F.avg_pool1d(
@@ -567,6 +553,15 @@ class AvgPool2d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
     """
+
+    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
+                 count_include_pad=True):
+        super(AvgPool2d, self).__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride or kernel_size
+        self.padding = padding
+        self.ceil_mode = ceil_mode
+        self.count_include_pad = count_include_pad
 
     def forward(self, input):
         return F.avg_pool2d(input, self.kernel_size, self.stride,
@@ -630,6 +625,15 @@ class AvgPool3d(_AvgPoolNd):
         >>> output = m(input)
     """
 
+    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
+                 count_include_pad=True):
+        super(AvgPool3d, self).__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride or kernel_size
+        self.padding = padding
+        self.ceil_mode = ceil_mode
+        self.count_include_pad = count_include_pad
+
     def forward(self, input):
         return F.avg_pool3d(input, self.kernel_size, self.stride,
                             self.padding, self.ceil_mode, self.count_include_pad)
@@ -644,7 +648,7 @@ class AvgPool3d(_AvgPoolNd):
 class FractionalMaxPool2d(Module):
     r"""Applies a 2D fractional max pooling over an input signal composed of several input planes.
 
-    Fractiona MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
+    Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
     The max-pooling operation is applied in :math:`kHxkW` regions by a stochastic
     step size determined by the target output size.

@@ -1990,6 +1990,7 @@ class Net(object):
         if use_cudnn:
             for op in self._net.op:
                 op.engine = "CUDNN"
+
     def RunAllOnMKL(self):
         """A convenient function to run everything using MKLDNN."""
         device_option = caffe2_pb2.DeviceOption()

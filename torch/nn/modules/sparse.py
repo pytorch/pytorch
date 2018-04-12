@@ -16,25 +16,34 @@ class Embedding(Module):
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
-        padding_idx (int, optional): If given, pads the output with zeros whenever it encounters the index.
+        padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
+                                         (initialized to zeros) whenever it encounters the index.
         max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
+        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the frequency of
                                                 the words in the mini-batch.
-        sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+        sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
                                     more details regarding sparse gradients.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
 
     Shape:
-        - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
-        - Output: `(N, W, embedding_dim)`
+        - Input: LongTensor of arbitrary shape containing the indices to extract
+        - Output: `(*, embedding_dim)`, where `*` is the input shape
 
-    Notes:
+    .. note::
         Keep in mind that only a limited number of optimizers support
         sparse gradients: currently it's :class:`optim.SGD` (`CUDA` and `CPU`),
         :class:`optim.SparseAdam` (`CUDA` and `CPU`) and :class:`optim.Adagrad` (`CPU`)
+
+    .. note::
+        With :attr:`padding_idx` set, the embedding vector at
+        :attr:`padding_idx` is initialized to all zeros. However, note that this
+        vector can be modified afterwards, e.g., using a customized
+        initialization method, and thus changing the vector used to pad the
+        output. The gradient for this vector from :class:`~torch.nn.Embedding`
+        is always zero.
 
     Examples::
 
@@ -166,10 +175,10 @@ class EmbeddingBag(Module):
         embedding_dim (int): the size of each embedding vector
         max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
+        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the frequency of
                                                 the words in the dictionary.
         mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
-        sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+        sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
                                     more details regarding sparse gradients.
 
     Attributes:

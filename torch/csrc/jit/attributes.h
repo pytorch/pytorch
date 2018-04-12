@@ -32,7 +32,7 @@ struct AttributeValue {
 
 template<typename T, AttributeKind Kind>
 struct ScalarAttributeValue : public AttributeValue {
-  using ConstructorType = const T &;
+  using ConstructorType = T;
   using ValueType = T;
   ScalarAttributeValue(Symbol name, ConstructorType value_)
   : AttributeValue(name), value_(value_) {}
@@ -49,7 +49,7 @@ private:
 
 template<typename T, AttributeKind Kind>
 struct VectorAttributeValue : public AttributeValue {
-  using ConstructorType = const std::vector<T> &&;
+  using ConstructorType = std::vector<T>;
   using ValueType = std::vector<T>;
   VectorAttributeValue(Symbol name, ConstructorType value_)
   : AttributeValue(name), value_(std::move(value_)) {}

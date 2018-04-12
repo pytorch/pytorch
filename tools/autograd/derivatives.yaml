@@ -348,8 +348,14 @@
 - name: log(Tensor self)
   self: grad.div(self)
 
+- name: log10(Tensor self)
+  self: grad / (self * 2.3025850929940456)
+
 - name: log1p(Tensor self)
   self: grad / (self + 1)
+
+- name: log2(Tensor self)
+  self: grad / (self * 0.6931471805599453)
 
 - name: logdet(Tensor self)
   self: logdet_backward(grad, self, result)
@@ -587,6 +593,9 @@
 
 - name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
   self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
+
+- name: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool normalized, bool onesided, Tensor window, int64_t pad_end)
+  self: not_implemented("stft")
 
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
@@ -1123,3 +1132,7 @@
 # mkldnn
 - name: mkldnn_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation)
   self, weight, bias: mkldnn_convolution_backward(self, grad, weight, padding, stride, dilation, grad_input_mask)
+
+# fft
+- name: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes)
+  self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalized, onesided, output_sizes)

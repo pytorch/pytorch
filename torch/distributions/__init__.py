@@ -35,7 +35,7 @@ taking action :math:`a` in state :math:`s` given policy :math:`\pi^\theta`.
 
 In practice we would sample an action from the output of a network, apply this
 action in an environment, and then use ``log_prob`` to construct an equivalent
-loss function. Note that we use a negative because optimisers use gradient
+loss function. Note that we use a negative because optimizers use gradient
 descent, whilst the rule above assumes gradient ascent. With a categorical
 policy, the code for implementing REINFORCE would be as follows::
 

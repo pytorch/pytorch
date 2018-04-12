@@ -12,7 +12,7 @@ class Optimizer(object):
     """Base class for all optimizers.
 
     .. warning::
-        Parameters needs to be specified as collections that have a deterministic
+        Parameters need to be specified as collections that have a deterministic
         ordering that is consistent between runs. Examples of objects that don't
         satisfy those properties are sets and iterators over values of dictionaries.
 

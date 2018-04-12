@@ -1375,6 +1375,14 @@ class TestDistributions(TestCase):
                                     'MultivariateNormal(loc={}, scale_tril={})'.format(mean, scale_tril),
                                     multivariate=True)
 
+    def test_multivariate_normal_properties(self):
+        loc = torch.randn(5)
+        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
+        m = MultivariateNormal(loc=loc, scale_tril=scale_tril)
+        self.assertEqual(m.covariance_matrix, m.scale_tril.mm(m.scale_tril.t()))
+        self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
+        self.assertEqual(m.scale_tril, torch.potrf(m.covariance_matrix, upper=False))
+
     def test_exponential(self):
         rate = variable(torch.randn(5, 5).abs(), requires_grad=True)
         rate_1d = variable(torch.randn(1).abs(), requires_grad=True)
@@ -2605,7 +2613,6 @@ class TestKL(TestCase):
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for (p, _), (_, q) in self.finite_examples:
-            print('Testing KL({}, {}) using Monte Carlo'.format(type(p).__name__, type(q).__name__))
             actual = kl_divergence(p, q)
             numerator = 0
             denominator = 0
@@ -2623,10 +2630,47 @@ class TestKL(TestCase):
                 'Actual (analytic): {}'.format(actual),
             ]))
 
+    # Multivariate normal has a separate Monte Carlo based test due to the requirement of random generation of
+    # positive (semi) definite matrices. n is set to 5, but can be increased during testing.
+    def test_kl_multivariate_normal(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        n = 5  # Number of tests for multivariate_normal
+        for i in range(0, n):
+            loc = [torch.randn(4) for _ in range(0, 2)]
+            scale_tril = [transform_to(constraints.lower_cholesky)(torch.randn(4, 4)) for _ in range(0, 2)]
+            p = MultivariateNormal(loc=loc[0], scale_tril=scale_tril[0])
+            q = MultivariateNormal(loc=loc[1], scale_tril=scale_tril[1])
+            actual = kl_divergence(p, q)
+            numerator = 0
+            denominator = 0
+            while denominator < self.max_samples:
+                x = p.sample(sample_shape=(self.samples_per_batch,))
+                numerator += (p.log_prob(x) - q.log_prob(x)).sum(0)
+                denominator += x.size(0)
+                expected = numerator / denominator
+                error = torch.abs(expected - actual) / (1 + expected)
+                if error[error == error].max() < self.precision:
+                    break
+            self.assertLess(error[error == error].max(), self.precision, '\n'.join([
+                'Incorrect KL(MultivariateNormal, MultivariateNormal) instance {}/{}'.format(i + 1, n),
+                'Expected ({} Monte Carlo sample): {}'.format(denominator, expected),
+                'Actual (analytic): {}'.format(actual),
+            ]))
+
+    def test_kl_multivariate_normal_batched(self):
+        b = 7  # Number of batches
+        loc = [torch.randn(b, 3) for _ in range(0, 2)]
+        scale_tril = [transform_to(constraints.lower_cholesky)(torch.randn(b, 3, 3)) for _ in range(0, 2)]
+        expected_kl = torch.stack([
+            kl_divergence(MultivariateNormal(loc[0][i], scale_tril=scale_tril[0][i]),
+                          MultivariateNormal(loc[1][i], scale_tril=scale_tril[1][i])) for i in range(0, b)])
+        actual_kl = kl_divergence(MultivariateNormal(loc[0], scale_tril=scale_tril[0]),
+                                  MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
+        self.assertEqual(expected_kl, actual_kl)
+
     def test_kl_exponential_family(self):
         for (p, _), (_, q) in self.finite_examples:
             if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
-                print('Testing KL({}, {}) using Bregman Divergence'.format(type(p).__name__, type(q).__name__))
                 actual = kl_divergence(p, q)
                 expected = _kl_expfamily_expfamily(p, q)
                 if isinstance(expected, Variable) and not isinstance(actual, Variable):

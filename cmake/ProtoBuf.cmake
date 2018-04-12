@@ -26,11 +26,8 @@ macro(custom_protobuf_find)
   endif()
 
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
-    # We will need to build protobuf with -fPIC.
-    set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
     set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
     set(__caffe2_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
     set(BUILD_SHARED_LIBS OFF)
     if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
@@ -41,10 +38,14 @@ macro(custom_protobuf_find)
     endif()
   endif()
 
+  set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
   add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/protobuf/cmake)
 
+  set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
+
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
-    set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
     set(BUILD_SHARED_LIBS ON)
     set(CMAKE_CXX_FLAGS ${__caffe2_CMAKE_CXX_FLAGS})
@@ -104,11 +105,12 @@ if ((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lit
   #     "Please set the proper paths so that I can find protobuf correctly.")
 endif()
 
-# Protobuf generated files use <> as inclusion path, so following normal
-# convention we will use SYSTEM inclusion path.
+# Protobuf generated files use <> as inclusion path, so maybe we should use
+# SYSTEM inclusion path. But we need these include dirs to be found before
+# other protobuf include dirs in Anaconda
 get_target_property(__tmp protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "Caffe2 protobuf include directory: " ${__tmp})
-include_directories(BEFORE SYSTEM ${__tmp})
+include_directories(BEFORE ${__tmp})
 
 # If Protobuf_VERSION is known (true in most cases, false if we are building
 # local protobuf), then we will add a protobuf version check in

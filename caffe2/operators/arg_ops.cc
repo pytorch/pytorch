@@ -2,7 +2,6 @@
 
 #include <functional>
 
-#include "caffe2/operators/arg_ops_eigen.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -42,12 +41,7 @@ bool ArgMaxOp<T, Context>::Compute(
     const TIndex next_size,
     const TIndex n,
     TIndex* Y) {
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  arg_ops_eigen::ComputeArgMaxEigen(
-      Eigen::DefaultDevice(), X, prev_size, next_size, n, Y);
-#else // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   ComputeArgImpl(X, prev_size, next_size, n, std::greater<T>(), Y, &context_);
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   return true;
 }
 
@@ -58,12 +52,7 @@ bool ArgMinOp<T, Context>::Compute(
     const TIndex next_size,
     const TIndex n,
     TIndex* Y) {
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  arg_ops_eigen::ComputeArgMinEigen(
-      Eigen::DefaultDevice(), X, prev_size, next_size, n, Y);
-#else // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   ComputeArgImpl(X, prev_size, next_size, n, std::less<T>(), Y, &context_);
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   return true;
 }
 

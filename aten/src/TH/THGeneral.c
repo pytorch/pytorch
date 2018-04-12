@@ -252,6 +252,11 @@ void THFree(void *ptr)
   free(ptr);
 }
 
+double THLog10(const double x)
+{
+  return log10(x);
+}
+
 double THLog1p(const double x)
 {
 #if (defined(_MSC_VER) || defined(__MINGW32__))
@@ -260,6 +265,11 @@ double THLog1p(const double x)
 #else
   return log1p(x);
 #endif
+}
+
+double THLog2(const double x)
+{
+  return log2(x);
 }
 
 double THExpm1(const double x)
