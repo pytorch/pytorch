@@ -310,7 +310,7 @@ if [[ -z $SKIP_CONDA_TESTS && -n $UPLOAD_TO_CONDA ]]; then
   CONDA_BUILD_ARGS+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
 
   # If building a redistributable, then package the CUDA libraries with it
-  if [[ -n $CUDA_VERSION]]; then
+  if [[ -n $CUDA_VERSION ]]; then
     export PACKAGE_CUDA_LIBS=1
   fi
 
