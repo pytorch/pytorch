@@ -2355,7 +2355,7 @@ class TestScript(TestCase):
             m = M2()
             m(torch.zeros(4, 3))
 
-    def test_rnn_trace_override(self):
+    def test_pack_padded_pad_packed_trace(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
         T, B, C = 3, 5, 7
 
@@ -2429,6 +2429,51 @@ class TestScript(TestCase):
             def foo(a):
                 b, c = torch.chunk(a, dim=0, chunks=3)
                 return b
+
+    def test_rnn_trace_override(self):
+        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+        num_layers = 3
+        T, B, C = 11, 5, 7
+
+        class RNNTraceWrapper(torch.nn.Module):
+            def __init__(self, cell_type):
+                super(RNNTraceWrapper, self).__init__()
+                if cell_type == 'RNN':
+                    self.rnn = torch.nn.RNN(input_size=C, hidden_size=C, num_layers=num_layers)
+                elif cell_type == 'LSTM':
+                    self.rnn = torch.nn.LSTM(input_size=C, hidden_size=C, num_layers=num_layers)
+                elif cell_type == 'GRU':
+                    self.rnn = torch.nn.GRU(input_size=C, hidden_size=C, num_layers=num_layers)
+
+            def forward(self, x, seq_lens):
+                x = pack_padded_sequence(x, seq_lens)
+                x, _ = self.rnn(x)
+                x, _ = pad_packed_sequence(x)
+                return x
+
+        for cell_type in ['RNN', 'LSTM', 'GRU']:
+            x = torch.ones(T, B, C, requires_grad=True)
+            seq_lens = torch.from_numpy(np.array([11, 3, 2, 2, 1], dtype=np.int32))
+
+            m = RNNTraceWrapper(cell_type)
+            m_traced = torch.jit.trace(x, seq_lens)(m)
+
+            y = m(x, seq_lens)
+            loss = torch.sum(y)
+            loss.backward()
+            grad = x.grad.clone()
+            x.grad.zero_()
+
+            y_traced = m_traced(x, seq_lens)
+            loss_traced = torch.sum(y_traced)
+            loss_traced.backward()
+            grad_traced = x.grad.clone()
+
+            self.assertEqual(y_traced, y)
+            self.assertEqual(grad, grad_traced)
+
+            f = io.BytesIO()
+            torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
 
 # Smoke tests for export methods
