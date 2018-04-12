@@ -31,9 +31,6 @@
 
 set -ex
 
-export CAFFE2_BUILD_VERSION='0.8.dev'
-export PYTORCH_BUILD_VERSION="$(date +"%Y.%m.%d")"
-
 #
 # Functions used in this script
 #
@@ -150,9 +147,15 @@ if [[ -n $CUDA_VERSION ]]; then
   echo "Detected CUDA_VERSION $CUDA_VERSION"
 fi
 
-
 ###########################################################
-# Read python and gcc version
+# Set the build version
+export CAFFE2_BUILD_VERSION='0.8.dev'
+export PYTORCH_BUILD_VERSION="$(date +"%Y.%m.%d")"
+if [[ -n $BUILD_INTEGRATED ]]; then
+  export CAFFE2_BUILD_VERSION=$PYTORCH_BUILD_VERSION
+fi
+
+
 ###########################################################
 # Read the gcc version to see what ABI to build for
 if [[ "$(uname)" != 'Darwin' ]]; then
@@ -211,7 +214,7 @@ if [[ -n $CUDA_VERSION ]]; then
 else
   BUILD_STRING="${BUILD_STRING}_cpu"
 fi
-if [[ "$(uname)" != 'Darwin' && $GCC_USE_C11 -eq 0 ]]; then
+if [[ "$(uname)" != 'Darwin' && -z $BUILD_INTEGRATED && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
   #PACKAGE_NAME="${PACKAGE_NAME}-gcc${GCC_VERSION:0:3}"
   BUILD_STRING="${BUILD_STRING}_gcc${GCC_VERSION:0:3}"
@@ -250,8 +253,6 @@ fi
 # Add packages required for all Caffe2 builds
 add_package 'glog'
 add_package 'gflags'
-add_package 'leveldb'
-add_package 'lmdb'
 add_package 'opencv'
 
 # Add packages required for pytorch
@@ -272,6 +273,8 @@ if [[ -n $BUILD_INTEGRATED ]]; then
     add_package $CUDA_FEATURE_NAME
     CONDA_CHANNEL+=('-c pytorch')
   fi
+else
+  add_package 'leveldb'
 fi
 
 # Flags required for CUDA for Caffe2
@@ -293,8 +296,10 @@ fi
 if [[ "$(uname)" != 'Darwin' && "$GCC_USE_C11" -eq 0 ]]; then
   # opencv 3.3.1 in conda-forge doesn't have imgcodecs, and opencv 3.1.0
   # requires numpy 1.12
+  remove_lines_with 'opencv'
   add_package 'opencv' '==3.1.0'
   if [[ "$PYTHON_VERSION" == 3.* ]]; then
+    remove_lines_with 'numpy'
     add_package 'numpy' '>1.11'
   fi
   # Default conda channels use gcc 7.2, conda-forge uses gcc 4.8.5

@@ -79,6 +79,8 @@ python setup.py install
 #########################################################################
 # Copy over CUDA .so files from system locations to the conda build dir #
 #########################################################################
+# Copies libnvrtc and libnvToolsExt to the site-packages/torch/lib/ directory
+# All other CUDA libraries should be statically linked
 if [[ -z $PACKAGE_CUDA_LIBS ]]; then
   exit 0
 fi
@@ -97,57 +99,21 @@ fname_with_sha256() {
   fi
 }
 
-# These are all the CUDA related libaries needed by Pytorch and Caffe2
-# For some reason if we use exact version numbers for CUDA9 .so files 
-# (like .so.9.0.176), we see segfaults during dlopen somewhere
-# deep inside these libs.
-# hence for CUDA9, use e.g. '.9.0', and don't use hashed names
-DEPS_SONAME=(
-  "libcudart.so.${CUDA_VERSION:0:3}"
-  "libnvToolsExt.so.1"
-  "libcublas.so.${CUDA_VERSION:0:3}"
-  "libcurand.so.${CUDA_VERSION:0:3}"
-  "libcusparse.so.${CUDA_VERSION:0:3}"
-  "libnvrtc.so.${CUDA_VERSION:0:3}"
-  "libnvrtc-builtins.so"
-  "libcudnn.so.${CUDNN_VERSION:0:1}"
-  "libnccl.so.2"
-)
+# full_path_to_dependency <parent> <target> finds the full path to
+# libtarget.so* in 'ldd libparent*.so*'
+full_path_to_dependency() {
+  local _DEP="$(find $SP_DIR/torch/ -name "${1}*.so*" -maxdepth 1)"
+  local _TAR="lib${2}.so"
+  DEPS_SO_PATHS+=($(ldd $_DEP| grep -oP '(?<='$_TAR'\S* => )\S+'$_TAR'\S*'))
+  echo $DEPS_SO_PATHS
+}
+
+# These are all the CUDA related libaries needed by Pytorch and Caffe2 that are
+# not statically linked
 DEPS_SO_PATHS=()
-NOT_IN_LDD=()
-
-# Find which CUDA libraries the Pytorch binaries built against
-# This should probably be done by writing these to a file in cmake when the
-# files are found, and then reading that file here.
-# This is needed to handle libcuda and libcudnn on CI machines, and will also
-# allow this script to work for any user as well
-LDD_OUTPUT="$(ldd $PREFIX/lib/libcaffe2_gpu.so)"
-for ((i=0;i<${#DEPS_SONAME[@]};++i));
-do
-  filename=${DEPS_SONAME[i]}
-  set +e
-  FULL_PATH=$(echo "$LDD_OUTPUT" | grep -oP '(?<='$filename' => )\S+(?='$filename')')
-  set -e
-  if [[ -n $FULL_PATH ]]; then
-    echo "Found $filename in ldd output"
-    DEPS_SOPATHS+=("$FULL_PATH/$filename")
-  else
-    echo "$filename not found"
-    NOT_IN_LDD+=(i)
-  fi
-  if [[ $filename == libcublas* ]]; then
-    SO_GUESSED_LOC=$FULL_PATH
-  fi
-done
-
-# If the .so wasn't in the libcaffe2_gpu dependencies, then we just guess that
-# it's where libcublas is
-echo "Guessing that all of the following libraries are located in $SO_GUESSED_LOC"
-echo "${NOT_IN_LDD[@]}"
-for i in "${NOT_IN_LDD[@]}"
-do
-  DEPS_SOPATHS+=("$SO_GUESSED_LOC/${DEPS_SONAME[i]})
-done
+DEPS_SO_PATHS+=($(full_path_to_dependency '_C' 'nvToolsExt'))
+DEPS_DO_PATHS+=($(full_path_to_dependency '_nvrtc' 'nvrtc'))
+# TODO add nvrtc-builtins too, but that doesn't show up in ldd or in patchelf
 
 # Loop through .so, adding hashes and copying them to site-packages
 patched=()
@@ -171,13 +137,11 @@ do
 	echo "Copied $filepath to $patchedpath"
 done
 
-# run patchelf to fix the so names to the hashed names
-# TODO add libcaffe2_gpu.so here? Or would we also need to add all of its
-# dependencies too
-for ((i=0;i<${#DEPS_SONAME[@]};++i));
+# Run patchelf to fix all the libaries to use the hashed names
+for ((i=0;i<${#DEPS_SOPATHS[@]};++i));
 do
 	find $SP_DIR/torch -name '*.so*' | while read sofile; do
-	  origname=${DEPS_SONAME[i]}
+    origname=$(basename ${DEPS_SOPATHS[i]})
 	  patchedname=${patched[i]}
 	  if [[ "$origname" != "$patchedname" ]]; then
 	    set +e
