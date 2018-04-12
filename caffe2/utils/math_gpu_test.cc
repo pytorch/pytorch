@@ -319,7 +319,208 @@ INSTANTIATE_TEST_CASE_P(
     GemmBatchedGPUTest,
     testing::Combine(testing::Bool(), testing::Bool()));
 
-class TransposeGPUTest : public testing::Test {
+class ReduceTensorGPUTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    if (!HasCudaGPU()) {
+      return;
+    }
+    option_.set_device_type(CUDA);
+    cuda_context_ = make_unique<CUDAContext>(option_);
+    Blob* blob_x = ws_.CreateBlob("X");
+    Blob* blob_y = ws_.CreateBlob("Y");
+    Blob* blob_dims = ws_.CreateBlob("dims");
+    Blob* blob_axes = ws_.CreateBlob("axes");
+    Blob* blob_scratch = ws_.CreateBlob("scratch");
+    X_ = blob_x->GetMutable<Tensor<CUDAContext>>();
+    Y_ = blob_y->GetMutable<Tensor<CUDAContext>>();
+    dims_device_ = blob_dims->GetMutable<Tensor<CUDAContext>>();
+    axes_device_ = blob_axes->GetMutable<Tensor<CUDAContext>>();
+    scratch_ptr_ = blob_scratch->GetMutable<Tensor<CUDAContext>>();
+  }
+
+  void SetUpData(
+      const std::vector<int>& x_dims,
+      const std::vector<int>& y_dims,
+      const std::vector<int>& axes,
+      const std::vector<float>& x_data) {
+    dims_device_->Resize(x_dims.size());
+    cuda_context_->Copy<int, CPUContext, CUDAContext>(
+        x_dims.size(), x_dims.data(), dims_device_->mutable_data<int>());
+    axes_device_->Resize(axes.size());
+    cuda_context_->Copy<int, CPUContext, CUDAContext>(
+        axes.size(), axes.data(), axes_device_->mutable_data<int>());
+    X_->Resize(x_dims);
+    Y_->Resize(y_dims);
+    cuda_context_->Copy<float, CPUContext, CUDAContext>(
+        x_data.size(), x_data.data(), X_->mutable_data<float>());
+  }
+
+  void VerifyResult(const std::vector<float>& expected_output) {
+    Blob* blob_y_host = ws_.CreateBlob("Y_host");
+    auto* Y_host = blob_y_host->GetMutable<TensorCPU>();
+    Y_host->CopyFrom<CUDAContext, CUDAContext>(*Y_, cuda_context_.get());
+    cuda_context_->FinishDeviceComputation();
+    ASSERT_EQ(expected_output.size(), Y_host->size());
+    for (std::size_t i = 0; i < expected_output.size(); ++i) {
+      EXPECT_FLOAT_EQ(expected_output[i], Y_host->data<float>()[i]);
+    }
+  }
+
+  template <class ReduceFunc>
+  void RunRedcueTensorTest(
+      const ReduceFunc& reduce_func,
+      const std::vector<int>& x_dims,
+      const std::vector<int>& y_dims,
+      const std::vector<int>& axes,
+      const std::vector<float>& x_data,
+      const std::vector<float>& y_data) {
+    SetUpData(x_dims, y_dims, axes, x_data);
+    reduce_func(
+        X_->size(),
+        Y_->size(),
+        dims_device_->size(),
+        dims_device_->data<int>(),
+        axes_device_->size(),
+        axes_device_->data<int>(),
+        X_->data<float>(),
+        Y_->mutable_data<float>(),
+        cuda_context_.get(),
+        scratch_ptr_);
+    VerifyResult(y_data);
+  }
+
+  Workspace ws_;
+  DeviceOption option_;
+  std::unique_ptr<CUDAContext> cuda_context_;
+  Tensor<CUDAContext>* X_ = nullptr;
+  Tensor<CUDAContext>* Y_ = nullptr;
+  Tensor<CUDAContext>* dims_device_ = nullptr;
+  Tensor<CUDAContext>* axes_device_ = nullptr;
+  Tensor<CUDAContext>* scratch_ptr_ = nullptr;
+};
+
+TEST_F(ReduceTensorGPUTest, ReduceSumGPUTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
+  // Test for 1D tensor.
+  RunRedcueTensorTest(
+      math::ReduceSum<float, CUDAContext>,
+      {3},
+      {1},
+      {0},
+      {1.0f, 2.0f, 3.0f},
+      {6.0f});
+
+  // Test for 2D Tensor.
+  RunRedcueTensorTest(
+      math::ReduceSum<float, CUDAContext>,
+      {2, 3},
+      {2, 1},
+      {1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {6.0f, 15.0f});
+  RunRedcueTensorTest(
+      math::ReduceSum<float, CUDAContext>,
+      {2, 3},
+      {1, 3},
+      {0},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {5.0f, 7.0f, 9.0f});
+  RunRedcueTensorTest(
+      math::ReduceSum<float, CUDAContext>,
+      {2, 3},
+      {1, 1},
+      {0, 1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {21.0f});
+
+  // Test for 3D tensor.
+  RunRedcueTensorTest(
+      math::ReduceSum<float, CUDAContext>,
+      {2, 2, 2},
+      {2, 1, 1},
+      {1, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {10.0f, 26.0f});
+  RunRedcueTensorTest(
+      math::ReduceSum<float, CUDAContext>,
+      {2, 2, 2},
+      {1, 1, 2},
+      {0, 1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {16.0f, 20.0f});
+  RunRedcueTensorTest(
+      math::ReduceSum<float, CUDAContext>,
+      {2, 2, 2},
+      {1, 2, 1},
+      {0, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {14.0f, 22.0f});
+}
+
+TEST_F(ReduceTensorGPUTest, ReduceMeanGPUTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
+  // Test for 1D tensor.
+  RunRedcueTensorTest(
+      math::ReduceMean<float, CUDAContext>,
+      {3},
+      {1},
+      {0},
+      {1.0f, 2.0f, 3.0f},
+      {2.0f});
+
+  // Test for 2D Tensor.
+  RunRedcueTensorTest(
+      math::ReduceMean<float, CUDAContext>,
+      {2, 3},
+      {2, 1},
+      {1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {2.0f, 5.0f});
+  RunRedcueTensorTest(
+      math::ReduceMean<float, CUDAContext>,
+      {2, 3},
+      {1, 3},
+      {0},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {2.5f, 3.5f, 4.5f});
+  RunRedcueTensorTest(
+      math::ReduceMean<float, CUDAContext>,
+      {2, 3},
+      {1, 1},
+      {0, 1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {3.5f});
+
+  // Test for 3D tensor.
+  RunRedcueTensorTest(
+      math::ReduceMean<float, CUDAContext>,
+      {2, 2, 2},
+      {2, 1, 1},
+      {1, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {2.5f, 6.5f});
+  RunRedcueTensorTest(
+      math::ReduceMean<float, CUDAContext>,
+      {2, 2, 2},
+      {1, 1, 2},
+      {0, 1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {4.0f, 5.0f});
+  RunRedcueTensorTest(
+      math::ReduceMean<float, CUDAContext>,
+      {2, 2, 2},
+      {1, 2, 1},
+      {0, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {3.5f, 5.5f});
+}
+
+class TransposeGPUTest : public testing::TestWithParam<bool> {
  protected:
   void SetUp() override {
     if (!HasCudaGPU()) {
@@ -339,11 +540,15 @@ class TransposeGPUTest : public testing::Test {
     axes_device_ = blob_axes->GetMutable<Tensor<CUDAContext>>();
   }
 
-  void SetData(
+  void SetUpData(
       const std::vector<int>& x_dims,
-      const std::vector<int>& y_dims,
       const std::vector<int>& axes,
       const std::vector<float>& x_data) {
+    const int ndim = x_dims.size();
+    std::vector<int> y_dims(ndim);
+    for (int i = 0; i < ndim; ++i) {
+      y_dims[i] = x_dims[axes[i]];
+    }
     x_dims_device_->Resize(x_dims.size());
     cuda_context_->Copy<int, CPUContext, CUDAContext>(
         x_dims.size(), x_dims.data(), x_dims_device_->mutable_data<int>());
@@ -355,23 +560,8 @@ class TransposeGPUTest : public testing::Test {
         axes.size(), axes.data(), axes_device_->mutable_data<int>());
     X_->Resize(x_dims);
     Y_->Resize(y_dims);
-    for (std::size_t i = 0; i < x_data.size(); ++i) {
-      math::Set<float, CUDAContext>(
-          1, x_data[i], X_->mutable_data<float>() + i, cuda_context_.get());
-    }
-  }
-
-  void RunTranspose(const int num_axes, const int data_size) {
-    math::Transpose<float, CUDAContext>(
-        num_axes,
-        x_dims_device_->data<int>(),
-        y_dims_device_->data<int>(),
-        axes_device_->data<int>(),
-        data_size,
-        X_->data<float>(),
-        Y_->mutable_data<float>(),
-        cuda_context_.get());
-    cuda_context_->FinishDeviceComputation();
+    cuda_context_->Copy<float, CPUContext, CUDAContext>(
+        x_data.size(), x_data.data(), X_->mutable_data<float>());
   }
 
   void VerifyResult(const std::vector<float>& expected_output) {
@@ -385,6 +575,36 @@ class TransposeGPUTest : public testing::Test {
     }
   }
 
+  void RunTransposeTest(
+      const std::vector<int>& x_dims,
+      const std::vector<int>& axes,
+      const std::vector<float>& x_data,
+      const std::vector<float>& y_data) {
+    SetUpData(x_dims, axes, x_data);
+    if (GetParam()) {
+      math::Transpose<float, CUDAContext>(
+          x_data.size(),
+          x_dims.size(),
+          x_dims_device_->data<int>(),
+          y_dims_device_->data<int>(),
+          axes_device_->data<int>(),
+          X_->data<float>(),
+          Y_->mutable_data<float>(),
+          cuda_context_.get());
+    } else {
+      math::Transpose<float, CUDAContext>(
+          x_data.size(),
+          x_dims.size(),
+          x_dims_device_->data<int>(),
+          axes_device_->data<int>(),
+          X_->data<float>(),
+          Y_->mutable_data<float>(),
+          cuda_context_.get());
+    }
+    cuda_context_->FinishDeviceComputation();
+    VerifyResult(y_data);
+  }
+
   Workspace ws_;
   DeviceOption option_;
   std::unique_ptr<CUDAContext> cuda_context_;
@@ -395,51 +615,34 @@ class TransposeGPUTest : public testing::Test {
   Tensor<CUDAContext>* axes_device_ = nullptr;
 };
 
-TEST_F(TransposeGPUTest, TransposeGPUFloatTest) {
+TEST_P(TransposeGPUTest, TransposeGPUFloatTest) {
   if (!HasCudaGPU()) {
     return;
   }
-  {
-    // Test for 1D transpose.
-    const std::vector<int> x_dims = {3};
-    const std::vector<int> y_dims = {3};
-    const std::vector<int> axes = {0};
-    SetData(x_dims, y_dims, axes, {1.0f, 2.0f, 3.0f});
-    RunTranspose(1, 3);
-    VerifyResult({1.0f, 2.0f, 3.0f});
-  }
-  {
-    // Test for 2D transpose.
-    const std::vector<int> x_dims = {2, 3};
-    const std::vector<int> y_dims = {3, 2};
-    const std::vector<int> axes = {1, 0};
-    SetData(x_dims, y_dims, axes, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
-    RunTranspose(2, 6);
-    VerifyResult({1.0f, 4.0f, 2.0f, 5.0f, 3.0f, 6.0f});
-  }
-  {
-    // Test for 3D transpose.
-    const std::vector<int> x_dims = {2, 2, 2};
-    const std::vector<int> y_dims = {2, 2, 2};
-    const std::vector<int> axes1 = {1, 2, 0};
-    SetData(
-        x_dims,
-        y_dims,
-        axes1,
-        {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f});
-    RunTranspose(3, 8);
-    VerifyResult({1.0f, 5.0f, 2.0f, 6.0f, 3.0f, 7.0f, 4.0f, 8.0f});
+  // Test for 1D transpose.
+  RunTransposeTest({3}, {0}, {1.0f, 2.0f, 3.0f}, {1.0f, 2.0f, 3.0f});
 
-    const std::vector<int> axes2 = {1, 0, 2};
-    SetData(
-        x_dims,
-        y_dims,
-        axes2,
-        {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f});
-    RunTranspose(3, 8);
-    VerifyResult({1.0f, 2.0f, 5.0f, 6.0f, 3.0f, 4.0f, 7.0f, 8.0f});
-  }
+  // Test for 2D transpose.
+  RunTransposeTest(
+      {2, 3},
+      {1, 0},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {1.0f, 4.0f, 2.0f, 5.0f, 3.0f, 6.0f});
+
+  // Test for 3D transpose.
+  RunTransposeTest(
+      {2, 2, 2},
+      {1, 2, 0},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {1.0f, 5.0f, 2.0f, 6.0f, 3.0f, 7.0f, 4.0f, 8.0f});
+  RunTransposeTest(
+      {2, 2, 2},
+      {1, 0, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {1.0f, 2.0f, 5.0f, 6.0f, 3.0f, 4.0f, 7.0f, 8.0f});
 }
+
+INSTANTIATE_TEST_CASE_P(WithYDims, TransposeGPUTest, testing::Bool());
 
 } // namespace
 

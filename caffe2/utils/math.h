@@ -16,10 +16,12 @@ extern "C" {
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
 
-#ifndef __CUDACC__
 #include "Eigen/Core"
 #include "Eigen/Dense"
-#endif
+
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+#include "unsupported/Eigen/CXX11/Tensor"
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
 namespace caffe2 {
 
@@ -30,7 +32,6 @@ class Tensor;
 // engine specified.
 class DefaultEngine {};
 
-#ifndef __CUDACC__
 // Common Eigen types that we will often use
 template <typename T>
 using EigenMatrixMap =
@@ -54,7 +55,13 @@ using ConstEigenVectorMap =
 template <typename T>
 using ConstEigenVectorArrayMap =
     Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1> >;
-#endif
+
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+
+template <typename T, int D>
+using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D, Eigen::RowMajor>>;
+
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
 namespace math {
 
@@ -146,6 +153,32 @@ void ReduceMax(
     Tensor<Context>* scratch_ptr,
     Context* context);
 
+template <typename T, class Context>
+void ReduceSum(
+    const int X_size,
+    const int Y_size,
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context,
+    Tensor<Context>* scratch_ptr = nullptr);
+
+template <typename T, class Context>
+void ReduceMean(
+    const int X_size,
+    const int Y_size,
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context,
+    Tensor<Context>* scratch_ptr = nullptr);
+
 // Adds batch sub-tensors elementwise to output. Stripe is the stripe length
 // and N is the number of elements to add (size of Y).
 template <typename T, class Context>
@@ -182,15 +215,26 @@ void Maximum(
     T* y,
     Context* context);
 
+// Transpose tensor X with dims by axes and write the result to tensor Y.
+template <typename T, class Context>
+void Transpose(
+    const int size,
+    const int ndim,
+    const int* dims,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
 // Transpose tensor X with x_dims by axes and write the result to tensor Y with
 // y_dims.
 template <typename T, class Context>
 void Transpose(
-    const int num_axes,
+    const int size,
+    const int ndim,
     const int* x_dims,
     const int* y_dims,
     const int* axes,
-    const int data_size,
     const T* X,
     T* Y,
     Context* context);
