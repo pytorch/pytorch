@@ -4220,6 +4220,20 @@ Example::
 
 """)
 
+add_docstr(torch.randn_like,
+           r"""
+randn_like(other) -> Tensor
+
+Returns a tensor with the same size as :attr:`other` that is filled with
+random numbers from a normal distribution with zero mean and variance of
+one. This is equivalent to `torch.randn(other.size())`.
+
+Args:
+    other (Tensor): the size of :attr:`other` will determine size of the output tensor
+
+""")
+
+
 add_docstr(torch.randperm,
            r"""
 randperm(n, out=None) -> LongTensor
