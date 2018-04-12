@@ -125,7 +125,9 @@ LDD_OUTPUT="$(ldd $PREFIX/lib/libcaffe2_gpu.so)"
 for ((i=0;i<${#DEPS_SONAME[@]};++i));
 do
   filename=${DEPS_SONAME[i]}
+  set +e
   FULL_PATH=$(echo "$LDD_OUTPUT" | grep -oP '(?<='$filename' => )\S+(?='$filename')')
+  set -e
   if [[ -n $FULL_PATH ]]; then
     echo "Found $filename in ldd output"
     DEPS_SOPATHS+=("$FULL_PATH/$filename")

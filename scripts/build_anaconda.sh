@@ -31,6 +31,9 @@
 
 set -ex
 
+export CAFFE2_BUILD_VERSION='0.8.dev'
+export PYTORCH_BUILD_VERSION="$(date +"%Y.%m.%d")"
+
 #
 # Functions used in this script
 #
@@ -192,7 +195,6 @@ portable_sed "s#path:.*#path: $PYTORCH_ROOT#" $META_YAML
 ###########################################################
 # Build the package name and build string depending on gcc and CUDA
 ###########################################################
-# TODO follow pytorch and always have the same name but change build strings
 PACKAGE_NAME='caffe2'
 BUILD_STRING='py{{py}}'
 if [[ -n $BUILD_INTEGRATED ]]; then
@@ -204,20 +206,21 @@ if [[ -n $CUDA_VERSION ]]; then
   # the package name in meta.yaml based off of these values, we let Caffe2
   # take the CUDA and cuDNN versions that it finds in the build environment,
   # and manually set the package name ourself.
-  PACKAGE_NAME="${PACKAGE_NAME}-cuda${CUDA_VERSION:0:3}-cudnn${CUDNN_VERSION:0:1}"
+  #PACKAGE_NAME="${PACKAGE_NAME}-cuda${CUDA_VERSION:0:3}-cudnn${CUDNN_VERSION:0:1}"
   BUILD_STRING="${BUILD_STRING}_cuda${CUDA_VERSION}_cudnn${CUDNN_VERSION}_nccl2"
 else
   BUILD_STRING="${BUILD_STRING}_cpu"
 fi
 if [[ "$(uname)" != 'Darwin' && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
-  PACKAGE_NAME="${PACKAGE_NAME}-gcc${GCC_VERSION:0:3}"
+  #PACKAGE_NAME="${PACKAGE_NAME}-gcc${GCC_VERSION:0:3}"
   BUILD_STRING="${BUILD_STRING}_gcc${GCC_VERSION:0:3}"
 fi
 if [[ -n $BUILD_FULL ]]; then
-  PACKAGE_NAME="${PACKAGE_NAME}-full"
+  #PACKAGE_NAME="${PACKAGE_NAME}-full"
   BUILD_STRING="${BUILD_STRING}_full"
 fi
+BUILD_STRING="${BUILD_STRING}_${PYTORCH_BUILD_VERSION}"
 portable_sed "s/name: caffe2.*\$/name: ${PACKAGE_NAME}/" $META_YAML
 portable_sed "s/string:.*\$/string: ${BUILD_STRING}/" $META_YAML
 
@@ -302,8 +305,8 @@ fi
 
 
 ###########################################################
-# Upload to Anaconda.org if needed. This is only allowed if testing is
-# enabled
+# Set flags needed for uploading to Anaconda. This is only allowed if testing
+# is enabled
 ###########################################################
 if [[ -z $SKIP_CONDA_TESTS && -n $UPLOAD_TO_CONDA ]]; then
   CONDA_BUILD_ARGS+=(" --user ${ANACONDA_USERNAME}")

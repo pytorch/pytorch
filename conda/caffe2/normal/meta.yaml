@@ -1,15 +1,14 @@
-{% set version = "0.8.dev" %}
 
 package:
   name: caffe2
-  version: {{ version }}
+  version: {{ environ.get('CAFFE2_BUILD_VERSION') }}-{{ environ.get('PYTORCH_BUILD_VERSION') }}
 
 source:
   path: ../../..
 
 build:
   number: 0
-  string: py{{py}}
+  string: py{{py}}_{{ environ.get('PYTORCH_BUILD_VERSION') }}
   skip: True  # [win]
   script_env:
     - CONDA_CAFFE2_CMAKE_ARGS
