@@ -30,17 +30,20 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   : self(std::move(self)) {}
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::vector<Value*> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_binders) override {
     if (attributes.size() > 0)
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
-    // TODO: remove when we support tuple packing for PythonOp
-    if (cd.allow_varargs && cd.n_outputs == 1) {
-      cd.allow_varargs = false;
-    }
-    if (cd.allow_varargs)
-      throw ErrorReport(loc) << "Vararg outputs are currently not supported for PythonOp.";
-    // Release the function object so we can wrap it in a PythonOp
     Graph& g = *m.graph();
+
+    // this python object might be a @trace or @script stand-alone function
+    // if so, inline the graph rather than calling the python
+    if(py::isinstance<GraphExecutor>(self)) {
+      GraphExecutor& ge = py::cast<GraphExecutor&>(self);
+      ensureSizeMatches(loc, ge.graph()->inputs().size(), inputs.size(), "arguments");
+      return packOutputs(inlineCallTo(*m.graph(), *ge.graph(), inputs));
+    }
+
+    // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
     std::string cconv(inputs.size(), 't');
     Node* new_node = g.insertNode(g.createPythonOp(
@@ -49,9 +52,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     for(auto i : inputs)
       new_node->addInput(i);
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < cd.n_outputs; ++i)
+    for(size_t i = 0; i < n_binders; ++i)
       outputs.push_back(new_node->addOutput());
-    return outputs;
+    return packOutputs(outputs);
   }
 
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
@@ -102,13 +105,7 @@ protected:
 struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
   using PythonValue::PythonValue;
   virtual Value * asValue(SourceRange loc, Method & m) override {
-    if(py::isinstance<py::int_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kInt).scalarTensor(py::cast<int32_t>(self)));
-    } else if(py::isinstance<py::float_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kFloat).scalarTensor(py::cast<float>(self)));
-    } else if(py::isinstance<py::bool_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kByte).scalarTensor(py::cast<bool>(self)));
-    }
+
     return PythonValue::asValue(loc, m);
   }
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
@@ -118,15 +115,30 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(size_t i = 0; i < tup.size(); ++i) {
-      result.push_back(std::make_shared<ConstantPythonValue>(tup[i]));
+      result.push_back(create(loc, m, tup[i]));
     }
     return result;
   }
+  static std::shared_ptr<SugaredValue> create(SourceRange loc, Method& m, py::object self) {
+    // directly create SimpleValues when possible, because they are first-class
+    // and can be re-assigned. Otherwise, this would be invalid:
+    // f = python_constant
+    // while ...
+    //   f = f + 1
+    if(py::isinstance<py::int_>(self)) {
+      return createConstant(loc, m, at::CPU(at::kInt).scalarTensor(py::cast<int32_t>(self)));
+    } else if(py::isinstance<py::float_>(self)) {
+      return createConstant(loc, m, at::CPU(at::kFloat).scalarTensor(py::cast<float>(self)));
+    } else if(py::isinstance<py::bool_>(self)) {
+      return createConstant(loc, m, at::CPU(at::kByte).scalarTensor(py::cast<bool>(self)));
+    }
+    return std::make_shared<ConstantPythonValue>(self);
+  }
 private:
-  static Value * createConstant(SourceRange loc, Method& m, const at::Tensor& val) {
+  static std::shared_ptr<SugaredValue> createConstant(SourceRange loc, Method& m, const at::Tensor& val) {
     auto n = m.graph()->createConstant(val);
     n->setSourceLocation(std::make_shared<SourceRange>(loc));
-    return m.graph()->insertNode(n)->output();
+    return std::make_shared<SimpleValue>(m.graph()->insertNode(n)->output());
   }
 };
 
@@ -156,17 +168,13 @@ struct MethodValue : public SugaredValue {
   std::string kind() const override {
     return "method";
   }
-  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_binders) override {
     if(attributes.size() != 0) {
-      throw ErrorReport(loc) << "not yet implemented - calls to python functions using keyword arguments";
+      throw ErrorReport(loc) << "not yet implemented - calls to script methods using keyword arguments";
     }
     ensureSizeMatches(loc, method.num_inputs(), inputs.size(), "inputs");
     auto outputs = caller.emit_call_to(method, inputs);
-    // Allow for tuples. TODO: starred exprs?
-    if (!cd.allow_varargs) {
-      ensureSizeMatches(loc, outputs.size(), cd.n_outputs, "outputs");
-    }
-    return outputs;
+    return packOutputs(outputs);
   }
 private:
   std::shared_ptr<Module> module;
@@ -200,7 +208,7 @@ struct ModuleValue : public SugaredValue {
          py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
         return std::make_shared<PythonValue>(attr);
       } else if(py_module.attr("_constants_set").contains(field.c_str())) {
-        return std::make_shared<ConstantPythonValue>(attr);
+        return ConstantPythonValue::create(loc, m, attr);
       } else {
         throw ErrorReport(loc) << "attribute '" << field << "' of type '" << typeString(attr) << "' is not usable in a script method (did you forget to add it __constants__?)";
       }
@@ -208,8 +216,8 @@ struct ModuleValue : public SugaredValue {
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
   // call module.forward
-  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
-    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, cd);
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_binders) override {
+    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
@@ -223,7 +231,7 @@ struct ModuleValue : public SugaredValue {
         auto r = py::cast<std::shared_ptr<Module>>(obj);
         result.push_back(std::make_shared<ModuleValue>(r));
       } else {
-        result.push_back(std::make_shared<ConstantPythonValue>(obj));
+        result.push_back(ConstantPythonValue::create(loc, m, obj));
       }
     }
     return result;
