@@ -77,7 +77,7 @@ class TestCaffe2Basic(TestCase):
         weight = np.array([[1, 0], [0, 1]])
         graph_def = make_graph(
             [make_node("Add", ["X", "Y"], ["Z0"]),
-             make_node("Cast", ["Z0"], ["Z"], to="float"),
+             make_node("Cast", ["Z0"], ["Z"], to=onnx.TensorProto.FLOAT),
              make_node("Mul", ["Z", "weight"], ["W0"]),
              make_node("Tanh", ["W0"], ["W1"]),
              make_node("Sigmoid", ["W1"], ["W2"]),
