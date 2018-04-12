@@ -140,6 +140,7 @@ done
 
 # If the .so wasn't in the libcaffe2_gpu dependencies, then we just guess that
 # it's where libcublas is
+echo "Guessing that all of the following libraries are located in $SO_GUESSED_LOC"
 echo "${NOT_IN_LDD[@]}"
 for i in "${NOT_IN_LDD[@]}"
 do
