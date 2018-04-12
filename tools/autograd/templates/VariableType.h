@@ -22,6 +22,7 @@ using at::Storage;
 using at::Tensor;
 using at::TensorList;
 using at::Type;
+using at::ScalarType;
 
 struct VariableType final : public at::Type {
   VariableType(Context* context, at::Type* baseType);

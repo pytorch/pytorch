@@ -378,7 +378,7 @@ PyObject *THPVariable_dtype(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getDtype(self_.type().scalarType(), self_.type().is_cuda()));
+  return torch::autograd::utils::wrap(torch::getDtype(self_.type().scalarType()));
   END_HANDLE_TH_ERRORS
 }
 
