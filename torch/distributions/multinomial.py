@@ -1,6 +1,5 @@
 import torch
 from torch.distributions.distribution import Distribution
-from torch.autograd import Variable
 from torch.distributions import Categorical
 from numbers import Number
 from torch.distributions import constraints
