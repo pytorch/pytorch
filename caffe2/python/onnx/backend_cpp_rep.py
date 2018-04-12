@@ -30,10 +30,10 @@ class Caffe2CppRep(BackendRep):
     def external_inputs(self):
         return self.__core.external_inputs()
 
-    def run(self, inputs, threadsafe = False):
+    def run(self, inputs):
         output_values = None
         if isinstance(inputs, dict):
-            output_values = self.__core.run(inputs, threadsafe)
+            output_values = self.__core.run(inputs)
         elif isinstance(inputs, list) or isinstance(inputs, tuple):
             if len(inputs) != len(self.__uninitialized_inputs):
                 raise RuntimeError('Expected {} values for uninitialized '
@@ -44,8 +44,8 @@ class Caffe2CppRep(BackendRep):
             input_map = {}
             for k, v in zip(self.__uninitialized_inputs, inputs):
                 input_map[k] = v
-            output_values = self.__core.run(input_map, threadsafe)
+            output_values = self.__core.run(input_map)
         else:
             # single input
-            output_values = self.__core.run([inputs], threadsafe)
+            output_values = self.__core.run([inputs])
         return namedtupledict('Outputs', self.__external_outputs)(*output_values)

@@ -27,15 +27,15 @@ void Caffe2BackendRep::CheckInit() {
 }
 
 void Caffe2BackendRep::Run(
-    const TensorVector& inputs, OutputTensorVector* outputs, bool threadsafe) {
+    const TensorVector& inputs, OutputTensorVector* outputs) {
   CheckInit();
-  predictor_->run(inputs, outputs, threadsafe);
+  predictor_->run(inputs, outputs);
 }
 
 void Caffe2BackendRep::RunMap(
-    const TensorMap& inputs, OutputTensorVector* outputs, bool threadsafe) {
+    const TensorMap& inputs, OutputTensorVector* outputs) {
   CheckInit();
-  predictor_->run_map(inputs, outputs, threadsafe);
+  predictor_->run_map(inputs, outputs);
 }
 
 }}

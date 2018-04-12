@@ -70,10 +70,10 @@ class PredictorBase {
   //   outputs->size() == run_net.external_inputs.size()
 
   // Returns true on success
-  virtual bool run(const TensorVector& inputs, OutputTensorVector* outputs, bool mulithread = false) = 0;
+  virtual bool run(const TensorVector& inputs, OutputTensorVector* outputs) = 0;
 
   // Similar to run, but consumes a map of name to tensor as input
-  virtual bool run_map(const TensorMap& inputs, OutputTensorVector* outputs, bool mulithread = false) = 0;
+  virtual bool run_map(const TensorMap& inputs, OutputTensorVector* outputs) = 0;
 
   const NetDef& def() const {
     return run_net_;
@@ -124,15 +124,15 @@ class Predictor : public PredictorBase {
     CAFFE_ENFORCE(ws_.CreateNet(run_net));
   }
 
-  virtual bool run(const TensorVector& inputs, OutputTensorVector* outputs, bool threadsafe = false) override;
-  virtual bool run_map(const TensorMap& inputs, OutputTensorVector* outputs, bool threadsafe = false) override;
+  virtual bool run(const TensorVector& inputs, OutputTensorVector* outputs) override;
+  virtual bool run_map(const TensorMap& inputs, OutputTensorVector* outputs) override;
 
  private:
   std::shared_ptr<Context> context_;
 };
 
 template <class Context>
-bool Predictor<Context>::run(const TensorVector& inputs, OutputTensorVector* outputs, bool threadsafe) {
+bool Predictor<Context>::run(const TensorVector& inputs, OutputTensorVector* outputs) {
   TensorMap input_map;
   CAFFE_ENFORCE(inputs.size() <= run_net_.external_input_size());
   for (auto i = 0; i < inputs.size(); ++i) {

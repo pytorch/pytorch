@@ -653,8 +653,7 @@ void addObjectMethods(py::module& m) {
       .def(
           "run",
           [](caffe2::onnx::Caffe2BackendRep& instance,
-             std::map<std::string, py::object> inputs,
-             bool threadsafe)
+             std::map<std::string, py::object> inputs)
               -> std::vector<py::object> {
             PredictorBase::TensorMap tensors;
             std::map<std::string, TensorCPU> tensors_data{};
@@ -674,7 +673,7 @@ void addObjectMethods(py::module& m) {
             PredictorBase::OutputTensorVector out;
             {
               py::gil_scoped_release g;
-              instance.RunMap(tensors, &out, threadsafe);
+              instance.RunMap(tensors, &out);
             }
             std::vector<py::object> pyout;
             for (auto t : out) {
@@ -682,14 +681,11 @@ void addObjectMethods(py::module& m) {
                   TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
             }
             return pyout;
-          },
-          py::arg("inputs"),
-          py::arg("threadsafe") = false)
+          })
       .def(
           "run",
           [](caffe2::onnx::Caffe2BackendRep& instance,
-             std::vector<py::object> inputs,
-             bool threadsafe)
+             std::vector<py::object> inputs)
               -> std::vector<py::object> {
             PredictorBase::TensorVector tensors;
             std::vector<TensorCPU> tensors_data(inputs.size());
@@ -707,7 +703,7 @@ void addObjectMethods(py::module& m) {
             PredictorBase::OutputTensorVector out;
             {
               py::gil_scoped_release g;
-              instance.Run(tensors, &out, threadsafe);
+              instance.Run(tensors, &out);
             }
             std::vector<py::object> pyout;
             for (auto t : out) {
@@ -715,9 +711,7 @@ void addObjectMethods(py::module& m) {
                   TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
             }
             return pyout;
-          },
-          py::arg("inputs"),
-          py::arg("threadsafe") = false);
+          });
 
   py::class_<caffe2::onnx::Caffe2Backend>(m, "Caffe2Backend")
       .def(py::init<>())
@@ -781,8 +775,7 @@ void addObjectMethods(py::module& m) {
       .def(
           "run",
           [](PredictorBase& instance,
-             std::vector<py::object> inputs,
-             bool threadsafe) -> std::vector<py::object> {
+             std::vector<py::object> inputs) -> std::vector<py::object> {
             PredictorBase::TensorVector tensors;
             std::vector<TensorCPU> tensors_data(inputs.size());
             for (auto i = 0; i < inputs.size(); ++i) {
@@ -799,7 +792,7 @@ void addObjectMethods(py::module& m) {
             PredictorBase::OutputTensorVector out;
             {
               py::gil_scoped_release g;
-              instance.run(tensors, &out, threadsafe);
+              instance.run(tensors, &out);
             }
             std::vector<py::object> pyout;
             for (auto t : out) {
@@ -807,14 +800,11 @@ void addObjectMethods(py::module& m) {
                   TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
             }
             return pyout;
-          },
-          py::arg("inputs"),
-          py::arg("threadsafe") = false)
+          })
       .def(
           "run",
           [](PredictorBase& instance,
-            std::map<std::string, py::object> inputs,
-            bool threadsafe)
+            std::map<std::string, py::object> inputs)
               -> std::vector<py::object> {
             PredictorBase::TensorMap tensors;
             std::map<std::string, TensorCPU> tensors_data{};
@@ -833,7 +823,7 @@ void addObjectMethods(py::module& m) {
             PredictorBase::OutputTensorVector out;
             {
               py::gil_scoped_release g;
-              instance.run_map(tensors, &out, threadsafe);
+              instance.run_map(tensors, &out);
             }
             std::vector<py::object> pyout;
             for (auto t : out) {
@@ -841,9 +831,7 @@ void addObjectMethods(py::module& m) {
                   TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
             }
             return pyout;
-          },
-          py::arg("inputs"),
-          py::arg("threadsafe") = false);
+          });
 
   py::class_<script::CompilationUnit>(m, "CompilationUnit")
       .def(py::init<>())

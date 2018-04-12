@@ -88,63 +88,24 @@ PredictorBase::PredictorBase(
 PredictorBase::~PredictorBase() {}
 
 template <>
-bool Predictor<CPUContext>::run_map(const TensorMap& inputs, OutputTensorVector* outputs, bool threadsafe) {
+bool Predictor<CPUContext>::run_map(const TensorMap& inputs, OutputTensorVector* outputs) {
   if (!inputNames_.empty()) {
     CAFFE_ENFORCE_EQ(inputs.size(), inputNames_.size());
   }
-  if (!threadsafe) {
-    // If threadsafe is false, we run the net in the contained workspace of the predictor
-    for (auto &input : inputs) {
-      if (!inputNames_.empty()) {
-        CAFFE_ENFORCE_GT(inputNames_.count(input.first), 0);
-      }
-      predictor_details::ShareInputTensor(&ws_, input.first, input.second);
+  for (auto &input : inputs) {
+    if (!inputNames_.empty()) {
+      CAFFE_ENFORCE_GT(inputNames_.count(input.first), 0);
     }
+    predictor_details::ShareInputTensor(&ws_, input.first, input.second);
+  }
 
-    if (!ws_.RunNet(run_net_.name())) {
-      return false;
-    }
+  if (!ws_.RunNet(run_net_.name())) {
+    return false;
+  }
 
-    outputs->resize(run_net_.external_output_size());
-    for (auto i = 0; i < outputs->size(); ++i) {
-      (*outputs)[i] = predictor_details::ExtractOutputTensor(&ws_, run_net_.external_output(i));
-    }
-  } else {
-    // If threadsafe is true, we create a temporary new workspace and load the network to the new workspace
-
-    // Instead of running the init_net in the new workspace
-    // We directly forward these blobs from ws_ for efficiency.
-    // Note: RNN might have problem doing this way.
-    std::unordered_map<std::string, std::string> forwarded_blobs;
-    for (auto &input : initialized_) {
-      forwarded_blobs.emplace(input, input);
-    }
-    Workspace ws(&ws_, forwarded_blobs);
-
-    // For each input, create a local blob without touching ws_.
-    // This will override the mapped blob from ws_.
-    for (auto &input: inputs) {
-      if (!inputNames_.empty()) {
-        CAFFE_ENFORCE_GT(inputNames_.count(input.first), 0);
-      }
-      auto *blob = ws.CreateLocalBlob(input.first);
-      CAFFE_ENFORCE(blob, "Blob: ", input.first, " does not exist");
-      blob->template GetMutable<TensorCPU>();
-      predictor_details::ShareInputTensor(&ws, input.first, input.second);
-    }
-
-    if (!ws.RunNetOnce(run_net_)) {
-      return false;
-    }
-
-    outputs->resize(run_net_.external_output_size());
-    for (auto i = 0; i < outputs->size(); ++i) {
-      auto name = run_net_.external_output(i);
-      auto *blob = ws.GetBlob(name);
-      CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
-      (*outputs)[i] = std::make_shared<TensorCPU>();
-      (*outputs)[i]->CopyFrom(*blob->template GetMutable<TensorCPU>(), context_.get());
-    }
+  outputs->resize(run_net_.external_output_size());
+  for (auto i = 0; i < outputs->size(); ++i) {
+    (*outputs)[i] = predictor_details::ExtractOutputTensor(&ws_, run_net_.external_output(i));
   }
   return true;
 }
