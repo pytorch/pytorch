@@ -129,8 +129,7 @@ THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *va
 }
 
 THSTensor* THSTensor_(_move_csr)(THSTensor *self, THLongTensor *csr) {
-  int empty = (self->csr == NULL);
-  if (!empty) {
+  if (self->csr != NULL) {
     THArgCheck(self->size[0] + 1 == THLongTensor_size(csr, 0), 1, 
         "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1, THLongTensor_size(csr, 0));
   }
@@ -142,15 +141,6 @@ THSTensor* THSTensor_(_move_csr)(THSTensor *self, THLongTensor *csr) {
   return self;
 }
 
-THSTensor* THSTensor_(_set_csr)(THSTensor *self, THLongTensor *csr) {
-  if (csr != NULL) {
-    return THSTensor_(_move_csr)(
-      self, THLongTensor_newClone(csr));
-  }
-  else {
-    return THSTensor_(_move_csr)(self, NULL);
-  }
-}
 
 /*** end helper methods ***/
 
@@ -298,7 +288,6 @@ THSTensor *THSTensor_(newClone)(THSTensor *self) {
 
   other->coalesced = self->coalesced;
   other->nnz = self->nnz;
-  THSTensor_(_set_csr)(other, self->csr);
 
   return other;
 }
@@ -410,7 +399,6 @@ void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
   THSTensor_(_set)(self, src->indices, src->values);
   self->nnz = src->nnz;
   self->coalesced = src->coalesced;
-  THSTensor_(_set_csr)(self, src->csr);
 }
 
 // In place transpose
@@ -586,7 +574,6 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   THTensor *r_values_ = THTensor_(new)();
   THTensor_(resizeAs)(r_values_, mask_values_);
   THSTensor_(_move)(r_, THLongTensor_newClone(mask_indices_), r_values_);
-  THSTensor_(_set_csr)(r_, mask->csr);
   r_->coalesced = mask->coalesced;
   r_->nnz = mask->nnz;
 

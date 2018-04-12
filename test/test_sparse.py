@@ -405,6 +405,8 @@ class TestSparse(TestCase):
         self.assertFalse(Dt.is_coalesced())
         r = torch.mm(Dt, x)
         self.assertEqual(r, res)
+        r = torch.mm(D.t_(), x)
+        self.assertEqual(r, res)
 
     @cpu_only
     def test_mm(self):

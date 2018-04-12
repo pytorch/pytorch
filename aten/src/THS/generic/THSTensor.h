@@ -89,6 +89,5 @@ TH_API THSTensor* THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, i
 THSTensor* THSTensor_(_move)(THSTensor *self, THLongTensor *indices, THTensor *values);
 THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *values);
 THSTensor* THSTensor_(_move_csr)(THSTensor *self, THLongTensor *csr);
-THSTensor* THSTensor_(_set_csr)(THSTensor *self, THLongTensor *csr);
 
 #endif
