@@ -246,10 +246,10 @@ class RNN(RNNBase):
 
         h_t = \tanh(w_{ih} x_t + b_{ih}  +  w_{hh} h_{(t-1)} + b_{hh})
 
-    where :math:`h_t` is the hidden state at time `t`, and :math:`x_t` is
-    the hidden state of the previous layer at time `t` or :math:`input_t`
-    for the first layer. If :attr:`nonlinearity`='relu', then `ReLU` is used instead
-    of `tanh`.
+    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is
+    the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
+    previous layer at time `t` or the initial hidden state for the first layer.
+    If :attr:`nonlinearity`='relu', then `ReLU` is used instead of `tanh`.
 
     Args:
         input_size: The number of expected features in the input `x`
