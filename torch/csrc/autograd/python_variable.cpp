@@ -149,6 +149,12 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable_as_param(THPVariable* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  return THPVariable_Wrap(make_variable(self->cdata.data(), true));
+  END_HANDLE_TH_ERRORS
+}
+
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
 
@@ -435,6 +441,7 @@ static PyMappingMethods THPVariable_as_mapping = {
 
 static PyMethodDef extra_methods[] = {
   {"_make_subclass", (PyCFunction)THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, NULL},
+  {"as_param", (PyCFunction)THPVariable_as_param, METH_NOARGS, NULL},
   {NULL}
 };
 
