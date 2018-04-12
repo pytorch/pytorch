@@ -172,7 +172,7 @@ class CosineAnnealingLR(_LRScheduler):
     .. math::
 
         \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})(1 +
-        \cos(\frac{T_{cur}}{T_{max}\times T_{mult}}\pi))
+        \cos(\frac{T_{cur}}{T_{max}\cdot T_{mult}}\pi))
 
     When last_epoch=-1, sets initial lr as lr.
 
@@ -183,14 +183,14 @@ class CosineAnnealingLR(_LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         T_max (int): Maximum number of iterations.
         eta_min (float): Minimum learning rate. Default: 0.
-        T_mult (int): Multiplicative factor of T_max. Default: 2.
         last_epoch (int): The index of last epoch. Default: -1.
+        T_mult (int): Multiplicative factor of T_max. Default: 2.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T_max, eta_min=0, T_mult=2, last_epoch=-1):
+    def __init__(self, optimizer, T_max, eta_min=0, last_epoch=-1, T_mult=2):
         self.T_max = T_max
         self.Ti = T_max
         self.eta_min = eta_min
