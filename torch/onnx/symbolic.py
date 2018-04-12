@@ -859,6 +859,41 @@ def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropo
     return symbolic
 
 
+# WARNING: Here be dragons. i.e. this is a hack that should die in a fire
+#
+# Since we need RNN nodes to work both in the GraphExecutor as well as call the
+# correct symbolic function during ONNX export, we do the following:
+#
+# 1. During tracing we dispatch to this function
+# 2. This function emits a PythonOp wrapping the RNN function that would have
+#    run had we not been tracing. Thus, GraphExecutor will call the RNN operator
+#    via Python. In the future we will likely want to make the RNN modules into
+#    ScriptModules so we can optimize them.
+# 3. We store a wrapper around the ONNX symbolic function in the `symbolic`
+#    attribute of the Python function. The ONNX export pass accesses this
+#    attribute during tracing and calls it to lower the PythonOp into the right
+#    thing
+#
+# The first three parameters to this function are meant to be bound with:
+#   cell_type - The string description of the type of RNN cell. e.g. 'LSTM'
+#   func - The function that would have been called here if we had not been
+#          tracing, e.g. CudnnRNN or AutogradRNN.
+#   sym - The ONNX symbolic we should store in the PythonOp for later export.
+#
+# With those three parameters bound, we can pass the function into the
+# torch.onnx.symbolic_override* functions
+#
+# The remaining arguments are equivalent to the inputs seen when dispatching
+# a symbolic function for an operator. Concretely:
+#  * input - a single input tensor [seq_len, batch, input_size] or if bach_first=True,
+#            [batch, seq_len, input_size]
+#  * weights - list of list of tensors. len(weights) = number of layers
+#              weights[i] is a list of weights, same as the parameters to
+#              torch.nn.{RNN,LSTM,GRU}. See the symbolic builders above
+#  * hiddens - hidden state for the first layer, or {hidden state, cell state} if
+#              cell_type == LSTM
+#  * batch_sizes - 1-D tensor containing the sequence length for each example
+#                  in the batch.
 def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens, batch_sizes):
     num_layers = len(weights)
     num_weights = 0
@@ -866,6 +901,13 @@ def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens
         num_weights += len(x)
     weights_per_layer = num_weights // num_layers
     has_batch_sizes = batch_sizes is not None
+
+    # Since we need flat argument lists in the IR, these two functions and the
+    # supporting code before the `wrapPyFuncWithSymbolic` call are simply
+    # helpers to reconstruct the input, weights, hiddens, and batch_sizes
+    # inputs from the flat argument list. To do this, the above code captures
+    # then lengths of each of these inputs so that we can rematerialize them
+    # later before calling either the RNN function or the ONNX symbolic function
 
     def forward_flattened_wrapper(input, *args):
         args_offset = 0
@@ -879,10 +921,17 @@ def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens
         else:
             hiddens = args[args_offset:]
             batch_sizes = None
+        if cell_type != 'LSTM':
+            assert len(hiddens) == 1
+            hiddens = hiddens[0]
         outputs = func(input, weights, hiddens, batch_sizes)
+        # We also need a flattened output list
         outs_flattened = [outputs[0]]
-        for o in outputs[1]:
-            outs_flattened.append(o)
+        if cell_type == 'LSTM':
+            for o in outputs[1]:
+                outs_flattened.append(o)
+        else:
+            outs_flattened.append(outputs[1])
         return tuple(outs_flattened)
 
     def symbolic_flattened_wrapper(g, input, *args):
@@ -893,13 +942,15 @@ def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens
             args_offset += weights_per_layer
         if has_batch_sizes:
             hiddens = args[args_offset:-1]
-            hiddens = hiddens[0] if len(hiddens) == 1 else list(hiddens)
             batch_sizes = args[-1]
         else:
             hiddens = args[args_offset:]
-            hiddens = hiddens[0] if len(hiddens) == 1 else list(hiddens)
             batch_sizes = None
+        if cell_type != 'LSTM':
+            assert len(hiddens) == 1
+            hiddens = hiddens[0]
         return sym(g, input, weights, hiddens, batch_sizes)
+
     flattened_weights = []
     for x in weights:
         for y in x:
