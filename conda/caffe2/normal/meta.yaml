@@ -14,6 +14,8 @@ build:
   script_env:
     - CONDA_CAFFE2_CMAKE_ARGS
     - PACKAGE_CUDA_LIBS
+    - CUDA_VERSION
+    - CUDNN_VERSION
   # features section here
 
 requirements:
