@@ -4,6 +4,9 @@ add_subdirectory(nccl)
 add_subdirectory(prof)
 add_subdirectory(shm_mutex)
 add_subdirectory(script)
+if (USE_TENSORRT)
+add_subdirectory(tensorrt)
+endif()
 # Finally pass the src lists back to the parent
 
 # CPU source, test sources, binary sources

@@ -17,9 +17,10 @@ using ::ONNX_NAMESPACE::GraphProto;
 using ::ONNX_NAMESPACE::ModelProto;
 using ::ONNX_NAMESPACE::NodeProto;
 using ::ONNX_NAMESPACE::TensorProto;
+} // namespace
+
 using ConvertedResult =
     std::pair<std::vector<NodeProto>, std::vector<TensorProto>>;
-} // namespace
 
 class OnnxExporter {
   using SpecialOpConverter = ConvertedResult (OnnxExporter::*)(
@@ -27,10 +28,13 @@ class OnnxExporter {
       const std::unordered_map<std::string, caffe2::TensorShape>&);
 
  public:
+  OnnxExporter(bool legacy_mode = false):legacy_mode_(legacy_mode) {}
+
   ConvertedResult Caffe2OpToOnnxNodes(
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 
+  void InitOpToTensorProto(const caffe2::OperatorDef& def, TensorProto* tensor);
  private:
   ConvertedResult CommonCaffe2OpToOnnxNodes(const caffe2::OperatorDef& def);
 
@@ -81,6 +85,8 @@ class OnnxExporter {
       get_per_op_renamed_attrs() const;
   const std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>&
   get_special_operators() const;
+
+  bool legacy_mode_{false};
 };
 } // namespace onnx
 } // namespace caffe2

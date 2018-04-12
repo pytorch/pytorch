@@ -845,6 +845,10 @@ void SetOpEnginePref(
 
 TensorShape GetTensorShapeOfBlob(const Blob* b);
 
+TensorShapes InferBlobShapesAndTypes(
+    CaffeMap<string, TensorShape>& blob_desc,
+    const vector<NetDef*>& nets);
+
 TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
     const vector<NetDef*>& nets);
