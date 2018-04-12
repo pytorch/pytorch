@@ -95,8 +95,7 @@ def test_cpp_extensions(python, test_module, test_directory, options):
         if sys.platform == 'win32':
             install_directory = os.path.join(cpp_extensions, 'install')
             install_directories = get_shell_output(
-                "where -r \"{}\" *.pyd".format(install_directory)).split(
-                    '\r\n')
+                'where -r "{}" *.pyd'.format(install_directory)).split('\r\n')
 
             assert install_directories, 'install_directory must not be empty'
 
@@ -236,6 +235,11 @@ def get_selected_tests(options):
         selected_tests = selected_tests[:last_index + 1]
 
     if sys.platform == 'win32' and not options.ignore_win_blacklist:
+        ostype = os.environ.get('MSYSTEM')
+        target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
+        if ostype != 'MINGW64' or target_arch != 'x64':
+            WINDOWS_BLACKLIST.append('cpp_extensions')
+
         for test in WINDOWS_BLACKLIST:
             if test in selected_tests:
                 print_to_stderr('Excluding {} on Windows'.format(test))
