@@ -34,10 +34,10 @@ export PYTORCH_BUILD_NUMBER=$PKG_BUILDNUM
 export NCCL_ROOT_DIR=/usr/local/cuda
 
 # Validate some configurations, try to fail as early as possible
-if [[ -n $PACKAGE_CUDA_DIR ]]; then
-  if [[ -z $PACKAGE_CUDA_DIR || -z $CUDA_VERSION || -z $CUDNN_VERSION ]]; then
+if [[ -n $PACKAGE_CUDA_LIBS ]]; then
+  if [[ -z $CUDA_VERSION || -z $CUDNN_VERSION ]]; then
     echo "Packaging CUDA libs along with the Pytorch binaries is only allowed"
-    echo "if PACKAGE_CUDA_DIR, CUDA_VERSION, and CUDNN_VERSION are all set."
+    echo "if CUDA_VERSION, and CUDNN_VERSION are all set."
     echo "This should only be used when building binaries for distribution"
     exit 1
   fi
@@ -79,7 +79,7 @@ python setup.py install
 #########################################################################
 # Copy over CUDA .so files from system locations to the conda build dir #
 #########################################################################
-if [[ -z $PACKAGE_CUDA_DIR ]]; then
+if [[ -z $PACKAGE_CUDA_LIBS ]]; then
   exit 0
 fi
 
@@ -96,10 +96,6 @@ fname_with_sha256() {
 	  echo "$DIRNAME/$INITNAME-$HASH.$ENDNAME"
   fi
 }
-
-# This is the install location on the Pytorch docker images used to build the
-# pytorch binaries
-PACKAGE_CUDA_DIR="/usr/local/cuda/lib64/"
 
 # These are all the CUDA related libaries needed by Pytorch and Caffe2
 # For some reason if we use exact version numbers for CUDA9 .so files 
