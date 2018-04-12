@@ -362,7 +362,7 @@ class TestSparse(TestCase):
             y = y.transpose(i, j)
             self.assertEqual(self.safeToDense(x), y)
 
-    def test_transpose_coalesce_invariant(self):
+    def test_coalesce_transpose(self):
         # If a sparse tensor is transposed, it should be uncoalesced
         x_coalesced = self._gen_sparse(2, 3, 4)[0].coalesce()
         x_indices = x_coalesced._indices()
