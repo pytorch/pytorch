@@ -54,6 +54,21 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     at::ArrayRef<Value*> inputs,
     List<Attribute> attributes,
     size_t n_binders) {
+// n_binders is always set to the number of variables an expression is
+// syntactically bound to:
+//     a = foo() # 1 binder (note in this case the single binder might be a tuple)
+//     a, * b = foo() # 1 binder
+//     a, b = foo() # 2 binders
+//     foo() # 0 binders
+//
+// In subexpressions, like bar() in foo(bar()), n_binders is always set to
+// 1. n_binders is used as a hint to subexpressions to determine how many
+// values they should return when that number is ambiguous statically. In
+// particular it is currently used to decide how many tensors a call to a
+// python function will return. It is only a hint, functions do not have to
+// check that n_binders match the number of things they are returning, the
+// assignment logic will do that anyway.
+
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 

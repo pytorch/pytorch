@@ -959,7 +959,7 @@ public:
   }
   Node* createTuple(at::ArrayRef<Value*> values) {
     auto types = fmap(values, [](Value* v) { return v->type(); });
-    auto tt = std::make_shared<TupleType>(types);
+    auto tt = std::make_shared<TupleType>(std::move(types));
     auto n = create(prim::TupleConstruct, values);
     n->output()->setType(tt);
     return n;

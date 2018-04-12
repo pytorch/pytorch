@@ -508,8 +508,8 @@ private:
     for (const auto& x : sorted_mutations) {
       auto tv = save_true->getVar(x, stmt.range());
       true_block->registerOutput(tv);
-      auto tf = save_false->getVar(x, stmt.range());
-      false_block->registerOutput(tf);
+      auto fv = save_false->getVar(x, stmt.range());
+      false_block->registerOutput(fv);
       environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(tv->type()));
     }
 
@@ -709,10 +709,8 @@ private:
       environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr));
       return;
     }
-    // how many non-starred things are on the lhs?
-    // a = ... (1)
-    // b, *c = ... (1)
-    // a, b = ... (2)
+
+    // See [N_BINDERS]
     size_t n_binders = stmt.lhs().size();
     if(starred_unpack)
       n_binders--;
@@ -845,12 +843,14 @@ private:
   }
 
   Value* ensureTensor(const SourceRange& range, Value* v) {
-    // for now the only types we have are tuples and tensors
-    // as we add more types this function will need to change to be more specific
-    if(v->type()->kind() == TypeKind::TupleType) {
-      throw ErrorReport(range) << "expected a tensor value but found a tuple";
+    // both 'DynamicType' and 'TensorType' are actually Tensors:
+    // 'Dynamic' currently means a dynamically-sized tensor vs e.g. a TupleType
+    // TensorType means a 'sized' tensor which is added by some optimizations
+    if(v->type()->kind() == TypeKind::DynamicType
+       || v->type()->kind() == TypeKind::TensorType) {
+         return v;
     }
-    return v;
+    throw ErrorReport(range) << "expected a tensor value but found a tuple";
   }
 
   Value* emitExpr(Expr tree) {
