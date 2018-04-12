@@ -114,6 +114,12 @@ struct SymbolicVariable {
     n->i_(attr::dim, dim);
     return r;
   }
+  static SymbolicVariable stack(ArrayRef<SymbolicVariable> inputs, int32_t dim) {
+    Node* n;
+    auto r = create(aten::stack, inputs, 1, &n)[0];
+    n->i_(attr::dim, dim);
+    return r;
+  }
   SymbolicVariable sum() const {
     auto r = create(t("sum"), {*this})[0];
     return r;

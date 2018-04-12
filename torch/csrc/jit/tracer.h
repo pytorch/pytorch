@@ -62,8 +62,38 @@ inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
   return fmap(vars, &VariableFlags::of);
 }
 
-}
+} // namespace detail
 
+
+struct ArgumentStash {
+  struct IntListTrace : std::vector<Value*> {
+    IntListTrace(int size)
+      : std::vector<Value*>(size, nullptr) {}
+  };
+
+  static bool empty() {
+    return stash.intlists.empty();
+  }
+
+  static void stashIntListElem(const std::string& arg_name,
+                               size_t size,
+                               size_t idx,
+                               const Variable& var);
+
+  static bool hasIntList(const std::string& arg_name) {
+    return stash.intlists.count(arg_name) > 0;
+  }
+
+  static IntListTrace popIntList(const std::string& arg_name) {
+    auto info = std::move(stash.intlists.at(arg_name));
+    stash.intlists.erase(arg_name);
+    return info;
+  }
+
+private:
+  static thread_local ArgumentStash stash;
+  std::unordered_map<std::string, IntListTrace> intlists;
+};
 
 // Should a function which takes 'vars' as inputs be traced?
 // It suffices for ONE variable to be tracing: any "untraced" variables
@@ -257,7 +287,6 @@ std::shared_ptr<Graph> createGraphByTracing(
 #endif
 void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
 
-
-
+autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
 
 }}} // namespace torch::jit::tracer

@@ -33,6 +33,7 @@
 #include "torch/csrc/Generator.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/tensor/python_tensor.h"
 #include "torch/csrc/utils/device.h"
 #include "torch/csrc/utils/object_ptr.h"
@@ -58,7 +59,7 @@ struct ParsedArgs {
 };
 
 struct PythonArgParser {
-  explicit PythonArgParser(std::vector<std::string> fmts);
+  explicit PythonArgParser(std::vector<std::string> fmts, bool traceable=false);
 
   template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
@@ -71,15 +72,18 @@ private:
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
   ssize_t max_args;
+  bool traceable;
 };
 
 struct PythonArgs {
-  PythonArgs(int idx, const FunctionSignature& signature, PyObject** args)
+  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args)
     : idx(idx)
+    , traceable(traceable)
     , signature(signature)
     , args(args) {}
 
   int idx;
+  bool traceable;
   const FunctionSignature& signature;
   PyObject** args;
 
@@ -250,7 +254,17 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
-      res[idx] = THPUtils_unpackIndex(obj);
+      // Elements of torch.Size are tensors during tracing, and we need to record extra
+      // information before they are turned into an IntList
+      if (traceable && reinterpret_cast<PyObject*>(Py_TYPE(obj)) == THPVariableClass) {
+        auto & var = reinterpret_cast<THPVariable*>(obj)->cdata;
+        jit::tracer::ArgumentStash::stashIntListElem(
+            signature.params[i].name, size, idx, var);
+        res[idx] = var.toCLong();
+        continue;
+      } else {
+        res[idx] = THPUtils_unpackIndex(obj);
+      }
     } catch (std::runtime_error &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),

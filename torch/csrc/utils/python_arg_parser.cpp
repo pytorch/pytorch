@@ -413,8 +413,11 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       return false;
     } else if (param.check(obj)) {
       dst[i++] = obj;
+    // XXX: the Variable check is necessary because sizes become tensors when
+    // tracer is enabled. This behavior easily leads to ambiguities, and we
+    // should avoid having complex signatures that make use of it...
     } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-               THPUtils_checkIndex(obj)) {
+               (THPUtils_checkIndex(obj) || THPVariable_Check(obj))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
@@ -454,8 +457,9 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
   return true;
 }
 
-PythonArgParser::PythonArgParser(std::vector<std::string> fmts)
+PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
  : max_args(0)
+ , traceable(traceable)
 {
   for (auto& fmt : fmts) {
     signatures_.push_back(FunctionSignature(fmt));
@@ -474,13 +478,13 @@ PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     signature.parse(args, kwargs, parsed_args, true);
-    return PythonArgs(0, signature, parsed_args);
+    return PythonArgs(0, traceable, signature, parsed_args);
   }
 
   int i = 0;
   for (auto& signature : signatures_) {
     if (signature.parse(args, kwargs, parsed_args, false)) {
-      return PythonArgs(i, signature, parsed_args);
+      return PythonArgs(i, traceable, signature, parsed_args);
     }
     i++;
   }

@@ -770,6 +770,22 @@ class TestJit(TestCase):
         del z
         check(False, True)
 
+    def test_trace_size(self):
+        def fn(x):
+            return x.view(x.shape[1] * 2, x.size(0), 2)
+
+        x = torch.randn(5, 2, 4)
+        y = torch.randn(4, 8, 4)
+
+        # Check that it behaves as expected
+        traced_fn = torch.jit.trace(x)(fn)
+        self.assertEqual(traced_fn(y), fn(y))
+        self.assertEqual(traced_fn(x), fn(x))
+
+        # Check that the trace looks ok
+        trace, _ = torch.jit.get_trace_graph(fn, (x,))
+        self.assertExpectedTrace(trace)
+
     def test_multiuse_fn(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
         w = Variable(torch.randn(2, 2), requires_grad=True)
