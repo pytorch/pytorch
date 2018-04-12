@@ -320,6 +320,15 @@ class ExprBuilder(Builder):
         return Var(Ident(r, expr.id))
 
     @staticmethod
+    def build_NameConstant(ctx, expr):
+        text = "True" if expr.value else "False"
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(text))
+        if expr.value:
+            return TrueLiteral(r)
+        else:
+            return FalseLiteral(r)
+
+    @staticmethod
     def build_BinOp(ctx, expr):
         lhs = build_expr(ctx, expr.left)
         rhs = build_expr(ctx, expr.right)
