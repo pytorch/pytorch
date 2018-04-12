@@ -27,7 +27,7 @@ if ! which conda; then
   pip install mkl mkl-devel
 fi
 
-python setup.py install
+WERROR=1 python setup.py install
 
 # Add the ATen test binaries so that they won't be git clean'ed away
 git add -f aten/build/src/ATen/test
