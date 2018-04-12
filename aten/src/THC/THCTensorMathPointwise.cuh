@@ -842,9 +842,9 @@ struct TensorDigammaOp {
        8.33333333333333333333E-2,
     };
 
-    compute_type x = ScalarConvert<real, compute_type>::to(*in);
+    auto x = scalar_cast<compute_type>(*in);
     if (x == 0) {
-      *out = ScalarConvert<float, real>::to(INFINITY);
+      *out = scalar_cast<real>(INFINITY);
       return;
     }
 
@@ -852,13 +852,13 @@ struct TensorDigammaOp {
     compute_type result = 0;
     if (x < 0) {
       if (x_is_integer) {
-        *out = ScalarConvert<float, real>::to(INFINITY);
+        *out = scalar_cast<real>(INFINITY);
         return;
       }
       // Rounding errors in tan's input can really affect the output
       // for extreme values, so we always perform this computation in double.
-      result = ScalarConvert<double, compute_type>::to(
-          - PI_f64 / tan(PI_f64 * ScalarConvert<compute_type, double>::to(x)));
+      result = scalar_cast<compute_type>(
+          - PI_f64 / tan(PI_f64 * scalar_cast<double>(x)));
       x = 1 - x;
     }
 
@@ -867,7 +867,7 @@ struct TensorDigammaOp {
       x += 1;
     }
     if (x == 10) {
-      *out = ScalarConvert<compute_type, real>::to(result + PSI_10);
+      *out = scalar_cast<real>(result + PSI_10);
       return;
     }
 
@@ -882,8 +882,7 @@ struct TensorDigammaOp {
       y = z * polevl_result;
     }
 
-    *out = ScalarConvert<compute_type, real>::to(
-        log(x) - (0.5 / x) - y + result);
+    *out = scalar_cast<real>(log(x) - (0.5 / x) - y + result);
     return;
   }
 };
