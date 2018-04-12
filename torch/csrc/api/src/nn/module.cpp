@@ -45,12 +45,29 @@ bool Module::is_training() const noexcept {
 }
 
 // Recursive Transformations
-void Module::cpu() {}
+void Module::cpu() {
+  // parameters().apply([](Tensor& tensor) { tensor.toBackend_(kCPU); });
+}
 
-void Module::cuda() {}
+void Module::cuda() {
+  // parameters().apply([](Tensor& tensor) { tensor.toBackend_(kCUDA); });
+}
 
-void Module::type(at::ScalarType new_type) {}
-void Module::zero_grad() {}
+void Module::type(at::ScalarType new_type) {
+  // parameters().apply([=](Tensor& tensor) { tensor.toType_(new_type); });
+  // buffers().apply([=](Tensor& tensor) { tensor.toType_(new_type); });
+}
+
+void Module::zero_grad() {
+  parameters().apply([](Tensor& tensor) {
+    // Temporary!!! Downcast should not be necessary...
+    auto& variable = as_variable_ref(tensor);
+    if (variable.requires_grad()) {
+      variable.grad().detach_();
+      variable.grad().zero_();
+    }
+  });
+}
 
 // Recursive Accessors
 ModuleCursor Module::modules() {

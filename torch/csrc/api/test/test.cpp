@@ -3,6 +3,9 @@
 
 #include <torch/torch.h>
 
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/engine.h>
+
 #include <iostream>
 #include <iterator>
 #include <map>
@@ -18,11 +21,14 @@ struct TestModule : public torch::nn::Module {
       : torch::nn::Module("TestModule"),
         tensor1(at::randn(torch::CPU(at::kFloat), {size})),
         tensor2(at::randn(torch::CPU(at::kFloat), {size})) {
+    // Temporary, will figure out an API for this
+    as_variable_ref(tensor1).set_requires_grad(true);
+    as_variable_ref(tensor2).set_requires_grad(true);
     register_parameters({{"tensor1", tensor1}, {"tensor2", tensor2}});
   }
 
   std::vector<Tensor> forward(const std::vector<Tensor>& inputs) override {
-    return inputs;
+    return {tensor1 + tensor2};
   }
 
   Tensor tensor1;
@@ -225,6 +231,29 @@ TEST_CASE("ParameterCursor", "[cursor]") {
         REQUIRE((++iterator)->value.equal(modules[index]->tensor1));
         REQUIRE((++iterator)->value.equal(modules[index]->tensor2));
       }
+    }
+  }
+}
+
+void backward(Tensor loss) {
+  torch::autograd::edge_list edgelst;
+  torch::autograd::variable_list varlst;
+  edgelst.emplace_back(loss.grad_fn(), loss.output_nr());
+  varlst.emplace_back(
+      torch::autograd::make_variable(ones_like(loss.data()), false));
+  torch::autograd::Engine engine;
+  engine.execute(edgelst, varlst, false, false);
+}
+
+TEST_CASE("Modules", "[modules]") {
+  TestModule module(1);
+  SECTION("Recursive transformations") {
+    SECTION("zero_grad zeroes out gradients") {
+      auto output = module({});
+      auto loss = output.front().sum();
+      backward(loss);
+      module.zero_grad();
+      REQUIRE(as_variable_ref(module.tensor1).grad().sum().toCFloat() == 0);
     }
   }
 }
