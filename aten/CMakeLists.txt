@@ -398,6 +398,7 @@ ENDMACRO(Install_Required_Library libname)
 
 FIND_PACKAGE(BLAS)
 SET(AT_MKL_ENABLED 0)
+SET(AT_MKL_MT 0)
 IF(BLAS_FOUND)
   SET(USE_BLAS 1)
   IF(BLAS_INFO STREQUAL "mkl")
@@ -409,6 +410,10 @@ IF(BLAS_FOUND)
         `pip install mkl-devel` if using pip. If build fails with header files \
         available in the system, please make sure that CMake will search the \
         directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
+    ENDIF()
+    IF(MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
+      ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
+      SET(AT_MKL_MT 1)
     ENDIF()
     INCLUDE_DIRECTORIES(${BLAS_INCLUDE_DIR})  # include MKL headers
     SET(AT_MKL_ENABLED 1)
