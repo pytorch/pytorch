@@ -193,10 +193,12 @@ def _str(self):
     type_str = 'tensor'
     prefix = type_str + '('
     indent = len(prefix)
+
+    suffix = ')'
+    if str(self.device.type) != 'cpu':
+        suffix = ', device=\'' + str(self.device.type) + '\'' + suffix
     if str(self.dtype) not in IMPLICIT_DTYPES:
-        suffix = ', dtype=' + str(self.dtype) + ')'
-    else:
-        suffix = ')'
+        suffix = ', dtype=' + str(self.dtype) + suffix
 
     if self.numel() == 0:
         tensor_str = '[]'
