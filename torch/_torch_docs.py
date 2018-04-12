@@ -4225,9 +4225,9 @@ add_docstr(torch.randn_like,
 randn_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
-random numbers from a normal distribution with zero mean and variance of
-one. This is equivalent to
-``torch.randn(input.size(), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)``.
+random numbers from a normal distribution with mean 0 and variance 1.
+``torch.randn_like(input)`` is equivalent to
+``torch.randn(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
     input (Tensor): the size of :attr:`input` will determine size of the output tensor
