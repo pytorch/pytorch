@@ -1219,10 +1219,12 @@ class TestJit(TestCase):
         # test single grad case
 
         outputs = func(*recording_inputs)
-        grads = torch.autograd.grad(allSum(outputs), recording_inputs)
+        grads = torch.autograd.grad(allSum(outputs), recording_inputs,
+                                    allow_unused=True)
 
         outputs_ge = ge(*recording_inputs)
-        grads_ge = torch.autograd.grad(allSum(outputs_ge), recording_inputs)
+        grads_ge = torch.autograd.grad(allSum(outputs_ge), recording_inputs,
+                                       allow_unused=True)
         self.assertEqual(outputs, outputs_ge)
         self.assertEqual(grads, grads_ge)
 
@@ -1230,9 +1232,10 @@ class TestJit(TestCase):
 
         outputs = func(*recording_inputs)
         l1 = allSum(outputs)
-        grads = torch.autograd.grad(l1, recording_inputs, create_graph=True)
+        grads = torch.autograd.grad(l1, recording_inputs, create_graph=True,
+                                    allow_unused=True)
         l2 = (allSum(grads) * l1)
-        grads2 = torch.autograd.grad(l2, recording_inputs)
+        grads2 = torch.autograd.grad(l2, recording_inputs, allow_unused=True)
 
         recording_inputs = [Variable(t, requires_grad=True)
                             for t in reference_tensors]
@@ -1240,9 +1243,9 @@ class TestJit(TestCase):
         outputs_ge = ge(*recording_inputs)
         l1_ge = allSum(outputs_ge)
         grads_ge = torch.autograd.grad(
-            l1_ge, recording_inputs, create_graph=True)
+            l1_ge, recording_inputs, create_graph=True, allow_unused=True)
         l2_ge = (allSum(grads_ge) * l1_ge)
-        grads2_ge = torch.autograd.grad(l2_ge, recording_inputs)
+        grads2_ge = torch.autograd.grad(l2_ge, recording_inputs, allow_unused=True)
 
         self.assertEqual(outputs, outputs_ge)
         self.assertEqual(grads, grads_ge)

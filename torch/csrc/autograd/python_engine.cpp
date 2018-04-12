@@ -92,7 +92,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   unsigned char keep_graph = 0;
   unsigned char create_graph = 0;
   PyObject *inputs = nullptr;
-  unsigned char allow_unreachable = 1;
+  unsigned char allow_unreachable = 0;
   const char *accepted_kwargs[] = {
       "variables", "grad_variables", "keep_graph", "create_graph", "inputs",
       "allow_unreachable", nullptr
@@ -171,8 +171,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;
     for (int i = 0; i < num_inputs; i++) {
-      THPUtils_assert(allow_unreachable || outputs[i].defined(), "One of the differentiated "
-                      "Variables appears to not have been used in the graph");
+      THPUtils_assert(allow_unreachable || outputs[i].defined(), "One of the "
+                      "differentiated Variables appears to not have been used "
+                      "in the graph. Set allow_unused=True if this is the "
+                      "desired behavior.");
       PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
     }
     return py_outputs.release();
