@@ -22,11 +22,11 @@ struct Archive;
 class Module {
  public:
   /// Tells the base `Module` about the name of the submodule.
-  explicit Module(std::string name);
+  explicit Module(const char* name);
   virtual ~Module();
 
   /// Returns the name of the `Module`.
-  const std::string& name() const noexcept;
+  const char* name() const noexcept;
 
   /// Performs a recursive clone of the entire module hierarchy, including
   /// parameters and buffers. This is to enable deep copying in a polymorphic
@@ -112,7 +112,7 @@ class Module {
   friend void collect_buffers(T&, Items&);
 
   /// The module's name (e.g. "LSTM").
-  std::string name_;
+  const char* name_;
 
   /// Whether the module is in training mode.
   bool is_training_;
@@ -132,7 +132,7 @@ class Module {
 template <typename Derived>
 class CloneableModule : public Module {
  public:
-  explicit CloneableModule(std::string name) : Module(std::move(name)) {}
+  explicit CloneableModule(const char* name) : Module(name) {}
 
   std::unique_ptr<Module> clone() override {
     return std::unique_ptr<Module>(new Derived(static_cast<Derived&>(*this)));

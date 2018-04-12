@@ -13,8 +13,7 @@
 
 namespace torch { namespace nn {
 
-Module::Module(std::string name)
-    : name_(std::move(name)), is_training_(false) {}
+Module::Module(const char* name) : name_(name), is_training_(false) {}
 
 Module::~Module() = default;
 
@@ -23,8 +22,8 @@ std::unique_ptr<Module> Module::clone() {
       "clone() has not been implemented for %s. "
       "Use the copy constructor if you don't require polymorphic cloning. "
       "Otherwise, subclass CloneableModule<%s> to inherit cloning behavior.",
-      name_.c_str(),
-      name_.c_str());
+      name_,
+      name_);
 }
 
 std::vector<Tensor> Module::operator()(const std::vector<Tensor>& inputs) {
@@ -106,7 +105,7 @@ ConstBufferCursor Module::buffers() const {
 void Module::serialize(Archive& archive) {}
 void Module::deserialize(Archive&& archive) {}
 
-const std::string& Module::name() const noexcept {
+const char* Module::name() const noexcept {
   return name_;
 }
 
