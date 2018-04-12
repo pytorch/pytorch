@@ -41,7 +41,7 @@ set -ex
 #   portable_sed <full regex string> <file>
 if [ "$(uname)" == 'Darwin' ]; then
   portable_sed () {
-    sed --regexp-extended -i '' "$1" "$2"
+    sed -E -i '' "$1" "$2"
   }
 else
   portable_sed () {

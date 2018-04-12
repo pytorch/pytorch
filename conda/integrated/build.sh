@@ -102,7 +102,7 @@ fname_with_sha256() {
 PACKAGE_CUDA_DIR="/usr/local/cuda/lib64/"
 
 # These are all the CUDA related libaries needed by Pytorch and Caffe2
-# for some reason if we use exact version numbers for CUDA9 .so files 
+# For some reason if we use exact version numbers for CUDA9 .so files 
 # (like .so.9.0.176), we see segfaults during dlopen somewhere
 # deep inside these libs.
 # hence for CUDA9, use e.g. '.9.0', and don't use hashed names
@@ -132,29 +132,29 @@ do
   FULL_PATH=$(echo "$LDD_OUTPUT" | grep -oP '(?<='$filename' => )\S+(?='$filename')')
   if [[ -n $FULL_PATH ]]; then
     echo "Found $filename in ldd output"
-    DEPS_SO_PATHS+=("$FULL_PATH/$filename")
+    DEPS_SOPATHS+=("$FULL_PATH/$filename")
   else
     echo "$filename not found"
     NOT_IN_LDD+=(i)
   fi
-  if [[ $filename == libcudart* ]]; then
+  if [[ $filename == libcublas* ]]; then
     SO_GUESSED_LOC=$FULL_PATH
   fi
 done
 
 # If the .so wasn't in the libcaffe2_gpu dependencies, then we just guess that
-# it's where libcudart is
+# it's where libcublas is
 echo "${NOT_IN_LDD[@]}"
 for i in "${NOT_IN_LDD[@]}"
 do
-  DEPS_SO_PATHS+=("$SO_GUESSED_LOC/${DEPS_SONAME[i]})
+  DEPS_SOPATHS+=("$SO_GUESSED_LOC/${DEPS_SONAME[i]})
 done
 
 # Loop through .so, adding hashes and copying them to site-packages
 patched=()
-for filename in "${DEPS_SONAME[@]}"
+for filepath in "${DEPS_SOPATHS[@]}"
 do
-	filepath="$PACKAGE_CUDA_DIR/$filename"
+  filename=$(basename $filepath)
 	destpath=$SP_DIR/torch/lib/$filename
 	if [[ "$filepath" != "$destpath" ]]; then
     echo "Copying $filepath to $destpath"
@@ -173,6 +173,8 @@ do
 done
 
 # run patchelf to fix the so names to the hashed names
+# TODO add libcaffe2_gpu.so here? Or would we also need to add all of its
+# dependencies too
 for ((i=0;i<${#DEPS_SONAME[@]};++i));
 do
 	find $SP_DIR/torch -name '*.so*' | while read sofile; do
@@ -197,11 +199,10 @@ find $SP_DIR/torch -name "*.so*" -maxdepth 1 -type f | while read sofile; do
 	patchelf --set-rpath '$ORIGIN:$ORIGIN/lib:$ORIGIN/../../..' $sofile
 	patchelf --print-rpath $sofile
 done
-    
+
 # set RPATH of lib/ files to $ORIGIN and conda/lib
 find $SP_DIR/torch/lib -name "*.so*" -maxdepth 1 -type f | while read sofile; do
 	echo "Setting rpath of $sofile to " '$ORIGIN:$ORIGIN/lib:$ORIGIN/../../../..'
 	patchelf --set-rpath '$ORIGIN:$ORIGIN/../../../..' $sofile
 	patchelf --print-rpath $sofile
 done
-    
