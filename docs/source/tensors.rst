@@ -187,6 +187,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_add_
    .. automethod:: index_copy_
    .. automethod:: index_fill_
+   .. automethod:: index_put_
    .. automethod:: index_select
    .. automethod:: int
    .. automethod:: inverse
