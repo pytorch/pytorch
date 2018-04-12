@@ -93,14 +93,13 @@ class Module {
 
  protected:
   /// Inserts the parameters into the parameters_ map.
-  void register_parameters(torch::detail::OrderedDict<Tensor>&& parameters);
+  void register_parameters(detail::OrderedDict<Tensor>&& parameters);
 
   /// Inserts the buffers into the buffers_ map.
-  void register_buffers(torch::detail::OrderedDict<Tensor>&& buffers);
+  void register_buffers(detail::OrderedDict<Tensor>&& buffers);
 
   /// Inserts the modules into the modules_ map.
-  void register_modules(
-      torch::detail::OrderedDict<std::shared_ptr<Module>>&& modules);
+  void register_modules(detail::OrderedDict<std::shared_ptr<Module>>&& modules);
 
  private:
   template <typename T, typename Items>
@@ -118,9 +117,9 @@ class Module {
   /// Whether the module is in training mode.
   bool is_training_;
 
-  torch::detail::OrderedDict<std::shared_ptr<Module>> children_;
-  torch::detail::OrderedDict<Tensor> parameters_;
-  torch::detail::OrderedDict<Tensor> buffers_;
+  detail::OrderedDict<std::shared_ptr<Module>> children_;
+  detail::OrderedDict<Tensor> parameters_;
+  detail::OrderedDict<Tensor> buffers_;
 };
 
 /// The `clone()` method in the base `Module` class does not have knowledge of
