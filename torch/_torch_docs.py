@@ -4222,7 +4222,7 @@ Example::
 
 add_docstr(torch.randn_like,
            r"""
-randn_like(other) -> Tensor
+randn_like(other, dtype) -> Tensor
 
 Returns a tensor with the same size as :attr:`other` that is filled with
 random numbers from a normal distribution with zero mean and variance of
@@ -4230,6 +4230,8 @@ one. This is equivalent to `torch.randn(other.size())`.
 
 Args:
     other (Tensor): the size of :attr:`other` will determine size of the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
+        Default: the dtype of :attr:`other`.
 
 """)
 
