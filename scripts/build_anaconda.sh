@@ -220,7 +220,6 @@ if [[ -n $BUILD_FULL ]]; then
   #PACKAGE_NAME="${PACKAGE_NAME}-full"
   BUILD_STRING="${BUILD_STRING}_full"
 fi
-BUILD_STRING="${BUILD_STRING}_${PYTORCH_BUILD_VERSION}"
 portable_sed "s/name: caffe2.*\$/name: ${PACKAGE_NAME}/" $META_YAML
 portable_sed "s/string:.*\$/string: ${BUILD_STRING}/" $META_YAML
 
