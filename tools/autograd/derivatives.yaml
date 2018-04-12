@@ -594,9 +594,6 @@
 - name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
   self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
 
-- name: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool normalized, bool onesided, Tensor window, int64_t pad_end)
-  self: not_implemented("stft")
-
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
 
