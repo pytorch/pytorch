@@ -47,7 +47,8 @@ class GetMergeDimGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     CAFFE_ENFORCE( Def().input(0) != Def().output(0),
-        "Cannot compute gradient of MergeDim when in-place.",
+        "Cannot compute gradient of MergeDim when using in-place. "
+        "Need to have the original tensor to resize like it.",
         ProtoDebugString(Def()));
     
     return SingleGradientDef(
