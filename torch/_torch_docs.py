@@ -4222,17 +4222,23 @@ Example::
 
 add_docstr(torch.randn_like,
            r"""
-randn_like(other, dtype) -> Tensor
+randn_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
-Returns a tensor with the same size as :attr:`other` that is filled with
+Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a normal distribution with zero mean and variance of
-one. This is equivalent to `torch.randn(other.size())`.
+one. This is equivalent to
+``torch.randn(input.size(), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)``.
 
 Args:
-    other (Tensor): the size of :attr:`other` will determine size of the output tensor
+    input (Tensor): the size of :attr:`input` will determine size of the output tensor
     dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
-        Default: the dtype of :attr:`other`.
-
+        Default: if None, defaults to the dtype of :attr:`input`.
+    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
+        Default: if None, defaults to the layout of :attr:`input`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, defaults to the device of :attr:`input`.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: False.
 """)
 
 
