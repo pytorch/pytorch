@@ -64,7 +64,7 @@ remove_lines_with () {
 #    <some insertion>
 #    <some marker>
 #
-# (\s*)     captured whitespace before match == the indentation in the meta.yaml
+# ( *)     captured spaces before match == the indentation in the meta.yaml
 # ${1}     the marker to insert before
 # '\1'     captured whitespace == correct indentation
 # ${2}     the string to insert
@@ -72,7 +72,7 @@ remove_lines_with () {
 # '\1'      captured whitespace == correct indentation
 # ${1}     put the marker back
 add_before() {
-  portable_sed 's@(\s*)'"${1}@"'\1'"${2}\\"$'\n''\1'"${1}@" $3
+  portable_sed 's@( *)'"${1}@"'\1'"${2}\\"$'\n''\1'"${1}@" $3
 }
 append_to_section () {
   add_before "# ${1} section here" "$2" $META_YAML
