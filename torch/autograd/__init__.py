@@ -85,7 +85,8 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
         retain_graph = create_graph
 
     Variable._execution_engine.run_backward(
-        tensors, grad_tensors, retain_graph, create_graph, True)  # last flag is allow_unreachable
+        tensors, grad_tensors, retain_graph, create_graph,
+        allow_unreachable=True)  # allow_unreachable flag
 
 
 def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=False,
