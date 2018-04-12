@@ -73,7 +73,8 @@ if (r.isNone(${out_idx})) {
   ${call_dispatch}
 } else {
   if (!r.isNone(${type_idx})) {
-    check_out_type_matches(r.tensor(${out_idx}), r.dtype(${type_idx}), r.layout(${layout_idx}));
+    check_out_type_matches(r.tensor(${out_idx}), r.scalartype(${type_idx}), r.layout(${layout_idx}),
+                           r.device(${device_idx}), r.isNone(${device_idx}));
   }
   ${call_dispatch_out}
 }
@@ -207,9 +208,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
-        'const Type &': 'dtype',
+        'const Type &': 'scalartype',
         'const THPLayout &': 'layout',
-        'const Device &': 'deviceInt64',
+        'const Device &': 'device',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -221,6 +222,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'int64_t': 'toInt64WithDefault',
         'bool': 'setDefaultBool',
         'double': 'setDefaultDouble',
+        'const Type &': 'scalartypeWithDefault',
+        'const THPLayout &': 'layoutWithDefault',
+        'const Device &': 'deviceWithDefault',
+        'ScalarType': 'scalartypeWithDefault',
     }
 
     def first_tensor_arg(arguments):
@@ -286,6 +291,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     '`{}` type is not supported in python_default_init'.format(typename)
                 unpack_with_default = unpack_with_default_methods.get(typename)
                 default_expr = arg.get('python_default_init')
+                # TODO: Type currently maps to ScalarType, figure out a cleaner solution
+                if typename == 'const Type &':
+                    default_expr += '.scalarType()'
                 expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
                 unpack = unpack_methods.get(typename, typename.lower())
@@ -335,7 +343,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 actuals.append('results[{}]'.format(i))
 
         layout = None
-        parsed_type_dispatch = None
         # type args go after the outputs to match the signature generation.
         arg_idx = arg_idx if out_idx is None else out_idx + 1
         for arg in type_args:
@@ -357,23 +364,29 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         for arg in python_binding_arguments:
             if arg['name'] == 'dtype' and arg['simple_type'] == 'Type':
                 pass  # already handled by type_dispatched_args
-            elif arg['name'] == 'device' and arg['simple_type'] == 'Device':
-                if len(outputs) == 0:
-                    has_device_bind = True
-                    append_actuals_formals(*parse_arg(arg, device_idx))
-            elif arg['name'] == 'requires_grad' and arg['simple_type'] == 'bool':
-                requires_grad = parse_arg(arg, requires_grad_idx)[0]
             elif arg['name'] == 'layout' and arg['simple_type'] == 'Layout':
                 # out(s) determines the type and layout if it is present, so only use this if there are no outputs.
                 if len(outputs) == 0:
-                    layout = parse_arg(arg, layout_idx)[0]
+                    layout = parse_arg(arg, layout_idx, arg.get('python_default_init'))[0]
+            elif arg['name'] == 'device' and arg['simple_type'] == 'Device':
+                if len(outputs) == 0:
                     assert parsed_type_args
-                    actuals.append("torch::getType({}, {})".format(parsed_type_args[0], layout))
+                    assert layout
+                    device_arg = parse_arg(arg, device_idx, True)
+                    # add type, device formals and corresponding actuals.
+                    # The type actual isthe ATen type mapped from (ScalarType, Layout, Device)
+                    # The device actual is the corresponding AutoGPU index for the Device.
                     formal_args.append(parsed_type_args[1])
+                    formal_args.append(device_arg[1])
+                    actuals.append("torch::getType({}, {}, {}.type)".format(parsed_type_args[0], layout, device_arg[0]))
+                    actuals.append('{}.deviceInt64()'.format(device_arg[0]))
+                    has_device_bind = True
+            elif arg['name'] == 'requires_grad' and arg['simple_type'] == 'bool':
+                requires_grad = parse_arg(arg, requires_grad_idx)[0]
             else:
                 raise RuntimeError(("found {} in python_binding_arguments but only "
-                                    "\"bool requires_grad\", \"Dtype dtype\", \"Layout layout\", \"Device device\" "
-                                    "are supported".format(arg)))
+                                    "\"bool requires_grad\", \"ScalarType dtype\", \"Layout layout\", "
+                                    "\"Device device\" are supported".format(arg)))
 
         env['unpack_args'] = []
         env['formal_args'] = formal_args
@@ -414,7 +427,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             has_dtype_bind = 'dtype' in [d['name'] for d in dictionary['out'].get('python_binding_arguments', [])]
             if has_dtype_bind:
                 body = PY_VARIABLE_OUT_CHECK_TYPE.substitute(env, out_idx=out_idx, type_idx=out_idx + 1,
-                                                             layout_idx=out_idx + 2).split('\n')
+                                                             layout_idx=out_idx + 2, device_idx=out_idx + 3).split('\n')
             else:
                 body = PY_VARIABLE_OUT.substitute(env, out_idx=out_idx).split('\n')
         else:
@@ -463,6 +476,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             }
             python_binding_arguments.append(dtype_arg)
         if is_factory_function or is_typed_like_function:
+            py_default_layout = '*torch::getLayout(self.type().backend())' if is_typed_like_function else None
             layout_arg = {
                 'default': 'torch.strided',
                 'dynamic_type': 'Layout',
@@ -470,9 +484,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'name': 'layout',
                 'type': 'const THPLayout &',
                 'simple_type': 'Layout',
+                'python_default_init': py_default_layout,
             }
             python_binding_arguments.append(layout_arg)
-        if is_factory_or_like_function:
+            py_default_device = 'torch::utils::getDevice(self)' if is_typed_like_function else None
             device_arg = {
                 'default': 'None',
                 'default_init': 'None',
@@ -480,9 +495,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'kwarg_only': True,
                 'name': 'device',
                 'type': 'const Device &',
-                'simple_type': 'Device'
+                'simple_type': 'Device',
+                'python_default_init': py_default_device
             }
             python_binding_arguments.append(device_arg)
+        if is_factory_or_like_function:
             requires_grad_arg = {
                 'default': False,
                 'dynamic_type': 'bool',
@@ -590,7 +607,7 @@ def get_python_signature(declaration, include_out):
     positional = True
 
     def get_py_formal_arg(arg):
-        typename = arg['simple_type'] if arg['simple_type'] != 'Type' else 'Dtype'
+        typename = arg['simple_type'] if arg['simple_type'] != 'Type' else 'ScalarType'
         if arg.get('is_nullable'):
             typename = '{}?'.format(typename)
         if arg.get('size') is not None:

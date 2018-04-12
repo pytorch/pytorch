@@ -35,7 +35,7 @@ static inline const char* deviceTypeString(torch::DeviceType device_type) {
 PyObject *THPDevice_repr(THPDevice *self)
 {
   std::ostringstream oss;
-  oss << "Device(device_type=\'" << deviceTypeString(self->device.type) << "\'";
+  oss << "device(device_type=\'" << deviceTypeString(self->device.type) << "\'";
   if (!self->device.is_default) {
     oss << ", device_index=" << self->device.index;
   }

@@ -957,9 +957,9 @@ class TestTorch(TestCase):
         long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
     @staticmethod
-    def _test_remainder_overflow(self, dtype=torch.int64):
+    def _test_remainder_overflow(self, dtype, device):
         # Check Integer Overflows
-        x = torch.tensor(23500, dtype=dtype)
+        x = torch.tensor(23500, dtype=dtype, device=device)
         q = 392486996410368
         self.assertEqual(x % q, x)
         self.assertEqual(-x % q, q - x)
@@ -967,7 +967,7 @@ class TestTorch(TestCase):
         self.assertEqual(-x % -q, -x)
 
     def test_remainder_overflow(self):
-        self._test_remainder_overflow(self, dtype=torch.int64)
+        self._test_remainder_overflow(self, dtype=torch.int64, device='cpu')
 
     def test_mm(self):
         # helper function
@@ -1429,28 +1429,19 @@ class TestTorch(TestCase):
         self.assertEqual(output, expected)
 
     @staticmethod
-    def _test_dtypes(self, cpu_dtypes, cuda_dtypes, layout):
-        dtypes = cpu_dtypes + (cuda_dtypes if torch.cuda.is_available() else [])
-
+    def _test_dtypes(self, dtypes, layout, device):
         for dtype in dtypes:
-            # no ops on torch.float16 currently, cuda.float16 doesn't work on windows
             if dtype != torch.float16:
-                if dtype.is_cuda and torch.cuda.device_count() > 1:
-                    out = torch.zeros((2, 3), device=1, dtype=dtype, layout=layout)
-                    self.assertIs(dtype, out.dtype)
-                    self.assertIs(layout, out.layout)
-                    self.assertEqual(1, out.get_device())
-                else:
-                    out = torch.zeros((2, 3), dtype=dtype, layout=layout)
-                    self.assertIs(dtype, out.dtype)
-                    self.assertIs(layout, out.layout)
-            self.assertEqual(dtype in cuda_dtypes, dtype.is_cuda)
+                out = torch.zeros((2, 3), dtype=dtype, layout=layout, device=device)
+                self.assertIs(dtype, out.dtype)
+                self.assertIs(layout, out.layout)
+                self.assertEqual(device, out.device)
 
     def test_dtypes(self):
         all_dtypes = torch.testing.get_all_dtypes()
-        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda]
-        cuda_dtypes = [d for d in all_dtypes if d.is_cuda]
-        self._test_dtypes(self, cpu_dtypes, cuda_dtypes, torch.strided)
+        self._test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
+        if torch.cuda.is_available():
+            self._test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
     def test_device(self):
         cpu = torch.device('cpu')
@@ -1508,20 +1499,19 @@ class TestTorch(TestCase):
             assertEqual('cuda:0', lambda: torch.tensor(5).cuda('cuda:0'))
             self.assertRaises(RuntimeError, lambda: torch.tensor(5).cuda('cpu'))
             self.assertRaises(RuntimeError, lambda: torch.tensor(5).cuda('cpu:0'))
-            assertEqual('cuda:0', lambda: torch.tensor(5, dtype=torch.cuda.int64, device=0))
-            assertEqual('cuda:0', lambda: torch.tensor(5, dtype=torch.cuda.int64, device='cuda:0'))
+            assertEqual('cuda:0', lambda: torch.tensor(5, dtype=torch.int64, device=0))
+            assertEqual('cuda:0', lambda: torch.tensor(5, dtype=torch.int64, device='cuda:0'))
             assertEqual('cuda:' + str(torch.cuda.current_device()),
-                        lambda: torch.tensor(5, dtype=torch.cuda.int64, device='cuda'))
+                        lambda: torch.tensor(5, dtype=torch.int64, device='cuda'))
 
             if torch.cuda.device_count() > 1:
                 assertEqual('cuda:1', lambda: torch.tensor(5).cuda(1))
                 assertEqual('cuda:1', lambda: torch.tensor(5).cuda('cuda:1'))
-                assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.cuda.int64, device=1))
-                assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.cuda.int64, device='cuda:1'))
+                assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.int64, device=1))
+                assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.int64, device='cuda:1'))
 
     @staticmethod
-    def _test_empty_full(self, cpu_dtypes, cuda_dtypes, layout):
-        dtypes = cpu_dtypes + (cuda_dtypes if torch.cuda.is_available() else [])
+    def _test_empty_full(self, dtypes, layout, device):
         shape = torch.Size([2, 3])
 
         def check_value(tensor, dtype, layout, device, value, requires_grad):
@@ -1530,7 +1520,7 @@ class TestTorch(TestCase):
             self.assertIs(layout, tensor.layout)
             self.assertEqual(tensor.requires_grad, requires_grad)
             if tensor.is_cuda and device != -1:
-                self.assertEqual(device, tensor.get_device())
+                self.assertEqual(device, tensor.device)
             if value is not None:
                 fill = tensor.new(shape).fill_(value)
                 self.assertEqual(tensor, fill)
@@ -1547,7 +1537,6 @@ class TestTorch(TestCase):
         for dtype in dtypes:
             for rg in [True, False]:
                 int64_dtype = get_int64_dtype(dtype)
-                device = -1 if not (dtype.is_cuda and torch.cuda.device_count() > 1) else 1
                 v = torch.empty(shape, dtype=dtype, device=device, layout=layout, requires_grad=rg)
                 check_value(v, dtype, layout, device, None, rg)
                 out = v.new()
@@ -1576,10 +1565,10 @@ class TestTorch(TestCase):
                                 int64_dtype, layout, device, fv + 5, rg)
 
     def test_empty_full(self):
-        all_dtypes = torch.testing.get_all_dtypes()
-        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda]
-        cuda_dtypes = [d for d in all_dtypes if d.is_cuda]
-        self._test_empty_full(self, cpu_dtypes, cuda_dtypes, torch.strided)
+        self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
+        if torch.cuda.device_count() > 0:
+            self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, -1)
+            self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cuda:0'))
 
     def test_dtype_out_match(self):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
@@ -1606,9 +1595,9 @@ class TestTorch(TestCase):
         self.assertIs(torch.FloatStorage, torch.Storage)
 
         if torch.cuda.is_available():
-            torch.set_default_tensor_type(torch.cuda.float32)
-            self.assertIs(torch.cuda.float32, torch.get_default_dtype())
-            self.assertIs(torch.cuda.float32, torch.cuda.FloatTensor.dtype)
+            torch.set_default_tensor_type(torch.cuda.FloatTensor)
+            self.assertIs(torch.float32, torch.get_default_dtype())
+            self.assertIs(torch.float32, torch.cuda.FloatTensor.dtype)
             self.assertIs(torch.cuda.FloatStorage, torch.Storage)
 
         # don't support integral or sparse default types.
@@ -1686,8 +1675,22 @@ class TestTorch(TestCase):
         saved_dtype = torch.get_default_dtype()
         torch.set_default_tensor_type(torch.float32)
         self.assertIs(torch.float32, torch.tensor(0.).dtype)
-        torch.set_default_tensor_type(torch.cuda.float64)
-        self.assertIs(torch.cuda.float64, torch.tensor(0.).dtype)
+        self.assertEqual(torch.device('cpu'), torch.tensor(0.).device)
+        torch.set_default_tensor_type(torch.float64)
+        self.assertIs(torch.float64, torch.tensor(0.).dtype)
+        torch.set_default_tensor_type(saved_dtype)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_tensor_factory_cuda_type(self):
+        saved_dtype = torch.get_default_dtype()
+        torch.set_default_tensor_type(torch.cuda.FloatTensor)
+        x = torch.zeros((5, 5))
+        self.assertIs(torch.float32, x.dtype)
+        self.assertTrue(x.is_cuda)
+        torch.set_default_tensor_type(torch.cuda.DoubleTensor)
+        x = torch.zeros((5, 5))
+        self.assertIs(torch.float64, x.dtype)
+        self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_dtype)
 
     def test_new_tensor(self):
@@ -1721,23 +1724,23 @@ class TestTorch(TestCase):
             expected = expected.cuda(1)
             res1 = expected.new_tensor([1, 1])
             self.assertEqual(res1.get_device(), expected.get_device())
-            res1 = expected.new_tensor([1, 1], dtype=torch.cuda.int)
-            self.assertIs(torch.cuda.int, res1.dtype)
+            res1 = expected.new_tensor([1, 1], dtype=torch.int)
+            self.assertIs(torch.int, res1.dtype)
             self.assertEqual(res1.get_device(), expected.get_device())
 
             res2 = expected.new_tensor(expected)
             self.assertEqual(res2.get_device(), expected.get_device())
-            res2 = expected.new_tensor(expected, dtype=torch.cuda.int)
-            self.assertIs(torch.cuda.int, res1.dtype)
+            res2 = expected.new_tensor(expected, dtype=torch.int)
+            self.assertIs(torch.int, res1.dtype)
             self.assertEqual(res2.get_device(), expected.get_device())
-            res2 = expected.new_tensor(expected, dtype=torch.cuda.int, device=0)
-            self.assertIs(torch.cuda.int, res1.dtype)
+            res2 = expected.new_tensor(expected, dtype=torch.int, device=0)
+            self.assertIs(torch.int, res1.dtype)
             self.assertEqual(res2.get_device(), 0)
 
             res1 = expected.new_tensor(1)
             self.assertEqual(res1.get_device(), expected.get_device())
-            res1 = expected.new_tensor(1, dtype=torch.cuda.int)
-            self.assertIs(torch.cuda.int, res1.dtype)
+            res1 = expected.new_tensor(1, dtype=torch.int)
+            self.assertIs(torch.int, res1.dtype)
             self.assertEqual(res1.get_device(), expected.get_device())
 
     def test_diag(self):
@@ -1748,49 +1751,49 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
     @staticmethod
-    def _test_diagonal(self, dtype=torch.float32):
-        x = torch.randn((100, 100), dtype=dtype)
+    def _test_diagonal(self, dtype, device):
+        x = torch.randn((100, 100), dtype=dtype, device=device)
         result = torch.diagonal(x)
         expected = torch.diag(x)
         self.assertEqual(result, expected)
 
-        x = torch.randn((100, 100), dtype=dtype)
+        x = torch.randn((100, 100), dtype=dtype, device=device)
         result = torch.diagonal(x, 17)
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
 
     def test_diagonal(self):
-        self._test_diagonal(self, dtype=torch.float32)
+        self._test_diagonal(self, dtype=torch.float32, device='cpu')
 
     @staticmethod
-    def _test_diagflat(self, dtype=torch.float32):
+    def _test_diagflat(self, dtype, device):
         # Basic sanity test
-        x = torch.randn((100,), dtype=dtype)
+        x = torch.randn((100,), dtype=dtype, device=device)
         result = torch.diagflat(x)
         expected = torch.diag(x)
         self.assertEqual(result, expected)
 
         # Test offset
-        x = torch.randn((100,), dtype=dtype)
+        x = torch.randn((100,), dtype=dtype, device=device)
         result = torch.diagflat(x, 17)
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
 
         # Test where input has more than one dimension
-        x = torch.randn((2, 3, 4), dtype=dtype)
+        x = torch.randn((2, 3, 4), dtype=dtype, device=device)
         result = torch.diagflat(x)
         expected = torch.diag(x.contiguous().view(-1))
         self.assertEqual(result, expected)
 
         # Noncontig input
-        x = torch.randn((2, 3, 4), dtype=dtype).transpose(2, 0)
+        x = torch.randn((2, 3, 4), dtype=dtype, device=device).transpose(2, 0)
         self.assertFalse(x.is_contiguous())
         result = torch.diagflat(x)
         expected = torch.diag(x.contiguous().view(-1))
         self.assertEqual(result, expected)
 
     def test_diagflat(self):
-        self._test_diagflat(self, dtype=torch.float32)
+        self._test_diagflat(self, dtype=torch.float32, device='cpu')
 
     def test_eye(self):
         res1 = torch.eye(100, 100)
@@ -2667,13 +2670,11 @@ class TestTorch(TestCase):
     def _test_cat_empty(self, use_cuda=False):
         # FIXME: this is legacy behavior and should be removed
         # when we support empty tensors with arbitrary sizes
-        if use_cuda:
-            dtype = torch.cuda.float32
-        else:
-            dtype = torch.float32
+        dtype = torch.float32
+        device = 'cuda' if use_cuda else 'cpu'
 
-        x = torch.randn((4, 3, 32, 32), dtype=dtype)
-        empty = torch.randn((0,), dtype=dtype)
+        x = torch.randn((4, 3, 32, 32), dtype=dtype, device=device)
+        empty = torch.randn((0,), dtype=dtype, device=device)
 
         res1 = torch.cat([x, empty], dim=1)
         res2 = torch.cat([empty, x], dim=1)

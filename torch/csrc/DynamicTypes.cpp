@@ -33,8 +33,7 @@ static std::unordered_map<PyTypeObject*, at::Type*> py_storage_type_to_attype;
 
 static const int NumBoolOptions = 2;
 static THPDtype* dtype_registry
-  [static_cast<int>(at::ScalarType::NumOptions)]
-  [NumBoolOptions] = {};
+  [static_cast<int>(at::ScalarType::NumOptions)] = {};
 
 static THPLayout* layout_registry
   [static_cast<int>(at::Backend::NumOptions)] = {};
@@ -72,8 +71,8 @@ void registerStoragePyTypeObject(PyTypeObject *pytype, const std::string& name, 
   }
 }
 
-void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType, bool is_cuda) {
-  dtype_registry[static_cast<int>(scalarType)][is_cuda] = dtype;
+void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType) {
+  dtype_registry[static_cast<int>(scalarType)] = dtype;
 }
 
 void registerLayoutObject(THPLayout *layout, at::Backend backend) {
@@ -89,15 +88,16 @@ static PyTypeObject* getPyTypeObject(const at::Storage& storage)
   throw std::invalid_argument("unsupported Storage type");
 }
 
-at::Type& getType(const THPDtype &dtype, const THPLayout& layout) {
-  at::Backend backend = get_backend(dtype.is_cuda, !layout.is_strided);
+at::Type& getType(at::ScalarType scalarType, const THPLayout& layout, const DeviceType& deviceType) {
+  at::Backend backend = get_backend(deviceType == DeviceType::CUDA, !layout.is_strided);
   // use type_registry rather than context.getType() because getType throws exceptions.
   auto baseType = at::globalContext().type_registry[static_cast<int>(backend)]
-                                                   [static_cast<int>(dtype.scalar_type)].get();
+                                                   [static_cast<int>(scalarType)].get();
   if (!baseType) {
     std::ostringstream oss;
-    oss << "Error attempting to use dtype " << dtype.name << " with layout " << layout.name << ".";
-    if (!torch::utils::cuda_enabled()) {
+    oss << "Error attempting to use dtype " << getDtype(scalarType)->name << " with layout " << layout.name
+        << " and device type " << (deviceType == DeviceType::CPU ? "CPU" : "CUDA") << ".";
+    if (deviceType == DeviceType::CUDA && !torch::utils::cuda_enabled()) {
       oss << "  Torch not compiled with CUDA enabled." << std::endl;
     }
     throw std::runtime_error(oss.str());
@@ -105,10 +105,10 @@ at::Type& getType(const THPDtype &dtype, const THPLayout& layout) {
   return *torch::autograd::VariableType::getType(*baseType);
 }
 
-THPDtype* getDtype(at::ScalarType scalarType, bool is_cuda) {
-  auto dtype = dtype_registry[static_cast<int>(scalarType)][is_cuda];
+THPDtype* getDtype(at::ScalarType scalarType) {
+  auto dtype = dtype_registry[static_cast<int>(scalarType)];
   if (!dtype) {
-    throw std::invalid_argument("unsupported backend, scalarType");
+    throw std::invalid_argument("unsupported scalarType");
   }
   return dtype;
 }
@@ -119,6 +119,10 @@ THPLayout* getLayout(at::Backend backend) {
     throw std::invalid_argument("unsupported at::Backend");
   }
   return layout;
+}
+
+DeviceType getDeviceType(const at::Type& type) {
+  return type.is_cuda() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
 }
 
 PyObject* createPyObject(const at::Storage& storage)

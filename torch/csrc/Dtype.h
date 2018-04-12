@@ -8,7 +8,6 @@ const int DTYPE_NAME_LEN = 64;
 struct THPDtype {
   PyObject_HEAD
   at::ScalarType scalar_type;
-  bool is_cuda;
   char name[DTYPE_NAME_LEN + 1];
 };
 
@@ -18,6 +17,6 @@ inline bool THPDtype_Check(PyObject *obj) {
   return Py_TYPE(obj) == &THPDtypeType;
 }
 
-PyObject * THPDtype_New(at::ScalarType scalar_type, bool is_cuda, const std::string& name);
+PyObject * THPDtype_New(at::ScalarType scalar_type, const std::string& name);
 
 void THPDtype_init(PyObject *module);
