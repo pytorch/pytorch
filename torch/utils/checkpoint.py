@@ -42,18 +42,24 @@ class CheckpointFunction(torch.autograd.Function):
 def checkpoint(function, *args):
     r"""Checkpoint a model or part of the model
 
-    Checkpoint works by trading compute for memory. It can be applied on any
-    part of the model. In the forward pass, the model activations are not
-    stored. The forward pass save the inputs tuple and the :attr:`function`
-    parameter. In the backwards pass, the saved inputs and :attr:`function` is
-    retreived, and the forward pass is done on the model again (`non`-volatile
-    this time) since we need to get the activations values for calculating the
-    gradient and then the gradients are calculated.
+    Checkpointing works by trading compute for memory. Rather than storing all
+    intermediate activations of the entire computation graph for computing
+    backward, the checkpointed part does **not** save intermediate activations,
+    and instead computes them in backward pass of this particular part. It can
+    be applied on any part of a model.
+
+    Specifically, in the forward pass, :attr:`function` will run in
+    :func:`torch.no_grad` manner, i.e., not storing the intermediate
+    activations. Instead, the forward pass saves the inputs tuple and the
+    :attr:`function` parameter. In the backwards pass, the saved inputs and
+    :attr:`function` is retreived, and the forward pass is computed on
+    :attr:`function` again, now tracking the intermediate activations, and then
+    the gradients are calculated using these activation values.
 
     .. warning::
 
-        Checkpointing doesn't work with :func:`torch.autograd.grad()`, but only
-        with :func:`torch.autograd.backward()`.
+        Checkpointing doesn't work with :func:`torch.autograd.grad`, but only
+        with :func:`torch.autograd.backward`.
 
     Args:
         function: describes what to run in the forward pass of the model or
@@ -73,17 +79,19 @@ def checkpoint_sequential(functions, segments, *inputs):
     r"""A helper function for checkpointing Sequential based models.
 
     For models that are constructed using :class:`torch.nn.Sequential`, they
-    normally are built using various modules/functions. For such models, given a
-    list of modules/functions it executes in order (sequentially), we can divide
-    the model in various segments and checkpoint the segments. All segments
-    except the last will be run in `volatile` manner i.e. the model activations
-    are not stored. The inputs of each checkpointed segment will be saved for
-    re-running the segment in the backward pass.
+    normally are built using various modules/functions. Such models executes a
+    list of modules/functions in order (sequentially). Therefore, we can divide
+    the model in various segments and checkpoint each segment. All segments
+    except the last will run in :func:`torch.no_grad` manner, i.e., not storing
+    the intermediate activations. The inputs of each checkpointed segment will
+    be saved for re-running the segment in the backward pass.
+
+    See :func:`~torch.utils.checkpoint.checkpoint` on how checkpointing works.
 
     .. warning::
 
-        Checkpointing doesn't work with :func:`torch.autograd.grad()`, but only
-        with :func:`torch.autograd.backward()`.
+        Checkpointing doesn't work with :func:`torch.autograd.grad`, but only
+        with :func:`torch.autograd.backward`.
 
     Args:
         functions: A :class:`torch.nn.Sequential` or the list of modules or
