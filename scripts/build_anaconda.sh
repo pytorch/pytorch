@@ -149,10 +149,10 @@ fi
 
 ###########################################################
 # Set the build version
-export CAFFE2_BUILD_VERSION='0.8.dev'
-export PYTORCH_BUILD_VERSION="$(date +"%Y.%m.%d")"
 if [[ -n $BUILD_INTEGRATED ]]; then
-  export CAFFE2_BUILD_VERSION=$PYTORCH_BUILD_VERSION
+  export PYTORCH_BUILD_VERSION="$(date +"%Y.%m.%d")"
+else
+  export PYTORCH_BUILD_VERSION="0.8.dev.$(date +"%Y.%m.%d")"
 fi
 
 

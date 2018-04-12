@@ -1,7 +1,7 @@
 
 package:
   name: caffe2
-  version: {{ environ.get('CAFFE2_BUILD_VERSION') }}-{{ environ.get('PYTORCH_BUILD_VERSION') }}
+  version: {{ environ.get('PYTORCH_BUILD_VERSION') }}
 
 source:
   path: ../../..
@@ -13,8 +13,6 @@ build:
   script_env:
     - CONDA_CAFFE2_CMAKE_ARGS
     - PACKAGE_CUDA_LIBS
-    - CUDA_VERSION
-    - CUDNN_VERSION
   # features section here
 
 requirements:
