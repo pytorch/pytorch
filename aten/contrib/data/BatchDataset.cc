@@ -27,7 +27,7 @@ void BatchDataset::getField(uint64_t idx, std::string& fieldkey, at::Tensor& fie
    // loop over samples:
    Tensor singlefield, buffer;
    uint64_t maxsize = std::min(batchsize_, size_ - idx * batchsize_);
-   for(int n = 0; n < maxsize; n++) {
+   for(uint64_t n = 0; n < maxsize; n++) {
 
       // get sample:
       uint64_t batchidx = idx * batchsize_ + n;
@@ -39,7 +39,7 @@ void BatchDataset::getField(uint64_t idx, std::string& fieldkey, at::Tensor& fie
          // determine size of batch:
          std::vector<int64_t> fieldsize;
          fieldsize.push_back(maxsize);
-         for(uint64_t d = 0; d < singlefield.dim(); ++d) {
+         for(long d = 0; d < singlefield.dim(); ++d) {
             fieldsize.push_back(singlefield.size(d));
          }
 
