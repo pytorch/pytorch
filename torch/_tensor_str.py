@@ -104,10 +104,6 @@ def _number_format(tensor, min_sz=-1):
     scale = 1
     exp_max = int(exp_max)
     prec = PRINT_OPTS.precision
-
-    scale = 1
-    exp_max = int(exp_max)
-    prec = PRINT_OPTS.precision
     if int_mode:
         if exp_max > prec + 1:
             format = '{{:11.{}e}}'.format(prec)
