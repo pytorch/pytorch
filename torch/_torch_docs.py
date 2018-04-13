@@ -1753,13 +1753,19 @@ Example::
 
 add_docstr(torch.from_numpy,
            r"""
-from_numpy(ndarray) -> Tensor
+from_numpy(ndarray, requires_grad=False) -> Tensor
 
 Creates a :class:`Tensor` from a :class:`numpy.ndarray`.
 
-The returned tensor and `ndarray` share the same memory. Modifications to the
-tensor will be reflected in the `ndarray` and vice versa. The returned tensor
-is not resizable.
+The returned tensor and :attr:`ndarray` share the same memory. Modifications to
+the tensor will be reflected in the `ndarray` and vice versa. The returned
+tensor is not resizable.
+
+Args:
+   ndarray (:class:`numpy.ndarray`): The NumPy :class:`numpy.ndarray` to be
+       converted to a tensor.
+   requires_grad (bool, optional): If autograd should record operations on the
+       returned tensor. Default: False.
 
 Example::
 
