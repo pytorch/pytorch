@@ -5732,7 +5732,9 @@ Args:
     layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
         Default: :class:`torch.strided`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
 
