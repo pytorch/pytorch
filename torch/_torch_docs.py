@@ -5728,13 +5728,11 @@ Args:
     size (int...): a tuple of integers defining the shape of the output tensor.
     out (Tensor, optional): the output tensor
     dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
-        Default: if None, defaults to the default tensor dtype (:class:`torch.float32`).
-        The default can be changed through :func:`torch.set_default_tensor_type`.
+        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
     layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
         Default: :class:`torch.strided`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, defaults to the default tensor device (``torch.device('cpu')``).
-        The default can be changed through :func:`torch.set_default_tensor_type`.
+        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
 
