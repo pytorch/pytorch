@@ -148,6 +148,7 @@ def set_default_tensor_type(t):
         t = _import_dotted_name(t)
     _C._set_default_tensor_type(t)
 
+
 def set_default_dtype(d):
     r"""Sets the default ``torch.dtype`` type to type :attr:`d`.
 
