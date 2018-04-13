@@ -1523,7 +1523,7 @@ class TestTorch(TestCase):
         self.assertIs(torch.float32, a.to(dtype=torch.float32).dtype)
 
         if torch.cuda.is_available():
-            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 0 else 'cuda:1']:
+            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
                 b = torch.tensor(5., device=cuda)
                 self.assertEqual(b.device, b.to(cuda).device)
                 self.assertEqual(a.device, b.to('cpu').device)
