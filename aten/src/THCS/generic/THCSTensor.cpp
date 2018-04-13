@@ -98,7 +98,7 @@ THCSTensor* THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI,
 // directly assign without cloning or retaining (internal method)
 THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
   int empty = THCTensor_(nDimension)(state, values) == 0;
-  if (!empty) { 
+  if (!empty) {
     THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 2, 2,
         "indices must be nDim x nnz");
     THArgCheck(THCIndexTensor_(size)(state, indices, 1) == THCTensor_(size)(state, values, 0), 2,
