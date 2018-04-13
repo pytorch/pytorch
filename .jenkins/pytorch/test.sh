@@ -43,6 +43,7 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
    CPP_BUILD="$PWD/../cpp-build"
    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
      "$CPP_BUILD"/libtorch/bin/test_jit
+     "$CPP_BUILD"/libtorch/bin/test_rng
    else
      "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
    fi
