@@ -37,8 +37,8 @@ bool loadPythonClasses() {
 }
 
 template<void (*F)(std::shared_ptr<Graph>& graph)>
-void graph_pass(const std::shared_ptr<tracer::TracingState>& state) {
-  return F(state->graph);
+void graph_pass(std::shared_ptr<Graph>& graph) {
+  return F(graph);
 }
 
 // we cannot use the default py:cast<autograd::Variable> because it currently
