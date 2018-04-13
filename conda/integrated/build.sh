@@ -94,8 +94,7 @@ fname_with_sha256() {
 full_path_to_dependency() {
   local _DEP="$(find $SP_DIR/torch/ -name "${1}*.so*" -maxdepth 1)"
   local _TAR="lib${2}.so"
-  DEPS_SO_PATHS+=($(ldd $_DEP| grep -oP '(?<='$_TAR'\S* => )\S+'$_TAR'\S*'))
-  echo $DEPS_SO_PATHS
+  echo $(ldd $_DEP | grep -oP '(?<= => )\S+'$_TAR'\S*')
 }
 
 # These are all the CUDA related libaries needed by Pytorch and Caffe2 that are
