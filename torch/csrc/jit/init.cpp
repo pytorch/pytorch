@@ -36,11 +36,6 @@ bool loadPythonClasses() {
   return true;
 }
 
-template<void (*F)(std::shared_ptr<Graph>& graph)>
-void graph_pass(std::shared_ptr<Graph>& graph) {
-  return F(graph);
-}
-
 // we cannot use the default py:cast<autograd::Variable> because it currently
 // unwraps the data tensor in the conversion process
 // TODO: replace with bs type
@@ -65,15 +60,17 @@ void initJITBindings(PyObject *module) {
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
    .def("_jit_pass_onnx_from_graph", ToONNXFromGraph)
-   .def("_jit_pass_onnx_peephole", graph_pass<PeepholeOptimizeONNX>)
-   .def("_jit_pass_fuse", graph_pass<FuseGraph>)
-   .def("_jit_pass_dce", graph_pass<EliminateDeadCode>)
-   .def("_jit_pass_cse", graph_pass<EliminateCommonSubexpression>)
-   .def("_jit_pass_peephole", graph_pass<PeepholeOptimize>)
+   .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+   .def("_jit_pass_fuse", FuseGraph)
+   .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g){
+     return EliminateDeadCode(g); // overload resolution
+   })
+   .def("_jit_pass_cse", EliminateCommonSubexpression)
+   .def("_jit_pass_peephole", PeepholeOptimize)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })
-   .def("_jit_pass_lint", graph_pass<LintGraph>)
+   .def("_jit_pass_lint", LintGraph)
    .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
      auto tensor_inputs = createVariableTensorList(inputs);
      PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
