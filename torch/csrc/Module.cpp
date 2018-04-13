@@ -128,6 +128,14 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THPModule_setDefaultDtype(PyObject *_unused, PyObject *dtype)
+{
+  HANDLE_TH_ERRORS
+  torch::tensor::py_set_default_dtype(dtype);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPModule_safeCall(PyObject *_unused, PyObject *args, PyObject *kwargs)
 {
   PyObject *result = NULL;
@@ -345,6 +353,7 @@ static PyMethodDef TorchMethods[] = {
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  NULL},
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
+  {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
