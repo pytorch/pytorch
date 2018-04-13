@@ -13,7 +13,7 @@ typedef struct THCGeneratorState {
 
 struct THCGenerator {
   std::mutex mutex; /* mutex for using this generator */
-  THCGeneratorState gen_state;
+  THCGeneratorState state;
 };
 
 #endif
