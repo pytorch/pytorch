@@ -64,7 +64,7 @@ string FormatDoc() {
   return doc;
 }
 
-//  Helper function to enforce naming conventions at compile time.
+// Helper function to enforce naming conventions at compile time.
 constexpr bool equal(
     char const* lhs,
     char const* rhs1,
