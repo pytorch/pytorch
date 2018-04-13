@@ -4220,6 +4220,28 @@ Example::
 
 """)
 
+add_docstr(torch.randn_like,
+           r"""
+randn_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+
+Returns a tensor with the same size as :attr:`input` that is filled with
+random numbers from a normal distribution with mean 0 and variance 1.
+``torch.randn_like(input)`` is equivalent to
+``torch.randn(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+Args:
+    input (Tensor): the size of :attr:`input` will determine size of the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
+        Default: if None, defaults to the dtype of :attr:`input`.
+    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
+        Default: if None, defaults to the layout of :attr:`input`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, defaults to the device of :attr:`input`.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: False.
+""")
+
+
 add_docstr(torch.randperm,
            r"""
 randperm(n, out=None) -> LongTensor

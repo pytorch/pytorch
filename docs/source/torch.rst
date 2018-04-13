@@ -59,6 +59,7 @@ Random sampling
 .. autofunction:: rand
 .. autofunction:: randint
 .. autofunction:: randn
+.. autofunction:: randn_like
 .. autofunction:: randperm
 
 In-place random sampling
