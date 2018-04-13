@@ -99,9 +99,9 @@ full_path_to_dependency() {
 
 # These are all the CUDA related libaries needed by Pytorch and Caffe2 that are
 # not statically linked
-DEPS_SO_PATHS=()
-DEPS_SO_PATHS+=($(full_path_to_dependency '_C' 'nvToolsExt'))
-DEPS_DO_PATHS+=($(full_path_to_dependency '_nvrtc' 'nvrtc'))
+DEPS_SOPATHS=()
+DEPS_SOPATHS+=($(full_path_to_dependency '_C' 'nvToolsExt'))
+DEPS_SOPATHS+=($(full_path_to_dependency '_nvrtc' 'nvrtc'))
 # TODO add nvrtc-builtins too, but that doesn't show up in ldd or in patchelf
 
 # Loop through .so, adding hashes and copying them to site-packages
