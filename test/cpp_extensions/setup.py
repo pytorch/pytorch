@@ -20,13 +20,6 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
 
-    ext_modules.append(
-        CUDAExtension(
-            'torch_test_rng', ['rng.cpp'],
-            extra_compile_args={'cxx': ['-g'], 'nvcc': ['-O2']}
-        )
-    )
-
 setup(
     name='torch_test_cpp_extension',
     ext_modules=ext_modules,
