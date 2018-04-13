@@ -17,10 +17,10 @@ class DistributedDataParallelCPU(Module):
     handles a portion of the input. During the backwards pass, gradients from
     each node are averaged.
 
-    This module should be used in conjunction with the DistributedSampler,
+    This module could be used in conjunction with the DistributedSampler,
     (see :class `torch.utils.data.distributed.DistributedSampler`)
     which will load a subset of the original datset for each node with the same
-    batch size. So weak scaling should be configed like this:
+    batch size. So strong scaling should be configured like this:
         n = 1, batch size = 128
         n = 2, batch size = 64
         n = 4, batch size = 32
@@ -33,7 +33,7 @@ class DistributedDataParallelCPU(Module):
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
         function of the output of this module) is a distributed synchronization
-        point. Take that into account in case different processes might be
+        point. Take that into account in case different node might be
         executing different code.
 
     .. warning::
@@ -51,7 +51,7 @@ class DistributedDataParallelCPU(Module):
     .. note::
         Parameters are broadcast between nodes in the __init__() function. The
         module performs an all-reduce step on gradients and assumes that they
-        will be modified by the optimizer in all processes in the same way.
+        will be modified by the optimizer in all nodes in the same way.
 
     .. warning::
         Forward and backward hooks defined on :attr:`module` and its submodules
