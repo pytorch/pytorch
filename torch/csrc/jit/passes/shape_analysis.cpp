@@ -16,7 +16,11 @@ struct propagation_error : std::exception {};
 namespace {
 void setDynamicType(Node * node) {
   for(auto o : node->outputs()) {
-    o->setType(DynamicType::get());
+    // Inference of Handle types is pretty hard, and we always set them correctly
+    // when tracing, so never overwrite this information!
+    if (o->type()->kind() != TypeKind::HandleType) {
+      o->setType(DynamicType::get());
+    }
   }
 }
 

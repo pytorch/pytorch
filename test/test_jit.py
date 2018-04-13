@@ -545,6 +545,26 @@ class TestJit(TestCase):
         torch._C._tracer_exit((y,))
         self.assertExpectedTrace(trace)
 
+    def test_python_function(self):
+
+        class MyLegacyFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        @torch.jit.trace(torch.zeros(2))
+        def fn(x):
+            return MyLegacyFn.apply(x + 2) + 3
+
+        x = torch.tensor([1., 2., 3.])
+        y = torch.randn(2, 2, requires_grad=True)
+        fn(x)
+        fn(y)
+
     def test_legacy_fail(self):
 
         class MyLegacyFn(Function):
