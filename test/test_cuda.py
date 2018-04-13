@@ -1500,6 +1500,18 @@ class TestCuda(TestCase):
         test(True)
         test(False)
 
+        # Test float32 behavior near and at poles.
+        cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
+                                  -100.99999994, -1931.99999994, 0.000000111,
+                                  -0.000000111, 0, -1, -2, -931])
+        nan = float('nan')
+        expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan])
+        gpu_tensor = cpu_tensor.cuda()
+        cpu_out = cpu_tensor.digamma()
+        gpu_out = gpu_tensor.digamma()
+        norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
+        self.assertEqual(norm_errors, expected_errors)
+
     def test_polygamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
