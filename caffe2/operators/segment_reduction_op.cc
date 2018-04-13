@@ -92,14 +92,14 @@ constexpr bool equal(
           __VA_ARGS__::OpDef::name,                                          \
           "Gradient"),                                                       \
       gradient_name);                                                        \
-  OPERATOR_SCHEMA_STR(string(segment_name))                                  \
+  OPERATOR_SCHEMA(segment_name)                                  \
       .NumInputs(__VA_ARGS__::ForwardOp::kNumInputs)                         \
       .NumOutputs(1)                                                         \
       .SetDoc(FormatDoc<__VA_ARGS__>())                                      \
       .Output(0, "OUTPUT", "Aggregated tensor")                              \
       .FillUsing(__VA_ARGS__::PopulateSchema);                               \
   REGISTER_CPU_OPERATOR_STR(string(gradient_name), __VA_ARGS__::BackwardOp); \
-  OPERATOR_SCHEMA_STR(string(gradient_name))                                 \
+  OPERATOR_SCHEMA(gradient_name)                                 \
       .NumInputs(__VA_ARGS__::BackwardOp::kNumInputs)                        \
       .NumOutputs(1);                                                        \
   REGISTER_GRADIENT_STR(string(segment_name), __VA_ARGS__::GetGradient)
@@ -255,7 +255,7 @@ REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
       gradient_name);                                               \
   REGISTER_CPU_OPERATOR_STR(                                        \
       string(gradient_name), __VA_ARGS__::WithMainInputBackwardOp); \
-  OPERATOR_SCHEMA_STR(string(gradient_name))                        \
+  OPERATOR_SCHEMA(gradient_name)                        \
       .NumInputs(__VA_ARGS__::WithMainInputBackwardOp::kNumInputs)  \
       .NumOutputs(1, INT_MAX)
 
@@ -279,7 +279,7 @@ REGISTER_GRADIENT_WITH_MAIN_INPUT(
   REGISTER_CPU_OPERATOR_STR(                                                \
       string(gradient_name),                                                \
       __VA_ARGS__::WithMainInputAndForwardOutputBackwardOp);                \
-  OPERATOR_SCHEMA_STR(string(gradient_name))                                \
+  OPERATOR_SCHEMA(gradient_name)                                \
       .NumInputs(                                                           \
           __VA_ARGS__::WithMainInputAndForwardOutputBackwardOp::kNumInputs) \
       .NumOutputs(1, INT_MAX)
@@ -289,7 +289,7 @@ REGISTER_GRADIENT_WITH_MAIN_INPUT(
   static_assert(                                                            \
       equal(segment_name, __VA_ARGS__::basename, __VA_ARGS__::OpDef::name), \
       gradient_name);                                                       \
-  OPERATOR_SCHEMA_STR(string(segment_name))                                 \
+  OPERATOR_SCHEMA(segment_name)                                 \
       .NumInputs(__VA_ARGS__::ForwardOp::kNumInputs)                        \
       .NumOutputs(1)                                                        \
       .SetDoc(FormatDoc<__VA_ARGS__>())                                     \
