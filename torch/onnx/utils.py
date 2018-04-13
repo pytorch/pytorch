@@ -84,22 +84,23 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
     _export(model, args, f, export_params, verbose, training, input_names, output_names)
 
 
-def _optimize_trace(trace, aten):
+def _optimize_graph(graph, aten):
     # run dce first to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
-    torch._C._jit_pass_dce(trace.graph())
-    torch._C._jit_pass_lint(trace.graph())
+    torch._C._jit_pass_dce(graph)
+    torch._C._jit_pass_lint(graph)
 
-    torch._C._jit_pass_peephole(trace.graph())
-    torch._C._jit_pass_lint(trace.graph())
-    trace.set_graph(torch._C._jit_pass_onnx(trace.graph(), aten))
-    torch._C._jit_pass_lint(trace.graph())
-    torch._C._jit_pass_onnx_peephole(trace.graph())
-    torch._C._jit_pass_lint(trace.graph())
-    torch._C._jit_pass_dce(trace.graph())
-    torch._C._jit_pass_lint(trace.graph())
-    trace.set_graph(torch._C._jit_pass_canonicalize(trace.graph()))
-    torch._C._jit_pass_lint(trace.graph())
+    torch._C._jit_pass_peephole(graph)
+    torch._C._jit_pass_lint(graph)
+    graph = torch._C._jit_pass_onnx(graph, aten)
+    torch._C._jit_pass_lint(graph)
+    torch._C._jit_pass_onnx_peephole(graph)
+    torch._C._jit_pass_lint(graph)
+    torch._C._jit_pass_dce(graph)
+    torch._C._jit_pass_lint(graph)
+    graph = torch._C._jit_pass_canonicalize(graph)
+    torch._C._jit_pass_lint(graph)
+    return graph
 
 
 def _trace(func, args, return_outs=False, aten=False):
@@ -108,7 +109,7 @@ def _trace(func, args, return_outs=False, aten=False):
         args = (args, )
 
     trace, torch_out = torch.jit.get_trace_graph(func, args)
-    _optimize_trace(trace, aten)
+    trace.set_graph(_optimize_graph(trace.graph(), aten))
     if return_outs:
         return trace, torch_out
     return trace
@@ -136,7 +137,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
-    _optimize_trace(trace, aten)
+    trace.set_graph(_optimize_graph(trace.graph(), aten))
 
     _set_input_and_output_names(trace.graph(), input_names, output_names)
 
