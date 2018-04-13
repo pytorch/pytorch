@@ -51,6 +51,7 @@ void compare(
     int group,
     const std::string& algorithm,
     const std::string& convolutionTransformStrategy,
+    const std::string& activation,
     float maxRelErr,
     float absErrForRelErrFailure) {
   LOG(INFO) << "running N " << N << " inputC " << inputC << " H " << H << " W "
@@ -79,6 +80,10 @@ void compare(
   if (!convolutionTransformStrategy.empty()) {
     nnpackOpDef.add_arg()->CopyFrom(MakeArgument(
         "convolution_transform_strategy", convolutionTransformStrategy));
+  }
+  if (!activation.empty()) {
+    nnpackOpDef.add_arg()->CopyFrom(MakeArgument(
+        "activation", activation));
   }
   nnpackOpDef.add_arg()->CopyFrom(MakeArgument("stride_h", strideH));
   nnpackOpDef.add_arg()->CopyFrom(MakeArgument("stride_w", strideW));
@@ -117,6 +122,18 @@ void compare(
   unique_ptr<OperatorBase> referenceOp(CreateOperator(referenceOpDef, &ws));
   EXPECT_NE(nullptr, referenceOp.get());
 
+  unique_ptr<OperatorBase> activationOp;
+  if (activation == "ReLU") {
+    OperatorDef activationOpDef;
+    activationOpDef.set_name("activation");
+    activationOpDef.set_type("Relu");
+    activationOpDef.add_input("Y_reference");
+    activationOpDef.add_output("Y_reference");
+    activationOp = CreateOperator(activationOpDef, &ws);
+    EXPECT_NE(nullptr, activationOp.get());
+  }
+
+
   for (auto i = 0; i < 10; ++i) {
     EXPECT_TRUE(nnpackOp->Run());
   }
@@ -126,6 +143,9 @@ void compare(
 
   for (auto i = 0; i < 10; ++i) {
     EXPECT_TRUE(referenceOp->Run());
+    if (activationOp) {
+      EXPECT_TRUE(activationOp->Run());
+    }
   }
 
   Blob* referenceOutputBlob = ws.GetBlob("Y_reference");
@@ -185,7 +205,8 @@ void runConv(
     int planesIn = randInt(1, 6),
     int planesOut = randInt(1, 6),
     int n = randInt(1, 2),
-    std::string convolutionTransformStrategy = "COMPUTE") {
+    std::string convolutionTransformStrategy = "COMPUTE",
+    std::string activation = "identity") {
   int h = randInt(20, 100);
   int w = randInt(20, 100);
   // This pad restriction is imposed by NNPACK
@@ -211,6 +232,7 @@ void runConv(
       group,
       algo,
       convolutionTransformStrategy,
+      activation,
       0.05f,
       0.1f);
 }
@@ -285,6 +307,17 @@ TEST(NNPACK, Conv_1x1s1) {
   }
 }
 
+TEST(NNPACK, ConvRelu_1x1s1) {
+  for (int i = 0; i < kIters; ++i) {
+    auto group = randInt(1, 3);
+    auto inChannels = randInt(1, 8) * group;
+    auto outChannels = randInt(1, 8) * group;
+    auto n = 1;
+    runConv(
+        1, 1, 1, 1, group, "DIRECT", inChannels, outChannels, n, "PRECOMPUTE", "ReLU");
+  }
+}
+
 TEST(NNPACK, Conv_1x1s1_precompute) {
   for (int i = 0; i < kIters; ++i) {
     auto group = randInt(1, 3);
@@ -323,6 +356,14 @@ TEST(NNPACK, Conv_NxNsW) {
     int kernel = randInt(3, 5);
     int stride = randInt(1, kernel - 1);
     runConv(kernel, kernel, stride, stride);
+  }
+}
+
+TEST(NNPACK, ConvRelu_NxNsW) {
+  for (int i = 0; i < 3; ++i) {
+    int kernel = randInt(3, 5);
+    int stride = randInt(1, kernel - 1);
+    runConv(kernel, kernel, stride, stride, 1, "", 1, 1, 1, "COMPUTE", "ReLU");
   }
 }
 

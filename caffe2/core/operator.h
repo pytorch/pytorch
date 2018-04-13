@@ -276,8 +276,7 @@ class OperatorBase : public Observable<OperatorBase> {
   }
 
   const std::string& type() const {
-    CAFFE_ENFORCE(operator_def_.get() != nullptr);
-    return operator_def_->type();
+    return type_;
   }
 
   void annotate_engine(const std::string& engine) {
@@ -304,6 +303,7 @@ class OperatorBase : public Observable<OperatorBase> {
   std::shared_ptr<const OperatorDef> operator_def_;
   DeviceOption device_option_;
   std::string engine_;
+  std::string type_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
 
@@ -845,13 +845,17 @@ void SetOpEnginePref(
 
 TensorShape GetTensorShapeOfBlob(const Blob* b);
 
+TensorShapes InferBlobShapesAndTypes(
+    CaffeMap<string, TensorShape>& blob_desc,
+    const vector<NetDef*>& nets);
+
 TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
-    const vector<std::unique_ptr<NetDef>>& nets);
+    const vector<NetDef*>& nets);
 
 TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
-    const vector<std::unique_ptr<NetDef>>& nets);
+    const vector<NetDef*>& nets);
 
 std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
     OperatorBase& op,

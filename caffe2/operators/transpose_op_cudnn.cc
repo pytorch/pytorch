@@ -94,11 +94,11 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
     if (typedesc == CUDNN_DATA_INT32) {
       // CUDNN Transpose only support float for now
       math::Transpose<int, CUDAContext>(
+          input.size(),
           axes_.size(),
           x_dims_device_.template data<int>(),
           y_dims_device_.template data<int>(),
           axes_device_.template data<int>(),
-          input.size(),
           input.template data<int>(),
           output->template mutable_data<int>(),
           &context_);

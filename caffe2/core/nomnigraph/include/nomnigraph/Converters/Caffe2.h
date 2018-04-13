@@ -14,7 +14,8 @@ namespace converters {
 
 repr::NNModule convertFromCaffe2Proto(const caffe2::NetDef &net, std::unordered_map<std::string, repr::NNGraph::NodeRef>* blobMapOut = nullptr);
 caffe2::NetDef convertToCaffe2Proto(repr::NNModule&);
-
+std::unique_ptr<repr::NeuralNetOperator> convertOperator(
+    caffe2::OperatorDef op);
 } // namespace converters
 } // namespace nom
 

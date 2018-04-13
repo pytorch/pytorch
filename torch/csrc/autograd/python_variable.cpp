@@ -1,6 +1,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 
 #include "THP.h"
+#include "torch/csrc/Device.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
@@ -27,6 +28,7 @@
 #include <list>
 #include <memory>
 #include <structmember.h>
+#include <sstream>
 
 using namespace at;
 using namespace torch;
@@ -376,7 +378,7 @@ PyObject *THPVariable_dtype(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getDtype(self_.type().scalarType(), self_.type().is_cuda()));
+  return torch::autograd::utils::wrap(torch::getDtype(self_.type().scalarType()));
   END_HANDLE_TH_ERRORS
 }
 
@@ -384,6 +386,20 @@ static PyObject * THPVariable_layout(THPVariable* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
   return torch::autograd::utils::wrap(torch::getLayout(self_.type().backend()));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_device(THPVariable* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  if (self_.type().is_cuda()) {
+    torch::Device device(torch::DeviceType::CUDA, self_.get_device(), false);
+    return THPDevice_New(device);
+  }
+  else {
+    torch::Device device(torch::DeviceType::CPU, -1, true);
+    return THPDevice_New(device);
+  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -407,6 +423,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, NULL, NULL, NULL},
   {"layout", (getter)THPVariable_layout, NULL, NULL, NULL},
+  {"device", (getter)THPVariable_device, NULL, NULL, NULL},
   {nullptr}
 };
 

@@ -9,6 +9,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from mock import Mock
 from hypothesis import assume, given
 import hypothesis.strategies as st
 
@@ -300,9 +301,7 @@ class DataParallelModelTest(TestCase):
         workspace.CreateNet(model.net)
         workspace.RunNet(model.net)
 
-
     def test_synchronization_barrier(self):
-
         def run(comm_rank, comm_size, tmpdir):
             def add_input_ops(model):
                 pass
@@ -355,6 +354,41 @@ class DataParallelModelTest(TestCase):
         with self.assertRaises(AssertionError):
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
                 data_parallel_model.Parallelize_GPU(None, None, None)
+
+    def test_net_transformer_function(self):
+        devices = [1, 2, 3]
+
+        def add_input_ops(model):
+            model.param_init_net.UniformFill([], ["data"], shape=[32, 8])
+
+        def add_optimizer(model):
+            optimizer.build_sgd(model, 0.1)
+
+        def add_model_ops(model, loss_scale):
+            fc1 = brew.fc(model, "data", "fc1", dim_in=8, dim_out=8)
+            return [fc1]
+
+        kwargs = {
+            'input_builder_fun': add_input_ops,
+            'forward_pass_builder_fun': add_model_ops,
+            'devices': devices,
+        }
+
+        # assert that the transformer is called for both train and test cases
+        transform = Mock()
+        kwargs['net_transformer_fun'] = transform
+        model = model_helper.ModelHelper(name="r", init_params=False)
+        data_parallel_model.Parallelize_CPU(model, **kwargs)
+        self.assertTrue(transform.called)
+        self.assertEqual(transform.call_count, 1)
+
+        transform = Mock()
+        kwargs['net_transformer_fun'] = transform
+        kwargs['optimizer_builder_fun'] = add_optimizer
+        model = model_helper.ModelHelper(name="r", init_params=True)
+        data_parallel_model.Parallelize_CPU(model, **kwargs)
+        self.assertTrue(transform.called)
+        self.assertEqual(transform.call_count, 1)
 
 
 class RecurrentNetworkParallelTest(TestCase):

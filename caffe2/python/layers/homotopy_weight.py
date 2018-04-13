@@ -12,9 +12,11 @@ import numpy as np
 import logging
 logger = logging.getLogger(__name__)
 '''
-Homotopy Weighting between two weights x, y by doing: alpha x + (1-alpha) y
-where x is a decreasing scalar parameter ranging from [min, max] (default, [0,
-1]);
+Homotopy Weighting between two weights x, y by doing:
+    alpha x + beta y
+where alpha is a decreasing scalar parameter ranging from [min, max] (default,
+[0, 1]), and alpha + beta = max + min, which means that beta is increasing in
+the range [min, max];
 
 Homotopy methods first solves an "easy" problem (one to which the solution is
 well known), and is gradually transformed into the target problem
@@ -112,8 +114,8 @@ class HomotopyWeight(ModelLayer):
         net.Sub([self.model.global_constants['ONE'], lr], [comp_lr])
         net.Scale([lr], [scaled_lr], scale=self.scale)
         net.Scale([comp_lr], [scaled_comp_lr], scale=self.scale)
-        net.Add([lr, self.offset], [alpha])
-        net.Add([comp_lr, self.offset], beta)
+        net.Add([scaled_lr, self.offset], [alpha])
+        net.Add([scaled_comp_lr, self.offset], [beta])
         return alpha, beta
 
     def add_ops(self, net):

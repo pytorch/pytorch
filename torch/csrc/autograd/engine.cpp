@@ -38,6 +38,11 @@ static constexpr int NO_DEVICE = -2;
 // handling reentrant backwards calls; see Note [Reentrant backwards]
 static thread_local int worker_device = NO_DEVICE;
 
+// This variable is true if ALL invocations in the stack of re-entrant engine
+// invocations are imperative backwards. This special variable is needed for the
+// gradient checkpointing feature only.
+static thread_local bool checkpoint_valid = true;
+
 // XXX: Changes to the way multithreading works in execute should be done with
 // great care. Right now the implementation guarantees that a single function's
 // apply will never be entered concurrently (even if multiple graphs are
@@ -146,6 +151,7 @@ struct GraphTask {
   // run in a "default" mode, which means that all next_edges we encounter should
   // get executed. If it's not empty, only functions that have an entry and this entry
   // has needed == True should be executed.
+  // exec_info.empty() means it's .backward(), otherwise it's .grad().
   std::unordered_map<Function*, ExecInfo> exec_info;
   std::vector<Variable> captured_vars;
 
@@ -154,6 +160,10 @@ struct GraphTask {
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
   int owner;
+
+  bool can_checkpoint() {
+    return exec_info.empty();
+  }
 
   GraphTask(bool keep_graph, bool grad_mode)
     : exception()
@@ -278,6 +288,8 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, variab
 }
 
 static variable_list call_function(FunctionTask& task) {
+  bool prev_checkpoint_valid_state = checkpoint_valid;
+  checkpoint_valid = task.base->can_checkpoint() && prev_checkpoint_valid_state;
   auto& fn = *task.fn;
   auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
 
@@ -285,7 +297,7 @@ static variable_list call_function(FunctionTask& task) {
     fn.will_release_variables();
   }
   auto outputs = fn(inputs);
-
+  checkpoint_valid = prev_checkpoint_valid_state;
   return call_post_hooks(fn, std::move(outputs), std::move(inputs));
 }
 
@@ -476,6 +488,10 @@ void Engine::queue_callback(std::function<void()> callback) {
   final_callbacks.emplace_back(std::move(callback));
 }
 
+bool Engine::is_checkpoint_valid() {
+  return checkpoint_valid;
+}
+
 auto Engine::ready_queue(int device) -> ReadyQueue& {
   return *ready_queues.at(device + 1);
 }
@@ -563,6 +579,5 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
     }
   }
 }
-
 
 }} // namespace torch::autograd

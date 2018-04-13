@@ -312,15 +312,19 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "cuda(int64_t? device=-1, bool non_blocking=False)",
-    "cuda(int64_t? device=-1, bool async=False)|deprecated"
+    "cuda(Device? device=None, bool non_blocking=False)",
+    "cuda(Device? device=None, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
   auto& type = self_.type().toBackend(backend);
-  auto device = r.toInt64(0);
+  auto device_obj = r.device(0);
+  if (!r.isNone(0) && device_obj.type != DeviceType::CUDA) {
+    throw std::runtime_error("Invalid device, must be cuda device");
+  }
+  auto device = (device_obj.is_default || device_obj.type == DeviceType::CPU) ? -1 : device_obj.index;
   return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
@@ -561,7 +565,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else {
     throw TypeError("dtype must be a type, str, or dtype object");
   }
-  auto& type = is_dtype ? torch::getType(r.dtype(0), *torch::getLayout(self_.type().backend())) :
+  auto self_device_type = torch::getDeviceType(self_.type());
+  auto& type = is_dtype ? torch::getType(r.scalartype(0), *torch::getLayout(self_.type().backend()), self_device_type) :
                           torch::utils::type_from_string(type_name);
   return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, -1, r.toBool(1)));
   END_HANDLE_TH_ERRORS

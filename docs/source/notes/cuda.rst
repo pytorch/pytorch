@@ -97,7 +97,7 @@ ensure proper synchronization.
 Memory management
 -----------------
 
-PyTorch use a caching memory allocator to speed up memory allocations. This
+PyTorch uses a caching memory allocator to speed up memory allocations. This
 allows fast memory deallocation without device synchronizations. However, the
 unused memory managed by the allocator will still show as if used in
 ``nvidia-smi``. You can use :meth:`~torch.cuda.memory_allocated` and

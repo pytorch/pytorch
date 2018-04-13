@@ -18,6 +18,7 @@
 
 #include "THP.h"
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Device.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DataLoader.h"
 #include "torch/csrc/Generator.h"
@@ -330,8 +331,7 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   auto& type = torch::tensor::get_default_tensor_type();
-  bool is_cuda = type.backend() == at::kCUDA;
-  auto dtype = (PyObject*)torch::getDtype(type.scalarType(), is_cuda);
+  auto dtype = (PyObject*)torch::getDtype(type.scalarType());
   Py_INCREF(dtype);
   return dtype;
   END_HANDLE_TH_ERRORS
@@ -463,6 +463,7 @@ static PyObject* initModule() {
   THPSize_init(module);
   THPDtype_init(module);
   THPLayout_init(module);
+  THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));

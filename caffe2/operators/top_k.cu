@@ -260,11 +260,11 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
     values_transposed_buffer_.Resize(std::vector<TIndex>{outer_size, k_});
     indices_transposed_buffer_.Resize(std::vector<TIndex>{outer_size, k_});
     math::Transpose(
+        input.size(),
         3,
         input_dims_device_.data<int>(),
         input_transposed_dims_device_.data<int>(),
         input_axes_device_.data<int>(),
-        input.size(),
         input.template data<T>(),
         input_transposed_buffer_.mutable_data<T>(),
         &context_);
@@ -290,20 +290,20 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
         &output_transposed_axes_device_,
         &context_);
     math::Transpose(
+        values_transposed_buffer_.size(),
         3,
         output_transposed_dims_device_.data<int>(),
         output_dims_device_.data<int>(),
         output_transposed_axes_device_.data<int>(),
-        values_transposed_buffer_.size(),
         values_transposed_buffer_.data<T>(),
         values->template mutable_data<T>(),
         &context_);
     math::Transpose(
+        indices_transposed_buffer_.size(),
         3,
         output_transposed_dims_device_.data<int>(),
         output_dims_device_.data<int>(),
         output_transposed_axes_device_.data<int>(),
-        indices_transposed_buffer_.size(),
         indices_transposed_buffer_.data<TIndex>(),
         indices->template mutable_data<TIndex>(),
         &context_);

@@ -8,7 +8,7 @@ namespace torch { namespace autograd {
 
 
 void InputBuffer::add(size_t pos, Variable var) {
-  TORCH_ASSERT(pos >= 0 && pos < buffer.size());
+  TORCH_ASSERT(pos < buffer.size());
   if (!var.defined()) {
     return;
   }

@@ -192,6 +192,7 @@ struct GraphExecutorImpl {
   }
 
 private:
+  friend struct GraphExecutor;
 
   static bool needsGradient(const variable_tensor_list & inputs) {
     if (!autograd::GradMode::is_enabled()) {
@@ -376,6 +377,10 @@ GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool s
 
 variable_tensor_list GraphExecutor::run(variable_tensor_list && inputs) {
   return pImpl->run(std::move(inputs));
+}
+
+std::shared_ptr<Graph> GraphExecutor::graph() const {
+  return pImpl->graph;
 }
 
 }}

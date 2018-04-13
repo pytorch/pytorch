@@ -370,6 +370,9 @@ if(USE_CUDA)
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
         caffe2::cuda caffe2::curand caffe2::cublas caffe2::cudnn caffe2::nvrtc)
+    if(USE_TENSORRT) 
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt) 
+    endif()
   else()
     message(WARNING
         "Not compiling with CUDA. Suppress this warning with "
@@ -587,3 +590,12 @@ list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
 # Recover the build shared libs option.
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 
+# --[ TensorRT integration with onnx-trt
+if (USE_TENSORRT) 
+  set(CMAKE_CUDA_COMPILER ${CUDA_NVCC_EXECUTABLE})
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/onnx-trt)
+  include_directories("${PROJECT_SOURCE_DIR}/third_party/onnx-trt")
+  caffe2_interface_library(onnx2trt_importer_static onnx_trt_library)
+  list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_trt_library)
+  set(CAFFE2_USE_TRT 1)
+endif()

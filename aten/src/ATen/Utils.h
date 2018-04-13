@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <sstream>
 #include <typeinfo>
+#include <numeric>
 
 namespace at {
 
@@ -65,6 +66,14 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
   }
   std::copy_n(list.begin(), N, res.begin());
   return res;
+}
+
+inline int64_t sum_intlist(ArrayRef<int64_t> list) {
+  return std::accumulate(list.begin(), list.end(), 0);
+}
+
+inline int64_t prod_intlist(ArrayRef<int64_t> list) {
+  return std::accumulate(list.begin(), list.end(), 1, std::multiplies<int64_t>());
 }
 
 } // at

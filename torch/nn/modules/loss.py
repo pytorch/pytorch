@@ -15,14 +15,15 @@ def _assert_no_grad(variable):
 
 
 class _Loss(Module):
-    def __init__(self, size_average=True):
+    def __init__(self, size_average=True, reduce=True):
         super(_Loss, self).__init__()
         self.size_average = size_average
+        self.reduce = reduce
 
 
 class _WeightedLoss(_Loss):
-    def __init__(self, weight=None, size_average=True):
-        super(_WeightedLoss, self).__init__(size_average)
+    def __init__(self, weight=None, size_average=True, reduce=True):
+        super(_WeightedLoss, self).__init__(size_average, reduce)
         self.register_buffer('weight', weight)
 
 
@@ -77,8 +78,7 @@ class L1Loss(_Loss):
         >>> output.backward()
     """
     def __init__(self, size_average=True, reduce=True):
-        super(L1Loss, self).__init__(size_average)
-        self.reduce = reduce
+        super(L1Loss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -185,9 +185,8 @@ class NLLLoss(_WeightedLoss):
     """
 
     def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=True):
-        super(NLLLoss, self).__init__(weight, size_average)
+        super(NLLLoss, self).__init__(weight, size_average, reduce)
         self.ignore_index = ignore_index
-        self.reduce = reduce
 
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -214,7 +213,7 @@ class PoissonNLLLoss(_Loss):
         \text{loss}(\text{input}, \text{target}) = \text{input} - \text{target} * \log(\text{input})
                                     + \log(\text{target!})
 
-    The last term can be omitted or approximised with Stirling formula. The
+    The last term can be omitted or approximated with Stirling formula. The
     approximation is used for target values more than 1. For targets less or
     equal to 1 zeros are added to the loss.
 
@@ -246,11 +245,10 @@ class PoissonNLLLoss(_Loss):
         >>> output.backward()
     """
     def __init__(self, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):
-        super(PoissonNLLLoss, self).__init__(size_average)
+        super(PoissonNLLLoss, self).__init__(size_average, reduce)
         self.log_input = log_input
         self.full = full
         self.eps = eps
-        self.reduce = reduce
 
     def forward(self, log_input, target):
         _assert_no_grad(target)
@@ -311,8 +309,7 @@ class KLDivLoss(_Loss):
 
     """
     def __init__(self, size_average=True, reduce=True):
-        super(KLDivLoss, self).__init__(size_average)
-        self.reduce = reduce
+        super(KLDivLoss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -370,8 +367,7 @@ class MSELoss(_Loss):
         >>> output.backward()
     """
     def __init__(self, size_average=True, reduce=True):
-        super(MSELoss, self).__init__(size_average)
-        self.reduce = reduce
+        super(MSELoss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -430,8 +426,7 @@ class BCELoss(_WeightedLoss):
         >>> output.backward()
     """
     def __init__(self, weight=None, size_average=True, reduce=True):
-        super(BCELoss, self).__init__(weight, size_average)
-        self.reduce = reduce
+        super(BCELoss, self).__init__(weight, size_average, reduce)
 
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -440,7 +435,7 @@ class BCELoss(_WeightedLoss):
                                       reduce=self.reduce)
 
 
-class BCEWithLogitsLoss(Module):
+class BCEWithLogitsLoss(_Loss):
     r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single
     class. This version is more numerically stable than using a plain `Sigmoid`
     followed by a `BCELoss` as, by combining the operations into one layer,
@@ -492,9 +487,7 @@ class BCEWithLogitsLoss(Module):
         >>> output.backward()
     """
     def __init__(self, weight=None, size_average=True, reduce=True):
-        super(BCEWithLogitsLoss, self).__init__()
-        self.size_average = size_average
-        self.reduce = reduce
+        super(BCEWithLogitsLoss, self).__init__(size_average, reduce)
         self.register_buffer('weight', weight)
 
     def forward(self, input, target):
@@ -553,9 +546,8 @@ class HingeEmbeddingLoss(_Loss):
     """
 
     def __init__(self, margin=1.0, size_average=True, reduce=True):
-        super(HingeEmbeddingLoss, self).__init__(size_average)
+        super(HingeEmbeddingLoss, self).__init__(size_average, reduce)
         self.margin = margin
-        self.reduce = reduce
 
     def forward(self, input, target):
         return F.hinge_embedding_loss(input, target, self.margin, self.size_average,
@@ -598,8 +590,7 @@ class MultiLabelMarginLoss(_Loss):
         - Output: scalar. If `reduce` is False, then `(N)`.
     """
     def __init__(self, size_average=True, reduce=True):
-        super(MultiLabelMarginLoss, self).__init__(size_average)
-        self.reduce = reduce
+        super(MultiLabelMarginLoss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -650,8 +641,7 @@ class SmoothL1Loss(_Loss):
 
     """
     def __init__(self, size_average=True, reduce=True):
-        super(SmoothL1Loss, self).__init__(size_average)
-        self.reduce = reduce
+        super(SmoothL1Loss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -684,8 +674,7 @@ class SoftMarginLoss(_Loss):
 
     """
     def __init__(self, size_average=True, reduce=True):
-        super(SoftMarginLoss, self).__init__(size_average)
-        self.reduce = reduce
+        super(SoftMarginLoss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -750,9 +739,8 @@ class CrossEntropyLoss(_WeightedLoss):
     """
 
     def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=True):
-        super(CrossEntropyLoss, self).__init__(weight, size_average)
+        super(CrossEntropyLoss, self).__init__(weight, size_average, reduce)
         self.ignore_index = ignore_index
-        self.reduce = reduce
 
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -791,8 +779,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     """
 
     def __init__(self, weight=None, size_average=True, reduce=True):
-        super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average)
-        self.reduce = reduce
+        super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average, reduce)
 
     def forward(self, input, target):
         return F.multilabel_soft_margin_loss(input, target, self.weight, self.size_average,
@@ -800,7 +787,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
 
 class CosineEmbeddingLoss(_Loss):
-    r"""Creates a criterion that measures the loss given  an input tensors
+    r"""Creates a criterion that measures the loss given input tensors
     :math:`x_1`, :math:`x_2` and a `Tensor` label `y` with values 1 or -1.
     This is used for measuring whether two inputs are similar or dissimilar,
     using the cosine distance, and is typically used for learning nonlinear
@@ -829,9 +816,8 @@ class CosineEmbeddingLoss(_Loss):
     """
 
     def __init__(self, margin=0, size_average=True, reduce=True):
-        super(CosineEmbeddingLoss, self).__init__(size_average)
+        super(CosineEmbeddingLoss, self).__init__(size_average, reduce)
         self.margin = margin
-        self.reduce = reduce
 
     def forward(self, input1, input2, target):
         return F.cosine_embedding_loss(input1, input2, target, self.margin, self.size_average,
@@ -869,9 +855,8 @@ class MarginRankingLoss(_Loss):
     """
 
     def __init__(self, margin=0, size_average=True, reduce=True):
-        super(MarginRankingLoss, self).__init__(size_average)
+        super(MarginRankingLoss, self).__init__(size_average, reduce)
         self.margin = margin
-        self.reduce = reduce
 
     def forward(self, input1, input2, target):
         return F.margin_ranking_loss(input1, input2, target, self.margin, self.size_average,
@@ -919,13 +904,12 @@ class MultiMarginLoss(_WeightedLoss):
     """
 
     def __init__(self, p=1, margin=1, weight=None, size_average=True, reduce=True):
-        super(MultiMarginLoss, self).__init__(weight, size_average)
+        super(MultiMarginLoss, self).__init__(weight, size_average, reduce)
         if p != 1 and p != 2:
             raise ValueError("only p == 1 and p == 2 supported")
         assert weight is None or weight.dim() == 1
         self.p = p
         self.margin = margin
-        self.reduce = reduce
 
     def forward(self, input, target):
         return F.multi_margin_loss(input, target, self.p, self.margin, self.weight,
@@ -982,12 +966,11 @@ class TripletMarginLoss(_Loss):
     """
 
     def __init__(self, margin=1.0, p=2, eps=1e-6, swap=False, size_average=True, reduce=True):
-        super(TripletMarginLoss, self).__init__(size_average)
+        super(TripletMarginLoss, self).__init__(size_average, reduce)
         self.margin = margin
         self.p = p
         self.eps = eps
         self.swap = swap
-        self.reduce = reduce
 
     def forward(self, anchor, positive, negative):
         return F.triplet_margin_loss(anchor, positive, negative, self.margin, self.p,

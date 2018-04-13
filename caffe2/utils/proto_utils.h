@@ -28,6 +28,8 @@ void ShutdownProtobufLibrary();
 // protobuf-lite instead.
 std::string DeviceTypeName(const int32_t& d);
 
+int DeviceId(const DeviceOption& option);
+
 // Returns if the two DeviceOptions are pointing to the same device.
 bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs);
 

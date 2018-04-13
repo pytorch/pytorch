@@ -23,12 +23,13 @@ namespace script {
 // Def   = Def(Ident name, List<Param> params, List<Stmt> body)         TK_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
-//       | For(List<Ident> targets, List<Expr> iters, List<Stmt> body)  TK_FOR
+//       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
-//       | Assign(List<Ident> lhs, AssignType maybe_reduce, Expr rhs)   TK_ASSIGN
+//       -- NB: the only type of Expr's allowed on lhs are Starred and Var
+//       | Assign(List<Expr> lhs, AssignType maybe_reduce, Expr rhs)    TK_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
-//       | ExprStmt(Expr expr)                                          TK_EXPR_STMT
+//       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
 //
 // Expr  = TernaryIf(Expr cond, Expr true_expr, Expr false_expr)        TK_IF_EXPR
 //       | BinOp(Expr lhs, Expr rhs)
@@ -56,6 +57,7 @@ namespace script {
 //       | Gather(Expr value, Expr indices)                             TK_GATHER
 //       | Var(Ident name)                                              TK_VAR
 //       | ListLiteral(List<Expr> inputs)                               TK_LIST_LITERAL
+//       | Starred(Expr expr)                                           TK_STARRED
 //
 // -- NB: only allowed expressions are Const or List(Const)
 //        (List as a value, not type constructor)
@@ -240,10 +242,11 @@ struct Expr : public TreeView {
       case TK_NE:
       case '+':
       case '-':
+      case TK_UNARY_MINUS:
       case '*':
+      case TK_STARRED:
       case '/':
       case TK_NOT:
-      /* case '-': - unary minus */
       case TK_CONST:
       case TK_TRUE:
       case TK_FALSE:
@@ -401,8 +404,8 @@ struct For : public Stmt {
   explicit For(const TreeRef& tree) : Stmt(tree) {
     tree->match(TK_FOR);
   }
-  List<Ident> targets() const {
-    return List<Ident>(subtree(0));
+  List<Expr> targets() const {
+    return List<Expr>(subtree(0));
   }
   List<Expr> itrs() const {
     return List<Expr>(subtree(1));
@@ -412,7 +415,7 @@ struct For : public Stmt {
   }
   static For create(
       const SourceRange& range,
-      const List<Ident>& targets,
+      const List<Expr>& targets,
       const List<Expr>& itrs,
       const List<Stmt>& body) {
     return For(Compound::create(TK_FOR, range, {targets, itrs, body}));
@@ -452,13 +455,13 @@ struct Assign : public Stmt {
   }
   static Assign create(
       const SourceRange& range,
-      const List<Ident>& lhs,
+      const List<Expr>& lhs,
       const AssignKind& reduction,
       const Expr& rhs) {
     return Assign(Compound::create(TK_ASSIGN, range, {lhs, reduction, rhs}));
   }
-  List<Ident> lhs() const {
-    return List<Ident>(subtree(0));
+  List<Expr> lhs() const {
+    return List<Expr>(subtree(0));
   }
   int reduction() const {
     return subtree(1)->kind();
@@ -484,11 +487,11 @@ struct ExprStmt : public Stmt {
   explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_EXPR_STMT);
   }
-  Expr expr() {
-    return Expr(subtree(0));
+  List<Expr> exprs() {
+    return List<Expr>(subtree(0));
   }
-  static ExprStmt create(const SourceRange& range, const Expr& value) {
-    return ExprStmt(Compound::create(TK_EXPR_STMT, range, {value}));
+  static ExprStmt create(const SourceRange& range, const List<Expr>& list) {
+    return ExprStmt(Compound::create(TK_EXPR_STMT, range, {list}));
   }
 };
 
@@ -533,7 +536,7 @@ struct BinOp : public Expr {
 struct UnaryOp : public Expr {
   explicit UnaryOp(const TreeRef& tree) : Expr(tree) {
     switch (tree->kind()) {
-      case '-':
+      case TK_UNARY_MINUS:
       case TK_NOT:
         if (tree->trees().size() != 1)
           throw ErrorReport(tree) << "UnaryOp expected 1 subtree, found " << tree->trees().size();
@@ -562,6 +565,9 @@ struct Const : public Expr {
   }
   double asFloatingPoint() const {
     return std::stod(subtree(0)->stringValue());
+  }
+  const std::string& text() const {
+    return subtree(0)->stringValue();
   }
   static Const create(const SourceRange& range, const std::string& value) {
     return Const(Compound::create(TK_CONST, range, {String::create(value)}));
@@ -712,6 +718,19 @@ struct ListLiteral : public Expr {
   }
   static ListLiteral create(const SourceRange& range, const List<Expr>& inputs) {
     return ListLiteral(Compound::create(TK_LIST_LITERAL, range, {inputs}));
+  }
+};
+
+
+struct Starred : public Expr {
+  explicit Starred(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_STARRED);
+  }
+  Expr expr() const {
+    return Expr(subtree(0));
+  }
+  static Starred create(const SourceRange& range, const Expr& expr) {
+    return Starred(Compound::create(TK_STARRED, range, {expr}));
   }
 };
 

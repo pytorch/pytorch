@@ -29,7 +29,7 @@ class RNNBase(Module):
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
                 isinstance(dropout, bool):
             raise ValueError("dropout should be a number in range [0, 1] "
-                             "representing the probablity of an element being "
+                             "representing the probability of an element being "
                              "zeroed")
         if dropout > 0 and num_layers == 1:
             warnings.warn("dropout option adds dropout after all but last "
@@ -264,7 +264,7 @@ class RNN(RNNBase):
         batch_first: If ``True``, then the input and output tensors are provided
             as `(batch, seq, feature)`
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
-            RNN layer except the last layer, with dropout probablity equal to
+            RNN layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
@@ -358,7 +358,7 @@ class LSTM(RNNBase):
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
-            LSTM layer except the last layer, with dropout probablity equal to
+            LSTM layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional LSTM. Default: ``False``
 
@@ -442,7 +442,7 @@ class GRU(RNNBase):
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
-            GRU layer except the last layer, with dropout probablity equal to
+            GRU layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``
 

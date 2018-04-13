@@ -648,7 +648,7 @@ class AvgPool3d(_AvgPoolNd):
 class FractionalMaxPool2d(Module):
     r"""Applies a 2D fractional max pooling over an input signal composed of several input planes.
 
-    Fractiona MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
+    Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
     The max-pooling operation is applied in :math:`kHxkW` regions by a stochastic
     step size determined by the target output size.

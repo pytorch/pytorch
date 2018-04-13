@@ -56,6 +56,7 @@ _(prim, Reverse) \
 _(prim, Return) \
 _(prim, Store) \
 _(prim, Undefined) \
+_(prim, Starred)
 /* end */
 
 // Workaround for some not-yet-defined ATen symbols, see

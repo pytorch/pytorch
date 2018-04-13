@@ -52,8 +52,22 @@ class DataParallel(Module):
 
     .. warning::
         Forward and backward hooks defined on :attr:`module` and its submodules
-        won't be invoked anymore, unless the hooks are initialized in the
-        :meth:`forward` method.
+        will be invoked ``len(device_ids)`` times, each with inputs located on
+        a particular device. Particularly, the hooks are only guaranteed to be
+        executed in correct order with respect to operations on corresponding
+        devices. For example, it is not guaranteed that hooks set via
+        :meth:`~torch.nn.Module.register_forward_pre_hook` be executed before
+        `all` ``len(device_ids)`` :meth:`~torch.nn.Module.forward` calls, but
+        that each such hook be executed before the corresponding
+        :meth:`~torch.nn.Module.forward` call of that device.
+
+    .. note::
+        There is a subtlety in using the
+        ``pack sequence -> recurrent network -> unpack sequence`` pattern in a
+        :class:`~torch.nn.Module` wrapped in :class:`~torch.nn.DataParallel`.
+        See :ref:`pack-rnn-unpack-with-data-parallelism` section in FAQ for
+        details.
+
 
     Args:
         module: module to be parallelized

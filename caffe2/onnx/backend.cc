@@ -336,6 +336,7 @@ Caffe2Backend::get_special_operators() const {
               {"Concat", &Caffe2Backend::CreateConcat},
               {"LogSoftmax", &Caffe2Backend::CreateLogSoftmax},
               {"Slice", &Caffe2Backend::CreateSlice},
+              {"Split", &Caffe2Backend::CreateSplit},
               {"Reciprocal", &Caffe2Backend::CreateReciprocal},
               {"BatchNormalization", &Caffe2Backend::CreateBatchNormalization},
               {"MatMul", &Caffe2Backend::CreateMatMul}};
@@ -541,7 +542,6 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
 }
 
 Caffe2Ops Caffe2Backend::CreatePad(OnnxNode* onnx_node, int opset_version) {
-  const auto& node = onnx_node->node;
   auto& attributes = onnx_node->attributes;
   ::google::protobuf::RepeatedField<::google::protobuf::int64> pads;
   std::string pad_name = opset_version < 2 ? "paddings" : "pads";
@@ -768,10 +768,21 @@ Caffe2Ops Caffe2Backend::CreateSlice(OnnxNode* onnx_node, int opset_version) {
 Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     OnnxNode* onnx_node,
     int opset_version) {
-  const auto& node = onnx_node->node;
   if (opset_version < 6) {
     auto& attributes = onnx_node->attributes;
     attributes.remove("consumed_inputs");
+  }
+
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+}
+
+Caffe2Ops Caffe2Backend::CreateSplit(
+    OnnxNode* onnx_node,
+    int opset_version) {
+  auto& attributes = onnx_node->attributes;
+  if (!attributes.HasAttribute("axis")) {
+    auto* attr = attributes.AddRewrittenAttibute("axis");
+    attr->set_i(0);
   }
 
   return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
@@ -890,17 +901,55 @@ Caffe2Ops Caffe2Backend::ConvertNode(
   return OnnxNodeToCaffe2Ops(init_model, pred_model, &onnx_node, opset_version);
 }
 
+void Caffe2Backend::CheckOpSchemaArguments(
+    const caffe2::OpSchema& schema,
+    const caffe2::OperatorDef& op) {
+  const auto& schema_args = schema.args();
+  if (schema_args.size() > 0){
+    std::vector<std::string> argnames;
+    std::transform(
+        schema_args.begin(),
+        schema_args.end(),
+        std::back_inserter(argnames),
+        [](caffe2::OpSchema::Argument elem) { return elem.name(); });
+
+    for (const auto& arg : op.arg()) {
+      if (std::count(argnames.begin(), argnames.end(), arg.name()) == 0) {
+        CAFFE_THROW(
+            "Don't know how to map unexpected argument ",
+            arg.name(),
+            " (from operator ",
+            op.type(), ")");
+      }
+    }
+  } else {
+    // A number of C2 operators do not declare proper arguments. Let's log the error
+    VLOG(2) << "Operator " << op.type() << " does not declare arguments in its schema. Please file a Caffe2 issue.";
+  }
+}
+
 Caffe2Ops Caffe2Backend::OnnxNodeToCaffe2Ops(
     const ModelProto& init_model,
     const ModelProto& pred_model,
     OnnxNode* onnx_node,
     int opset_version) {
+  Caffe2Ops res;
   if (get_special_operators().count(onnx_node->node.op_type())) {
-    return (this->*get_special_operators().at(onnx_node->node.op_type()))(
+    res = (this->*get_special_operators().at(onnx_node->node.op_type()))(
         onnx_node, opset_version);
   } else {
-    return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+    res = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
   }
+
+  for (const auto& result_op: res.ops){
+    const auto* schema = OpSchemaRegistry::Schema(result_op.type());
+    if (schema) {
+      CheckOpSchemaArguments(*schema, result_op);
+    } else {
+      CAFFE_THROW("Caffe2 has no such operator, could not find schema for ", result_op.type());
+    }
+  }
+  return res;
 }
 
 void Caffe2Backend::OnnxToCaffe2(

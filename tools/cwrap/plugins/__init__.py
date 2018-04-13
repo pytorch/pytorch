@@ -212,7 +212,7 @@ class CWrapPlugin(object):
 
         '(PyObject*)Py_TYPE(PyTuple_GET_ITEM(args, 1)) == THPTensorClass'
 
-        This function can be overriden to support modifying this check string.
+        This function can be overridden to support modifying this check string.
         For example, if an argument can be null, we might want to check and see
         if the type is Py_None, as well.
 

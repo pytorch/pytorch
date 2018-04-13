@@ -83,13 +83,11 @@ class Job(object):
             return self.init_group.used_nodes()
 
     def compile(self, session_class):
-        return Job(
-            init_group=session_class.compile(self.init_group),
-            epoch_group=session_class.compile(self.epoch_group),
-            download_group=session_class.compile(self.download_group),
-            exit_group=session_class.compile(self.exit_group),
-            stop_signals=self.stop_signals,
-            nodes_to_checkpoint=self.nodes_to_checkpoint())
+        self._nodes_to_checkpoint = self.nodes_to_checkpoint()
+        self.init_group = session_class.compile(self.init_group)
+        self.epoch_group = session_class.compile(self.epoch_group)
+        self.download_group = session_class.compile(self.download_group)
+        self.exit_group = session_class.compile(self.exit_group)
 
     def __enter__(self):
         self.epoch_group.__enter__()

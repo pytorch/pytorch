@@ -308,6 +308,10 @@ class Caffe2Frontend(object):
             del fake_inits
 
     @classmethod
+    def ssa_rewrite(cls, net, init_net, value_info):
+        return cls._ssa_rewrite(net, init_net, value_info)
+
+    @classmethod
     def _ssa_rewrite(cls, net, init_net, value_info):
         def ssa_name(name, version):
             return '{}_{}'.format(name, version)
@@ -354,3 +358,4 @@ class Caffe2Frontend(object):
 caffe2_net_to_onnx_graph = Caffe2Frontend.caffe2_net_to_onnx_graph
 caffe2_net_to_onnx_model = Caffe2Frontend.caffe2_net_to_onnx_model
 caffe2_init_net_to_initializer = Caffe2Frontend.caffe2_init_net_to_initializer
+ssa_rewrite = Caffe2Frontend.ssa_rewrite

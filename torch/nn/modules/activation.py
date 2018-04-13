@@ -56,7 +56,7 @@ class ReLU(Threshold):
     r"""Applies the rectified linear unit function element-wise
     :math:`\text{ReLU}(x)= \max(0, x)`
 
-    .. image:: _static/img/activation/ReLU.png
+    .. image:: scripts/activation_images/ReLU.png
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -147,7 +147,7 @@ class Hardtanh(Module):
     The range of the linear region :math:`[-1, 1]` can be adjusted using
     :attr:`min_val` and :attr:`max_val`.
 
-    .. image:: _static/img/activation/Hardtanh.png
+    .. image:: scripts/activation_images/Hardtanh.png
 
     Args:
         min_val: minimum value of the linear region range. Default: -1
@@ -204,7 +204,7 @@ class ReLU6(Hardtanh):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/ReLU6.png
+    .. image:: scripts/activation_images/ReLU6.png
 
     Examples::
 
@@ -229,7 +229,7 @@ class Sigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Sigmoid.png
+    .. image:: scripts/activation_images/Sigmoid.png
 
     Examples::
 
@@ -251,7 +251,7 @@ class Tanh(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Tanh.png
+    .. image:: scripts/activation_images/Tanh.png
 
     Examples::
 
@@ -277,7 +277,7 @@ class ELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/ELU.png
+    .. image:: scripts/activation_images/ELU.png
 
     Examples::
 
@@ -305,7 +305,7 @@ class SELU(Module):
     with :math:`\alpha = 1.6732632423543772848170429916717` and
     :math:`\text{scale} = 1.0507009873554804934193349852946`.
 
-    .. image:: _static/img/activation/SELU.png
+    .. image:: scripts/activation_images/SELU.png
 
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
@@ -389,7 +389,7 @@ class Hardshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Hardshrink.png
+    .. image:: scripts/activation_images/Hardshrink.png
 
     Examples::
 
@@ -429,7 +429,7 @@ class LeakyReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/LeakyReLU.png
+    .. image:: scripts/activation_images/LeakyReLU.png
 
     Examples::
 
@@ -459,7 +459,7 @@ class LogSigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/LogSigmoid.png
+    .. image:: scripts/activation_images/LogSigmoid.png
 
     Examples::
 
@@ -490,7 +490,7 @@ class Softplus(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Softplus.png
+    .. image:: scripts/activation_images/Softplus.png
 
     Examples::
 
@@ -532,7 +532,7 @@ class Softshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Softshrink.png
+    .. image:: scripts/activation_images/Softshrink.png
 
     Examples::
 
@@ -580,7 +580,7 @@ class PReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/PReLU.png
+    .. image:: scripts/activation_images/PReLU.png
 
     Examples::
 
@@ -609,7 +609,7 @@ class Softsign(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Softsign.png
+    .. image:: scripts/activation_images/Softsign.png
 
     Examples::
 
@@ -630,7 +630,7 @@ class Tanhshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: _static/img/activation/Tanhshrink.png
+    .. image:: scripts/activation_images/Tanhshrink.png
 
     Examples::
 

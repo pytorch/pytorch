@@ -850,9 +850,9 @@ class TestSparse(TestCase):
                     for use_cuda in ([False] if not torch.cuda.is_available() else [True, False]):
                         # have to include size with cuda sparse tensors
                         include_size = include_size or use_cuda
-                        dtype = torch.cuda.float64 if use_cuda else torch.float64
-                        long_dtype = torch.cuda.int64 if use_cuda else torch.int64
-                        device = -1 if not use_cuda else torch.cuda.device_count() - 1
+                        dtype = torch.float64
+                        long_dtype = torch.int64
+                        device = torch.device('cpu') if not use_cuda else torch.device(torch.cuda.device_count() - 1)
                         indices = torch.tensor(([0], [2]), dtype=long_dtype) if use_tensor_idx else ([0], [2])
                         values = torch.tensor([1.], dtype=dtype) if use_tensor_val else 1.
                         if include_size:
@@ -866,7 +866,7 @@ class TestSparse(TestCase):
                         self.assertEqual(size if include_size else default_size, sparse_tensor.size())
                         self.assertEqual(dtype, sparse_tensor.dtype)
                         if use_cuda:
-                            self.assertEqual(device, sparse_tensor._values().get_device())
+                            self.assertEqual(device, sparse_tensor._values().device)
                         self.assertEqual(True, sparse_tensor.requires_grad)
 
     @cpu_only
@@ -910,17 +910,18 @@ class TestSparse(TestCase):
 
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
-        all_dtypes = torch.testing.get_all_dtypes()
-        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda and d != torch.float16]
-        cuda_dtypes = [d for d in all_dtypes if d.is_cuda and d != torch.cuda.float16]
-        TestTorch._test_dtypes(self, cpu_dtypes, cuda_dtypes, torch.sparse_coo)
+        all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]
+        TestTorch._test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
+        if torch.cuda.is_available():
+            TestTorch._test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     @cpu_only  # not really, but we only really want to run this once
     def test_empty_full(self):
-        all_dtypes = torch.testing.get_all_dtypes()
-        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda and d != torch.half]
-        cuda_dtypes = [d for d in all_dtypes if d.is_cuda and d != torch.cuda.half]
-        TestTorch._test_empty_full(self, cpu_dtypes, cuda_dtypes, torch.sparse_coo)
+        all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]
+        TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
+        if torch.cuda.device_count() > 0:
+            TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, -1)
+            TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     def test_is_sparse(self):
         x = torch.randn(3, 3)

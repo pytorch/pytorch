@@ -547,12 +547,22 @@ class ConvPoolOpBase : public Operator<Context> {
   static vector<TensorShape> TensorInferenceForConv(
       const OperatorDef& def,
       const vector<TensorShape>& in) {
+    if (in[0].unknown_shape()) {
+      vector<TensorShape> out(1);
+      out[0].set_unknown_shape(true);
+      return out;
+    }
     return TensorInferenceForSchema(def, in, in[1].dims(0));
   }
 
   static vector<TensorShape> TensorInferenceForPool(
       const OperatorDef& def,
       const vector<TensorShape>& in) {
+    if (in[0].unknown_shape()) {
+      vector<TensorShape> out(1);
+      out[0].set_unknown_shape(true);
+      return out;
+    }
     ArgumentHelper helper(def);
     auto order =
         StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));

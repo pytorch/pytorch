@@ -83,9 +83,6 @@ static void _maybe_reinitialize_engine_after_fork() {
 }
 
 // Implementation of torch._C._EngineBase.run_backward
-//
-// When inputs == nullptr, this is a torch.autograd.backward() call
-// When inputs != nullptr, this is a torch.autograd.grad() call
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
@@ -95,12 +92,13 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   unsigned char keep_graph = 0;
   unsigned char create_graph = 0;
   PyObject *inputs = nullptr;
+  unsigned char allow_unreachable = 0;
   const char *accepted_kwargs[] = {
       "variables", "grad_variables", "keep_graph", "create_graph", "inputs",
-      nullptr
+      "allow_unreachable", nullptr
   };
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|O", (char**)accepted_kwargs,
-        &variables, &grad_variables, &keep_graph, &create_graph, &inputs))
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|Ob", (char**)accepted_kwargs,
+        &variables, &grad_variables, &keep_graph, &create_graph, &inputs, &allow_unreachable))
     return nullptr;
 
   THPUtils_assert(PyTuple_Check(variables), "variables argument is expected to "
@@ -157,8 +155,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       if (!grad_fn) {
         output_edges.emplace_back();
       } else {
-        THPUtils_assert(grad_fn,
-            "One of the differentiated Variables appears to not have been used in the graph");
         output_edges.emplace_back(grad_fn, output_nr);
       }
     }
@@ -175,6 +171,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;
     for (int i = 0; i < num_inputs; i++) {
+      THPUtils_assert(allow_unreachable || outputs[i].defined(), "One of the "
+                      "differentiated Variables appears to not have been used "
+                      "in the graph. Set allow_unused=True if this is the "
+                      "desired behavior.");
       PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
     }
     return py_outputs.release();
@@ -198,6 +198,16 @@ PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPEngine_is_checkpoint_valid(PyObject *self) {
+  HANDLE_TH_ERRORS
+  if(engine.is_checkpoint_valid()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   return type->tp_alloc(type, 0);
@@ -206,6 +216,7 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward", (PyCFunction)THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, nullptr},
+  {(char*)"is_checkpoint_valid", (PyCFunction)THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
   {nullptr}
 };
 

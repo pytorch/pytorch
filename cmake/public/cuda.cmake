@@ -31,6 +31,23 @@ if(NOT CUDNN_FOUND)
   return()
 endif()
 
+# Optionally, find TensorRT
+if (${USE_TENSORRT} AND DEFINED TENSORRT_ROOT)
+  find_path(TENSORRT_INCLUDE_DIR NvInfer.h
+    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES include)
+  find_library(TENSORRT_LIBRARY nvinfer
+    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES lib lib64 lib/x64)
+  find_package_handle_standard_args(
+    TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
+  if(NOT TENSORRT_FOUND)
+    message(WARNING 
+      "Caffe2: Cannot find TensorRT library. Turning the option off")
+    set(USE_TENSORRT OFF)
+  endif()
+endif()
+
 # After both cuda and cudnn are found, we can safely proceed.
 set(CAFFE2_FOUND_CUDA TRUE)
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
@@ -109,6 +126,17 @@ set_property(
 set_property(
     TARGET caffe2::curand PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
+
+# TensorRT
+if(${USE_TENSORRT})
+  add_library(caffe2::tensorrt UNKNOWN IMPORTED)
+  set_property(
+      TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
+      ${TENSORRT_LIBRARY})
+  set_property(
+      TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+      ${TENSORRT_INCLUDE_DIR})
+endif()
 
 # cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
 # interface library similar to cudart.
@@ -376,3 +404,6 @@ endif()
 
 # Set expt-relaxed-constexpr to suppress Eigen warnings
 list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
+
+# Set expt-extended-lambda to support lambda on device
+list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda")

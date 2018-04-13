@@ -3,7 +3,14 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python.dataio import Reader, ReaderWithLimit, ReaderWithTimeLimit
+from caffe2.python.dataio import (
+    CompositeReader,
+    CompositeReaderBuilder,
+    Reader,
+    ReaderBuilder,
+    ReaderWithLimit,
+    ReaderWithTimeLimit,
+)
 from caffe2.python.dataset import Dataset
 from caffe2.python.pipeline import pipe
 from caffe2.python.schema import Struct, NewRecord, FeedRecord
@@ -11,22 +18,25 @@ from caffe2.python.session import LocalSession
 from caffe2.python.task import TaskGroup, final_output, WorkspaceType
 from caffe2.python.test_util import TestCase
 from caffe2.python.cached_reader import CachedReader
-from caffe2.python import core, workspace
+from caffe2.python import core, workspace, schema
 from caffe2.python.net_builder import ops
 
 import numpy as np
+import numpy.testing as npt
 import os
 import shutil
+import unittest
 import tempfile
 import time
 
 
-def init_dataset(ws, size=100):
-    src_init = core.Net('src_init')
-    with core.NameScope('src'):
-        src_values = Struct(('label', np.array(range(size))))
+def init_dataset(ws, size=100, offset=0, name=None):
+    name = name or "src"
+    src_init = core.Net("{}_init".format(name))
+    with core.NameScope(name):
+        src_values = Struct(('label', np.array(range(offset, offset + size))))
         src_blobs = NewRecord(src_init, src_values)
-        src_ds = Dataset(src_blobs)
+        src_ds = Dataset(src_blobs, name=name)
         FeedRecord(src_blobs, src_values, ws)
     ws.run(src_init)
     return src_ds
@@ -64,6 +74,102 @@ class ReaderWithDelay(Reader):
 
         read_net.Python(sleep_op)([], [])
         return ([read_net], ) + self.reader.read(read_net)
+
+
+class TestReaderBuilder(ReaderBuilder):
+    def __init__(self, name, size, offset):
+        self._schema = schema.Struct(
+            ('label', schema.Scalar()),
+        )
+        self._name = name
+        self._size = size
+        self._offset = offset
+        self._src_ds = None
+
+    def schema(self):
+        return self._schema
+
+    def setup(self, ws):
+        self._src_ds = init_dataset(ws, offset=self._offset, size=self._size,
+                                    name=self._name)
+
+    def new_reader(self, **kwargs):
+        return self._src_ds
+
+
+class TestCompositeReader(TestCase):
+    @unittest.skipIf(os.environ.get('JENKINS_URL'), 'Flaky test on Jenkins')
+    def test_composite_reader(self):
+        ws = workspace.C.Workspace()
+        session = LocalSession(ws)
+        num_srcs = 3
+        names = ["src_{}".format(i) for i in range(num_srcs)]
+        size = 100
+        offsets = [i * size for i in range(num_srcs)]
+        src_dses = [init_dataset(ws, offset=offset, size=size, name=name)
+                    for (name, offset) in zip(names, offsets)]
+
+        data = [ws.fetch_blob(str(src.field_blobs[0])) for src in src_dses]
+        # Sanity check we didn't overwrite anything
+        for d, offset in zip(data, offsets):
+            npt.assert_array_equal(d, range(offset, offset + size))
+
+        # Create an identically sized empty destnation dataset
+        dst_init = core.Net('dst_init')
+        with core.NameScope('dst'):
+            dst_ds = Dataset(schema.Struct(
+                *[(name, src_ds.content().clone_schema())
+                  for name, src_ds in zip(names, src_dses)]
+            ))
+            dst_ds.init_empty(dst_init)
+        ws.run(dst_init)
+
+        with TaskGroup() as tg:
+            reader = CompositeReader(names,
+                                     [src_ds.reader() for src_ds in src_dses])
+            pipe(reader, dst_ds.writer(), num_runtime_threads=3)
+        session.run(tg)
+
+        for i in range(num_srcs):
+            written_data = sorted(
+                ws.fetch_blob(str(dst_ds.content()[names[i]].label())))
+            npt.assert_array_equal(data[i], written_data)
+
+    @unittest.skipIf(os.environ.get('JENKINS_URL'), 'Flaky test on Jenkins')
+    def test_composite_reader_builder(self):
+        ws = workspace.C.Workspace()
+        session = LocalSession(ws)
+        num_srcs = 3
+        names = ["src_{}".format(i) for i in range(num_srcs)]
+        size = 100
+        offsets = [i * size for i in range(num_srcs)]
+        src_ds_builders = [
+            TestReaderBuilder(offset=offset, size=size, name=name)
+            for (name, offset) in zip(names, offsets)
+        ]
+
+        # Create an identically sized empty destnation dataset
+        dst_init = core.Net('dst_init')
+        with core.NameScope('dst'):
+            dst_ds = Dataset(schema.Struct(
+                *[(name, src_ds_builder.schema())
+                  for name, src_ds_builder in zip(names, src_ds_builders)]
+            ))
+            dst_ds.init_empty(dst_init)
+        ws.run(dst_init)
+
+        with TaskGroup() as tg:
+            reader_builder = CompositeReaderBuilder(
+                names, src_ds_builders)
+            reader_builder.setup(ws=ws)
+            pipe(reader_builder.new_reader(), dst_ds.writer(),
+                 num_runtime_threads=3)
+        session.run(tg)
+
+        for name, offset in zip(names, offsets):
+            written_data = sorted(
+                ws.fetch_blob(str(dst_ds.content()[name].label())))
+            npt.assert_array_equal(range(offset, offset + size), written_data)
 
 
 class TestReaderWithLimit(TestCase):
