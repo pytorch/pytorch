@@ -152,7 +152,7 @@ static Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
 static inline Tensor &sum_out(Tensor &result, const Tensor &self, int64_t dim,
                  bool keepdim, optional<ScalarType> dtype) {
   // result type is favored over dtype
-  return at::_sum_out(result, self.toType(result.type().scalarType()), dim);
+  return at::_sum_out(result, self.toType(result.type().scalarType()), dim, keepdim);
 }
 
 Tensor& sum_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
@@ -183,7 +183,7 @@ Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
 static inline Tensor &prod_out(Tensor &result, const Tensor &self, int64_t dim,
                  bool keepdim, optional<ScalarType> dtype) {
   // result type is favored over dtype
-  return at::_prod_out(result, self.toType(result.type().scalarType()), dim);
+  return at::_prod_out(result, self.toType(result.type().scalarType()), dim, keepdim);
 }
 
 Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
