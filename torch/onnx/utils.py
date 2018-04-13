@@ -98,7 +98,7 @@ def _optimize_trace(trace, aten):
     torch._C._jit_pass_lint(trace.graph())
     torch._C._jit_pass_dce(trace.graph())
     torch._C._jit_pass_lint(trace.graph())
-    torch._C._jit_pass_canonicalize(trace.graph())
+    trace.set_graph(torch._C._jit_pass_canonicalize(trace.graph()))
     torch._C._jit_pass_lint(trace.graph())
 
 

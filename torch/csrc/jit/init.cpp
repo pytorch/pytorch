@@ -70,7 +70,9 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_dce", graph_pass<EliminateDeadCode>)
    .def("_jit_pass_cse", graph_pass<EliminateCommonSubexpression>)
    .def("_jit_pass_peephole", graph_pass<PeepholeOptimize>)
-   .def("_jit_pass_canonicalize", graph_pass<Canonicalize>)
+   .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
+     return Canonicalize(g);
+   })
    .def("_jit_pass_lint", graph_pass<LintGraph>)
    .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
      auto tensor_inputs = createVariableTensorList(inputs);

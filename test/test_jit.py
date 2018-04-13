@@ -77,7 +77,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_dce(trace.graph())
         torch._C._jit_pass_lint(trace.graph())
-        torch._C._jit_pass_canonicalize(trace.graph())
+        trace.set_graph(torch._C._jit_pass_canonicalize(trace.graph()))
         torch._C._jit_pass_lint(trace.graph())
         self.assertExpected(str(trace), *args, **kwargs)
 
