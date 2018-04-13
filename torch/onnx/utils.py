@@ -92,7 +92,7 @@ def _optimize_trace(trace, aten):
 
     torch._C._jit_pass_peephole(trace.graph())
     torch._C._jit_pass_lint(trace.graph())
-    torch._C._jit_pass_onnx(trace, aten)
+    trace.set_graph(torch._C._jit_pass_onnx(trace.graph(), aten))
     torch._C._jit_pass_lint(trace.graph())
     torch._C._jit_pass_onnx_peephole(trace.graph())
     torch._C._jit_pass_lint(trace.graph())

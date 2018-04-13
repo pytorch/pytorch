@@ -59,7 +59,6 @@ void initJITBindings(PyObject *module) {
 
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
-   .def("_jit_pass_onnx_from_graph", ToONNXFromGraph)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
    .def("_jit_pass_fuse", FuseGraph)
    .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g){

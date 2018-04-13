@@ -23,18 +23,9 @@ bool hasUsedHandle(Node *node) {
 
 } // anonymous namespace
 
-void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
-  // Check that the tracing state is live (it should be, because
-  // you were supposed to request zero derivatives.)
-  if (state->is_expired()) {
-    throw std::logic_error("ToONNX: tracing state is expired");
-  }
-  state->graph = ToONNXFromGraph(state->graph, aten);
-}
-
 // Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
 // Argument aten indicates whether we should export ops as "ATen" ONNX ops if possible.
-std::shared_ptr<Graph> ToONNXFromGraph(std::shared_ptr<Graph>& graph, bool aten) {
+std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, bool aten) {
   auto new_graph = std::make_shared<Graph>(graph->scope_root());
 
   torch::autograd::SymbolicContext ctx;
