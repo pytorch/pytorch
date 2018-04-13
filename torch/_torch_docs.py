@@ -3620,6 +3620,11 @@ Returns a tensor filled with the scalar value `1`, with the same size as
 :attr:`input`. ``torch.ones_like(input)`` is equivalent to
 ``torch.ones(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
+.. warning::
+    As of 0.4, this function does not support an :attr:`out` keyword. As an alternative,
+    the old ``torch.ones_like(input, out=output)`` is equivalent to
+    ``output.resize_as_(input).fill_(1.)``.
+
 Args:
     input (Tensor): the size of :attr:`input` will determine size of the output tensor
     dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
@@ -5762,6 +5767,11 @@ zeros_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> 
 Returns a tensor filled with the scalar value `0`, with the same size as
 :attr:`input`. ``torch.zeros_like(input)`` is equivalent to
 ``torch.zeros(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+.. warning::
+    As of 0.4, this function does not support an :attr:`out` keyword. As an alternative,
+    the old ``torch.zeros_like(input, out=output)`` is equivalent to
+    ``output.resize_as_(input).fill_(0.)``.
 
 Args:
     input (Tensor): the size of :attr:`input` will determine size of the output tensor
