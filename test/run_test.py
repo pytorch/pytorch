@@ -164,8 +164,7 @@ CUSTOM_HANDLERS = {
 
 
 def parse_test_module(test):
-    idx = test.find('.')
-    return test[:idx if idx > -1 else None]
+    return test.split('.')[0]
 
 
 class TestChoices(list):
@@ -236,27 +235,51 @@ def get_python_command(options):
 
 
 def find_test_index(test, selected_tests, find_last_index=False):
+    """Find the index of the first or last occurrence of a given test/test module in the list of seleceted tests.
+
+    This function is used to determine the indexes when slicing the list of selected tests when
+    ``options.first``(:attr:`find_last_index`=False) and/or ``options.last``(:attr:`find_last_index`=True) are used.
+
+    :attr:`selected_tests` can be a list that contains multiple consequent occurrences of tests
+    as part of the same test module, e.g.:
+
+    ```
+    selected_tests = ['autograd', 'cuda', **'torch.TestTorch.test_acos',
+                     'torch.TestTorch.test_tan', 'torch.TestTorch.test_add'**, 'utils']
+    ```
+
+    If :attr:`test`='torch' and :attr:`find_last_index`=False result should be **2**.
+    If :attr:`test`='torch' and :attr:`find_last_index`=True result should be **4**.
+
+    Arguments:
+        test (str): Name of test to lookup
+        selected_tests (list): List of tests
+        find_last_index (bool, optional): should we lookup the index of first or last
+            occurrence (first is default)
+
+    Returns:
+        index of the first or last occurance of the given test
+    """
     idx = 0
     found_idx = -1
     for t in selected_tests:
         if t.startswith(test):
+            found_idx = idx
             if not find_last_index:
-                return idx
-            else:
-                found_idx = idx
+                break
         idx += 1
     return found_idx
 
 
-def exclude_tests(exclude_list, tests, exclude_message=None):
-    sel_tests = tests[:]
-    for test in exclude_list:
-        for t in sel_tests:
-            if t.startswith(test):
+def exclude_tests(exclude_list, selected_tests, exclude_message=None):
+    tests_copy = selected_tests[:]
+    for exclude_test in exclude_list:
+        for test in tests_copy:
+            if test.startswith(exclude_test):
                 if exclude_message is not None:
-                    print_to_stderr(('Excluding {} ' + exclude_message).format(t))
-                tests.remove(t)
-    return tests
+                    print_to_stderr('Excluding {} {}'.format(test, exclude_message))
+                selected_tests.remove(test)
+    return selected_tests
 
 
 def get_selected_tests(options):
@@ -267,7 +290,7 @@ def get_selected_tests(options):
         selected_tests = selected_tests[first_index:]
 
     if options.last:
-        last_index = find_test_index(options.last, selected_tests, True)
+        last_index = find_test_index(options.last, selected_tests, find_last_index=True)
         selected_tests = selected_tests[:last_index + 1]
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
