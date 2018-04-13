@@ -13,7 +13,6 @@ class __PrinterOptions(object):
 
 PRINT_OPTS = __PrinterOptions()
 SCALE_FORMAT = '{:.5e} *\n'
-IMPLICIT_DTYPES = ['torch.int64', 'torch.float32']
 
 
 # We could use **kwargs, but this will give better docs
@@ -29,8 +28,8 @@ def set_printoptions(
     Args:
         precision: Number of digits of precision for floating point output
             (default = 8).
-        threshold: Upper bound of dim size for a full representation. Dims with
-            larger size will be summarized (default = 1000).
+        threshold: Total number of array elements which trigger summarization
+            rather than full `repr` (default = 1000).
         edgeitems: Number of array items in summary at beginning and end of
             each dimension (default = 3).
         linewidth: The number of characters per line for the purpose of
@@ -74,6 +73,7 @@ def _get_min_log_scale():
 
 
 def _number_format(tensor, min_sz=-1):
+    int_mode = not tensor.dtype.is_floating_point
     _min_log_scale = _get_min_log_scale()
     min_sz = max(min_sz, 2)
     tensor = torch.DoubleTensor(tensor.size()).copy_(tensor).abs_().view(tensor.nelement())
@@ -90,13 +90,6 @@ def _number_format(tensor, min_sz=-1):
     if invalid_value_mask.any():
         min_sz = max(min_sz, 3)
 
-    int_mode = True
-    # TODO: use fmod?
-    for value in tensor:
-        if value != math.ceil(value.item()):
-            int_mode = False
-            break
-
     exp_min = tensor.min()
     if exp_min != 0:
         exp_min = math.floor(math.log10(exp_min)) + 1
@@ -107,6 +100,10 @@ def _number_format(tensor, min_sz=-1):
         exp_max = math.floor(math.log10(exp_max)) + 1
     else:
         exp_max = 1
+
+    scale = 1
+    exp_max = int(exp_max)
+    prec = PRINT_OPTS.precision
 
     scale = 1
     exp_max = int(exp_max)
@@ -142,17 +139,15 @@ def _number_format(tensor, min_sz=-1):
 def _scalar_str(self, fmt, scale):
     scalar_str = fmt.format(self.item() / scale)
     # The leading space for positives is ugly on scalars, so we strip it
-    if scalar_str[0] == ' ':
-        return scalar_str[1:]
-    return scalar_str
+    return scalar_str.lstrip()
 
 
-def _vector_str(self, indent, fmt, scale, sz):
+def _vector_str(self, indent, fmt, scale, sz, summarize):
     element_length = sz + 2
     elements_per_line = int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
     char_per_line = element_length * elements_per_line
 
-    if self.size(0) > PRINT_OPTS.threshold:
+    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
         data = ([fmt.format(val.item() / scale) for val in self[:PRINT_OPTS.edgeitems]] +
                 [' ...'] +
                 [fmt.format(val.item() / scale) for val in self[-PRINT_OPTS.edgeitems:]])
@@ -164,21 +159,22 @@ def _vector_str(self, indent, fmt, scale, sz):
     return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
 
 
-def _tensor_str(self, indent, fmt, scale, sz):
+def _tensor_str(self, indent, fmt, scale, sz, summarize):
     dim = self.dim()
 
     if dim == 0:
         return _scalar_str(self, fmt, scale)
     if dim == 1:
-        return _vector_str(self, indent, fmt, scale, sz)
+        return _vector_str(self, indent, fmt, scale, sz, summarize)
 
-    if self.size(0) > PRINT_OPTS.threshold:
-        slices = ([_tensor_str(self[i], indent + 1, fmt, scale, sz) for i in range(0, PRINT_OPTS.edgeitems)] +
+    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
+        slices = ([_tensor_str(self[i], indent + 1, fmt, scale, sz, summarize)
+                   for i in range(0, PRINT_OPTS.edgeitems)] +
                   ['...'] +
-                  [_tensor_str(self[i], indent + 1, fmt, scale, sz) for i in range(len(self) - PRINT_OPTS.edgeitems,
-                                                                                   len(self))])
+                  [_tensor_str(self[i], indent + 1, fmt, scale, sz, summarize)
+                   for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
     else:
-        slices = [_tensor_str(self[i], indent + 1, fmt, scale, sz) for i in range(0, self.size(0))]
+        slices = [_tensor_str(self[i], indent + 1, fmt, scale, sz, summarize) for i in range(0, self.size(0))]
 
     tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
     return '[' + tensor_str + ']'
@@ -190,14 +186,21 @@ def _str(self):
         return '{} of size {} with indices:\n{}and values:\n{}'.format(
             self.type(), size_str, self._indices(), self._values())
 
-    type_str = 'tensor'
-    prefix = type_str + '('
+    prefix = 'tensor('
     indent = len(prefix)
+    summarize = self.numel() > PRINT_OPTS.threshold
 
     suffix = ')'
-    if str(self.device.type) != 'cpu':
-        suffix = ', device=\'' + str(self.device.type) + '\'' + suffix
-    if str(self.dtype) not in IMPLICIT_DTYPES:
+    if not torch.is_default_cuda_device():
+        if self.device.type == 'cuda':
+            suffix = ', device=' + str(self.device.index) + suffix
+    else:
+        if self.device.type == 'cpu':
+            suffix = ', device=\'' + self.device.type + '\'' + suffix
+        elif torch.cuda.current_device() != self.device.index:
+            suffix = ', device=' + str(self.device.index) + suffix
+
+    if self.dtype != torch.get_default_dtype() and str(self.dtype) != 'torch.int64':
         suffix = ', dtype=' + str(self.dtype) + suffix
 
     if self.numel() == 0:
@@ -206,6 +209,6 @@ def _str(self):
         fmt, scale, sz = _number_format(self)
         if scale != 1:
             prefix = prefix + SCALE_FORMAT.format(scale) + ' ' * indent
-        tensor_str = _tensor_str(self, indent, fmt, scale, sz)
+        tensor_str = _tensor_str(self, indent, fmt, scale, sz, summarize)
 
     return prefix + tensor_str + suffix
