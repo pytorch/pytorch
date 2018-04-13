@@ -64,6 +64,7 @@ void initJITBindings(PyObject *module) {
 
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
+   .def("_jit_pass_onnx_from_graph", ToONNXFromGraph)
    .def("_jit_pass_onnx_peephole", graph_pass<PeepholeOptimizeONNX>)
    .def("_jit_pass_fuse", graph_pass<FuseGraph>)
    .def("_jit_pass_dce", graph_pass<EliminateDeadCode>)
