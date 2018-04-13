@@ -3623,7 +3623,7 @@ Returns a tensor filled with the scalar value `1`, with the same size as
 .. warning::
     As of 0.4, this function does not support an :attr:`out` keyword. As an alternative,
     the old ``torch.ones_like(input, out=output)`` is equivalent to
-    ``output.resize_as_(input).fill_(1.)``.
+    ``torch.ones(input.size(), out=output)``.
 
 Args:
     input (Tensor): the size of :attr:`input` will determine size of the output tensor
@@ -5771,7 +5771,7 @@ Returns a tensor filled with the scalar value `0`, with the same size as
 .. warning::
     As of 0.4, this function does not support an :attr:`out` keyword. As an alternative,
     the old ``torch.zeros_like(input, out=output)`` is equivalent to
-    ``output.resize_as_(input).fill_(0.)``.
+    ``torch.zeros(input.size(), out=output)``.
 
 Args:
     input (Tensor): the size of :attr:`input` will determine size of the output tensor
