@@ -6132,6 +6132,11 @@ class TestTorch(TestCase):
         x = np.zeros((0, 2))
         self.assertEqual(torch.from_numpy(x).shape, (0,))
 
+        # check requires_grad
+        x = np.ones(1)
+        self.assertFalse(torch.from_numpy(x).requires_grad)
+        self.assertTrue(torch.from_numpy(x, requires_grad=True).requires_grad)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self):
         dtypes = [
