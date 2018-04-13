@@ -28,10 +28,9 @@ if("${isSystemDir}" STREQUAL "-1")
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
-IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wextra -Wno-missing-field-initializers -Wno-type-limits -Wno-unused-parameter -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
-  set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
-ENDIF(NOT MSVC)
+if(NOT MSVC)
+  set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
+endif()
 
 INCLUDE(CheckCXXSourceCompiles)
 
@@ -423,12 +422,6 @@ IF(LAPACK_FOUND)
 ENDIF(LAPACK_FOUND)
 
 #############################################
-
-if (NOT MSVC)
-if ($ENV{WERROR})
-  set(CMAKE_CXX_FLAGS "-Werror ${CMAKE_CXX_FLAGS}")
-endif()
-endif()
 
 set(ATen_CPU_SRCS)
 set(ATen_CPU_INCLUDE)
