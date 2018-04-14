@@ -11,6 +11,8 @@ import re
 import sys
 import threading
 import traceback
+import os
+import time
 from torch._six import string_classes, int_classes
 
 if sys.version_info[0] == 2:
@@ -30,8 +32,13 @@ class ExceptionWrapper(object):
 _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
 
+IS_WINDOWS = sys.platform == "win32"
+MANAGER_STATUS_CHECK_INTERVAL = 5.0
+if IS_WINDOWS:
+    MANAGER_UPDATE_INTERVAL = 1.0
 
-def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
+
+def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id, manager_heartbeat):
     global _use_shared_memory
     _use_shared_memory = True
 
@@ -48,9 +55,28 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     if init_fn is not None:
         init_fn(worker_id)
 
+    worker_done_event = threading.Event()
+
+    def check_manager_process_status(worker_done_event):
+        if not worker_done_event.is_set():
+            should_exit = False
+            if IS_WINDOWS:
+                if (time.time() - manager_heartbeat.value) > MANAGER_UPDATE_INTERVAL:
+                    should_exit = True
+            else:
+                if os.getppid() == 1:
+                    should_exit = True
+            if should_exit:
+                index_queue.put(None)
+            else:
+                threading.Timer(MANAGER_STATUS_CHECK_INTERVAL,
+                                check_manager_process_status, args=[worker_done_event]).start()
+    check_manager_process_status(worker_done_event)
+
     while True:
         r = index_queue.get()
         if r is None:
+            worker_done_event.set()
             break
         idx, batch_indices = r
         try:
@@ -207,6 +233,16 @@ class _DataLoaderIter(object):
             self.send_idx = 0
             self.rcvd_idx = 0
             self.reorder_dict = {}
+            self.manager_heartbeat = None
+
+            if IS_WINDOWS:
+                self.manager_heartbeat = multiprocessing.Value('d', time.time())
+
+                def update_heartbeat():
+                    threading.Timer(MANAGER_UPDATE_INTERVAL, update_heartbeat).start()
+                    self.manager_heartbeat.value = time.time()
+
+                update_heartbeat()
 
             base_seed = torch.LongTensor(1).random_()[0]
             self.workers = [
@@ -214,7 +250,7 @@ class _DataLoaderIter(object):
                     target=_worker_loop,
                     args=(self.dataset, self.index_queues[i],
                           self.worker_result_queue, self.collate_fn, base_seed + i,
-                          self.worker_init_fn, i))
+                          self.worker_init_fn, i, self.manager_heartbeat))
                 for i in range(self.num_workers)]
 
             if self.pin_memory or self.timeout > 0:
