@@ -232,8 +232,8 @@ template <typename T, class Context>
 void Transpose(
     const int size,
     const int ndim,
-    const int* x_dims,
-    const int* y_dims,
+    const int* X_dims,
+    const int* Y_dims,
     const int* axes,
     const T* X,
     T* Y,

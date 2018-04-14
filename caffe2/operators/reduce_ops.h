@@ -51,29 +51,28 @@ class ReduceOpBase : public Operator<Context> {
         Y_dims.push_back(X_dims[i]);
       }
     }
-    dims_device_.Resize(ndim);
-    context_.template Copy<int, CPUContext, Context>(
-        ndim, X_dims.data(), dims_device_.template mutable_data<int>());
-    axes_device_.Resize(axes_.size());
-    context_.template Copy<int, CPUContext, Context>(
-        axes_.size(), axes_.data(), axes_device_.template mutable_data<int>());
     Y->Resize(Y_dims);
     return this->Compute(
         X.size(),
         Y->size(),
+        X_dims,
+        axes_,
         X.template data<T>(),
         Y->template mutable_data<T>());
   }
 
  protected:
-  virtual bool
-  Compute(const int X_size, const int Y_size, const T* X_data, T* Y_data) = 0;
+  virtual bool Compute(
+      const int X_size,
+      const int Y_size,
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data) = 0;
 
   std::vector<int> axes_;
   const int keep_dims_;
 
-  Tensor<Context> dims_device_;
-  Tensor<Context> axes_device_;
   Tensor<Context> buffer_;
 };
 
@@ -86,15 +85,20 @@ class ReduceSumOp final : public ReduceOpBase<T, Context> {
       : ReduceOpBase<T, Context>(operator_def, ws) {}
 
  protected:
-  bool Compute(const int X_size, const int Y_size, const T* X_data, T* Y_data)
-      override {
+  bool Compute(
+      const int X_size,
+      const int Y_size,
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data) override {
     math::ReduceSum<T, Context>(
         X_size,
         Y_size,
-        this->dims_device_.size(),
-        this->dims_device_.template data<int>(),
-        this->axes_device_.size(),
-        this->axes_device_.template data<int>(),
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
         X_data,
         Y_data,
         &context_,
@@ -112,15 +116,20 @@ class ReduceMeanOp final : public ReduceOpBase<T, Context> {
       : ReduceOpBase<T, Context>(operator_def, ws) {}
 
  protected:
-  bool Compute(const int X_size, const int Y_size, const T* X_data, T* Y_data)
-      override {
+  bool Compute(
+      const int X_size,
+      const int Y_size,
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data) override {
     math::ReduceMean<T, Context>(
         X_size,
         Y_size,
-        this->dims_device_.size(),
-        this->dims_device_.template data<int>(),
-        this->axes_device_.size(),
-        this->axes_device_.template data<int>(),
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
         X_data,
         Y_data,
         &context_,
