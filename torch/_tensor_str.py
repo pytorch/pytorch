@@ -139,7 +139,7 @@ def _scalar_str(self, fmt, scale):
 
 
 def _vector_str(self, indent, fmt, scale, sz, summarize):
-    element_length = sz + 2
+    element_length = sz + 3
     elements_per_line = int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
     char_per_line = element_length * elements_per_line
 
@@ -151,7 +151,7 @@ def _vector_str(self, indent, fmt, scale, sz, summarize):
         data = [fmt.format(val.item() / scale) for val in self]
 
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
-    lines = [','.join(line) for line in data_lines]
+    lines = [', '.join(line) for line in data_lines]
     return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
 
 
@@ -187,16 +187,16 @@ def _str(self):
     summarize = self.numel() > PRINT_OPTS.threshold
 
     suffix = ')'
-    if not torch.is_default_cuda_device():
+    if not torch._C._is_default_type_cuda():
         if self.device.type == 'cuda':
-            suffix = ', device=' + str(self.device.index) + suffix
+            suffix = ', device=' + repr(self.device.index) + suffix
     else:
         if self.device.type == 'cpu':
-            suffix = ', device=\'' + self.device.type + '\'' + suffix
+            suffix = ', device=' + repr(self.device.type) + suffix
         elif torch.cuda.current_device() != self.device.index:
-            suffix = ', device=' + str(self.device.index) + suffix
+            suffix = ', device=' + repr(self.device.index) + suffix
 
-    if self.dtype != torch.get_default_dtype() and str(self.dtype) != 'torch.int64':
+    if self.dtype != torch.get_default_dtype() and self.dtype != torch.int64:
         suffix = ', dtype=' + str(self.dtype) + suffix
 
     if self.numel() == 0:
