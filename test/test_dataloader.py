@@ -22,7 +22,7 @@ if __name__ == '__main__':
     from common_nn import TEST_CUDA
 
 
-JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 10
+JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 15.0
 
 
 class TestDatasetRandomSplit(TestCase):
