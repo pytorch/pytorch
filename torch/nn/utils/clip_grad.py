@@ -17,7 +17,7 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
     Returns:
         Total norm of the parameters (viewed as a single vector).
     """
-    parameters = list(filter(lambda p: p.grad is not None, parameters))
+    parameters = filter(lambda p: p.grad is not None, parameters)
     max_norm = float(max_norm)
     norm_type = float(norm_type)
     if norm_type == float('inf'):
@@ -59,5 +59,5 @@ def clip_grad_value_(parameters, clip_value):
             The gradients are clipped in the range [-clip_value, clip_value]
     """
     clip_value = float(clip_value)
-    for p in list(filter(lambda p: p.grad is not None, parameters)):
+    for p in filter(lambda p: p.grad is not None, parameters):
         p.grad.data.clamp_(min=-clip_value, max=clip_value)

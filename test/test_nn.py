@@ -1201,6 +1201,18 @@ class TestNN(NNTestCase):
             self.assertLessEqual(p.grad.data.max(), clip_value)
             self.assertGreaterEqual(p.grad.data.min(), -clip_value)
 
+        grads = torch.arange(-50, 50).view(10, 10).div(5), torch.ones(10).mul(2)
+        for i, (p, g) in enumerate(zip(l.parameters(), grads)):
+            if i == 0:
+                p._grad = Variable(g.clone().view_as(p.data))
+            else:
+                p._grad = None
+
+        clip_grad_value_(l.parameters(), clip_value)
+        for p in filter(lambda p: p.grad is not None, l.parameters()):
+            self.assertLessEqual(p.grad.data.max(), clip_value)
+            self.assertGreaterEqual(p.grad.data.min(), -clip_value)
+
     def test_parameters_to_vector(self):
         conv1 = nn.Conv2d(3, 10, 5)
         fc1 = nn.Linear(10, 20)
