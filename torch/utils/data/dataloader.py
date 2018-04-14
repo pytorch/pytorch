@@ -239,8 +239,8 @@ class _DataLoaderIter(object):
                 self.manager_heartbeat = multiprocessing.Value('d', time.time())
 
                 def update_heartbeat():
-                    threading.Timer(MANAGER_UPDATE_INTERVAL, update_heartbeat).start()
                     self.manager_heartbeat.value = time.time()
+                    threading.Timer(MANAGER_UPDATE_INTERVAL, update_heartbeat).start()
 
                 update_heartbeat()
 
