@@ -14,11 +14,21 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
 
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+#include "unsupported/Eigen/CXX11/Tensor"
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+
 #if THRUST_VERSION >= 100800
 #define THRUST_SUPPORTS_PER_THREAD
 #endif  // THRUST_VERSION >= 100800
 
 namespace caffe2 {
+
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+template <typename T, int D>
+using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D, Eigen::RowMajor>>;
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+
 namespace math {
 
 #define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(T, Funcname, function)             \
@@ -2409,32 +2419,32 @@ constexpr int kCUDATransposeMaxDims = 8;
 
 __device__ int GetXIndex(
     const int ndim,
-    const int* y_dims,
-    const int* x_strides,
-    int y_index) {
-  int x_index = 0;
+    const int* X_strides,
+    const int* Y_dims,
+    int Y_index) {
+  int X_index = 0;
 #pragma unroll
-  for (int i = ndim - 1; i >= 0 && y_index > 0; --i) {
-    x_index += (y_index % y_dims[i]) * x_strides[i];
-    y_index /= y_dims[i];
+  for (int i = ndim - 1; i >= 0 && Y_index > 0; --i) {
+    X_index += (Y_index % Y_dims[i]) * X_strides[i];
+    Y_index /= Y_dims[i];
   }
-  return x_index;
+  return X_index;
 }
 
 template <typename T, int D>
 __global__ void TransposeCUDAKernel(
     const int size,
-    const SimpleArray<int, D> x_strides,
-    const SimpleArray<int, D> y_dims,
+    const SimpleArray<int, D> X_strides,
+    const SimpleArray<int, D> Y_dims,
     const T* X,
     T* Y) {
-  const int ndim = x_strides.size;
-  CUDA_1D_KERNEL_LOOP(y_index, size) {
-    const int x_index = GetXIndex(ndim, y_dims.data, x_strides.data, y_index);
+  const int ndim = X_strides.size;
+  CUDA_1D_KERNEL_LOOP(Y_index, size) {
+    const int X_index = GetXIndex(ndim, X_strides.data, Y_dims.data, Y_index);
 #if __CUDA_ARCH__ >= 350
-    Y[y_index] = __ldg(X + x_index);
+    Y[Y_index] = __ldg(X + X_index);
 #else
-    Y[y_index] = X[x_index];
+    Y[Y_index] = X[X_index];
 #endif
   }
 }
@@ -2517,17 +2527,17 @@ bool EigenTransposeCUDA(
 template <int D>
 void ComputeXStride(
     const int ndim,
-    const int* x_dims,
+    const int* X_dims,
     const int* axes,
-    int* x_strides) {
+    int* X_strides) {
   int buff[D];
   int cur_stride = 1;
   for (int i = ndim - 1; i >= 0; --i) {
     buff[i] = cur_stride;
-    cur_stride *= x_dims[i];
+    cur_stride *= X_dims[i];
   }
   for (int i = 0; i < ndim; ++i) {
-    x_strides[i] = buff[axes[i]];
+    X_strides[i] = buff[axes[i]];
   }
 }
 
@@ -2535,29 +2545,25 @@ template <typename T, int D>
 void TransposeCUDAImpl(
     const int size,
     const int ndim,
-    const int* x_dims,
-    const int* y_dims,
+    const int* X_dims,
+    const int* Y_dims,
     const int* axes,
     const T* X,
     T* Y,
     CUDAContext* context) {
-  SimpleArray<int, D> x_strides_array;
-  SimpleArray<int, D> y_dims_array;
-  x_strides_array.size = ndim;
-  ComputeXStride<D>(ndim, x_dims, axes, x_strides_array.data);
-  y_dims_array.size = ndim;
-  if (y_dims == nullptr) {
-    for (int i = 0; i < ndim; ++i) {
-      y_dims_array.data[i] = x_dims[axes[i]];
-    }
-  } else {
-    std::copy_n(y_dims, ndim, y_dims_array.data);
+  SimpleArray<int, D> X_strides_array;
+  SimpleArray<int, D> Y_dims_array;
+  X_strides_array.size = ndim;
+  ComputeXStride<D>(ndim, X_dims, axes, X_strides_array.data);
+  Y_dims_array.size = ndim;
+  for (int i = 0; i < ndim; ++i) {
+    Y_dims_array.data[i] = Y_dims == nullptr ? X_dims[axes[i]] : Y_dims[i];
   }
   TransposeCUDAKernel<T, D>
       <<<CAFFE_GET_BLOCKS(size),
          CAFFE_CUDA_NUM_THREADS,
          0,
-         context->cuda_stream()>>>(size, x_strides_array, y_dims_array, X, Y);
+         context->cuda_stream()>>>(size, X_strides_array, Y_dims_array, X, Y);
 }
 
 } // namespace
