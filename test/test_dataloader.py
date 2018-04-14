@@ -710,9 +710,7 @@ class TestIndividualWorkerQueue(TestCase):
 
 
 if __name__ == '__main__':
-    if sys.version_info[0] == 2:
-        multiprocessing.set_start_method('fork')
-    else:
+    if sys.version_info[0] == 3:
         # We need spawn start method for test_manager_unclean_exit
         multiprocessing.set_start_method('spawn')
     run_tests()
