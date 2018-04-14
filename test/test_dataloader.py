@@ -518,6 +518,7 @@ class TestDataLoader(TestCase):
     @unittest.skipIf(sys.version_info[0] == 2,
                      "spawn start method is not supported in Python 2, \
                      but we need it for creating another process with CUDA")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_manager_unclean_exit(self):
         '''there might be ConnectionResetError or leaked semaphore warning (due to dirty process exit), \
 but they are all safe to ignore'''
