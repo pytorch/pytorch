@@ -65,8 +65,7 @@ void compare(
   OperatorDef nnpackOpDef;
   nnpackOpDef.set_name("test");
   nnpackOpDef.set_type("Conv");
-  nnpackOpDef.set_engine(
-      algorithm == "DEPTHWISE_3x3" ? "DEPTHWISE_3x3" : "NNPACK");
+  nnpackOpDef.set_engine("NNPACK");
   nnpackOpDef.add_input("X");
   nnpackOpDef.add_input("W");
   nnpackOpDef.add_input("B");
@@ -123,7 +122,7 @@ void compare(
   EXPECT_NE(nullptr, referenceOp.get());
 
   unique_ptr<OperatorBase> activationOp;
-  if (activation == "ReLU") {
+  if (activation == "Relu") {
     OperatorDef activationOpDef;
     activationOpDef.set_name("activation");
     activationOpDef.set_type("Relu");
@@ -314,7 +313,7 @@ TEST(NNPACK, ConvRelu_1x1s1) {
     auto outChannels = randInt(1, 8) * group;
     auto n = 1;
     runConv(
-        1, 1, 1, 1, group, "DIRECT", inChannels, outChannels, n, "PRECOMPUTE", "ReLU");
+        1, 1, 1, 1, group, "DIRECT", inChannels, outChannels, n, "PRECOMPUTE", "Relu");
   }
 }
 
@@ -363,7 +362,7 @@ TEST(NNPACK, ConvRelu_NxNsW) {
   for (int i = 0; i < 3; ++i) {
     int kernel = randInt(3, 5);
     int stride = randInt(1, kernel - 1);
-    runConv(kernel, kernel, stride, stride, 1, "", 1, 1, 1, "COMPUTE", "ReLU");
+    runConv(kernel, kernel, stride, stride, 1, "", 1, 1, 1, "COMPUTE", "Relu");
   }
 }
 
@@ -374,14 +373,6 @@ TEST(NNPACK, Conv_HxWsHxW) {
     int strideH = randInt(1, kernelH - 1);
     int strideW = randInt(1, kernelW - 1);
     runConv(kernelH, kernelW, strideH, strideW);
-  }
-}
-
-TEST(NNPACK, Depthwise3x3Conv) {
-  for (int i = 0; i < kIters; ++i) {
-    int channel = 2;
-    runConv(
-        3, 3, 1, 1, channel, "DEPTHWISE_3x3", channel, channel, randInt(1, 2));
   }
 }
 
