@@ -26,6 +26,7 @@
 #include "torch/csrc/jit/graph_node_list.h"
 #include "torch/csrc/jit/variable_flags.h"
 #include "torch/csrc/jit/source_location.h"
+#include "torch/csrc/utils/functional.h"
 
 namespace torch { namespace autograd {
 
@@ -731,6 +732,12 @@ struct Block {
   const Node * return_node() const {
     return output_;
   }
+  Node * param_node() {
+    return input_;
+  }
+  const Node * param_node() const {
+    return input_;
+  }
   Value * addInput(std::string name="") {
     Value * v = input_->addOutput();
     if (name != "") v->setUniqueName(name);
@@ -948,6 +955,21 @@ public:
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
     n->i_(attr::device, device);
+    return n;
+  }
+  Node* createTuple(at::ArrayRef<Value*> values) {
+    auto types = fmap(values, [](Value* v) { return v->type(); });
+    auto tt = std::make_shared<TupleType>(std::move(types));
+    auto n = create(prim::TupleConstruct, values);
+    n->output()->setType(tt);
+    return n;
+  }
+  Node* createTupleUnpack(Value * v) {
+    TupleType* tt = v->type()->expect<TupleType>();
+    auto n = create(prim::TupleUnpack, {v}, 0);
+    for(auto & element : tt->elements()) {
+      n->addOutput()->setType(element);
+    }
     return n;
   }
   Node* createPythonOp(

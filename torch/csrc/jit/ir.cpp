@@ -28,11 +28,8 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
   if (is_legacy) {
     return std::string(obj->ob_type->tp_name);
   } else {
-    // NB: hypothetically __name__ could mutate the Python
-    // object in a externally visible way. Please don't!
-    auto wobj = const_cast<PyObject*>(obj);
-    THPObjectPtr name{PyObject_GetAttrString(wobj, "__name__")};
-    return THPUtils_unpackString(name.get());
+    auto v = py::getattr(const_cast<PyObject*>(obj), "__name__", py::str("<python_value>"));
+    return py::str(v);
   }
 }
 
