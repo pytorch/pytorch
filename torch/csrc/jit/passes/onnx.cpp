@@ -25,14 +25,8 @@ bool hasUsedHandle(Node *node) {
 
 // Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
 // Argument aten indicates whether we should export ops as "ATen" ONNX ops if possible.
-void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
-  // Check that the tracing state is live (it should be, because
-  // you were supposed to request zero derivatives.)
-  if (state->is_expired()) {
-    throw std::logic_error("ToONNX: tracing state is expired");
-  }
-
-  auto new_graph = std::make_shared<Graph>(state->graph->scope_root());
+std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, bool aten) {
+  auto new_graph = std::make_shared<Graph>(graph->scope_root());
 
   torch::autograd::SymbolicContext ctx;
   ctx.graph = new_graph.get();
@@ -50,7 +44,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
   };
 
   // Initialize context and environment
-  for (auto input : state->graph->inputs()) {
+  for (auto input : graph->inputs()) {
     auto n = ctx.graph->addInput()->copyMetadata(input);
     n->setStage(input->stage());
     env[input] = n;
@@ -192,7 +186,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
   };
 
   // Finally, visit all nodes in the graph
-  for (auto node : state->graph->nodes()) {
+  for (auto node : graph->nodes()) {
     if (hasUsedHandle(node)) {
       // Nothing we can do here. The handle is used, so we'll need to capture the
       // original state and can't do anything with this op (we don't know what the
@@ -210,13 +204,13 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
       callPySymbolicFunction(node);
     IR_END()
   }
-  for (auto output : state->graph->outputs()) {
+  for (auto output : graph->outputs()) {
     ctx.graph->registerOutput(env.at(output));
   }
 
   // Copy stage from original graph
-  new_graph->setStage(state->graph->stage());
-  state->graph = std::move(new_graph);
+  new_graph->setStage(graph->stage());
+  return new_graph;
 }
 
 }}
