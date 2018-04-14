@@ -3614,14 +3614,27 @@ Example::
 
 add_docstr(torch.ones_like,
            r"""
-ones_like(input, out=None) -> Tensor
+ones_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the same size as
-:attr:`input`.
+:attr:`input`. ``torch.ones_like(input)`` is equivalent to
+``torch.ones(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+.. warning::
+    As of 0.4, this function does not support an :attr:`out` keyword. As an alternative,
+    the old ``torch.ones_like(input, out=output)`` is equivalent to
+    ``torch.ones(input.size(), out=output)``.
 
 Args:
     input (Tensor): the size of :attr:`input` will determine size of the output tensor
-    out (Tensor, optional): the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
+        Default: if None, defaults to the dtype of :attr:`input`.
+    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
+        Default: if None, defaults to the layout of :attr:`input`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, defaults to the device of :attr:`input`.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: False.
 
 Example::
 
@@ -5749,14 +5762,27 @@ Example::
 
 add_docstr(torch.zeros_like,
            r"""
-zeros_like(input, out=None) -> Tensor
+zeros_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the same size as
-:attr:`input`.
+:attr:`input`. ``torch.zeros_like(input)`` is equivalent to
+``torch.zeros(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+.. warning::
+    As of 0.4, this function does not support an :attr:`out` keyword. As an alternative,
+    the old ``torch.zeros_like(input, out=output)`` is equivalent to
+    ``torch.zeros(input.size(), out=output)``.
 
 Args:
-    input (Tensor): the size of the input will determine the size of the output.
-    out (Tensor, optional): the output tensor
+    input (Tensor): the size of :attr:`input` will determine size of the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
+        Default: if None, defaults to the dtype of :attr:`input`.
+    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
+        Default: if None, defaults to the layout of :attr:`input`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, defaults to the device of :attr:`input`.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: False.
 
 Example::
 
@@ -5826,12 +5852,22 @@ Example::
 
 add_docstr(torch.empty_like,
            r"""
-empty_like(input) -> Tensor
+empty_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
 Returns an uninitialized tensor with the same size as :attr:`input`.
+``torch.empty_like(input)`` is equivalent to
+``torch.empty(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
     input (Tensor): the size of :attr:`input` will determine size of the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
+        Default: if None, defaults to the dtype of :attr:`input`.
+    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
+        Default: if None, defaults to the layout of :attr:`input`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, defaults to the device of :attr:`input`.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: False.
 
 Example::
 
