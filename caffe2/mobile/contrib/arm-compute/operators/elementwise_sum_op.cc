@@ -27,6 +27,9 @@ bool GLSumOp<T>::RunOnDevice() {
   if (first_run_) {
     A_ = GLContext::getGLTensor<T>(Ablob);
     B_ = GLContext::getGLTensor<T>(Bblob);
+  } else {
+    A_ = GLContext::getGLTensor<T>(Ablob, A_.release());
+    B_ = GLContext::getGLTensor<T>(Bblob, B_.release());
   }
 
   GLTensor<T> *Y =
@@ -39,7 +42,6 @@ bool GLSumOp<T>::RunOnDevice() {
     A_->lazy_allocate(Ablob, second_run_, true);
     B_->lazy_allocate(Bblob, second_run_, true);
     second_run_ = false;
-    Y->ResizeLike(*A_);
     Y->allocate();
     add_layer_.run();
   } else {

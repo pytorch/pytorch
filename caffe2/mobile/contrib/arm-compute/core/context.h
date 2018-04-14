@@ -53,7 +53,6 @@ public:
 
   template <typename T>
   using deleted_unique_ptr = std::unique_ptr<T, std::function<void(T *)>>;
-
   template <typename T>
     static deleted_unique_ptr<const GLTensor<T>> getGLTensor(const Blob *b, const GLTensor<T>* X_old = nullptr) {
     if (b->IsType<TensorCPU>()) {
@@ -67,13 +66,17 @@ public:
         X_raw_ptr = new GLTensor<T>();
         X_raw_ptr->ResizeLike(Xcpu);
       }
-      deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(X_raw_ptr, [](const GLTensor<T> *X) { delete X; });
-      return X_unique_ptr;
+      if (X_old) {
+        deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(X_raw_ptr, EmptyDeleter<T>);
+        return X_unique_ptr;
+      } else {
+        deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(X_raw_ptr, GLTensorDeleter<T>);
+        return X_unique_ptr;
+      }
     }
     const GLTensor<T> *X_raw_ptr;
     X_raw_ptr = &b->Get<GLTensor<T>>();
-    deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(
-        X_raw_ptr, [](const GLTensor<T> *X) { return; });
+    deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(X_raw_ptr, EmptyDeleter<T>);
     return X_unique_ptr;
   }
 
@@ -122,6 +125,17 @@ public:
   }
   bool HasAsyncPartDefault() const { return false; }
   bool SupportsAsyncScheduling() const { return false; }
+
+private:
+  template <typename T>
+  static void GLTensorDeleter(const GLTensor<T> *X) {
+    delete X;
+  }
+
+  template <typename T>
+  static void EmptyDeleter(const GLTensor<T> *X) {
+    return;
+  }
 
 };
 

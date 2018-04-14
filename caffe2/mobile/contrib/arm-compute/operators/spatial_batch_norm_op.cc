@@ -44,6 +44,8 @@ bool GLSpatialBNOp<T>::RunOnDevice() {
     bias_ = GLContext::getGLTensor<T>(biasBlob);
     mean_ = GLContext::getGLTensor<T>(meanBlob);
     var_ = GLContext::getGLTensor<T>(varBlob);
+  } else {
+    X_ = GLContext::getGLTensor<T>(XBlob, X_.release());
   }
 
   auto C = X_->dim32(1);

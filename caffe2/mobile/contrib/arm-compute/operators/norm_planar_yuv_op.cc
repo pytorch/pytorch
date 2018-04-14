@@ -27,6 +27,8 @@ template <typename T> bool GLNormalizePlanarYUVOp<T>::RunOnDevice() {
     X_ = GLContext::getGLTensor<T>(Xblob);
     mean_ = GLContext::getGLTensor<T>(meanblob);
     sd_ = GLContext::getGLTensor<T>(sdblob);
+  } else {
+    X_ = GLContext::getGLTensor<T>(Xblob, X_.release());
   }
 
   CAFFE_ENFORCE_EQ(X_->ndim(), 4);

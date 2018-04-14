@@ -29,6 +29,10 @@ bool GLFullyConnectedOp<T>::RunOnDevice() {
     X_ = GLContext::getGLTensor<T>(Xblob);
     W_ = GLContext::getGLTensor<T>(Wblob);
     B_ = GLContext::getGLTensor<T>(Bblob);
+  } else {
+    X_ = GLContext::getGLTensor<T>(Xblob, X_.release());
+    W_ = GLContext::getGLTensor<T>(Wblob, W_.release());
+    B_ = GLContext::getGLTensor<T>(Bblob, B_.release());
   }
 
   auto M = X_->dim32(0);

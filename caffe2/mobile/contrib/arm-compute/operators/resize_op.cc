@@ -38,6 +38,8 @@ bool GLResizeNearestOp<T>::RunOnDevice() {
 
   if (first_run_) {
     X_ = GLContext::getGLTensor<T>(Xblob);
+  } else {
+    X_ = GLContext::getGLTensor<T>(Xblob, X_.release());
   }
 
   auto N = X_->dim32(0);
