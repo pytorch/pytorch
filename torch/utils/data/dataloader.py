@@ -366,6 +366,12 @@ class _DataLoaderIter(object):
                     pass
                 for q in self.index_queues:
                     q.put(None)
+                # We should wait for the workers to finish before shutting down
+                # the manager process, otherwise in the `spawn` start method
+                # workers won't be able to access the queues from manager
+                # and will give FileNotFoundError (https://bugs.python.org/issue28965)
+                for w in self.workers:
+                    w.join()
                 # done_event should be sufficient to exit worker_manager_thread,
                 # but be safe here and put another None
                 self.worker_result_queue.put(None)
