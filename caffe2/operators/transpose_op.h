@@ -33,46 +33,36 @@ class TransposeOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
-    auto* Y = Output(0);
     const int ndim = X.ndim();
-    const std::vector<int> x_dims(X.dims().cbegin(), X.dims().cend());
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.rbegin(), axes_.rend(), 0);
     } else {
       CAFFE_ENFORCE_EQ(ndim, axes_.size());
     }
-    std::vector<int> y_dims(ndim);
-    for (int i = 0; i < ndim; ++i) {
-      y_dims[i] = x_dims[axes_[i]];
-    }
-    Y->Resize(y_dims);
-    SetDeviceTensor(x_dims, &x_dims_device_);
-    SetDeviceTensor(y_dims, &y_dims_device_);
-    SetDeviceTensor(axes_, &axes_device_);
-
     // Do the actual transpose, which is implemented in DoRunWithType().
     return DispatchHelper<TensorTypes<float, double, int, long>>::call(
         this, Input(0));
   }
 
  protected:
-  void SetDeviceTensor(const std::vector<int>& data, Tensor<Context>* tensor) {
-    tensor->Resize(data.size());
-    context_.template Copy<int, CPUContext, Context>(
-        data.size(), data.data(), tensor->template mutable_data<int>());
-  }
-
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
+    const int ndim = X.ndim();
+    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    std::vector<int> Y_dims(ndim);
+    for (int i = 0; i < ndim; ++i) {
+      Y_dims[i] = X_dims[axes_[i]];
+    }
+    Y->Resize(Y_dims);
     math::Transpose<T, Context>(
         X.size(),
         axes_.size(),
-        x_dims_device_.template data<int>(),
-        y_dims_device_.template data<int>(),
-        axes_device_.template data<int>(),
+        X_dims.data(),
+        Y_dims.data(),
+        axes_.data(),
         X.template data<T>(),
         Y->template mutable_data<T>(),
         &context_);
@@ -80,10 +70,6 @@ class TransposeOp final : public Operator<Context> {
   }
 
   std::vector<int> axes_;
-
-  Tensor<Context> x_dims_device_;
-  Tensor<Context> y_dims_device_;
-  Tensor<Context> axes_device_;
 };
 
 } // namespace caffe2

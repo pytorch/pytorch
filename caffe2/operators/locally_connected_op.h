@@ -51,20 +51,6 @@ class LocallyConnectedOp final : public ConvPoolOpBase<Context> {
       Tensor<Context>* column_transposed_buffer,
       Tensor<Context>* Y_transposed_buffer);
 
-  void SetColumnBufferShape(
-      const int N,
-      const int C,
-      const int kernel_size,
-      const int output_image_size,
-      std::vector<int>* column_dims,
-      std::vector<int>* column_transposed_dims);
-
-  void SetYTranposedBufferShape(
-      const int N,
-      const int M,
-      const int output_image_size,
-      std::vector<int>* Y_transposed_dims);
-
   Tensor<Context> bias_multiplier_;
 
   // Buffer.
@@ -75,11 +61,6 @@ class LocallyConnectedOp final : public ConvPoolOpBase<Context> {
   // Dims devices.
   Tensor<Context> X_dims_device_;
   Tensor<Context> column_dims_device_;
-  Tensor<Context> column_transposed_dims_device_;
-  Tensor<Context> column_axes_device_;
-  Tensor<Context> Y_dims_device_;
-  Tensor<Context> Y_transposed_dims_device_;
-  Tensor<Context> Y_transposed_axes_device_;
 
   // Input: X, W, b
   // Output: Y
@@ -93,7 +74,7 @@ class LocallyConnectedGradientOp final : public ConvPoolOpBase<Context> {
 
   LocallyConnectedGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws),
-        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
+        OP_SINGLE_ARG(bool, "no_bias", no_bias_, false) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
@@ -132,20 +113,6 @@ class LocallyConnectedGradientOp final : public ConvPoolOpBase<Context> {
       Tensor<Context>* column_transposed_buffer,
       Tensor<Context>* dY_transposed_buffer);
 
-  void SetColumnBufferShape(
-      const int N,
-      const int C,
-      const int kernel_size,
-      const int output_image_size,
-      std::vector<int>* column_dims,
-      std::vector<int>* column_transposed_dims);
-
-  void SetDYTranposedBufferShape(
-      const int N,
-      const int M,
-      const int output_image_size,
-      std::vector<int>* dY_transposed_dims);
-
   const bool no_bias_;
 
   Tensor<Context> bias_multiplier_;
@@ -158,12 +125,6 @@ class LocallyConnectedGradientOp final : public ConvPoolOpBase<Context> {
   // Dims devices.
   Tensor<Context> X_dims_device_;
   Tensor<Context> column_dims_device_;
-  Tensor<Context> column_transposed_dims_device_;
-  Tensor<Context> column_axes_device_;
-  Tensor<Context> column_transposed_axes_device_;
-  Tensor<Context> dY_dims_device_;
-  Tensor<Context> dY_transposed_dims_device_;
-  Tensor<Context> dY_axes_device_;
 
   // input: X, W, dY
   // output: dW, db, and optionally dX

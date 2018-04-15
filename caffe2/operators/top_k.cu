@@ -20,32 +20,6 @@ namespace caffe2 {
 
 namespace {
 
-void MakeTransposeParams(
-    const TIndex prev_size,
-    const TIndex next_size,
-    const TIndex n,
-    TensorCUDA* x_dims,
-    TensorCUDA* y_dims,
-    TensorCUDA* axes,
-    CUDAContext* context) {
-  const std::array<int, 3> x_dims_vec = {static_cast<int>(prev_size),
-                                         static_cast<int>(n),
-                                         static_cast<int>(next_size)};
-  const std::array<int, 3> y_dims_vec = {static_cast<int>(prev_size),
-                                         static_cast<int>(next_size),
-                                         static_cast<int>(n)};
-  const std::array<int, 3> axes_vec = {0, 2, 1};
-  x_dims->Resize(3);
-  context->Copy<int, CPUContext, CUDAContext>(
-      3, x_dims_vec.data(), x_dims->mutable_data<int>());
-  y_dims->Resize(3);
-  context->Copy<int, CPUContext, CUDAContext>(
-      3, y_dims_vec.data(), y_dims->mutable_data<int>());
-  axes->Resize(3);
-  context->Copy<int, CPUContext, CUDAContext>(
-      3, axes_vec.data(), axes->mutable_data<int>());
-}
-
 template <typename T, int kHeapSize, bool kSelectMax = true>
 void RunHeapSelectionImpl(
     const T* input,
@@ -125,7 +99,7 @@ void RunTopKOnLastDimCUDAImpl(
   }
 }
 
-__global__ void FlattenIndicesCUDA(
+__global__ void FlattenIndicesCUDAKernel(
     const TIndex* src,
     const TIndex size,
     const TIndex stride,
@@ -144,7 +118,7 @@ __global__ void FlattenIndicesCUDA(
 }
 
 template <typename T>
-__global__ void SetTopKGradientCUDA(
+__global__ void SetTopKGradientCUDAKernel(
     const T* values,
     const TIndex* indices,
     const TIndex size,
@@ -247,14 +221,13 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
       : flatten_indices->template mutable_data<TIndex>();
 
   if (need_transpose) {
-    MakeTransposeParams(
-        prev_size,
-        next_size,
-        inner_size,
-        &input_dims_device_,
-        &input_transposed_dims_device_,
-        &input_axes_device_,
-        &context_);
+    const std::array<int, 3> X_dims = {static_cast<int>(prev_size),
+                                       static_cast<int>(inner_size),
+                                       static_cast<int>(next_size)};
+    const std::array<int, 3> Y_dims = {static_cast<int>(prev_size),
+                                       static_cast<int>(next_size),
+                                       static_cast<int>(inner_size)};
+    const std::array<int, 3> axes = {0, 2, 1};
     input_transposed_buffer_.Resize(
         std::vector<TIndex>{outer_size, inner_size});
     values_transposed_buffer_.Resize(std::vector<TIndex>{outer_size, k_});
@@ -262,9 +235,9 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
     math::Transpose(
         input.size(),
         3,
-        input_dims_device_.data<int>(),
-        input_transposed_dims_device_.data<int>(),
-        input_axes_device_.data<int>(),
+        X_dims.data(),
+        Y_dims.data(),
+        axes.data(),
         input.template data<T>(),
         input_transposed_buffer_.mutable_data<T>(),
         &context_);
@@ -281,29 +254,26 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
       indices_data,
       &context_);
   if (need_transpose) {
-    MakeTransposeParams(
-        prev_size,
-        next_size,
-        k_,
-        &output_dims_device_,
-        &output_transposed_dims_device_,
-        &output_transposed_axes_device_,
-        &context_);
+    const std::array<int, 3> X_dims = {
+        static_cast<int>(prev_size), k_, static_cast<int>(next_size)};
+    const std::array<int, 3> Y_dims = {
+        static_cast<int>(prev_size), static_cast<int>(next_size), k_};
+    const std::array<int, 3> axes = {0, 2, 1};
     math::Transpose(
         values_transposed_buffer_.size(),
         3,
-        output_transposed_dims_device_.data<int>(),
-        output_dims_device_.data<int>(),
-        output_transposed_axes_device_.data<int>(),
+        Y_dims.data(),
+        X_dims.data(),
+        axes.data(),
         values_transposed_buffer_.data<T>(),
         values->template mutable_data<T>(),
         &context_);
     math::Transpose(
         indices_transposed_buffer_.size(),
         3,
-        output_transposed_dims_device_.data<int>(),
-        output_dims_device_.data<int>(),
-        output_transposed_axes_device_.data<int>(),
+        Y_dims.data(),
+        X_dims.data(),
+        axes.data(),
         indices_transposed_buffer_.data<TIndex>(),
         indices->template mutable_data<TIndex>(),
         &context_);
@@ -311,7 +281,7 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
 
   // Flatten the indices if needed.
   if (flatten_indices != nullptr) {
-    FlattenIndicesCUDA<<<
+    FlattenIndicesCUDAKernel<<<
         CAFFE_GET_BLOCKS(indices->size()),
         CAFFE_CUDA_NUM_THREADS,
         0,
@@ -366,7 +336,7 @@ bool TopKGradientOp<T, CUDAContext>::RunOnDevice() {
       values_dims.cend(),
       TIndex(1),
       std::multiplies<TIndex>());
-  SetTopKGradientCUDA<<<
+  SetTopKGradientCUDAKernel<<<
       CAFFE_GET_BLOCKS(indices.size()),
       CAFFE_CUDA_NUM_THREADS,
       0,
