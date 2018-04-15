@@ -12,7 +12,7 @@ import subprocess
 from torch import multiprocessing
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
-from torch.utils.data.dataloader import default_collate, ExceptionWrapper
+from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MANAGER_STATUS_CHECK_INTERVAL
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 
 # We set dummy defaults here and only overwrite these values when in __main__,
@@ -22,7 +22,7 @@ if __name__ == '__main__':
     from common_nn import TEST_CUDA
 
 
-JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 15.0
+JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 4.5
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -547,7 +547,8 @@ but they are all safe to ignore'''
                 break
             else:
                 time.sleep(1)
-                self.assertFalse(time.time() - start_time > JOIN_TIMEOUT, 'subprocess not terminated')
+                self.assertFalse(time.time() - start_time > MANAGER_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT,
+                                 'subprocess not terminated')
 
     def test_len(self):
         def check_len(dl, expected):
