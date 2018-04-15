@@ -2596,7 +2596,7 @@ void TransposeCUDA(
       TransposeCUDAImpl<T, 8>(size, X_dims, Y_dims, axes, X, Y, context);
       break;
     }
-    default: { return; }
+    default: { break; }
   }
 }
 
