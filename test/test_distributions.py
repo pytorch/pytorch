@@ -35,10 +35,10 @@ from torch.autograd import Variable, grad, gradcheck, variable
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
                                  Exponential, ExponentialFamily,
-                                 FisherSnedecor, Gamma, Geometric,
-                                 Gumbel, Laplace, LogNormal, LogisticNormal,
-                                 Multinomial, MultivariateNormal, Normal,
-                                 OneHotCategorical, Pareto, Poisson,
+                                 FisherSnedecor, Gamma, Geometric, Gumbel,
+                                 Independent, Laplace, LogisticNormal,
+                                 LogNormal, Multinomial, MultivariateNormal,
+                                 Normal, OneHotCategorical, Pareto, Poisson,
                                  RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
                                  constraints, kl_divergence)
@@ -49,8 +49,8 @@ from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
-                                            PowerTransform,
-                                            SigmoidTransform, SoftmaxTransform,
+                                            PowerTransform, SigmoidTransform,
+                                            SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
 from torch.distributions.utils import _finfo, probs_to_logits, softmax
@@ -172,6 +172,33 @@ EXAMPLES = [
         {
             'loc': torch.randn(1, requires_grad=True),
             'scale': variable(torch.randn(1).abs(), requires_grad=True),
+        },
+    ]),
+    Example(Independent, [
+        {
+            'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
+                                        variable(torch.randn(2, 3).abs(), requires_grad=True)),
+            'reinterpreted_batch_ndims': 0,
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
+                                        variable(torch.randn(2, 3).abs(), requires_grad=True)),
+            'reinterpreted_batch_ndims': 1,
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
+                                        variable(torch.randn(2, 3).abs(), requires_grad=True)),
+            'reinterpreted_batch_ndims': 2,
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
+                                        variable(torch.randn(2, 3, 5).abs(), requires_grad=True)),
+            'reinterpreted_batch_ndims': 2,
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
+                                        variable(torch.randn(2, 3, 5).abs(), requires_grad=True)),
+            'reinterpreted_batch_ndims': 3,
         },
     ]),
     Example(Laplace, [

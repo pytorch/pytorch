@@ -69,7 +69,6 @@ derivative would be as follows::
 
 from .bernoulli import Bernoulli
 from .beta import Beta
-from .transforms import *
 from .binomial import Binomial
 from .categorical import Categorical
 from .cauchy import Cauchy
@@ -77,12 +76,13 @@ from .chi2 import Chi2
 from .constraint_registry import biject_to, transform_to
 from .dirichlet import Dirichlet
 from .distribution import Distribution
-from .exponential import Exponential
 from .exp_family import ExponentialFamily
+from .exponential import Exponential
 from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
+from .independent import Independent
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .log_normal import LogNormal
@@ -97,6 +97,7 @@ from .relaxed_bernoulli import RelaxedBernoulli
 from .relaxed_categorical import RelaxedOneHotCategorical
 from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
+from .transforms import *
 from .uniform import Uniform
 
 __all__ = [
@@ -114,6 +115,7 @@ __all__ = [
     'Gamma',
     'Geometric',
     'Gumbel',
+    'Independent',
     'Laplace',
     'LogNormal',
     'LogisticNormal',
