@@ -2668,6 +2668,65 @@ class TestScript(TestCase):
         f = io.BytesIO()
         torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
 
+    def test_onnx_export_script_module_loop(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for _ in range(100):
+                    x = x + x
+                return x
+
+        mte = ModuleToExport()
+        f = io.BytesIO()
+        torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+
+    def test_onnx_export_script_module_if(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                if torch.sum(x) > 0:
+                    x = torch.neg(x)
+                return x
+
+        mte = ModuleToExport()
+        f = io.BytesIO()
+        torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+
+    def test_onnx_export_script_inline_params(self):
+        class ModuleToInline(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToInline, self).__init__()
+                self.m = torch.nn.Parameter(torch.ones(3, 3))
+                self.unused = torch.nn.Parameter(torch.ones(1, 2, 3))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.mm(x, self.m)
+
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+                self.mod = ModuleToInline()
+                self.param = torch.nn.Parameter(torch.ones(3, 4))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                y = self.mod(x)
+                return torch.mm(y, self.param)
+
+        mte = ModuleToExport()
+        result = mte(torch.zeros(2, 3))
+        reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
+        self.assertEqual(result, reference)
+        f = io.BytesIO()
+        torch.onnx._export(mte, (torch.ones(2, 3),), f, verbose=False)
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):

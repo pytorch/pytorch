@@ -105,6 +105,7 @@ void initPythonIRBindings(PyObject * module_) {
     .GS(appendNode)
     .GS(prependNode)
     .GS(lint)
+    .GS(insertNode)
     ;
     #undef GS
 
@@ -139,6 +140,8 @@ void initPythonIRBindings(PyObject * module_) {
     ;
 
   #undef VS
+
+  py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block");
 
   #define NS(name) \
     def(#name,&Node :: name)
@@ -179,6 +182,10 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(eraseOutput)
     .NS(addOutput)
     .NS(scopeName)
+    .def("blocks", [](Node& n) {
+      return py::make_iterator(n.blocks().begin(), n.blocks().end());
+    })
+    .NS(addBlock)
 
 #define AS(name) def(#name,&Attributes<Node> :: name)
     // methods from Attributes

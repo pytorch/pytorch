@@ -2,6 +2,8 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/argument_spec.h"
 #include <ATen/optional.h>
 #include <functional>
 
@@ -38,7 +40,7 @@ struct Method {
       member_input_index[member] = i++;
     }
   }
-  
+
   variable_tensor_list run(variable_tensor_list && inputs) {
     std::call_once(executor_init, [&]{
       executor = GraphExecutor(graph(), optimize);
@@ -77,6 +79,20 @@ struct Method {
     member_input_index[slot] = graph()->inputs().size();
     return graph()->addInput();
   }
+
+  std::shared_ptr<Graph> propagate_shapes(std::vector<at::Tensor> inputs, bool with_grad=false) {
+    auto retval = graph_->copy();
+    for (auto inp : member_inputs) {
+      inputs.push_back(*inp);
+    }
+    PropagateInputShapes(*retval, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+    return retval;
+  }
+
+  std::vector<at::Tensor*> params() {
+    return member_inputs;
+  }
+
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
@@ -273,6 +289,7 @@ struct Module : public std::enable_shared_from_this<Module> {
       return at::optional<Method&>(**pm);
     return at::nullopt;
   }
+
 
 private:
 

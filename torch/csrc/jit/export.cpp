@@ -36,6 +36,10 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g,
                  const std::vector<at::Tensor> & initializers,
                  RawDataExportMap* raw_data_export_map=nullptr);
 
+void encodeBlock(onnx::GraphProto * p_g, Block *b,
+                const std::vector<at::Tensor> & initializers,
+                RawDataExportMap* raw_data_export_map);
+
 void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor,
                   at::optional<std::string> external_ref={},
                   RawDataExportMap* raw_data_export_map = nullptr) {
@@ -193,21 +197,27 @@ void encodeValueInfo(onnx::ValueInfoProto* v, Value* n) {
   encodeTypeProtoTensorType(tensor_type, n);
 }
 
-void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g,
+void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph>& g,
+                 const std::vector<at::Tensor> & initializers,
+                 RawDataExportMap* raw_data_export_map) {
+  encodeBlock(p_g, g->block(), initializers, raw_data_export_map);
+}
+
+void encodeBlock(onnx::GraphProto * p_g, Block *b,
                  const std::vector<at::Tensor> & initializers,
                  RawDataExportMap* raw_data_export_map) {
   JIT_ASSERT(p_g != nullptr);
   p_g->set_name("torch-jit-export");
 
-  for (auto input : g->inputs()) {
+  for (auto input : b->inputs()) {
     onnx::ValueInfoProto* v = p_g->add_input();
     encodeValueInfo(v, input);
   }
-  for (auto output : g->outputs()) {
+  for (auto output : b->outputs()) {
     onnx::ValueInfoProto* v = p_g->add_output();
     encodeValueInfo(v, output);
   }
-  for (auto node : g->nodes()) {
+  for (auto node : b->nodes()) {
     if (node->kind() == prim::Undefined) {
       // Undefined nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
@@ -235,9 +245,33 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g,
     for(auto attr_name : node->attributeNames()) {
       addAttribute(p_n, node, attr_name);
     }
+    if (node->kind() == torch::jit::onnx::Loop) {
+      JIT_ASSERT(node->blocks().size() == 1);
+
+      auto body = p_n->add_attribute();
+      body->set_name("body");
+      body->set_type(onnx::aGRAPH);
+      auto g = body->mutable_g();
+      encodeBlock(g, node->blocks()[0], initializers, raw_data_export_map);
+    }
+    if (node->kind() == torch::jit::onnx::If) {
+      JIT_ASSERT(node->blocks().size() == 2);
+
+      auto true_branch = p_n->add_attribute();
+      true_branch->set_name("then_branch");
+      true_branch->set_type(onnx::aGRAPH);
+      auto true_g = true_branch->mutable_g();
+      encodeBlock(true_g, node->blocks()[0], initializers, raw_data_export_map);
+
+      auto false_branch = p_n->add_attribute();
+      false_branch->set_name("else_branch");
+      false_branch->set_type(onnx::aGRAPH);
+      auto false_g = false_branch->mutable_g();
+      encodeBlock(false_g, node->blocks()[1], initializers, raw_data_export_map);
+    }
   }
   auto num_initializers = initializers.size();
-  int inputs_count = g->inputs().size() - num_initializers;
+  int inputs_count = b->inputs().size() - num_initializers;
   for (auto & tensor : initializers) {
     // TODO: stop using positions to determine which initializers
     // match to which inputs
