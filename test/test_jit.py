@@ -2588,6 +2588,9 @@ class TestScript(TestCase):
 
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
             @torch.jit.script_method
             def forward(self, x):
                 y = x - x
@@ -2599,6 +2602,9 @@ class TestScript(TestCase):
 
     def test_onnx_export_script_python_fail(self):
         class ModuleToInline(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToInline, self).__init__()
+
             def forward(self, x):
                 return torch.neg(x)
 
@@ -2619,6 +2625,9 @@ class TestScript(TestCase):
 
     def test_onnx_export_script_inline_trace(self):
         class ModuleToInline(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToInline, self).__init__()
+
             def forward(self, x):
                 return torch.neg(x)
 
@@ -2638,6 +2647,9 @@ class TestScript(TestCase):
 
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToInline, self).__init__()
+
             @torch.jit.script_method
             def forward(self, x):
                 return torch.neg(x)
