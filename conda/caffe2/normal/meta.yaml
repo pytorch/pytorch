@@ -1,17 +1,19 @@
-{% set version = "0.8.dev" %}
 
 package:
   name: caffe2
-  version: {{ version }}
+  version: {{ environ.get('PYTORCH_BUILD_VERSION') }}
 
 source:
   path: ../../..
 
 build:
   number: 0
+  string: py{{py}}_{{ environ.get('PYTORCH_BUILD_VERSION') }}
   skip: True  # [win]
   script_env:
-    - CONDA_CMAKE_BUILD_ARGS
+    - CONDA_CAFFE2_CMAKE_ARGS
+    - PACKAGE_CUDA_LIBS
+  # features section here
 
 requirements:
   build:
@@ -20,16 +22,17 @@ requirements:
     - numpy
     - python
     - six
-    # other packages here
+    # build section here
   run:
     - future
     - numpy
     - protobuf
     - python
     - six
-    # other packages here
+    # run section here
 
 test:
+  # test section here
   imports:
     - caffe2.python.core
 

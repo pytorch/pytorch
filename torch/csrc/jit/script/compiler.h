@@ -54,6 +54,21 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     at::ArrayRef<Value*> inputs,
     List<Attribute> attributes,
     size_t n_binders) {
+// n_binders is always set to the number of variables an expression is
+// syntactically bound to:
+//     a = foo() # 1 binder (note in this case the single binder might be a tuple)
+//     a, * b = foo() # 1 binder
+//     a, b = foo() # 2 binders
+//     foo() # 0 binders
+//
+// In subexpressions, like bar() in foo(bar()), n_binders is always set to
+// 1. n_binders is used as a hint to subexpressions to determine how many
+// values they should return when that number is ambiguous statically. In
+// particular it is currently used to decide how many tensors a call to a
+// python function will return. It is only a hint, functions do not have to
+// check that n_binders match the number of things they are returning, the
+// assignment logic will do that anyway.
+
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
@@ -71,8 +86,11 @@ struct SimpleValue : public SugaredValue {
   virtual Value * asValue(SourceRange range, Method & m) override {
     return value;
   }
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override;
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
-
+  Value* getValue() const {
+    return value;
+  }
 private:
   Value* value;
 };
@@ -108,7 +126,7 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
-std::shared_ptr<SugaredValue> packOutputs(at::ArrayRef<Value*> values);
+std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values);
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 
 

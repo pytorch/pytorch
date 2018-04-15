@@ -1,43 +1,43 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 3.0 FATAL_ERROR)
-CMAKE_POLICY(VERSION 3.0)
+cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+cmake_policy(VERSION 3.0)
 
-SET(CMAKE_CXX_STANDARD 14)
-SET(CMAKE_CXX_STANDARD_REQUIRED ON)
-SET(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if (VERBOSE)
   message(STATUS "ATEN_PATH is ${ATEN_PATH}")
   message(STATUS "ATEN_BUILD_PATH is ${ATEN_BUILD_PATH}")
 endif()
 
-FIND_PATH(ATEN_INCLUDE_DIR ATen/ATen.h PATHS "${ATEN_PATH}/src/" NO_DEFAULT_PATH)
-FIND_PATH(ATEN_BUILD_INCLUDE_DIR ATen/Type.h PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
-FIND_LIBRARY(ATEN_LIBRARY ATen PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
+find_path(ATEN_INCLUDE_DIR ATen/ATen.h PATHS "${ATEN_PATH}/src/" NO_DEFAULT_PATH)
+find_path(ATEN_BUILD_INCLUDE_DIR ATen/Type.h PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
+find_library(ATEN_LIBRARY ATen PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
 
-FIND_PATH(TORCH_SRC_DIR torch.h PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch" NO_DEFAULT_PATH)
+find_path(TORCH_SRC_DIR torch.h PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch" NO_DEFAULT_PATH)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-IF(NOT NO_CUDA)
+if(NOT NO_CUDA)
   set(CMAKE_MODULE_PATH
     ${TORCH_SRC_DIR}/../aten/cmake
     ${TORCH_SRC_DIR}/../aten/cmake/FindCUDA
     /usr/lib/x86_64-linux-gnu/
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
     ${CMAKE_MODULE_PATH})
-  SET(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
+  set(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 
-  IF(NOT CUDA_FOUND)
-    FIND_PACKAGE(CUDA 5.5)
-  ENDIF()
+  if(NOT CUDA_FOUND)
+    find_package(CUDA 5.5)
+  endif()
 
-  FIND_PACKAGE(MAGMA)
-  IF(CUDA_FOUND AND MAGMA_FOUND)
-    INCLUDE_DIRECTORIES("${MAGMA_INCLUDE_DIR}")
-    SET(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
-    INCLUDE(CheckPrototypeDefinition)
+  find_package(MAGMA)
+  if(CUDA_FOUND AND MAGMA_FOUND)
+    include_directories("${MAGMA_INCLUDE_DIR}")
+    set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
+    include(CheckPrototypeDefinition)
     check_prototype_definition(magma_get_sgeqrf_nb
      "magma_int_t magma_get_sgeqrf_nb( magma_int_t m, magma_int_t n );"
      "0"
@@ -45,40 +45,40 @@ IF(NOT NO_CUDA)
       MAGMA_V2)
     IF (MAGMA_V2)
       add_definitions(-DMAGMA_V2)
-    ENDIF (MAGMA_V2)
+    endif (MAGMA_V2)
 
-    SET(USE_MAGMA 1)
+    set(USE_MAGMA 1)
     if(VERBOSE)
-      MESSAGE(STATUS "Compiling with MAGMA support")
-      MESSAGE(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
-      MESSAGE(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
-      MESSAGE(STATUS "MAGMA V2 check: ${MAGMA_V2}")
+      message(STATUS "Compiling with MAGMA support")
+      message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
+      message(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
+      message(STATUS "MAGMA V2 check: ${MAGMA_V2}")
     endif()
-  ELSE()
-    MESSAGE(STATUS "MAGMA not found. Compiling without MAGMA support")
-  ENDIF()
-ENDIF()
+  else()
+    message(STATUS "MAGMA not found. Compiling without MAGMA support")
+  endif()
+endif()
 
-ADD_DEFINITIONS(-DNO_PYTHON)
+add_definitions(-DNO_PYTHON)
 
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORCE_INLINES")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORCE_INLINES")
 
-IF(NOT TORCH_INSTALL_BIN_DIR)
-  SET(TORCH_INSTALL_BIN_DIR bin)
-ENDIF(NOT TORCH_INSTALL_BIN_DIR)
+if(NOT TORCH_INSTALL_BIN_DIR)
+  set(TORCH_INSTALL_BIN_DIR bin)
+endif()
 
-IF(NOT TORCH_INSTALL_INCLUDE_DIR)
-  SET(TORCH_INSTALL_INCLUDE_DIR include/libtorch)
-ENDIF(NOT TORCH_INSTALL_INCLUDE_DIR)
+if(NOT TORCH_INSTALL_INCLUDE_DIR)
+  set(TORCH_INSTALL_INCLUDE_DIR include/libtorch)
+endif()
 
-IF(NOT TORCH_INSTALL_LIB_DIR)
-  SET(TORCH_INSTALL_LIB_DIR lib)
-ENDIF(NOT TORCH_INSTALL_LIB_DIR)
+if(NOT TORCH_INSTALL_LIB_DIR)
+  set(TORCH_INSTALL_LIB_DIR lib)
+endif()
 
-IF(NOT NO_CUDA)
-  ADD_DEFINITIONS( -DWITH_CUDA )
+if(NOT NO_CUDA)
+  add_definitions( -DWITH_CUDA )
 
-  SET(TORCH_CUDA_LIBRARIES
+  set(TORCH_CUDA_LIBRARIES
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libcuda.so
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvrtc.so
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
@@ -89,7 +89,7 @@ IF(NOT NO_CUDA)
       ${CUDA_INCLUDE_DIRS}
       "${ATEN_BUILD_PATH}/src/THC"
       "${ATEN_PATH}/src/THC")
-ENDIF(NOT NO_CUDA)
+endif()
 
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
@@ -106,7 +106,7 @@ if("${isSystemDir}" STREQUAL "-1")
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
-SET(TORCH_SRCS
+set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
@@ -134,6 +134,7 @@ SET(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
@@ -150,9 +151,9 @@ SET(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
   )
 
-ADD_LIBRARY(torch SHARED ${TORCH_SRCS})
+add_library(torch SHARED ${TORCH_SRCS})
 
-TARGET_LINK_LIBRARIES(torch
+target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
   ${ATEN_LIBRARY}
 )
@@ -165,39 +166,39 @@ set(COMMON_INCLUDES
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CUDA_INCLUDE_DIRS}")
 
-TARGET_INCLUDE_DIRECTORIES(torch
+target_include_directories(torch
   PUBLIC
   "${COMMON_INCLUDES}"
   "${TORCH_SRC_DIR}/../"
   "${TORCH_SRC_DIR}/../third_party/nanopb")
 
-SET_TARGET_PROPERTIES(torch PROPERTIES VERSION 1 SOVERSION 1)
+set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
-  SET_PROPERTY(TARGET torch PROPERTY CXX_STANDARD 11)
-endif(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
+  set_property(TARGET torch PROPERTY CXX_STANDARD 11)
+endif()
 
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
 
-INSTALL(TARGETS torch
+install(TARGETS torch
   RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
   LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
-SET(TORCH_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
+set(TORCH_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
 
-ADD_EXECUTABLE(test_jit ${TORCH_TEST_SRCS})
+add_executable(test_jit ${TORCH_TEST_SRCS})
 
-TARGET_LINK_LIBRARIES(test_jit torch)
+target_link_libraries(test_jit torch)
 
-TARGET_INCLUDE_DIRECTORIES(test_jit PUBLIC
+target_include_directories(test_jit PUBLIC
   "${TORCH_SRC_DIR}/../"
   "${TORCH_SRC_DIR}/../aten/src/ATen/utils/catch/single_include"
   "${COMMON_INCLUDES}")
 
-INSTALL(TARGETS test_jit
+install(TARGETS test_jit
   RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
   LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
