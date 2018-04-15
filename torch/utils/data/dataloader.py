@@ -33,7 +33,7 @@ _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
 
 IS_WINDOWS = sys.platform == "win32"
-MANAGER_STATUS_CHECK_INTERVAL = 5.0
+MANAGER_STATUS_CHECK_INTERVAL = 1.0
 if IS_WINDOWS:
     MANAGER_UPDATE_INTERVAL = 1.0
 
@@ -64,7 +64,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
                 if (time.time() - manager_heartbeat.value) > MANAGER_UPDATE_INTERVAL:
                     should_exit = True
             else:
-                if os.getppid() == 1:
+                if os.getppid() in [0, 1]:
                     should_exit = True
             if should_exit:
                 index_queue.put(None)
