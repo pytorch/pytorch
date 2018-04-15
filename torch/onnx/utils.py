@@ -115,12 +115,7 @@ def _trace(func, args, return_outs=False, aten=False):
     return trace
 
 
-def _export(model, args, f, export_params=True, verbose=False, training=False,
-            input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE):
-    # Special case for common case of passing a single Tensor
-    if isinstance(args, torch.Tensor):
-        args = (args, )
-
+def _trace_and_get_graph_from_model(model, args, training):
     # A basic sanity check: make sure the state_dict keys are the same
     # before and after running the model.  Fail fast!
     orig_state_dict_keys = _unique_state_dict(model).keys()
@@ -137,23 +132,45 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
-    trace.set_graph(_optimize_graph(trace.graph(), aten))
+    return trace.graph(), torch_out
 
-    _set_input_and_output_names(trace.graph(), input_names, output_names)
+
+# NOTE: the output `torch_out` will contain the output tensors resulting from
+# the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
+# this output will be None, since we are not doing any tracing but rather
+# directly extracting the graph.
+def _export(model, args, f, export_params=True, verbose=False, training=False,
+            input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE):
+    # Special case for common case of passing a single Variable
+    if isinstance(args, torch.Tensor):
+        args = (args, )
+
+    if isinstance(model, torch.jit.ScriptModule):
+        torch_out = None
+        try:
+            graph = model.__getattr__('forward').graph()
+            graph.propagate_shapes(args, False)
+        except AttributeError:
+            # TODO: just trace it
+            raise RuntimeError('\'forward\' method must be a script method')
+    else:
+        graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
+
+    graph = _optimize_graph(graph, aten)
+
+    _set_input_and_output_names(graph, input_names, output_names)
 
     if verbose:
-        print(trace)
+        print(graph)
 
     # TODO: Don't allocate a in-memory string for the protobuf
     from torch.onnx.symbolic import _onnx_opset_version
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
-        # NB: OrderedDict values is not actually a list, but trace.export is
-        # not duck-typed and expects an actual list.
-        proto, export_map = trace.export(list(_unique_state_dict(model).values()),
+        proto, export_map = graph.export(list(_unique_state_dict(model).values()),
                                          _onnx_opset_version, defer_weight_export)
     else:
-        proto, export_map = trace.export([], _onnx_opset_version, False)
+        proto, export_map = graph.export([], _onnx_opset_version, False)
 
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)
