@@ -69,6 +69,7 @@ public:
   std::shared_ptr<Type> asShared() {
     return shared_from_this();
   }
+  virtual ~Type() {}
 };
 
 
