@@ -108,7 +108,8 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
         dX1 = workspace.FetchBlob("dX1")
         np.testing.assert_array_equal(dX, dX1)
 
-    def max_op_test(self, op_name, num_reduce_dim, gc, dc, in_data, in_names, ref_max):
+    def max_op_test(
+            self, op_name, num_reduce_dim, gc, dc, in_data, in_names, ref_max):
 
         op = core.CreateOperator(
             op_name,
@@ -344,4 +345,3 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
         self.reduce_op_test(
             "ReduceBackMean", ref_mean, [X, lengths], ["input", "lengths"],
             num_reduce_dim, gc)
-
