@@ -32,7 +32,7 @@ Tensor Type::copy(const Tensor & src, bool non_blocking) const {
     auto & this_dense_idx = this_dense.toScalarType(ScalarType::Long);
     auto indices_copy = this_dense_idx.copy(indices, non_blocking);
     auto values_copy = this_dense.copy(values, non_blocking);
-    return sparse_coo_tensor(indices_copy, values_copy, src.sizes());
+    return _sparse_coo_tensor_unsafe(indices_copy, values_copy, src.sizes());
   } else {
     Tensor r = this->tensor(src.sizes());
     r.copy_(src, non_blocking);

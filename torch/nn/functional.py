@@ -1352,7 +1352,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         out_size = (n,) + input.size()[2:]
         if target.size()[1:] != input.size()[2:]:
             raise ValueError('Expected target size {}, got {}'.format(
-                out_size, input.size()))
+                out_size, target.size()))
         input = input.contiguous().view(n, c, 1, -1)
         target = target.contiguous().view(n, 1, -1)
         if reduce:

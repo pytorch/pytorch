@@ -40,7 +40,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     if(py::isinstance<GraphExecutor>(self)) {
       GraphExecutor& ge = py::cast<GraphExecutor&>(self);
       ensureSizeMatches(loc, ge.graph()->inputs().size(), inputs.size(), "arguments");
-      return packOutputs(inlineCallTo(*m.graph(), *ge.graph(), inputs));
+      return packOutputs(*m.graph(),inlineCallTo(*m.graph(), *ge.graph(), inputs));
     }
 
     // Release the function object so we can wrap it in a PythonOp
@@ -54,7 +54,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     std::vector<Value*> outputs;
     for(size_t i = 0; i < n_binders; ++i)
       outputs.push_back(new_node->addOutput());
-    return packOutputs(outputs);
+    return packOutputs(*m.graph(), outputs);
   }
 
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
@@ -174,7 +174,7 @@ struct MethodValue : public SugaredValue {
     }
     ensureSizeMatches(loc, method.num_inputs(), inputs.size(), "inputs");
     auto outputs = caller.emit_call_to(method, inputs);
-    return packOutputs(outputs);
+    return packOutputs(*caller.graph(), outputs);
   }
 private:
   std::shared_ptr<Module> module;

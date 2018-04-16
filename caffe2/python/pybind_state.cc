@@ -608,6 +608,25 @@ void addObjectMethods(py::module& m) {
         return c2ops;
       }));
 
+  py::class_<caffe2::onnx::DummyName>(m, "DummyName")
+      .def(py::init<>())
+      .def(
+          "reset",
+          [](caffe2::onnx::DummyName& instance, const py::object& args) {
+            if (args.is(py::none())) {
+              instance.Reset(std::unordered_set<std::string>());
+            } else {
+              instance.Reset(args.cast<std::unordered_set<std::string>>());
+            }
+          },
+          "Reset the dummy name generator",
+          py::arg("args") = py::none())
+      .def(
+          "new_dummy_name",
+          [](caffe2::onnx::DummyName& instance) -> std::string {
+            return instance.NewDummyName();
+          });
+
   py::class_<caffe2::onnx::Caffe2BackendRep>(m, "Caffe2BackenRep")
       .def(py::init<>())
       .def(
@@ -683,8 +702,7 @@ void addObjectMethods(py::module& m) {
       .def(
           "run",
           [](caffe2::onnx::Caffe2BackendRep& instance,
-             std::vector<py::object> inputs)
-              -> std::vector<py::object> {
+             std::vector<py::object> inputs) -> std::vector<py::object> {
             Predictor::TensorVector tensors;
             std::vector<TensorCPU> tensors_data(inputs.size());
             for (auto i = 0; i < inputs.size(); ++i) {
@@ -710,6 +728,7 @@ void addObjectMethods(py::module& m) {
 
   py::class_<caffe2::onnx::Caffe2Backend>(m, "Caffe2Backend")
       .def(py::init<>())
+      .def(py::init<caffe2::onnx::DummyName*>())
       .def(
           "support_onnx_import",
           [](caffe2::onnx::Caffe2Backend& instance,
@@ -1373,15 +1392,6 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(raw_data);
     return GetNUMANode(raw_data);
   });
-  m.def(
-      "reset_dummy_name",
-      [](const std::unordered_set<std::string>& args) -> std::string {
-        caffe2::onnx::DummyName::Reset(args);
-        return "";
-      });
-  m.def("new_dummy_name", []() -> std::string {
-    return caffe2::onnx::DummyName::NewDummyName();
-  });
   m.def("support_onnx_export", [](const std::string& op) -> bool {
     const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(op);
     if (!schema) {
@@ -1391,7 +1401,9 @@ void addGlobalMethods(py::module& m) {
   });
   m.def(
       "export_to_onnx",
-      [](const py::bytes& c2op,
+      [](
+        caffe2::onnx::DummyName* dummy,
+        const py::bytes& c2op,
          const std::unordered_map<std::string, std::vector<int>>& shapes)
           -> std::pair<std::vector<py::bytes>, std::vector<py::bytes>> {
         OperatorDef op;
@@ -1406,7 +1418,7 @@ void addGlobalMethods(py::module& m) {
               it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
         }
         auto results =
-            onnx::OnnxExporter().Caffe2OpToOnnxNodes(op, tensor_shapes);
+            onnx::OnnxExporter(dummy).Caffe2OpToOnnxNodes(op, tensor_shapes);
         std::pair<std::vector<py::bytes>, std::vector<py::bytes>> ret;
         auto& nodes_str = ret.first;
         auto& tensors_str = ret.second;

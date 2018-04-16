@@ -18,7 +18,10 @@ struct ShapeParams {
   std::vector<int> input_image_dims;
   std::vector<int> column_dims;
   std::vector<int> column_transposed_dims;
+  std::vector<int> column_axes;
+  std::vector<int> Y_dims;
   std::vector<int> Y_transposed_dims;
+  std::vector<int> Y_axes;
 };
 
 struct CUDAConvNetShapeParams {
@@ -31,25 +34,23 @@ struct CUDAConvNetShapeParams {
   int Y_W;
 };
 
-void SetColumnBufferShapeImpl(
+void SetColumnBufferShape(
     int N,
     int kernel_dim,
     int output_image_size,
     StorageOrder order,
     std::vector<int>* column_dims,
     std::vector<int>* column_transposed_dims,
-    std::vector<int>* column_axes,
-    std::vector<int>* column_transposed_axes);
+    std::vector<int>* column_axes);
 
-void SetYBufferShapeImpl(
+void SetYBufferShape(
     int N,
     int M,
     int output_image_size,
     StorageOrder order,
     std::vector<int>* Y_dims,
     std::vector<int>* Y_transposed_dims,
-    std::vector<int>* Y_axes,
-    std::vector<int>* Y_transposed_axes);
+    std::vector<int>* Y_axes);
 
 } // namespace lc_op_util
 } // namespace caffe2
