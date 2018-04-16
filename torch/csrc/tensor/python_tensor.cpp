@@ -292,10 +292,10 @@ static bool PyTensorType_Check(PyObject* obj) {
   return it != tensor_types.end();
 }
 
-static PyTensorType& get_tensor_type(THPDtype *obj) {
+static PyTensorType& get_tensor_type(THPDtype *dtype, THPLayout *layout, bool is_cuda) {
   auto it = std::find_if(tensor_types.begin(), tensor_types.end(),
-    [obj](const PyTensorType& x) {
-      return x.dtype == obj;
+    [dtype, layout, is_cuda](const PyTensorType& x) {
+      return x.dtype == dtype && x.layout == layout && x.is_cuda == is_cuda;
     });
   if (it == tensor_types.end()) {
     throw TypeError("invalid dtype object");
@@ -307,8 +307,21 @@ void py_set_default_tensor_type(PyObject* obj) {
   PyTensorType *type;
   if (PyTensorType_Check(obj)) {
     type = (PyTensorType*)obj;
-  } else if (THPDtype_Check(obj)) {
-    type = &get_tensor_type((THPDtype*)obj);
+  } else {
+    throw TypeError("invalid type object");
+  }
+  if (!type->aten_type) {
+    throw unavailable_type(*type);
+  }
+  set_default_tensor_type(*type->aten_type);
+}
+
+void py_set_default_dtype(PyObject* obj) {
+  PyTensorType *type;
+  if (THPDtype_Check(obj)) {
+    auto &current_default = get_default_tensor_type();
+    type = &get_tensor_type((THPDtype*)obj, torch::getLayout(current_default.backend()),
+                            torch::getDeviceType(current_default) == DeviceType::CUDA);
   } else {
     throw TypeError("invalid type object");
   }

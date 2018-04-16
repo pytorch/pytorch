@@ -143,17 +143,29 @@ def set_default_tensor_type(t):
          3.0000
         [torch.FloatTensor of size (2,)]
 
+    """
+    if isinstance(t, _string_classes):
+        t = _import_dotted_name(t)
+    _C._set_default_tensor_type(t)
+
+
+def set_default_dtype(d):
+    r"""Sets the default ``torch.dtype`` type to type :attr:`d`.
+
+    Args:
+        d (dtype): the dtype to make the default
+
+    Example::
+
         >>> torch.set_default_tensor_type(torch.double)
-        >>> torch.Tensor([1.2, 3])
+        >>> torch.tensor([1.2, 3], device='cpu')
 
          1.2000
          3.0000
         [torch.DoubleTensor of size (2,)]
 
     """
-    if isinstance(t, _string_classes):
-        t = _import_dotted_name(t)
-    _C._set_default_tensor_type(t)
+    _C._set_default_dtype(d)
 
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
 from .serialization import save, load
