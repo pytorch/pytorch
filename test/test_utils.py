@@ -613,10 +613,10 @@ class TestCollectEnv(TestCase):
         return re.sub(version_hash_regex, r'\1', info_output)
 
     def assertExpectedOutput(self, info_output, build_env):
+        processed_info = self._preprocess_info_for_test(info_output)
         print("got:")
         print(processed_info)
         expect_filename = self._build_env_to_expect(build_env)
-        processed_info = self._preprocess_info_for_test(info_output)
 
         with open(expect_filename, 'r') as f:
             expected_info = f.read()
