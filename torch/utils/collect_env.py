@@ -105,7 +105,7 @@ def get_cudnn_version(run_lambda):
         return None
     if rc != 1 and rc != 0:
         return None
-    return 'Probably one of the following: \n{}'.format(out)
+    return 'Probably one of the following:\n{}'.format(out)
 
 
 def get_platform():
