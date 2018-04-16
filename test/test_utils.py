@@ -602,12 +602,6 @@ import os
 
 
 class TestCollectEnv(TestCase):
-    ci_build_envs = [
-        'pytorch-linux-trusty-py2.7',
-        'pytorch-linux-xenial-cuda9-cudnn7-py3',
-        'pytorch-macos-10.13-py3',
-        'pytorch-win-ws2016-cuda9-cudnn7-py3'
-    ]
 
     def _build_env_to_expect(build_env):
         return 'expect/TestCollectEnv.test_{}.expect'.format(
@@ -634,6 +628,12 @@ class TestCollectEnv(TestCase):
         info_output = get_pretty_env_info()
         self.assertTrue(len(info_output.split('\n')) > 5)
 
+        ci_build_envs = [
+            'pytorch-linux-trusty-py2.7',
+            'pytorch-linux-xenial-cuda9-cudnn7-py3',
+            'pytorch-macos-10.13-py3',
+            'pytorch-win-ws2016-cuda9-cudnn7-py3'
+        ]
         if 'BUILD_ENVIRONMENT' not in os.environ.keys():
             return
         build_env = os.environ['BUILD_ENVIRONMENT']
