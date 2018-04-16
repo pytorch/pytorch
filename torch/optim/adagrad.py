@@ -19,22 +19,25 @@ class Adagrad(Optimizer):
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
     """
 
-    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0):
+    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= lr_decay:
             raise ValueError("Invalid lr_decay value: {}".format(lr_decay))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+        if not 0.0 <= initial_accumulator_value:
+            raise ValueError("Invalid initial_accumulator_value value: {}".format(initial_accumulator_value))
 
-        defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay)
+        defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay,
+                        initial_accumulator_value=initial_accumulator_value)
         super(Adagrad, self).__init__(params, defaults)
 
         for group in self.param_groups:
             for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
-                state['sum'] = torch.zeros_like(p.data)
+                state['sum'] = torch.full_like(p.data, initial_accumulator_value)
 
     def share_memory(self):
         for group in self.param_groups:
