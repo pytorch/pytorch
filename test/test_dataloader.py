@@ -15,11 +15,12 @@ from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MANAGER_STATUS_CHECK_INTERVAL
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 
-# We set dummy defaults here and only overwrite these values when in __main__,
-# to get around duplicated import issue when using multiprocessing on Windows.
-TEST_CUDA = False
+# We only import the actual values when in __main__, to get around
+# duplicated import issue when using multiprocessing on Windows.
 if __name__ == '__main__':
     from common_nn import TEST_CUDA
+else:
+    TEST_CUDA = False
 
 
 JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 4.5
