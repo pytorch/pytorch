@@ -528,6 +528,39 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "to(Device device, *, ScalarType dtype=None)",
+    "to(ScalarType dtype)",
+    "to(Tensor other)",
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    auto device = r.device(0);
+    auto deviceAutoGPU = device.deviceInt64();
+    auto scalarType = r.scalartypeWithDefault(1, self_.type().scalarType());
+    auto& layout = *torch::getLayout(self_.type().backend());
+    auto& type = torch::getType(scalarType, layout, device.type);
+    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, false));
+  } else if (r.idx == 1) {
+    auto scalarType = r.scalartype(0);
+    auto& type = self_.type().toScalarType(scalarType);
+    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
+  } else if (r.idx == 2) {
+    auto other = r.tensor(0);
+    auto& type = other.type();
+    auto deviceType = torch::getDeviceType(type);
+    auto deviceAutoGPU = (deviceType == DeviceType::CPU) ? -1 : other.get_device();
+    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, false));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -633,6 +666,7 @@ PyMethodDef variable_methods[] = {
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},
   {"storage_type", (PyCFunction)THPVariable_storage_type, METH_NOARGS, NULL},
   {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"to", (PyCFunction)THPVariable_to, METH_VARARGS | METH_KEYWORDS, NULL},
   {"tolist", (PyCFunction)THPVariable_tolist, METH_NOARGS, NULL},
   {"type", (PyCFunction)THPVariable_type, METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}
