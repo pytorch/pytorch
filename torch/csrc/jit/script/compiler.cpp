@@ -820,9 +820,7 @@ private:
   std::shared_ptr<SugaredValue> emitApplyIdent(Ident ident, std::vector<Value*> inputs, List<Attribute> attributes, size_t n_binders) {
     auto it = function_table.find(ident.name());
     if (it != function_table.end()) {
-      if(inputs.size() != it->second.num_inputs())
-        throw ErrorReport(ident) << "expected " << it->second.num_inputs() << " but found " << inputs.size();
-      return packOutputs(*graph, method.emit_call_to(it->second, inputs));
+      return packOutputs(*graph, method.emit_call_to(ident.range(), it->second, inputs));
     } else if (ident.name() == "print") {
       if (!attributes.empty())
         throw ErrorReport(ident) << "print doesn't accept any keyword arguments";
@@ -1071,34 +1069,50 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const Resolver& resolver, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
   FunctionTable table;
-  for(auto def : definitions) {
+  JIT_ASSERT(definitions.size() == resolvers.size());
+  auto resolver_it = resolvers.begin();
+  std::vector<Method*> methods;
+  for(Def def : definitions) {
     const std::string& name = def.name().name();
-    Method& method = m.create_method(name);
-    to_ir(def, table, resolver, self,  method);
-    auto result = table.emplace(name, method);
-    if(!result.second) {
-      throw ErrorReport(def) << "duplicate definition of function '" << name << "'";
+    Resolver resolver = *resolver_it++;
+    auto creator = [def, &table, resolver, self](Method& method) {
+      to_ir(def, table, resolver, self,  method);
+    };
+    Method& method = m.create_method(name, creator);
+    // if self is defined, then these are methods and do not go into the global namespace
+    // otherwise, they get defined together so we add them to the function table
+    // so the methods can see each other
+    if(!self) {
+      auto result = table.emplace(name, method);
+      if(!result.second) {
+        throw ErrorReport(def) << "duplicate definition of function '" << name << "'";
+      }
     }
+    methods.push_back(&method);
+  }
+  for(Method* method : methods) {
+    method->ensure_defined();
   }
 }
 
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
   Parser p(source);
   std::vector<Def> definitions;
+  std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     definitions.push_back(Def(p.parseFunction()));
+    resolvers.push_back(resolver);
   }
-  defineMethodsInModule(m, definitions, resolver, self);
+  defineMethodsInModule(m, definitions, resolvers, self);
 }
 
 std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
   Module m; //note: we don't use 'm' to execute so this setting is unused
-  defineMethodsInModule(m, {def}, resolver, nullptr);
+  defineMethodsInModule(m, {def}, {resolver}, nullptr);
   return m.get_method(def.name().name()).graph();
 }
-
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {
   auto & graph = *m.graph();
@@ -1109,6 +1123,12 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc,
     });
   }
   return SugaredValue::asTuple(loc, m);
+}
+
+void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what) {
+  if(expected != actual) {
+    throw ErrorReport(loc) << "expected " << expected << " " << what << " but found " << actual;
+  }
 }
 
 } // namespace script
