@@ -77,7 +77,7 @@ class TestCaffe2Basic(TestCase):
         weight = np.array([[1, 0], [0, 1]])
         graph_def = make_graph(
             [make_node("Add", ["X", "Y"], ["Z0"]),
-             make_node("Cast", ["Z0"], ["Z"], to="float"),
+             make_node("Cast", ["Z0"], ["Z"], to=onnx.TensorProto.FLOAT),
              make_node("Mul", ["Z", "weight"], ["W0"]),
              make_node("Tanh", ["W0"], ["W1"]),
              make_node("Sigmoid", ["W1"], ["W2"]),
@@ -224,7 +224,7 @@ class TestCaffe2Basic(TestCase):
                 ends=ends,
             ),
         ])
-        ws, (Y,) = c2_native_run_net(
+        ws, c2_outputs = c2_native_run_net(
             init_net=None,
             predict_net=predict_net,
             inputs=[X])
@@ -234,8 +234,38 @@ class TestCaffe2Basic(TestCase):
             value_info={
                 'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape)
             })
-        Y, = c2.run_model(onnx_model, inputs=[X])
-        np.testing.assert_almost_equal(Y, X[:, 1:2, :])
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
+
+    def test_cast(self):
+        X = np.random.randn(1, 2, 3).astype(np.float32)
+
+        for to_type in ['INT8', caffe2_pb2.TensorProto.INT8,
+                        'DOUBLE', caffe2_pb2.TensorProto.DOUBLE]:
+            predict_net = caffe2_pb2.NetDef()
+            predict_net.name = 'test-cast-net'
+            predict_net.external_input[:] = ['X']
+            predict_net.external_output[:] = ['Y']
+            predict_net.op.extend([
+                core.CreateOperator(
+                    'Cast',
+                    inputs=['X'],
+                    outputs=['Y'],
+                    to=to_type,
+                ),
+            ])
+            ws, c2_outputs = c2_native_run_net(
+                init_net=None,
+                predict_net=predict_net,
+                inputs=[X])
+
+            onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+                predict_net=predict_net,
+                value_info={
+                    'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape)
+                })
+            onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+            self.assertSameOutputs(c2_outputs, onnx_outputs)
 
 
 class TestCaffe2End2End(TestCase):

@@ -631,19 +631,19 @@ def _unique(g, input, sorted, return_inverse):
 # TODO: remove these once we support Type's in the JIT IR and we can once again
 # use the unified toType operator
 cast_pytorch_to_onnx = {
-    'uint8_t': 'UINT8',
-    'int8_t': 'INT8',
-    'double': 'DOUBLE',
-    'float': 'FLOAT',
-    'Half': 'FLOAT16',
-    'int': 'INT32',
-    'int64_t': 'INT64',
-    'int16_t': 'INT16',
+    'uint8_t': 2,
+    'int8_t': 3,
+    'double': 11,
+    'float': 1,
+    'Half': 10,
+    'int': 6,
+    'int64_t': 7,
+    'int16_t': 5,
 }
 
 
-def _cast_func_template(to_s, g, input, non_blocking):
-    return g.op("Cast", input, to_s=to_s)
+def _cast_func_template(to_i, g, input, non_blocking):
+    return g.op("Cast", input, to_i=to_i)
 
 
 for k, v in cast_pytorch_to_onnx.items():
