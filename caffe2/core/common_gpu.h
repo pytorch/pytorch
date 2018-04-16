@@ -294,7 +294,6 @@ class DeviceGuard {
 template <typename T, int N>
 struct SimpleArray {
   T data[N];
-  int size;
 };
 
 }  // namespace caffe2
