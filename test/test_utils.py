@@ -598,14 +598,49 @@ class TestBottleneck(TestCase):
 
 
 from torch.utils.collect_env import get_pretty_env_info
+import os
 
 
-class TestEnvinfo(TestCase):
-    def test_integration(self):
-        info = get_pretty_env_info()
-        print(info)
-        import os
-        print(os.environ['BUILD_ENVIRONMENT'])
+class TestCollectEnv(TestCase):
+    ci_build_envs = [
+        'pytorch-linux-trusty-py2.7',
+        'pytorch-linux-xenial-cuda9-cudnn7-py3',
+        'pytorch-macos-10.13-py3',
+        'pytorch-win-ws2016-cuda9-cudnn7-py3'
+    ]
+
+    def _build_env_to_expect(build_env):
+        return 'expect/TestCollectEnv.test_{}.expect'.format(
+            build_env.replace('.', '').replace('-', '_'))
+
+    def _preprocess_info_for_test(info_output):
+        # Remove the version hash
+        version_hash_regex = re.compile(r'(a\d+)\+???????')
+        return re.sub(version_hash_regex, r'\1', info_output)
+
+    def assertExpectedOutput(self, info_output, build_env):
+        print("got:")
+        print(processed_info)
+        expect_filename = self._build_env_to_expect(build_env)
+        processed_info = self._preprocess_info_for_test(info_output)
+
+        with open(expect_filename, 'r') as f:
+            expected_info = f.read()
+            print("expected:")
+            print(expected_info)
+            self.assertEquals(processed_info, expected_info)
+
+    def test_simple(self):
+        info_output = get_pretty_env_info()
+        self.assertTrue(len(info_output.split('\n')) > 5)
+
+        if 'BUILD_ENVIRONMENT' not in os.environ.keys():
+            return
+        build_env = os.environ['BUILD_ENVIRONMENT']
+        if build_env not in ci_build_envs:
+            return
+
+        self.assertExpectedOutput(info_output, build_env)
 
 
 class TestONNXUtils(TestCase):
