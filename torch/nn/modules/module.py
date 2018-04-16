@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import functools
 
 import torch
@@ -45,6 +45,7 @@ class Module(object):
     """
 
     dump_patches = False
+    _version = 0
 
     def __init__(self):
         self._backend = thnn_backend
@@ -555,7 +556,7 @@ class Module(object):
         else:
             object.__delattr__(self, name)
 
-    def state_dict(self, destination=None, prefix='', keep_vars=False):
+    def state_dict(self, destination=None, prefix='', keep_vars=False, no_child=False):
         r"""Returns a dictionary containing a whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
@@ -573,6 +574,9 @@ class Module(object):
             keep_vars (bool, optional): if ``True``, returns a Tensor for each
                 parameter. If ``False``, returns a Tensor for each parameter.
                 Default: ``False``
+            no_child (bool, optional): if ``True``, excludes parameters and
+                buffers of submodules in the returned state dict.
+                Default: ``False``
 
         Returns:
             dict:
@@ -586,87 +590,111 @@ class Module(object):
         """
         if destination is None:
             destination = OrderedDict()
+        destination[prefix + '_version'] = self._version
         for name, param in self._parameters.items():
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.data
         for name, buf in self._buffers.items():
             if buf is not None:
                 destination[prefix + name] = buf
-        for name, module in self._modules.items():
-            if module is not None:
-                module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
+        if not no_child:
+            for name, module in self._modules.items():
+                if module is not None:
+                    module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def _load_state_dict_key_mismatch(self, full_name, name, is_missing):
-        r"""This is called in :meth:`~torch.nn.Module.load_state_dict` when
-        there is state dict key mismatch in ``strict=True`` mode. This method
-        can be overridden by subclasses to raise class-specific errors.
-
-        When :attr:`is_missing` is ``True``, :attr:`full_name` can not be found in
-        the dict being loaded. When :attr:`is_missing` is ``False``,
-        :attr:`full_name` is unexpected in the dict being loaded.
-
-        :attr:`name` is the actual name of the parameter/buffer, i.e., the
-        substring after the last `dot` in :attr:`full_name`.
-        """
-        pass
-
-    def load_state_dict(self, state_dict, strict=True):
-        r"""Copies parameters and buffers from :attr:`state_dict` into
-        this module and its descendants. If :attr:`strict` is ``True`` then
-        the keys of :attr:`state_dict` must exactly match the keys returned
-        by this module's :func:`state_dict()` function.
+    def load_local_state_dict(self, local_state_dict, strict=True):
+        r"""Copies parameters and buffers from :attr:`local_state_dict` into
+        only this module, but not its descendants. This is called on every
+        submodule in :meth:`~torch.nn.Module.load_state_dict`. This method
+        can be overridden by subclasses to achieve class-specific backward
+        compatible loading using the version number stored in
+        ``local_state_dict['_version']``.
 
         Arguments:
-            state_dict (dict): A dict containing parameters and
-                persistent buffers.
+            local_state_dict (dict): A dict containing local parameters and
+                persistent buffers of this module, but not of its descendants.
             strict (bool): Strictly enforce that the keys in :attr:`state_dict`
-                match the keys returned by this module's `:func:`state_dict()`
-                function.
+                match the keys returned by this module's
+                :func:`~torch.nn.Module.state_dict` function. Default: ``True``
         """
-        def submodule_key_mismatch(full_name, is_missing):
-            module = self
-            names = full_name.split(".")
-            for module_name in names[:-1]:
-                if module_name in module._modules:
-                    module = module._modules[module_name]
-                else:
-                    return
-            module._load_state_dict_key_mismatch(full_name, names[-1], is_missing)
+        own_local_state = self.state_dict(no_child=True)
 
         unexpected = []
-        own_state = self.state_dict()
-        for name, param in state_dict.items():
-            if name in own_state:
+        for name, param in local_state_dict.items():
+            if name == '_version':
+                continue
+            elif name in own_local_state:
                 if isinstance(param, Parameter):
                     # backwards compatibility for serialized parameters
                     param = param.data
                 try:
-                    own_state[name].copy_(param)
+                    own_local_state[name].copy_(param)
                 except Exception:
                     raise RuntimeError('While copying the parameter named {}, '
                                        'whose dimensions in the model are {} and '
                                        'whose dimensions in the checkpoint are {}.'
-                                       .format(name, own_state[name].size(), param.size()))
+                                       .format(name, own_local_state[name].size(), param.size()))
             elif strict:
                 unexpected.append(name)
+
         if strict:
-            missing = set(own_state.keys()) - set(state_dict.keys())
-            # pass the mismatch info to submodules so that they have a chance to
-            # raise a custom class-specific error
-            for name in unexpected:
-                submodule_key_mismatch(name, False)
-            for name in missing:
-                submodule_key_mismatch(name, True)
+            missing = set(own_local_state.keys()) - set(local_state_dict.keys())
             error_msg = ''
             if len(unexpected) > 0:
                 error_msg += 'Unexpected key(s) in state_dict: {}. '.format(
                     ', '.join('"{}"'.format(k) for k in unexpected))
             if len(missing) > 0:
                 error_msg += 'Missing key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in unexpected))
+                    ', '.join('"{}"'.format(k) for k in missing))
             if len(error_msg) > 0:
-                raise KeyError(error_msg)
+                raise KeyError('Error loading state_dict for {}: {}'.format(
+                               self.__class__.__name__, error_msg))
+
+    def load_state_dict(self, state_dict, strict=True):
+        r"""Copies parameters and buffers from :attr:`state_dict` into
+        this module and its descendants. If :attr:`strict` is ``True``, then
+        the keys of :attr:`state_dict` must exactly match the keys returned
+        by this module's :func:`~torch.nn.Module.state_dict` function.
+
+        Arguments:
+            state_dict (dict): A dict containing parameters and
+                persistent buffers.
+            strict (bool): Strictly enforce that the keys in :attr:`state_dict`
+                match the keys returned by this module's
+                :func:`~torch.nn.Module.state_dict` function. Default: ``True``
+        """
+        child_state_dicts = defaultdict(dict)
+        local_state_dict = {'_version': -1}  # default version counter
+        for key, value in state_dict.items():
+            path = key.split('.', maxsplit=1)
+            if len(path) > 1:
+                child_state_dicts[path[0]][path[1]] = value
+            else:
+                local_state_dict[path[0]] = value
+
+        self.load_local_state_dict(local_state_dict, strict)
+
+        missing = []
+        for name, module in self._modules.items():
+            if module is not None:
+                if name in child_state_dicts:
+                    module.load_state_dict(child_state_dicts[name], strict)
+                elif strict:
+                    missing.append((module.__class__.__name__, name))
+
+        if strict:
+            unexpected = set(self._modules.keys()) - set(child_state_dicts.keys())
+            error_msg = ''
+            if len(unexpected) > 0:
+                error_msg += 'Unexpected module key(s) in state_dict: {}. '.format(
+                    ', '.join('"{}"'.format(k) for k in unexpected))
+            if len(missing) > 0:
+                error_msg += 'Missing module key(s) in state_dict: {}. '.format(
+                    ', '.join('"{}" of type {}'.format(name, cls) for cls, name in missing))
+            if len(error_msg) > 0:
+                raise KeyError('Error loading state_dict for {}: {}'.format(
+                               self.__class__.__name__, error_msg))
 
     def parameters(self):
         r"""Returns an iterator over module parameters.

@@ -1,3 +1,5 @@
+import warnings
+
 from .batchnorm import _BatchNorm
 from .. import functional as F
 
@@ -11,22 +13,29 @@ class _InstanceNorm(_BatchNorm):
     def _check_input_dim(self, input):
         return NotImplemented
 
-    def _load_state_dict_key_mismatch(self, full_name, name, is_missing):
-        if not is_missing and not self.track_running_stats and \
-                name in ('running_mean', 'running_var'):
-            raise KeyError(
-                'Unexpected running stats buffer "{name}" in state_dict for '
-                '{klass} with track_running_stats=False. If you are trying to '
-                'load a checkpoint saved before 0.4.0, this may be expected '
-                'because {klass} does not track running stats by default '
-                'anymore since 0.4.0. If running stats are not used, remove '
-                'them from state_dict before calling load_state_dict. '
-                'Otherwise, set track_running_stats=True in {klass} to use '
-                'running stats. See the documentation of {klass} for more '
-                'details.'
-                .format(name=full_name, klass=self.__class__.__name__))
-        super(_InstanceNorm, self)._load_state_dict_key_mismatch(
-            full_name, name, is_missing)
+    def load_local_state_dict(self, local_state_dict, strict=True):
+        load_version = local_state_dict['_version']
+
+        # at version 0: removed running_mean and running_var when
+        # track_running_stats=False (default)
+        if load_version < 0 and not self.track_running_stats:
+            running_stats_keys = tuple(k for k in ('running_mean', 'running_var') if k in local_state_dict)
+            if len(running_stats_keys) > 0:
+                warnings.warn(
+                    'Unexpected running stats buffer(s) {names} in state_dict '
+                    'for {klass} with track_running_stats=False. If you are '
+                    'trying to load a checkpoint saved before 0.4.0, this may '
+                    'be expected because {klass} does not track running stats '
+                    'by default anymore since 0.4.0. These buffers won\'t be '
+                    'actually loaded. If these stats are actually needed, set '
+                    'track_running_stats=True in {klass} to enable running '
+                    'stats. See the documentation of {klass} for details.'
+                    .format(names=" and ".join('"{}"'.format(k) for k in running_stats_keys),
+                            klass=self.__class__.__name__))
+                for key in running_stats_keys:
+                    local_state_dict.pop(key)
+
+        super(_InstanceNorm, self).load_local_state_dict(local_state_dict, strict)
 
     def forward(self, input):
         self._check_input_dim(input)
