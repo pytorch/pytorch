@@ -15,6 +15,11 @@ import os
 import time
 from torch._six import string_classes, int_classes
 
+IS_WINDOWS = sys.platform == "win32"
+if IS_WINDOWS:
+    import ctypes
+    from ctypes.wintypes import DWORD, BOOL, HANDLE
+
 if sys.version_info[0] == 2:
     import Queue as queue
 else:
@@ -32,13 +37,10 @@ class ExceptionWrapper(object):
 _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
 
-IS_WINDOWS = sys.platform == "win32"
 MANAGER_STATUS_CHECK_INTERVAL = 1.0
-if IS_WINDOWS:
-    MANAGER_UPDATE_INTERVAL = 1.0
 
 
-def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id, manager_heartbeat):
+def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id, manager_pid):
     global _use_shared_memory
     _use_shared_memory = True
 
@@ -57,21 +59,39 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
 
     worker_done_event = threading.Event()
 
-    def check_manager_process_status(worker_done_event):
+    manager_handle = None
+    if IS_WINDOWS:
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
+        kernel32.OpenProcess.restype = HANDLE
+        kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
+        kernel32.WaitForSingleObject.restype = DWORD
+
+        # Value obtained from https://msdn.microsoft.com/en-us/library/ms684880.aspx
+        SYNCHRONIZE = 0x00100000
+        manager_handle = kernel32.OpenProcess(SYNCHRONIZE, 0, manager_pid)
+
+        if not manager_handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def check_manager_process_status(worker_done_event, manager_pid, manager_handle):
         if not worker_done_event.is_set():
             should_exit = False
             if IS_WINDOWS:
-                if (time.time() - manager_heartbeat.value) > MANAGER_UPDATE_INTERVAL:
+                result = kernel32.WaitForSingleObject(manager_handle, 0)
+                # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
+                if result == 0x00000000:
                     should_exit = True
             else:
-                if os.getppid() in [0, 1]:
+                if os.getppid() != manager_pid:
                     should_exit = True
             if should_exit:
                 index_queue.put(None)
             else:
                 threading.Timer(MANAGER_STATUS_CHECK_INTERVAL,
-                                check_manager_process_status, args=[worker_done_event]).start()
-    check_manager_process_status(worker_done_event)
+                                check_manager_process_status,
+                                args=[worker_done_event, manager_pid, manager_handle]).start()
+    check_manager_process_status(worker_done_event, manager_pid, manager_handle)
 
     while True:
         r = index_queue.get()
@@ -233,24 +253,15 @@ class _DataLoaderIter(object):
             self.send_idx = 0
             self.rcvd_idx = 0
             self.reorder_dict = {}
-            self.manager_heartbeat = None
-
-            if IS_WINDOWS:
-                self.manager_heartbeat = multiprocessing.Value('d', time.time())
-
-                def update_heartbeat():
-                    self.manager_heartbeat.value = time.time()
-                    threading.Timer(MANAGER_UPDATE_INTERVAL, update_heartbeat).start()
-
-                update_heartbeat()
 
             base_seed = torch.LongTensor(1).random_()[0]
+            manager_pid = os.getpid()
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
                     args=(self.dataset, self.index_queues[i],
                           self.worker_result_queue, self.collate_fn, base_seed + i,
-                          self.worker_init_fn, i, self.manager_heartbeat))
+                          self.worker_init_fn, i, manager_pid))
                 for i in range(self.num_workers)]
 
             if self.pin_memory or self.timeout > 0:
