@@ -72,7 +72,7 @@ def get_shell_output(command):
 
 def run_test(python, test_module, test_directory, options):
     verbose = '--verbose' if options.verbose else ''
-    return shell('{} {} {}'.format(python, test_module, verbose),
+    return shell('{} -m unittest {} {}'.format(python, verbose, test_module),
                  test_directory)
 
 
@@ -163,6 +163,18 @@ CUSTOM_HANDLERS = {
 }
 
 
+def parse_test_module(test):
+    return test.split('.')[0]
+
+
+class TestChoices(list):
+    def __init__(self, *args, **kwargs):
+        super(TestChoices, self).__init__(args[0])
+
+    def __contains__(self, item):
+        return list.__contains__(self, parse_test_module(item))
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Run the PyTorch unit test suite',
@@ -180,10 +192,12 @@ def parse_args():
         '-i',
         '--include',
         nargs='+',
-        choices=TESTS,
+        choices=TestChoices(TESTS),
         default=TESTS,
         metavar='TESTS',
-        help='select a set of tests to include (defaults to ALL tests)')
+        help='select a set of tests to include (defaults to ALL tests).'
+             ' tests can be specified with module name, module.TestClass'
+             ' or module.TestClass.test_method')
     parser.add_argument(
         '-x',
         '--exclude',
@@ -220,19 +234,66 @@ def get_python_command(options):
         return os.environ.get('PYCMD', 'python')
 
 
+def find_test_index(test, selected_tests, find_last_index=False):
+    """Find the index of the first or last occurrence of a given test/test module in the list of seleceted tests.
+
+    This function is used to determine the indexes when slicing the list of selected tests when
+    ``options.first``(:attr:`find_last_index`=False) and/or ``options.last``(:attr:`find_last_index`=True) are used.
+
+    :attr:`selected_tests` can be a list that contains multiple consequent occurrences of tests
+    as part of the same test module, e.g.:
+
+    ```
+    selected_tests = ['autograd', 'cuda', **'torch.TestTorch.test_acos',
+                     'torch.TestTorch.test_tan', 'torch.TestTorch.test_add'**, 'utils']
+    ```
+
+    If :attr:`test`='torch' and :attr:`find_last_index`=False result should be **2**.
+    If :attr:`test`='torch' and :attr:`find_last_index`=True result should be **4**.
+
+    Arguments:
+        test (str): Name of test to lookup
+        selected_tests (list): List of tests
+        find_last_index (bool, optional): should we lookup the index of first or last
+            occurrence (first is default)
+
+    Returns:
+        index of the first or last occurance of the given test
+    """
+    idx = 0
+    found_idx = -1
+    for t in selected_tests:
+        if t.startswith(test):
+            found_idx = idx
+            if not find_last_index:
+                break
+        idx += 1
+    return found_idx
+
+
+def exclude_tests(exclude_list, selected_tests, exclude_message=None):
+    tests_copy = selected_tests[:]
+    for exclude_test in exclude_list:
+        for test in tests_copy:
+            if test.startswith(exclude_test):
+                if exclude_message is not None:
+                    print_to_stderr('Excluding {} {}'.format(test, exclude_message))
+                selected_tests.remove(test)
+    return selected_tests
+
+
 def get_selected_tests(options):
     selected_tests = options.include
-    for test in options.exclude:
-        if test in selected_tests:
-            selected_tests.remove(test)
 
     if options.first:
-        first_index = selected_tests.index(options.first)
+        first_index = find_test_index(options.first, selected_tests)
         selected_tests = selected_tests[first_index:]
 
     if options.last:
-        last_index = selected_tests.index(options.last)
+        last_index = find_test_index(options.last, selected_tests, find_last_index=True)
         selected_tests = selected_tests[:last_index + 1]
+
+    selected_tests = exclude_tests(options.exclude, selected_tests)
 
     if sys.platform == 'win32' and not options.ignore_win_blacklist:
         ostype = os.environ.get('MSYSTEM')
@@ -240,10 +301,7 @@ def get_selected_tests(options):
         if ostype != 'MINGW64' or target_arch != 'x64':
             WINDOWS_BLACKLIST.append('cpp_extensions')
 
-        for test in WINDOWS_BLACKLIST:
-            if test in selected_tests:
-                print_to_stderr('Excluding {} on Windows'.format(test))
-                selected_tests.remove(test)
+        selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
 
     return selected_tests
 
@@ -253,6 +311,7 @@ def main():
     python = get_python_command(options)
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
+
     if options.verbose:
         print_to_stderr('Selected tests: {}'.format(', '.join(selected_tests)))
 
@@ -260,14 +319,16 @@ def main():
         shell('coverage erase')
 
     for test in selected_tests:
-        test_module = 'test_{}.py'.format(test)
-        print_to_stderr('Running {} ...'.format(test_module))
-        handler = CUSTOM_HANDLERS.get(test, run_test)
-        return_code = handler(python, test_module, test_directory, options)
+        test_name = 'test_{}'.format(test)
+        test_module = parse_test_module(test)
+
+        print_to_stderr('Running {} ...'.format(test_name))
+        handler = CUSTOM_HANDLERS.get(test_module, run_test)
+        return_code = handler(python, test_name, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
-            message = '{} failed!'.format(test_module)
+            message = '{} failed!'.format(test_name)
             if return_code < 0:
                 # subprocess.Popen returns the child process' exit signal as
                 # return code -N, where N is the signal number.
