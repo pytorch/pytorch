@@ -17,7 +17,7 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
     Returns:
         Total norm of the parameters (viewed as a single vector).
     """
-    parameters = filter(lambda p: p.grad is not None, parameters)
+    parameters = list(filter(lambda p: p.grad is not None, parameters))
     max_norm = float(max_norm)
     norm_type = float(norm_type)
     if norm_type == float('inf'):

@@ -1192,21 +1192,10 @@ class TestNN(NNTestCase):
         l = nn.Linear(10, 10)
         clip_value = 2.5
 
-        grads = torch.arange(-50, 50).view(10, 10).div(5), torch.ones(10).mul(2)
-        for p, g in zip(l.parameters(), grads):
-            p._grad = Variable(g.clone().view_as(p.data))
-
-        clip_grad_value_(l.parameters(), clip_value)
-        for p in l.parameters():
-            self.assertLessEqual(p.grad.data.max(), clip_value)
-            self.assertGreaterEqual(p.grad.data.min(), -clip_value)
-
-        grads = torch.arange(-50, 50).view(10, 10).div(5), torch.ones(10).mul(2)
-        for i, (p, g) in enumerate(zip(l.parameters(), grads)):
-            if i == 0:
-                p._grad = Variable(g.clone().view_as(p.data))
-            else:
-                p._grad = None
+        grad_w, grad_b = torch.arange(-50, 50).view(10, 10).div(5), torch.ones(10).mul(2)
+        for grad_list in [[grad_w, grad_b], [grad_w, None]]:
+            for p, g in zip(l.parameters(), grad_list):
+                p._grad = Variable(g.clone().view_as(p.data)) if g is not None else g
 
         clip_grad_value_(l.parameters(), clip_value)
         for p in filter(lambda p: p.grad is not None, l.parameters()):
