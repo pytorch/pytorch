@@ -36,7 +36,7 @@ Tensor cumsum(const Tensor& self, int64_t dim) {
 static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   AT_ASSERT(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
-            "provided dtype must match dtype of resultin cumsum.  Got %s and %s.",
+            "provided dtype must match dtype of result in cumsum.  Got %s and %s.",
             at::toString(result.type().scalarType()), at::toString(dtype.value()));
   return at::_cumsum_out(result, self.toType(result.type().scalarType()), dim);
 }
