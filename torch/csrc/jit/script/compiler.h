@@ -116,7 +116,7 @@ using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& 
 void defineMethodsInModule(
   Module & m,
   const std::vector<Def>& definitions,
-  const Resolver& resolver, /* determines how we handle free variables*/
+  const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
   std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
 );
 
@@ -128,6 +128,7 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
 // a SimpleValue, otherwise pack all the values into a Tuple.
 std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values);
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
+void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
 
 
 } // namespace script

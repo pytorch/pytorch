@@ -5732,14 +5732,26 @@ Example::
 
 add_docstr(torch.zeros,
            r"""
-zeros(*sizes, out=None) -> Tensor
+zeros(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the shape defined
 by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a set of integers defining the shape of the output tensor
+    sizes (int...): a sequence of integers defining the shape of the output tensor.
+        Can be a variable number of arguments or a collection like a list or tuple.
     out (Tensor, optional): the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
+    layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+        Default: ``torch.strided``.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+
 
 Example::
 

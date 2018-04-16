@@ -136,7 +136,7 @@ THCSTensor* THCSTensor_(_move_csr)(THCState *state, THCSTensor *self, THCudaIntT
     THCudaIntTensor_free(state, self->csr);
   }
   self->csr = csr;
-  return self; 
+  return self;
 }
 
 static inline THCSTensor* THCSTensor_(_newWithDimsAndTensor)(THCState *state, int64_t nDimI, int64_t nDimV, int64_t *sizes, THCIndexTensor *indices, THCTensor *values) {
