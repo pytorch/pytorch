@@ -1126,6 +1126,26 @@ void addGlobalMethods(py::module& m) {
         const auto c = schema->InferCost(def, shapes);
         return std::make_tuple(c.flops, c.bytes_moved);
       });
+  m.def(
+      "get_operator_input_blob_shape",
+      [](const py::bytes& op_def, const std::vector<string>& input_blobs) {
+        CAFFE_ENFORCE(gWorkspace);
+        OperatorDef def;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(op_def.cast<std::string>(), &def),
+            "Couldn't parse operator proto.");
+        auto* schema = OpSchemaRegistry::Schema(def.type());
+        CAFFE_ENFORCE(schema);
+        std::unordered_map<string, std::vector<int64_t>> shapes;
+        for (const auto& blob_name : input_blobs) {
+          auto* blob = gWorkspace->GetBlob(blob_name);
+          auto ts = GetTensorShapeOfBlob(blob);
+          for (auto dim : ts.dims()) {
+            shapes[blob_name].emplace_back(dim);
+          }
+        }
+        return shapes;
+      });
   m.def("run_net_once", [](const py::bytes& net_def) {
     CAFFE_ENFORCE(gWorkspace);
     NetDef def;
