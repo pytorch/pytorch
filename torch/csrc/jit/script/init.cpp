@@ -15,12 +15,6 @@ using ResolutionCallback = std::function<py::function(std::string)>;
 #define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
-static void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what) {
-  if(expected != actual) {
-    throw ErrorReport(loc) << "expected " << expected << " " << what << " but found " << actual;
-  }
-}
-
 static std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
@@ -172,9 +166,7 @@ struct MethodValue : public SugaredValue {
     if(attributes.size() != 0) {
       throw ErrorReport(loc) << "not yet implemented - calls to script methods using keyword arguments";
     }
-    ensureSizeMatches(loc, method.num_inputs(), inputs.size(), "inputs");
-    auto outputs = caller.emit_call_to(method, inputs);
-    return packOutputs(*caller.graph(), outputs);
+    return packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs));
   }
 private:
   std::shared_ptr<Module> module;
@@ -298,11 +290,15 @@ void initJitScriptBindings(PyObject* module) {
             auto self = has_self ? std::make_shared<ModuleValue>(m.shared_from_this()) : nullptr;
             return defineMethodsInModule(m, script, pythonResolver(rcb), self);
           })
-      .def("_create_method", [](Module& m, Def def, ResolutionCallback rcb) {
+      .def("_create_methods", [](Module& m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
+        std::vector<Resolver> resolvers;
+        for(auto & callback : rcbs) {
+          resolvers.push_back(pythonResolver(callback));
+        }
         defineMethodsInModule(
           m,
-          { def },
-          pythonResolver(rcb),
+          defs,
+          resolvers,
           std::make_shared<ModuleValue>(m.shared_from_this()));
       })
       .def("_get_method",
