@@ -1,6 +1,7 @@
 #pragma once
 
 #include "caffe2/core/common.h"
+#include "caffe2/onnx/helper.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "onnx/onnx_pb.h"
 
@@ -28,7 +29,14 @@ class OnnxExporter {
       const std::unordered_map<std::string, caffe2::TensorShape>&);
 
  public:
-  OnnxExporter(bool legacy_mode = false):legacy_mode_(legacy_mode) {}
+  OnnxExporter(DummyName* dummy = nullptr, bool legacy_mode = false)
+      : legacy_mode_(legacy_mode) {
+    if (dummy) {
+      dummy_ = std::shared_ptr<DummyName>(dummy, [](DummyName*) {});
+    } else {
+      dummy_ = std::make_shared<DummyName>();
+    }
+  }
 
   ConvertedResult Caffe2OpToOnnxNodes(
       const caffe2::OperatorDef& def,
@@ -90,7 +98,11 @@ class OnnxExporter {
   const std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>&
   get_special_operators() const;
 
+  // To generate onnx models with opset < 6
   bool legacy_mode_{false};
+
+  // Dummy name generator
+  std::shared_ptr<DummyName> dummy_;
 };
 } // namespace onnx
 } // namespace caffe2

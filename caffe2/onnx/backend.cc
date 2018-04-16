@@ -98,12 +98,12 @@ U LookUpWithDefault(
   }
 }
 
-void UpdateNames(const caffe2::OperatorDef& op) {
+void UpdateNames(std::shared_ptr<DummyName> dummy, const caffe2::OperatorDef& op) {
   for (const auto& n : op.input()) {
-    DummyName::AddName(n);
+    dummy->AddName(n);
   }
   for (const auto& n : op.output()) {
-    DummyName::AddName(n);
+    dummy->AddName(n);
   }
 }
 
@@ -491,7 +491,7 @@ Caffe2Ops Caffe2Backend::CreateReshape(OnnxNode* onnx_node, int opset_version) {
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
   CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
   auto* op = c2_op.ops.Mutable(0);
-  op->add_output(DummyName::NewDummyName());
+  op->add_output(dummy_->NewDummyName());
 
   return c2_op;
 }
@@ -559,7 +559,7 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
   auto alpha = onnx_node->attributes.get<float>("alpha", 1.0);
   auto beta = onnx_node->attributes.get<float>("beta", 1.0);
   if (!AlmostEqual(alpha, 1)) {
-    auto scaled_a = DummyName::NewDummyName();
+    auto scaled_a = dummy_->NewDummyName();
     caffe2::Argument scale;
     scale.set_name("scale");
     scale.set_f(alpha);
@@ -569,7 +569,7 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
     input_a = scaled_a;
   }
   if (!AlmostEqual(beta, 1)) {
-    auto scaled_c = DummyName::NewDummyName();
+    auto scaled_c = dummy_->NewDummyName();
     caffe2::Argument scale;
     scale.set_name("scale");
     scale.set_f(beta);
@@ -586,7 +586,7 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
     auto* c2_op = ret.ops.Add();
     BuildOperator(c2_op, "FC", {input_a, input_b, input_c}, {output});
   } else {
-    auto ab = DummyName::NewDummyName();
+    auto ab = dummy_->NewDummyName();
     caffe2::Argument arg_trans_a;
     arg_trans_a.set_name("trans_a");
     arg_trans_a.set_i(trans_a);
@@ -655,7 +655,7 @@ Caffe2Ops Caffe2Backend::CreateConcat(OnnxNode* onnx_node, int opset_version) {
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
   CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
   auto* op = c2_op.ops.Mutable(0);
-  op->add_output(DummyName::NewDummyName());
+  op->add_output(dummy_->NewDummyName());
 
   return c2_op;
 }
@@ -671,7 +671,7 @@ Caffe2Ops Caffe2Backend::CreateLogSoftmax(
   caffe2::Argument arg_axis;
   arg_axis.set_name("axis");
   arg_axis.set_i(axis);
-  auto softmax_a = DummyName::NewDummyName();
+  auto softmax_a = dummy_->NewDummyName();
 
   Caffe2Ops ret;
   auto* c2_op = ret.ops.Add();
@@ -728,13 +728,13 @@ Caffe2Ops Caffe2Backend::CreateSlice(OnnxNode* onnx_node, int opset_version) {
 
   CAFFE_ENFORCE_GE(op->input_size(), 1);
   auto data = op->input(0);
-  auto shape_tensor = DummyName::NewDummyName();
+  auto shape_tensor = dummy_->NewDummyName();
   Caffe2Ops ret;
 
   auto* c2_op = ret.ops.Add();
   BuildOperator(c2_op, "Shape", {data}, {shape_tensor});
 
-  auto axes_tensor = DummyName::NewDummyName();
+  auto axes_tensor = dummy_->NewDummyName();
   c2_op = ret.ops.Add();
   {
     caffe2::Argument shape;
@@ -744,9 +744,9 @@ Caffe2Ops Caffe2Backend::CreateSlice(OnnxNode* onnx_node, int opset_version) {
         c2_op, "GivenTensorIntFill", {}, {axes_tensor}, {shape, axes_vals});
   }
 
-  auto starts_vals_tensor = DummyName::NewDummyName();
-  auto starts_tensor = DummyName::NewDummyName();
-  auto casted_starts_tensor = DummyName::NewDummyName();
+  auto starts_vals_tensor = dummy_->NewDummyName();
+  auto starts_tensor = dummy_->NewDummyName();
+  auto casted_starts_tensor = dummy_->NewDummyName();
   c2_op = ret.ops.Add();
   {
     caffe2::Argument shape_starts;
@@ -786,9 +786,9 @@ Caffe2Ops Caffe2Backend::CreateSlice(OnnxNode* onnx_node, int opset_version) {
   c2_op = ret.ops.Add();
   BuildOperator(c2_op, "Cast", {starts_tensor}, {casted_starts_tensor}, {to});
 
-  auto ends_vals_tensor = DummyName::NewDummyName();
-  auto ends_tensor = DummyName::NewDummyName();
-  auto casted_ends_tensor = DummyName::NewDummyName();
+  auto ends_vals_tensor = dummy_->NewDummyName();
+  auto ends_tensor = dummy_->NewDummyName();
+  auto casted_ends_tensor = dummy_->NewDummyName();
   c2_op = ret.ops.Add();
   {
     caffe2::Argument shape_ends;
@@ -1051,7 +1051,7 @@ void Caffe2Backend::OnnxToCaffe2(
   auto name_set = AllNamesInGraph(init_model.graph());
   auto name_set_pred = AllNamesInGraph(pred_model.graph());
   name_set.insert(name_set_pred.begin(), name_set_pred.end());
-  DummyName::Reset(name_set);
+  dummy_->Reset(name_set);
 
   size_t idx_extra = 0;
   auto converter = [&](const ModelProto& model, caffe2::NetDef* net) mutable {
@@ -1067,15 +1067,15 @@ void Caffe2Backend::OnnxToCaffe2(
         if (idx_extra < extras.size()) {
           const auto& c2ops = extras[idx_extra++];
           for (const auto& op : c2ops.init_ops) {
-            UpdateNames(op);
+            UpdateNames(dummy_, op);
           }
           init_net_tmp->mutable_op()->MergeFrom(c2ops.init_ops);
           for (const auto& op : c2ops.ops) {
-            UpdateNames(op);
+            UpdateNames(dummy_, op);
           }
           net->mutable_op()->MergeFrom(c2ops.ops);
           for (const auto& input : c2ops.interface_blobs) {
-            DummyName::AddName(input);
+            dummy_->AddName(input);
           }
           net->mutable_external_input()->MergeFrom(c2ops.interface_blobs);
         } else {
