@@ -20,13 +20,13 @@ Via a string:
 ::
 
     >>> torch.device('cuda:0')
-    device(device_type='cuda', device_index=0)
+    device(type='cuda', index=0)
 
     >>> torch.device('cpu')
-    device(device_type='cpu')
+    device(type='cpu')
 
     >>> torch.device('cuda')  # current cuda device
-    device(device_type='cuda')
+    device(type='cuda')
 
 
 Via a string and device ordinal:
@@ -34,17 +34,17 @@ Via a string and device ordinal:
 ::
 
     >>> torch.device('cuda', 0)
-    device(device_type='cuda', device_index=0)
+    device(type='cuda', index=0)
 
     >>> torch.device('cpu', 0)
-    device(device_type='cpu', device_index=0)
+    device(type='cpu', index=0)
 
 Via a device ordinal (device ordinals by themselves are treated as cuda devices).
 
 ::
 
   >>> torch.device(1)
-  device(device_type='cuda', device_index=1)
+  device(type='cuda', index=1)
 
 .. note::
    Methods which take a device will generally accept a (properly formatted) string
