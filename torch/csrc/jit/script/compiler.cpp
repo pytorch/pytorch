@@ -1,4 +1,5 @@
 #include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/generated/aten_dispatch.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
@@ -19,22 +20,21 @@ using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
-// Tuple of values. Used to implement tuple return values and unpacking
-struct TupleValue : public SugaredValue {
-  TupleValue(std::vector<std::shared_ptr<SugaredValue>> values) : values(std::move(values)) {}
-
-  virtual std::string kind() const override {
-    return "tuple";
+static std::string diagnosticType(TypePtr ptr) {
+  if(TupleType* tt = ptr->cast<TupleType>()) {
+    std::stringstream ss;
+    ss << "(";
+    for(size_t i = 0; i < tt->elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << diagnosticType(tt->elements()[i]);
+    }
+    ss << ")";
+    return ss.str();
+  } else {
+    return "Tensor";
   }
-
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m)
-      override {
-    return values;
-  }
-
- private:
-  std::vector<std::shared_ptr<SugaredValue>> values;
-};
+}
 
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
@@ -94,9 +94,9 @@ struct Environment {
     return value_table.at(name)->asValue(loc, method);
   }
 
-  SugaredValuePtr createCapturedInput(const std::string& name) {
+  SugaredValuePtr createCapturedInput(Value* orig, const std::string& name) {
     // Create the input
-    Value* new_input = b->addInput();
+    Value* new_input = b->addInput()->setType(orig->type());
 
     // Associate this name with this value
     auto sv = std::make_shared<SimpleValue>(new_input);
@@ -118,13 +118,46 @@ struct Environment {
     return owning_kind;
   }
 
-  void setVar(const std::string& name, Value* value) {
-    if (!findInThisFrame(name) && findInParentFrame(name) &&
-        getBlockOwningKind() == prim::Loop)
-      createCapturedInput(name);
-    setSugaredVar(name, std::make_shared<SimpleValue>(value));
+  void setVar(const SourceRange& loc, const std::string& name, Value* value) {
+    setSugaredVar(loc, name, std::make_shared<SimpleValue>(value));
   }
-  void setSugaredVar(const std::string& name, SugaredValuePtr value) {
+  static Value* asSimple(SugaredValuePtr value) {
+    if(SimpleValue* sv = dynamic_cast<SimpleValue*>(value.get())) {
+      return sv->getValue();
+    }
+    return nullptr;
+  }
+
+  void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
+    Value* as_simple_value = asSimple(value);
+    // prevent re-assignment involving any sugared values
+    // any reassignment like:
+    // a = ...
+    // while ...
+    //   a = ..
+    // requires 'a' to be first-class in the graph since its value depends on
+    // control flow
+    if(auto parent = findInParentFrame(name)) {
+      if(!as_simple_value) {
+        throw ErrorReport(loc) << "cannot re-assign '" << name << "' to a value of type " << value->kind()
+        << ". Only reassignments to first-class values are allowed";
+      }
+      Value* simple_parent = asSimple(parent);
+      if(!simple_parent) {
+        throw ErrorReport(loc) << "cannot re-assign '" << name << "' because it has type " << value->kind()
+        << ". Only reassignments to first-class values are allowed";
+      }
+      if(*as_simple_value->type() != *simple_parent->type()) {
+        throw ErrorReport(loc) << "variable '" << name << "' previously has type " << diagnosticType(simple_parent->type())
+        << " but is now being assigned to a value of type " << diagnosticType(as_simple_value->type());
+      }
+    }
+    if (as_simple_value &&
+        !findInThisFrame(name) &&
+        findInParentFrame(name) &&
+        getBlockOwningKind() == prim::Loop) {
+      createCapturedInput(as_simple_value, name);
+    }
     value_table[name] = std::move(value);
   }
 
@@ -140,7 +173,9 @@ struct Environment {
 
     if (!retval && (retval = findInParentFrame(ident)) &&
         getBlockOwningKind() == prim::Loop) {
-      retval = createCapturedInput(ident);
+      if(Value* simple_val = asSimple(retval)) {
+        retval = createCapturedInput(simple_val, ident);
+      }
     }
 
     if(!retval) {
@@ -195,73 +230,102 @@ private:
   ValueTable value_table;
 };
 
-Node* emitBuiltinCall(
+Const getAttributeValue(Expr value_expr) {
+  switch (value_expr.kind()) {
+    case TK_CONST: {
+      return Const(value_expr);
+    } break;
+    case TK_TRUE: {
+      return Const::create(value_expr.range(), "1");
+    } break;
+    case TK_FALSE: {
+      return Const::create(value_expr.range(), "0");
+    } break;
+    default:
+      throw ErrorReport(value_expr) << "attributes must be constants, or a list of constants";
+      break;
+  }
+}
+
+std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values) {
+  if(values.size() == 1) {
+    return std::make_shared<SimpleValue>(values[0]);
+  }
+  return std::make_shared<SimpleValue>(g.insertNode(g.createTuple(values))->output());
+}
+
+std::shared_ptr<SugaredValue> emitBuiltinCall(
   const SourceRange& loc,
   Method& method,
   const std::string & name,
   at::ArrayRef<Value*> inputs,
   List<Attribute> attributes,
-  CallsiteDescriptor cd) {
+  // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
+  // otherwise it will return nullptr if the builtin is not found.
+  bool required) {
+
   NodeKind kind(Symbol::aten(name)); // TODO: this is a guess; could it be jit?
   auto graph = method.graph();
-  auto n = graph->insertNode(graph->create(kind, inputs, cd.n_outputs))
+  auto n = graph->insertNode(graph->create(kind, inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   for (const auto& attr : attributes) {
     const auto& name = Symbol::attr(attr.name().name());
     const Expr& value_expr = attr.value();
-    switch (value_expr.kind()) {
-      case TK_CONST: {
-        Const value {value_expr};
-        if (value.isFloatingPoint()) {
-          n->f_(name, value.asFloatingPoint());
-        } else {
-          n->i_(name, value.asIntegral());
-        }
-      } break;
-      case TK_LIST_LITERAL: {
-        List<Const> value_list {ListLiteral(value_expr).inputs()};
-        std::vector<Const> values;
-        for (Const number : value_list)
-          values.push_back(std::move(number));
-        bool is_float = std::any_of(values.begin(), values.end(),
-                                    [](const Const& c) { return c.isFloatingPoint(); });
-        if (is_float) {
-          n->fs_(name, fmap(values, [](const Const& c) { return c.asFloatingPoint(); }));
-        } else {
-          n->is_(name, fmap(values, [](const Const& c) { return c.asIntegral(); }));
-        }
-      } break;
-    default:
-        throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value_expr.kind();
-        break;
+    if(value_expr.kind() == TK_LIST_LITERAL) {
+      auto value_list = ListLiteral(value_expr).inputs();
+      std::vector<Const> values = fmap(value_list, getAttributeValue);
+      bool is_float = std::any_of(values.begin(), values.end(),
+                                  [](const Const& c) { return c.isFloatingPoint(); });
+      if (is_float) {
+        n->fs_(name, fmap(values, [](const Const& c) { return c.asFloatingPoint(); }));
+      } else {
+        n->is_(name, fmap(values, [](const Const& c) { return c.asIntegral(); }));
+      }
+    } else {
+      auto value = getAttributeValue(value_expr);
+      if (value.isFloatingPoint()) {
+        n->f_(name, value.asFloatingPoint());
+      } else {
+        n->i_(name, value.asIntegral());
+      }
     }
   }
+  auto op = findTensorOp(n);
+  if(!op) {
+    n->destroy();
+    if(!required)
+      return nullptr;
+    throw ErrorReport(loc) << "unknown builtin op";
+  }
+  if(op->num_outputs == UNKNOWN_OUTPUTS) {
+    throw ErrorReport(loc) << "produces an unknown number of outputs, so it cannot be used directly from script methods";
+  }
+  for(size_t i = 0; i < op->num_outputs; ++i)
+    n->addOutput();
 
-  return n;
+  return packOutputs(*graph, n->outputs());
 }
 
-std::vector<Value*> BuiltinFunction::call(
+struct NoneValue : SugaredValue {
+  NoneValue() {}
+  virtual std::string kind() const override {
+    return "None";
+  }
+};
+
+
+std::shared_ptr<SugaredValue> BuiltinFunction::call(
     SourceRange loc,
     Method & m,
     at::ArrayRef<Value*> inputs_,
     List<Attribute> attributes,
-    CallsiteDescriptor cd) {
+    size_t n_binders) {
   std::vector<Value*> inputs;
-  if (value) inputs.push_back(value);
+  if (value)
+    inputs.push_back(value);
   inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-  // TODO: remove when we support tuple packing for builtins.
-  if (cd.allow_varargs && cd.n_outputs == 1) {
-    cd.allow_varargs = false;
-  }
-  Node * n = emitBuiltinCall(loc, m, name, inputs, attributes, cd);
-  if (!hasTensorOp(n)) {
-    throw ErrorReport(loc) << "unknown builtin op";
-  }
-  if (cd.allow_varargs) {
-    throw ErrorReport(loc) << "Starred packing for the output of a builtin is not supported.";
-  }
-  return n->outputs();
+  return emitBuiltinCall(loc, m, name, inputs, attributes, true);
 }
 
 struct to_ir {
@@ -284,12 +348,12 @@ struct to_ir {
     if(self) {
       if(it == end)
         throw ErrorReport(def.params().range()) << "methods must have a self argument";
-      environment_stack->setSugaredVar((*it).ident().name(), self);
+      environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
       ++it;
     }
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
-      environment_stack->setVar(name, graph->addInput(name));
+      environment_stack->setVar((*it).ident().range(), name, graph->addInput(name));
     }
     // body
     auto stmts = def.statements();
@@ -305,10 +369,14 @@ struct to_ir {
 
     // outputs
     if (has_return) {
-      for (auto output : Return(*stmts_end).values()) {
-        graph->registerOutput(emitExpr(output, {1, false})[0]);
+      auto results = getValues(Return(*stmts_end).values(), true);
+      for(auto r : results) {
+        graph->registerOutput(r);
       }
     }
+
+    // remove any uses of tuples that we inserted
+    LowerTuples(graph);
   }
 
 private:
@@ -352,13 +420,13 @@ private:
         case TK_GLOBAL:
           for (auto ident : Global(stmt).names()) {
             const auto& name = Ident(ident).name();
-            environment_stack->setVar(name, graph->addInput(name));
+            environment_stack->setVar(ident.range(), name, graph->addInput(name));
           }
           break;
         case TK_EXPR_STMT: {
           auto exprs = ExprStmt(stmt).exprs();
           for (const auto& expr : exprs) {
-            emitExpr(expr, {0, false});
+            emitSugaredExpr(expr, 0);
           }
         }
         break;
@@ -386,16 +454,16 @@ private:
     return popFrame();
   }
 
-  Node* create(Symbol kind, const SourceRange& loc,  CallsiteDescriptor cd) {
+  Node* create(Symbol kind, const SourceRange& loc,  size_t n_outputs) {
     return graph
-             ->create(kind, cd.n_outputs)
+             ->create(kind, n_outputs)
              ->setSourceLocation(std::make_shared<SourceRange>(loc));
   }
 
-  std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
-    Value* cond_value = emitExpr(expr.cond(), {1, false})[0];
+  Value* emitTernaryIf(const TernaryIf& expr) {
+    Value* cond_value = emitExpr(expr.cond());
 
-    Node* n = graph->insertNode(create(prim::If, expr.range(), {0, false}));
+    Node* n = graph->insertNode(create(prim::If, expr.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -403,7 +471,7 @@ private:
     auto emit_if_expr = [this](Block* b, const Expr& expr) {
       pushFrame(b);
       WithInsertPoint guard(b);
-      Value* out_val = emitExpr(expr, {1, false})[0];
+      Value* out_val = emitExpr(expr);
       b->registerOutput(out_val);
       popFrame();
     };
@@ -414,13 +482,13 @@ private:
     // Add op outputs
     auto expr_value = n->addOutput(); // Resulting value
 
-    return {expr_value};
+    return expr_value;
   }
 
   void emitIf(const If& stmt) {
-    Value* cond_value = emitExpr(stmt.cond(), {1, false})[0];
+    Value* cond_value = emitExpr(stmt.cond());
 
-    Node* n = graph->insertNode(create(prim::If, stmt.range(), {0, false}));
+    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -438,16 +506,13 @@ private:
 
     // Register outputs in each block
     for (const auto& x : sorted_mutations) {
-      true_block->registerOutput(save_true->getVar(x, stmt.range()));
-    }
-    for (const auto& x : sorted_mutations) {
-      false_block->registerOutput(save_false->getVar(x, stmt.range()));
+      auto tv = save_true->getVar(x, stmt.range());
+      true_block->registerOutput(tv);
+      auto fv = save_false->getVar(x, stmt.range());
+      false_block->registerOutput(fv);
+      environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(tv->type()));
     }
 
-    // Add op outputs
-    for (const auto& x : sorted_mutations) {
-      environment_stack->setVar(x, n->addOutput());
-    }
   }
 
   // *********************** Loop Operators ************************************
@@ -473,20 +538,20 @@ private:
       at::optional<Expr> cond,
       const List<Stmt>& body,
       at::optional<Ident> itr_ident) {
-    Node* n = graph->insertNode(create(prim::Loop, range, {0, false}));
+    Node* n = graph->insertNode(create(prim::Loop, range, 0));
     Value *max_trip_count_val, *cond_val;
     {
       WithInsertPoint guard(n);
       if (max_trip_count) {
-        max_trip_count_val = emitExpr(max_trip_count.value(), {1, false})[0];
+        max_trip_count_val = emitExpr(max_trip_count.value());
       } else {
         max_trip_count_val =
-            emitConst(Const::create(range, std::to_string(INT_MAX)))[0];
+            emitConst(Const::create(range, std::to_string(INT_MAX)));
       }
       if (cond) {
-        cond_val = emitExpr(cond.value(), {1, false})[0];
+        cond_val = emitExpr(cond.value());
       } else {
-        cond_val = emitBooleanConst(range, true)[0];
+        cond_val = emitBooleanConst(range, true);
       }
     }
     n->addInput(max_trip_count_val);
@@ -498,17 +563,17 @@ private:
     {
       pushFrame(body_block);
       if (itr_ident) {
-        environment_stack->setVar(itr_ident.value().name(), trip_count);
+        environment_stack->setVar(itr_ident->range(), itr_ident->name(), trip_count);
       }
       WithInsertPoint guard(body_block);
       emitStatements(body);
 
       // Also emit the conditional
       if (cond) {
-        Value* body_cond_value = emitExpr(cond.value(), {1, false})[0];
+        Value* body_cond_value = emitExpr(cond.value());
         body_block->registerOutput(body_cond_value);
       } else {
-        Value* cond_value_dummy = emitBooleanConst(range, true)[0];
+        Value* cond_value_dummy = emitBooleanConst(range, true);
         body_block->registerOutput(cond_value_dummy);
       }
 
@@ -520,9 +585,10 @@ private:
 
       // Add block outputs
       for (const auto& x : body_frame->captured_inputs) {
-        body_block->registerOutput(body_frame->getValueInThisFrame(range, x));
+        auto fv = body_frame->getValueInThisFrame(range, x);
+        body_block->registerOutput(fv);
         n->addInput(outer_frame->getVar(x, range));
-        outer_frame->setVar(x, n->addOutput());
+        outer_frame->setVar(range, x, n->addOutput()->setType(fv->type()));
       }
 
     }
@@ -571,18 +637,18 @@ private:
 
     // it isn't a range(<expr>) loop, treat it as a sugared value that maybe can be
     // unrolled
-    auto sv = emitSugaredExpr(itrs[0]);
+    auto sv = emitSugaredExpr(itrs[0], 1);
     auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
     for(auto inst : instances) {
-      environment_stack->setSugaredVar(target_name, inst);
+      environment_stack->setSugaredVar(itrs[0].range(), target_name, inst);
       emitStatements(body);
     }
 
     for (const auto & n : environment_stack->definedVariables()) {
       if (environment_stack->findInParentFrame(n)) {
-        environment_stack->next->setVar(n, environment_stack->getVar(n, stmt.range()));
+        environment_stack->next->setVar(stmt.range(), n, environment_stack->getVar(n, stmt.range()));
       }
     }
     popFrame();
@@ -629,17 +695,7 @@ private:
     return num_starred;
   }
 
-  std::vector<SugaredValuePtr> createSugaredValuesFromValues(const std::vector<Value*> values) {
-    std::vector<SugaredValuePtr> sugared_outputs;
-    sugared_outputs.reserve(values.size());
-    for (Value* output : values) {
-      sugared_outputs.emplace_back(std::make_shared<SimpleValue>(output));
-    }
-    return sugared_outputs;
-  }
-
-  std::vector<Value*> emitAssignment(const Assign& stmt) {
-    std::vector<Value*> outputs{stmt.lhs().size()};
+  void emitAssignment(const Assign& stmt) {
     bool starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
     if (stmt.reduction() != '=') {
       if (stmt.lhs().size() != 1) {
@@ -650,40 +706,57 @@ private:
       Ident lhs = Var(stmt.lhs()[0]).name();
       Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
                                 Var::create(lhs.range(), lhs), stmt.rhs());
-      outputs = emitExpr(expr, {1, false});
-    } else {
-      CallsiteDescriptor cd{stmt.lhs().size(), starred_unpack || stmt.lhs().size() == 1};
-      outputs =
-          emitExpr(stmt.rhs(), cd);
+      environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr));
+      return;
     }
-    if (stmt.lhs().size() == 1 && outputs.size() != 1) {
-      // Pack up a tuple sugared value
-      SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromValues(outputs));
-      if (stmt.lhs()[0].kind() != TK_VAR) {
-        throw ErrorReport(stmt.lhs()[0]) << "Cannot pack a tuple into a non-variable.";
-      }
-      environment_stack->setSugaredVar(Var(stmt.lhs()[0]).name().name(), tup);
-    } else {
-      int i = 0;
-      for (auto assignee : stmt.lhs()) {
-        if (assignee.kind() == TK_VAR) {
-          environment_stack->setVar(Var(assignee).name().name(), outputs.at(i));
-          i++;
-        } else if (assignee.kind() == TK_STARRED) {
-          auto var = Starred(assignee).expr();
-          if (var.kind() != TK_VAR) {
-            throw ErrorReport(var) << "Cannot pack a tuple into a non-variable.";
-          }
-          std::vector<Value*> starred_slice(
-              outputs.begin() + i, outputs.begin() + i + (starred_unpack ? 1 : 0));
-          SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromValues(starred_slice));
-          environment_stack->setSugaredVar(
-              Var(Starred(assignee).expr()).name().name(), tup);
-          i += starred_unpack ? 1 : 0;
+
+    // See [N_BINDERS]
+    size_t n_binders = stmt.lhs().size();
+    if(starred_unpack)
+      n_binders--;
+
+    auto output = emitSugaredExpr(stmt.rhs(), n_binders);
+
+    if(stmt.lhs().size() == 1) {
+      JIT_ASSERT(!starred_unpack);
+      auto v = Var(stmt.lhs()[0]);
+      environment_stack->setSugaredVar(v.range(), v.name().name(), output);
+      return;
+    }
+
+    auto outputs = output->asTuple(stmt.rhs().range(), method);
+    if(outputs.size() < n_binders) {
+      throw ErrorReport(stmt)
+        << "need " << (starred_unpack ? "at least " : "")
+        << n_binders << " values to unpack but found only "
+        << outputs.size();
+    }
+    if(outputs.size() > n_binders && !starred_unpack) {
+      throw ErrorReport(stmt)
+      << "too many values to unpack, need " << n_binders << " but found "
+      << outputs.size();
+    }
+    int i = 0;
+    for (auto assignee : stmt.lhs()) {
+      if (assignee.kind() == TK_VAR) {
+        environment_stack->setSugaredVar(assignee.range(), Var(assignee).name().name(), outputs.at(i));
+        i++;
+      } else if (assignee.kind() == TK_STARRED) {
+        auto var = Starred(assignee).expr();
+        if (var.kind() != TK_VAR) {
+          throw ErrorReport(var) << "Cannot pack a tuple into a non-variable.";
         }
+        size_t n_matched = outputs.size() - n_binders;
+        ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
+        auto values = fmap(outputs_ref.slice(i, n_matched), [&](const std::shared_ptr<SugaredValue>& v) {
+          return v->asValue(assignee.range(), method);
+        });
+        auto tup = graph->insertNode(graph->createTuple(values))->output();
+        environment_stack->setVar(
+          var.range(), Var(var).name().name(), tup);
+        i += n_matched;
       }
     }
-    return outputs;
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -723,100 +796,95 @@ private:
     }
   }
 
-  template <typename Trees>
-  std::vector<Value*> getValues(const Trees& trees, bool maybe_unpack=false) {
+  std::vector<Value*> getValues(TreeList trees, bool maybe_unpack=false) {
     std::vector<Value*> values;
     for (const auto& tree : trees) {
-      CallsiteDescriptor cd{1, maybe_unpack};
-      auto outputs = emitExpr(tree, cd);
-      if (!maybe_unpack && outputs.size() > 1) {
-        throw ErrorReport(tree) << "Expr unexpectedly returned more than 1 value."
-                                << " File a bug report.";
-      }
-      for (auto* v : outputs) {
-        values.push_back(v);
+      if(maybe_unpack && tree->kind() == TK_STARRED) {
+        auto starred = Starred(tree);
+        auto entries = emitSugaredExpr(starred.expr(), 1)->asTuple(starred.range(), method);
+        for(auto entry : entries) {
+          values.push_back(ensureTensor(starred.range(), entry->asValue(starred.range(), method)));
+        }
+      } else {
+        values.push_back(emitExpr(Expr(tree)));
       }
     }
     return values;
   }
-
-  void expectOutputs(
-      const TreeRef& tree,
-      const size_t expected_size,
-      const size_t size) {
-    if (expected_size != 0 && expected_size != size) {
-      throw ErrorReport(tree)
-          << "expected operator to produce " << expected_size
-          << " outputs but it produced " << size;
-    }
+  std::vector<Value*> getValues(List<Expr> trees, bool maybe_unpack=false) {
+    return getValues(trees.tree()->trees(), maybe_unpack);
   }
 
+
   // special rules apply when we directly call foo(a,b) when foo is an ident
-  std::vector<Value*> emitApplyIdent(Ident ident, std::vector<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) {
+  std::shared_ptr<SugaredValue> emitApplyIdent(Ident ident, std::vector<Value*> inputs, List<Attribute> attributes, size_t n_binders) {
     auto it = function_table.find(ident.name());
     if (it != function_table.end()) {
       if(inputs.size() != it->second.num_inputs())
         throw ErrorReport(ident) << "expected " << it->second.num_inputs() << " but found " << inputs.size();
-      auto outputs = method.emit_call_to(it->second, inputs);
-      if (!cd.allow_varargs)
-        expectOutputs(ident, cd.n_outputs, outputs.size());
-      return outputs;
+      return packOutputs(*graph, method.emit_call_to(it->second, inputs));
     } else if (ident.name() == "print") {
-      expectOutputs(ident, cd.n_outputs, 0);
       if (!attributes.empty())
         throw ErrorReport(ident) << "print doesn't accept any keyword arguments";
-      return emitNode(prim::Print, ident.range(), inputs, {0, false})->outputs();
+      emitNode(prim::Print, ident.range(), inputs, 0);
+      return std::make_shared<NoneValue>();
     }
-    // TODO: remove when we can support tuple packing for builtins.
-    if (cd.allow_varargs && cd.n_outputs == 1) {
-      cd.allow_varargs = false;
+    if(auto result = emitBuiltinCall(ident.range(), method, ident.name(), inputs, attributes, false)) {
+      return result;
     }
-    Node* builtin = emitBuiltinCall(ident.range(), method, ident.name(), inputs, attributes, cd);
-    if (hasTensorOp(builtin)) {
-      if (cd.allow_varargs) {
-        throw ErrorReport(ident.range()) << "Starred assignment isn't supported on builtins.";
-      }
-      return builtin->outputs();
-    }
-    builtin->destroy();
     // it wasn't known built in, so treat it like standard apply
-    return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, cd);
+    return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, n_binders);
   }
 
-  std::vector<Value*> emitApplyExpr(Expr callee, const std::vector<Value*>& inputs, List<Attribute> attributes, CallsiteDescriptor cd) {
+  std::shared_ptr<SugaredValue> emitApplyExpr(Expr callee, const std::vector<Value*>& inputs, List<Attribute> attributes, size_t n_binders) {
     // otherwise we evaluate the callee and then desugar it
-    auto sv = emitSugaredExpr(callee);
-    return sv->call(callee.range(), method, inputs, attributes, cd);
+    auto sv = emitSugaredExpr(callee, 1);
+    return sv->call(callee.range(), method, inputs, attributes, n_binders);
+  }
+
+  Value* ensureTensor(const SourceRange& range, Value* v) {
+    // both 'DynamicType' and 'TensorType' are actually Tensors:
+    // 'Dynamic' currently means a dynamically-sized tensor vs e.g. a TupleType
+    // TensorType means a 'sized' tensor which is added by some optimizations
+    if(v->type()->kind() == TypeKind::DynamicType
+       || v->type()->kind() == TypeKind::TensorType) {
+         return v;
+    }
+    throw ErrorReport(range) << "expected a tensor value but found a tuple";
+  }
+
+  Value* emitExpr(Expr tree) {
+    return ensureTensor(tree.range(), emitSugaredExpr(tree, 1)->asValue(tree.range(), method));
   }
 
   // any expression that can produce a SugaredValue is handled here
-  // with emitExpr falling back to this function to handle them
-  // the kinds handled here should be kept in sync with [SUGARED VALUES]
-  // in emitExpr
-  std::shared_ptr<SugaredValue> emitSugaredExpr(Expr tree) {
+  // expressions that only return a single Value* are handled in emitSimpleExpr
+  std::shared_ptr<SugaredValue> emitSugaredExpr(Expr tree, size_t n_binders) {
     switch(tree.kind()) {
       case TK_VAR:
         return environment_stack->getSugaredVar(Var(tree).name());
       case '.': {
         auto select = Select(tree);
-        auto sv = emitSugaredExpr(select.value());
+        auto sv = emitSugaredExpr(select.value(), 1);
         return sv->attr(select.range(), method, select.selector().name());
       }
+      case TK_APPLY: {
+        auto apply = Apply(tree);
+        auto inputs = getValues(apply.inputs(), true);
+        // the apply is directly an identifier 'foo'
+        if(apply.callee().kind() == TK_VAR) {
+          return emitApplyIdent(Var(apply.callee()).name(), inputs, apply.attributes(), n_binders);
+        }
+        return emitApplyExpr(apply.callee(), inputs, apply.attributes(), n_binders);
+      } break;
       default:
-        return std::make_shared<SimpleValue>(emitExpr(tree, {1, false})[0]);
+        return std::make_shared<SimpleValue>(emitSimpleExpr(tree));
     }
   }
 
-  std::vector<Value*> emitExpr(
-      const TreeRef& tree,
-      CallsiteDescriptor cd) {
+  Value* emitSimpleExpr(
+      const TreeRef& tree) {
     switch (tree->kind()) {
-      // the expressions have special handling because they may operate
-      // on sugared values
-      // [SUGARED VALUES]
-      case TK_VAR: case '.': {
-        return { emitSugaredExpr(Expr(tree))->asValue(tree->range(), method) };
-      } break;
       case TK_NE:
       case TK_EQ:
       case '<':
@@ -829,47 +897,26 @@ private:
       case TK_OR:
       case TK_NOT:
       case TK_UNARY_MINUS: {
-        expectOutputs(tree, cd.n_outputs, 1);
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        return emitNode(kind, tree->range(), getValues(inputs), cd)->outputs();
+        return emitNode(kind, tree->range(), getValues(inputs), 1)->output();
       } break;
       case '+':
       case '-': {
-        expectOutputs(tree, cd.n_outputs, 1);
-        const auto& inputs = tree->trees();
+        const auto& inputs =tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto* node = emitNode(kind, tree->range(), getValues(inputs), cd);
+        auto* node = emitNode(kind, tree->range(), getValues(inputs), 1);
         node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
-        return node->outputs();
+        return node->output();
       }
       case TK_STARRED: {
-        const auto starred = Starred(tree);
-        auto sugared = emitSugaredExpr(starred.expr());
-        auto sugared_retvals = sugared->asTuple(starred.range(), environment_stack->method);
-        std::vector<Value*> retvals;
-        retvals.reserve(sugared_retvals.size());
-        for (auto & val : sugared_retvals) {
-          retvals.push_back(val->asValue(starred.range(), method));
-        }
-        return retvals;
+        throw ErrorReport(tree) << "Unexpected starred expansion. File a bug report.";
       }
-      case TK_APPLY: {
-        auto apply = Apply(tree);
-        auto inputs = getValues(apply.inputs(), true);
-        // the apply is directly an identifier 'foo'
-        if(apply.callee().kind() == TK_VAR) {
-          return emitApplyIdent(Var(apply.callee()).name(), inputs, apply.attributes(), cd);
-        }
-        return emitApplyExpr(apply.callee(), inputs, apply.attributes(), cd);
-      } break;
       case TK_CAST: {
-        expectOutputs(tree, cd.n_outputs, 1);
         const auto cast = Cast(tree);
         return emitCast(cast.input(), cast.type());
       } break;
       case TK_CONST: {
-        expectOutputs(tree, cd.n_outputs, 1);
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
@@ -879,21 +926,17 @@ private:
         return emitBooleanConst(tree->range(), false);
       } break;
       case TK_SLICE: {
-        expectOutputs(tree, cd.n_outputs, 1);
         const auto slice = Slice(tree);
         return emitSlice(
             slice.range(),
-            {slice.value(), slice.startOr(0), slice.endOr(-1)},
-            cd);
+            {slice.value(), slice.startOr(0), slice.endOr(-1)});
       } break;
       case TK_GATHER: {
-        expectOutputs(tree, cd.n_outputs, 1);
         const auto gather = Gather(tree);
         return emitGather(
-            gather.range(), {gather.value(), gather.indices()}, cd);
+            gather.range(), {gather.value(), gather.indices()});
       } break;
       case TK_IF_EXPR: {
-        expectOutputs(tree, cd.n_outputs, 1);
         return emitTernaryIf(TernaryIf(tree));
       } break;
       default:
@@ -902,7 +945,7 @@ private:
     }
   }
 
-  std::vector<Value*> emitCast(const TreeRef& input, const ScalarType& type) {
+  Value* emitCast(Expr input, const ScalarType& type) {
     at::ScalarType t;
     switch (type.kind()) {
       case TK_INT:
@@ -922,21 +965,21 @@ private:
     }
     return emitNode(
                Symbol::aten("type_as"),
-               input->range(),
-               {emitExpr(input, {1, false})[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
-               {1, false})
-        ->outputs();
+               input.range(),
+               {emitExpr(input), createConstant(input.range(), at::ones(at::CPU(t), {1}))},
+               1)
+        ->output();
   }
 
-  std::vector<Value*> emitBooleanConst(SourceRange range, bool val) {
-    return {createConstant(range, at::CPU(at::kByte).scalarTensor(val))};
+  Value* emitBooleanConst(SourceRange range, bool val) {
+    return createConstant(range, at::CPU(at::kByte).scalarTensor(val));
   }
 
-  std::vector<Value*> emitConst(const Const& c) {
+  Value* emitConst(const Const& c) {
     if (c.isFloatingPoint()) {
-      return {createConstant(c.range(), at::CPU(at::kFloat).scalarTensor(c.asFloatingPoint()))};
+      return createConstant(c.range(), at::CPU(at::kFloat).scalarTensor(c.asFloatingPoint()));
     } else {
-      return {createConstant(c.range(), at::CPU(at::kLong).scalarTensor(c.asIntegral()))};
+      return createConstant(c.range(), at::CPU(at::kLong).scalarTensor(c.asIntegral()));
     }
   }
 
@@ -944,8 +987,8 @@ private:
       NodeKind kind,
       const SourceRange& loc,
       const std::vector<Value*> inputs,
-      CallsiteDescriptor cs) {
-    Node* n = graph->insertNode(create(kind, loc, cs));
+      size_t n_outputs) {
+    Node* n = graph->insertNode(create(kind, loc, n_outputs));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
     }
@@ -954,10 +997,9 @@ private:
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
-  std::vector<Value*> emitSlice(
+  Value* emitSlice(
       const SourceRange& loc,
-      TreeList&& inputs,
-      CallsiteDescriptor cs) {
+      TreeList&& inputs) {
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
@@ -968,18 +1010,17 @@ private:
                Symbol::aten("slice"),
                loc,
                {tensor},
-               cs)
+               1)
                ->i_(attr::dim, 0)
                ->i_(attr::step, 1)
                ->i_(attr::start, begin)
-               ->i_(attr::end, end)->outputs();
+               ->i_(attr::end, end)->output();
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
-  std::vector<Value*> emitGather(
+  Value* emitGather(
       const SourceRange& loc,
-      TreeList&& inputs,
-      CallsiteDescriptor cs) {
+      TreeList&& inputs) {
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
@@ -989,10 +1030,10 @@ private:
                Symbol::aten("select"),
                loc,
                {tensor},
-               cs)
+               1)
                ->i_(attr::dim, 0)
                ->i_(attr::index, idx)
-               ->outputs();
+               ->output();
   }
 
   Value* createConstant(const SourceRange& loc, const at::Tensor& val) {
@@ -1008,6 +1049,27 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
   return std::make_shared<BuiltinFunction>(field, value);
 }
 
+std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
+  std::unordered_map<Value*, Value*> value_map;
+  auto value_map_func = [&](Value* v) { return value_map.at(v); };
+  JIT_ASSERT(callee.inputs().size() == inputs.size());
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    value_map[callee.inputs()[i]] = inputs[i];
+  }
+  for (auto* node : callee.nodes()) {
+    auto* new_node =
+        g.insertNode(g.createClone(node, value_map_func));
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      value_map[node->outputs()[i]] = new_node->outputs()[i];
+    }
+  }
+
+  std::vector<Value*> outputs;
+  for (auto* output : callee.outputs()) {
+    outputs.push_back(value_map_func(output));
+  }
+  return outputs;
+}
 
 void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const Resolver& resolver, SugaredValuePtr self) {
   FunctionTable table;
@@ -1035,6 +1097,18 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
   Module m; //note: we don't use 'm' to execute so this setting is unused
   defineMethodsInModule(m, {def}, resolver, nullptr);
   return m.get_method(def.name().name()).graph();
+}
+
+
+std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {
+  auto & graph = *m.graph();
+  if(value->type()->kind() == TypeKind::TupleType) {
+    auto n = graph.insertNode(graph.createTupleUnpack(value));
+    return fmap(n->outputs(), [](Value* v) -> std::shared_ptr<SugaredValue> {
+      return std::make_shared<SimpleValue>(v);
+    });
+  }
+  return SugaredValue::asTuple(loc, m);
 }
 
 } // namespace script

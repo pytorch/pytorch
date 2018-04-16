@@ -51,7 +51,7 @@ CONSTRUCTOR = CodeTemplate("""\
     drop(stack, ${num_dynamic_inputs});
     pack(stack, std::move(result));
     return 0;
-  }, "${name}", ${num_dynamic_inputs});
+  }, "${name}", ${num_dynamic_inputs}, ${num_outputs});
 }},
 """)
 
@@ -68,6 +68,7 @@ def is_jit_op(decl):
             not any(arg['simple_type'] == 'Generator' for arg in decl['arguments']) and
             not any(arg['simple_type'] == 'SparseTensor' for arg in decl['arguments']) and
             not any(arg['simple_type'] == 'Storage' for arg in decl['arguments']) and
+            not any(arg['simple_type'] == 'ScalarType' for arg in decl['arguments']) and
             not any(arg['simple_type'] == 'Type' for arg in decl['arguments']) and
             uses_tensors)
 
@@ -131,11 +132,12 @@ def gen_jit_dispatch(declarations, out):
                 pos_assignments.append(assign)
                 arguments.append(arg['name'])
             else:
+                attr_method = ATTR_METHOD_MAP[arg['simple_type']]
                 assign = KW_ASSIGNMENT.substitute(type_cast=TYPE_CASTS.get(arg['simple_type'], arg['simple_type']),
                                                   name=arg['name'],
-                                                  method=ATTR_METHOD_MAP[arg['simple_type']])
+                                                  method=attr_method)
                 kw_assignments.append(assign)
-                attr_names.append(arg['name'])
+                attr_names.append('{}_{}'.format(arg['name'], attr_method))
                 arguments.append(arg['name'])
         call = get_invocation(decl, arguments)
 
@@ -153,11 +155,22 @@ def gen_jit_dispatch(declarations, out):
                    for idx in skip_scalar_overload[descriptor]):
                 return
 
+        returns = decl['returns']
+        all_scalars = all(r['dynamic_type'] != 'TensorList' for r in returns)
+        num_outputs = str(len(returns)) if all_scalars else 'UNKNOWN_OUTPUTS'
+
+        # special case for chunk when the chunks=<const> is known
+        # DO NOT ADD MORE SPECIAL CASES HERE, REFACTOR INTO A FUNCTION IF
+        # NEEDED
+        if decl['name'] == 'chunk' and 'chunks_i' in attr_names:
+            num_outputs = 'node->i(Symbol::attr("chunks"))'
+
         constructor = CONSTRUCTOR.substitute(descriptor=descriptor, name=decl['name'],
                                              call=call,
                                              kw_assignments=kw_assignments,
                                              pos_assignments=pos_assignments,
-                                             num_dynamic_inputs=num_dynamic_inputs)
+                                             num_dynamic_inputs=num_dynamic_inputs,
+                                             num_outputs=num_outputs)
 
         assert descriptor not in ops, descriptor
         ops[descriptor] = constructor
@@ -191,6 +204,7 @@ def gen_jit_dispatch(declarations, out):
         'api_name': name,
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
+        'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t'}],
     } for name in ['sizes', 'strides', 'dim']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
@@ -219,7 +233,6 @@ def gen_jit_dispatch(declarations, out):
         'aten_symbols': ["_(aten, {}) \\".format(n) for n in sorted(names)],
         'attr_symbols': ["_(attr, {}) \\".format(n) for n in sorted(attrs)]
     }
-
     write(out, 'aten_interned_strings.h', ATEN_INTERNED_STRINGS_H, strings_env)
 
 

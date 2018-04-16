@@ -212,6 +212,8 @@ On Windows
 set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
 set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 set DISTUTILS_USE_SDK=1
+REM The following line is needed for Python 2.7, but the support for it is very experimental.
+set MSSdk=1
 
 call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
 python setup.py install
@@ -224,7 +226,8 @@ Dockerfile is supplied to build images with cuda support and cudnn v7. Build as 
 docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```
 
-Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run with nvidia-docker:
+You can also pull a pre-built docker image from Docker Hub and run with nvidia-docker,
+but this is not currently maintained and will pull PyTorch 0.2.
 ```
 nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest
 ```

@@ -264,6 +264,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "DynamicType";
         case TypeKind::TensorType:
           return "TensorType";
+        case TypeKind::TupleType:
+          return "TupleType";
         default:
           torch::barf("unknown type kind");
           return "";

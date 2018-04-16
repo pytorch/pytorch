@@ -371,9 +371,11 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   throw std::runtime_error("new(): invalid arguments");
 }
 
-static const Type& typeWithDefault(PythonArgs& r, int64_t idx, const Type& type) {
-  auto dtype = r.dtypeWithDefault(idx, *torch::getDtype(type.scalarType(), type.is_cuda()));
-  return torch::getType(dtype, *torch::getLayout(type.backend()));
+static const Type& typeWithDefault(PythonArgs& r, int64_t dtype_idx, int64_t device_idx, const Type& type) {
+  auto scalartype = r.scalartypeWithDefault(dtype_idx, type.scalarType());
+  auto types_device_type = torch::getDeviceType(type);
+  auto device_type = r.isNone(device_idx) ? types_device_type : r.device(device_idx).type;
+  return torch::getType(scalartype, *torch::getLayout(type.backend()), device_type);
 }
 
 static Tensor set_requires_grad(Tensor self, bool requires_grad) {
@@ -386,15 +388,15 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
   const auto& default_sparse_type = type.toBackend(sparse_backend);
 
   static PythonArgParser parser({
-    "sparse_coo_tensor(PyObject* indices, PyObject* values, *, Dtype dtype=None, Device? device=None, bool requires_grad=False)",
-    "sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, Dtype dtype=None, Device? device=None, bool requires_grad=False)",
+    "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+    "sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<6> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     bool type_inference = r.isNone(2);
-    const auto& sparse_type = typeWithDefault(r, 2, default_sparse_type);
+    const auto& sparse_type = typeWithDefault(r, 2, 3, default_sparse_type);
     const auto& dense_type = sparse_type.toBackend(sparse_type.is_cuda() ? kCUDA : kCPU);
     const auto& index_type = dense_type.toScalarType(kLong);
     AutoGPU autogpu(r.deviceInt64(3));
@@ -405,7 +407,7 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
     return set_requires_grad(sparse_type_to_use.sparse_coo_tensor(indices, values), r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
-    const auto& sparse_type = typeWithDefault(r, 3, default_sparse_type);
+    const auto& sparse_type = typeWithDefault(r, 3, 4, default_sparse_type);
     const auto& dense_type = sparse_type.toBackend(sparse_type.is_cuda() ? kCUDA : kCPU);
     const auto& index_type = dense_type.toScalarType(kLong);
     AutoGPU autogpu(r.deviceInt64(4));
@@ -420,7 +422,7 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
 
 Tensor tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "tensor(PyObject* data, *, Dtype dtype=None, Device? device=None, bool requires_grad=False)",
+    "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<4> parsed_args;
@@ -428,7 +430,7 @@ Tensor tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   if (r.idx == 0) {
     bool type_inference = r.isNone(1);
     return set_requires_grad(internal_new_from_data(
-        typeWithDefault(r, 1, type), r.deviceInt64(2), r.pyobject(0), true, true, type_inference), r.toBool(3));
+        typeWithDefault(r, 1, 2, type), r.deviceInt64(2), r.pyobject(0), true, true, type_inference), r.toBool(3));
   }
   throw std::runtime_error("tensor(): invalid arguments");
 }
@@ -436,27 +438,27 @@ Tensor tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
 
 Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_tensor(PyObject* data, *, Dtype dtype=None, Device? device=None, bool requires_grad=False)",
+    "new_tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     return set_requires_grad(new_from_data_copy(
-        typeWithDefault(r, 1, type), r.deviceInt64(2), r.pyobject(0)), r.toBool(3));
+        typeWithDefault(r, 1, 2, type), r.deviceInt64(2), r.pyobject(0)), r.toBool(3));
   }
   throw std::runtime_error("new_tensor(): invalid arguments");
 }
 
 Tensor new_empty(const at::Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_empty(IntList size, *, Dtype dtype=None, Device? device=None, bool requires_grad=False)",
+    "new_empty(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    const auto& actual_type = typeWithDefault(r, 1, type);
+    const auto& actual_type = typeWithDefault(r, 1, 2, type);
     return set_requires_grad(new_with_sizes(actual_type, r.deviceInt64(2), r.intlist(0)), r.toBool(3));
   }
   throw std::runtime_error("new_empty(): invalid arguments");
@@ -464,13 +466,13 @@ Tensor new_empty(const at::Type& type, PyObject* args, PyObject* kwargs) {
 
 Tensor new_full(const at::Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_full(IntList size, Scalar fill_value, *, Dtype dtype=None, Device? device=None, bool requires_grad=False)",
+    "new_full(IntList size, Scalar fill_value, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    const auto& actual_type = typeWithDefault(r, 2, type);
+    const auto& actual_type = typeWithDefault(r, 2, 3, type);
     return set_requires_grad(dispatch_full(actual_type, r.scalar(1), r.deviceInt64(3), r.intlist(0)), r.toBool(4));
   }
   throw std::runtime_error("new_full(): invalid arguments");
@@ -478,13 +480,13 @@ Tensor new_full(const at::Type& type, PyObject* args, PyObject* kwargs) {
 
 Tensor new_ones(const at::Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_ones(IntList size, *, Dtype dtype=None, Device? device=None, bool requires_grad=False)",
+    "new_ones(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    const auto& actual_type = typeWithDefault(r, 1, type);
+    const auto& actual_type = typeWithDefault(r, 1, 2, type);
     return set_requires_grad(dispatch_ones(actual_type, r.deviceInt64(2), r.intlist(0)), r.toBool(3));
   }
   throw std::runtime_error("new_ones(): invalid arguments");
@@ -492,13 +494,13 @@ Tensor new_ones(const at::Type& type, PyObject* args, PyObject* kwargs) {
 
 Tensor new_zeros(const at::Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_zeros(IntList size, *, Dtype dtype=None, Device? device=None, bool requires_grad=False)",
+    "new_zeros(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    const auto& actual_type = typeWithDefault(r, 1, type);
+    const auto& actual_type = typeWithDefault(r, 1, 2, type);
     return set_requires_grad(dispatch_zeros(actual_type, r.deviceInt64(2), r.intlist(0)), r.toBool(3));
   }
   throw std::runtime_error("new_zeros(): invalid arguments");

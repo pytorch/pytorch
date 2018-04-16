@@ -1,5 +1,5 @@
 r"""
-torch.distributed.launch is a helper module that spawns up multiple distributed
+`torch.distributed.launch` is a module that spawns up multiple distributed
 training processes on each of the training nodes.
 
 The utility can be used for single-node distributed training, in which one or
@@ -24,26 +24,39 @@ GPU (nproc_per_node - 1)*.
 
 1. Single-Node multi-process distributed training
 
-  ``python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
-  YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3 and all other arguments of
-  your training script)``
+::
+
+    >>> python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+               YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3 and all other
+               arguments of your training script)
 
 2. Multi-Node multi-process distributed training: (e.g. two nodes)
 
-    **Node 1**: *(IP: 192.168.1.1, and has a free port: 1234)*
-        ``python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
-        --nnodes=2 --node_rank=0 --master_addr="192.168.1.1"
-        --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3 and
-        all other arguments of your training script)``
-    **Node 2**:
-        ``python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
-        --nnodes=2 --node_rank=1 --master_addr="192.168.1.1"
-        --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3 and
-        all other arguments of your training script)``
+
+Node 1: *(IP: 192.168.1.1, and has a free port: 1234)*
+
+::
+
+    >>> python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+               --nnodes=2 --node_rank=0 --master_addr="192.168.1.1"
+               --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
+               and all other arguments of your training script)
+
+Node 2:
+
+::
+
+    >>> python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+               --nnodes=2 --node_rank=1 --master_addr="192.168.1.1"
+               --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
+               and all other arguments of your training script)
 
 3. To look up what optional arguments this module offers:
 
-        >>> python -m torch.distributed.launch --help
+::
+
+    >>> python -m torch.distributed.launch --help
+
 
 **Important Notices:**
 
@@ -53,18 +66,22 @@ the NCCL distributed backend. Thus NCCL backend is the recommended backend to
 use for GPU training.
 
 2. In your training program, you must parse the command-line argument:
-``--local_rank=LOCAL_PROCESS_RANK, which will be provided by this module.
+``--local_rank=LOCAL_PROCESS_RANK``, which will be provided by this module.
 If your training program uses GPUs, you should ensure that your code only
 runs on the GPU device of LOCAL_PROCESS_RANK. This can be done by:
 
-    Parsing the local_rank argument
+Parsing the local_rank argument
+
+::
 
     >>> import argparse
     >>> parser = argparse.ArgumentParser()
     >>> parser.add_argument("--local_rank", type=int)
     >>> args = parser.parse_args()
 
-    Set your device to local rank using either
+Set your device to local rank using either
+
+::
 
     >>> torch.cuda.set_device(arg.local_rank)  # before your code runs
 
@@ -76,18 +93,24 @@ runs on the GPU device of LOCAL_PROCESS_RANK. This can be done by:
 3. In your training program, you are supposed to call the following function
 at the beginning to start the distributed backend. You need to make sure that
 the init_method uses ``env://``, which is the only supported ``init_method``
-by this module:
+by this module.
 
-    ``torch.distributed.init_process_group(backend='YOUR BACKEND',
-    init_method='env://')``
+::
+
+    torch.distributed.init_process_group(backend='YOUR BACKEND',
+                                         init_method='env://')
 
 4. In your training program, you can either use regular distributed functions
-or use DistributedDataParallel module. If your training program uses GPUs for
-training and you would like to use DistributedDataParallel module, here is how
-to configure it.
+or use :func:`torch.nn.parallel.DistributedDataParallel` module. If your
+training program uses GPUs for training and you would like to use
+:func:`torch.nn.parallel.DistributedDataParallel` module,
+here is how to configure it.
 
-    ``model = torch.nn.parallel.DistributedDataParallel(model,
-    device_ids=[arg.local_rank], output_device=arg.local_rank)``
+::
+
+    model = torch.nn.parallel.DistributedDataParallel(model,
+                                                      device_ids=[arg.local_rank],
+                                                      output_device=arg.local_rank)
 
 Please ensure that ``device_ids`` argument is set to be the only GPU device id
 that your code will be operating on. This is generally the local rank of the
@@ -149,31 +172,36 @@ def parse_args():
     return parser.parse_args()
 
 
-args = parse_args()
+def main():
+    args = parse_args()
 
-# world size in terms of number of processes
-dist_world_size = args.nproc_per_node * args.nnodes
+    # world size in terms of number of processes
+    dist_world_size = args.nproc_per_node * args.nnodes
 
-# set PyTorch distributed related environmental variables
-current_env = os.environ.copy()
-current_env["MASTER_ADDR"] = args.master_addr
-current_env["MASTER_PORT"] = str(args.master_port)
-current_env["WORLD_SIZE"] = str(dist_world_size)
+    # set PyTorch distributed related environmental variables
+    current_env = os.environ.copy()
+    current_env["MASTER_ADDR"] = args.master_addr
+    current_env["MASTER_PORT"] = str(args.master_port)
+    current_env["WORLD_SIZE"] = str(dist_world_size)
 
-processes = []
+    processes = []
 
-for local_rank in range(0, args.nproc_per_node):
-    # each process's rank
-    dist_rank = args.nproc_per_node * args.node_rank + local_rank
-    current_env["RANK"] = str(dist_rank)
+    for local_rank in range(0, args.nproc_per_node):
+        # each process's rank
+        dist_rank = args.nproc_per_node * args.node_rank + local_rank
+        current_env["RANK"] = str(dist_rank)
 
-    # spawn the processes
-    cmd = ["python",
-           args.training_script,
-           "--local_rank={}".format(local_rank)] + args.training_script_args
+        # spawn the processes
+        cmd = ["python",
+               args.training_script,
+               "--local_rank={}".format(local_rank)] + args.training_script_args
 
-    process = subprocess.Popen(cmd, env=current_env)
-    processes.append(process)
+        process = subprocess.Popen(cmd, env=current_env)
+        processes.append(process)
 
-for process in processes:
-    process.wait()
+    for process in processes:
+        process.wait()
+
+
+if __name__ == "__main__":
+    main()

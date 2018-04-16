@@ -16,6 +16,7 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
+#include "torch/csrc/utils/tensor_devices.h"
 #include "torch/csrc/utils/tensor_layouts.h"
 
 #include "python_torch_functions_dispatch.h"
@@ -33,8 +34,11 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
   return self;
 }
 
-static void check_out_type_matches(Tensor result, const THPDtype &dtype, const THPLayout& layout) {
-  const auto& type = torch::getType(dtype, layout);
+static void check_out_type_matches(Tensor result, ScalarType scalarType, const THPLayout& layout,
+                                   const Device& device, bool device_is_none) {
+  auto result_device_type = torch::getDeviceType(result.type());
+  auto device_type = device_is_none ? result_device_type : device.type;
+  const auto& type = torch::getType(scalarType, layout, device_type);
   if (result.type() != type) {
     AT_ERROR(
         "type corresponding to %s does not match type of out parameter (%s)",
@@ -90,19 +94,13 @@ static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyO
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_promote_types(Dtype type1, Dtype type2)",
+    "_promote_types(ScalarType type1, ScalarType type2)",
   });
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    auto& d1 = r.dtype(0);
-    auto& d2 = r.dtype(1);
-    if (d1.is_cuda != d2.is_cuda) {
-      AT_ERROR("_promote_types only supports dtypes being both on cpu or cuda.  Got %s and %s",
-               d1.is_cuda ? "true" : "false", d2.is_cuda ? "true" : "false");
-    }
-    ScalarType promoted = at::promoteTypes(d1.scalar_type, d2.scalar_type);
-    return torch::autograd::utils::wrap(torch::getDtype(promoted, d1.is_cuda));
+    ScalarType promoted = at::promoteTypes(r.scalartype(0), r.scalartype(1));
+    return torch::autograd::utils::wrap(torch::getDtype(promoted));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

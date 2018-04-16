@@ -146,6 +146,11 @@ private:                                                                       \
 #define CAFFE2_API CAFFE2_IMPORT
 #endif
 
+
+#if defined(_MSC_VER)
+#define NOMINMAX
+#endif
+
 // make_unique is a C++14 feature. If we don't have 14, we will emulate
 // its behavior. This is copied from folly/Memory.h
 #if __cplusplus >= 201402L ||                                              \

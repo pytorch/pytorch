@@ -749,6 +749,20 @@ Example::
 
 """)
 
+add_docstr_all('index_put_',
+               r"""
+index_put_(indices, value) -> Tensor
+
+Puts values from the tensor :attr:`value` into the tensor :attr:`self` using
+the indices specified in :attr:`indices` (which is a tuple of Tensors). The
+expression ``tensor.index_put_(indices, value)`` is equivalent to
+``tensor[indices] = value``. Returns :attr:`self`.
+
+Args:
+    indices (tuple of LongTensor): tensors used to index into `self`.
+    value (Tensor): tensor of same dtype as `self`.
+""")
+
 add_docstr_all('index_select',
                r"""
 index_select(dim, index) -> Tensor
