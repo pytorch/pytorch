@@ -73,13 +73,13 @@ Tensor embedding_sparse_backward(
 
   // check if all our grad come from padding_idx
   if (grad.numel() == 0) {
-    return sparse_type.sparse_coo_tensor(indices_.type().tensor(),
+    return sparse_type._sparse_coo_tensor_unsafe(indices_.type().tensor(),
                                          dense_type.tensor(), weight_size);
   }
 
   auto index = indices.view({1, -1});
   auto values = grad.contiguous().view({-1, num_features});
-  return sparse_type.sparse_coo_tensor(index, values, weight_size);
+  return sparse_type._sparse_coo_tensor_unsafe(index, values, weight_size);
 }
 
 Tensor embedding_backward_cpu(

@@ -3906,7 +3906,19 @@
       arguments:
         - THTensor* self
 ]]
-
+[[
+  name: _sparse_coo_tensor_unsafe
+  return: THTensor*
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  variants: [function]
+  cname: newWithTensorAndSizeUnsafe
+  arguments:
+    - THDenseIndexTensor* indices
+    - THDenseTensor* values
+    - THSize* size
+]]
 [[
   name: _copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps
