@@ -607,7 +607,7 @@ class TestCollectEnv(TestCase):
 
     def _preprocess_info_for_test(self, info_output):
         # Remove the version hash
-        version_hash_regex = re.compile(r'(a\d+)\+???????')
+        version_hash_regex = re.compile(r'(a\d+)\+.......')
         return re.sub(version_hash_regex, r'\1', info_output)
 
     def assertExpectedOutput(self, info_output, build_env):
