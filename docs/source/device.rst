@@ -13,8 +13,9 @@ device type.  If the device ordinal is not present, this represents the current 
 e.g. a :class:`torch.Tensor` constructed with device ``'cuda'`` is equivalent to ``'cuda:X'`` where X is the result of
 :func:`torch.cuda.get_device()`.
 
-A :class:`torch.device` can be constructed via a string, a string and device ordinal, or a device ordinal.
+A :class:`torch.Tensor`'s device can be accessed via the :attr:`Tensor.device` property.
 
+A :class:`torch.device` can be constructed via a string or via a string and device ordinal
 
 Via a string:
 ::
@@ -28,7 +29,6 @@ Via a string:
     >>> torch.device('cuda')  # current cuda device
     device(type='cuda')
 
-
 Via a string and device ordinal:
 
 ::
@@ -39,17 +39,18 @@ Via a string and device ordinal:
     >>> torch.device('cpu', 0)
     device(type='cpu', index=0)
 
-Via a device ordinal (device ordinals by themselves are treated as cuda devices).
+.. note::
+   For legacy reasons, a device can be constructed via a single device ordinal, which is treated
+   as a cuda device.  This matches :meth:`Tensor.get_device`, which returns an ordinal for cuda
+   tensors and is not supported for cpu tensors.
 
-::
-
-  >>> torch.device(1)
-  device(type='cuda', index=1)
+   >>> torch.device(1)
+   device(type='cuda', index=1)
 
 .. note::
    Methods which take a device will generally accept a (properly formatted) string
-   or integer device ordinal, e.g. the following are all equivalent:
+   or (legacy) integer device ordinal, i.e. the following are all equivalent:
 
-   >>> torch.randn((2,3), device=1)
-   >>> torch.randn((2,3), device='cuda:1')
    >>> torch.randn((2,3), device=torch.device('cuda:1'))
+   >>> torch.randn((2,3), device='cuda:1')
+   >>> torch.randn((2,3), device=1)  # legacy
