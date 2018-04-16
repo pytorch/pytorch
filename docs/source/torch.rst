@@ -25,6 +25,7 @@ Creation Ops
 .. autofunction:: range
 .. autofunction:: zeros
 .. autofunction:: zeros_like
+.. autofunction:: empty
 .. autofunction:: empty_like
 
 Indexing, Slicing, Joining, Mutating Ops
