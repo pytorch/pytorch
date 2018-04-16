@@ -8,13 +8,13 @@
       {
         "path": "aten/src/THC/THCBlas.cu",
         "functions": [
-          {"hipblasSgemmEx": "HIPBLAS_STATUS_SUCCESS"},
-          {"hipblasSgetrfBatched": "HIPBLAS_STATUS_SUCCESS"},
-          {"hipblasDgetrfBatched": "HIPBLAS_STATUS_SUCCESS"},
-          {"hipblasSgetrsBatched": "HIPBLAS_STATUS_SUCCESS"},
-          {"hipblasDgetrsBatched": "HIPBLAS_STATUS_SUCCESS"},
-          {"hipblasSgetriBatched": "HIPBLAS_STATUS_SUCCESS"},
-          {"hipblasDgetriBatched": "HIPBLAS_STATUS_SUCCESS"},
+          {"hipblasSgemmEx": "HIPBLAS_STATUS_INTERNAL_ERROR"},
+          {"hipblasSgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"},
+          {"hipblasDgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"},
+          {"hipblasSgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"},
+          {"hipblasDgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"},
+          {"hipblasSgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"},
+          {"hipblasDgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"},
         ],
         "constants": [
           {
