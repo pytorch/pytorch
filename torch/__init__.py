@@ -131,6 +131,8 @@ def is_storage(obj):
 def set_default_tensor_type(t):
     r"""Sets the default ``torch.Tensor`` type to type :attr:`t`.
 
+    The default tensor type is initially ``"torch.FloatTensor"``.
+
     Args:
         t (type or string): the tensor type or its name
 

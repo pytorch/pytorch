@@ -2500,6 +2500,37 @@ class TestScript(TestCase):
                 if True:
                     a = 4
 
+    def test_script_define_order(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                pass
+
+            @torch.jit.script_method
+            def call_foo(self, input):
+                return self.foo(input)
+
+            @torch.jit.script_method
+            def foo(self, input):
+                return input + 1
+        m = M()
+        self.assertEqual(2, m.call_foo(torch.ones(())))
+
+    def test_script_define_order_recursive_fail(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                pass
+
+            @torch.jit.script_method
+            def call_foo(self, input):
+                return self.foo(input)
+
+            @torch.jit.script_method
+            def foo(self, input):
+                self.call_foo(input)
+
+        with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
+            M()
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
