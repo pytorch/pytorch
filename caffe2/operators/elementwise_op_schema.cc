@@ -123,13 +123,16 @@ For example, the following tensor shapes are supported:
 class GetAddGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    if (!ArgumentHelper::HasArgument(Def(), "broadcast")) {
+    int broadcast_value=ArgumentHelper::GetSingleArgument(Def(), "broadcast", 0);
+    if (broadcast_value==0) {
       SetDense(0, GO(0));
       SetDense(1, GO(0));
       return vector<OperatorDef>();
     }
+    
+    // broadcast case
     SetDense(0, GO(0));
-
+    
     return SingleGradientDef(
         "SumReduceLike",
         "",
@@ -144,44 +147,36 @@ REGISTER_GRADIENT(Add, GetAddGradient);
 class GetSubGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    if (!ArgumentHelper::HasArgument(Def(), "broadcast")) {
+    int broadcast_value=ArgumentHelper::GetSingleArgument(Def(), "broadcast", 0);
+    if (broadcast_value==0) {
       SetDense(0, GO(0));
       return SingleGradientDef(
           "Negative", "", vector<string>{GO(0)}, vector<string>{GI(1)});
-    } else {
-      SetDense(0, GO(0));
-      vector<OperatorDef> grad_ops;
-      grad_ops.push_back(CreateOperatorDef(
-          "Negative",
-          "",
-          vector<string>{GO(0)},
-          vector<string>{GI(1) + "_autogen_pre_red"}));
-
-      Argument axis, axis_str, order;
-      if (ArgumentHelper::HasArgument(Def(), "axis")) {
-        axis = GetArgument(Def(), "axis");
-      } else {
-        axis = MakeArgument<int>("axis", -1);
-      }
-      if (ArgumentHelper::HasArgument(Def(), "axis_str")) {
-        axis_str = GetArgument(Def(), "axis_str");
-      } else {
-        axis_str = MakeArgument<string>("axis_str", "");
-      }
-      if (ArgumentHelper::HasArgument(Def(), "order")) {
-        order = GetArgument(Def(), "order");
-      } else {
-        order = MakeArgument<string>("order", "NCHW");
-      }
-      grad_ops.push_back(CreateOperatorDef(
-          "SumReduceLike",
-          "",
-          vector<string>{GI(1) + "_autogen_pre_red", I(1)},
-          vector<string>{GI(1)},
-          vector<Argument>{axis, axis_str, order}));
-
-      return grad_ops;
     }
+    
+    // broadcast case
+    SetDense(0, GO(0));
+    vector<OperatorDef> grad_ops;
+    grad_ops.push_back(CreateOperatorDef(
+        "Negative",
+        "",
+        vector<string>{GO(0)},
+        vector<string>{GI(1) + "_autogen_pre_red"}));
+    
+    Argument axis     =GetArgumentWithDefault(Def(), "axis", -1);
+    Argument axis_str =GetArgumentWithDefault(Def(), "axis_str", string(""));
+    Argument order    =GetArgumentWithDefault(Def(), "order", string("NCHW"));
+    vector<Argument> args={axis, axis_str, order};
+    
+    grad_ops.push_back(CreateOperatorDef(
+        "SumReduceLike",
+        "",
+        vector<string>{GI(1) + "_autogen_pre_red", I(1)},
+        vector<string>{GI(1)},
+        args));
+    
+    return grad_ops;
+    
   }
   // Make sure the broadcast argument is not copied over.
   bool CopyArguments() const override {
@@ -198,57 +193,46 @@ class GetMulGradient : public GradientMakerBase {
         "Gradient computation cannot be carried out if Mul uses in-place "
         "computation: ",
         ProtoDebugString(Def()));
-    if (!ArgumentHelper::HasArgument(Def(), "broadcast")) {
+    
+    int broadcast_value=ArgumentHelper::GetSingleArgument(Def(), "broadcast", 0);
+    
+    if (broadcast_value==0) {
       return vector<OperatorDef>{
           CreateOperatorDef(
               "Mul", "", vector<string>{GO(0), I(1)}, vector<string>{GI(0)}),
           CreateOperatorDef(
               "Mul", "", vector<string>{GO(0), I(0)}, vector<string>{GI(1)})};
-    } else {
-      Argument broadcast, axis, axis_str, order;
-      if (ArgumentHelper::HasArgument(Def(), "broadcast")) {
-        broadcast = GetArgument(Def(), "broadcast");
-      } else {
-        broadcast = MakeArgument<int>("broadcast", 0);
-      }
-      if (ArgumentHelper::HasArgument(Def(), "axis")) {
-        axis = GetArgument(Def(), "axis");
-      } else {
-        axis = MakeArgument<int>("axis", -1);
-      }
-      if (ArgumentHelper::HasArgument(Def(), "axis_str")) {
-        axis_str = GetArgument(Def(), "axis_str");
-      } else {
-        axis_str = MakeArgument<string>("axis_str", "");
-      }
-      if (ArgumentHelper::HasArgument(Def(), "order")) {
-        order = GetArgument(Def(), "order");
-      } else {
-        order = MakeArgument<string>("order", "NCHW");
-      }
-
-      vector<OperatorDef> grad_ops;
-      grad_ops.push_back(CreateOperatorDef(
-          "Mul",
-          "mul_grad_1st_op",
-          vector<string>{GO(0), I(1)},
-          vector<string>{GI(0)},
-          vector<Argument>{broadcast, axis, axis_str, order}));
-      grad_ops.push_back(CreateOperatorDef(
-          "Mul",
-          "mul_gradient_2nd_op",
-          vector<string>{GO(0), I(0)},
-          vector<string>{GI(1) + "_autogen_pre_red"}));
-
-      grad_ops.push_back(CreateOperatorDef(
-          "SumReduceLike",
-          "mul_with_broadcast_grad_3",
-          vector<string>{GI(1) + "_autogen_pre_red", I(1)},
-          vector<string>{GI(1)},
-          vector<Argument>{axis, axis_str, order}));
-
-      return grad_ops;
     }
+    
+    // broadcast case
+    Argument broadcast=GetArgumentWithDefault(Def(), "broadcast", 0);
+    Argument axis     =GetArgumentWithDefault(Def(), "axis", -1);
+    Argument axis_str =GetArgumentWithDefault(Def(), "axis_str", string(""));
+    Argument order    =GetArgumentWithDefault(Def(), "order", string("NCHW"));
+    vector<Argument> args={broadcast, axis, axis_str, order};
+    
+    vector<OperatorDef> grad_ops;
+    grad_ops.push_back(CreateOperatorDef(
+        "Mul",
+        "mul_grad_1st_op",
+        vector<string>{GO(0), I(1)},
+        vector<string>{GI(0)},
+        args));
+    grad_ops.push_back(CreateOperatorDef(
+        "Mul",
+        "mul_gradient_2nd_op",
+        vector<string>{GO(0), I(0)},
+        vector<string>{GI(1) + "_autogen_pre_red"}));
+
+    grad_ops.push_back(CreateOperatorDef(
+        "SumReduceLike",
+        "mul_with_broadcast_grad_3",
+        vector<string>{GI(1) + "_autogen_pre_red", I(1)},
+        vector<string>{GI(1)},
+        args));
+
+    return grad_ops;
+    
   }
 
   // Make sure the broadcast argument is not copied over.
@@ -262,13 +246,32 @@ class GetDivGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     CAFFE_ENFORCE(
-        !ArgumentHelper::HasArgument(Def(), "broadcast"),
-        "Gradient not ready yet for Div with broadcasting.");
-    return SingleGradientDef(
+        Def().input(0) != Def().output(0) && Def().input(1) != Def().output(0),
+        "Gradient computation cannot be carried out if Div uses in-place "
+        "computation: ",
+        ProtoDebugString(Def()));
+    
+    int broadcast_value=ArgumentHelper::GetSingleArgument(Def(), "broadcast", 0);
+    
+    if (broadcast_value==0) {
+      return SingleGradientDef(
         "DivGradient",
         "",
         vector<string>{I(1), O(0), GO(0)},
         vector<string>{GI(0), GI(1)});
+    }
+    
+    // broadcast case
+    
+    vector<OperatorDef> ops;
+    ops.push_back(CreateOperatorDef("Div", "", {GO(0), I(1)}, {GI(0)}, Def().arg()));
+    ops.push_back(CreateOperatorDef("Mul", "", {GI(0), O(0)}, {GI(1)+"#temp1"}));
+    ops.push_back(CreateOperatorDef(
+        "Negative", "", {GI(1)+"#temp1"}, {GI(1)+"#temp1"}));
+    ops.push_back(CreateOperatorDef(
+        "SumReduceLike", "", {GI(1)+"#temp1", I(1)}, {GI(1)}, Def().arg()));
+    
+    return ops;
   }
 };
 REGISTER_GRADIENT(Div, GetDivGradient);

@@ -304,6 +304,15 @@ bool inline operator==(const DeviceOption& dl, const DeviceOption& dr) {
 }
 
 
+template <typename T>
+Argument GetArgumentWithDefault(const OperatorDef& def, const string& name, const T& default_value) {
+  if (ArgumentHelper::HasArgument(def,name)) {
+    return GetArgument(def, name);
+  }
+  return MakeArgument<T>(name, default_value);
+}
+
+
 } // namespace caffe2
 
 namespace std {
