@@ -11,7 +11,7 @@ or will be allocated.
 The :class:`torch.device` contains a device type (``'cpu'`` or ``'cuda'``) and optional device ordinal for the
 device type.  If the device ordinal is not present, this represents the current device for the device type;
 e.g. a :class:`torch.Tensor` constructed with device ``'cuda'`` is equivalent to ``'cuda:X'`` where X is the result of
-:func:`torch.cuda.get_device()`.
+:func:`torch.cuda.current_device()`.
 
 A :class:`torch.Tensor`'s device can be accessed via the :attr:`Tensor.device` property.
 
