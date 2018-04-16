@@ -30,6 +30,7 @@ struct PyTensorType {
   at::Type* aten_type;
   THPDtype* dtype;
   THPLayout* layout;
+  bool is_cuda;
   char name[64];
 };
 
@@ -51,7 +52,7 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   if (!tensor_type.aten_type) {
     throw unavailable_type(tensor_type);
   }
-  if (tensor_type.dtype->is_cuda) {
+  if (tensor_type.aten_type->is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(*tensor_type.aten_type, args, kwargs));
@@ -79,7 +80,7 @@ PyObject *Tensor_layout(PyTensorType* self) {
 }
 
 PyObject *Tensor_is_cuda(PyTensorType* self) {
-  if (self->dtype->is_cuda) {
+  if (self->is_cuda) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -178,7 +179,8 @@ static void set_type(PyTensorType& type_obj, Backend backend, ScalarType scalarT
   auto baseType = globalContext().type_registry[static_cast<int>(backend)][static_cast<int>(scalarType)].get();
   type_obj.aten_type = baseType ? torch::autograd::VariableType::getType(*baseType) : nullptr;
   type_obj.layout = torch::getLayout(backend);
-  type_obj.dtype = torch::getDtype(scalarType, backend == kCUDA || backend == kSparseCUDA);
+  type_obj.dtype = torch::getDtype(scalarType);
+  type_obj.is_cuda = (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
 }
 
 static void set_name(PyTensorType& type_obj, const std::string& name) {
@@ -290,10 +292,10 @@ static bool PyTensorType_Check(PyObject* obj) {
   return it != tensor_types.end();
 }
 
-static PyTensorType& get_tensor_type(THPDtype *obj) {
+static PyTensorType& get_tensor_type(THPDtype *dtype, THPLayout *layout, bool is_cuda) {
   auto it = std::find_if(tensor_types.begin(), tensor_types.end(),
-    [obj](const PyTensorType& x) {
-      return x.dtype == obj;
+    [dtype, layout, is_cuda](const PyTensorType& x) {
+      return x.dtype == dtype && x.layout == layout && x.is_cuda == is_cuda;
     });
   if (it == tensor_types.end()) {
     throw TypeError("invalid dtype object");
@@ -305,8 +307,21 @@ void py_set_default_tensor_type(PyObject* obj) {
   PyTensorType *type;
   if (PyTensorType_Check(obj)) {
     type = (PyTensorType*)obj;
-  } else if (THPDtype_Check(obj)) {
-    type = &get_tensor_type((THPDtype*)obj);
+  } else {
+    throw TypeError("invalid type object");
+  }
+  if (!type->aten_type) {
+    throw unavailable_type(*type);
+  }
+  set_default_tensor_type(*type->aten_type);
+}
+
+void py_set_default_dtype(PyObject* obj) {
+  PyTensorType *type;
+  if (THPDtype_Check(obj)) {
+    auto &current_default = get_default_tensor_type();
+    type = &get_tensor_type((THPDtype*)obj, torch::getLayout(current_default.backend()),
+                            torch::getDeviceType(current_default) == DeviceType::CUDA);
   } else {
     throw TypeError("invalid type object");
   }

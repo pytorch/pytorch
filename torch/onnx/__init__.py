@@ -21,9 +21,9 @@ def export(*args, **kwargs):
     return utils.export(*args, **kwargs)
 
 
-def _optimize_trace(*args, **kwargs):
+def _optimize_trace(trace, aten):
     from torch.onnx import utils
-    return utils._optimize_trace(*args, **kwargs)
+    trace.set_graph(utils._optimize_graph(trace.graph(), aten))
 
 
 def set_training(*args, **kwargs):

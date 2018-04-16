@@ -297,6 +297,12 @@ ENDIF(UNIX)
 
 IF(NOT MSVC)
   TARGET_LINK_LIBRARIES(ATen m)
+ELSE(NOT MSVC)
+  IF(AT_MKL_MT)
+    set_target_properties(ATen PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:vcomp")
+    set_target_properties(ATen PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:vcomp")
+    set_target_properties(ATen PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:vcomp")
+  ENDIF(AT_MKL_MT)
 ENDIF(NOT MSVC)
 
 # Is __thread supported?

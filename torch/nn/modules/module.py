@@ -272,6 +272,96 @@ class Module(object):
         """
         return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
+    def to(self, *args, **kwargs):
+        r"""Moves and/or casts the parameters and buffers.
+
+        This can be called with a :attr:`device` argument and/or a :attr:`dtype`
+        argument, and has the exact signature as :meth:`torch.Tensor.to`, except
+        that this method only takes in floating point :attr:`dtype`, and will
+        only cast the floating point parameters and buffers to :attr:`dtype`. It
+        will still move the integral parameters and buffers to :attr:`device`,
+        if that is given. See below for examples.
+
+        Returns:
+            Module: self
+
+        Example::
+
+            >>> linear = nn.Linear(2, 2)
+            >>> linear.weight
+
+            -0.1106  0.0493
+             0.1250 -0.5175
+            [torch.FloatTensor of size (2,2)]
+
+            >>> linear.to(torch.double)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+
+            -0.1106  0.0493
+             0.1250 -0.5175
+            [torch.DoubleTensor of size (2,2)]
+
+            >>> linear.to(torch.device("cuda"), dtype=torch.half)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+
+            -0.1107  0.0493
+             0.1250 -0.5176
+            [torch.cuda.HalfTensor of size (2,2) (GPU 0)]
+
+            >>> linear.to("cpu")  # can also use string to represent device
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+
+            -0.1107  0.0493
+             0.1250 -0.5176
+            [torch.HalfTensor of size (2,2)]
+
+        """
+        def arg_error():
+            arg_reprs = list(repr(arg) for arg in args)
+            for key, val in kwargs.items():
+                arg_reprs.append("{}={}".format(key, val))
+            return ValueError('module.to expects .to(device), .to(dtype) or '
+                              '.to(device, dtype), where dtype is a floating '
+                              'point type, but got .to({})'
+                              .format(", ".join(arg_reprs)))
+
+        nargs = len(args) + len(kwargs)
+        device = dtype = None
+        if nargs < 1 or nargs > 2:
+            raise arg_error()
+        else:
+            for key, val in kwargs.items():
+                if key == 'dtype':
+                    dtype = kwargs['dtype']
+                elif 'device' in kwargs:
+                    device = kwargs['device']
+                else:
+                    raise arg_error()
+            for arg in args:
+                if isinstance(arg, torch.dtype):
+                    if dtype is not None:
+                        raise arg_error()
+                    dtype = arg
+                else:
+                    if device is not None:
+                        raise arg_error()
+                    device = arg
+
+        if dtype is not None:
+            if not dtype.is_floating_point:
+                raise arg_error()
+
+            if device is None:
+                return self._apply(lambda t: t.to(dtype) if t.is_floating_point() else t)
+            else:
+                return self._apply(lambda t: t.to(device, dtype) if t.is_floating_point() else t.to(device))
+
+        else:
+            return self._apply(lambda t: t.to(device))
+
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.
 

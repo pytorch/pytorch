@@ -715,8 +715,9 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            for m in methods:
-                self._create_method(m.ast, m.resolution_callback)
+            asts = [m.ast for m in methods]
+            rcbs = [m.resolution_callback for m in methods]
+            self._create_methods(asts, rcbs)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)

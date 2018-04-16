@@ -325,14 +325,14 @@ class TestAutograd(TestCase):
         z = x * 2
         w = y * 2
 
-        grad_x, grad_y = torch.autograd.grad(x * 2, [x, y])
+        grad_x, grad_y = torch.autograd.grad(x * 2, [x, y], allow_unused=True)
         self.assertEqual(grad_x, x * 2)
         self.assertIsNone(grad_y)
 
         # This is slightly different than the case above, because z doesn't even
         # have a grad accumulator allocated.
         z = Variable(torch.ones(1), requires_grad=True)
-        grad_x, grad_z = torch.autograd.grad(x * 2, [x, z])
+        grad_x, grad_z = torch.autograd.grad(x * 2, [x, z], allow_unused=True)
         self.assertEqual(grad_x, x * 2)
         self.assertIsNone(grad_z)
 
@@ -851,19 +851,20 @@ class TestAutograd(TestCase):
     def test_requires_grad_factory(self):
         x = Variable(torch.randn(2, 3))
         fns = [torch.ones_like, torch.testing.randn_like]
-        dtypes = [torch.float32, torch.float64, torch.cuda.float32, torch.cuda.float64]
+        dtypes = [torch.float32, torch.float64]
         for fn in fns:
             for requires_grad in [True, False]:
                 for dtype in dtypes:
-                    if not dtype.is_cuda:
-                        output = fn(x, dtype=dtype, requires_grad=requires_grad)
-                        self.assertEqual(requires_grad, output.requires_grad)
-                        self.assertIs(dtype, output.dtype)
-                    elif torch.cuda.is_available() and torch.cuda.device_count() > 1:
-                        output = fn(x, dtype=dtype, device=1, requires_grad=requires_grad)
-                        self.assertEqual(requires_grad, output.requires_grad)
-                        self.assertIs(dtype, output.dtype)
-                        self.assertEqual(1, output.get_device())
+                    for use_cuda in [True, False]:
+                        if not use_cuda:
+                            output = fn(x, dtype=dtype, requires_grad=requires_grad)
+                            self.assertEqual(requires_grad, output.requires_grad)
+                            self.assertIs(dtype, output.dtype)
+                        elif torch.cuda.is_available() and torch.cuda.device_count() > 1:
+                            output = fn(x, dtype=dtype, device=1, requires_grad=requires_grad)
+                            self.assertEqual(requires_grad, output.requires_grad)
+                            self.assertIs(dtype, output.dtype)
+                            self.assertEqual(1, output.get_device())
 
     def test_grad_assignment(self):
         x = Variable(torch.randn(5, 5))
@@ -1929,9 +1930,9 @@ class TestAutograd(TestCase):
         _test_real((2, 3, 4), 2)
         _test_real((2, 3, 4, 3), 3)
 
-        _test_complex((2, 10, 2), 1)
-        _test_complex((2, 3, 4, 2), 2)
-        _test_complex((2, 3, 4, 3, 2), 3)
+        _test_complex((2, 2, 10, 2), 1)
+        _test_complex((1, 2, 3, 4, 2), 2)
+        _test_complex((2, 1, 3, 4, 3, 2), 3)
 
     def test_variable_traverse(self):
         def get_out_and_unrefed_cycle():

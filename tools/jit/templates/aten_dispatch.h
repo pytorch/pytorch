@@ -47,22 +47,22 @@ static inline at::Tensor pop(Stack & stack) {
   return r;
 }
 
+constexpr size_t UNKNOWN_OUTPUTS = std::numeric_limits<size_t>::max();
+
 struct TensorOp {
-  TensorOp(Operation op, std::string name, size_t num_inputs)
+  TensorOp(Operation op, std::string name, size_t num_inputs, size_t num_outputs)
     : op(op)
     , name(name)
-    , num_inputs(num_inputs) {}
+    , num_inputs(num_inputs)
+    , num_outputs(num_outputs) {}
 
   const Operation op;
   const std::string name;
   const size_t num_inputs;
+  const size_t num_outputs;
 };
 
-using operator_constructor = std::function<TensorOp(jit::Node*)>;
-using ConstructorsMap = std::unordered_map<std::string, operator_constructor>;
-
-ConstructorsMap::iterator findTensorOp(jit::Node* n);
-bool hasTensorOp(jit::Node* n);
+at::optional<TensorOp> findTensorOp(jit::Node* n);
 TensorOp getTensorOp(jit::Node* n);
 
 }} // namespace torch::jit;

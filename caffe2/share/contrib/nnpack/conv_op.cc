@@ -146,6 +146,9 @@ NNPACKConvOp::getActivationType() const {
 }
 
 bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
+  /* Global variable with a unique ID of the pre-transformed kernel blob */
+  volatile static uint32_t precomputed_transform_id = 0;
+
   auto& X = Input(0);
   auto& filter = Input(1);
   auto* Y = Output(0);
@@ -231,7 +234,8 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
         for (auto g = 0; g < group_; g++) {
           transformedFilters_[g] =
               ws_->CreateBlob(
-                     debug_def().name() + "_transformed_" + to_string(g))
+                     "__transformed_kernel_" +
+                     to_string(__sync_fetch_and_add(&precomputed_transform_id, 1)))
                   ->GetMutable<TensorCPU>();
           transformedFilters_[g]->Resize(transformedFilterElements);
 

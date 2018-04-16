@@ -100,8 +100,14 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     # Cannot find src or obj, revert back to original style
                     return orig_spawn(cmd)
 
-                from distutils.spawn import _nt_quote_args
-                cmd = _nt_quote_args(cmd)
+                quote_regex = re.compile('".*"')
+                quote_list = [quote_regex.search(
+                    arg) is not None for arg in cmd]
+                no_quote = any(quote_list)
+
+                if not no_quote:
+                    from distutils.spawn import _nt_quote_args
+                    cmd = _nt_quote_args(cmd)
 
                 builder.writer.build(
                     [obj], 'compile', [src],

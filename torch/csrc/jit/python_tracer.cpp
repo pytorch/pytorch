@@ -59,6 +59,9 @@ void initPythonTracerBindings(PyObject* module_) {
       return std::make_tuple(
           py::bytes(graph), python_serialized_export_map);
     })
+    .def("set_graph", [](TracingState& s, std::shared_ptr<Graph> g) {
+      s.graph = g;
+    })
     .def("graph", [](TracingState& s) {
       return s.graph;
     })

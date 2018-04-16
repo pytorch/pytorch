@@ -86,7 +86,9 @@ std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   return res;
 }
 
-ConstructorsMap constructors = {
+
+using operator_constructor = std::function<TensorOp(jit::Node*)>;
+std::unordered_map<std::string, operator_constructor> constructors = {
   ${constructors}
 };
 
@@ -98,10 +100,13 @@ std::string getDescriptor(jit::Node* n) {
     s << "-" << n->inputs().size();
   else
     s << "-*";
-  std::vector<const char*> attr_names = fmap(n->attributeNames(), [](Symbol x) { return x.toUnqualString(); });
-  std::sort(attr_names.begin(), attr_names.end(), [](const char *a, const char *b) {
-    return std::strcmp(a, b) < 0;
+  std::vector<std::string> attr_names = fmap(n->attributeNames(), [&](Symbol x) {
+    std::stringstream ss;
+    ss << x.toUnqualString() << "_" << toString(n->kindOf(x));
+    return ss.str();
   });
+  std::sort(attr_names.begin(), attr_names.end());
+
   for (const auto & name : attr_names)
     s << "-" << name;
   return s.str();
@@ -109,22 +114,23 @@ std::string getDescriptor(jit::Node* n) {
 
 } // anonymous namespace
 
-ConstructorsMap::iterator findTensorOp(jit::Node* n) {
+at::optional<TensorOp> findTensorOp(jit::Node* n) {
   auto signature = getDescriptor(n);
-  return constructors.find(signature);
-}
-bool hasTensorOp(jit::Node* n) {
-  return constructors.end() != findTensorOp(n);
+  auto it = constructors.find(signature);
+  if(it == constructors.end()) {
+    return at::nullopt;
+  }
+  return it->second(n);
 }
 TensorOp getTensorOp(jit::Node* n) {
-  auto itr = findTensorOp(n);
-  if (itr == constructors.end()) {
+  auto op = findTensorOp(n);
+  if (!op) {
     throw std::runtime_error(
         "Unsupported op descriptor: " + getDescriptor(n) +
         ". "
         "File a bug report.");
   }
-  return itr->second(n);
+  return op.value();
 }
 
 }} // namespace torch::jit

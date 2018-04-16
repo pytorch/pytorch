@@ -8,7 +8,7 @@
 # if your installation is not being properly detected by CMake.
 #
 #   mkdir -p build && cd build
-#   cmake $(python ../scripts/get_python_libs.py) ..
+#   cmake $(python ../scripts/get_python_cmake_flags.py) ..
 #   make
 #
 
