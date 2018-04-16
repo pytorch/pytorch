@@ -5731,7 +5731,7 @@ Args:
     dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
         Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
     layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
-        Default: :class:`torch.strided`.
+        Default: ``torch.strided``.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
         Default: if None, uses the current device for the default tensor type
         (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
