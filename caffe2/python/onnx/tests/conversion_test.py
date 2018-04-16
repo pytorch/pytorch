@@ -18,7 +18,7 @@ from caffe2.python.model_helper import ModelHelper
 from click.testing import CliRunner
 import numpy as np
 from onnx import helper, ModelProto, TensorProto
-from caffe2.python.onnx.helper import dummy_name, c2_native_run_net
+from caffe2.python.onnx.helper import c2_native_run_net
 
 from caffe2.python.onnx.bin.conversion import caffe2_to_onnx, onnx_to_caffe2
 import caffe2.python.onnx.backend as c2

@@ -74,9 +74,9 @@ int64_t DimProd(const caffe2::TensorShape& shape, int start, int end) {
   return acc;
 }
 
-TensorProto CreateOnnxShapeTensor(const std::vector<int64_t>& shape) {
+TensorProto CreateOnnxShapeTensor(std::shared_ptr<DummyName> dummy, const std::vector<int64_t>& shape) {
   TensorProto tensor;
-  tensor.set_name(DummyName::NewDummyName());
+  tensor.set_name(dummy->NewDummyName());
   tensor.set_data_type(TensorProto::INT64);
   tensor.add_dims(shape.size());
   tensor.mutable_raw_data()->assign(
@@ -492,13 +492,13 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
   auto& nodes = result.first;
   auto& const_tensors = result.second;
 
-  const auto reshape_output = DummyName::NewDummyName();
+  const auto reshape_output = dummy_->NewDummyName();
   std::vector<int64_t> dims = {n, g, c / g, h, w};
-  const_tensors.emplace_back(CreateOnnxShapeTensor(dims));
+  const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
   nodes.emplace_back(
       MakeNode("Reshape", {x, const_tensors.back().name()}, {reshape_output}));
 
-  const auto transpose_output = DummyName::NewDummyName();
+  const auto transpose_output = dummy_->NewDummyName();
   dims = {0, 2, 1, 3, 4};
   nodes.emplace_back(MakeNode(
       "Transpose",
@@ -507,7 +507,7 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
       {MakeAttribute("perm", dims)}));
 
   dims = {n, c, h, w};
-  const_tensors.emplace_back(CreateOnnxShapeTensor(dims));
+  const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
   nodes.emplace_back(MakeNode(
       "Reshape", {transpose_output, const_tensors.back().name()}, {y}));
 
@@ -575,7 +575,7 @@ ConvertedResult OnnxExporter::CreateReshapeNodes(
       for (const auto k: attr.ints()) {
         shape.push_back(k);
       }
-      const_tensors.emplace_back(CreateOnnxShapeTensor(shape));
+      const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, shape));
       node.add_input(const_tensors.back().name());
       break;
     }
@@ -628,8 +628,8 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     auto outer = DimProd(x_shape, 0, axis);
     auto inner = DimProd(x_shape, axis, x_shape.dims().size());
     std::vector<int64_t> dims = {outer, inner};
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dims));
-    auto reshaped_x = DummyName::NewDummyName();
+    auto reshaped_x = dummy_->NewDummyName();
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
     nodes.emplace_back(
         MakeNode("Reshape", {x, const_tensors.back().name()}, {reshaped_x}));
     x = reshaped_x;
@@ -646,14 +646,14 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     auto outer = DimProd(w_shape, 0, axis_w);
     auto inner = DimProd(w_shape, axis_w, w_shape.dims().size());
     std::vector<int64_t> dims = {outer, inner};
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dims));
-    auto reshaped_w = DummyName::NewDummyName();
+    auto reshaped_w = dummy_->NewDummyName();
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
     nodes.emplace_back(
         MakeNode("Reshape", {w, const_tensors.back().name()}, {reshaped_w}));
     w = reshaped_w;
   }
 
-  auto gemm_y_output = (has_axis) ? DummyName::NewDummyName() : y;
+  auto gemm_y_output = (has_axis) ? dummy_->NewDummyName() : y;
   nodes.emplace_back(MakeNode(
       "Gemm",
       {x, w, b},
@@ -667,7 +667,7 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
       dims.push_back(x_shape.dims(i));
     }
     dims.push_back(-1);
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dims));
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
     nodes.emplace_back(
         MakeNode("Reshape", {gemm_y_output, const_tensors.back().name()}, {y}));
   }
