@@ -38,7 +38,7 @@ def split(tensor, split_size_or_sections, dim=0):
     """
     # Overwriting reason:
     # This dispatches to two ATen functions depending on the type of
-    # split_size_or_sections. The branching code is in variable.py, which we
+    # split_size_or_sections. The branching code is in tensor.py, which we
     # call here.
     return tensor.split(split_size_or_sections, dim)
 
@@ -93,7 +93,7 @@ def btrifact(A, info=None, pivot=True):
     """
     # Overwriting reason:
     # `info` is being deprecated in favor of `btrifact_with_info`. This warning
-    # is in variable.py, which we call here.
+    # is in tensor.py, which we call here.
     return A.btrifact(info, pivot)
 
 
@@ -317,7 +317,7 @@ def isnan(tensor):
          0
         [torch.ByteTensor of size 3]
     """
-    if not torch.is_tensor(tensor):
+    if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor")
     return tensor != tensor
 
@@ -384,7 +384,7 @@ def unique(input, sorted=False, return_inverse=False):
          1  2
         [torch.LongTensor of size (2,2)]
     """
-    output, inverse_indices = torch._C._VariableFunctions._unique(
+    output, inverse_indices = torch._unique(
         input,
         sorted=sorted,
         return_inverse=return_inverse,

@@ -60,8 +60,8 @@ def compile(arg=None, nderivs=1, optimize=True, enabled=True):
         A JIT compiled function/module may be compiled multiple times, as
         different inputs can result in different traces.  Currently, the
         JIT compiler conservatively assumes the trace may change if the
-        `size` or `requires_grad` of `Variable` inputs change, or if
-        any of the non-Variable inputs change.  For example, if you JIT
+        `size` or `requires_grad` of `Tensor` inputs change, or if
+        any of the non-Tensor inputs change.  For example, if you JIT
         compile an RNN which takes the number of hidden units as a parameter,
         we will compile a trace for every RNN length you use at runtime.
 
@@ -130,7 +130,7 @@ def compile(arg=None, nderivs=1, optimize=True, enabled=True):
 
     Example: Compile as function decorator.  The same modes of use for the class
     decorator are also supported for functions; however, the decorated
-    function must declare *all* Variable inputs in its arguments.
+    function must declare *all* Tensor inputs in its arguments.
 
         >>> @jit.compile
         >>> def f(x):
@@ -226,7 +226,7 @@ def get_trace_graph(f, args=tuple(), kwargs=None, nderivs=0):
     Arguments:
         f (torch.nn.Module or function): the function or module
             to be traced.
-        args (tuple or Variable): the positional arguments to pass to the
+        args (tuple or Tensor): the positional arguments to pass to the
             function/module to be traced.  A non-tuple is assumed to
             be a single positional argument to be passed to the model.
         kwargs (dict): the keyword arguments to pass to the function/module
@@ -296,15 +296,16 @@ def _clone_inputs(args):
     def clone_input(a):
         if a is None:
             return None
-        elif isinstance(a, Variable):
+        elif isinstance(a, torch.Tensor):
+            # TODO: figure out one liner to .clone() and set requires_grad
             v = Variable(a.data.clone(), requires_grad=a.requires_grad)
             if a.grad is not None:
                 v.grad = clone_input(v.grad)
             return v
         else:
             return a.clone()
-    return function._nested_map(lambda o: isinstance(o, Variable) or torch.is_tensor(o),
-                                clone_input, condition_msg="Variables")(args)
+    return function._nested_map(lambda x: isinstance(x, torch.Tensor),
+                                clone_input, condition_msg="tensors")(args)
 
 
 # This is purely for developer debugging.  We are not going to advertise it.
@@ -360,7 +361,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
         model (compiled torch.nn.Module or function): the module/function to be
             verified.  The module/function definition MUST have been decorated with
             `@torch.jit.compile`.
-        args (tuple or Variable): the positional arguments to pass to the
+        args (tuple or Tensor): the positional arguments to pass to the
             compiled function/module to be verified.  A non-tuple is assumed to
             be a single positional argument to be passed to the model.
         loss_fn (function, optional): the loss function to be applied to
@@ -456,9 +457,9 @@ def trace(*args, **kwargs):
     Keyword arguments:
         optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
 
-        >>> @jit.trace(torch.autograd.Variable(torch.rand(1)))
-        >>> def f(x):
-        >>>     return x * 2
+        >>> @jit.trace(torch.rand(1))
+        ... def f(x):
+        ...     return x * 2
     """
     def wrapper(func):
         executor_options = {'optimize': True}

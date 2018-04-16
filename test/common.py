@@ -17,7 +17,6 @@ import errno
 
 import torch
 import torch.cuda
-from torch.autograd import Variable
 from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
@@ -186,7 +185,7 @@ class TestCase(unittest.TestCase):
             if idx_tup in value_map:
                 value_map[idx_tup] += val
             else:
-                value_map[idx_tup] = val.clone() if torch.is_tensor(val) else val
+                value_map[idx_tup] = val.clone() if isinstance(val, torch.Tensor) else val
 
         new_indices = sorted(list(value_map.keys()))
         new_values = [value_map[idx] for idx in new_indices]
@@ -207,13 +206,6 @@ class TestCase(unittest.TestCase):
 
         return tg
 
-    def unwrapVariables(self, x, y):
-        if isinstance(x, Variable):
-            x = x.data
-        if isinstance(y, Variable):
-            y = y.data
-        return x, y
-
     def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
         if isinstance(prec, str) and message == '':
             message = prec
@@ -221,13 +213,11 @@ class TestCase(unittest.TestCase):
         if prec is None:
             prec = self.precision
 
-        x, y = self.unwrapVariables(x, y)
-
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, prec, message, allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
             self.assertEqual(x, y.item(), prec, message, allow_inf)
-        elif torch.is_tensor(x) and torch.is_tensor(y):
+        elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
@@ -285,9 +275,7 @@ class TestCase(unittest.TestCase):
         if prec is None:
             prec = self.precision
 
-        x, y = self.unwrapVariables(x, y)
-
-        if torch.is_tensor(x) and torch.is_tensor(y):
+        if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             if x.size() != y.size():
                 super(TestCase, self).assertNotEqual(x.size(), y.size())
             self.assertGreater(x.numel(), 0)

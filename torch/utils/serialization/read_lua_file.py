@@ -219,7 +219,7 @@ def _load_backend(obj):
     # Try to find tensor attributes and infer type from them
     for key in dir(obj):
         attr = getattr(obj, key)
-        if torch.is_tensor(attr):
+        if isinstance(attr, torch.Tensor):
             try:
                 obj._backend = type2backend[attr.type()]
             except KeyError:
@@ -229,7 +229,7 @@ def _load_backend(obj):
 
     def updateOutput_patch(*args):
         input = args[0]
-        while not torch.is_tensor(input):
+        while not isinstance(input, torch.Tensor):
             input = input[0]
         obj._backend = type2backend[input.type()]
         obj.updateOutput = updateOutput_orig
