@@ -516,7 +516,6 @@ class TestBottleneck(TestCase):
         return (rc, output, err)
 
     def _run_bottleneck(self, test_file, scriptargs=''):
-        import os
         curdir = os.path.dirname(os.path.abspath(__file__))
         filepath = '{}/{}'.format(curdir, test_file)
         if scriptargs != '':
@@ -598,30 +597,32 @@ class TestBottleneck(TestCase):
 
 
 from torch.utils.collect_env import get_pretty_env_info
-import os
 
 
 class TestCollectEnv(TestCase):
 
-    def _build_env_to_expect(build_env):
+    def _build_env_to_expect(self, build_env):
         return 'expect/TestCollectEnv.test_{}.expect'.format(
             build_env.replace('.', '').replace('-', '_'))
 
-    def _preprocess_info_for_test(info_output):
+    def _preprocess_info_for_test(self, info_output):
         # Remove the version hash
         version_hash_regex = re.compile(r'(a\d+)\+???????')
         return re.sub(version_hash_regex, r'\1', info_output)
 
     def assertExpectedOutput(self, info_output, build_env):
         processed_info = self._preprocess_info_for_test(info_output)
-        print("got:")
-        print(processed_info)
         expect_filename = self._build_env_to_expect(build_env)
+
+        ci_warning = ('This test will error out if the CI config was recently '
+                      'updated. If this is the case, please update the expect '
+                      'files to match the CI machines\' system config.')
 
         with open(expect_filename, 'r') as f:
             expected_info = f.read()
-            print("expected:")
-            print(expected_info)
+            if processed_info != expected_info:
+                warnings.warn(ci_warning)
+            # Pretty-prints an error message with the strings
             self.assertEquals(processed_info, expected_info)
 
     def test_simple(self):
