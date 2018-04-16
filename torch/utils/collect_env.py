@@ -94,7 +94,7 @@ def get_running_cuda_version(run_lambda):
 
 def get_cudnn_version(run_lambda):
     """This will return a list of libcudnn.so; it's hard to tell which one is being used"""
-    rc, out, _ = run_lambda('find /usr/local -type f -name "libcudnn*"  2>/dev/null')
+    rc, out, _ = run_lambda('find /usr/local /usr/lib -type f -name "libcudnn*" 2> /dev/null')
     # find will return 1 if there are permission errors or if not found
     if len(out.strip()) == 0:
         return None
