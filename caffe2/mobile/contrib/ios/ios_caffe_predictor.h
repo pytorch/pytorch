@@ -4,6 +4,7 @@
 #include <string>
 #include "caffe2/core/net.h"
 #include "caffe2/core/predictor.h"
+#include "caffe2/core/context.h"
 #include "caffe2/mobile/contrib/ios/ios_caffe_defines.h"
 
 struct Tensor {
@@ -32,5 +33,5 @@ class IOS_CAFFE_EXPORT Caffe2IOSPredictor final {
                      const caffe2::NetDef& predict_net,
                      bool disableMultithreadProcessing,
                      bool usingMetalOperators);
-  caffe2::Predictor predictor_;
+  caffe2::Predictor<caffe2::CPUContext> predictor_;
 };

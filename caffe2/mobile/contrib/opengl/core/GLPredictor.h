@@ -4,10 +4,15 @@
 #include "GLImage.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/predictor.h"
+#include "caffe2/core/context.h"
 
 namespace caffe2 {
-class GLPredictor : public Predictor {
+class GLPredictor : public Predictor<CPUContext> {
  public:
+  using TensorVector = PredictorBase::TensorVector;
+  using TensorMap = PredictorBase::TensorMap;
+  using OutputTensorVector = PredictorBase::OutputTensorVector;
+
   GLPredictor(const NetDef& init_net,
               const NetDef& run_net,
               bool use_texture_input = false,

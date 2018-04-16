@@ -34,25 +34,33 @@ GLPredictor::GLPredictor(const NetDef& init_net,
                          const NetDef& run_net,
                          bool use_texture_input,
                          Workspace* parent)
-    : Predictor(init_net, create_gl_run_net(init_net, run_net, use_texture_input), parent) {}
+    : Predictor<CPUContext>(init_net, create_gl_run_net(init_net, run_net, use_texture_input), parent) {
+  for (const auto& name : run_net_.external_input()) {
+    if (!initialized_.count(name)) {
+      auto* blob = ws_.GetBlob(name);
+      CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
+      blob->template GetMutable<TensorCPU>();
+    }
+  }
+}
 
 GLPredictor::~GLPredictor() {}
 
 template <class T>
 bool GLPredictor::run(std::vector<GLImageVector<T>*>& inputs,
                       std::vector<const GLImageVector<T>*>* outputs) {
-  const NetDef& run_net_ = Predictor::def();
+  const NetDef& run_net_ = PredictorBase::def();
   CAFFE_ENFORCE(inputs.size() <= run_net_.external_input_size());
   for (auto i = 0; i < inputs.size(); ++i) {
-    shareInputGLImage<T>(Predictor::ws(), run_net_.external_input(i), inputs[i]);
+    shareInputGLImage<T>(PredictorBase::ws(), run_net_.external_input(i), inputs[i]);
   }
 
-  if (!Predictor::ws()->RunNet(run_net_.name())) {
+  if (!PredictorBase::ws()->RunNet(run_net_.name())) {
     return false;
   }
 
   for (auto i = 0; i < run_net_.external_output_size(); ++i) {
-    outputs->push_back(extractOutputGLImage<T>(Predictor::ws(), run_net_.external_output(i)));
+    outputs->push_back(extractOutputGLImage<T>(PredictorBase::ws(), run_net_.external_output(i)));
   }
 
   return true;

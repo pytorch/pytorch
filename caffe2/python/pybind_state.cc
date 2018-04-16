@@ -655,7 +655,7 @@ void addObjectMethods(py::module& m) {
           [](caffe2::onnx::Caffe2BackendRep& instance,
              std::map<std::string, py::object> inputs)
               -> std::vector<py::object> {
-            Predictor::TensorMap tensors;
+            PredictorBase::TensorMap tensors;
             std::map<std::string, TensorCPU> tensors_data{};
             for (const auto pair : inputs) {
               const auto& name = pair.first;
@@ -670,9 +670,11 @@ void addObjectMethods(py::module& m) {
               tensors.insert(std::make_pair(name, &tensors_data[name]));
             }
 
-
-            std::vector<TensorCPU*> out;
-            instance.RunMap(tensors, &out);
+            PredictorBase::OutputTensorVector out;
+            {
+              py::gil_scoped_release g;
+              instance.RunMap(tensors, &out);
+            }
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(
@@ -685,7 +687,7 @@ void addObjectMethods(py::module& m) {
           [](caffe2::onnx::Caffe2BackendRep& instance,
              std::vector<py::object> inputs)
               -> std::vector<py::object> {
-            Predictor::TensorVector tensors;
+            PredictorBase::TensorVector tensors;
             std::vector<TensorCPU> tensors_data(inputs.size());
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
@@ -698,8 +700,11 @@ void addObjectMethods(py::module& m) {
                   DeviceOption(), array, &(tensors_data[i]));
               tensors.push_back(&(tensors_data[i]));
             }
-            std::vector<TensorCPU*> out;
-            instance.Run(tensors, &out);
+            PredictorBase::OutputTensorVector out;
+            {
+              py::gil_scoped_release g;
+              instance.Run(tensors, &out);
+            }
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(
@@ -753,22 +758,25 @@ void addObjectMethods(py::module& m) {
             return vals;
           });
 
-  py::class_<Predictor>(m, "Predictor")
+  py::class_<PredictorBase>(m, "Predictor")
       .def(
-          py::init([](py::bytes init_net, py::bytes predict_net) {
+          py::init([](py::bytes init_net, py::bytes predict_net, const std::string& type) {
             CAFFE_ENFORCE(gWorkspace);
             NetDef init_net_, predict_net_;
             CAFFE_ENFORCE(ParseProtoFromLargeString(
                 init_net.cast<std::string>(), &init_net_));
             CAFFE_ENFORCE(ParseProtoFromLargeString(
                 predict_net.cast<std::string>(), &predict_net_));
-            return new Predictor(init_net_, predict_net_, gWorkspace);
-          }))
+            return PredictorRegistry()->Create(type, init_net_, predict_net_, gWorkspace).release();
+          }),
+          py::arg("init_net"),
+          py::arg("predict_net"),
+          py::arg("type") = "CPU")
       .def(
           "run",
-          [](Predictor& instance,
+          [](PredictorBase& instance,
              std::vector<py::object> inputs) -> std::vector<py::object> {
-            Predictor::TensorVector tensors;
+            PredictorBase::TensorVector tensors;
             std::vector<TensorCPU> tensors_data(inputs.size());
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
@@ -781,8 +789,11 @@ void addObjectMethods(py::module& m) {
                   DeviceOption(), array, &(tensors_data[i]));
               tensors.push_back(&(tensors_data[i]));
             }
-            std::vector<TensorCPU*> out;
-            instance.run(tensors, &out);
+            PredictorBase::OutputTensorVector out;
+            {
+              py::gil_scoped_release g;
+              instance.run(tensors, &out);
+            }
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(
@@ -792,9 +803,10 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "run",
-          [](Predictor& instance, std::map<std::string, py::object> inputs)
+          [](PredictorBase& instance,
+            std::map<std::string, py::object> inputs)
               -> std::vector<py::object> {
-            Predictor::TensorMap tensors;
+            PredictorBase::TensorMap tensors;
             std::map<std::string, TensorCPU> tensors_data{};
             for (const auto pair : inputs) {
               const auto& name = pair.first;
@@ -808,8 +820,11 @@ void addObjectMethods(py::module& m) {
                   DeviceOption(), array, &tensors_data[name]);
               tensors.insert(std::make_pair(name, &tensors_data[name]));
             }
-            std::vector<TensorCPU*> out;
-            instance.run_map(tensors, &out);
+            PredictorBase::OutputTensorVector out;
+            {
+              py::gil_scoped_release g;
+              instance.run_map(tensors, &out);
+            }
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(
