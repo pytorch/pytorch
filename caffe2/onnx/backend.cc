@@ -323,6 +323,7 @@ Caffe2Backend::get_special_operators() const {
   const static std::
       unordered_map<std::string, Caffe2Backend::SpecialOpConverter>
           kSpecialOperators = {
+              {"Cast", &Caffe2Backend::CreateCast},
               {"Constant", &Caffe2Backend::CreateConstant},
               {"Conv", &Caffe2Backend::CreateConvPoolOpBase},
               {"AveragePool", &Caffe2Backend::CreateConvPoolOpBase},
@@ -346,6 +347,71 @@ Caffe2Backend::get_special_operators() const {
 //============================
 // Special Operator Converters
 //============================
+
+Caffe2Ops Caffe2Backend::CreateCast(OnnxNode* onnx_node, int opset_version) {
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+
+  auto onnx_dtype =
+      onnx_node->attributes.get<int64_t>("to", TensorProto::UNDEFINED);
+  auto c2_dtype = caffe2::TensorProto::UNDEFINED;
+  switch (onnx_dtype) {
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT:
+      c2_dtype = caffe2::TensorProto::FLOAT;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::UINT8:
+      c2_dtype = caffe2::TensorProto::UINT8;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::INT8:
+      c2_dtype = caffe2::TensorProto::INT8;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::UINT16:
+      c2_dtype = caffe2::TensorProto::UINT16;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::INT16:
+      c2_dtype = caffe2::TensorProto::INT16;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::INT32:
+      c2_dtype = caffe2::TensorProto::INT32;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::INT64:
+      c2_dtype = caffe2::TensorProto::INT64;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::STRING:
+      c2_dtype = caffe2::TensorProto::STRING;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::BOOL:
+      c2_dtype = caffe2::TensorProto::BOOL;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT16:
+      c2_dtype = caffe2::TensorProto::FLOAT16;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::DOUBLE:
+      c2_dtype = caffe2::TensorProto::DOUBLE;
+      break;
+    case ::ONNX_NAMESPACE::TensorProto::UINT32:
+    case ::ONNX_NAMESPACE::TensorProto::UINT64:
+    case ::ONNX_NAMESPACE::TensorProto::COMPLEX64:
+    case ::ONNX_NAMESPACE::TensorProto::COMPLEX128:
+    case ::ONNX_NAMESPACE::TensorProto::UNDEFINED:
+      c2_dtype = caffe2::TensorProto::UNDEFINED;
+      break;
+  };
+
+  CAFFE_ENFORCE_NE(
+      c2_dtype,
+      caffe2::TensorProto::UNDEFINED,
+      "Casting to '",
+      onnx_dtype,
+      "' dtype is not supported");
+
+  CAFFE_ENFORCE_EQ(
+      c2_op.ops[0].arg().size(),
+      1,
+      "Unexpected number of attributes in 'Cast'");
+  c2_op.ops.Mutable(0)->mutable_arg(0)->set_i(c2_dtype);
+
+  return c2_op;
+}
 
 Caffe2Ops Caffe2Backend::CreateConstant(
     OnnxNode* onnx_node,

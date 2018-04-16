@@ -129,17 +129,17 @@ const std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>&
 OnnxExporter::get_special_operators() const {
   const static std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>
       kSpecialOperators = {
-        {"Conv", &OnnxExporter::CreateConvPoolNodes},
-        {"ConvTranspose", &OnnxExporter::CreateConvPoolNodes},
-        {"MaxPool", &OnnxExporter::CreateConvPoolNodes},
-        {"AveragePool", &OnnxExporter::CreateConvPoolNodes},
-        {"FC", &OnnxExporter::CreateGemmNodes},
-        {"Concat", &OnnxExporter::CreateConcatNodes},
-        {"LRN", &OnnxExporter::CreateLrnNodes},
-        {"Reshape", &OnnxExporter::CreateReshapeNodes},
-        {"Slice", &OnnxExporter::CreateSliceNodes},
-        {"ChannelShuffle",  &OnnxExporter::CreateChannelShuffleNodes}
-      };
+          {"Cast", &OnnxExporter::CreateCastNodes},
+          {"Conv", &OnnxExporter::CreateConvPoolNodes},
+          {"ConvTranspose", &OnnxExporter::CreateConvPoolNodes},
+          {"MaxPool", &OnnxExporter::CreateConvPoolNodes},
+          {"AveragePool", &OnnxExporter::CreateConvPoolNodes},
+          {"FC", &OnnxExporter::CreateGemmNodes},
+          {"Concat", &OnnxExporter::CreateConcatNodes},
+          {"LRN", &OnnxExporter::CreateLrnNodes},
+          {"Reshape", &OnnxExporter::CreateReshapeNodes},
+          {"Slice", &OnnxExporter::CreateSliceNodes},
+          {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes}};
   return kSpecialOperators;
 }
 
@@ -242,6 +242,98 @@ ConvertedResult OnnxExporter::CommonCaffe2OpToOnnxNodes(
       CopyCaffe2ArgToOnnxAttr(attr, def.type(), a);
     }
   }
+  return result;
+}
+
+ConvertedResult OnnxExporter::CreateCastNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  auto result = CommonCaffe2OpToOnnxNodes(def);
+  auto* attr = result.first[0].mutable_attribute(0);
+  auto onnx_dtype = ::ONNX_NAMESPACE::TensorProto::UNDEFINED;
+  const auto& arg = def.arg(0);
+  if (arg.has_s()) {
+    auto c2_dtype = arg.s();
+    std::transform(
+        c2_dtype.begin(), c2_dtype.end(), c2_dtype.begin(), ::toupper);
+    if (c2_dtype == "FLOAT") {
+    } else if (c2_dtype == "INT32") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
+    } else if (c2_dtype == "BOOL") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::BOOL;
+    } else if (c2_dtype == "UINT8") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::UINT8;
+    } else if (c2_dtype == "INT8") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::INT8;
+    } else if (c2_dtype == "UINT16") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::UINT16;
+    } else if (c2_dtype == "INT16") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::INT16;
+    } else if (c2_dtype == "INT64") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::INT64;
+    } else if (c2_dtype == "FLOAT16") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::FLOAT16;
+    } else if (c2_dtype == "DOUBLE") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::DOUBLE;
+    } else {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::UNDEFINED;
+    }
+    CAFFE_ENFORCE_NE(
+        onnx_dtype,
+        ::ONNX_NAMESPACE::TensorProto::UNDEFINED,
+        "Casting to '",
+        c2_dtype,
+        "' dtype is not supported");
+    attr->clear_s();
+    attr->set_type(AttributeProto::INT);
+  } else if (arg.has_i()) {
+    const auto& c2_dtype = arg.i();
+    switch (c2_dtype) {
+      case caffe2::TensorProto::FLOAT:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
+        break;
+      case caffe2::TensorProto::INT32:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::INT32;
+        break;
+      case caffe2::TensorProto::BOOL:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::BOOL;
+        break;
+      case caffe2::TensorProto::UINT8:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::UINT8;
+        break;
+      case caffe2::TensorProto::INT8:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::INT8;
+        break;
+      case caffe2::TensorProto::UINT16:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::UINT16;
+        break;
+      case caffe2::TensorProto::INT16:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::INT16;
+        break;
+      case caffe2::TensorProto::INT64:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::INT64;
+        break;
+      case caffe2::TensorProto::FLOAT16:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::FLOAT16;
+        break;
+      case caffe2::TensorProto::DOUBLE:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::DOUBLE;
+        break;
+
+      case caffe2::TensorProto::STRING:
+      case caffe2::TensorProto::BYTE:
+      case caffe2::TensorProto::UNDEFINED:
+        onnx_dtype = ::ONNX_NAMESPACE::TensorProto::UNDEFINED;
+        break;
+    }
+    CAFFE_ENFORCE_NE(
+        onnx_dtype,
+        ::ONNX_NAMESPACE::TensorProto::UNDEFINED,
+        "Casting to '",
+        c2_dtype,
+        "' dtype is not supported");
+  }
+  attr->set_i(onnx_dtype);
   return result;
 }
 

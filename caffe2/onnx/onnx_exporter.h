@@ -38,6 +38,10 @@ class OnnxExporter {
  private:
   ConvertedResult CommonCaffe2OpToOnnxNodes(const caffe2::OperatorDef& def);
 
+  ConvertedResult CreateCastNodes(
+      const caffe2::OperatorDef& def,
+      const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
+
   ConvertedResult CreateConvPoolNodes(
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
