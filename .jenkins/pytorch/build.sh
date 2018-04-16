@@ -27,10 +27,8 @@ fi
 python setup.py install
 
 # Test ATen
-if [[ "$BUILD_ENVIRONMENT" != *cuda* ]]; then
-  echo "Testing ATen"
-  time tools/run_aten_tests.sh
-fi
+echo "Testing ATen"
+time tools/run_aten_tests.sh
 
 # Test C FFI plugins
 # cffi install doesn't work for Python 3.7
