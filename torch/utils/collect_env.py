@@ -64,7 +64,12 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 
 def get_conda_packages(run_lambda):
-    return run_and_read_all(run_lambda, 'conda list | grep "torch\|soumith"')
+    out = run_and_read_all(run_lambda, 'conda list | grep "torch\|soumith"')
+    if out is None:
+        return out
+    # Comment starting at beginning of line
+    comment_regex = re.compile(r'^#.*\n')
+    return re.sub(comment_regex, '', out)
 
 
 def get_gcc_version(run_lambda):
