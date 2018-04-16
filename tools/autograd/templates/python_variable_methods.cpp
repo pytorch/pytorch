@@ -532,7 +532,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "to(Device device, *, ScalarType dtype=None)",
+    "to(Device device, ScalarType dtype=None)",
     "to(ScalarType dtype)",
     "to(Tensor other)",
   });
