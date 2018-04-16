@@ -1268,6 +1268,19 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 }
 
+std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
+						       IntList expand1, IntList expand2, IntList expand3,
+						       IntList sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
+  Tensor grad_i1, grad_i2, grad_i3;
+  if (grad_mask[0])
+    grad_i1 = at::_trilinear(grad_out, i2, i3, sumdim, expand2, expand3, expand1);
+  if (grad_mask[1])
+    grad_i2 = at::_trilinear(i1, grad_out, i3, expand1, sumdim, expand3, expand2);
+  if (grad_mask[2])
+    grad_i3 = at::_trilinear(i1, i2, grad_out, expand1, expand2, sumdim, expand3);
+  return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
+}
+
 } // anonymous namespace
 
 ${autograd_function_definitions}

@@ -688,6 +688,8 @@
   self: not_implemented("_standard_gamma_grad")
 
 # NN
+- name: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim)
+  i1, i2, i3: _trilinear_backward(grad, i1, i2, i3, expand1, expand2, expand3, sumdim, unroll_dim, grad_input_mask)
 
 - name: binary_cross_entropy_forward(Tensor self, Tensor target, Tensor weight, bool size_average, bool reduce)
   self: binary_cross_entropy_backward(grad, self, target, weight, size_average, reduce)

@@ -695,6 +695,9 @@
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
 
+- func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
+  variants: function
+
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
