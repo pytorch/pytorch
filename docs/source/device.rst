@@ -8,9 +8,9 @@ torch.device
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
 
-The :class:`torch.device` contains a device type ('cpu' or 'cuda') and optional device ordinal for the
+The :class:`torch.device` contains a device type (``'cpu'`` or ``'cuda'``) and optional device ordinal for the
 device type.  If the device ordinal is not present, this represents the current device for the device type;
-e.g. a :class:`torch.Tensor` constructed with device 'cuda' is equivalent to 'cuda:X' where X is the result of
+e.g. a :class:`torch.Tensor` constructed with device ``'cuda'`` is equivalent to ``'cuda:X'`` where X is the result of
 :func:`torch.cuda.get_device()`.
 
 A :class:`torch.device` can be constructed via a string, a string and device ordinal, or a device ordinal.
