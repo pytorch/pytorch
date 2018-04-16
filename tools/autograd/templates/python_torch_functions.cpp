@@ -82,11 +82,19 @@ static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* 
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
+static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
+  static PythonArgParser parser({
+    "from_numpy(PyObject* data, *, bool requires_grad=False)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    auto data = torch::utils::tensor_from_numpy(r.pyobject(0));
+    return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/r.toBool(1)));
+  }
+  throw std::runtime_error("from_numpy(): invalid arguments");
   END_HANDLE_TH_ERRORS
 }
 
@@ -127,7 +135,7 @@ ${py_methods}
 static PyMethodDef torch_functions[] = {
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"dsmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
+  {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"hsmm", (PyCFunction)THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"_promote_types", (PyCFunction)THPVariable__promote_types, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
