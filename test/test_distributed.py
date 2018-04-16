@@ -759,23 +759,7 @@ class _DistTestBase(object):
         self._test_all_gather_multigpu_helper(group, group_id, rank,
                                               rankToGPUMapping)
 
-    # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
-    def _test_DDP_helper(self, model, input_var, target, loss):
-        model.train()
-        output = model(input_var)
-        l = loss(output, target)
-        l.backward()
-
-    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                     "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
-    @skip_if_no_multigpu
-    def test_DistributedDataParallel(self):
-        # Run a simple end to end DDP model, use result of single node model
-        # as baseline
-        group, group_id, rank = self._init_global_test()
-        rankToGPUMapping = self._init_multigpu_helper()
-
+    def _create_Net(self):
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
@@ -789,19 +773,44 @@ class _DistTestBase(object):
                 x = self.relu(self.fc2(x))
                 x = self.fc3(x)
                 return F.softmax(x, dim=1)
+        return Net()
 
-        def model_step(model):
-            for param in model.parameters():
-                param.data += param.grad
-                param.grad = None
+    def _model_step(self, model):
+        for param in model.parameters():
+            param.data += param.grad
+            param.grad = None
 
-        def assert_equal_param(param_gpu, param_DDP):
-            self.assertEqual(len(param_gpu), len(param_DDP))
-            for p_gpu, p_DDP in zip(param_gpu, param_DDP):
-                self.assertEqual(p_gpu, p_DDP)
+    def _prepare_dummy_data(self, local_bs):
+        global_bs = int(WORLD_SIZE) * local_bs
+        input_cpu = torch.randn(global_bs, 2)
+        target = torch.randn(global_bs, 4)
+        loss = nn.MSELoss()
+        return global_bs, input_cpu, target, loss
+
+    # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
+    def _test_DDP_helper(self, model, input_var, target, loss):
+        model.train()
+        output = model(input_var)
+        l = loss(output, target)
+        l.backward()
+
+    def _assert_equal_param(self, param_gpu, param_DDP):
+        self.assertEqual(len(param_gpu), len(param_DDP))
+        for p_gpu, p_DDP in zip(param_gpu, param_DDP):
+            self.assertEqual(p_gpu, p_DDP)
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_multigpu
+    def test_DistributedDataParallel(self):
+        # Run a simple end to end DDP model, use result of single node model
+        # as baseline
+        group, group_id, rank = self._init_global_test()
+        rankToGPUMapping = self._init_multigpu_helper()
 
         # cpu training setup
-        model = Net()
+        model = self._create_Net()
 
         # single gpu training setup
         model_gpu = copy.deepcopy(model)
@@ -812,12 +821,7 @@ class _DistTestBase(object):
         model_DDP = copy.deepcopy(model)
         model_DDP.cuda(gpu_subset[0])
         model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=gpu_subset)
-
-        # batch_size for DDP should be divisible by #GPU per node.
-        batch_size = len(gpu_subset) * int(WORLD_SIZE)
-        input_cpu = torch.randn(batch_size, 2)
-        target = torch.randn(batch_size, 4)
-        loss = nn.MSELoss()
+        batch_size, input_cpu, target, loss = self._prepare_dummy_data(len(gpu_subset))
 
         for i in range(2):
             # single gpu training
@@ -833,10 +837,10 @@ class _DistTestBase(object):
                                   loss)
 
             # Update weights and run a second iteration to shake out errors
-            model_step(model_gpu)
-            model_step(model_DDP)
+            self._model_step(model_gpu)
+            self._model_step(model_DDP)
 
-            assert_equal_param(list(model_gpu.parameters()), list(model_DDP.module.parameters()))
+            self._assert_equal_param(list(model_gpu.parameters()), list(model_DDP.module.parameters()))
 
             # Shuffle the input so that DDP input is different
             input_cpu = input_cpu[torch.randperm(batch_size)]
@@ -849,46 +853,19 @@ class _DistTestBase(object):
         # model as baseline
         group, group_id, rank = self._init_global_test()
 
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.fc1 = nn.Linear(2, 10, bias=False)
-                self.fc2 = nn.Linear(10, 50, bias=False)
-                self.fc3 = nn.Linear(50, 4, bias=False)
-                self.relu = nn.ReLU()
-
-            def forward(self, x):
-                x = self.relu(self.fc1(x))
-                x = self.relu(self.fc2(x))
-                x = self.fc3(x)
-                return F.softmax(x, dim=1)
-
-        def model_step(model):
-            for param in model.parameters():
-                param.data += param.grad
-                param.grad = None
-
-        def assert_equal_param(param_gpu, param_DDP):
-            self.assertEqual(len(param_gpu), len(param_DDP))
-            for p_gpu, p_DDP in zip(param_gpu, param_DDP):
-                self.assertEqual(p_gpu, p_DDP)
-
         # cpu training setup
-        model = Net()
+        model = self._create_Net()
 
         # single cpu training setup
         model_single = copy.deepcopy(model)
 
-        # DDP-MPI training setup
+        # DDP-CPU training setup
         model_DDP = copy.deepcopy(model)
         model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
 
         # batch_size for DDP should be divisible by WORLD_SIZE
-        local_bs = 10
-        global_bs = int(WORLD_SIZE) * local_bs
-        input_cpu = torch.randn(global_bs, 2)
-        target = torch.randn(global_bs, 4)
-        loss = nn.MSELoss()
+        local_bs = 2
+        global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
         for i in range(2):
             # single cpu training
@@ -904,10 +881,10 @@ class _DistTestBase(object):
                                   loss)
 
             # Update weights and run a second iteration to shake out errors
-            model_step(model_single)
-            model_step(model_DDP)
+            self._model_step(model_single)
+            self._model_step(model_DDP)
 
-            assert_equal_param(list(model_single.parameters()), list(model_DDP.module.parameters()))
+            self._assert_equal_param(list(model_single.parameters()), list(model_DDP.module.parameters()))
 
             # Shuffle the input so that DDP input is different
             input_cpu = input_cpu[torch.randperm(global_bs)]

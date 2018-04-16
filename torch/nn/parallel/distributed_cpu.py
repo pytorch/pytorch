@@ -70,7 +70,7 @@ class DistributedDataParallelCPU(Module):
     def __init__(self, module):
         super(DistributedDataParallelCPU, self).__init__()
         self.module = module
-        self.weight_broadcast()
+        self.sync_parameters()
 
         def allreduce_params():
             if self.needs_reduction:
@@ -96,8 +96,7 @@ class DistributedDataParallelCPU(Module):
             if param.requires_grad:
                 param.register_hook(allreduce_hook)
 
-    def weight_broadcast(self):
-        # broadcase the wight in the __init__ function
+    def sync_parameters(self):
         for param in self.module.parameters():
             dist.broadcast(param.data, 0)
 
