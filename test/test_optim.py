@@ -349,6 +349,10 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
         )
         self._test_basic_cases(
+            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1,
+                                               initial_accumulator_value=0.1)
+        )
+        self._test_basic_cases(
             lambda weight, bias: optim.Adagrad(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-1)
