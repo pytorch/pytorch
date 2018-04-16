@@ -2,7 +2,7 @@ import shutil
 import subprocess
 import os
 
-cwd = os.getcwd()
+cwd = os.path.dirname(__file__)
 proj_dir = os.path.dirname(cwd)
 out_dir = os.path.join(os.path.dirname(proj_dir), "pytorch_amd")
 exclude_dirs = [
