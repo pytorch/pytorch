@@ -1365,15 +1365,16 @@ class TestTorch(TestCase):
         shape = (3, 4, 5)
         reduced_shape = fn(torch.ones(shape)).shape
 
-        def _test_out(dtype):
+        def _test_out(dtype, other_dtype):
             out = torch.ones(reduced_shape, dtype=dtype)
             result = fn(x, out=out)
             self.assertIs(out.dtype, result.dtype)
-            self.assertEqual(fn(x.type(other_dtype)), result)
-            # 'out' is favored over dtype
+            self.assertEqual(fn(x.type(dtype)), result)
             result = fn(x, out=out, dtype=dtype)
             self.assertIs(out.dtype, result.dtype)
-            self.assertEqual(fn(x.type(other_dtype)), result)
+            self.assertEqual(fn(x.type(dtype)), result)
+            # 'out' is favored over dtype, check error
+            self.assertRaises(RuntimeError, lambda: fn(x, out=out, dtype=other_dtype))
 
         for dtype in [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]:
             x = torch.ones(shape, dtype=dtype)
@@ -1394,8 +1395,8 @@ class TestTorch(TestCase):
             self.assertEqual(fn(x.type(mixed_dtype)), fn(x, dtype=mixed_dtype))
 
             if has_out:
-                _test_out(other_dtype)
-                _test_out(mixed_dtype)
+                _test_out(dtype, other_dtype)
+                _test_out(dtype, mixed_dtype)
 
     def test_sum_integer_upcast(self):
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, **kwargs), False)
