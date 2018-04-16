@@ -1514,6 +1514,36 @@ class TestTorch(TestCase):
                 assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.int64, device=1))
                 assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.int64, device='cuda:1'))
 
+    def test_to(self):
+        a = torch.tensor(5)
+        self.assertEqual(a.device, a.to('cpu').device)
+        self.assertEqual(a.device, a.to('cpu', dtype=torch.float32).device)
+        self.assertIs(torch.float32, a.to('cpu', dtype=torch.float32).dtype)
+        self.assertEqual(a.device, a.to(torch.float32).device)
+        self.assertIs(torch.float32, a.to(dtype=torch.float32).dtype)
+
+        if torch.cuda.is_available():
+            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                b = torch.tensor(5., device=cuda)
+                self.assertEqual(b.device, b.to(cuda).device)
+                self.assertEqual(a.device, b.to('cpu').device)
+                self.assertEqual(b.device, a.to(cuda).device)
+                self.assertIs(torch.int32, b.to('cpu', dtype=torch.int32).dtype)
+                self.assertEqual(a.device, b.to('cpu', dtype=torch.int32).device)
+                self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
+                self.assertEqual(b.device, b.to(dtype=torch.int32).device)
+
+    def test_to_with_tensor(self):
+        a = torch.tensor(5)
+        self.assertEqual(a.device, a.to(a).device)
+
+        if torch.cuda.is_available():
+            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                b = torch.tensor(5., device=cuda)
+                self.assertEqual(b.device, b.to(b).device)
+                self.assertEqual(a.device, b.to(a).device)
+                self.assertEqual(b.device, a.to(b).device)
+
     @staticmethod
     def _test_empty_full(self, dtypes, layout, device):
         shape = torch.Size([2, 3])
