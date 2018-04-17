@@ -1645,10 +1645,9 @@ def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=Tr
 
 
 def pixel_shuffle(input, upscale_factor):
-    r"""Rearranges elements in a tensor of shape
-    ``[*, C, d_{1}, d_{2}, ..., d_{n}]`` to a tensor of shape
-    ``[*, C/(r^n), d_{1}*r, d_{2}*r, ..., d_{n}*r]``. Where ``n`` is the
-    dimensionality of the data.
+    r"""Rearranges elements in a Tensor of shape :math:`(N, C, d_{1}, d_{2}, ..., d_{n})` to a
+    tensor of shape :math:`(N, C/(r^n), d_{1}*r, d_{2}*r, ..., d_{n}*r)`.
+    Where :math:`n` is the dimensionality of the data.
 
     See :class:`~torch.nn.PixelShuffle` for details.
 
@@ -1658,23 +1657,20 @@ def pixel_shuffle(input, upscale_factor):
 
     Examples::
         # 1D example
-        >>> ps = nn.PixelShuffle(2)
         >>> input = torch.Tensor(1, 4, 8)
-        >>> output = ps(input)
+        >>> output = F.pixel_shuffle(input, 2)
         >>> print(output.size())
         torch.Size([1, 2, 16])
 
         # 2D example
-        >>> ps = nn.PixelShuffle(3)
         >>> input = torch.Tensor(1, 9, 8, 8)
-        >>> output = ps(input)
+        >>> output = F.pixel_shuffle(input, 3)
         >>> print(output.size())
         torch.Size([1, 1, 24, 24])
 
         # 3D example
-        >>> ps = nn.PixelShuffle(2)
         >>> input = torch.Tensor(1, 8, 16, 16, 16)
-        >>> output = ps(input)
+        >>> output = F.pixel_shuffle(input, 2)
         >>> print(output.size())
         torch.Size([1, 1, 32, 32, 32])
     """
