@@ -21,11 +21,21 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
 
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+#include "unsupported/Eigen/CXX11/Tensor"
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+
 #if THRUST_VERSION >= 100800
 #define THRUST_SUPPORTS_PER_THREAD
 #endif  // THRUST_VERSION >= 100800
 
 namespace caffe2 {
+
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+template <typename T, int D>
+using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D, Eigen::RowMajor>>;
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+
 namespace math {
 
 #define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(T, Funcname, function)             \
