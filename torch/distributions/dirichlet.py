@@ -1,7 +1,7 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Function, Variable
+from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
@@ -64,7 +64,7 @@ class Dirichlet(ExponentialFamily):
     def rsample(self, sample_shape=()):
         shape = self._extended_shape(sample_shape)
         concentration = self.concentration.expand(shape)
-        if isinstance(concentration, Variable):
+        if isinstance(concentration, torch.Tensor):
             return _Dirichlet.apply(concentration)
         return _dirichlet_sample_nograd(concentration)
 

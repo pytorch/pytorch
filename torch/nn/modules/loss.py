@@ -1,6 +1,5 @@
 import warnings
 
-from torch.autograd import Variable
 import torch
 from .module import Module
 from .container import Sequential
@@ -8,10 +7,10 @@ from .activation import LogSoftmax
 from .. import functional as F
 
 
-def _assert_no_grad(variable):
-    assert not variable.requires_grad, \
+def _assert_no_grad(tensor):
+    assert not tensor.requires_grad, \
         "nn criterions don't compute the gradient w.r.t. targets - please " \
-        "mark these variables as not requiring gradients"
+        "mark these tensors as not requiring gradients"
 
 
 class _Loss(Module):
@@ -336,8 +335,7 @@ class MSELoss(_Loss):
 
     The sum operation still operates over all the elements, and divides by `n`.
 
-    The division by `n` can be avoided if one sets the internal variable
-    `size_average` to ``False``.
+    The division by `n` can be avoided if one sets :attr:`size_average` to ``False``.
 
     To get a batch of losses, a loss per batch element, set `reduce` to
     ``False``. These losses are not averaged and are not affected by
@@ -492,9 +490,8 @@ class BCEWithLogitsLoss(_Loss):
 
     def forward(self, input, target):
         if self.weight is not None:
-            var = Variable(self.weight) if not isinstance(self.weight, Variable) else self.weight
             return F.binary_cross_entropy_with_logits(input, target,
-                                                      var,
+                                                      self.weight,
                                                       self.size_average,
                                                       reduce=self.reduce)
         else:
@@ -620,8 +617,7 @@ class SmoothL1Loss(_Loss):
     `x` and `y` arbitrary shapes with a total of `n` elements each
     the sum operation still operates over all the elements, and divides by `n`.
 
-    The division by `n` can be avoided if one sets the internal variable
-    `size_average` to ``False``
+    The division by `n` can be avoided if one sets :attr:`size_average` to ``False``
 
     Args:
         size_average (bool, optional): By default, the losses are averaged
@@ -936,7 +932,7 @@ class TripletMarginLoss(_Loss):
     tensors x1, x2, x3 and a margin with a value greater than 0.
     This is used for measuring a relative similarity between samples. A triplet
     is composed by `a`, `p` and `n`: anchor, positive examples and negative
-    example respectively. The shape of all input variables should be
+    example respectively. The shapes of all input tensors should be
     :math:`(N, D)`.
 
     The distance swap is described in detail in the paper `Learning shallow
