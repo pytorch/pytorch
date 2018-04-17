@@ -1,5 +1,3 @@
-#include "arm_compute/graph/Graph.h"
-#include "arm_compute/graph/Nodes.h"
 #include "caffe2/mobile/contrib/arm-compute/core/context.h"
 #include "caffe2/mobile/contrib/arm-compute/core/operator.h"
 
@@ -88,11 +86,6 @@ bool GLConvOp<T>::RunOnDevice() {
     filter_->lazy_allocate(filterblob, second_run_, second_run_);
     bias_->lazy_allocate(biasblob, second_run_, second_run_);
     second_run_ = false;
-    TensorCPU fakeX;
-    fakeX.Resize(X_->dims());
-    TensorCPU fakeY;
-    ConvPoolOpBase<GLContext>::SetOutputSize(fakeX, &fakeY, filter_->dim32(0));
-    Y->ResizeLike(fakeY);
     Y->allocate();
     conv_.run();
   } else {
