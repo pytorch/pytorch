@@ -1,5 +1,3 @@
-#include "arm_compute/graph/Graph.h"
-#include "arm_compute/graph/Nodes.h"
 #include "caffe2/mobile/contrib/arm-compute/core/context.h"
 #include "caffe2/mobile/contrib/arm-compute/core/operator.h"
 
