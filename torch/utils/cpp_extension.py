@@ -8,6 +8,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import time
 import warnings
 
 import torch
@@ -55,6 +56,51 @@ for instructions on how to install GCC 4.9 or higher.
                               !! WARNING !!
 '''
 CUDA_HOME = _find_cuda_home() if torch.cuda.is_available() else None
+
+
+class FileBaton:
+    '''A primitive, file-based synchronization utility.'''
+
+    def __init__(self, lock_file_path, wait_seconds=0.1):
+        '''
+        Creates a new :class:`FileBaton`.
+
+        Args:
+            lock_file_path: The path to the file used for locking.
+            wait_seconds: The seconds to periorically sleep (spin) when
+                calling ``wait()``.
+        '''
+        self.lock_file_path = lock_file_path
+        self.wait_seconds = wait_seconds
+        self.fd = None
+
+    def try_acquire(self):
+        '''
+        Tries to atomically create a file under exclusive access.
+
+        Returns:
+            True if the file could be created, else False.
+        '''
+        try:
+            self.fd = os.open(self.lock_file_path, os.O_CREAT | os.O_EXCL)
+            return True
+        except FileExistsError:
+            return False
+
+    def wait(self):
+        '''
+        Periodically sleeps for a certain amount until the baton is released.
+
+        The amount of time slept depends on the ``wait_seconds`` parameter
+        passed to the constructor.
+        '''
+        while os.path.exists(self.lock_file_path):
+            time.sleep(self.wait_seconds)
+
+    def release(self):
+        '''Releaes the baton and removes its file.'''
+        os.close(self.fd)
+        os.remove(self.lock_file_path)
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -454,49 +500,34 @@ def load(name,
     if build_directory is None:
         build_directory = _get_build_directory(name, verbose)
 
-    extra_ldflags = extra_ldflags or []
-    if sys.platform == 'win32':
-        python_path = os.path.dirname(sys.executable)
-        python_lib_path = os.path.join(python_path, 'libs')
+    baton = FileBaton(os.path.join(build_directory, 'lock'))
 
-        here = os.path.abspath(__file__)
-        torch_path = os.path.dirname(os.path.dirname(here))
-        lib_path = os.path.join(torch_path, 'lib')
+    if baton.try_acquire():
+        try:
+            with_cuda = any(map(_is_cuda_file, sources))
+            extra_ldflags = _prepare_ldflags(extra_ldflags or [], with_cuda)
+            build_file_path = os.path.join(build_directory, 'build.ninja')
+            if verbose:
+                print('Emitting ninja build file {}...'.format(build_file_path))
+            # NOTE: Emitting a new ninja build file does not cause re-compilation if
+            # the sources did not change, so it's ok to re-emit (and it's fast).
+            _write_ninja_file(
+                path=build_file_path,
+                name=name,
+                sources=sources,
+                extra_cflags=extra_cflags or [],
+                extra_cuda_cflags=extra_cuda_cflags or [],
+                extra_ldflags=extra_ldflags or [],
+                extra_include_paths=extra_include_paths or [],
+                with_cuda=with_cuda)
 
-        extra_ldflags.append('ATen.lib')
-        extra_ldflags.append('_C.lib')
-        extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
-        extra_ldflags.append('/LIBPATH:{}'.format(lib_path))
-
-    with_cuda = any(map(_is_cuda_file, sources))
-    if with_cuda:
-        if verbose:
-            print('Detected CUDA files, patching ldflags')
-        if sys.platform == 'win32':
-            extra_ldflags.append('/LIBPATH:{}'.format(_join_cuda_home('lib/x64')))
-            extra_ldflags.append('cudart.lib')
-        else:
-            extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
-            extra_ldflags.append('-lcudart')
-
-    build_file_path = os.path.join(build_directory, 'build.ninja')
-    if verbose:
-        print('Emitting ninja build file {}...'.format(build_file_path))
-    # NOTE: Emitting a new ninja build file does not cause re-compilation if
-    # the sources did not change, so it's ok to re-emit (and it's fast).
-    _write_ninja_file(
-        path=build_file_path,
-        name=name,
-        sources=sources,
-        extra_cflags=extra_cflags or [],
-        extra_cuda_cflags=extra_cuda_cflags or [],
-        extra_ldflags=extra_ldflags or [],
-        extra_include_paths=extra_include_paths or [],
-        with_cuda=with_cuda)
-
-    if verbose:
-        print('Building extension module {}...'.format(name))
-    _build_extension_module(name, build_directory)
+            if verbose:
+                print('Building extension module {}...'.format(name))
+            _build_extension_module(name, build_directory)
+        finally:
+            baton.release()
+    else:
+        baton.wait()
 
     if verbose:
         print('Loading extension module {}...'.format(name))
@@ -514,6 +545,32 @@ def verify_ninja_availability():
         except OSError:
             raise RuntimeError("Ninja is required to load C++ extensions")
 
+
+def _prepare_ldflags(extra_ldflags, with_cuda):
+    if sys.platform == 'win32':
+        python_path = os.path.dirname(sys.executable)
+        python_lib_path = os.path.join(python_path, 'libs')
+
+        here = os.path.abspath(__file__)
+        torch_path = os.path.dirname(os.path.dirname(here))
+        lib_path = os.path.join(torch_path, 'lib')
+
+        extra_ldflags.append('ATen.lib')
+        extra_ldflags.append('_C.lib')
+        extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
+        extra_ldflags.append('/LIBPATH:{}'.format(lib_path))
+
+    if with_cuda:
+        if verbose:
+            print('Detected CUDA files, patching ldflags')
+        if sys.platform == 'win32':
+            extra_ldflags.append('/LIBPATH:{}'.format(_join_cuda_home('lib/x64')))
+            extra_ldflags.append('cudart.lib')
+        else:
+            extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
+            extra_ldflags.append('-lcudart')
+
+    return extra_ldflags
 
 def _get_build_directory(name, verbose):
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
