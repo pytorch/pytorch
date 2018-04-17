@@ -45,10 +45,6 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 #endif
 }
 
-inline bool THPUtils_checkIndex(PyObject* obj) {
-  return THPUtils_checkLong(obj) || (PyIndex_Check(obj) && !PyBool_Check(obj));
-}
-
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
   int overflow;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);

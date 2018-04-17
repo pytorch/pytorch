@@ -403,7 +403,11 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     } else if (param.check(obj)) {
       dst[i++] = obj;
     } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-               THPUtils_checkIndex(obj)) {
+               THPUtils_checkLong(obj)) {
+      // technically this should probably check if the index is valid,
+      // but PyNumber_Index only checks that an obect _can_ be an index
+      // meaning tensors will bind here.
+
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
