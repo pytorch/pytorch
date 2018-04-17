@@ -47,7 +47,9 @@ DISTRIBUTED_TESTS_CONFIG = {
     'nccl': {
         'WORLD_SIZE': '2'
     },
-    'mpi': {},
+    'mpi': {
+        'WORLD_SIZE': '3'
+    },
 }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
