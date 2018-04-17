@@ -178,7 +178,7 @@ class Caffe2Backend(Backend):
     @classmethod
     def dummy_name(cls):
         return cls._dummy_name.new_dummy_name()
- 
+
     # NB: By default, you will use the LATEST definition of the operator,
     # so this interface MAY make BC-breaking changes.  Specify an
     # opset_version if you don't want this to version.
@@ -369,7 +369,7 @@ class Caffe2Backend(Backend):
                     batch_size = pred_mh.net.Slice(input_shape, name + '/batch_size_slice', starts=[1], ends=[2])
                     seq_len = pred_mh.net.Slice(input_shape, name + '/seq_len_slice', starts=[0], ends=[1])
                     dummy_sequence_lens = pred_mh.net.Tile([seq_len, batch_size], name + '/dummy_sequence_lens', axis=0)
-                    pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, dummy_name()], shape=[-1])
+                    pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, cls.dummy_name()], shape=[-1])
                     seq_lens_for_reverse = dummy_sequence_lens
 
             if direction_offset == 1:
@@ -501,7 +501,7 @@ class Caffe2Backend(Backend):
                     batch_size = pred_mh.net.Slice(input_shape, name + '/batch_size_slice', starts=[1], ends=[2])
                     seq_len = pred_mh.net.Slice(input_shape, name + '/seq_len_slice', starts=[0], ends=[1])
                     dummy_sequence_lens = pred_mh.net.Tile([seq_len, batch_size], name + '/dummy_sequence_lens', axis=0)
-                    pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, dummy_name()], shape=[-1])
+                    pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, cls.dummy_name()], shape=[-1])
                     seq_lens_for_reverse = dummy_sequence_lens
 
             if direction_offset == 1:
@@ -634,7 +634,7 @@ class Caffe2Backend(Backend):
                     batch_size = pred_mh.net.Slice(input_shape, name + '/batch_size_slice', starts=[1], ends=[2])
                     seq_len = pred_mh.net.Slice(input_shape, name + '/seq_len_slice', starts=[0], ends=[1])
                     dummy_sequence_lens = pred_mh.net.Tile([seq_len, batch_size], name + '/dummy_sequence_lens', axis=0)
-                    pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, dummy_name()], shape=[-1])
+                    pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, cls.dummy_name()], shape=[-1])
                     seq_lens_for_reverse = dummy_sequence_lens
 
             if direction_offset == 1:
