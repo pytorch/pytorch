@@ -320,17 +320,11 @@ class _DataLoaderIter(object):
             if not self.shutdown:
                 self.shutdown = True
                 self.done_event.set()
-                # if worker_manager_thread is waiting to put, make place for it
-                try:
-                    while not self.data_queue.empty():
-                        self.data_queue.get()
-                except FileNotFoundError:
-                    # FileNotFoundError can happen when we rebuild the fd
-                    # fetched from the queue but the socket is already closed
-                    # from the worker side (e.g. due to Python shutting down).
-                    pass
                 for q in self.index_queues:
                     q.put(None)
+                # worker_manager_thread puts data into a queue.Queue which has
+                # infinite capacity. So we don't need to call get to make space
+                # for it to progress and shutdown.
                 # done_event should be sufficient to exit worker_manager_thread,
                 # but be safe here and put another None
                 self.worker_result_queue.put(None)
