@@ -611,8 +611,8 @@ class Module(object):
         compatible loading using the version number stored in
         ``local_state_dict['_version']``. The version number for each module is
         a class attributed named ``_version``. It starts at ``0``, and should be
-        incremented when buffers/parameters are added/removed to the moduel. State dicts saved
-        before 0.4 has default version number ``-1``.
+        incremented when buffers/parameters are added/removed to the module.
+        State dicts saved before 0.4 has the default version number of ``-1``.
 
         Arguments:
             local_state_dict (dict): A dict containing local parameters and
