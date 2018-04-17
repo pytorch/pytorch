@@ -17,11 +17,11 @@
 #ifndef BATCHPERMUTATION_OP_H_
 #define BATCHPERMUTATION_OP_H_
 
+#include <cstring>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include <cstring>
 
 namespace caffe2 {
 
@@ -32,39 +32,7 @@ class BatchPermutationOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice() override {
-    const auto& X = Input(0);
-    auto& indices = Input(1);
-    auto* Y = Output(0);
-
-    CAFFE_ENFORCE(indices.ndim() == 1, "indices must be 1-d");
-    CAFFE_ENFORCE(
-      X.dim32(0) == indices.dim32(0),
-      "X.dim32(0) must be equal to indices.dim32(0)",
-      "(",
-      X.dim32(0),
-      " vs. ",
-      indices.dim32(0),
-      ")");
-
-    Y->ResizeLike(X);
-
-    const int N = X.dim32(0);
-    const int C = X.dim32(1);
-    const int H = X.dim32(2);
-    const int W = X.dim32(3);
-
-    const float *src = X.template data<float>();
-    float *dst = Y->template mutable_data<float>();
-
-    for (int i = 0; i < N; i++) {
-      int idx = indices.template data<int>()[i];
-
-      memcpy(dst + i * C * H * W, src + idx * C * H * W, sizeof(float) * C * H * W);
-    }
-
-    return true;
-  }
+  bool RunOnDevice() override;
 };
 
 template <typename T, class Context>

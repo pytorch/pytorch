@@ -134,7 +134,8 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   }
   ERArrXXf rois(proposal_num, 5);
   EArrXf scores(proposal_num);
-  for (int i = 0, len = 0; i < num_rpn_lvls; i++) {
+  int len = 0;
+  for (int i = 0; i < num_rpn_lvls; i++) {
     const auto& roi_in = Input(i);
     const int n = roi_in.dim(0);
 
