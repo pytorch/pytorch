@@ -5,13 +5,17 @@
 
 namespace at { namespace native {
 
+
+// sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
+// batch matrix multiplication // its main purpose is to provide a pairwise
+// reduction for einsum
 Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed
   AT_ASSERT(left_.dim()==right_.dim(), "number of dimensions must match");
   if (sum_dims_.size() == 0)
     return at::mul(left_, right_);
   int64_t dim = left_.dim();
-  auto sum_dims = dim_list_to_vector(sum_dims_, dim);
+  auto sum_dims = dim_list_to_bitset(sum_dims_, dim);
   std::vector<int64_t> lro, lo, ro;
   int64_t lro_size = 1, lo_size = 1, ro_size = 1, sum_size = 1;
   Tensor left = left_;
@@ -85,7 +89,6 @@ Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_di
   }
   return result;
 }
-
 
 Tensor einsum(String eqn, TensorList tensors) {
   std::string in_eqn;
@@ -194,90 +197,6 @@ Tensor einsum(String eqn, TensorList tensors) {
   }
   for (int64_t dim = position_labels.size()-1; dim >= num_outputs; dim--)
     result.squeeze_(dim);
-  return result;
-}
-
-// sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
-// batch matrix multiplication // its main purpose is to provide a pairwise
-// reduction for einsum
-Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
-  // assumes that tensors have been pre-unsqueezed
-  AT_ASSERT(left_.dim()==right_.dim(), "number of dimensions must match");
-  if (sum_dims_.size() == 0)
-    return at::mul(left_, right_);
-  int64_t dim = left_.dim();
-  auto sum_dims = dim_list_to_bitset(sum_dims_, dim);
-  std::vector<int64_t> lro, lo, ro;
-  int64_t lro_size = 1, lo_size = 1, ro_size = 1, sum_size = 1;
-  Tensor left = left_;
-  Tensor right = right_;
-  for (int64_t i = 0; i < dim; i++) {
-    auto sl = left.size(i)>1;
-    auto sr = right.size(i)>1;
-    if (sum_dims[i]) {
-      if (sl && sr) {
-	AT_ASSERT(left.size(i)==right.size(i), "sum indexes must match");
-	sum_size *= left.size(i);
-      } else if (sl) {
-	left = left.sum(i, true);
-      } else if (sr) {
-	right = right.sum(i, true);
-      }
-    } else if (sl && sr) {
-      AT_ASSERT(left.size(i)==right.size(i), "non-broadcast dimensions must match");
-      lro.push_back(i);
-      lro_size *= left.size(i);
-    } else if (sl) {
-      lo.push_back(i);
-      lo_size *= left.size(i);
-    } else {
-      ro.push_back(i);
-      ro_size *= right.size(i);
-    }
-  }
-  std::vector<int64_t> out_size;
-  for (auto& d : lro) out_size.push_back(left.size(d));
-  for (auto& d : lo) out_size.push_back(left.size(d));
-  for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warining about not using d
-  for (auto& d : ro) out_size.push_back(right.size(d));
-
-  std::vector<int64_t> lpermutation(lro);
-  lpermutation.insert(lpermutation.end(), lo.begin(), lo.end());
-  lpermutation.insert(lpermutation.end(), sum_dims_.begin(), sum_dims_.end());
-  lpermutation.insert(lpermutation.end(), ro.begin(), ro.end());
-
-  std::vector<int64_t> rpermutation(lro);
-  rpermutation.insert(rpermutation.end(), sum_dims_.begin(), sum_dims_.end());
-  rpermutation.insert(rpermutation.end(), ro.begin(), ro.end());
-  rpermutation.insert(rpermutation.end(), lo.begin(), lo.end());
-
-  std::vector<int64_t> opermutation(lro.size()+lo.size()+sum_dims_.size()+ro.size(), -1);
-  {
-  int64_t i = 0;
-
-  for (auto it = lro.begin(); it != lro.end(); i++, it++) {
-    opermutation[*it] = i;
-  }
-  for (auto it = lo.begin(); it != lo.end(); i++, it++) {
-    opermutation[*it] = i;
-  }
-  for (auto it = sum_dims_.begin(); it != sum_dims_.end(); i++, it++) {
-    opermutation[*it] = i;
-  }
-  for (auto it = ro.begin(); it != ro.end(); i++, it++) {
-    opermutation[*it] = i;
-  }
-  }
-
-  left = left.permute(lpermutation).reshape({lro_size, lo_size, sum_size});
-  right = right.permute(rpermutation).reshape({lro_size, sum_size, ro_size});
-  Tensor result = at::bmm(left, right);
-  result = result.view(out_size).permute(opermutation);
-  if (! keepdim) {
-    for (int i = dim-1; i>=0; i--)
-      if (sum_dims[i])
-	result.squeeze_(i);
-  }
   return result;
 }
 
