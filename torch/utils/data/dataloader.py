@@ -31,20 +31,6 @@ _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
 
 
-def _worker_step(index_queue, data_queue, dataset, collate_fn):
-    r = index_queue.get()
-    if r is None:
-        return False
-    idx, batch_indices = r
-    try:
-        samples = collate_fn([dataset[i] for i in batch_indices])
-    except Exception:
-        data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
-    else:
-        data_queue.put((idx, samples))
-    return True
-
-
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
     global _use_shared_memory
     _use_shared_memory = True
@@ -63,8 +49,17 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
         init_fn(worker_id)
 
     while True:
-        if not _worker_step(index_queue, data_queue, dataset, collate_fn):
+        r = index_queue.get()
+        if r is None:
             break
+        idx, batch_indices = r
+        try:
+            samples = collate_fn([dataset[i] for i in batch_indices])
+        except Exception:
+            data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
+        else:
+            data_queue.put((idx, samples))
+            del samples
 
 
 def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
