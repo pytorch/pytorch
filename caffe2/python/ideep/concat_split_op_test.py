@@ -22,10 +22,9 @@ import numpy as np
 import hypothesis.strategies as st
 import unittest
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core
+from caffe2.python import core, workspace
 from hypothesis import given, settings, unlimited
 import caffe2.python.ideep_test_util as mu
-
 
 @st.composite
 def _tensor_splits(draw, add_axis=False):
@@ -61,6 +60,7 @@ def _tensor_splits(draw, add_axis=False):
         )
 
 
+@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
 class TestConcatSplitOps(hu.HypothesisTestCase):
     @given(tensor_splits=_tensor_splits(),
            **mu.gcs)
