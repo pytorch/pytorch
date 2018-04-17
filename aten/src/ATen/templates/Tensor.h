@@ -126,6 +126,11 @@ struct Tensor : public detail::TensorBase {
   //example
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
+
+  template <typename F, typename... Args> 
+  Tensor m(F func, Args&&... params) {
+    return func(*this, params...);
+  } 
 };
 
 } //namespace at
