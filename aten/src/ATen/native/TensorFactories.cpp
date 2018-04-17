@@ -267,9 +267,9 @@ Tensor randperm(const Type& dtype, int64_t n, Generator* generator) {
 }
 
 Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
-  if (n <= 0) {
+  if (n < 0) {
     std::ostringstream oss;
-    oss << "n must be strictly positive, got " << n;
+    oss << "n must be non-negative, got " << n;
     throw std::runtime_error(oss.str());
   }
   if (result.type().backend() != at::kCPU) {
