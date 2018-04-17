@@ -781,6 +781,7 @@ class _DistTestBase(object):
             param.grad = None
 
     def _prepare_dummy_data(self, local_bs):
+        # global_bs for DDP should be divisible by WORLD_SIZE
         global_bs = int(WORLD_SIZE) * local_bs
         input_cpu = torch.randn(global_bs, 2)
         target = torch.randn(global_bs, 4)
@@ -799,6 +800,28 @@ class _DistTestBase(object):
         for p_gpu, p_DDP in zip(param_gpu, param_DDP):
             self.assertEqual(p_gpu, p_DDP)
 
+    def _test_DDP_2iter(self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size):
+        for i in range(2):
+            # single cpu/gpu training
+            self._test_DDP_helper(model_base,
+                                  input,
+                                  target,
+                                  loss)
+
+            # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
+            self._test_DDP_helper(model_DDP,
+                                  input[rank * local_bs: (rank + 1) * local_bs],
+                                  target[rank * local_bs: (rank + 1) * local_bs],
+                                  loss)
+
+            # Update weights and run a second iteration to shake out errors
+            self._model_step(model_base)
+            self._model_step(model_DDP)
+            self._assert_equal_param(list(model_base.parameters()), list(model_DDP.module.parameters()))
+
+            # Shuffle the input so that DDP input is different
+            input = input[torch.randperm(batch_size)]
+
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
@@ -813,38 +836,28 @@ class _DistTestBase(object):
         model = self._create_Net()
 
         # single gpu training setup
-        model_gpu = copy.deepcopy(model)
+        model_base = copy.deepcopy(model)
         gpu_subset = list(rankToGPUMapping[rank])
-        model_gpu.cuda(gpu_subset[0])
+        model_base.cuda(gpu_subset[0])
 
         # DDP training setup
         model_DDP = copy.deepcopy(model)
         model_DDP.cuda(gpu_subset[0])
         model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=gpu_subset)
-        batch_size, input_cpu, target, loss = self._prepare_dummy_data(len(gpu_subset))
 
-        for i in range(2):
-            # single gpu training
-            self._test_DDP_helper(model_gpu,
-                                  input_cpu.cuda(gpu_subset[0]),
-                                  target.cuda(gpu_subset[0]),
-                                  loss)
+        # dummy data initialization
+        local_bs = len(gpu_subset)
+        global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
-            # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
-            self._test_DDP_helper(model_DDP,
-                                  input_cpu[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)],
-                                  target[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)].cuda(gpu_subset[0]),
-                                  loss)
-
-            # Update weights and run a second iteration to shake out errors
-            self._model_step(model_gpu)
-            self._model_step(model_DDP)
-
-            self._assert_equal_param(list(model_gpu.parameters()), list(model_DDP.module.parameters()))
-
-            # Shuffle the input so that DDP input is different
-            input_cpu = input_cpu[torch.randperm(batch_size)]
-
+        # check two model parameters over 2 iterations
+        self._test_DDP_2iter(model_base,
+                             model_DDP,
+                             input_cpu.cuda(gpu_subset[0]),
+                             target.cuda(gpu_subset[0]),
+                             loss,
+                             local_bs,
+                             rank,
+                             global_bs)
         self._barrier()
 
     @unittest.skipIf(BACKEND == 'nccl', "nccl does not support DistributedDataParallelCPU")
@@ -854,41 +867,25 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_global_test()
 
         # cpu training setup
-        model = self._create_Net()
-
-        # single cpu training setup
-        model_single = copy.deepcopy(model)
+        model_base = self._create_Net()
 
         # DDP-CPU training setup
-        model_DDP = copy.deepcopy(model)
+        model_DDP = copy.deepcopy(model_base)
         model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
 
-        # batch_size for DDP should be divisible by WORLD_SIZE
+        # dummy data initialization
         local_bs = 2
         global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
-        for i in range(2):
-            # single cpu training
-            self._test_DDP_helper(model_single,
-                                  input_cpu,
-                                  target,
-                                  loss)
-
-            # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
-            self._test_DDP_helper(model_DDP,
-                                  input_cpu[rank * local_bs: (rank + 1) * local_bs],
-                                  target[rank * local_bs: (rank + 1) * local_bs],
-                                  loss)
-
-            # Update weights and run a second iteration to shake out errors
-            self._model_step(model_single)
-            self._model_step(model_DDP)
-
-            self._assert_equal_param(list(model_single.parameters()), list(model_DDP.module.parameters()))
-
-            # Shuffle the input so that DDP input is different
-            input_cpu = input_cpu[torch.randperm(global_bs)]
-
+        # check two model parameters over 2 iterations
+        self._test_DDP_2iter(model_base,
+                             model_DDP,
+                             input_cpu,
+                             target,
+                             loss,
+                             local_bs,
+                             rank,
+                             global_bs)
         self._barrier()
 
 
