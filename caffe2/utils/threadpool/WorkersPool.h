@@ -276,8 +276,8 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
       switch (state_to_act_upon) {
       case State::HasWork:
         // Got work to do! So do it, and then revert to 'Ready' state.
-        DCHECK(task_);
-        task_->Run();
+        DCHECK(task_.load());
+        (*task_).Run();
         task_ = nullptr;
         ChangeState(State::Ready);
         break;
@@ -297,7 +297,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
   // Called by the master thead to give this worker work to do.
   // It is only legal to call this if the worker
   void StartWork(Task* task) {
-    DCHECK(!task_);
+    DCHECK(!task_.load());
     task_ = task;
     DCHECK(state_.load(std::memory_order_acquire) == State::Ready);
     ChangeState(State::HasWork);
@@ -308,8 +308,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
   std::unique_ptr<std::thread> thread_;
 
   // The task to be worked on.
-  // Visibility of writes to task_ guarded by state_mutex_.
-  Task* task_;
+  std::atomic<Task*> task_;
 
   // The condition variable and mutex guarding state changes.
   std::condition_variable state_cond_;
