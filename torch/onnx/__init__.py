@@ -53,7 +53,7 @@ def _symbolic_override_wrapper_maker(symbolic_fn, might_trace, fn):
             return fn(*args, **kwargs)
 
         flat_args = tuple(function._iter_tensors_permissive(args))
-        flat_args_only_tensors = tuple(function._iter_tensors(flat_args))
+        flat_args_only_tensors = tuple(t for t in flat_args if isinstance(t, torch.Tensor))
         if not any(map(torch._C._jit_is_tracing, flat_args_only_tensors)):
             return fn(*args, **kwargs)
 
