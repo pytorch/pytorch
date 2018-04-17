@@ -110,9 +110,11 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   std::string in_eqn;
   size_t pos;
   // we need are number of mappings (letter) index for analysing the equation. The index runs from 0='a' through 25='z'.
-  std::vector<std::int64_t> number_of_occurences(number_of_letters, 0); // number of occurence in the equation of this index
-  std::vector<std::int64_t> last_occurence(number_of_letters, -1);      // the last operator (left to right) using this index
-  std::vector<std::int64_t> sorted_position(number_of_letters, -1);     // the position of the index in the tensor dimensions
+  std::array<std::int64_t, number_of_letters> number_of_occurrences; // number of occurrence in the equation of this index
+  number_of_occurrences.fill(0);
+  std::array<std::int64_t, number_of_letters> last_occurrence;      // the last operator (left to right) using this index
+  last_occurrence.fill(-1);
+
   if ((pos = eqn.find("->")) != std::string::npos) { // check whether we have a right hand side. in_eq is the left hand side
     in_eqn = eqn.substr(0, pos);
   } else {
@@ -129,14 +131,14 @@ Tensor einsum(std::string eqn, TensorList tensors) {
     for (auto &c : term) {                // c    = character with a single index
       AT_ASSERT(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
       int64_t index_num = c-'a';          // index_num  = index to be used in the vectors above
-      number_of_occurences[index_num]++;
-      // when there are two occurences we need to take a diagonal with respect to the dimensions
+      number_of_occurrences[index_num]++;
+      // when there are two occurrences we need to take a diagonal with respect to the dimensions
       // occuring multiple times before continuing the processing.
       // e.g. einsum('ii->i', [A]) should return the diagonal
       // This waits for the general diagonal handling discussed in #6479
       // for now, we error out here
-      AT_ASSERT(last_occurence[index_num] < operand, "diagonals (multiple occurences of the same index for one tensor) not implemented yet")
-      last_occurence[index_num] = operand;
+      AT_ASSERT(last_occurrence[index_num] < operand, "diagonals (multiple occurrences of the same index for one tensor) not implemented yet")
+      last_occurrence[index_num] = operand;
       dims_in_operand++;
     }
     AT_ASSERT((int64_t) tensors.size()>operand, "more operands in equation than tensors"); // we cannot have a longer equation than operands. We need to check here before we check the dimensions
@@ -148,6 +150,8 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   // the following parses or infers output (right hand side)
   // it also assigns the sorted_positions ((letter) index -> dimension in Tensors) and position_labels (dimensions in Tensors -> index)
   // for the output indices
+  std::array<std::int64_t, number_of_letters> sorted_position;     // the position of the index in the tensor dimensions
+  sorted_position.fill(-1);
   int64_t num_output_dims = 0;
   std::vector<int64_t> position_labels;
   if (pos != std::string::npos) {            // parse the user provided right hand side
@@ -161,7 +165,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
     }
   } else {                                   // create a right hand side: the indices that occur exactly once in alphabetic order
     for (size_t idx = 0; idx < number_of_letters; idx++) {
-      if (number_of_occurences[idx] == 1) {
+      if (number_of_occurrences[idx] == 1) {
 	sorted_position[idx] = num_output_dims;
 	position_labels.push_back(idx);
 	num_output_dims++;
@@ -172,7 +176,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   // for the non-output indices - those that are eventually summed over
   int64_t position = num_output_dims;            // we now determine the porder of the remaining indices (in so far they are in the equation)
   for (size_t idx = 0; idx < number_of_letters; idx++) {
-    if ((number_of_occurences[idx] > 0) && (sorted_position[idx]==-1)) {
+    if ((number_of_occurrences[idx] > 0) && (sorted_position[idx]==-1)) {
       sorted_position[idx] = position;
       position_labels.push_back(idx);
       position++;
@@ -185,8 +189,9 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   eqn_stream.clear();
   eqn_stream.seekg(0, std::ios_base::beg);
   for (int64_t op = 0; op < (int64_t) tensors.size(); op++) {
-    std::vector<int64_t> axes(number_of_letters, -1);
-    std::vector<int64_t> permutation;
+    std::array<int64_t, number_of_letters> axes; // the dimension which the letter refers to in the permuted tensor
+    axes.fill(-1);
+    std::vector<int64_t> permutation; // permutation for this tensor
     std::getline(eqn_stream, term, ',');
     int64_t dim = 0;
     for (auto &c : term) {
@@ -214,7 +219,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   // appear only there
   Tensor result = permuted_ops[0];
   for (int64_t idx = 0; idx < number_of_letters; idx++) {
-    if ((last_occurence[idx] == 0)
+    if ((last_occurrence[idx] == 0)
 	&& (sorted_position[idx]>=num_output_dims)) {
       result = result.sum(sorted_position[idx], true);
     }
@@ -224,7 +229,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   for (int64_t i = 1; i < (int64_t) permuted_ops.size(); i++) {
     std::vector<int64_t> sum_dims;
     for (int64_t idx = 0; idx < number_of_letters; idx++) {
-      if ((last_occurence[idx] == i)
+      if ((last_occurrence[idx] == i)
 	  && (sorted_position[idx]>=num_output_dims)) {
 	sum_dims.push_back(sorted_position[idx]);
       }
