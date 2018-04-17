@@ -1263,10 +1263,10 @@ class TestNN(NNTestCase):
         l = nn.Linear(10, 10)
         clip_value = 2.5
 
-        grad_w, grad_b = torch.arange(-50, 50).view(10, 10).div(5), torch.ones(10).mul(2)
+        grad_w, grad_b = torch.arange(-50, 50).view(10, 10).div_(5), torch.ones(10).mul_(2)
         for grad_list in [[grad_w, grad_b], [grad_w, None]]:
             for p, g in zip(l.parameters(), grad_list):
-                p._grad = Variable(g.clone().view_as(p.data)) if g is not None else g
+                p._grad = g.clone().view_as(p.data) if g is not None else g
 
         clip_grad_value_(l.parameters(), clip_value)
         for p in filter(lambda p: p.grad is not None, l.parameters()):
@@ -2785,7 +2785,6 @@ class TestNN(NNTestCase):
             (1, 256, 80, 128),
             (1, 256, 120, 192),
         ]
-        dtype = getattr(torch.cuda, dtype.__name__)
 
         def run_test(benchmark):
             with torch.backends.cudnn.flags(benchmark=benchmark):
