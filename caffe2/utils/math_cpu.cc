@@ -667,7 +667,7 @@ CAFFE2_SPECIALIZED_REDUCEMAX(int64_t)
 
 namespace {
 
-void IncreaseDimsIndex(const int n, const int* dims, int* index) {
+void IncreaseIndexInDims(const int n, const int* dims, int* index) {
   for (int i = n - 1; i >= 0; --i) {
     ++index[i];
     if (index[i] >= dims[i]) {
@@ -799,8 +799,6 @@ bool EigenReduceTensor(
 
 template <typename T, class Reducer>
 void ReduceTensor(
-    const int X_size,
-    const int Y_size,
     const int num_dims,
     const int* dims,
     const int num_axes,
@@ -810,106 +808,135 @@ void ReduceTensor(
     const T* X,
     T* Y,
     CPUContext* context) {
-  Set<T, CPUContext>(Y_size, init, Y, context);
-  std::vector<int> y_dims(dims, dims + num_dims);
+  std::vector<int> Y_dims(dims, dims + num_dims);
   for (int i = 0; i < num_axes; ++i) {
-    y_dims[axes[i]] = 1;
+    Y_dims[axes[i]] = 1;
   }
+  const int X_size =
+      std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
+  const int Y_size = std::accumulate(
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  Set<T, CPUContext>(Y_size, init, Y, context);
   std::vector<int> index(num_dims, 0);
-  for (int x_index = 0; x_index < X_size; ++x_index) {
-    const int y_index = GetIndexFromDims(num_dims, y_dims.data(), index.data());
-    Y[y_index] = reducer(Y[y_index], X[x_index]);
-    IncreaseDimsIndex(num_dims, dims, index.data());
+  for (int X_index = 0; X_index < X_size; ++X_index) {
+    const int Y_index = GetIndexFromDims(num_dims, Y_dims.data(), index.data());
+    Y[Y_index] = reducer(Y[Y_index], X[X_index]);
+    IncreaseIndexInDims(num_dims, dims, index.data());
   }
 }
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_REDUCE_SUM(T)       \
-  template <>                                  \
-  void ReduceSum<T, CPUContext>(               \
-      const int X_size,                        \
-      const int Y_size,                        \
-      const int num_dims,                      \
-      const int* dims,                         \
-      const int num_axes,                      \
-      const int* axes,                         \
-      const T* X,                              \
-      T* Y,                                    \
-      CPUContext* context,                     \
-      Tensor<CPUContext>* /* scratch_ptr */) { \
-    CAFFE_ENFORCE_LE(num_axes, num_dims);      \
-    if (EigenReduceTensor(                     \
-            num_dims,                          \
-            dims,                              \
-            num_axes,                          \
-            axes,                              \
-            Eigen::internal::SumReducer<T>(),  \
-            X,                                 \
-            Y)) {                              \
-      return;                                  \
-    }                                          \
-    ReduceTensor(                              \
-        X_size,                                \
-        Y_size,                                \
-        num_dims,                              \
-        dims,                                  \
-        num_axes,                              \
-        axes,                                  \
-        std::plus<T>(),                        \
-        T(0),                                  \
-        X,                                     \
-        Y,                                     \
-        context);                              \
+#define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                                      \
+  template <>                                                                 \
+  void ReduceSum<T, CPUContext>(                                              \
+      const int num_dims,                                                     \
+      const int* dims,                                                        \
+      const int num_axes,                                                     \
+      const int* axes,                                                        \
+      const T* X,                                                             \
+      T* Y,                                                                   \
+      CPUContext* context,                                                    \
+      Tensor<CPUContext>* /* scratch_ptr */) {                                \
+    CAFFE_ENFORCE_LE(num_axes, num_dims);                                     \
+    if (EigenReduceTensor(                                                    \
+            num_dims,                                                         \
+            dims,                                                             \
+            num_axes,                                                         \
+            axes,                                                             \
+            Eigen::internal::SumReducer<T>(),                                 \
+            X,                                                                \
+            Y)) {                                                             \
+      return;                                                                 \
+    }                                                                         \
+    ReduceTensor(                                                             \
+        num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context); \
   }
 CAFFE2_SPECIALIZED_REDUCE_SUM(float)
 #undef CAFFE2_SPECIALIZED_REDUCE_SUM
 
-#define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                        \
-  template <>                                                    \
-  void ReduceMean<T, CPUContext>(                                \
-      const int X_size,                                          \
-      const int Y_size,                                          \
-      const int num_dims,                                        \
-      const int* dims,                                           \
-      const int num_axes,                                        \
-      const int* axes,                                           \
-      const T* X,                                                \
-      T* Y,                                                      \
-      CPUContext* context,                                       \
-      Tensor<CPUContext>* /* scratch_ptr */) {                   \
-    CAFFE_ENFORCE_LE(num_axes, num_dims);                        \
-    if (EigenReduceTensor(                                       \
-            num_dims,                                            \
-            dims,                                                \
-            num_axes,                                            \
-            axes,                                                \
-            Eigen::internal::MeanReducer<T>(),                   \
-            X,                                                   \
-            Y)) {                                                \
-      return;                                                    \
-    }                                                            \
-    ReduceTensor(                                                \
-        X_size,                                                  \
-        Y_size,                                                  \
-        num_dims,                                                \
-        dims,                                                    \
-        num_axes,                                                \
-        axes,                                                    \
-        std::plus<T>(),                                          \
-        T(0),                                                    \
-        X,                                                       \
-        Y,                                                       \
-        context);                                                \
-    Scale<T, CPUContext>(                                        \
-        Y_size,                                                  \
-        static_cast<float>(Y_size) / static_cast<float>(X_size), \
-        Y,                                                       \
-        Y,                                                       \
-        context);                                                \
+#define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                                     \
+  template <>                                                                 \
+  void ReduceMean<T, CPUContext>(                                             \
+      const int num_dims,                                                     \
+      const int* dims,                                                        \
+      const int num_axes,                                                     \
+      const int* axes,                                                        \
+      const T* X,                                                             \
+      T* Y,                                                                   \
+      CPUContext* context,                                                    \
+      Tensor<CPUContext>* /* scratch_ptr */) {                                \
+    CAFFE_ENFORCE_LE(num_axes, num_dims);                                     \
+    if (EigenReduceTensor(                                                    \
+            num_dims,                                                         \
+            dims,                                                             \
+            num_axes,                                                         \
+            axes,                                                             \
+            Eigen::internal::MeanReducer<T>(),                                \
+            X,                                                                \
+            Y)) {                                                             \
+      return;                                                                 \
+    }                                                                         \
+    ReduceTensor(                                                             \
+        num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context); \
+    const int X_size =                                                        \
+        std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());    \
+    int scale = 1;                                                            \
+    for (int i = 0; i < num_axes; ++i) {                                      \
+      scale *= dims[axes[i]];                                                 \
+    }                                                                         \
+    const int Y_size = X_size / scale;                                        \
+    Scale<T, CPUContext>(                                                     \
+        Y_size, 1.0f / static_cast<float>(scale), Y, Y, context);             \
   }
 CAFFE2_SPECIALIZED_REDUCE_MEAN(float)
 #undef CAFFE2_SPECIALIZED_REDUCE_MEAN
+
+namespace {
+
+template <typename T>
+void BroadcastImpl(
+    const int X_ndim,
+    const int* X_dims,
+    const int Y_ndim,
+    const int* Y_dims,
+    const T* X,
+    T* Y) {
+  CAFFE_ENFORCE_LE(X_ndim, Y_ndim);
+  std::vector<int> X_dims_ex(Y_ndim);
+  const int d = Y_ndim - X_ndim;
+  std::fill(X_dims_ex.begin(), X_dims_ex.begin() + d, 1);
+  for (int i = d; i < Y_ndim; ++i) {
+    CAFFE_ENFORCE(X_dims[i - d] == 1 || X_dims[i - d] == Y_dims[i]);
+    X_dims_ex[i] = X_dims[i - d];
+  }
+  const int Y_size =
+      std::accumulate(Y_dims, Y_dims + Y_ndim, 1, std::multiplies<int>());
+  std::vector<int> index(Y_ndim, 0);
+  for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
+    const int X_index =
+        GetIndexFromDims(Y_ndim, X_dims_ex.data(), index.data());
+    Y[Y_index] = X[X_index];
+    IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
+  }
+}
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_BROADCAST(T)                     \
+  template <>                                               \
+  void Broadcast<T, CPUContext>(                            \
+      const int X_ndim,                                     \
+      const int* X_dims,                                    \
+      const int Y_ndim,                                     \
+      const int* Y_dims,                                    \
+      const T* X,                                           \
+      T* Y,                                                 \
+      CPUContext* /* context */) {                          \
+    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, X, Y); \
+  }
+CAFFE2_SPECIALIZED_BROADCAST(float)
+#undef CAFFE2_SPECIALIZED_BROADCAST
 
 #define CAFFE2_SPECIALIZED_ROWWISEMAX(T)                         \
   template <>                                                    \
@@ -1767,7 +1794,6 @@ bool TryTransposeWithHPTT(
     float* Y) {
   std::vector<int> axes_cm(ndim);
   std::vector<int> dims_cm(ndim);
-
   // Convert row-major index to column-major.
   const auto cm_fn = [ndim](const int i) { return ndim - i - 1; };
   for (int i = 0; i < ndim; ++i) {
@@ -1812,112 +1838,100 @@ ComputeXStrides(const int ndim, const int* dims, const int* axes) {
 
 template <typename T>
 void TransposeCPUImpl(
-    const int size,
     const int ndim,
-    const int* x_dims,
-    const int* y_dims,
+    const int* dims,
     const int* axes,
     const T* X,
     T* Y) {
-  std::vector<int> y_dims_vec;
-  if (y_dims == nullptr) {
-    y_dims_vec.resize(ndim);
-    for (int i = 0; i < ndim; ++i) {
-      y_dims_vec[i] = x_dims[axes[i]];
-    }
-    y_dims = y_dims_vec.data();
+  std::vector<int> Y_dims(ndim);
+  for (int i = 0; i < ndim; ++i) {
+    Y_dims[i] = dims[axes[i]];
   }
   // Measure amount of contiguous data we can copy at once
   int block_size = 1;
   int num_shared_idx = 0;
   for (int i = ndim - 1; i >= 0 && axes[i] == i; --i) {
-    block_size *= y_dims[i];
+    block_size *= Y_dims[i];
     ++num_shared_idx;
   }
-  if (ndim < 2 || num_shared_idx == ndim) {
-    memcpy(Y, X, size * sizeof(T));
+  const int itr_axes = ndim - num_shared_idx;
+  const int num_blocks = std::accumulate(
+      Y_dims.cbegin(), Y_dims.cbegin() + itr_axes, 1, std::multiplies<int>());
+  if (ndim < 2 || itr_axes == 0) {
+    std::memcpy(Y, X, num_blocks * block_size * sizeof(T));
     return;
   }
-  const int itr_axes = ndim - num_shared_idx;
-  const std::vector<int> x_strides = ComputeXStrides(itr_axes, x_dims, axes);
-  std::vector<int> index_digits(itr_axes, 0);
-  const int num_blocks = size / block_size;
-  for (int y_index = 0; y_index < num_blocks; ++y_index) {
-    const int x_index = std::inner_product(
-        x_strides.cbegin(), x_strides.cend(), index_digits.cbegin(), 0);
+  const std::vector<int> X_strides = ComputeXStrides(itr_axes, dims, axes);
+  std::vector<int> index(itr_axes, 0);
+  for (int Y_index = 0; Y_index < num_blocks; ++Y_index) {
+    const int X_index = std::inner_product(
+        X_strides.cbegin(), X_strides.cend(), index.cbegin(), 0);
     if (block_size == 1) {
-      Y[y_index] = X[x_index];
+      Y[Y_index] = X[X_index];
     } else {
-      memcpy(
-          Y + block_size * y_index,
-          X + block_size * x_index,
+      std::memcpy(
+          Y + block_size * Y_index,
+          X + block_size * X_index,
           block_size * sizeof(T));
     }
-    IncreaseDimsIndex(itr_axes, y_dims, index_digits.data());
+    IncreaseIndexInDims(itr_axes, Y_dims.data(), index.data());
   }
 }
 
 template <typename T, int D>
-void EigenTransposeImpl(
-    const int* X_dims,
-    const int* Y_dims,
-    const int* axes,
-    const T* X,
-    T* Y) {
-  Eigen::DSizes<Eigen::DenseIndex, D> X_dims_array;
-  Eigen::DSizes<Eigen::DenseIndex, D> Y_dims_array;
+void EigenTransposeImpl(const int* dims, const int* axes, const T* X, T* Y) {
+  Eigen::DSizes<Eigen::DenseIndex, D> X_dims;
+  Eigen::DSizes<Eigen::DenseIndex, D> Y_dims;
   Eigen::array<Eigen::DenseIndex, D> axes_array;
 #pragma unroll
   for (int i = 0; i < D; ++i) {
-    X_dims_array[i] = static_cast<Eigen::DenseIndex>(X_dims[i]);
-    Y_dims_array[i] = static_cast<Eigen::DenseIndex>(
-        Y_dims == nullptr ? X_dims[axes[i]] : Y_dims[i]);
+    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
+    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[axes[i]]);
     axes_array[i] = static_cast<Eigen::DenseIndex>(axes[i]);
   }
-  EigenTensorMap<T, D>(Y, Y_dims_array) =
-      EigenTensorMap<T, D>(const_cast<T*>(X), X_dims_array).shuffle(axes_array);
+  EigenTensorMap<T, D>(Y, Y_dims) =
+      EigenTensorMap<T, D>(const_cast<T*>(X), X_dims).shuffle(axes_array);
 }
 
 template <typename T>
 bool EigenTranspose(
     const int ndim,
-    const int* X_dims,
-    const int* Y_dims,
+    const int* dims,
     const int* axes,
     const T* X,
     T* Y) {
 #if EIGEN_VERSION_AT_LEAST(3, 3, 0)
   switch (ndim) {
     case 1: {
-      EigenTransposeImpl<T, 1>(X_dims, Y_dims, axes, X, Y);
+      EigenTransposeImpl<T, 1>(dims, axes, X, Y);
       return true;
     }
     case 2: {
-      EigenTransposeImpl<T, 2>(X_dims, Y_dims, axes, X, Y);
+      EigenTransposeImpl<T, 2>(dims, axes, X, Y);
       return true;
     }
     case 3: {
-      EigenTransposeImpl<T, 3>(X_dims, Y_dims, axes, X, Y);
+      EigenTransposeImpl<T, 3>(dims, axes, X, Y);
       return true;
     }
     case 4: {
-      EigenTransposeImpl<T, 4>(X_dims, Y_dims, axes, X, Y);
+      EigenTransposeImpl<T, 4>(dims, axes, X, Y);
       return true;
     }
     case 5: {
-      EigenTransposeImpl<T, 5>(X_dims, Y_dims, axes, X, Y);
+      EigenTransposeImpl<T, 5>(dims, axes, X, Y);
       return true;
     }
     case 6: {
-      EigenTransposeImpl<T, 6>(X_dims, Y_dims, axes, X, Y);
+      EigenTransposeImpl<T, 6>(dims, axes, X, Y);
       return true;
     }
     case 7: {
-      EigenTransposeImpl<T, 7>(X_dims, Y_dims, axes, X, Y);
+      EigenTransposeImpl<T, 7>(dims, axes, X, Y);
       return true;
     }
     case 8: {
-      EigenTransposeImpl<T, 8>(X_dims, Y_dims, axes, X, Y);
+      EigenTransposeImpl<T, 8>(dims, axes, X, Y);
       return true;
     }
     default: { return false; }
@@ -1930,7 +1944,6 @@ bool EigenTranspose(
 
 template <>
 void Transpose<float, CPUContext>(
-    const int size,
     const int ndim,
     const int* dims,
     const int* axes,
@@ -1942,64 +1955,26 @@ void Transpose<float, CPUContext>(
     return;
   }
 #endif // CAFFE2_USE_HPTT
-  if (EigenTranspose(ndim, dims, nullptr, axes, X, Y)) {
+  if (EigenTranspose(ndim, dims, axes, X, Y)) {
     return;
   }
-  TransposeCPUImpl(size, ndim, dims, nullptr, axes, X, Y);
+  TransposeCPUImpl(ndim, dims, axes, X, Y);
 }
 
-template <>
-void Transpose<float, CPUContext>(
-    const int size,
-    const int ndim,
-    const int* X_dims,
-    const int* Y_dims,
-    const int* axes,
-    const float* X,
-    float* Y,
-    CPUContext* /* context */) {
-#ifdef CAFFE2_USE_HPTT
-  if (TryTransposeWithHPTT(ndim, X_dims, axes, X, Y)) {
-    return;
+#define CAFFE2_SPECIALIZED_TRANSPOSE(T)           \
+  template <>                                     \
+  void Transpose<T, CPUContext>(                  \
+      const int ndim,                             \
+      const int* dims,                            \
+      const int* axes,                            \
+      const T* X,                                 \
+      T* Y,                                       \
+      CPUContext* /* context */) {                \
+    if (EigenTranspose(ndim, dims, axes, X, Y)) { \
+      return;                                     \
+    }                                             \
+    TransposeCPUImpl(ndim, dims, axes, X, Y);     \
   }
-#endif // CAFFE2_USE_HPTT
-  if (EigenTranspose(ndim, X_dims, Y_dims, axes, X, Y)) {
-    return;
-  }
-  TransposeCPUImpl(size, ndim, X_dims, Y_dims, axes, X, Y);
-}
-
-#define CAFFE2_SPECIALIZED_TRANSPOSE(T)                       \
-  template <>                                                 \
-  void Transpose<T, CPUContext>(                              \
-      const int size,                                         \
-      const int ndim,                                         \
-      const int* dims,                                        \
-      const int* axes,                                        \
-      const T* X,                                             \
-      T* Y,                                                   \
-      CPUContext* /* context */) {                            \
-    if (EigenTranspose(ndim, dims, nullptr, axes, X, Y)) {    \
-      return;                                                 \
-    }                                                         \
-    TransposeCPUImpl(size, ndim, dims, nullptr, axes, X, Y);  \
-  }                                                           \
-  template <>                                                 \
-  void Transpose<T, CPUContext>(                              \
-      const int size,                                         \
-      const int ndim,                                         \
-      const int* X_dims,                                      \
-      const int* Y_dims,                                      \
-      const int* axes,                                        \
-      const T* X,                                             \
-      T* Y,                                                   \
-      CPUContext* /* context */) {                            \
-    if (EigenTranspose(ndim, X_dims, Y_dims, axes, X, Y)) {   \
-      return;                                                 \
-    }                                                         \
-    TransposeCPUImpl(size, ndim, X_dims, Y_dims, axes, X, Y); \
-  }
-
 CAFFE2_SPECIALIZED_TRANSPOSE(double)
 CAFFE2_SPECIALIZED_TRANSPOSE(int)
 CAFFE2_SPECIALIZED_TRANSPOSE(long)
