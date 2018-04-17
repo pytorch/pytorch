@@ -1345,8 +1345,8 @@ class TestTorch(TestCase):
             ("abcd,dfg->abcfg", F, G),  # tensor tensor contraction
             ("ijk,jk->ik", C, A),       # tensor matrix contraction with double indices
             ("ijk,jk->ij", C, A),       # tensor matrix contraction with double indices
-            ("ijk,ik->j", C, B),        # fixme -- non contiguous
-            ("ijk,ik->jk", C, B),       # fixme -- non contiguous with double indices
+            ("ijk,ik->j", C, B),        # non contiguous
+            ("ijk,ik->jk", C, B),       # non contiguous with double indices
             # -- Other
             ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
         ]

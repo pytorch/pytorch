@@ -148,29 +148,29 @@ Tensor einsum(String eqn, TensorList tensors) {
   // the following parses or infers output (right hand side)
   // it also assigns the sorted_positions ((letter) index -> dimension in Tensors) and position_labels (dimensions in Tensors -> index)
   // for the output indices
-  int64_t num_outputs = 0;
+  int64_t num_output_dims = 0;
   std::vector<int64_t> position_labels;
   if (pos != std::string::npos) {            // parse the user provided right hand side
     for (auto &c : eqn.substr(pos+2)) {
       AT_ASSERT(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
       int64_t index_num = c-'a';
       AT_ASSERT(sorted_position[index_num] == -1, "index %c occurs twice in output", c);
-      sorted_position[index_num] = num_outputs;
+      sorted_position[index_num] = num_output_dims;
       position_labels.push_back(index_num);
-      num_outputs++;
+      num_output_dims++;
     }
   } else {                                   // create a right hand side: the indices that occur exactly once in alphabetic order
     for (size_t idx = 0; idx < number_of_letters; idx++) {
       if (number_of_occurences[idx] == 1) {
-	sorted_position[idx] = num_outputs;
+	sorted_position[idx] = num_output_dims;
 	position_labels.push_back(idx);
-	num_outputs++;
+	num_output_dims++;
       }
     }
   }
   // now we assign the sorted_positions ((letter) index -> dimension in Tensors) and position_labels (dimensions in Tensors -> index)
   // for the non-output indices - those that are eventually summed over
-  int64_t position = num_outputs;            // we now determine the porder of the remaining indices (in so far they are in the equation)
+  int64_t position = num_output_dims;            // we now determine the porder of the remaining indices (in so far they are in the equation)
   for (size_t idx = 0; idx < number_of_letters; idx++) {
     if ((number_of_occurences[idx] > 0) && (sorted_position[idx]==-1)) {
       sorted_position[idx] = position;
@@ -215,7 +215,7 @@ Tensor einsum(String eqn, TensorList tensors) {
   Tensor result = permuted_ops[0];
   for (int64_t idx = 0; idx < number_of_letters; idx++) {
     if ((last_occurence[idx] == 0)
-	&& (sorted_position[idx]>=num_outputs)) {
+	&& (sorted_position[idx]>=num_output_dims)) {
       result = result.sum(sorted_position[idx], true);
     }
   }
@@ -225,14 +225,14 @@ Tensor einsum(String eqn, TensorList tensors) {
     std::vector<int64_t> sum_dims;
     for (int64_t idx = 0; idx < number_of_letters; idx++) {
       if ((last_occurence[idx] == i)
-	  && (sorted_position[idx]>=num_outputs)) {
+	  && (sorted_position[idx]>=num_output_dims)) {
 	sum_dims.push_back(sorted_position[idx]);
       }
     }
     result = at::native::sumproduct_pair(result, permuted_ops[i], sum_dims, true);
   }
   // finally, we squeeze out all non-result dimensions
-  for (int64_t dim = position_labels.size()-1; dim >= num_outputs; dim--)
+  for (int64_t dim = position_labels.size()-1; dim >= num_output_dims; dim--)
     result.squeeze_(dim);
   return result;
 }
