@@ -56,18 +56,18 @@ struct TensorImpl : public Retainable {
   // Some methods below are defined in TensorImpl.cpp because Tensor is an
   // incomplete type.
 
-  virtual void set_requires_grad(bool requires_grad) {
+  AT_API virtual void set_requires_grad(bool requires_grad) {
     AT_ERROR("set_requires_grad is not implemented for Tensor");
   }
-  virtual bool requires_grad() const {
+  AT_API virtual bool requires_grad() const {
     AT_ERROR("requires_grad is not implemented for Tensor");
   }
 
-  virtual Tensor& grad();
-  virtual const Tensor& grad() const;
+  AT_API virtual Tensor& grad();
+  AT_API virtual const Tensor& grad() const;
 
-  virtual Tensor detach() const;
-  virtual void detach_() {
+  AT_API virtual Tensor detach() const;
+  AT_API virtual void detach_() {
     AT_ERROR("detach_ is not implemented for Tensor");
   }
 
