@@ -1,6 +1,10 @@
 import functools
 import types
 
+import torch._C as _C
+
+TensorProtoDataType = _C.onnx.TensorProtoDataType
+
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
 

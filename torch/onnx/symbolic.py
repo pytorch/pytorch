@@ -631,14 +631,14 @@ def _unique(g, input, sorted, return_inverse):
 # TODO: remove these once we support Type's in the JIT IR and we can once again
 # use the unified toType operator
 cast_pytorch_to_onnx = {
-    'uint8_t': 2,
-    'int8_t': 3,
-    'double': 11,
-    'float': 1,
-    'Half': 10,
-    'int': 6,
-    'int64_t': 7,
-    'int16_t': 5,
+    'uint8_t': torch.onnx.TensorProtoDataType.UINT8,
+    'int8_t': torch.onnx.TensorProtoDataType.INT8,
+    'double': torch.onnx.TensorProtoDataType.DOUBLE,
+    'float': torch.onnx.TensorProtoDataType.FLOAT,
+    'Half': torch.onnx.TensorProtoDataType.FLOAT16,
+    'int': torch.onnx.TensorProtoDataType.INT32,
+    'int64_t': torch.onnx.TensorProtoDataType.INT64,
+    'int16_t': torch.onnx.TensorProtoDataType.INT16,
 }
 
 
