@@ -76,6 +76,24 @@ void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
   types[1] = node->inputs().at(1)->type()->expect<TensorType>();
 }
 
+void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>& types) {
+  auto op_info = getTensorOp(node);
+  std::vector<at::Tensor> stack;
+
+  for(auto & type : types) {
+    stack.push_back(representativeTensor(type));
+  }
+  // XXX: we're not catching any exceptions from the op for now. This
+  // is to uncover any mistakes we could make when editing this code,
+  // and eventually it shouldn't matter, because this phase should be
+  // preceded by schema checking.
+  op_info.op(stack);
+  JIT_ASSERT(stack.size() == node->outputs().size());
+  for(size_t i = 0; i < stack.size(); ++i) {
+    node->outputs()[i]->inferTypeFrom(stack[i]);
+  }
+}
+
 void PropagateShapeOnNode(Node * node) {
   using AKind = AttributeKind;
   // These don't require the types and present flag. Return early after we
@@ -267,6 +285,13 @@ void PropagateShapeOnNode(Node * node) {
         node->output()->setType(types.at(0)->withSizes(sizes));
       }
     } break;
+    case aten::expand: {
+      if(check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
+                         {{AKind::is, attr::size}})) {
+        // it is safe to run this, even if we have an integer input tensor
+        PropagateShapeOnNodeByRunningIt(node, types);
+      }
+    } break;
     case prim::ReplaceIfUndef: {
       // If types[0] has a type, then it is not defined, and the type will
       // get set to types[0] because that will be the value propagated.
@@ -298,32 +323,17 @@ void PropagateShapeOnNode(Node * node) {
   // If we haven't manage to handle the op so far, we fall back to inferring the
   // shapes by doing an example run of the op (if we can).
   if (!handled) {
-    auto op_info = getTensorOp(node);
-    std::vector<at::Tensor> stack;
-    bool shape_inferenceable = true;
     // Integral typed inputs are often an indicator that we're indexing into
     // a tensor, so we should special-case these ops in the shape propagation.
     // Additionally, passing in a zero representative tensor into an integer
     // division op causes divide-by-zero errors
-    for(auto & type : types) {
-      if (at::isIntegralType(type->scalarType())) {
-        shape_inferenceable = false;
-        break;
-      }
-      stack.push_back(representativeTensor(type));
-    }
+    bool shape_inferenceable = !std::any_of(types.begin(), types.end(), [](TensorType* t){
+      return at::isIntegralType(t->scalarType());
+    });
     if (!shape_inferenceable) {
       setDynamicType(node);
     } else {
-      // XXX: we're not catching any exceptions from the op for now. This
-      // is to uncover any mistakes we could make when editing this code,
-      // and eventually it shouldn't matter, because this phase should be
-      // preceded by schema checking.
-      op_info.op(stack);
-      JIT_ASSERT(stack.size() == node->outputs().size());
-      for(size_t i = 0; i < stack.size(); ++i) {
-        node->outputs()[i]->inferTypeFrom(stack[i]);
-      }
+      PropagateShapeOnNodeByRunningIt(node, types);
     }
   }
 }

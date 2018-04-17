@@ -1,5 +1,5 @@
-#include "caffe2/core/logging.h"
 #include "caffe2/onnx/onnx_exporter.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/onnx/helper.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/map_utils.h"
@@ -80,10 +80,83 @@ TensorProto CreateOnnxShapeTensor(std::shared_ptr<DummyName> dummy, const std::v
   tensor.set_data_type(TensorProto::INT64);
   tensor.add_dims(shape.size());
   tensor.mutable_raw_data()->assign(
-      reinterpret_cast<const char*>(shape.data()), sizeof(int64_t) * shape.size());
+      reinterpret_cast<const char*>(shape.data()),
+      sizeof(int64_t) * shape.size());
   return tensor;
 }
+
+std::string SsaName(const std::string& n, int version) {
+  return MakeString(n, "_", version);
+}
 } // namespace
+
+std::pair<
+    std::unordered_map<std::string, std::string>,
+    std::unordered_map<std::string, std::string>>
+SsaRewrite(caffe2::NetDef* init_net, caffe2::NetDef* pred_net) {
+  std::unordered_map<std::string, std::string> input_mapping;
+  std::unordered_map<std::string, std::string> output_mapping;
+  std::unordered_map<std::string, int> blob_versions;
+
+#define REWRITE_EXTERNAL_IO(net, name)                 \
+  for (auto& name : *net->mutable_external_##name()) { \
+    auto version = blob_versions.at(name);             \
+    auto new_##name = SsaName(name, version);          \
+    name##_mapping.emplace(new_##name, name);          \
+    name = new_##name;                                 \
+  }
+
+  if (init_net) {
+    for (auto& op : *init_net->mutable_op()) {
+      CAFFE_ENFORCE_EQ(op.type().find("GivenTensor"), 0);
+      CAFFE_ENFORCE_EQ(op.type().rfind("Fill"), op.type().size() - 4);
+      CAFFE_ENFORCE_EQ(op.output_size(), 1);
+      const auto& output = op.output(0);
+      op.set_output(0, SsaName(output, 0));
+    }
+    for (const auto& input : init_net->external_input()) {
+      blob_versions.emplace(input, 0);
+    }
+    for (const auto& output : init_net->external_output()) {
+      blob_versions.emplace(output, 0);
+    }
+    REWRITE_EXTERNAL_IO(init_net, input);
+    REWRITE_EXTERNAL_IO(init_net, output);
+    blob_versions.clear();
+  }
+
+  if (pred_net) {
+    for (const auto& input : pred_net->external_input()) {
+      blob_versions.emplace(input, 0);
+    }
+    REWRITE_EXTERNAL_IO(pred_net, input);
+    for (auto& op : *pred_net->mutable_op()) {
+      for (auto& input : *op.mutable_input()) {
+        const auto it = blob_versions.find(input);
+        if (it != blob_versions.end()) {
+          input = SsaName(input, it->second);
+        } else {
+          blob_versions.emplace(input, 0);
+          input = SsaName(input, 0);
+        }
+      }
+      for (auto& output : *op.mutable_output()) {
+        auto it = blob_versions.find(output);
+        if (it != blob_versions.end()) {
+          it->second += 1;
+          output = SsaName(output, it->second);
+        } else {
+          blob_versions.emplace(output, 0);
+          output = SsaName(output, 0);
+        }
+      }
+    }
+    REWRITE_EXTERNAL_IO(pred_net, output);
+  }
+#undef REWRITE_EXTERNAL_IO
+
+  return std::make_pair(std::move(input_mapping), std::move(output_mapping));
+}
 
 const std::unordered_map<std::string, std::string>&
 OnnxExporter::get_renamed_operators() const {
@@ -453,7 +526,7 @@ ConvertedResult OnnxExporter::CreateConcatNodes(
   }
 
   bool explicit_axis = false;
-  for (const auto& a: def.arg()) {
+  for (const auto& a : def.arg()) {
     if (a.name() == "axis") {
       explicit_axis = true;
       break;
@@ -481,7 +554,7 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
   auto h = x_shape.dims(2);
   auto w = x_shape.dims(3);
   int64_t g = 0;
-  for (const auto& arg: def.arg()) {
+  for (const auto& arg : def.arg()) {
     if (arg.name() == "group") {
       g = arg.i();
       break;
@@ -528,7 +601,7 @@ ConvertedResult OnnxExporter::CreateSliceNodes(
   const auto& shape = shapes.at(node.input(0));
 
   std::vector<int64_t> dims;
-  for (auto& attr: *node.mutable_attribute()) {
+  for (auto& attr : *node.mutable_attribute()) {
     if (attr.name() == "starts") {
       auto len = attr.ints_size();
       if (len) {
@@ -538,7 +611,7 @@ ConvertedResult OnnxExporter::CreateSliceNodes(
     } else if (attr.name() == "ends") {
       for (int i = 0; i < attr.ints_size(); ++i) {
         auto end = attr.ints(i);
-        if (end >=0) {
+        if (end >= 0) {
           continue;
         }
         if (end == -1) {
@@ -572,7 +645,7 @@ ConvertedResult OnnxExporter::CreateReshapeNodes(
     const auto& attr = node.attribute(i);
     if (attr.name() == "shape") {
       std::vector<int64_t> shape;
-      for (const auto k: attr.ints()) {
+      for (const auto k : attr.ints()) {
         shape.push_back(k);
       }
       const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, shape));

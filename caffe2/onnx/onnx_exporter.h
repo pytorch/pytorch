@@ -23,6 +23,11 @@ using ::ONNX_NAMESPACE::TensorProto;
 using ConvertedResult =
     std::pair<std::vector<NodeProto>, std::vector<TensorProto>>;
 
+std::pair<
+    std::unordered_map<std::string, std::string>,
+    std::unordered_map<std::string, std::string>>
+SsaRewrite(caffe2::NetDef* init_net, caffe2::NetDef* pred_net);
+
 class OnnxExporter {
   using SpecialOpConverter = ConvertedResult (OnnxExporter::*)(
       const caffe2::OperatorDef&,

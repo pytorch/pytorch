@@ -59,6 +59,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
             data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
             data_queue.put((idx, samples))
+            del samples
 
 
 def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
