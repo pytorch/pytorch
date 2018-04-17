@@ -15,10 +15,10 @@ import itertools as it
 
 class TestReduceOps(hu.HypothesisTestCase):
     @given(
-        d0=st.integers(1, 5),
-        d1=st.integers(1, 5),
-        d2=st.integers(1, 5),
-        d3=st.integers(1, 5),
+        d0=st.integers(0, 5),
+        d1=st.integers(0, 5),
+        d2=st.integers(0, 5),
+        d3=st.integers(0, 5),
         keepdims=st.integers(0, 1),
         seed=st.integers(0, 2**32 - 1),
         **hu.gcs_cpu_only)
@@ -45,11 +45,15 @@ class TestReduceOps(hu.HypothesisTestCase):
                                            keepdims=keepdims))
 
         np.random.seed(seed)
+
+        # Note: sum is well defined for the 0 size case, but mean is not since
+        # we divide by 0 and UBSAN doesn't like that.
         for axes in it.combinations(range(4), 2):
             data = np.random.randn(d0, d1, d2, d3).astype(np.float32)
 
-            reduce_op_test("ReduceMean", reduce_mean_ref, data, axes, keepdims,
-                           gc)
+            if data.size > 0:
+                reduce_op_test(
+                    "ReduceMean", reduce_mean_ref, data, axes, keepdims, gc)
 
             reduce_op_test("ReduceSum", reduce_sum_ref, data, axes, keepdims,
                            gc)
@@ -57,8 +61,9 @@ class TestReduceOps(hu.HypothesisTestCase):
         for axes in it.combinations(range(3), 2):
             data = np.random.randn(d0, d1, d2).astype(np.float32)
 
-            reduce_op_test("ReduceMean", reduce_mean_ref, data, axes, keepdims,
-                           gc)
+            if data.size > 0:
+                reduce_op_test(
+                    "ReduceMean", reduce_mean_ref, data, axes, keepdims, gc)
 
             reduce_op_test("ReduceSum", reduce_sum_ref, data, axes, keepdims,
                            gc)
@@ -66,8 +71,9 @@ class TestReduceOps(hu.HypothesisTestCase):
         for axes in it.combinations(range(2), 2):
             data = np.random.randn(d0, d1).astype(np.float32)
 
-            reduce_op_test("ReduceMean", reduce_mean_ref, data, axes, keepdims,
-                           gc)
+            if data.size > 0:
+                reduce_op_test(
+                    "ReduceMean", reduce_mean_ref, data, axes, keepdims, gc)
 
             reduce_op_test("ReduceSum", reduce_sum_ref, data, axes, keepdims,
                            gc)
@@ -75,8 +81,9 @@ class TestReduceOps(hu.HypothesisTestCase):
         for axes in it.combinations(range(1), 1):
             data = np.random.randn(d0).astype(np.float32)
 
-            reduce_op_test("ReduceMean", reduce_mean_ref, data, axes, keepdims,
-                           gc)
+            if data.size > 0:
+                reduce_op_test(
+                    "ReduceMean", reduce_mean_ref, data, axes, keepdims, gc)
 
             reduce_op_test("ReduceSum", reduce_sum_ref, data, axes, keepdims,
                            gc)
@@ -344,4 +351,3 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
         self.reduce_op_test(
             "ReduceBackMean", ref_mean, [X, lengths], ["input", "lengths"],
             num_reduce_dim, gc)
-
