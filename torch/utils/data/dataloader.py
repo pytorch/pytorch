@@ -39,6 +39,35 @@ r"""Whether to use shared memory in default_collate"""
 
 MANAGER_STATUS_CHECK_INTERVAL = 5.0
 
+if IS_WINDOWS:
+    class ManagerWatchdog(object):
+        def __init__(self):
+            self.manager_pid = os.getppid()
+
+            kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
+            kernel32.OpenProcess.restype = HANDLE
+            kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
+            kernel32.WaitForSingleObject.restype = DWORD
+
+            # Value obtained from https://msdn.microsoft.com/en-us/library/ms684880.aspx
+            SYNCHRONIZE = 0x00100000
+            self.manager_handle = kernel32.OpenProcess(SYNCHRONIZE, 0, manager_pid)
+
+            if not self.manager_handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+
+        def is_alive(self):
+            # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
+            return kernel32.WaitForSingleObject(self.manager_handle, 0) != 0
+else:
+    class ManagerWatchdog(object):
+        def __init__(self):
+            self.manager_pid = os.getppid()
+
+        def is_alive(self):
+            return os.getppid() == self.manager_pid
+
 
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id, manager_pid):
     global _use_shared_memory
@@ -57,37 +86,13 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     if init_fn is not None:
         init_fn(worker_id)
 
-    manager_handle = None
-    if IS_WINDOWS:
-        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
-        kernel32.OpenProcess.restype = HANDLE
-        kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
-        kernel32.WaitForSingleObject.restype = DWORD
-
-        # Value obtained from https://msdn.microsoft.com/en-us/library/ms684880.aspx
-        SYNCHRONIZE = 0x00100000
-        manager_handle = kernel32.OpenProcess(SYNCHRONIZE, 0, manager_pid)
-
-        if not manager_handle:
-            raise ctypes.WinError(ctypes.get_last_error())
-
-    def is_manager_process_alive(manager_pid, manager_handle):
-        if IS_WINDOWS:
-            result = kernel32.WaitForSingleObject(manager_handle, 0)
-            # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
-            if result == 0:
-                return False
-        else:
-            if os.getppid() != manager_pid:
-                return False
-        return True
+    watchdog = ManagerWatchdog()
 
     while True:
         try:
             r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
         except queue.Empty:
-            if is_manager_process_alive(manager_pid, manager_handle):
+            if watchdog.is_alive():
                 continue
             else:
                 break
