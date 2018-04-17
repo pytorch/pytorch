@@ -1,6 +1,7 @@
 import os
 import time
 
+
 class FileBaton:
     '''A primitive, file-based synchronization utility.'''
 
