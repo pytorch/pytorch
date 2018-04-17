@@ -8,16 +8,12 @@
 
 #include <Python.h>
 
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
-#include "torch/csrc/utils/tensor_devices.h"
-#include "torch/csrc/utils/tensor_layouts.h"
 
 #include "python_torch_functions_dispatch.h"
 
@@ -34,17 +30,27 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
   return self;
 }
 
-static void check_out_type_matches(Tensor result, ScalarType scalarType, const THPLayout& layout,
-                                   const Device& device, bool device_is_none) {
-  auto result_device_type = torch::getDeviceType(result.type());
-  auto device_type = device_is_none ? result_device_type : device.type;
-  const auto& type = torch::getType(scalarType, layout, device_type);
+static void check_out_type_matches(Tensor result, const at::Type &type) {
   if (result.type() != type) {
-    AT_ERROR(
-        "type corresponding to %s does not match type of out parameter (%s)",
-        type.toString(),
-        result.type().toString());
+    at::runtime_error("type corresponding to %s does not match type of out parameter (%s)",
+                      type.toString(), result.type().toString());
   }
+}
+
+static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp(min, max);
+}
+static Tensor dispatch_clamp_min(const Tensor & self, Scalar min) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp_min(min);
+}
+static Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp_max(max);
 }
 
 // The Python clamp() syntax has to be mapped to one of three C++ functions
@@ -52,33 +58,19 @@ static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* 
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "clamp(Tensor input, Scalar min=None, Scalar max=None, *, Tensor out=None)",
+    "clamp(Tensor input, Scalar min=None, Scalar max=None)",
   });
-
-  ParsedArgs<4> parsed_args;
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (!r.isNone(1) && !r.isNone(2)) {
-    if (!r.isNone(3)) {
-        return wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2), r.tensor(3)));
-    } else {
-        return wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2)));
-    }
+    return THPVariable_Wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2)));
   } else if (!r.isNone(1)) {
-    if (!r.isNone(3)) {
-        return wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1), r.tensor(3)));
-    } else {
-        return wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1)));
-    }
+    return THPVariable_Wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1)));
   } else if (!r.isNone(2)) {
-    if (!r.isNone(3)) {
-        return wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2), r.tensor(3)));
-    } else {
-        return wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2)));
-    }
+    return THPVariable_Wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2)));
   } else {
     throw std::runtime_error("At least one of 'min' or 'max' must not be None");
   }
-  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -94,13 +86,19 @@ static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyO
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_promote_types(ScalarType type1, ScalarType type2)",
+    "_promote_types(Type type1, Type type2)",
   });
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    ScalarType promoted = at::promoteTypes(r.scalartype(0), r.scalartype(1));
-    return torch::autograd::utils::wrap(torch::getDtype(promoted));
+    const at::Type& t1 = r.type(0);
+    const at::Type& t2 = r.type(1);
+    if (t1.backend() != t2.backend()) {
+      at::runtime_error("_promote_types only supports types with the same backends.  Got %s and %s.",
+                        at::toString(t1.backend()), at::toString(t2.backend()));
+    }
+    ScalarType promoted = at::promoteTypes(t1.scalarType(), t2.scalarType());
+    return torch::autograd::utils::wrap(torch::getDtype(t1.backend(), promoted));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

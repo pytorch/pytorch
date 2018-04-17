@@ -9,8 +9,6 @@ WITH_CUDNN = False
 CUDNN_LIB_DIR = None
 CUDNN_INCLUDE_DIR = None
 CUDNN_LIBRARY = None
-WITH_STATIC_CUDNN = os.getenv("USE_STATIC_CUDNN")
-
 if WITH_CUDA and not check_env_flag('NO_CUDNN'):
     lib_paths = list(filter(bool, [
         os.getenv('CUDNN_LIB_DIR'),
@@ -65,11 +63,7 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
                 CUDNN_LIB_DIR = path
                 break
         else:
-            if WITH_STATIC_CUDNN is not None:
-                search_name = 'libcudnn_static.a'
-            else:
-                search_name = 'libcudnn*' + str(CUDNN_INCLUDE_VERSION) + "*"
-            libraries = sorted(glob.glob(os.path.join(path, search_name)))
+            libraries = sorted(glob.glob(os.path.join(path, 'libcudnn*' + str(CUDNN_INCLUDE_VERSION) + "*")))
             if libraries:
                 CUDNN_LIBRARY = libraries[0]
                 CUDNN_LIB_DIR = path
