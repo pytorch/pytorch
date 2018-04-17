@@ -711,14 +711,14 @@ void EigenReduceTensorImpl(
     T* Y) {
   Eigen::DSizes<Eigen::DenseIndex, kNumDims> X_dims;
   Eigen::DSizes<Eigen::DenseIndex, kNumDims> Y_dims;
-  Eigen::array<TIndex, kNumAxes> reduce_dims;
+  Eigen::array<Eigen::DenseIndex, kNumAxes> reduce_dims;
   for (int i = 0; i < kNumDims; ++i) {
     X_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
     Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
   }
   for (int i = 0; i < kNumAxes; ++i) {
     Y_dims[axes[i]] = static_cast<Eigen::DenseIndex>(1);
-    reduce_dims[i] = axes[i];
+    reduce_dims[i] = static_cast<Eigen::DenseIndex>(axes[i]);
   }
   EigenTensorMap<T, kNumDims>(Y, Y_dims) =
       EigenTensorMap<T, kNumDims>(const_cast<T*>(X), X_dims)
@@ -1867,6 +1867,75 @@ void TransposeCPUImpl(
   }
 }
 
+template <typename T, int D>
+void EigenTransposeImpl(
+    const int* X_dims,
+    const int* Y_dims,
+    const int* axes,
+    const T* X,
+    T* Y) {
+  Eigen::DSizes<Eigen::DenseIndex, D> X_dims_array;
+  Eigen::DSizes<Eigen::DenseIndex, D> Y_dims_array;
+  Eigen::array<Eigen::DenseIndex, D> axes_array;
+#pragma unroll
+  for (int i = 0; i < D; ++i) {
+    X_dims_array[i] = static_cast<Eigen::DenseIndex>(X_dims[i]);
+    Y_dims_array[i] = static_cast<Eigen::DenseIndex>(
+        Y_dims == nullptr ? X_dims[axes[i]] : Y_dims[i]);
+    axes_array[i] = static_cast<Eigen::DenseIndex>(axes[i]);
+  }
+  EigenTensorMap<T, D>(Y, Y_dims_array) =
+      EigenTensorMap<T, D>(const_cast<T*>(X), X_dims_array).shuffle(axes_array);
+}
+
+template <typename T>
+bool EigenTranspose(
+    const int ndim,
+    const int* X_dims,
+    const int* Y_dims,
+    const int* axes,
+    const T* X,
+    T* Y) {
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  switch (ndim) {
+    case 1: {
+      EigenTransposeImpl<T, 1>(X_dims, Y_dims, axes, X, Y);
+      return true;
+    }
+    case 2: {
+      EigenTransposeImpl<T, 2>(X_dims, Y_dims, axes, X, Y);
+      return true;
+    }
+    case 3: {
+      EigenTransposeImpl<T, 3>(X_dims, Y_dims, axes, X, Y);
+      return true;
+    }
+    case 4: {
+      EigenTransposeImpl<T, 4>(X_dims, Y_dims, axes, X, Y);
+      return true;
+    }
+    case 5: {
+      EigenTransposeImpl<T, 5>(X_dims, Y_dims, axes, X, Y);
+      return true;
+    }
+    case 6: {
+      EigenTransposeImpl<T, 6>(X_dims, Y_dims, axes, X, Y);
+      return true;
+    }
+    case 7: {
+      EigenTransposeImpl<T, 7>(X_dims, Y_dims, axes, X, Y);
+      return true;
+    }
+    case 8: {
+      EigenTransposeImpl<T, 8>(X_dims, Y_dims, axes, X, Y);
+      return true;
+    }
+    default: { return false; }
+  }
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  return false;
+}
+
 } // namespace
 
 template <>
@@ -1883,6 +1952,9 @@ void Transpose<float, CPUContext>(
     return;
   }
 #endif // CAFFE2_USE_HPTT
+  if (EigenTranspose(ndim, dims, nullptr, axes, X, Y)) {
+    return;
+  }
   TransposeCPUImpl(size, ndim, dims, nullptr, axes, X, Y);
 }
 
@@ -1890,18 +1962,21 @@ template <>
 void Transpose<float, CPUContext>(
     const int size,
     const int ndim,
-    const int* x_dims,
-    const int* y_dims,
+    const int* X_dims,
+    const int* Y_dims,
     const int* axes,
     const float* X,
     float* Y,
     CPUContext* /* context */) {
 #ifdef CAFFE2_USE_HPTT
-  if (TryTransposeWithHPTT(ndim, x_dims, axes, X, Y)) {
+  if (TryTransposeWithHPTT(ndim, X_dims, axes, X, Y)) {
     return;
   }
 #endif // CAFFE2_USE_HPTT
-  TransposeCPUImpl(size, ndim, x_dims, y_dims, axes, X, Y);
+  if (EigenTranspose(ndim, X_dims, Y_dims, axes, X, Y)) {
+    return;
+  }
+  TransposeCPUImpl(size, ndim, X_dims, Y_dims, axes, X, Y);
 }
 
 #define CAFFE2_SPECIALIZED_TRANSPOSE(T)                       \
@@ -1914,19 +1989,25 @@ void Transpose<float, CPUContext>(
       const T* X,                                             \
       T* Y,                                                   \
       CPUContext* /* context */) {                            \
+    if (EigenTranspose(ndim, dims, nullptr, axes, X, Y)) {    \
+      return;                                                 \
+    }                                                         \
     TransposeCPUImpl(size, ndim, dims, nullptr, axes, X, Y);  \
   }                                                           \
   template <>                                                 \
   void Transpose<T, CPUContext>(                              \
       const int size,                                         \
       const int ndim,                                         \
-      const int* x_dims,                                      \
-      const int* y_dims,                                      \
+      const int* X_dims,                                      \
+      const int* Y_dims,                                      \
       const int* axes,                                        \
       const T* X,                                             \
       T* Y,                                                   \
       CPUContext* /* context */) {                            \
-    TransposeCPUImpl(size, ndim, x_dims, y_dims, axes, X, Y); \
+    if (EigenTranspose(ndim, X_dims, Y_dims, axes, X, Y)) {   \
+      return;                                                 \
+    }                                                         \
+    TransposeCPUImpl(size, ndim, X_dims, Y_dims, axes, X, Y); \
   }
 
 CAFFE2_SPECIALIZED_TRANSPOSE(double)

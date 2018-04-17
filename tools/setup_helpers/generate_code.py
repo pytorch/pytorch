@@ -84,10 +84,17 @@ def generate_code(ninja_global=None):
         if not os.path.exists(d):
             os.mkdir(d)
     gen_autograd(
+<<<<<<< HEAD
         'torch/lib/tmp_install/share/ATen/Declarations.yaml',
         autograd_gen_dir)
     gen_jit_dispatch(
         'torch/lib/tmp_install/share/ATen/Declarations.yaml',
+=======
+        'aten/src/ATen/Declarations.yaml',
+        autograd_gen_dir)
+    gen_jit_dispatch(
+        'aten/src/ATen/Declarations.yaml',
+>>>>>>> e360624... Update transpose and reduce interface with params on host.
         jit_gen_dir)
 
 

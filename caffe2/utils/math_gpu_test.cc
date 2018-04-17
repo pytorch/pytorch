@@ -329,13 +329,9 @@ class ReduceTensorGPUTest : public testing::Test {
     cuda_context_ = make_unique<CUDAContext>(option_);
     Blob* blob_x = ws_.CreateBlob("X");
     Blob* blob_y = ws_.CreateBlob("Y");
-    Blob* blob_dims = ws_.CreateBlob("dims");
-    Blob* blob_axes = ws_.CreateBlob("axes");
     Blob* blob_scratch = ws_.CreateBlob("scratch");
     X_ = blob_x->GetMutable<Tensor<CUDAContext>>();
     Y_ = blob_y->GetMutable<Tensor<CUDAContext>>();
-    dims_device_ = blob_dims->GetMutable<Tensor<CUDAContext>>();
-    axes_device_ = blob_axes->GetMutable<Tensor<CUDAContext>>();
     scratch_ptr_ = blob_scratch->GetMutable<Tensor<CUDAContext>>();
   }
 
@@ -344,12 +340,6 @@ class ReduceTensorGPUTest : public testing::Test {
       const std::vector<int>& y_dims,
       const std::vector<int>& axes,
       const std::vector<float>& x_data) {
-    dims_device_->Resize(x_dims.size());
-    cuda_context_->Copy<int, CPUContext, CUDAContext>(
-        x_dims.size(), x_dims.data(), dims_device_->mutable_data<int>());
-    axes_device_->Resize(axes.size());
-    cuda_context_->Copy<int, CPUContext, CUDAContext>(
-        axes.size(), axes.data(), axes_device_->mutable_data<int>());
     X_->Resize(x_dims);
     Y_->Resize(y_dims);
     cuda_context_->Copy<float, CPUContext, CUDAContext>(
@@ -379,10 +369,10 @@ class ReduceTensorGPUTest : public testing::Test {
     reduce_func(
         X_->size(),
         Y_->size(),
-        dims_device_->size(),
-        dims_device_->data<int>(),
-        axes_device_->size(),
-        axes_device_->data<int>(),
+        x_dims.size(),
+        x_dims.data(),
+        axes.size(),
+        axes.data(),
         X_->data<float>(),
         Y_->mutable_data<float>(),
         cuda_context_.get(),
@@ -395,8 +385,6 @@ class ReduceTensorGPUTest : public testing::Test {
   std::unique_ptr<CUDAContext> cuda_context_;
   Tensor<CUDAContext>* X_ = nullptr;
   Tensor<CUDAContext>* Y_ = nullptr;
-  Tensor<CUDAContext>* dims_device_ = nullptr;
-  Tensor<CUDAContext>* axes_device_ = nullptr;
   Tensor<CUDAContext>* scratch_ptr_ = nullptr;
 };
 
@@ -530,14 +518,8 @@ class TransposeGPUTest : public testing::TestWithParam<bool> {
     cuda_context_ = make_unique<CUDAContext>(option_);
     Blob* blob_x = ws_.CreateBlob("X");
     Blob* blob_y = ws_.CreateBlob("Y");
-    Blob* blob_x_dims = ws_.CreateBlob("x_dims");
-    Blob* blob_y_dims = ws_.CreateBlob("y_dims");
-    Blob* blob_axes = ws_.CreateBlob("axes");
     X_ = blob_x->GetMutable<Tensor<CUDAContext>>();
     Y_ = blob_y->GetMutable<Tensor<CUDAContext>>();
-    x_dims_device_ = blob_x_dims->GetMutable<Tensor<CUDAContext>>();
-    y_dims_device_ = blob_y_dims->GetMutable<Tensor<CUDAContext>>();
-    axes_device_ = blob_axes->GetMutable<Tensor<CUDAContext>>();
   }
 
   void SetUpData(
@@ -549,15 +531,6 @@ class TransposeGPUTest : public testing::TestWithParam<bool> {
     for (int i = 0; i < ndim; ++i) {
       y_dims[i] = x_dims[axes[i]];
     }
-    x_dims_device_->Resize(x_dims.size());
-    cuda_context_->Copy<int, CPUContext, CUDAContext>(
-        x_dims.size(), x_dims.data(), x_dims_device_->mutable_data<int>());
-    y_dims_device_->Resize(y_dims.size());
-    cuda_context_->Copy<int, CPUContext, CUDAContext>(
-        y_dims.size(), y_dims.data(), y_dims_device_->mutable_data<int>());
-    axes_device_->Resize(axes.size());
-    cuda_context_->Copy<int, CPUContext, CUDAContext>(
-        axes.size(), axes.data(), axes_device_->mutable_data<int>());
     X_->Resize(x_dims);
     Y_->Resize(y_dims);
     cuda_context_->Copy<float, CPUContext, CUDAContext>(
@@ -582,12 +555,17 @@ class TransposeGPUTest : public testing::TestWithParam<bool> {
       const std::vector<float>& y_data) {
     SetUpData(x_dims, axes, x_data);
     if (GetParam()) {
+      const int ndim = x_dims.size();
+      std::vector<int> y_dims(ndim);
+      for (int i = 0; i < ndim; ++i) {
+        y_dims[i] = x_dims[axes[i]];
+      }
       math::Transpose<float, CUDAContext>(
           x_data.size(),
           x_dims.size(),
-          x_dims_device_->data<int>(),
-          y_dims_device_->data<int>(),
-          axes_device_->data<int>(),
+          x_dims.data(),
+          y_dims.data(),
+          axes.data(),
           X_->data<float>(),
           Y_->mutable_data<float>(),
           cuda_context_.get());
@@ -595,8 +573,8 @@ class TransposeGPUTest : public testing::TestWithParam<bool> {
       math::Transpose<float, CUDAContext>(
           x_data.size(),
           x_dims.size(),
-          x_dims_device_->data<int>(),
-          axes_device_->data<int>(),
+          x_dims.data(),
+          axes.data(),
           X_->data<float>(),
           Y_->mutable_data<float>(),
           cuda_context_.get());
@@ -610,9 +588,6 @@ class TransposeGPUTest : public testing::TestWithParam<bool> {
   std::unique_ptr<CUDAContext> cuda_context_;
   Tensor<CUDAContext>* X_ = nullptr;
   Tensor<CUDAContext>* Y_ = nullptr;
-  Tensor<CUDAContext>* x_dims_device_ = nullptr;
-  Tensor<CUDAContext>* y_dims_device_ = nullptr;
-  Tensor<CUDAContext>* axes_device_ = nullptr;
 };
 
 TEST_P(TransposeGPUTest, TransposeGPUFloatTest) {
