@@ -385,30 +385,31 @@ class ReduceTensorTest : public testing::Test {
   template <class ReduceFunc>
   void RunRedcueTensorTest(
       const ReduceFunc& reduce_func,
-      const std::vector<int>& x_dims,
-      const std::vector<int>& y_dims,
+      const std::vector<int>& X_dims,
       const std::vector<int>& axes,
-      const std::vector<float>& x_data,
-      const std::vector<float>& y_data) {
-    X_.Resize(x_dims);
-    Y_.Resize(y_dims);
-    ASSERT_EQ(x_data.size(), X_.size());
+      const std::vector<float>& X_data,
+      const std::vector<float>& Y_data) {
+    std::vector<int> Y_dims = X_dims;
+    for (const int axis : axes) {
+      Y_dims[axis] = 1;
+    }
+    X_.Resize(X_dims);
+    Y_.Resize(Y_dims);
+    ASSERT_EQ(X_data.size(), X_.size());
     cpu_context_->Copy<float, CPUContext, CPUContext>(
-        x_data.size(), x_data.data(), X_.mutable_data<float>());
+        X_data.size(), X_data.data(), X_.mutable_data<float>());
     reduce_func(
-        X_.size(),
-        Y_.size(),
-        x_dims.size(),
-        x_dims.data(),
+        X_dims.size(),
+        X_dims.data(),
         axes.size(),
         axes.data(),
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get(),
         nullptr);
-    ASSERT_EQ(y_data.size(), Y_.size());
+    ASSERT_EQ(Y_data.size(), Y_.size());
     for (int i = 0; i < Y_.size(); ++i) {
-      EXPECT_FLOAT_EQ(y_data[i], Y_.data<float>()[i]);
+      EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
     }
   }
 
@@ -423,7 +424,6 @@ TEST_F(ReduceTensorTest, ReduceSumTest) {
   RunRedcueTensorTest(
       math::ReduceSum<float, CPUContext>,
       {3},
-      {1},
       {0},
       {1.0f, 2.0f, 3.0f},
       {6.0f});
@@ -432,21 +432,18 @@ TEST_F(ReduceTensorTest, ReduceSumTest) {
   RunRedcueTensorTest(
       math::ReduceSum<float, CPUContext>,
       {2, 3},
-      {2, 1},
       {1},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
       {6.0f, 15.0f});
   RunRedcueTensorTest(
       math::ReduceSum<float, CPUContext>,
       {2, 3},
-      {1, 3},
       {0},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
       {5.0f, 7.0f, 9.0f});
   RunRedcueTensorTest(
       math::ReduceSum<float, CPUContext>,
       {2, 3},
-      {1, 1},
       {0, 1},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
       {21.0f});
@@ -455,21 +452,18 @@ TEST_F(ReduceTensorTest, ReduceSumTest) {
   RunRedcueTensorTest(
       math::ReduceSum<float, CPUContext>,
       {2, 2, 2},
-      {2, 1, 1},
       {1, 2},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
       {10.0f, 26.0f});
   RunRedcueTensorTest(
       math::ReduceSum<float, CPUContext>,
       {2, 2, 2},
-      {1, 1, 2},
       {0, 1},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
       {16.0f, 20.0f});
   RunRedcueTensorTest(
       math::ReduceSum<float, CPUContext>,
       {2, 2, 2},
-      {1, 2, 1},
       {0, 2},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
       {14.0f, 22.0f});
@@ -480,7 +474,6 @@ TEST_F(ReduceTensorTest, ReduceMeanTest) {
   RunRedcueTensorTest(
       math::ReduceMean<float, CPUContext>,
       {3},
-      {1},
       {0},
       {1.0f, 2.0f, 3.0f},
       {2.0f});
@@ -489,21 +482,18 @@ TEST_F(ReduceTensorTest, ReduceMeanTest) {
   RunRedcueTensorTest(
       math::ReduceMean<float, CPUContext>,
       {2, 3},
-      {2, 1},
       {1},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
       {2.0f, 5.0f});
   RunRedcueTensorTest(
       math::ReduceMean<float, CPUContext>,
       {2, 3},
-      {1, 3},
       {0},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
       {2.5f, 3.5f, 4.5f});
   RunRedcueTensorTest(
       math::ReduceMean<float, CPUContext>,
       {2, 3},
-      {1, 1},
       {0, 1},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
       {3.5f});
@@ -512,70 +502,50 @@ TEST_F(ReduceTensorTest, ReduceMeanTest) {
   RunRedcueTensorTest(
       math::ReduceMean<float, CPUContext>,
       {2, 2, 2},
-      {2, 1, 1},
       {1, 2},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
       {2.5f, 6.5f});
   RunRedcueTensorTest(
       math::ReduceMean<float, CPUContext>,
       {2, 2, 2},
-      {1, 1, 2},
       {0, 1},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
       {4.0f, 5.0f});
   RunRedcueTensorTest(
       math::ReduceMean<float, CPUContext>,
       {2, 2, 2},
-      {1, 2, 1},
       {0, 2},
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
       {3.5f, 5.5f});
 }
 
-class TransposeTest : public testing::TestWithParam<bool> {
+class BroadcastTest : public testing::Test {
  protected:
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
   }
 
-  void RunTransposeTest(
-      const std::vector<int>& x_dims,
-      const vector<int>& axes,
-      const std::vector<float>& x_data,
-      const std::vector<float>& y_data) {
-    const int ndim = x_dims.size();
-    std::vector<int> y_dims(ndim);
-    for (int i = 0; i < ndim; ++i) {
-      y_dims[i] = x_dims[axes[i]];
-    }
-    X_.Resize(x_dims);
-    Y_.Resize(y_dims);
-    ASSERT_EQ(x_data.size(), X_.size());
+  void RunBroadcastTest(
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
+      const std::vector<float>& X_data,
+      const std::vector<float>& Y_data) {
+    X_.Resize(X_dims);
+    Y_.Resize(Y_dims);
+    ASSERT_EQ(X_data.size(), X_.size());
     cpu_context_->Copy<float, CPUContext, CPUContext>(
-        x_data.size(), x_data.data(), X_.mutable_data<float>());
-    if (GetParam()) {
-      math::Transpose<float, CPUContext>(
-          X_.size(),
-          x_dims.size(),
-          x_dims.data(),
-          y_dims.data(),
-          axes.data(),
-          X_.data<float>(),
-          Y_.mutable_data<float>(),
-          cpu_context_.get());
-    } else {
-      math::Transpose<float, CPUContext>(
-          X_.size(),
-          x_dims.size(),
-          x_dims.data(),
-          axes.data(),
-          X_.data<float>(),
-          Y_.mutable_data<float>(),
-          cpu_context_.get());
-    }
-    ASSERT_EQ(y_data.size(), Y_.size());
-    for (int i = 0; i < Y_.size(); ++i) {
-      ASSERT_EQ(Y_.data<float>()[i], y_data[i]);
+        X_data.size(), X_data.data(), X_.mutable_data<float>());
+    math::Broadcast<float, CPUContext>(
+        X_dims.size(),
+        X_dims.data(),
+        Y_dims.size(),
+        Y_dims.data(),
+        X_.data<float>(),
+        Y_.mutable_data<float>(),
+        cpu_context_.get());
+    ASSERT_EQ(Y_data.size(), Y_.size());
+    for (int i = 0; i < Y_data.size(); ++i) {
+      EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
     }
   }
 
@@ -586,7 +556,60 @@ class TransposeTest : public testing::TestWithParam<bool> {
   TensorCPU Y_;
 };
 
-TEST_P(TransposeTest, TransposeFloatTest) {
+TEST_F(BroadcastTest, BroadcastFloatTest) {
+  RunBroadcastTest({2}, {2}, {1.0f, 2.0f}, {1.0f, 2.0f});
+  RunBroadcastTest({1}, {2}, {1.0f}, {1.0f, 1.0f});
+  RunBroadcastTest({1}, {2, 2}, {1.0f}, {1.0f, 1.0f, 1.0f, 1.0f});
+  RunBroadcastTest({2, 1}, {2, 2}, {1.0f, 2.0f}, {1.0f, 1.0f, 2.0f, 2.0f});
+  RunBroadcastTest(
+      {2, 1},
+      {2, 2, 2},
+      {1.0f, 2.0f},
+      {1.0f, 1.0f, 2.0f, 2.0f, 1.0f, 1.0f, 2.0f, 2.0f});
+}
+
+class TransposeTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    cpu_context_ = make_unique<CPUContext>(option_);
+  }
+
+  void RunTransposeTest(
+      const std::vector<int>& X_dims,
+      const std::vector<int>& axes,
+      const std::vector<float>& X_data,
+      const std::vector<float>& Y_data) {
+    const int ndim = X_dims.size();
+    std::vector<int> Y_dims(ndim);
+    for (int i = 0; i < ndim; ++i) {
+      Y_dims[i] = X_dims[axes[i]];
+    }
+    X_.Resize(X_dims);
+    Y_.Resize(Y_dims);
+    ASSERT_EQ(X_data.size(), X_.size());
+    cpu_context_->Copy<float, CPUContext, CPUContext>(
+        X_data.size(), X_data.data(), X_.mutable_data<float>());
+    math::Transpose<float, CPUContext>(
+        X_dims.size(),
+        X_dims.data(),
+        axes.data(),
+        X_.data<float>(),
+        Y_.mutable_data<float>(),
+        cpu_context_.get());
+    ASSERT_EQ(Y_data.size(), Y_.size());
+    for (int i = 0; i < Y_.size(); ++i) {
+      EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
+    }
+  }
+
+  DeviceOption option_;
+  std::unique_ptr<CPUContext> cpu_context_;
+
+  TensorCPU X_;
+  TensorCPU Y_;
+};
+
+TEST_F(TransposeTest, TransposeFloatTest) {
   // Test for 1D transpose.
   RunTransposeTest({3}, {0}, {1.0f, 2.0f, 3.0f}, {1.0f, 2.0f, 3.0f});
 
@@ -609,8 +632,6 @@ TEST_P(TransposeTest, TransposeFloatTest) {
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
       {1.0f, 2.0f, 5.0f, 6.0f, 3.0f, 4.0f, 7.0f, 8.0f});
 }
-
-INSTANTIATE_TEST_CASE_P(WithYDims, TransposeTest, testing::Bool());
 
 } // namespace
 
