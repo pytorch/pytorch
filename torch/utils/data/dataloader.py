@@ -37,7 +37,7 @@ class ExceptionWrapper(object):
 _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
 
-MANAGER_STATUS_CHECK_INTERVAL = 1.0
+MANAGER_STATUS_CHECK_INTERVAL = 5.0
 
 
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id, manager_pid):
@@ -57,8 +57,6 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     if init_fn is not None:
         init_fn(worker_id)
 
-    worker_done_event = threading.Event()
-
     manager_handle = None
     if IS_WINDOWS:
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -74,29 +72,26 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
         if not manager_handle:
             raise ctypes.WinError(ctypes.get_last_error())
 
-    def check_manager_process_status(worker_done_event, manager_pid, manager_handle):
-        if not worker_done_event.is_set():
-            should_exit = False
-            if IS_WINDOWS:
-                result = kernel32.WaitForSingleObject(manager_handle, 0)
-                # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
-                if result == 0:
-                    should_exit = True
-            else:
-                if os.getppid() != manager_pid:
-                    should_exit = True
-            if should_exit:
-                index_queue.put(None)
-            else:
-                threading.Timer(MANAGER_STATUS_CHECK_INTERVAL,
-                                check_manager_process_status,
-                                args=[worker_done_event, manager_pid, manager_handle]).start()
-    check_manager_process_status(worker_done_event, manager_pid, manager_handle)
+    def is_manager_process_alive(manager_pid, manager_handle):
+        if IS_WINDOWS:
+            result = kernel32.WaitForSingleObject(manager_handle, 0)
+            # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
+            if result == 0:
+                return False
+        else:
+            if os.getppid() != manager_pid:
+                return False
+        return True
 
     while True:
-        r = index_queue.get()
+        try:
+            r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
+        except queue.Empty:
+            if is_manager_process_alive(manager_pid, manager_handle):
+                continue
+            else:
+                break
         if r is None:
-            worker_done_event.set()
             break
         idx, batch_indices = r
         try:
