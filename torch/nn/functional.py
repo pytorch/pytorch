@@ -1352,7 +1352,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         out_size = (n,) + input.size()[2:]
         if target.size()[1:] != input.size()[2:]:
             raise ValueError('Expected target size {}, got {}'.format(
-                out_size, input.size()))
+                out_size, target.size()))
         input = input.contiguous().view(n, c, 1, -1)
         target = target.contiguous().view(n, 1, -1)
         if reduce:
@@ -1426,9 +1426,12 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input: Variable :math:`(N, C)` where `C = number of classes`
-        target: Variable :math:`(N)` where each value is
-            :math:`0 \leq \text{targets}[i] \leq C-1`
+        input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
+            in the case of K-dimensional loss.
+        target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
+            or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
+            K-dimensional loss.
         weight (Tensor, optional): a manual rescaling weight given to each
                 class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): By default, the losses are averaged

@@ -1500,6 +1500,18 @@ class TestCuda(TestCase):
         test(True)
         test(False)
 
+        # Test float32 behavior near and at poles.
+        cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
+                                  -100.99999994, -1931.99999994, 0.000000111,
+                                  -0.000000111, 0, -1, -2, -931])
+        nan = float('nan')
+        expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan])
+        gpu_tensor = cpu_tensor.cuda()
+        cpu_out = cpu_tensor.digamma()
+        gpu_out = gpu_tensor.digamma()
+        norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
+        self.assertEqual(norm_errors, expected_errors)
+
     def test_polygamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
@@ -1545,6 +1557,10 @@ class TestCuda(TestCase):
 
     def test_diagflat(self):
         TestTorch._test_diagflat(self, dtype=torch.float32, device='cuda')
+
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_trtrs(self):
+        TestTorch._test_trtrs(self, lambda t: t.cuda())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_get_set_rng_state_all(self):

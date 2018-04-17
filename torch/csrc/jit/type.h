@@ -14,7 +14,8 @@ namespace torch { namespace jit {
 #define TH_FORALL_TYPES(_) \
 _(DynamicType) \
 _(TensorType) \
-_(HandleType)
+_(HandleType) \
+_(TupleType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -27,6 +28,7 @@ using TypePtr = std::shared_ptr<Type>;
 
 
 struct Type : std::enable_shared_from_this<Type> {
+
 private:
   TypeKind kind_;
 
@@ -35,6 +37,7 @@ protected:
     : kind_(kind) {}
 
 public:
+  virtual bool operator==(const Type& rhs) const = 0;
   TypeKind kind() const {
     return kind_;
   }
@@ -66,12 +69,16 @@ public:
   std::shared_ptr<Type> asShared() {
     return shared_from_this();
   }
+  virtual ~Type() {}
 };
 
 
 struct DynamicType : public Type {
   DynamicType()
   : Type(TypeKind::DynamicType) {}
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
   static const TypeKind Kind = TypeKind::DynamicType;
   // global singleton
   static TypePtr get();
@@ -116,6 +123,15 @@ struct TensorType : public Type {
     t->strides_ = TensorType::contiguousStridesOf(sizes_);
     return t;
   }
+  virtual bool operator==(const Type& rhs) const override {
+    if(rhs.kind() != kind())
+      return false;
+    auto rt = rhs.expect<TensorType>();
+    return scalarType() == rt->scalarType() &&
+           sizes() == rt->sizes() &&
+           strides() == rt->strides() &&
+           device() == rt->device();
+  }
 private:
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
@@ -154,23 +170,32 @@ struct HandleType : public Type {
   friend struct Type;
   HandleType()
     : Type(TypeKind::HandleType) {}
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
   static const TypeKind Kind = TypeKind::HandleType;
   // global singleton
   static TypePtr get();
 };
 
-static inline bool operator==(const Type & lhs, const Type & rhs) {
-  if(lhs.kind() != rhs.kind())
-    return false;
-  if(lhs.kind() != TypeKind::TensorType)
-    return true;
-  auto lt = lhs.expect<TensorType>();
-  auto rt = lhs.expect<TensorType>();
-  return lt->scalarType() == rt->scalarType() &&
-         lt->sizes() == rt->sizes() &&
-         lt->strides() == rt->strides() &&
-         lt->device() == rt->device();
-}
+struct TupleType : public Type {
+  friend struct Type;
+  TupleType(std::vector<TypePtr> elements_)
+  : Type(TypeKind::TupleType)
+  , elements_(std::move(elements_)) {}
+  static const TypeKind Kind = TypeKind::TupleType;
+  at::ArrayRef<TypePtr> elements() const {
+    return elements_;
+  }
+  virtual bool operator==(const Type& rhs) const override {
+    if(rhs.kind() != kind())
+      return false;
+    return rhs.cast<TupleType>()->elements().equals(elements());
+  }
+private:
+  std::vector<TypePtr> elements_;
+};
+
 inline bool operator!=(const Type & lhs, const Type & rhs) {
   return !(lhs == rhs);
 }

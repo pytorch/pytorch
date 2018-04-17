@@ -7,6 +7,7 @@ Tensors
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
 .. autofunction:: set_default_tensor_type
+.. autofunction:: set_default_dtype
 .. autofunction:: numel
 .. autofunction:: set_printoptions
 .. autofunction:: set_flush_denormal
@@ -18,13 +19,16 @@ Creation Ops
 .. autofunction:: from_numpy
 .. autofunction:: linspace
 .. autofunction:: logspace
-.. autofunction:: ones
-.. autofunction:: ones_like
 .. autofunction:: arange
 .. autofunction:: range
+.. autofunction:: ones
+.. autofunction:: ones_like
 .. autofunction:: zeros
 .. autofunction:: zeros_like
+.. autofunction:: empty
 .. autofunction:: empty_like
+.. autofunction:: full
+.. autofunction:: full_like
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -59,6 +63,7 @@ Random sampling
 .. autofunction:: rand
 .. autofunction:: randint
 .. autofunction:: randn
+.. autofunction:: randn_like
 .. autofunction:: randperm
 
 In-place random sampling

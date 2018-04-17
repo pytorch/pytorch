@@ -74,11 +74,11 @@ class TestJit(TestCase):
         self.assertEqual(misses, compiled_fn.misses)
 
     def assertExpectedTrace(self, trace, *args, **kwargs):
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_dce(trace)
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_canonicalize(trace)
-        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_lint(trace.graph())
+        torch._C._jit_pass_dce(trace.graph())
+        torch._C._jit_pass_lint(trace.graph())
+        trace.set_graph(torch._C._jit_pass_canonicalize(trace.graph()))
+        torch._C._jit_pass_lint(trace.graph())
         self.assertExpected(str(trace), *args, **kwargs)
 
     def test_simple(self):
@@ -101,8 +101,8 @@ class TestJit(TestCase):
         y = Variable(torch.Tensor([[0.7]]), requires_grad=True)
 
         trace, z = torch.jit.get_trace_graph(lambda x, y: x.matmul(y), (x, y), nderivs=0)
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_lint(trace.graph())
+        torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace)
 
     def test_matmul_native_run(self):
@@ -221,10 +221,10 @@ class TestJit(TestCase):
         module = nn.LSTMCell(10, 20).float().cuda()  # Just to allocate weights with correct sizes
 
         trace, _ = torch.jit.get_trace_graph(LSTMCell, (input, (hx, cx)) + tuple(module.parameters()))
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_dce(trace)
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_lint(trace.graph())
+        torch._C._jit_pass_dce(trace.graph())
+        torch._C._jit_pass_lint(trace.graph())
+        torch._C._jit_pass_fuse(trace.graph())
         self.assertExpectedTrace(trace)
 
     def run_lstm_fusion(self, use_cuda):
@@ -283,8 +283,8 @@ class TestJit(TestCase):
             return torch.cat((hx + cx, hx * cx))
 
         trace, _ = torch.jit.get_trace_graph(Foo, (hx, cx))
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_lint(trace.graph())
+        torch._C._jit_pass_fuse(trace.graph())
         self.assertExpectedTrace(trace)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
@@ -296,10 +296,10 @@ class TestJit(TestCase):
         x = Variable(torch.randn(4, 4).float().cuda())
         y = Variable(torch.randn(4, 4).float().cuda())
         trace, _ = torch.jit.get_trace_graph(f, (x, y), nderivs=0)
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_lint(trace.graph())
+        torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace, 'raw')
-        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_fuse(trace.graph())
         self.assertExpectedTrace(trace)
 
     def test_arg_configurations(self):
@@ -358,8 +358,8 @@ class TestJit(TestCase):
             return z
         z = fn(*inputs)
         torch._C._tracer_exit((z,))
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_cse(trace)
+        torch._C._jit_pass_lint(trace.graph())
+        torch._C._jit_pass_cse(trace.graph())
 
         self.assertExpectedTrace(trace)
 
@@ -455,7 +455,7 @@ class TestJit(TestCase):
         x = Variable(torch.randn(10, 10), requires_grad=True)
         trace, out = torch.jit.get_trace_graph(MyFn.apply, x, nderivs=1)
         out.sum().backward()
-        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace)
 
     def test_legacy_traced_module(self):
@@ -487,17 +487,17 @@ class TestJit(TestCase):
         z, w = fn(*inputs)
 
         torch._C._tracer_exit((z, w))
-        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_lint(trace.graph())
 
         (z * w).backward()
-        torch._C._jit_pass_dce(trace)
-        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_dce(trace.graph())
+        torch._C._jit_pass_lint(trace.graph())
 
         x_grad = x.grad.data.clone()
         x.grad.data.zero_()
 
         function = torch._C._jit_createInterpreterFactory(trace)
-        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_lint(trace.graph())
         z2, w2 = function()(x, y)
         (z2 * w2).backward()
         self.assertEqual(z, z2)
@@ -603,7 +603,7 @@ class TestJit(TestCase):
             return y
         y = fn(*inputs)
         torch._C._tracer_exit((y,))
-        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_dce(trace.graph())
         ops = [n for n in trace.graph().nodes()]
         for op in ops:
             self.assertTrue(op.hasAttribute('inplace'))
@@ -644,18 +644,18 @@ class TestJit(TestCase):
             return y * 2 * x
         z = fn(*inputs)
         torch._C._tracer_exit((z,))
-        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_lint(trace.graph())
 
         # Run first backward
         grad, = torch.autograd.grad(z, x, Variable(torch.ones(2, 2), requires_grad=True), create_graph=True)
-        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_lint(trace.graph())
 
         # Run second backward
         grad.sum().backward(create_graph=True)
-        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_lint(trace.graph())
 
         # Run dead code elimination to remove unused trace nodes
-        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_dce(trace.graph())
         # This is nondeterministic, see:
         #   https://github.com/ezyang/pytorch/issues/227
         # self.assertExpectedTrace(trace)
@@ -671,14 +671,14 @@ class TestJit(TestCase):
             return x.cross(y)
         z = fn(*inputs)
         torch._C._tracer_exit((z,))
-        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_lint(trace.graph())
 
         # Run first backward
         grad, = torch.autograd.grad(z, x, Variable(torch.ones(3, 3), requires_grad=True), create_graph=True)
-        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_lint(trace.graph())
 
         # Run dead code elimination to remove unused trace nodes
-        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_dce(trace.graph())
         # This is nondeterministic, see:
         #   https://github.com/ezyang/pytorch/issues/227
         # self.assertExpectedTrace(trace)
@@ -1150,16 +1150,16 @@ class TestJit(TestCase):
             return out
 
         trace, z = torch.jit.get_trace_graph(f, (x, ), nderivs=0)
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_lint(trace.graph())
+        torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace)
 
     def test_index_trace(self):
         x = Variable(torch.randn(4, 4), requires_grad=True)
         trace, z = torch.jit.get_trace_graph(lambda x: x[0], (x, ), nderivs=1)
         z.sum().backward()
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_lint(trace.graph())
+        torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace)
 
     def test_saved_output(self):
@@ -2474,6 +2474,62 @@ class TestScript(TestCase):
 
             f = io.BytesIO()
             torch.onnx._export(m, (x, seq_lens), f, verbose=False)
+
+    def test_tuples(self):
+        @torch.jit.script
+        def foo(i):
+            a = torch.chunk(i, dim=0, chunks=2)
+            c = a
+            # some nonsense with if-statements and loops to check
+            # that tuple lowering doesn't fail
+            if True:
+                c = torch.chunk(i, dim=0, chunks=2)
+            t0, t1 = c
+            while False:
+                t0, t1 = c
+                c = torch.chunk(i, dim=0, chunks=2)
+            return t0
+
+        v = torch.rand(10, 3)
+        self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
+
+        with self.assertRaisesRegex(RuntimeError, "variable 'a' previously has type"):
+            @torch.jit.script
+            def mixtypes():
+                a = torch.chunk(1, dim=0, chunks=2)
+                if True:
+                    a = 4
+
+    def test_script_define_order(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                pass
+
+            @torch.jit.script_method
+            def call_foo(self, input):
+                return self.foo(input)
+
+            @torch.jit.script_method
+            def foo(self, input):
+                return input + 1
+        m = M()
+        self.assertEqual(2, m.call_foo(torch.ones(())))
+
+    def test_script_define_order_recursive_fail(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                pass
+
+            @torch.jit.script_method
+            def call_foo(self, input):
+                return self.foo(input)
+
+            @torch.jit.script_method
+            def foo(self, input):
+                self.call_foo(input)
+
+        with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
+            M()
 
 
 # Smoke tests for export methods

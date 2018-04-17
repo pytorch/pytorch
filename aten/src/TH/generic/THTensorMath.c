@@ -4256,7 +4256,7 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
 // Assumes x is close to zero and uses a Taylor expansion.
 static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
-  const real factor = TH_digamma(alpha) - TH_digamma(alpha + beta) - TH_MATH_NAME(log)(x);
+  const real factor = TH_MATH_NAME(TH_digamma)(alpha) - TH_MATH_NAME(TH_digamma)(alpha + beta) - TH_MATH_NAME(log)(x);
   real numer = 1;
   real series = numer / alpha * (factor + 1 / alpha);
   for (int i = 1; i <= 10; ++i) {
@@ -4271,7 +4271,7 @@ static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real bet
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
 // Assumes x is close to zero and uses a Taylor expansion.
 static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
-  const real factor = TH_digamma(alpha+beta) - TH_digamma(beta);
+  const real factor = TH_MATH_NAME(TH_digamma)(alpha+beta) - TH_MATH_NAME(TH_digamma)(beta);
   real numer = 1;
   real betas = 1;
   real dbetas = 0;
@@ -4382,7 +4382,7 @@ static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total)
       q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
     }
   }
-  const real approx = x * (TH_digamma(total) - TH_digamma(alpha)) / beta;
+  const real approx = x * (TH_MATH_NAME(TH_digamma)(total) - TH_MATH_NAME(TH_digamma)(alpha)) / beta;
   return p / q * approx;
 }
 
