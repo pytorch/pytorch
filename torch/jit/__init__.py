@@ -557,6 +557,7 @@ def script_method(fn):
 #  del view[name]
 #  view.items()
 #  view.keys()
+#  len(view)
 
 class OrderedDictWrapper(object):
     def __init__(self, module):
@@ -590,6 +591,9 @@ class OrderedDictWrapper(object):
     def __setitem__(self, k, v):
         raise NotImplementedError
 
+    def __len__(self):
+        raise NotImplementedError
+
 
 class OrderedModuleDict(OrderedDictWrapper):
     def __init__(self, module):
@@ -620,6 +624,9 @@ class OrderedModuleDict(OrderedDictWrapper):
     def __getitem__(self, k):
         return self._python_modules[k]
 
+    def __len__(self):
+        raise len(self._python_modules)
+
 
 class OrderedParameterDict(OrderedDictWrapper):
     def __init__(self, module):
@@ -641,6 +648,9 @@ class OrderedParameterDict(OrderedDictWrapper):
             raise KeyError(k)
         return self.module._get_parameter(k)
 
+    def __len__(self):
+        return len(self.items())
+
 
 class OrderedBufferDict(OrderedDictWrapper):
     def __init__(self, module):
@@ -661,6 +671,9 @@ class OrderedBufferDict(OrderedDictWrapper):
         if k not in self:
             raise KeyError(k)
         return self.module._get_parameter(k)
+
+    def __len__(self):
+        return len(self.items())
 
 # base types that can be constants
 # in addition, tuples and lists of these base types are also considered constants
@@ -774,9 +787,9 @@ def _get_methods(cls):
 _compiled_methods_whitelist = {
     'forward', 'register_buffer', 'register_parameter', 'add_module',
     '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
-    'state_dict', 'load_state_dict', 'parameters', 'named_parameters',
-    '_all_buffers', 'children', 'named_children', 'modules', 'named_modules',
-    'zero_grad', 'share_memory', '_get_name'
+    'state_dict', 'load_state_dict', 'load_local_state_dict', 'parameters',
+    'named_parameters', '_all_buffers', 'children', 'named_children', 'modules',
+    'named_modules', 'zero_grad', 'share_memory', '_get_name'
 }
 
 

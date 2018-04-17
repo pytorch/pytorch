@@ -744,7 +744,7 @@ class Module(object):
 
             def validate_tree(root=state_tree):
                 for name, module in root.module._modules.items():
-                    if module is not None:
+                    if module is not None and (len(module._parameters) > 0 or len(module._buffers) > 0):
                         if name not in root.children:
                             missing_modules.append(('.'.join(root.path + [name]), module.__class__.__name__))
                         else:
