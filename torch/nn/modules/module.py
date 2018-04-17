@@ -687,7 +687,7 @@ class Module(object):
                     missing.append((module.__class__.__name__, name))
 
         if strict:
-            unexpected = set(self._modules.keys()) - set(child_state_dicts.keys())
+            unexpected = set(child_state_dicts.keys()) - set(self._modules.keys())
             error_msg = ''
             if len(unexpected) > 0:
                 error_msg += 'Unexpected module key(s) in state_dict: {}. '.format(
