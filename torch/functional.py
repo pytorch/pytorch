@@ -7,6 +7,7 @@ __all__ = [
     'argmax',
     'argmin',
     'bartlett_window',
+    'bincount',
     'btrifact',
     'btriunpack',
     'hamming_window',
@@ -465,3 +466,64 @@ def argmin(input, dim=None, keepdim=False):
     if dim is None:
         return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
     return torch._argmin(input, dim, keepdim)
+
+
+def bincount(input, weights=None, minlength=0):
+    """Count the frequency of each value in an array of non-negative ints.
+
+    The number of bins (size 1) is one larger than the largest value in
+    ``input``. If ``minlength`` is specified, the number of bins is at least
+    ``minlength``. If ``n`` is the value at position ``i``,
+    ``out[n] += weights[i]`` if ``weights`` is specified else ``out[n] += 1``.
+
+    Arguments:
+        input (Tensor): 1-d int tensor
+        weights (Tensor): optional, weight for each value in the input tensor.
+            Should be of same size as input tensor.
+        minlength (int): optional, min number of bins in the output tensor.
+            Should be non-negative.
+
+    Example::
+
+        >>> input = torch.randint(0, 8, (5,), dtype=torch.int64)
+        >>> weights = torch.randint(10, (5,), dtype=torch.float32) / 10
+        >>> input, weights
+        (
+         4
+         4
+         6
+         7
+         2
+        [torch.LongTensor of size (5,)]
+        ,
+         0.5000
+         0.6000
+         0.0000
+         0.4000
+         0.9000
+        [torch.FloatTensor of size (5,)]
+        )
+
+        >>> torch.bincount(input)
+         0
+         0
+         1
+         0
+         2
+         0
+         1
+         1
+        [torch.LongTensor of size (8,)]
+
+        >>> torch.bincount(input, weights)
+         0.0000
+         0.0000
+         0.9000
+         0.0000
+         1.1000
+         0.0000
+         0.0000
+         0.4000
+        [torch.DoubleTensor of size (8,)]
+    """
+    return torch._bincount(input, weights, minlength)

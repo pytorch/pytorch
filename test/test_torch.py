@@ -6546,6 +6546,40 @@ class TestTorch(TestCase):
             lambda: torch.unique(torch.cuda.FloatTensor([0., 1.])),
         )
 
+    def test_bincount_cpu(self):
+        # test weights
+        byte_counts = torch.bincount(torch.ByteTensor([0, 1, 1, 1, 4]),
+                                     torch.FloatTensor([.1, .2, .3, .4, .5]))
+        self.assertEqual(torch.DoubleTensor([0.1, 0.9, 0, 0, 0.5]), byte_counts)
+        # test tensor method without weights
+        long_counts = torch.LongTensor([0, 3, 2, 1, 3]).bincount()
+        self.assertEqual(torch.LongTensor([1, 1, 1, 2]), long_counts)
+        # test minlength functionality
+        int_counts = torch.bincount(torch.IntTensor([1, 1, 1, 1]), minlength=5)
+        self.assertEqual(torch.DoubleTensor([0, 4, 0, 0, 0]), int_counts)
+
+        # negative input throws
+        with self.assertRaises(RuntimeError):
+            torch.bincount(torch.LongTensor([1, -1]))
+        # n-d input, with n > 1 throws
+        with self.assertRaises(RuntimeError):
+            torch.bincount(torch.LongTensor([[1, 2], [3, 4]]))
+        # minlength < 0 throws
+        with self.assertRaises(RuntimeError):
+            torch.bincount(torch.LongTensor([1, 3]),
+                           torch.DoubleTensor([.2, .2]),
+                           minlength=-1)
+        # floating input type throws
+        with self.assertRaises(RuntimeError):
+            torch.bincount(torch.DoubleTensor([1., 3.]),
+                           torch.DoubleTensor([.2, .2]))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_bincount_cuda(self):
+        # bincount currently does not support CUDA.
+        self.assertRaises(
+            RuntimeError, lambda: torch.cuda.LongTensor([0, 1]).bincount())
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1

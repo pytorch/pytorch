@@ -109,6 +109,11 @@
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
   variants: function
 
+- func: _bincount(Tensor self, Tensor? weights={}, int64_t minlength=0) -> Tensor
+  dispatch:
+    CPU: _bincount_cpu
+    CUDA: _bincount_cuda
+
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
@@ -510,13 +515,13 @@
   variants: function
 
 - func: randint_out(Tensor result, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
-  variants: function  
+  variants: function
 
 - func: randint_like(Tensor self, int64_t high) -> Tensor
   variants: function
 
 - func: randint_like(Tensor self, int64_t low, int64_t high) -> Tensor
-  variants: function  
+  variants: function
 
 - func: randint_like(Tensor self, int64_t high, *, Type dtype) -> Tensor
   variants: function
