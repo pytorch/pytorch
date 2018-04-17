@@ -555,6 +555,16 @@ class TestTorch(TestCase):
     def test_min(self):
         self._testSelection(torch.min, min)
 
+    def test_dim_reduction_uint8_overflow(self):
+        example = [[-1, 2, 1], [5, 3, 6]]
+        x = torch.tensor(example, dtype=torch.uint8)
+        self.assertEqual(x.sum(dtype=torch.uint8).item(), 16)
+        self.assertEqual(x.sum(0, dtype=torch.uint8), torch.FloatTensor([4, 5, 7]))
+        self.assertEqual(x.sum(1, dtype=torch.uint8), torch.FloatTensor([2, 14]))
+        y = torch.tensor(example, dtype=torch.uint8)
+        torch.sum(x, 0, out=y)
+        self.assertEqual(x.sum(0, dtype=torch.uint8), y)
+
     @staticmethod
     def _test_dim_reduction(self, cast):
         example = [[-1, 2, 1], [5, 3, 6]]
@@ -563,8 +573,7 @@ class TestTorch(TestCase):
                  torch.float,
                  torch.int64,
                  torch.int32,
-                 torch.int16,
-                 torch.uint8]
+                 torch.int16]
 
         # This won't test for 256bit instructions, since we usually
         # only work on 1 cacheline (1024bit) at a time and these
@@ -586,32 +595,24 @@ class TestTorch(TestCase):
             self.assertEqual(x.mean(1), torch.FloatTensor([2.0 / 3, 14.0 / 3]))
 
         for dtype in types:
-            if dtype == torch.uint8:  # Overflows
-                continue
             x = cast(torch.tensor(example, dtype=dtype))
             self.assertEqual(x.prod().item(), -180)
             self.assertEqual(x.prod(0), torch.FloatTensor([-5, 6, 6]))
             self.assertEqual(x.prod(1), torch.FloatTensor([-2, 90]))
 
         for dtype in types:
-            if dtype == torch.uint8:  # Doesn't support negative values
-                continue
             x = cast(torch.tensor(example, dtype=dtype))
             self.assertEqual(x.max().item(), 6)
             self.assertEqual(x.max(0), (torch.FloatTensor([5, 3, 6]), torch.FloatTensor([1, 1, 1])))
             self.assertEqual(x.max(1), (torch.FloatTensor([2, 6]), torch.FloatTensor([1, 2])))
 
         for dtype in types:
-            if dtype == torch.uint8:  # Doesn't support negative values
-                continue
             x = cast(torch.tensor(example, dtype=dtype))
             self.assertEqual(x.min().item(), -1)
             self.assertEqual(x.min(0), (torch.FloatTensor([-1, 2, 1]), torch.FloatTensor([0, 0, 0])))
             self.assertEqual(x.min(1), (torch.FloatTensor([-1, 3]), torch.FloatTensor([0, 1])))
 
         for dtype in types:
-            if dtype == torch.uint8:  # Doesn't support negative values
-                continue
             x = cast(torch.tensor(example, dtype=dtype))
             self.assertEqual(x.argmax().item(), 5)
             self.assertEqual(x.argmax(dim=0), torch.FloatTensor([1, 1, 1]))
@@ -621,8 +622,6 @@ class TestTorch(TestCase):
             self.assertEqual(x[:, :2].argmax().item(), 2)
 
         for dtype in types:
-            if dtype == torch.uint8:  # Doesn't support negative values
-                continue
             x = cast(torch.tensor(example, dtype=dtype))
             self.assertEqual(x.argmin().item(), 0)
             self.assertEqual(x.argmin(dim=0), torch.FloatTensor([0, 0, 0]))
@@ -1365,6 +1364,57 @@ class TestTorch(TestCase):
         res2 = torch.Tensor()
         torch.cumprod(x, 1, out=res2)
         self.assertEqual(res1, res2)
+
+    def _test_reduce_integer_upcast(self, fn, has_out=True):
+        shape = (3, 4, 5)
+        reduced_shape = fn(torch.ones(shape)).shape
+
+        def _test_out(dtype, other_dtype):
+            out = torch.ones(reduced_shape, dtype=dtype)
+            result = fn(x, out=out)
+            self.assertIs(out.dtype, result.dtype)
+            self.assertEqual(fn(x.type(dtype)), result)
+            result = fn(x, out=out, dtype=dtype)
+            self.assertIs(out.dtype, result.dtype)
+            self.assertEqual(fn(x.type(dtype)), result)
+            # 'out' is favored over dtype, check error
+            self.assertRaises(RuntimeError, lambda: fn(x, out=out, dtype=other_dtype))
+
+        for dtype in [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]:
+            x = torch.ones(shape, dtype=dtype)
+            expected_dtype = dtype if dtype.is_floating_point else torch.int64
+            self.assertIs(expected_dtype, fn(x).dtype)
+            self.assertEqual(fn(x.type(expected_dtype)), fn(x))
+
+            if dtype.is_floating_point:
+                other_dtype = torch.float32 if dtype == torch.float64 else torch.float64
+            else:
+                other_dtype = torch.int32 if dtype != torch.int32 else torch.int16
+            self.assertIs(other_dtype, fn(x, dtype=other_dtype).dtype)
+            self.assertEqual(fn(x.type(other_dtype)), fn(x, dtype=other_dtype))
+
+            # test mixed int/float
+            mixed_dtype = torch.int32 if dtype.is_floating_point else torch.float32
+            self.assertIs(mixed_dtype, fn(x, dtype=mixed_dtype).dtype)
+            self.assertEqual(fn(x.type(mixed_dtype)), fn(x, dtype=mixed_dtype))
+
+            if has_out:
+                _test_out(dtype, other_dtype)
+                _test_out(dtype, mixed_dtype)
+
+    def test_sum_integer_upcast(self):
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, **kwargs), False)
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, 0, **kwargs))
+
+    def test_prod_integer_upcast(self):
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.prod(x, **kwargs), False)
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.prod(x, 0, **kwargs))
+
+    def test_cumsum_integer_upcast(self):
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumsum(x, 0, **kwargs))
+
+    def test_cumprod_integer_upcast(self):
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumprod(x, 0, **kwargs))
 
     def test_cross(self):
         x = torch.rand(100, 3, 100)
