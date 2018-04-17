@@ -159,6 +159,13 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     Returns:
         True if all differences satisfy allclose condition
     """
+    tupled_inputs = _as_tuple(inputs)
+
+    # Make sure that gradients are saved for all inputs
+    for inp in tupled_inputs:
+        if isinstance(inp, torch.Tensor):
+            inp.retain_grad()
+
     output = _differentiable_outputs(func(*inputs))
 
     def fail_test(msg):
@@ -173,7 +180,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         def fn(input):
             return _as_tuple(func(*input))[i].data
 
-        analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(_as_tuple(inputs), o)
+        analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o)
         numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
 
         if not correct_grad_sizes:

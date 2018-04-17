@@ -20,7 +20,7 @@ import torch.nn.parallel as dp
 import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
-from torch.nn.utils import clip_grad_norm
+from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
@@ -1238,7 +1238,7 @@ class TestNN(NNTestCase):
             for p, g in zip(l.parameters(), grads):
                 p._grad = Variable(g.clone().view_as(p.data))
             norm_before = compute_norm(norm_type)
-            norm = clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
+            norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
             self.assertEqual(norm, norm_before)
             self.assertEqual(norm_after, max_norm)
@@ -1251,13 +1251,27 @@ class TestNN(NNTestCase):
             for p, g in zip(l.parameters(), grads):
                 p.grad.data.copy_(g)
             norm_before = compute_norm(norm_type)
-            norm = clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
+            norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
             self.assertEqual(norm, norm_before)
             self.assertEqual(norm_before, norm_after)
             self.assertLessEqual(norm_after, max_norm)
             scale = compare_scaling(grads)
             self.assertEqual(scale, 1)
+
+    def test_clip_grad_value(self):
+        l = nn.Linear(10, 10)
+        clip_value = 2.5
+
+        grad_w, grad_b = torch.arange(-50, 50).view(10, 10).div(5), torch.ones(10).mul(2)
+        for grad_list in [[grad_w, grad_b], [grad_w, None]]:
+            for p, g in zip(l.parameters(), grad_list):
+                p._grad = Variable(g.clone().view_as(p.data)) if g is not None else g
+
+        clip_grad_value_(l.parameters(), clip_value)
+        for p in filter(lambda p: p.grad is not None, l.parameters()):
+            self.assertLessEqual(p.grad.data.max(), clip_value)
+            self.assertGreaterEqual(p.grad.data.min(), -clip_value)
 
     def test_parameters_to_vector(self):
         conv1 = nn.Conv2d(3, 10, 5)

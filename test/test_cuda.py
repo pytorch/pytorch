@@ -1558,6 +1558,10 @@ class TestCuda(TestCase):
     def test_diagflat(self):
         TestTorch._test_diagflat(self, dtype=torch.float32, device='cuda')
 
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_trtrs(self):
+        TestTorch._test_trtrs(self, lambda t: t.cuda())
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_get_set_rng_state_all(self):
         states = torch.cuda.get_rng_state_all()

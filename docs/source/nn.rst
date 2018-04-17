@@ -700,10 +700,15 @@ DataParallel layers (multi-GPU, distributed)
 Utilities
 ---------
 
-:hidden:`clip_grad_norm`
+:hidden:`clip_grad_norm_`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: torch.nn.utils.clip_grad_norm
+.. autofunction:: torch.nn.utils.clip_grad_norm_
+
+:hidden:`clip_grad_value_`
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.clip_grad_value_
 
 :hidden:`weight_norm`
 ~~~~~~~~~~~~~~~~~~~~~

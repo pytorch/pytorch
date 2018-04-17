@@ -8,7 +8,7 @@ torch.Tensor
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
-Torch defines seven CPU tensor types and eight GPU tensor types:
+Torch defines eight CPU tensor types and eight GPU tensor types:
 
 ======================== ===========================   ================================
 Data type                CPU tensor                    GPU tensor
@@ -140,6 +140,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumsum
    .. automethod:: data_ptr
    .. automethod:: det
+   .. autoattribute:: device
+      :annotation:
    .. automethod:: diag
    .. automethod:: dim
    .. automethod:: dist

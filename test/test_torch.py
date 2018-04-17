@@ -2436,6 +2436,13 @@ class TestTorch(TestCase):
         torch.randperm(100, out=res2)
         self.assertEqual(res1, res2, 0)
 
+        # randperm of 0 elements is an empty tensor
+        res1 = torch.randperm(0)
+        res2 = torch.LongTensor(5)
+        torch.randperm(0, out=res2)
+        self.assertEqual(res1.numel(), 0)
+        self.assertEqual(res2.numel(), 0)
+
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36
         t = torch.FloatTensor(200)
@@ -3095,8 +3102,8 @@ class TestTorch(TestCase):
         res2 = torch.ormqr(m, tau, mat2, False, True)
         self.assertEqual(res1, res2)
 
-    @skipIfNoLapack
-    def test_trtrs(self):
+    @staticmethod
+    def _test_trtrs(self, cast):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -3105,6 +3112,9 @@ class TestTorch(TestCase):
         b = torch.Tensor(((4.02, 6.19, -8.22, -7.57, -3.03),
                           (-1.56, 4.00, -8.67, 1.75, 2.86),
                           (9.81, -4.09, -4.57, -8.61, 8.99))).t()
+
+        a = cast(a)
+        b = cast(b)
 
         U = torch.triu(a)
         L = torch.tril(a)
@@ -3143,13 +3153,17 @@ class TestTorch(TestCase):
 
         # test reuse
         res1 = torch.trtrs(b, a)[0]
-        ta = torch.Tensor()
-        tb = torch.Tensor()
+        ta = cast(torch.Tensor())
+        tb = cast(torch.Tensor())
         torch.trtrs(b, a, out=(tb, ta))
         self.assertEqual(res1, tb, 0)
         tb.zero_()
         torch.trtrs(b, a, out=(tb, ta))
         self.assertEqual(res1, tb, 0)
+
+    @skipIfNoLapack
+    def test_trtrs(self):
+        self._test_trtrs(self, lambda t: t)
 
     @skipIfNoLapack
     def test_gels(self):
@@ -5602,6 +5616,30 @@ class TestTorch(TestCase):
         self.assertEqual(r[50:].mean(), 1, 0.2)
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+    def test_parsing_int64(self):
+        # accepts integer arguments
+        x = torch.cumsum(torch.ones(5, 5), 0)
+        self.assertEqual(x, torch.cumsum(torch.ones(5, 5), torch.tensor(0)))
+        # doesn't accept floating point variables
+        self.assertRaises(TypeError, lambda: torch.cumsum(torch.ones(5, 5), torch.tensor(0.)))
+        # doesn't accept variables with requires_grad
+        self.assertRaises(TypeError, lambda: torch.cumsum(torch.ones(5, 5), torch.tensor(0, requires_grad=True)))
+
+    def test_parsing_double(self):
+        # accepts floating point and integer arguments
+        x = torch.randn(2, 3)
+        torch.isclose(x, x, 1, 1)
+        self.assertTrue(torch.isclose(x, x, 1, 1).all())
+        self.assertTrue(torch.isclose(x, x, 1.5, 1.).all())
+        # accepts floating point and integer tensors
+        self.assertTrue(torch.isclose(x, x, torch.tensor(1), torch.tensor(1)).all())
+        self.assertTrue(torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1.)).all())
+        # doesn't accept variables with requires_grad
+        self.assertRaises(TypeError,
+                          lambda: torch.isclose(x, x, torch.tensor(1, requires_grad=True), torch.tensor(1)).all())
+        self.assertRaises(TypeError,
+                          lambda: torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1., requires_grad=True)).all())
 
     def _test_serialization(self, filecontext_lambda, test_use_filename=True):
         a = [torch.randn(5, 5).float() for i in range(2)]
