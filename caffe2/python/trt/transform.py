@@ -70,9 +70,6 @@ def _infer_shapes(init_net, pred_net, inputs):
 
     return hints
 
-def _ssa_rewrite_input(i):
-    return i + "_0";
-
 def transform_caffe2_net(
         device_option,
         init_net,
@@ -87,24 +84,22 @@ def transform_caffe2_net(
     Transfrom the caffe2_net by collapsing TRT-runnable nodes into trt c2 ops
     """
     check_gpu_()
-    c2_front.ssa_rewrite(pred_net, init_net, value_info=[])
 
     # Fill the workspace with the weights
     with core.DeviceScope(device_option):
         workspace.RunNetOnce(init_net)
 
-    input_data = {}
-    for k,v in input_shapes.iteritems():
-        input_data[_ssa_rewrite_input(k)] = np.random.randn(*v).astype(np.float32)
-
     # Hacky way to infer shapes as not all our operators have shape inference function.
     # Normally this is not needed
+    shape_hints = {}
     if populate_shapes:
+        input_data = {}
+        for k,v in input_shapes.iteritems():
+            input_data[k] = np.random.randn(*v).astype(np.float32)
         shape_hints = _infer_shapes(init_net, pred_net, input_data)
 
-    shape_hints = {}
     for k,v in input_shapes.iteritems():
-        shape_hints[_ssa_rewrite_input(k)] = v
+        shape_hints[k] = v
     pred_net_str = C.transform_trt(pred_net.SerializeToString(),
                                    shape_hints,
                                    max_batch_size,

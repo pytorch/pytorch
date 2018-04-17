@@ -45,6 +45,7 @@ class TensorRTTransformer {
       ::ONNX_NAMESPACE::ModelProto* model,
       std::vector<OperatorDef>* new_ops);
 
+
   // TensorRT params
   size_t max_batch_size_{50};
   size_t max_workspace_size_{1024 * 1024 * 2};

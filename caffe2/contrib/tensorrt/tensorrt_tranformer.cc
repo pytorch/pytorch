@@ -1,16 +1,17 @@
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
+
+#include <iostream>
+#include <unordered_set>
+
+#include <NvInfer.h>
+#include <google/protobuf/text_format.h>
+#include <onnx2trt.hpp>
+
 #include "caffe2/contrib/tensorrt/trt_utils.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/onnx/onnx_exporter.h"
-
-#include <NvInfer.h>
-#include <onnx2trt.hpp>
-
-#include <google/protobuf/text_format.h>
-#include <iostream>
-#include <unordered_set>
 
 namespace caffe2 {
 
@@ -20,27 +21,54 @@ namespace {
 std::unordered_map<std::string, TensorShape> InferShapes(
     Workspace* ws,
     NetDef* pred_net,
-    const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
-  CaffeMap<std::string, TensorShape> shape_hints_ordered;
-  for (const auto& kv : input_shape_hints) {
-    shape_hints_ordered.emplace(kv.first, kv.second);
-  }
+    CaffeMap<std::string, TensorShape>* shape_hints_ordered) {
 
   // Populate shapes from workplace
   const std::vector<string>& ws_blobs = ws->Blobs();
   for (const auto& s : ws_blobs) {
-    shape_hints_ordered.emplace(s, GetTensorShapeOfBlob(ws->GetBlob(s)));
+    shape_hints_ordered->emplace(s, GetTensorShapeOfBlob(ws->GetBlob(s)));
   }
 
   std::vector<NetDef*> nets;
   nets.emplace_back(pred_net);
-  InferBlobShapesAndTypes(shape_hints_ordered, nets);
+  InferBlobShapesAndTypes(*shape_hints_ordered, nets);
   std::unordered_map<std::string, TensorShape> shape_hints;
-  for (const auto& kv : shape_hints_ordered) {
+  for (const auto& kv : *shape_hints_ordered) {
     shape_hints.emplace(kv.first, kv.second);
   }
 
   return shape_hints;
+}
+
+CaffeMap<std::string, TensorShape> SsaRewriteAndMapIO(
+    Workspace* ws,
+    NetDef* pred_net,
+    const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
+  std::unordered_map<std::string, std::string> input_mapping =
+      onnx::SsaRewrite(nullptr, pred_net);
+  std::unordered_map<std::string, std::string> input_reverse_mapping;
+  for (const auto kv : input_mapping) {
+    input_reverse_mapping.emplace(kv.second, kv.first);
+    try {
+      if (ws->GetBlob(kv.second)) {
+        ws->RenameBlob(kv.second, kv.first);
+      }
+    } catch (const EnforceNotMet& e) {
+      LOG(WARNING) << "Cannot rename blob " << kv.second << " to " << kv.first
+                   << ": " << e.what();
+    }
+  }
+  CaffeMap<std::string, TensorShape> shape_hints_ordered;
+  for (const auto& kv : input_shape_hints) {
+    const auto it = input_reverse_mapping.find(kv.first);
+    if (it != input_reverse_mapping.end()) {
+      LOG(INFO) << "Adding input hint: " << it->second;
+      shape_hints_ordered.emplace(it->second, kv.second);
+    } else {
+      shape_hints_ordered.emplace(kv.first, kv.second);
+    }
+  }
+  return shape_hints_ordered;
 }
 
 // Figuring out the input the tensorrt runnable subgraph
@@ -434,7 +462,10 @@ void TensorRTTransformer::Transform(
     NetDef* pred_net,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   CAFFE_ENFORCE(ws);
-  auto shape_hints = InferShapes(ws, pred_net, input_shape_hints);
+
+  auto shape_hints_ordered =
+      SsaRewriteAndMapIO(ws, pred_net, input_shape_hints);
+  auto shape_hints = InferShapes(ws, pred_net, &shape_hints_ordered);
 
   std::unordered_set<std::string> weights;
   const std::vector<string>& ws_blobs = ws->Blobs();
@@ -452,7 +483,7 @@ void TensorRTTransformer::Transform(
   int op_idx = 0;
   int start = 0;
   int end = 0;
-  onnx::OnnxExporter exporter(true);
+  onnx::OnnxExporter exporter(nullptr, true);
   for (const OperatorDef& op : pred_net->op()) {
     bool support_trt = true;
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());

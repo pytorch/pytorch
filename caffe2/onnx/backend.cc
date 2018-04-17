@@ -405,7 +405,7 @@ Caffe2Ops Caffe2Backend::CreateCast(OnnxNode* onnx_node, int opset_version) {
       "' dtype is not supported");
 
   CAFFE_ENFORCE_EQ(
-      c2_op.ops[0].arg().size(),
+      c2_op.ops.Get(0).arg().size(),
       1,
       "Unexpected number of attributes in 'Cast'");
   c2_op.ops.Mutable(0)->mutable_arg(0)->set_i(c2_dtype);
