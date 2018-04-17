@@ -185,10 +185,10 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
-- name: cumprod(Tensor self, int64_t dim)
+- name: _cumprod(Tensor self, int64_t dim)
   self: cumprod_backward(grad, self, dim)
 
-- name: cumsum(Tensor self, int64_t dim)
+- name: _cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
@@ -495,10 +495,10 @@
   self: grad * exponent * self.pow(exponent - 1)
   exponent: grad * self.pow(exponent) * self.log()
 
-- name: prod(Tensor self, int64_t dim, bool keepdim)
+- name: _prod(Tensor self, int64_t dim, bool keepdim)
   self: prod_backward(grad, self, result, dim, keepdim)
 
-- name: prod(Tensor self)
+- name: _prod(Tensor self)
   self: prod_backward(grad, self, result)
 
 - name: pstrf(Tensor self, bool upper, Scalar tol)
@@ -601,10 +601,10 @@
   self: grad
   other: -grad * alpha
 
-- name: sum(Tensor self)
+- name: _sum(Tensor self)
   self: grad.expand(self.sizes())
 
-- name: sum(Tensor self, int64_t dim, bool keepdim)
+- name: _sum(Tensor self, int64_t dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: svd(Tensor self, bool some)

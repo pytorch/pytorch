@@ -448,7 +448,7 @@ namespace {
           // (same for the hh weights, and the ih and hh biases).
           // Since we're storing all the weights in a single tensor anyway,
           // might as well merge the CUDNN ones into a single tensor as well
-	  int mat_numel = *filter_dim_a.prod().data<int>();
+	  int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data<int>();
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
             std::initializer_list<int64_t> size = {
               mat_numel * num_linear_layers / 2, 1};

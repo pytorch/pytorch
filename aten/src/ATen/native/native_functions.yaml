@@ -250,6 +250,28 @@
       name: grad_grid
   variants: function
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: cumsum(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: cumsum(Tensor self, int64_t dim) -> Tensor
+
+- func: cumsum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: cumsum_out(Tensor result, Tensor self, int64_t dim) -> Tensor
+  variants: function
+
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: cumprod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: cumprod(Tensor self, int64_t dim) -> Tensor
+
+- func: cumprod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: cumprod_out(Tensor result, Tensor self, int64_t dim) -> Tensor
+  variants: function
+
 - func: det(Tensor self) -> Tensor
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
@@ -653,14 +675,34 @@
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: sum(Tensor self, *, ScalarType dtype) -> Tensor
+
 - func: sum(Tensor self) -> Tensor
+
+- func: _sum(Tensor self) -> Tensor
   dispatch:
     CPU: _sum_cpu
     CUDA: _sum_cuda
 
+- func: sum(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+
 - func: sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
+- func: sum(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: _sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function
+
 - func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: sum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: _sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
   dispatch:
     CPU: _sum_out_cpu
@@ -676,14 +718,34 @@
     CPU: _sqrt_out_cpu
     CUDA: _sqrt_out_cuda
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: prod(Tensor self, *, ScalarType dtype) -> Tensor
+
 - func: prod(Tensor self) -> Tensor
+
+- func: _prod(Tensor self) -> Tensor
   dispatch:
     CPU: _prod_cpu
     CUDA: _prod_cuda
 
+- func: prod(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+
 - func: prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
+- func: prod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: _prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function
+
 - func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: prod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: _prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
   dispatch:
     CPU: _prod_out_cpu
