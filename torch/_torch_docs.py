@@ -4290,6 +4290,58 @@ Example::
     [torch.LongTensor of size (4,)]
 """)
 
+add_docstr(torch.tensor,
+           r"""
+tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a tensor with :attr:`data`.
+
+Args:
+    data (array_like): Initial data for the tensor. Can be a list, tuple,
+        numpy array, scalar, and other types.
+    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+        Default: if None, infers data type from :attr:`data`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+
+
+Example::
+
+    >>> torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]])
+
+     0.1000  1.2000
+     2.2000  3.1000
+     4.9000  5.2000
+    [torch.FloatTensor of size (3,2)]
+
+    >>> torch.tensor([0, 1])  # Type inference on data
+
+     0
+     1
+    [torch.LongTensor of size (2,)]
+
+    >>> torch.tensor([[0.11111, 0.222222, 0.3333333]],
+                     dtype=torch.float64,
+                     device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
+
+     0.1111  0.2222  0.3333
+    [torch.cuda.DoubleTensor of size (1,3) (GPU 0)]
+
+    >>> torch.tensor(3.14159)  # Create a scalar (zero-dimensional tensor)
+
+     3.1416
+    [torch.FloatTensor of size ()]
+
+    >>> torch.tensor([])  # Create an empty tensor (of size (0,))
+
+    [torch.FloatTensor of size (0,)]
+
+""")
+
 add_docstr(torch.range,
            r"""
 range(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
