@@ -207,6 +207,22 @@ class CreateTreeCursorOp : public Operator<CPUContext> {
   std::vector<std::string> fields_;
 };
 
+class GetCursorOffsetOp : public Operator<CPUContext> {
+ public:
+  GetCursorOffsetOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
+    Output(0)->Resize(cursor->offsets.size());
+    auto* output = Output(0)->mutable_data<int>();
+    for (size_t i = 0; i < cursor->offsets.size(); ++i) {
+      output[i] = cursor->offsets[i];
+    }
+    return true;
+  }
+};
+
 class ResetCursorOp : public Operator<CPUContext> {
  public:
   ResetCursorOp(const OperatorDef& operator_def, Workspace* ws)
@@ -1009,6 +1025,7 @@ class TrimDatasetOp : public Operator<CPUContext> {
 REGISTER_CPU_OPERATOR(CreateTreeCursor, CreateTreeCursorOp);
 REGISTER_CPU_OPERATOR(ResetCursor, ResetCursorOp);
 REGISTER_CPU_OPERATOR(ReadNextBatch, ReadNextBatchOp);
+REGISTER_CPU_OPERATOR(GetCursorOffset, GetCursorOffsetOp);
 REGISTER_CPU_OPERATOR(ComputeOffset, ComputeOffsetOp);
 REGISTER_CPU_OPERATOR(SortAndShuffle, SortAndShuffleOp);
 REGISTER_CPU_OPERATOR(ReadRandomBatch, ReadRandomBatchOp);
@@ -1123,6 +1140,13 @@ ReadNextBatch is thread safe.
     .Input(1, "dataset_field_0", "First dataset field")
     .Output(0, "field_0", "Tensor containing the next batch for field 0.")
     .Arg("batch_size", "Number of top-level entries to read.");
+
+OPERATOR_SCHEMA(GetCursorOffset)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc("Get the current offset in the cursor.")
+    .Input(0, "cursor", "A blob containing a pointer to the cursor.")
+    .Output(0, "offsets", "Tensor containing the offsets for the cursor.");
 
 OPERATOR_SCHEMA(ComputeOffset)
     .NumInputs(1, INT_MAX)
