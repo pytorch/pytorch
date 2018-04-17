@@ -21,7 +21,7 @@ void init_tbb_num_threads();
 // deemed inefficient to parallelise over arrays shorter than 32768. Further,
 // no parallel algorithm (such as parallel_reduce) should split work into
 // smaller than GRAIN_SIZE chunks.
-constexpr int64_t TBB_GRAIN_SIZE = 32768;
+constexpr size_t TBB_GRAIN_SIZE = 32768;
 } // namespace internal
 
 template <class T, template <class> class OP>
@@ -35,7 +35,7 @@ T parallel_reduce(
 
   T result_;
   static tbb::affinity_partitioner ap;
-  if (end - start < internal::TBB_GRAIN_SIZE) {
+  if ((size_t)(end - start) < internal::TBB_GRAIN_SIZE) {
     result_ = f(data, start, end, init_);
   } else {
     result_ = tbb::parallel_reduce(
@@ -89,4 +89,28 @@ void parallel_reduce_2d(
   }
 }
 
+template <class T>
+void parallel_for_1d(
+    void (*f)(T*, const T*, size_t, size_t),
+    Tensor& result,
+    const Tensor& self) {
+  internal::init_tbb_num_threads();
+
+  static tbb::affinity_partitioner ap;
+
+  T* arr_out = result.data<T>();
+  const T* arr_in = self.data<T>();
+  size_t start = 0;
+  size_t end = self.numel();
+  if (end - start < internal::TBB_GRAIN_SIZE) {
+    f(arr_out, arr_in, start, end);
+  } else {
+    tbb::parallel_for(
+        tbb::blocked_range<size_t>(start, end, internal::TBB_GRAIN_SIZE),
+        [&arr_out, &arr_in, &f](const tbb::blocked_range<size_t> r) {
+          f(arr_out, arr_in, r.begin(), r.end());
+        },
+        ap);
+  }
+}
 } // namespace at

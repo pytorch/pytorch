@@ -1076,8 +1076,8 @@
     - THTensor* self
 ]]
 [[
-  name: _abs
-  cname: abs
+  name: abs
+  return: argument 0
   types:
     - floating_point
     - Long
@@ -1089,10 +1089,25 @@
   variants:
     - method
     - function
-  return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
+    - THTensor* self
+]]
+[[
+  name: abs_
+  cname: abs
+  return: self
+  types:
+    - floating_point
+    - Long
+    - Int
+    - Short
+  backends:
+    - CPU
+    - CUDA
+  arguments:
+    - THTensor* self
     - THTensor* self
 ]]
 [[
@@ -1126,37 +1141,20 @@
     - THTensor* self
 ]]
 [[
-  name: _log
+  name: log_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: log
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: log10_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  cname: log10
   return: self
   arguments:
     - THTensor* self
     - THTensor* self
 ]]
 [[
-  name: log10
+  name: log
   types:
     - floating_point
   backends:
@@ -1186,35 +1184,6 @@
 ]]
 [[
   name: log1p
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: log2_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  cname: log2
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: log2
   types:
     - floating_point
   backends:
@@ -1319,8 +1288,20 @@
     - THTensor* self
 ]]
 [[
-  name: _exp
+  name: exp_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: exp
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+[[
+  name: exp
   types:
     - floating_point
   backends:
@@ -1365,8 +1346,20 @@
     - THTensor* self
 ]]
 [[
-  name: _cos
+  name: cos_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: cos
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+[[
+  name: cos
   types:
     - floating_point
   backends:
@@ -1440,8 +1433,20 @@
     - THTensor* self
 ]]
 [[
-  name: _sin
+  name: sin_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: sin
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+[[
+  name: sin
   types:
     - floating_point
   backends:
@@ -2257,7 +2262,7 @@
         - THTensor* self
 ]]
 [[
-  name: _th_sum
+  name: _sum
   variants:
     - method
     - function
@@ -2286,7 +2291,7 @@
         - THTensor* self
 ]]
 [[
-  name: _th_prod
+  name: _prod
   variants:
     - method
     - function
@@ -2304,8 +2309,7 @@
           default: "false"
 ]]
 [[
-  name: _cumsum
-  cname: cumsum
+  name: cumsum
   variants:
     - method
     - function
@@ -2318,8 +2322,7 @@
       wrap_dim: self
 ]]
 [[
-  name: _cumprod
-  cname: cumprod
+  name: cumprod
   variants:
     - method
     - function
@@ -3236,7 +3239,6 @@
     - Double
   backends:
     - CPU
-    - CUDA
   variants:
     - method
     - function
@@ -3909,19 +3911,7 @@
       arguments:
         - THTensor* self
 ]]
-[[
-  name: _sparse_coo_tensor_unsafe
-  return: THTensor*
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  variants: [function]
-  cname: newWithTensorAndSizeUnsafe
-  arguments:
-    - THDenseIndexTensor* indices
-    - THDenseTensor* values
-    - THSize* size
-]]
+
 [[
   name: _copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps

@@ -459,17 +459,13 @@ GENERATE_KERNEL1(generate_geometric, real, double p, float, curand_uniform, (Sca
 #endif
 
 #if defined(THC_REAL_IS_LONG) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_FLOAT)
-#define CURAND64(STATE) (((uint64_t)curand(STATE)) << 32) | (uint64_t)curand(STATE)
-GENERATE_KERNEL2(generate_random, real, int32_t base, uint32_t range, uint32_t, curand, \
-    static_cast<real>(static_cast<int32_t>((x % range) + base)))
-GENERATE_KERNEL2(generate_random_64, real, int64_t base, uint64_t range, uint64_t, CURAND64, \
-    static_cast<real>(static_cast<int64_t>((x % range) + base)))
+#define CURAND64(STATE) (((uint64_t)curand(&state[blockIdx.x])) << 32) | (uint64_t)curand(&state[blockIdx.x])
+GENERATE_KERNEL2(generate_random, real, int32_t base, uint32_t range, uint32_t, curand, (real)(x % range + base))
+GENERATE_KERNEL2(generate_random_64, real, int64_t base, uint64_t range, uint64_t, CURAND64, (real)(x % range + base))
 #elif defined(THC_REAL_IS_HALF)
-GENERATE_KERNEL2(generate_random, real, int32_t base, uint32_t range, uint32_t, curand,
-    (ScalarConvert<int32_t, real>::to(static_cast<int32_t>(x % range + base))))
+GENERATE_KERNEL2(generate_random, real, int32_t base, uint32_t range, uint32_t, curand, (ScalarConvert<uint32_t, real>::to(x % range + base)))
 #else
-GENERATE_KERNEL2(generate_random, real, int32_t base, uint32_t range, uint32_t, curand,
-    static_cast<real>(static_cast<int32_t>(x % range + base)))
+GENERATE_KERNEL2(generate_random, real, int32_t base, uint32_t range, uint32_t, curand, (real)(x % range + base))
 #endif
 
 THC_API void THCTensor_(geometric)(THCState* state, THCTensor *self_, double p)

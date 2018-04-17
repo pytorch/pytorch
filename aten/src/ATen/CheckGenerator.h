@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ATen/Error.h"
 #include "ATen/Generator.h"
 #include "ATen/Utils.h"
 
@@ -12,7 +11,7 @@ static inline T * check_generator(Generator * expr, Generator * defaultValue) {
     expr = defaultValue;
   if(auto result = dynamic_cast<T*>(expr))
     return result;
-  AT_ERROR("Expected a '%s' but found '%s'", typeid(T).name(), typeid(expr).name());
+  runtime_error("Expected a '%s' but found '%s'", typeid(T).name(), typeid(expr).name());
 }
 
 } // namespace at

@@ -1,8 +1,7 @@
 #include <ATen/ATen.h>
-#include <ATen/Config.h>
-#include <ATen/Error.h>
-#include <ATen/MatrixRef.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Config.h>
+#include <ATen/MatrixRef.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -365,7 +364,7 @@ namespace {
       case CUDNN_RNN_TANH:
         return 2;
       default:
-        AT_ERROR("unknown cuDNN RNN mode %d", mode);
+        at::runtime_error("unknown cuDNN RNN mode %d", mode);
     }
   }
 
@@ -448,7 +447,7 @@ namespace {
           // (same for the hh weights, and the ih and hh biases).
           // Since we're storing all the weights in a single tensor anyway,
           // might as well merge the CUDNN ones into a single tensor as well
-	  int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data<int>();
+	  int mat_numel = *filter_dim_a.prod().data<int>();
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
             std::initializer_list<int64_t> size = {
               mat_numel * num_linear_layers / 2, 1};

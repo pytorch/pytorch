@@ -28,7 +28,7 @@ void THNN_(LogSigmoid_updateGradInput)(
 {
   THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, buffer);
-/* deriv of -max(0,-x) - log(e(0 - max(0,-x)) + e(-x - max(0,-x))) is
+/* deriv of -max(0,-x) - log(e(0 - max(0,-x)) + e(-x - max(0,-x)) is
  * -max_deriv - (-max_deriv*e(0-max(0,-x)) + (-1 - max_deriv)*e(-x - max(0,-x)))/z
  * where z = e(0 - max(0,-x)) + e(-x - max(0,-x))
  * which simplifies to 

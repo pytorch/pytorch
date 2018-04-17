@@ -426,11 +426,11 @@ static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) 
   return dataOffset;
 }
 
-static inline void THTensor_(checkLinearIndex)(int64_t linearIndex, int64_t numel) {
+static void THTensor_(checkLinearIndex)(int64_t linearIndex, int64_t numel) {
   THArgCheck(linearIndex < numel && linearIndex >= -numel, 2, "out of range: %d out of %d", (int)linearIndex, (int)numel);
 }
 
-static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
+static int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
 }
 
@@ -448,9 +448,9 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
   int isContiguous = THTensor_(isContiguous)(src);
 
   // Exceptions must not be thrown across OpenMP parallel sections, so we
-  // record the position of the invalid index and throw the exception after the
+  // record the value of the invalid index and throw the exception after the
   // loop.
-  int64_t invalidIdxPos = -1;
+  int64_t invalidIdx = -1;
 
   ptrdiff_t i;
   #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD) private(i)
@@ -464,12 +464,12 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
         dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
       }
     } else {
-      THAtomicCompareAndSwapLong(&invalidIdxPos, -1, i);
+      THAtomicCompareAndSwapLong(&invalidIdx, -1, idx);
     }
   }
 
-  if (invalidIdxPos >= 0) {
-    THTensor_(checkLinearIndex)(index_data[invalidIdxPos], srcElements);
+  if (invalidIdx >= 0) {
+    THTensor_(checkLinearIndex)(invalidIdx, srcElements);
   }
 
   THLongTensor_free(index);
@@ -3840,9 +3840,7 @@ LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(log10,TH_MATH_NAME(log10))
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
-LAB_IMPLEMENT_BASIC_FUNCTION(log2,TH_MATH_NAME(log2))
 LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp))
 LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1))
 LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos))
@@ -4256,7 +4254,7 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
 // Assumes x is close to zero and uses a Taylor expansion.
 static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
-  const real factor = TH_MATH_NAME(TH_digamma)(alpha) - TH_MATH_NAME(TH_digamma)(alpha + beta) - TH_MATH_NAME(log)(x);
+  const real factor = TH_digamma(alpha) - TH_digamma(alpha + beta) - TH_MATH_NAME(log)(x);
   real numer = 1;
   real series = numer / alpha * (factor + 1 / alpha);
   for (int i = 1; i <= 10; ++i) {
@@ -4271,7 +4269,7 @@ static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real bet
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
 // Assumes x is close to zero and uses a Taylor expansion.
 static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
-  const real factor = TH_MATH_NAME(TH_digamma)(alpha+beta) - TH_MATH_NAME(TH_digamma)(beta);
+  const real factor = TH_digamma(alpha+beta) - TH_digamma(beta);
   real numer = 1;
   real betas = 1;
   real dbetas = 0;
@@ -4382,7 +4380,7 @@ static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total)
       q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
     }
   }
-  const real approx = x * (TH_MATH_NAME(TH_digamma)(total) - TH_MATH_NAME(TH_digamma)(alpha)) / beta;
+  const real approx = x * (TH_digamma(total) - TH_digamma(alpha)) / beta;
   return p / q * approx;
 }
 

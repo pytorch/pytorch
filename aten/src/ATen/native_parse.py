@@ -17,8 +17,6 @@ def parse_default(s):
         return s
     elif s == '{}':
         return '{}'
-    elif s == 'nullopt':
-        return s
     try:
         return int(s)
     except Exception:
