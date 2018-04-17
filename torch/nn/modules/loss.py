@@ -95,7 +95,7 @@ class NLLLoss(_WeightedLoss):
     unbalanced training set.
 
     The input given through a forward call is expected to contain
-    log-probabilities of each class. input has to be a Tensor of size either
+    log-probabilities of each class. `input` has to be a Tensor of size either
     :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)`
     with :math:`K \geq 2` for the `K`-dimensional case (described later).
 
@@ -155,7 +155,7 @@ class NLLLoss(_WeightedLoss):
         - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
             K-dimensional loss.
-        - Output: :math:`(1)`. If reduce is ``False``, then the same size
+        - Output: scalar (:math:`(1)`). If reduce is ``False``, then the same size
             as the target: :math:`(N)`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
             of K-dimensional loss.
@@ -692,7 +692,9 @@ class CrossEntropyLoss(_WeightedLoss):
 
     The `input` is expected to contain scores for each class.
 
-    `input` has to be a 2D `Tensor` of size `(minibatch, C)`.
+    `input` has to be a Tensor of size either :math:`(minibatch, C)` or
+    :math:`(minibatch, C, d_1, d_2, ..., d_K)`
+    with :math:`K \geq 2` for the `K`-dimensional case (described later).
 
     This criterion expects a class index (0 to `C-1`) as the
     `target` for each value of a 1D tensor of size `minibatch`
@@ -710,6 +712,12 @@ class CrossEntropyLoss(_WeightedLoss):
 
     The losses are averaged across observations for each minibatch.
 
+    Can also be used for higher dimension inputs, such as 2D images, by providing
+    an input of size :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`,
+    where :math:`K` is the number of dimensions, and a target of appropriate shape
+    (see below).
+
+
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
            If given, has to be a Tensor of size `C`
@@ -725,9 +733,16 @@ class CrossEntropyLoss(_WeightedLoss):
             size_average. Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`
-        - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`
-        - Output: scalar. If reduce is ``False``, then :math:`(N)` instead.
+        - Input: :math:`(N, C)` where `C = number of classes`, or
+            :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`
+            in the case of `K`-dimensional loss.
+        - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
+            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
+            K-dimensional loss.
+        - Output: scalar (:math:`(1)`). If reduce is ``False``, then the same size
+            as the target: :math:`(N)`, or
+            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
+            of K-dimensional loss.
 
     Examples::
 
