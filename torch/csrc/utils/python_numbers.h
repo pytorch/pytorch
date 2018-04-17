@@ -62,14 +62,14 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
 }
 
 inline int64_t THPUtils_unpackIndex(PyObject* obj) {
-  THPObjectPtr index;
   if (!THPUtils_checkLong(obj)) {
-    index = THPObjectPtr(PyNumber_Index(obj));
+    auto index = THPObjectPtr(PyNumber_Index(obj));
     if (index == nullptr) {
       throw python_error();
     }
+    obj = index.get();
   }
-  return THPUtils_unpackLong(index.get());
+  return THPUtils_unpackLong(obj);
 }
 
 inline bool THPUtils_checkDouble(PyObject* obj) {
