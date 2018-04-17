@@ -2,6 +2,7 @@ import torch
 from torch.autograd import Variable
 import warnings
 from torch.distributions import constraints
+from torch.distributions.utils import lazy_property
 
 
 class Distribution(object):
@@ -29,10 +30,10 @@ class Distribution(object):
         if self._validate_args:
             for param, constraint in self.arg_constraints.items():
                 if constraints.is_dependent(constraint):
-                    continue
-                if param not in self.__dict__:
-                    continue
-                if not constraint.check(self.__dict__[param]).all():
+                    continue  # skip constraints that cannot be checked
+                if param not in self.__dict__ and isinstance(getattr(type(self), param, None), lazy_property):
+                    continue  # skip checking lazily-constructed args
+                if not constraint.check(self.__getattribute__(param)).all():
                     raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
