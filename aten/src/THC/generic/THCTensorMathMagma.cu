@@ -111,8 +111,8 @@ THC_API void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, 
   magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
   magma_trans_t ts = trans[0] == 'N' ? MagmaNoTrans : MagmaTrans;
   magma_diag_t dg = diag[0] == 'U' ? MagmaUnit : MagmaNonUnit;
-  magma_queue_t queue;
-  magma_queue_create(THCTensor_(getDevice)(state, b_), &queue);
+
+  real alpha = 1;
 
   int64_t n = a_->size[0];
   int64_t nrhs = b_->size[1];
@@ -123,12 +123,11 @@ THC_API void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, 
   real *b_data = THCTensor_(data)(state, b);
 
 #if defined(THC_REAL_IS_FLOAT)
-  magma_strsm(sz, ul, ts, dg, n, nrhs, alpha, a_data, n, b_data, n, queue);
+  magma_strsm(sz, ul, ts, dg, n, nrhs, alpha, a_data, n, b_data, n);
 #else
-  magma_dtrsm(sz, ul, ts, dg, n, nrhs, alpha, a_data, n, b_data, n, queue);
+  magma_dtrsm(sz, ul, ts, dg, n, nrhs, alpha, a_data, n, b_data, n);
 #endif
 
-  magma_queue_destroy(queue);
   THCTensor_(freeCopyTo)(state, a, ra_);
   THCTensor_(freeCopyTo)(state, b, rb_);
 #else
