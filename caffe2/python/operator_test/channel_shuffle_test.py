@@ -25,7 +25,8 @@ class ChannelShuffleOpsTest(hu.HypothesisTestCase):
             X = X.transpose((0, 2, 3, 1))
 
         op = core.CreateOperator("ChannelShuffle", ["X"], ["Y"],
-                                 group=groups, kernel=1, order=order)
+                                 group=groups, kernel=1, order=order,
+                                 device_option=dc)
 
         def channel_shuffle_ref(X):
             if order == "NHWC":
