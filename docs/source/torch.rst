@@ -19,13 +19,16 @@ Creation Ops
 .. autofunction:: from_numpy
 .. autofunction:: linspace
 .. autofunction:: logspace
-.. autofunction:: ones
-.. autofunction:: ones_like
 .. autofunction:: arange
 .. autofunction:: range
+.. autofunction:: ones
+.. autofunction:: ones_like
 .. autofunction:: zeros
 .. autofunction:: zeros_like
+.. autofunction:: empty
 .. autofunction:: empty_like
+.. autofunction:: full
+.. autofunction:: full_like
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
