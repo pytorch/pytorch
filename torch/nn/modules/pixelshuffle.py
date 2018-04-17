@@ -24,7 +24,8 @@ class PixelShuffle(Module):
     Shape:
         - Input: :math:`(N, C, d_{1}, d_{2}, ..., d_{n})`
         - Output: :math:`(N, C/(r^n), d_{1}*r, d_{2}*r, ..., d_{n}*r)`
-        Where :math:`n` is the dimensionality of the data, e.g. :math:`n-1` for 1D audio, :math:`n=2` for 2D images, etc.
+        Where :math:`n` is the dimensionality of the data, e.g. :math:`n-1` for 1D audio,
+        :math:`n=2` for 2D images, etc.
 
     Examples::
 
