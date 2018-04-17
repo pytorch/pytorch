@@ -18,7 +18,6 @@ using at::Generator;
 using at::IntList;
 using at::Scalar;
 using at::SparseTensor;
-using at::String;
 using at::Storage;
 using at::Tensor;
 using at::TensorList;

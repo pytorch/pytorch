@@ -9,7 +9,7 @@ namespace at { namespace native {
 // sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
 // batch matrix multiplication
 // its main purpose is to provide a pairwise reduction for einsum
-Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
+static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed (so that all dimensions match - after broadcasting)
   // but makes no other assumptions on the order of dimensions
   AT_ASSERT(left_.dim()==right_.dim(), "number of dimensions must match");
@@ -105,7 +105,7 @@ Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_di
   return result;
 }
 
-Tensor einsum(String eqn, TensorList tensors) {
+Tensor einsum(std::string eqn, TensorList tensors) {
   constexpr size_t number_of_letters = 26;
   std::string in_eqn;
   size_t pos;
