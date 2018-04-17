@@ -95,6 +95,7 @@ struct PythonArgs {
   inline std::unique_ptr<at::Storage> storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
+  inline at::optional<at::ScalarType> scalartypeOptional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline Device device(int i);
@@ -270,6 +271,11 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
             torch::tensor::get_default_tensor_type().scalarType() : scalartype;
   }
   return reinterpret_cast<THPDtype*>(args[i])->scalar_type;
+}
+
+inline at::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
+  if (!args[i]) return at::nullopt;
+  return scalartype(i);
 }
 
 inline const THPLayout& PythonArgs::layout(int i) {
