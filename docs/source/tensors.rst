@@ -140,6 +140,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumsum
    .. automethod:: data_ptr
    .. automethod:: det
+   .. autoattribute:: device
+      :annotation:
    .. automethod:: diag
    .. automethod:: dim
    .. automethod:: dist
