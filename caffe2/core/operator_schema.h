@@ -510,9 +510,6 @@ OpSchema::Cost PointwiseCostInference(
   void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
   static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) =      \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
-#define OPERATOR_SCHEMA_STR(name)                                  \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(schema_registration) = \
-      &OpSchemaRegistry::NewSchema(name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
@@ -520,9 +517,6 @@ OpSchema::Cost PointwiseCostInference(
   void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
   static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) =      \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
-#define OPERATOR_SCHEMA_STR(name)                                  \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(schema_registration) = \
-      1 ? nullptr : &OpSchemaRegistry::NewSchema(name, __FILE__, __LINE__)
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 
