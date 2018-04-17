@@ -12,20 +12,25 @@ Tensors
 .. autofunction:: set_printoptions
 .. autofunction:: set_flush_denormal
 
+.. _tensor-creation-ops:
 
 Creation Ops
 ~~~~~~~~~~~~~~~~~~~~~~
-.. autofunction:: eye
+.. autofunction:: tensor
 .. autofunction:: from_numpy
-.. autofunction:: linspace
-.. autofunction:: logspace
+.. autofunction:: zeros
+.. autofunction:: zeros_like
 .. autofunction:: ones
 .. autofunction:: ones_like
 .. autofunction:: arange
 .. autofunction:: range
-.. autofunction:: zeros
-.. autofunction:: zeros_like
+.. autofunction:: linspace
+.. autofunction:: logspace
+.. autofunction:: eye
+.. autofunction:: empty
 .. autofunction:: empty_like
+.. autofunction:: full
+.. autofunction:: full_like
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
