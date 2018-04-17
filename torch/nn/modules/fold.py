@@ -17,7 +17,7 @@ class Fold(Module):
 
     | If :attr:`padding` is non-zero, then the input is implicitly
     zero-padded on both sides by :attr:`padding` number of points
-    | :attr:`dilation` controls the intenal spacing between the kernel points in the output.
+    | :attr:`dilation` controls the internal spacing between the kernel points in the output.
     It is harder to describe, but this `link`_ has a nice visualization of what
     dilation does.
 

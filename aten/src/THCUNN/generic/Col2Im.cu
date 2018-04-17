@@ -21,7 +21,7 @@ static inline void THNN_(Col2Im_shapeCheck)(
   THCUNN_argCheck(state, ndim == 2 || ndim == 3, 2, input,
                   "2D or 3D input tensor expected but got %s");
 
-  int batch_dim = (ndim == 4) ? 0 : -1;
+  int batch_dim = (ndim == 3) ? 0 : -1;
   long nInputPlane  = input->size[batch_dim + 1];
   long inputLength  = input->size[batch_dim + 2];
 
