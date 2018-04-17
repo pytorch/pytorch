@@ -284,6 +284,7 @@ fi
 if [[ -n $CUDA_VERSION ]]; then
   CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=ON")
   CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=ON")
+  CAFFE2_CMAKE_ARGS+=("-DCAFFE2_STATIC_LINK_CUDA=ON")
 else
   # Flags required for CPU for Caffe2
   CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=OFF")
@@ -320,9 +321,10 @@ if [[ -z $SKIP_CONDA_TESTS && -n $UPLOAD_TO_CONDA ]]; then
   CONDA_BUILD_ARGS+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
 
   # If building a redistributable, then package the CUDA libraries with it
-  if [[ -n $CUDA_VERSION ]]; then
-    export PACKAGE_CUDA_LIBS=1
-  fi
+  # TODO this doesn't work on Ubuntu right now
+  #if [[ -n $CUDA_VERSION ]]; then
+  #  export PACKAGE_CUDA_LIBS=1
+  #fi
 
   # Show what the final meta.yaml looks like
   echo "Finalized meta.yaml is"
