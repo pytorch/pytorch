@@ -260,7 +260,7 @@ def _unique_state_dict(module, keep_vars=False):
     filtered_dict = type(state_dict)()
     seen_ids = set()
     for k, v in state_dict.items():
-        if id(v) in seen_ids or k.split('.')[-1] == '_version':  # exclude version number
+        if id(v) in seen_ids:
             continue
         seen_ids.add(id(v))
         filtered_dict[k] = v

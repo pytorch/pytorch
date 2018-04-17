@@ -1,4 +1,4 @@
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict, namedtuple
 import functools
 
 import torch
@@ -45,6 +45,29 @@ class Module(object):
     """
 
     dump_patches = False
+
+    r"""This allows better BC support for :meth:`load_state_dict`. In
+    :meth:`state_dict`, the version number will be saved as in the attribute
+    `_versions` of the returned state dict, and thus pickled. `_versions` is a
+    dictionary. Its keys follow the naming convention of state dict, but ends
+    with key ``"version"`` and is associated with the version number of that
+    submodule. For example, if ``module.state_dict()._version`` is
+
+    {
+        "version":         10,
+        "m1.version":       0,
+        "m1.m2.version":    3,
+        "m1.m3.version":    1,
+    }
+
+    Then ``module`` has version number ``10`` and a submodule named ``m1`` with
+    version number 0, which contains two other submodules with names ``m2`` and
+    ``m3`` and version numbers ``3`` and ``1``.
+
+    If new parameters/buffers are added/removed from a module, this number shall
+    be bumped, and the module's `load_local_state_dict` method can compare the
+    version number and do appropriate changes if the state dict is from before
+    the change."""
     _version = 0
 
     def __init__(self):
@@ -567,8 +590,8 @@ class Module(object):
 
         Args:
             destination (dict, optional):
-                if not None, the return dictionary is stored into destination.
-                Default: None
+                if not ``None``, the return dictionary is stored into
+                :attr:`destination`. Default: None
             prefix (string, optional): Adds a prefix to the key (name) of every
                 parameter and buffer in the result dictionary. Default: ''
             keep_vars (bool, optional): if ``True``, returns a Tensor for each
@@ -590,7 +613,9 @@ class Module(object):
         """
         if destination is None:
             destination = OrderedDict()
-        destination[prefix + '_version'] = self._version
+            destination._versions = OrderedDict()
+        if hasattr(destination, '_versions'):
+            destination._versions[prefix + 'version'] = self._version
         for name, param in self._parameters.items():
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.data
@@ -603,31 +628,33 @@ class Module(object):
                     module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def load_local_state_dict(self, local_state_dict, strict=True):
+    def load_local_state_dict(self, local_state_dict, version, strict):
         r"""Copies parameters and buffers from :attr:`local_state_dict` into
         only this module, but not its descendants. This is called on every
         submodule in :meth:`~torch.nn.Module.load_state_dict`. This method
         can be overridden by subclasses to achieve class-specific backward
-        compatible loading using the version number stored in
-        ``local_state_dict['_version']``. The version number for each module is
-        a class attributed named ``_version``. It starts at ``0``, and should be
-        incremented when buffers/parameters are added/removed to the module.
-        State dicts saved before 0.4 has the default version number of ``-1``.
+        compatible loading using the version number :attr:`version`.
+
+        .. note::
+            :attr:`local_state_dict` is a different object that the input
+            :attr:`state_dict` to :meth:`~torch.nn.Module.load_state_dict`. So
+            it can be modified freely if needed.
 
         Arguments:
             local_state_dict (dict): A dict containing local parameters and
                 persistent buffers of this module, but not of its descendants.
-            strict (bool): Strictly enforce that the keys in :attr:`state_dict`
-                match the keys returned by this module's
-                :func:`~torch.nn.Module.state_dict` function. Default: ``True``
+            version (int): The version number associated with the input
+                :attr:`local_state_dict`. If the input state dict was created
+                without a version number, this will be ``None``
+            strict (bool): Whether to strictly enforce that the keys in
+                :attr:`state_dict` match the keys returned by this module's
+                :meth:`~torch.nn.Module.state_dict` function.
         """
         own_local_state = self.state_dict(no_child=True)
 
         unexpected = []
         for name, param in local_state_dict.items():
-            if name == '_version':
-                continue
-            elif name in own_local_state:
+            if name in own_local_state:
                 if isinstance(param, Parameter):
                     # backwards compatibility for serialized parameters
                     param = param.data
@@ -658,46 +685,90 @@ class Module(object):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
-        by this module's :func:`~torch.nn.Module.state_dict` function.
+        by this module's :meth:`~torch.nn.Module.state_dict` function.
 
         Arguments:
             state_dict (dict): A dict containing parameters and
                 persistent buffers.
-            strict (bool): Strictly enforce that the keys in :attr:`state_dict`
-                match the keys returned by this module's
-                :func:`~torch.nn.Module.state_dict` function. Default: ``True``
+            strict (bool, optional): Whether to strictly enforce that the keys
+                in :attr:`state_dict` match the keys returned by this module's
+                :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
         """
-        child_state_dicts = defaultdict(dict)
-        local_state_dict = {'_version': -1}  # default version counter
-        for key, value in state_dict.items():
-            path = key.split('.', maxsplit=1)
-            if len(path) > 1:
-                child_state_dicts[path[0]][path[1]] = value
+        versions = getattr(state_dict, '_versions', {})
+
+        # build a tree
+        # each node represents a (sub)module as a namedtuple
+        #     (
+        #       module            [nn.Module],
+        #       path              [list<string>],
+        #       local_state_dict  [dict<string, Tensor>],
+        #       children          [dict<string, Node>],
+        #     )
+        #
+        #  e.g. for state_dict with keys {"m1.resblock.weight", "m1.resblock.conv.weight"},
+        #       the Node for m1.resblock might be
+        #       (
+        #           module=ResnetBlock,
+        #           path=["m1", "resblock"],
+        #           local_state_dict={"weight": some_tensor},
+        #           children={"conv": some_node},
+        #        )
+        #
+
+        Node = namedtuple('Node', ['module', 'path', 'local_state_dict', 'children'])
+
+        state_tree = Node(self, [], {}, {})
+
+        unexpected_modules = set()
+
+        def add_to_tree(path, value, idx=0, root=state_tree):
+            if len(path) == idx + 1:  # at [..., name_of_param <- here]
+                root.local_state_dict[path[idx]] = value
             else:
-                local_state_dict[path[0]] = value
+                key = path[idx]       # at [..., name_of_submodule <- here, ..., name_of_param]
+                if key not in root.children:
+                    if key in root.module._modules:
+                        # make a subtree for this newly seen submodule
+                        subtree = Node(root.module._modules[key], path[:(idx + 1)], {}, {})
+                        root.children[key] = subtree
+                    elif strict:
+                        unexpected_modules.add('.'.join(path[:(idx + 1)]))
+                        return
+                add_to_tree(path, value, idx + 1, root.children[key])
 
-        self.load_local_state_dict(local_state_dict, strict)
-
-        missing = []
-        for name, module in self._modules.items():
-            if module is not None:
-                if name in child_state_dicts:
-                    module.load_state_dict(child_state_dicts[name], strict)
-                elif strict:
-                    missing.append((module.__class__.__name__, name))
+        for key, value in state_dict.items():
+            add_to_tree(key.split('.'), value)
 
         if strict:
-            unexpected = set(child_state_dicts.keys()) - set(self._modules.keys())
+            missing_modules = []
+
+            def validate_tree(root=state_tree):
+                for name, module in root.module._modules.items():
+                    if module is not None:
+                        if name not in root.children:
+                            missing_modules.append(('.'.join(root.path + [name]), module.__class__.__name__))
+                        else:
+                            validate_tree(root.children[name])
+
+            validate_tree()
             error_msg = ''
-            if len(unexpected) > 0:
+            if len(unexpected_modules) > 0:
                 error_msg += 'Unexpected module key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in unexpected))
-            if len(missing) > 0:
+                    ', '.join('"{}"'.format(k) for k in unexpected_modules))
+            if len(missing_modules) > 0:
                 error_msg += 'Missing module key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}" of type {}'.format(name, cls) for cls, name in missing))
+                    ', '.join('"{}" of type {}'.format(name, cls) for name, cls in missing_modules))
             if len(error_msg) > 0:
                 raise KeyError('Error loading state_dict for {}: {}'.format(
                                self.__class__.__name__, error_msg))
+
+        def load_tree(root=state_tree):
+            for subtree in root.children.values():
+                load_tree(subtree)
+            version = versions.get('.'.join(root.path + ['version']), None)
+            root.module.load_local_state_dict(root.local_state_dict, version, strict)
+
+        load_tree()
 
     def parameters(self):
         r"""Returns an iterator over module parameters.

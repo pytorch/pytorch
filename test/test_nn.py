@@ -2527,19 +2527,21 @@ class TestNN(NNTestCase):
         net.add_module('empty', None)
 
         state_dict = net.state_dict()
-        self.assertEqual(len(state_dict), 15)
-        self.assertIn('linear1._version', state_dict)
+        self.assertEqual(len(state_dict), 9)
+        self.assertEqual(len(state_dict._versions), 6)
+        self.assertIn('version', state_dict._versions)
+        self.assertIn('linear1.version', state_dict._versions)
         self.assertIn('linear1.weight', state_dict)
         self.assertIn('linear1.bias', state_dict)
-        self.assertIn('linear2._version', state_dict)
+        self.assertIn('linear2.version', state_dict._versions)
         self.assertIn('linear2.weight', state_dict)
         self.assertIn('linear2.bias', state_dict)
-        self.assertIn('block._version', state_dict)
-        self.assertIn('block.conv._version', state_dict)
+        self.assertIn('block.version', state_dict._versions)
+        self.assertIn('block.conv.version', state_dict._versions)
         self.assertIn('block.conv.weight', state_dict)
         self.assertIn('block.conv.weight', state_dict)
         self.assertNotIn('block.conv.bias', state_dict)
-        self.assertIn('bn._version', state_dict)
+        self.assertIn('bn.version', state_dict._versions)
         self.assertIn('bn.weight', state_dict)
         self.assertIn('bn.bias', state_dict)
         self.assertIn('bn.running_var', state_dict)
@@ -2551,15 +2553,13 @@ class TestNN(NNTestCase):
                 param = getattr(param, component)
                 if isinstance(param, Parameter):
                     param = param.data
-            if isinstance(v, torch.Tensor):
-                self.assertEqual(v.data_ptr(), param.data_ptr())
-            else:
-                self.assertEqual(v, param)
+            self.assertEqual(v.data_ptr(), param.data_ptr())
 
         l = nn.Linear(5, 5)
         state_dict = l.state_dict()
-        self.assertEqual(len(state_dict), 3)
-        self.assertTrue(state_dict['_version'] >= 0)
+        self.assertEqual(len(state_dict), 2)
+        self.assertEqual(len(state_dict._versions), 1)
+        self.assertTrue(state_dict._versions['version'] >= 0)
         self.assertEqual(state_dict['weight'].data_ptr(), l.weight.data_ptr())
         self.assertEqual(state_dict['bias'].data_ptr(), l.bias.data_ptr())
 
