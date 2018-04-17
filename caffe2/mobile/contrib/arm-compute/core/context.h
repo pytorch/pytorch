@@ -62,14 +62,11 @@ public:
       if (X_old) {
         X_raw_ptr = const_cast<GLTensor<T> *>(X_old);
         X_raw_ptr->ResizeLike(Xcpu);
-      } else {
-        X_raw_ptr = new GLTensor<T>();
-        X_raw_ptr->ResizeLike(Xcpu);
-      }
-      if (X_old) {
         deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(X_raw_ptr, EmptyDeleter<T>);
         return X_unique_ptr;
       } else {
+        X_raw_ptr = new GLTensor<T>();
+        X_raw_ptr->ResizeLike(Xcpu);
         deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(X_raw_ptr, GLTensorDeleter<T>);
         return X_unique_ptr;
       }

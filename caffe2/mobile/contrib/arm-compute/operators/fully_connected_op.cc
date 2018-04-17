@@ -25,14 +25,10 @@ bool GLFullyConnectedOp<T>::RunOnDevice() {
   auto *Wblob = OperatorBase::Inputs()[1];
   auto *Bblob = OperatorBase::Inputs()[2];
 
+  X_ = GLContext::getGLTensor<T>(Xblob, X_.release());
   if (first_run_) {
-    X_ = GLContext::getGLTensor<T>(Xblob);
     W_ = GLContext::getGLTensor<T>(Wblob);
     B_ = GLContext::getGLTensor<T>(Bblob);
-  } else {
-    X_ = GLContext::getGLTensor<T>(Xblob, X_.release());
-    W_ = GLContext::getGLTensor<T>(Wblob, W_.release());
-    B_ = GLContext::getGLTensor<T>(Bblob, B_.release());
   }
 
   auto M = X_->dim32(0);

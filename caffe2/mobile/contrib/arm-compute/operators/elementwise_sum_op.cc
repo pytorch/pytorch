@@ -24,13 +24,8 @@ bool GLSumOp<T>::RunOnDevice() {
   auto *Ablob = OperatorBase::Inputs()[0];
   auto *Bblob = OperatorBase::Inputs()[1];
 
-  if (first_run_) {
-    A_ = GLContext::getGLTensor<T>(Ablob);
-    B_ = GLContext::getGLTensor<T>(Bblob);
-  } else {
-    A_ = GLContext::getGLTensor<T>(Ablob, A_.release());
-    B_ = GLContext::getGLTensor<T>(Bblob, B_.release());
-  }
+  A_ = GLContext::getGLTensor<T>(Ablob, A_.release());
+  B_ = GLContext::getGLTensor<T>(Bblob, B_.release());
 
   GLTensor<T> *Y =
       OperatorBase::Outputs()[0]->template GetMutable<GLTensor<T>>();
