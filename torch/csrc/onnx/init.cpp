@@ -4,7 +4,7 @@
 namespace torch { namespace onnx {
 void initONNXBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  auto onnx = m.def_submodule("onnx");
+  auto onnx = m.def_submodule("_onnx");
   py::enum_<onnx_TensorProto_DataType>(onnx, "TensorProtoDataType")
       .value("UNDEFINED", onnx_TensorProto_DataType_UNDEFINED)
       .value("FLOAT", onnx_TensorProto_DataType_FLOAT)
