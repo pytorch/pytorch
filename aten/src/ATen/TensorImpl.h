@@ -71,7 +71,7 @@ struct TensorImpl : public Retainable {
     AT_ERROR("detach_ is not implemented for Tensor");
   }
 
-  virtual void set_data(Tensor new_data);
+  AT_API virtual void set_data(Tensor new_data);
 
 protected:
   bool is_scalar;
