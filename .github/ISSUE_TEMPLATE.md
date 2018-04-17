@@ -14,12 +14,14 @@ Please try to provide a minimal example to repro the bug.
 Error messages and stack traces are also helpful.
 
 ## System Info
-Much of the following information can be obtained for PyTorch from running our 
-[environment collection script](https://github.com/pytorch/pytorch/tree/master/torch/utils/collect_env.py).
-You can get it and run it with:
+Please copy and paste the output from our
+[environment collection script](https://github.com/pytorch/pytorch/tree/master/torch/utils/collect_env.py)
+(or fill out the checklist below manually).
+
+You can get the script and run it with:
 ```
 wget https://github.com/pytorch/pytorch/tree/master/torch/utils/collect_env.py
-# Check the contents of collect_env.py before running it.
+# For security purposes, please check the contents of collect_env.py before running it.
 python collect_env.py
 ```
 

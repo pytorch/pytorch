@@ -15,8 +15,8 @@ GPU 1: Tesla M60
 
 Nvidia driver version: 384.111
 cuDNN version: Probably one of the following:
-/usr/lib/x86_64-linux-gnu/libcudnn_static_v7.a
 /usr/lib/x86_64-linux-gnu/libcudnn.so.7.1.2
+/usr/lib/x86_64-linux-gnu/libcudnn_static_v7.a
 
 Versions of relevant libraries:
 [pip] numpy (1.14.2)
