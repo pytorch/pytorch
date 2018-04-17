@@ -72,6 +72,10 @@ public:
   virtual ~Type() {}
 };
 
+inline bool operator!=(const Type & lhs, const Type & rhs) {
+  return !(lhs == rhs);
+}
+
 
 struct DynamicType : public Type {
   DynamicType()
@@ -190,15 +194,21 @@ struct TupleType : public Type {
   virtual bool operator==(const Type& rhs) const override {
     if(rhs.kind() != kind())
       return false;
-    return rhs.cast<TupleType>()->elements().equals(elements());
+    const auto & l_elements = elements();
+    const auto & r_elements = rhs.cast<TupleType>()->elements();
+    if(l_elements.size() != r_elements.size())
+      return false;
+    for(size_t i = 0; i < l_elements.size(); ++i) {
+      if(*l_elements[i] != *r_elements[i])
+        return false;
+    }
+    return true;
   }
 private:
   std::vector<TypePtr> elements_;
 };
 
-inline bool operator!=(const Type & lhs, const Type & rhs) {
-  return !(lhs == rhs);
-}
+
 
 std::ostream& operator<<(std::ostream & out, const Type & t);
 
