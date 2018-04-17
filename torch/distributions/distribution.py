@@ -31,9 +31,9 @@ class Distribution(object):
             for param, constraint in self.arg_constraints.items():
                 if constraints.is_dependent(constraint):
                     continue  # skip constraints that cannot be checked
-                if param not in self.__dict__ and isinstance(getattr(type(self), param, None), lazy_property):
+                if param not in self.__dict__ and isinstance(getattr(type(self), param), lazy_property):
                     continue  # skip checking lazily-constructed args
-                if not constraint.check(self.__getattribute__(param)).all():
+                if not constraint.check(getattr(self, param)).all():
                     raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
