@@ -5610,6 +5610,30 @@ class TestTorch(TestCase):
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
+    def test_parsing_int64(self):
+        # accepts integer arguments
+        x = torch.cumsum(torch.ones(5, 5), 0)
+        self.assertEqual(x, torch.cumsum(torch.ones(5, 5), torch.tensor(0)))
+        # doesn't accept floating point variables
+        self.assertRaises(TypeError, lambda: torch.cumsum(torch.ones(5, 5), torch.tensor(0.)))
+        # doesn't accept variables with requires_grad
+        self.assertRaises(TypeError, lambda: torch.cumsum(torch.ones(5, 5), torch.tensor(0, requires_grad=True)))
+
+    def test_parsing_double(self):
+        # accepts floating point and integer arguments
+        x = torch.randn(2, 3)
+        torch.isclose(x, x, 1, 1)
+        self.assertTrue(torch.isclose(x, x, 1, 1).all())
+        self.assertTrue(torch.isclose(x, x, 1.5, 1.).all())
+        # accepts floating point and integer tensors
+        self.assertTrue(torch.isclose(x, x, torch.tensor(1), torch.tensor(1)).all())
+        self.assertTrue(torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1.)).all())
+        # doesn't accept variables with requires_grad
+        self.assertRaises(TypeError,
+                          lambda: torch.isclose(x, x, torch.tensor(1, requires_grad=True), torch.tensor(1)).all())
+        self.assertRaises(TypeError,
+                          lambda: torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1., requires_grad=True)).all())
+
     def _test_serialization(self, filecontext_lambda, test_use_filename=True):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]
