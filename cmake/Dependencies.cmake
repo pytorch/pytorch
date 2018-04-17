@@ -388,7 +388,7 @@ if(USE_CUDA)
       LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
           "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
     else()
-      LIST(APPENDCaffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
+      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
     endif()
     if(USE_TENSORRT) 
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt) 
