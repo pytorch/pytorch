@@ -2531,6 +2531,23 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
             M()
 
+    def test_trace_of_script(self):
+        @torch.jit.script
+        def foo(a, c):
+            b = 0
+            if a == 0:
+                b = 1
+            return b + c
+
+        a = torch.ones(1, dtype=torch.long)
+
+        @torch.jit.trace(torch.zeros(1, dtype=torch.long))
+        def use(b):
+            return foo(b - 1, a) + 1
+
+        self.assertEqual(3, use(torch.ones(1, dtype=torch.long)))
+        self.assertEqual(2, use(torch.zeros(1, dtype=torch.long)))
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
