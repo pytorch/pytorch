@@ -2436,6 +2436,13 @@ class TestTorch(TestCase):
         torch.randperm(100, out=res2)
         self.assertEqual(res1, res2, 0)
 
+        # randperm of 0 elements is an empty tensor
+        res1 = torch.randperm(0)
+        res2 = torch.LongTensor(5)
+        torch.randperm(0, out=res2)
+        self.assertEqual(res1.numel(), 0)
+        self.assertEqual(res2.numel(), 0)
+
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36
         t = torch.FloatTensor(200)
