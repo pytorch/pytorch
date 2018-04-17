@@ -58,10 +58,8 @@ class TransposeOp final : public Operator<Context> {
     }
     Y->Resize(Y_dims);
     math::Transpose<T, Context>(
-        X.size(),
-        axes_.size(),
+        X_dims.size(),
         X_dims.data(),
-        Y_dims.data(),
         axes_.data(),
         X.template data<T>(),
         Y->template mutable_data<T>(),
