@@ -122,7 +122,7 @@ class DistributedDataParallel(Module):
         self.nccl_reduce_bucket_size = 256 * MB
 
         # Sync params and buffers
-        module_states = list(self.module.state_dict().values())
+        module_states = list(v for k, v in self.module.state_dict().items() if k.split('.')[-1] != '_version')
         if len(module_states) > 0:
             self._dist_broadcast_coalesced(module_states,
                                            self.broadcast_bucket_size)
