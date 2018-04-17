@@ -15,6 +15,7 @@
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/jit/script/compiler.h"
 
 #include <unordered_map>
 
@@ -174,14 +175,18 @@ struct GraphExecutorImpl {
       ss << "expected " << num_inputs << " inputs but got " << inputs.size() << " inputs";
       throw std::runtime_error(ss.str());
     }
+
+    // the tracer has called a graph executor
+    // there is no need to optimize, but we do need to splice the graph of
+    // this excutor into the trace. Otherwise we might unroll control-flow
+    // operations.
+    if(isTracing(inputs)) {
+      return runTraced(std::move(inputs));
+    }
+
     // this is the fallback pathway, when we cannot differentiate
     if(!optimize || (!symbolically_differentiable && needsGradient(inputs))) {
-      auto & fb = getOrCreateAutogradFallback();
-      InterpreterState state(fb);
-      auto stack = std::move(inputs);
-      state.runOneStage(stack);
-      // note: we never unwrapped inputs, because we want autograd to record the trace
-      return stack;
+      return runFallback(std::move(inputs));
     }
 
     // either we can symbolically differentiate, or we do not need a gradient.
@@ -193,6 +198,42 @@ struct GraphExecutorImpl {
 
 private:
   friend struct GraphExecutor;
+
+  // TODO: switching tracing to be part of the local thread state, instead of
+  // a per-variable property will make this check significantly faster.
+  // It is along the fast path, so this is important.
+  static bool isTracing(const variable_tensor_list& inputs) {
+    for(auto & i : inputs) {
+      if(i.defined() && tracer::isTracingVar(autograd::as_variable_ref(i)))
+        return true;
+    }
+    return false;
+  }
+  variable_tensor_list runTraced(variable_tensor_list inputs) {
+    // TODO: unnecessary copy to variable_list
+    variable_list input_vars(inputs.begin(), inputs.end());
+    auto state = tracer::getTracingState(input_vars);
+    auto input_values = fmap(input_vars, [&](const Variable& v) {
+      return tracer::getValueTrace(state, v);
+    });
+    input_vars.clear(); // don't hold inputs during execution
+    auto outputs = runFallback(std::move(inputs));
+    auto output_values = script::inlineCallTo(*state->graph, *this->graph, input_values);
+
+    for(size_t i = 0; i < outputs.size(); ++i) {
+      tracer::setValueTrace(state, outputs[i], output_values[i]);
+    }
+    return outputs;
+  }
+
+  variable_tensor_list runFallback(variable_tensor_list inputs) {
+    auto & fb = getOrCreateAutogradFallback();
+    InterpreterState state(fb);
+    auto stack = std::move(inputs);
+    state.runOneStage(stack);
+    // note: we never unwrapped inputs, because we want autograd to record the trace
+    return stack;
+  }
 
   static bool needsGradient(const variable_tensor_list & inputs) {
     if (!autograd::GradMode::is_enabled()) {
