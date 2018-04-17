@@ -836,9 +836,9 @@ class _DistTestBase(object):
         model = self._create_Net()
 
         # single gpu training setup
-        model_base = copy.deepcopy(model)
-        gpu_subset = list(rankToGPUMapping[rank])
-        model_base.cuda(gpu_subset[0])
+        model_gpu = copy.deepcopy(model)
+        gpu_subset = list(rank_to_GPU[rank])
+        model_gpu.cuda(gpu_subset[0])
 
         # DDP training setup
         model_DDP = copy.deepcopy(model)
@@ -850,7 +850,7 @@ class _DistTestBase(object):
         global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
         # check two model parameters over 2 iterations
-        self._test_DDP_2iter(model_base,
+        self._test_DDP_2iter(model_gpu,
                              model_DDP,
                              input_cpu.cuda(gpu_subset[0]),
                              target.cuda(gpu_subset[0]),
