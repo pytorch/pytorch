@@ -155,7 +155,7 @@ class NLLLoss(_WeightedLoss):
         - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
             K-dimensional loss.
-        - Output: scalar (:math:`(1)`). If reduce is ``False``, then the same size
+        - Output: scalar. If reduce is ``False``, then the same size
             as the target: :math:`(N)`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
             of K-dimensional loss.
@@ -739,7 +739,7 @@ class CrossEntropyLoss(_WeightedLoss):
         - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
             K-dimensional loss.
-        - Output: scalar (:math:`(1)`). If reduce is ``False``, then the same size
+        - Output: scalar. If reduce is ``False``, then the same size
             as the target: :math:`(N)`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
             of K-dimensional loss.
