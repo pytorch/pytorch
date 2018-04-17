@@ -230,7 +230,7 @@ def _calculate_correct_fan(tensor, mode):
     return fan_in if mode == 'fan_in' else fan_out
 
 
-def kaiming_uniform_(tensor, a=0, mode='fan_in'):
+def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     r"""Fills the input `Tensor` with values according to the method
     described in "Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification" - He, K. et al. (2015), using a
@@ -250,20 +250,22 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in'):
             preserves the magnitude of the variance of the weights in the
             forward pass. Choosing `fan_out` preserves the magnitudes in the
             backwards pass.
+        nonlinearity: the non-linear function (`nn.functional` name),
+            recommended to use only with 'relu' or 'leaky_relu' (default).
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.kaiming_uniform_(w, mode='fan_in')
+        >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
     """
     fan = _calculate_correct_fan(tensor, mode)
-    gain = calculate_gain('leaky_relu', a)
+    gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
     with torch.no_grad():
         return tensor.uniform_(-bound, bound)
 
 
-def kaiming_normal_(tensor, a=0, mode='fan_in'):
+def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     r"""Fills the input `Tensor` with values according to the method
     described in "Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification" - He, K. et al. (2015), using a
@@ -283,13 +285,15 @@ def kaiming_normal_(tensor, a=0, mode='fan_in'):
             preserves the magnitude of the variance of the weights in the
             forward pass. Choosing `fan_out` preserves the magnitudes in the
             backwards pass.
+        nonlinearity: the non-linear function (`nn.functional` name),
+            recommended to use only with 'relu' or 'leaky_relu' (default).
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.kaiming_normal_(w, mode='fan_out')
+        >>> nn.init.kaiming_normal_(w, mode='fan_out', nonlinearity='relu')
     """
     fan = _calculate_correct_fan(tensor, mode)
-    gain = calculate_gain('leaky_relu', a)
+    gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     with torch.no_grad():
         return tensor.normal_(0, std)
