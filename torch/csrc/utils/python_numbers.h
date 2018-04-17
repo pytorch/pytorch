@@ -45,6 +45,10 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 #endif
 }
 
+inline bool THPUtils_checkIndex(PyObject* obj) {
+  return THPUtils_checkLong(obj) || (PyIndex_Check(obj) && !PyBool_Check(obj));
+}
+
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
   int overflow;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
@@ -55,6 +59,17 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
     throw std::runtime_error("Overflow when unpacking long");
   }
   return (int64_t)value;
+}
+
+inline int64_t THPUtils_unpackIndex(PyObject* obj) {
+  THPObjectPtr index;
+  if (!THPUtils_checkLong(obj)) {
+    index = THPObjectPtr(PyNumber_Index(obj));
+    if (index == nullptr) {
+      throw python_error();
+    }
+  }
+  return THPUtils_unpackLong(index.get());
 }
 
 inline bool THPUtils_checkDouble(PyObject* obj) {

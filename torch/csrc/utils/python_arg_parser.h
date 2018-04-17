@@ -241,7 +241,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   PyObject* arg = args[i];
   auto size = signature.params[i].size;
   if (size > 0 && THPUtils_checkLong(arg)) {
-    return std::vector<int64_t>(size, THPUtils_unpackLong(arg));
+    return std::vector<int64_t>(size, THPUtils_unpackIndex(arg));
   }
   auto tuple = PyTuple_Check(arg);
   size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
@@ -249,7 +249,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
-      res[idx] = THPUtils_unpackLong(obj);
+      res[idx] = THPUtils_unpackIndex(obj);
     } catch (std::runtime_error &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),
