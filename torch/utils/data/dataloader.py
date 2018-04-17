@@ -80,7 +80,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
             if IS_WINDOWS:
                 result = kernel32.WaitForSingleObject(manager_handle, 0)
                 # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
-                if result == 0x00000000:
+                if result == 0:
                     should_exit = True
             else:
                 if os.getppid() != manager_pid:
@@ -377,12 +377,6 @@ class _DataLoaderIter(object):
                     pass
                 for q in self.index_queues:
                     q.put(None)
-                # We should wait for the workers to finish before shutting down
-                # the manager process, otherwise in the `spawn` start method
-                # workers won't be able to access the queues from manager
-                # and will give FileNotFoundError (https://bugs.python.org/issue28965)
-                for w in self.workers:
-                    w.join()
                 # done_event should be sufficient to exit worker_manager_thread,
                 # but be safe here and put another None
                 self.worker_result_queue.put(None)
