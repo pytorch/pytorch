@@ -1093,6 +1093,10 @@ struct AT_API Type {
   virtual Tensor mv(const Tensor & self, const Tensor & vec) const;
   virtual Tensor & mv_out(Tensor & result, const Tensor & self, const Tensor & vec) const;
   virtual Tensor narrow(const Tensor & self, int64_t dim, int64_t start, int64_t length) const;
+  virtual Tensor nnpack_spatial_convolution(const Tensor & input, const Tensor & weight, const Tensor & bias, int64_t kW, int64_t kH, int64_t padW, int64_t padH) const;
+  virtual std::tuple<Tensor,Tensor,Tensor> nnpack_spatial_convolution_backward(const Tensor & input, const Tensor & grad_output, const Tensor & weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH, std::array<bool,3> output_mask) const;
+  virtual Tensor nnpack_spatial_convolution_backward_input(const Tensor & input, const Tensor & grad_output, const Tensor & weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH) const;
+  virtual Tensor nnpack_spatial_convolution_backward_weight(const Tensor & input, IntList weight_size, const Tensor & grad_output, int64_t kW, int64_t kH, int64_t padW, int64_t padH) const;
   virtual Tensor permute(const Tensor & self, IntList dims) const;
   virtual Tensor pin_memory(const Tensor & self) const;
   virtual Tensor rand_like(const Tensor & self) const;

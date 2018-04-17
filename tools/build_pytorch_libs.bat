@@ -31,12 +31,10 @@ IF "%~1"=="--with-nnpack" (
   set /a NO_NNPACK=1
 )
 
-set BUILD_TYPE=Release
 IF "%DEBUG%"=="1" (
   set BUILD_TYPE=Debug
-)
-IF "%REL_WITH_DEB_INFO%"=="1" (
-  set BUILD_TYPE=RelWithDebInfo
+) ELSE (
+  set BUILD_TYPE=Release 
 )
 
 IF NOT DEFINED MAX_JOBS (
@@ -156,3 +154,4 @@ goto:eof
   @endlocal
 
 goto:eof
+

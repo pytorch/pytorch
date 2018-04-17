@@ -63,7 +63,7 @@ virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals
 """)
 TYPE_METHOD_DEFINITION_ABSTRACT = CodeTemplate("""\
 ${return_type} Type::${method_prefix_derived}${api_name}(${type_method_formals}) const {
-    AT_ERROR("${method_prefix_derived}${api_name} is not implemented for type %s", toString());
+    runtime_error("${method_prefix_derived}${api_name} is not implemented for type %s", toString());
 }
 """)
 TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
@@ -130,7 +130,7 @@ if (${check_name}.dim() == 0) {
 }""")
 
 ZERO_DIM_ONLY = CodeTemplate("""\
-AT_ERROR("${api_name} only supports a 0-dimensional ${check_name} tensor, but got tensor "
+runtime_error("${api_name} only supports a 0-dimensional ${check_name} tensor, but got tensor "
     "with %" PRId64 " dimension(s)", ${check_name}.dim());
 """)
 

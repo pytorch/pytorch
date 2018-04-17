@@ -120,16 +120,6 @@ struct cudaDeviceProp* Context::getCurrentDeviceProperties() const {
 struct cudaDeviceProp* Context::getDeviceProperties(int device) const {
   return THCState_getDeviceProperties(thc_state, device);
 }
-#else
-cudaStream_t Context::getCurrentCUDAStream() const {
-  throw std::runtime_error("ATen not compiled with CUDA");
-}
-struct cudaDeviceProp* Context::getCurrentDeviceProperties() const {
-  throw std::runtime_error("ATen not compiled with CUDA");
-}
-struct cudaDeviceProp* Context::getDeviceProperties(int device) const {
-  throw std::runtime_error("ATen not compiled with CUDA");
-}
 #endif
 
 int64_t Context::current_device() const {

@@ -755,6 +755,10 @@ static inline Tensor & mm_out(Tensor & result, const Tensor & self, const Tensor
 static inline Tensor mv(const Tensor & self, const Tensor & vec);
 static inline Tensor & mv_out(Tensor & result, const Tensor & self, const Tensor & vec);
 static inline Tensor narrow(const Tensor & self, int64_t dim, int64_t start, int64_t length);
+static inline Tensor nnpack_spatial_convolution(const Tensor & input, const Tensor & weight, const Tensor & bias, int64_t kW, int64_t kH, int64_t padW, int64_t padH);
+static inline std::tuple<Tensor,Tensor,Tensor> nnpack_spatial_convolution_backward(const Tensor & input, const Tensor & grad_output, const Tensor & weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH, std::array<bool,3> output_mask);
+static inline Tensor nnpack_spatial_convolution_backward_input(const Tensor & input, const Tensor & grad_output, const Tensor & weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH);
+static inline Tensor nnpack_spatial_convolution_backward_weight(const Tensor & input, IntList weight_size, const Tensor & grad_output, int64_t kW, int64_t kH, int64_t padW, int64_t padH);
 static inline Tensor pin_memory(const Tensor & self);
 static inline Tensor rand_like(const Tensor & self);
 static inline Tensor randn_like(const Tensor & self);
@@ -3039,6 +3043,18 @@ static inline Tensor & mv_out(Tensor & result, const Tensor & self, const Tensor
 }
 static inline Tensor narrow(const Tensor & self, int64_t dim, int64_t start, int64_t length) {
     return infer_type(self).narrow(self, dim, start, length);
+}
+static inline Tensor nnpack_spatial_convolution(const Tensor & input, const Tensor & weight, const Tensor & bias, int64_t kW, int64_t kH, int64_t padW, int64_t padH) {
+    return infer_type(input).nnpack_spatial_convolution(input, weight, bias, kW, kH, padW, padH);
+}
+static inline std::tuple<Tensor,Tensor,Tensor> nnpack_spatial_convolution_backward(const Tensor & input, const Tensor & grad_output, const Tensor & weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH, std::array<bool,3> output_mask) {
+    return infer_type(input).nnpack_spatial_convolution_backward(input, grad_output, weight, kW, kH, padW, padH, output_mask);
+}
+static inline Tensor nnpack_spatial_convolution_backward_input(const Tensor & input, const Tensor & grad_output, const Tensor & weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH) {
+    return infer_type(input).nnpack_spatial_convolution_backward_input(input, grad_output, weight, kW, kH, padW, padH);
+}
+static inline Tensor nnpack_spatial_convolution_backward_weight(const Tensor & input, IntList weight_size, const Tensor & grad_output, int64_t kW, int64_t kH, int64_t padW, int64_t padH) {
+    return infer_type(input).nnpack_spatial_convolution_backward_weight(input, weight_size, grad_output, kW, kH, padW, padH);
 }
 static inline Tensor pin_memory(const Tensor & self) {
     return infer_type(self).pin_memory(self);

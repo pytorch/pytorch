@@ -5,7 +5,6 @@
 #include "ATen/Generator.h"
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
-#include "ATen/Error.h"
 
 #include <memory>
 #include <mutex>
@@ -33,7 +32,7 @@ public:
         auto & undef = type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)];
         if (undef) return *undef;
       }
-      AT_ERROR("%s%sType is not enabled.",toString(p),toString(s));
+      runtime_error("%s%sType is not enabled.",toString(p),toString(s));
     }
     return *type;
   }
@@ -41,7 +40,7 @@ public:
     initCUDAIfNeeded(p);
     auto & generator = generator_registry[static_cast<int>(p)];
     if(!generator)
-      AT_ERROR("%s backend type not enabled.",toString(p));
+      runtime_error("%s backend type not enabled.",toString(p));
     return *generator;
   }
   bool hasMKL() const;
