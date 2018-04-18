@@ -260,6 +260,9 @@ class TestTorch(TestCase):
             input = []
             input.append(list(range(-5, 5)))
             input.append([x + 1e-6 for x in range(-5, 5)])
+            # Some vectorized implementations don't support large ranges
+            input.append([x + 1e10 for x in range(-5, 5)])
+            input.append([x - 1e10 for x in range(-5, 5)])
             input.append(torch.randn(10).tolist())
             input.append((torch.randn(10) + 1e6).tolist())
             input.append([math.pi * (x / 2) for x in range(-5, 5)])
@@ -396,7 +399,9 @@ class TestTorch(TestCase):
             try:
                 return math.cosh(x)
             except OverflowError:
-                return float('inf') if x > 0 else float('-inf')
+                # Return inf on overflow.
+                # See http://en.cppreference.com/w/cpp/numeric/math/cosh
+                return float('inf')
         self._test_math(torch.cosh, cosh)
 
     def test_acos(self):

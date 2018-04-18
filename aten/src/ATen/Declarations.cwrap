@@ -74,7 +74,7 @@
           default: NULL
 ]]
 [[
-  name: fill_
+  name: _fill_
   return: self
   cname: fill
   options:
@@ -1163,20 +1163,8 @@
     - THTensor* self
 ]]
 [[
-  name: log10_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _log10
   cname: log10
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: log10
   types:
     - floating_point
   backends:
@@ -1192,24 +1180,11 @@
     - THTensor* self
 ]]
 [[
-  name: log1p_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _log1p
   cname: log1p
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: log1p
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1221,20 +1196,8 @@
     - THTensor* self
 ]]
 [[
-  name: log2_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _log2
   cname: log2
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: log2
   types:
     - floating_point
   backends:
@@ -1355,24 +1318,11 @@
     - THTensor* self
 ]]
 [[
-  name: expm1_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _expm1
   cname: expm1
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: expm1
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1400,24 +1350,11 @@
     - THTensor* self
 ]]
 [[
-  name: acos_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _acos
   cname: acos
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: acos
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1429,24 +1366,11 @@
     - THTensor* self
 ]]
 [[
-  name: cosh_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _cosh
   cname: cosh
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: cosh
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1474,24 +1398,11 @@
     - THTensor* self
 ]]
 [[
-  name: asin_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _asin
   cname: asin
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: asin
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1503,24 +1414,11 @@
     - THTensor* self
 ]]
 [[
-  name: sinh_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _sinh
   cname: sinh
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: sinh
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1532,24 +1430,11 @@
     - THTensor* self
 ]]
 [[
-  name: tan_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _tan
   cname: tan
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: tan
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1561,24 +1446,11 @@
     - THTensor* self
 ]]
 [[
-  name: atan_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _atan
   cname: atan
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: atan
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1590,24 +1462,11 @@
     - THTensor* self
 ]]
 [[
-  name: tanh_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _th_tanh
   cname: tanh
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: tanh
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1619,24 +1478,11 @@
     - THTensor* self
 ]]
 [[
-  name: erf_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _erf
   cname: erf
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: erf
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1693,24 +1539,11 @@
     - THTensor* self
 ]]
 [[
-  name: rsqrt_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _rsqrt
   cname: rsqrt
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: rsqrt
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method

@@ -83,3 +83,6 @@
 [submodule "third_party/onnx-tensorrt"]
 	path = third_party/onnx-tensorrt
 	url = https://github.com/onnx/onnx-tensorrt
+[submodule "third_party/sleef"]
+	path = third_party/sleef
+	url = https://github.com/shibatch/sleef
