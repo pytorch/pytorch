@@ -115,7 +115,7 @@ void runTileContiguous(
         Ydata + c_im * outputH * (colBlockSize * numColBlocks) + offsetY;
 
     int b = 0;
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
     // We vectorize the loop within the row
     {
       constexpr int kUnroll = (sizeof(float32x4_t) / sizeof(float)) * 4;
@@ -179,7 +179,7 @@ struct StoreInterleaved {};
 
 template <>
 struct StoreInterleaved<float, 1> {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
   inline static void store(float* p, float32x4_t v[1]) {
     vst1q_f32(p, v[0]);
   }
@@ -192,7 +192,7 @@ struct StoreInterleaved<float, 1> {
 
 template <>
 struct StoreInterleaved<float, 2> {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
   inline static void store(float* p, float32x4_t v[2]) {
     float32x4x2_t x = {{v[0], v[1]}};
     vst2q_f32(p, x);
@@ -207,7 +207,7 @@ struct StoreInterleaved<float, 2> {
 
 template <>
 struct StoreInterleaved<float, 3> {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
   inline static void store(float* p, float32x4_t v[3]) {
     float32x4x3_t x = {{v[0], v[1], v[2]}};
     vst3q_f32(p, x);
@@ -223,7 +223,7 @@ struct StoreInterleaved<float, 3> {
 
 template <>
 struct StoreInterleaved<float, 4> {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
   inline static void store(float* p, float32x4_t v[4]) {
     float32x4x4_t x = {{v[0], v[1], v[2], v[3]}};
     vst4q_f32(p, x);
@@ -264,12 +264,12 @@ void reinterleaveRows(
   dst += point * outputW;
 
   float b = bias ? bias[c] : 0;
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
   float32x4_t biasV = vdupq_n_f32(b);
 #endif
 
   int w = 0;
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
   constexpr int kUnroll = (sizeof(float32x4_t) / sizeof(float)) * 2;
   int limit = ((inputW - 1) / kUnroll) * kUnroll;
 
@@ -394,7 +394,7 @@ void reinterleaveMultithreaded(
   pool->run(fnReinterleave, totalTiles);
 }
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
 template <int N>
 struct SumMultiple {
   static void sumInto(float* acc, float** toSum, size_t size);
@@ -505,7 +505,7 @@ struct SumMultiple<3> {
 
 // Performs acc[i] += sum_j toSum_j[i] pointwise
 void sumInto(float* acc, std::vector<float*>& toSum, size_t size) {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
   if (toSum.size() == 1) {
     SumMultiple<1>::sumInto(acc, toSum.data(), size);
     return;

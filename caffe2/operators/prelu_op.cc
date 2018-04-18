@@ -6,7 +6,7 @@
 
 namespace caffe2 {
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
 namespace {
 
 void runNeonPrelu(float* out, const float* in, int size, float w) {
@@ -91,7 +91,7 @@ void runNeonPrelu(float* out, const float* in, int size, float w) {
 }
 
 }
-#endif // __ARM_NEON__
+#endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
 
 template <>
 bool PReluOp<float, CPUContext>::RunOnDevice() {
@@ -111,14 +111,14 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
   }
 
   if (C_shared) {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
     // The function is completely pointwise
     runNeonPrelu(Ydata, Xdata, X.size(), Wdata[0]);
 #else
     ConstEigenVectorMap<float> Xvec(Xdata, X.size());
     EigenVectorMap<float> Yvec(Ydata, Y->size());
     Yvec = Xvec.cwiseMax(0.f) + Xvec.cwiseMin(0.f) * Wdata[0];
-#endif // __ARM_NEON__
+#endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
     return true;
   }
 
@@ -128,7 +128,7 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
       const auto N = X.dim(0);
       const auto dim = X.size_from_dim(2);
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
       // Pointwise for each channel
       for (int n = 0; n < N; ++n) {
         for (int c = 0; c < C; ++c) {
