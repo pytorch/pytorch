@@ -32,18 +32,19 @@ class Binomial(Distribution):
         probs (Tensor): Event probabilities
         logits (Tensor): Event log-odds
     """
-    arg_constraints = {'probs': constraints.unit_interval}
+    arg_constraints = {'total_count': constraints.nonnegative_integer,
+                       'probs': constraints.unit_interval}
     has_enumerate_support = True
 
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
             self.total_count, self.probs, = broadcast_all(total_count, probs)
+            is_scalar = isinstance(self.probs, Number)
         else:
-            is_scalar = isinstance(logits, Number)
             self.total_count, self.logits, = broadcast_all(total_count, logits)
+            is_scalar = isinstance(self.logits, Number)
 
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
@@ -81,7 +82,7 @@ class Binomial(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
-            max_count = int(self.total_count.max().item())
+            max_count = max(int(self.total_count.max().item()), 1)
             shape = self._extended_shape(sample_shape) + (max_count,)
             bernoullis = torch.bernoulli(self.probs.unsqueeze(-1).expand(shape))
             if self.total_count.min() != max_count:
@@ -102,7 +103,7 @@ class Binomial(Distribution):
                 self.total_count * torch.log1p((self.logits + 2 * max_val).exp()))
 
     def enumerate_support(self):
-        total_count = int(self.total_count.max().item())
+        total_count = max(int(self.total_count.max().item()), 1)
         if not self.total_count.min() == total_count:
             raise NotImplementedError("Inhomogeneous total count not supported by method.")
         values = self._new(total_count,)

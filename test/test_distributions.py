@@ -117,6 +117,8 @@ EXAMPLES = [
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10., 8.])},
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
          'total_count': torch.tensor([[10., 8.], [5., 3.]])},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+         'total_count': torch.tensor(0.)},
     ]),
     Example(Multinomial, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
@@ -817,6 +819,10 @@ class TestDistributions(TestCase):
         self.assertEqual(bin1.sample(), total_count)
         self.assertAlmostEqual(bin1.log_prob(torch.tensor([float(total_count)]))[0], 0, places=3)
         self.assertEqual(float(bin1.log_prob(torch.tensor([float(total_count - 1)])).exp()), 0, allow_inf=True)
+        zero_counts = torch.zeros(torch.Size((2, 2)))
+        bin2 = Binomial(zero_counts, 1)
+        self.assertEqual(bin2.sample(), zero_counts)
+        self.assertEqual(bin2.log_prob(zero_counts), zero_counts)
 
     def test_binomial_vectorized_count(self):
         set_rng_seed(0)
