@@ -19,10 +19,6 @@ extern "C" {
 #include "Eigen/Core"
 #include "Eigen/Dense"
 
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-#include "unsupported/Eigen/CXX11/Tensor"
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
 namespace caffe2 {
 
 template <class Context>
@@ -55,13 +51,6 @@ using ConstEigenVectorMap =
 template <typename T>
 using ConstEigenVectorArrayMap =
     Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1> >;
-
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
-template <typename T, int D>
-using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D, Eigen::RowMajor>>;
-
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
 namespace math {
 

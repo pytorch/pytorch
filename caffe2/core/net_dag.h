@@ -12,6 +12,7 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/net_async_tracing.h"
 #include "caffe2/core/net_dag_utils.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
@@ -73,6 +74,9 @@ class DAGNetBase : public NetBase {
   std::mutex remaining_ops_mutex_;
   std::condition_variable cv_;
   std::mutex run_in_progress_;
+
+  // Tracing
+  std::shared_ptr<tracing::Tracer> tracer_;
 
   struct DAGNetStats {
     CAFFE_STAT_CTOR(DAGNetStats);

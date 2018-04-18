@@ -974,7 +974,6 @@ class Caffe2Backend(Backend):
         device_option = get_device_option(Device(device))
 
         init_model = cls.optimize_onnx(onnx_model, init=True)
-
         pred_model = cls.optimize_onnx(onnx_model, predict=True)
 
         init_net = caffe2_pb2.NetDef()
