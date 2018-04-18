@@ -29,10 +29,13 @@ fi
 
 python setup.py install
 
-# Test ATen
+# Add the ATen test binaries so that they won't be git clean'ed away
+git add -f aten/build/src/ATen/test
+
+# Testing ATen install
 if [[ "$BUILD_ENVIRONMENT" != *cuda* ]]; then
-  echo "Testing ATen"
-  time tools/run_aten_tests.sh
+  echo "Testing ATen install"
+  time tools/test_aten_install.sh
 fi
 
 # Test C FFI plugins

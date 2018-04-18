@@ -274,13 +274,13 @@ static void test(Type & type) {
 }
 
 TEST_CASE( "basic tests CPU", "[cpu]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   test(CPU(kFloat));
 }
 
 TEST_CASE( "basic tests GPU", "[cuda]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CUDA);
 
   if(at::hasCUDA()) {
     test(CUDA(kFloat));
