@@ -321,5 +321,57 @@ Tensor zeros_like(const Tensor& self, const Type& dtype) {
   return at::native::zeros(dtype, self.sizes());
 }
 
+Tensor reverse_dim(const Tensor& t, int64_t dim) {
+  Tensor index = at::arange(t.type().toScalarType(at::ScalarType::Long), t.size(dim) - 1, -1, -1);
+  return t.index_select(dim, index);
+}
+
+Tensor flip(const Tensor& self, IntList dims) {
+  if (dims.size() == 0) {
+    std::stringstream ss;
+    ss << "expected dims not empty, "
+       << "but got dims size=" << dims.size();
+    throw std::runtime_error(ss.str());
+  }
+
+  if (dims.size() > self.dim()) {
+    std::stringstream ss;
+    ss << "expected dims to have size <= total tensor dims, "
+       << "but got dims size=" << dims.size() << " and "
+       << "tensor dim=" << self.dim();
+    throw std::runtime_error(ss.str());
+  }
+
+  int64_t min_d = self.dim();
+  int64_t max_d = 0;
+  for (auto d : dims) {
+    min_d = std::min(min_d, d);
+    max_d = std::max(max_d, d);
+  }
+
+  if (min_d < 0) {
+    std::stringstream ss;
+    ss << "expected dims axis >= 0, "
+       << "but got min dims=" << min_d;
+    throw std::runtime_error(ss.str());
+  }
+
+  if (max_d >= self.dim()) {
+    std::stringstream ss;
+    ss << "expected dims axis < total tensor dims, "
+       << "but got max dims=" << max_d << " and "
+       << "tensor dim=" << self.dim();
+    throw std::runtime_error(ss.str());
+  }
+
+  // TODO: remove duplicates in dims
+
+  Tensor res = self.clone();
+  for (auto d : dims) {
+    res.copy_(reverse_dim(res, d));
+  }
+  return res;
+}
+
 }
 }
