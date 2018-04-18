@@ -580,14 +580,6 @@ class Module(object):
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
 
-        When keep_vars is ``True``, it returns a Tensor for each parameter
-        (rather than a Tensor).
-
-        Args:
-            keep_vars (bool, optional): if ``True``, returns a Tensor for each
-                parameter. If ``False``, returns a Tensor for each parameter.
-                Default: ``False``
-
         Returns:
             dict:
                 a dictionary containing a whole state of the module
@@ -598,17 +590,9 @@ class Module(object):
             ['bias', 'weight']
 
         """
-        if destination is not None:
-            raise ValueError("destination argument is deprecated")
-        if prefix is not '':
-            raise ValueError("prefix argument is deprecated")
-
-        destination = OrderedDict()
-        destination._metadata = OrderedDict()
-        return self._state_dict(destination, '', keep_vars)
-
-    def _state_dict(self, destination, prefix, keep_vars):
-        r"""Recursive helper of :meth:`~torch.nn.Module.state_dict`."""
+        if destination is None:
+            destination = OrderedDict()
+            destination._metadata = OrderedDict()
         destination._metadata[prefix] = dict(version=self._version)
         for name, param in self._parameters.items():
             if param is not None:
@@ -618,7 +602,7 @@ class Module(object):
                 destination[prefix + name] = buf
         for name, module in self._modules.items():
             if module is not None:
-                module._state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
+                module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
     def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys):
@@ -691,7 +675,7 @@ class Module(object):
         unexpected_keys = []
 
         # copy state_dict so _load_from_state_dict can modify it
-        metadata = state_dict._metadata if hasattr(state_dict, '_metadata') else None
+        metadata = getattr(state_dict, '_metadata', None)
         state_dict = state_dict.copy()
         if metadata is not None:
             state_dict._metadata = metadata
