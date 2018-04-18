@@ -104,7 +104,7 @@ def default_collate(batch):
 
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
-    if torch.is_tensor(batch[0]):
+    if isinstance(batch[0], torch.Tensor):
         out = None
         if _use_shared_memory:
             # If we're in a background process, concatenate directly into a
@@ -141,7 +141,7 @@ def default_collate(batch):
 
 
 def pin_memory_batch(batch):
-    if torch.is_tensor(batch):
+    if isinstance(batch, torch.Tensor):
         return batch.pin_memory()
     elif isinstance(batch, string_classes):
         return batch
