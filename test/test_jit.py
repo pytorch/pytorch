@@ -2642,8 +2642,8 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
-        f = io.BytesIO()
-        torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+        str = torch.onnx._export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), None, verbose=False)
+
 
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2681,7 +2681,9 @@ class TestScript(TestCase):
 
         mte = ModuleToExport()
         f = io.BytesIO()
-        torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+        str = torch.onnx._export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), None, verbose=False)
+        print(str)
+
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):

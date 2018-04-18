@@ -344,12 +344,13 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
 
 }
 
-std::tuple<std::string, RawDataExportMap> ExportGraph(
-                        const std::shared_ptr<Graph>& graph,
-                        const std::vector<at::Tensor> & initializers,
-                        int64_t onnx_opset_version,
-                        bool defer_weight_export) {
+namespace {
 
+std::tuple<::torch::onnx::ModelProto, RawDataExportMap> ToModelProto(
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<at::Tensor> & initializers,
+    int64_t onnx_opset_version,
+    bool defer_weight_export) {
   validateGraph(graph);
 
   ::torch::onnx::ModelProto model_proto;
@@ -369,6 +370,34 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
   } else {
     encodeModel(&model_proto, graph, initializers);
   }
+
+  return std::make_tuple(std::move(model_proto), raw_data_export_map);
+}
+
+}  // namespace
+
+
+std::string PrettyPrintExportedGraph(
+                        const std::shared_ptr<Graph>& graph,
+                        const std::vector<at::Tensor> & initializers,
+                        int64_t onnx_opset_version,
+                        bool defer_weight_export) {
+  ::torch::onnx::ModelProto model_proto;
+  RawDataExportMap raw_data_export_map;
+  std::tie(model_proto, raw_data_export_map) = ToModelProto(
+    graph, initializers, onnx_opset_version, defer_weight_export);
+  return model_proto.prettyPrint();
+}
+
+std::tuple<std::string, RawDataExportMap> ExportGraph(
+                        const std::shared_ptr<Graph>& graph,
+                        const std::vector<at::Tensor> & initializers,
+                        int64_t onnx_opset_version,
+                        bool defer_weight_export) {
+  ::torch::onnx::ModelProto model_proto;
+  RawDataExportMap raw_data_export_map;
+  std::tie(model_proto, raw_data_export_map) = ToModelProto(
+    graph, initializers, onnx_opset_version, defer_weight_export);
 
   size_t out_size;
   pb_get_encoded_size(&out_size, onnx_ModelProto_fields, &model_proto.proto);

@@ -45,6 +45,11 @@ void initPythonIRBindings(PyObject * module_) {
       }
       return std::make_tuple(py::bytes(graph), python_serialized_export_map);
     })
+    .def("prettyPrintExport", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
+                      int64_t onnx_opset_version, bool defer_weight_export=false) {
+      return PrettyPrintExportedGraph(
+        g, initializers, onnx_opset_version, defer_weight_export);
+    })
     .def("wrapPyFuncWithSymbolic", [](Graph &g, py::function func, std::vector<Value*> inputs, size_t n_outputs, py::function symbolic) {
       // This function should be used for situations where we have a Python function
       // that should have different behavior when exporting for JIT interpreter

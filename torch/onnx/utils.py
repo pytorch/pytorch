@@ -135,6 +135,36 @@ def _trace_and_get_graph_from_model(model, args, training):
     return trace.graph(), torch_out
 
 
+def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
+                             input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE):
+    # Special case for common case of passing a single Variable
+    if isinstance(args, torch.Tensor):
+        args = (args, )
+
+    if isinstance(model, torch.jit.ScriptModule):
+        torch_out = None
+        try:
+            method = model.__getattr__('forward')
+            graph = method.propagate_shapes(args, False)
+            params = method.params()
+        except AttributeError:
+            # TODO: just trace it
+            raise RuntimeError('\'forward\' method must be a script method')
+    else:
+        graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
+        params = list(_unique_state_dict(model).values())
+
+    graph = _optimize_graph(graph, aten)
+
+    _set_input_and_output_names(graph, input_names, output_names)
+
+    if verbose:
+        print(graph)
+
+    from torch.onnx.symbolic import _onnx_opset_version
+    return graph.prettyPrintExport(params, _onnx_opset_version, False)
+
+
 # NOTE: the output `torch_out` will contain the output tensors resulting from
 # the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
 # this output will be None, since we are not doing any tracing but rather
