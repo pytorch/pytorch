@@ -251,6 +251,8 @@ CUDA IPC operations
 They are not supported on Windows. Something like doing multiprocessing on CUDA
 tensors cannot succeed, there are two alternatives for this.
 
-1. Don't use `multiprocessing`. Set the ``num_worker`` of ``DataLoader`` to zero.
-2. Share CPU tensors instead. Remove ``.cuda()`` in your custom DataLoader definition.
+1. Don't use ``multiprocessing``. Set the ``num_worker`` of 
+:class:`~torch.utils.data.DataLoader` to zero.
+2. Share CPU tensors instead. Make sure your custom
+:class:`~torch.utils.data.DataSet` returns CPU tensors.
 
