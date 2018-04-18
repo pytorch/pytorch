@@ -621,9 +621,13 @@ class TestCollectEnv(TestCase):
             expected_info = f.read().strip()
             self.assertEqual(processed_info, expected_info, ci_warning)
 
-    def test_simple(self):
+    def test_smoke(self):
         info_output = get_pretty_env_info()
-        self.assertTrue(len(info_output.split('\n')) > 5)
+        self.assertTrue(info_output.count('\n') >= 17)
+
+    @unittest.skipIf('BUILD_ENVIRONMENT' not in os.environ.keys(), 'CI-only test')
+    def test_expect(self):
+        info_output = get_pretty_env_info()
 
         ci_build_envs = [
             'pytorch-linux-trusty-py2.7',
@@ -631,8 +635,6 @@ class TestCollectEnv(TestCase):
             'pytorch-macos-10.13-py3',
             'pytorch-win-ws2016-cuda9-cudnn7-py3'
         ]
-        if 'BUILD_ENVIRONMENT' not in os.environ.keys():
-            return
         build_env = os.environ['BUILD_ENVIRONMENT']
         if build_env not in ci_build_envs:
             return

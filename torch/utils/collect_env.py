@@ -101,11 +101,13 @@ def get_cudnn_version(run_lambda):
     """This will return a list of libcudnn.so; it's hard to tell which one is being used"""
     rc, out, _ = run_lambda('find /usr/local /usr/lib -type f -name "libcudnn*" 2> /dev/null')
     # find will return 1 if there are permission errors or if not found
-    if len(out.strip()) == 0:
+    if len(out) == 0:
         return None
     if rc != 1 and rc != 0:
         return None
-    return 'Probably one of the following:\n{}'.format(out)
+    # Alphabetize the result because the order is non-deterministic otherwise
+    result = '\n'.join(sorted(out.split('\n')))
+    return 'Probably one of the following:\n{}'.format(result)
 
 
 def get_platform():
