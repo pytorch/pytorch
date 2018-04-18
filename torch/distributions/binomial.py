@@ -1,10 +1,8 @@
 from numbers import Number
 import torch
-import math
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
-from torch.distributions.utils import clamp_probs
 
 
 class Binomial(Distribution):
