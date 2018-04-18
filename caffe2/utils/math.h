@@ -143,6 +143,28 @@ void ReduceMax(
     Context* context);
 
 template <typename T, class Context>
+void ReduceMin(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context,
+    Tensor<Context>* scratch_ptr = nullptr);
+
+template <typename T, class Context>
+void ReduceMax(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context,
+    Tensor<Context>* scratch_ptr = nullptr);
+
+template <typename T, class Context>
 void ReduceSum(
     const int num_dims,
     const int* dims,
