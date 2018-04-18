@@ -314,7 +314,7 @@ void TracerGuard::recordEventStart() {
       event_.tid_ = std::this_thread::get_id();
     }
     event_.is_beginning_ = true;
-    event_.timestamp_ = (long)std::round(tracer_->timer_.MicroSeconds());
+    event_.timestamp_ = (long)caffe2::round(tracer_->timer_.MicroSeconds());
     tracer_->recordEvent(event_);
   }
 }
@@ -322,7 +322,7 @@ void TracerGuard::recordEventStart() {
 TracerGuard::~TracerGuard() {
   if (enabled_) {
     event_.is_beginning_ = false;
-    event_.timestamp_ = (long)std::round(tracer_->timer_.MicroSeconds());
+    event_.timestamp_ = (long)caffe2::round(tracer_->timer_.MicroSeconds());
     tracer_->recordEvent(event_);
   }
 }
