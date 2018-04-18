@@ -10,10 +10,8 @@ from torch.distributions.utils import clamp_probs
 class Binomial(Distribution):
     r"""
     Creates a Binomial distribution parameterized by `total_count` and
-    either `probs` or `logits` (but not both).
-
-    -   Requires a single shared `total_count` for all
-        parameters and samples.
+    either `probs` or `logits` (but not both). `total_count` must be
+    broadcastable with `probs`/`logits`.
 
     Example::
 
@@ -25,8 +23,14 @@ class Binomial(Distribution):
          100
         [torch.FloatTensor of size 4]]
 
+        >>> m = Binomial(torch.Tensor([[5.], [10.]]), torch.Tensor([0.5, 0.8]))
+        >>> x = m.sample()
+         4  5
+         7  6
+        [torch.FloatTensor of size (2,2)]
+
     Args:
-        total_count (int): number of Bernoulli trials
+        total_count (Tensor): number of Bernoulli trials
         probs (Tensor): Event probabilities
         logits (Tensor): Event log-odds
     """
@@ -77,17 +81,15 @@ class Binomial(Distribution):
     def param_shape(self):
         return self._param.size()
 
-    def _get_homogeneous_count(self):
-        total_count = int(self.total_count.max().item())
-        if not self.total_count.min() == total_count:
-            raise NotImplementedError("Inhomogeneous total count not supported by method.")
-        return total_count
-
     def sample(self, sample_shape=torch.Size()):
-        total_count = self._get_homogeneous_count()
-        shape = self._extended_shape(sample_shape) + (total_count,)
+        max_count = int(self.total_count.max().item())
+        shape = self._extended_shape(sample_shape) + (max_count,)
         with torch.no_grad():
-            return torch.bernoulli(self.probs.unsqueeze(-1).expand(shape)).sum(dim=-1)
+            bernoullis = torch.bernoulli(self.probs.unsqueeze(-1).expand(shape))
+            if self.total_count.min() != max_count:
+                arange = torch.arange(max_count, out=self.total_count.new_empty(max_count))
+                bernoullis *= (arange < self.total_count.unsqueeze(-1)).type_as(bernoullis)
+            return bernoullis.sum(dim=-1)
 
     def log_prob(self, value):
         if self._validate_args:
@@ -102,7 +104,9 @@ class Binomial(Distribution):
                 self.total_count * torch.log1p((self.logits + 2 * max_val).exp()))
 
     def enumerate_support(self):
-        total_count = self._get_homogeneous_count()
+        total_count = int(self.total_count.max().item())
+        if not self.total_count.min() == total_count:
+            raise NotImplementedError("Inhomogeneous total count not supported by method.")
         values = self._new(total_count,)
         torch.arange(total_count, out=values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
