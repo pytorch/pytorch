@@ -96,8 +96,8 @@ find_library(CUDA_NVRTC_LIB nvrtc
 # Create new style imported libraries.
 # Several of these libraries have a hardcoded path if CAFFE2_STATIC_LINK_CUDA
 # is set. This path is where sane CUDA installations have their static
-# libraries installed. Users may have strange CUDA installations, but they
-# should never have this flag set and so shouldn't run into problems.
+# libraries installed. This flag should only be used for binary builds, so
+# end-users should never have this flag set.
 
 # cuda
 add_library(caffe2::cuda UNKNOWN IMPORTED)
