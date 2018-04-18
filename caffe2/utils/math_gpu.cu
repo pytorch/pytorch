@@ -2498,6 +2498,163 @@ void ReduceMeanCUDAImpl(
       Y_size, 1.0f / static_cast<float>(scale), Y, Y, context);
 }
 
+template <typename T>
+void ReduceMinCUDAImpl(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    CUDAContext* context,
+    Tensor<CUDAContext>* scratch_ptr) {
+  CAFFE_ENFORCE_LE(num_axes, num_dims);
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  if (EigenReduceTensorCUDA(
+          num_dims,
+          dims,
+          num_axes,
+          axes,
+          Eigen::internal::MinReducer<T>(),
+          X,
+          Y,
+          context)) {
+    return;
+  }
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  ReduceTensorCUDA(
+      num_dims,
+      dims,
+      num_axes,
+      axes,
+      cub::Min(),
+      std::numeric_limits<T>::max(),
+      X,
+      Y,
+      context,
+      scratch_ptr);
+}
+
+template <typename T>
+void ReduceMaxCUDAImpl(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    CUDAContext* context,
+    Tensor<CUDAContext>* scratch_ptr) {
+  CAFFE_ENFORCE_LE(num_axes, num_dims);
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  if (EigenReduceTensorCUDA(
+          num_dims,
+          dims,
+          num_axes,
+          axes,
+          Eigen::internal::MaxReducer<T>(),
+          X,
+          Y,
+          context)) {
+    return;
+  }
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  ReduceTensorCUDA(
+      num_dims,
+      dims,
+      num_axes,
+      axes,
+      cub::Max(),
+      std::numeric_limits<T>::lowest(),
+      X,
+      Y,
+      context,
+      scratch_ptr);
+}
+
+template <typename T>
+void ReduceSumCUDAImpl(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    CUDAContext* context,
+    Tensor<CUDAContext>* scratch_ptr) {
+  CAFFE_ENFORCE_LE(num_axes, num_dims);
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  if (EigenReduceTensorCUDA(
+          num_dims,
+          dims,
+          num_axes,
+          axes,
+          Eigen::internal::SumReducer<T>(),
+          X,
+          Y,
+          context)) {
+    return;
+  }
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  ReduceTensorCUDA(
+      num_dims,
+      dims,
+      num_axes,
+      axes,
+      cub::Sum(),
+      T(0),
+      X,
+      Y,
+      context,
+      scratch_ptr);
+}
+
+template <typename T>
+void ReduceMeanCUDAImpl(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    CUDAContext* context,
+    Tensor<CUDAContext>* scratch_ptr) {
+  CAFFE_ENFORCE_LE(num_axes, num_dims);
+#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  if (EigenReduceTensorCUDA(
+          num_dims,
+          dims,
+          num_axes,
+          axes,
+          Eigen::internal::MeanReducer<T>(),
+          X,
+          Y,
+          context)) {
+    return;
+  }
+#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  ReduceTensorCUDA(
+      num_dims,
+      dims,
+      num_axes,
+      axes,
+      cub::Sum(),
+      T(0),
+      X,
+      Y,
+      context,
+      scratch_ptr);
+  const int X_size =
+      std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
+  int scale = 1;
+  for (int i = 0; i < num_axes; ++i) {
+    scale *= dims[axes[i]];
+  }
+  const int Y_size = X_size / scale;
+  Scale<T, CUDAContext>(
+      Y_size, 1.0f / static_cast<float>(scale), Y, Y, context);
+}
+
 } // namespace
 
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(T)                        \
