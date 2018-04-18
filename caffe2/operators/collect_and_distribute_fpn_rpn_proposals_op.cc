@@ -58,12 +58,11 @@ void SortAndLimitRoIsByScores(Eigen::Ref<const EArrXf> scores, int n,
   // Note that people have found nth_element + sort to be much faster
   // than partial_sort so we use it here
   if (n > 0 && n < rois.rows()) {
-    std::nth_element(idxs.begin(), idxs.begin() + n, idxs.end(), comp);
     rois.resize(n, rois.cols());
   } else {
     n = rois.rows();
   }
-  std::sort(idxs.begin(), idxs.begin() + n, comp);
+  std::stable_sort(idxs.begin(), idxs.end(), comp);
   // Update RoIs based on new order
   for (int i = 0; i < n; i++) {
     rois.row(i) = rois_copy.row(idxs[i]);
