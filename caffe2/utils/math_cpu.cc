@@ -1786,7 +1786,7 @@ void BiasCHW<float, CPUContext>(
   for (int c = 0; c < bias_channels; ++c) {
     float b = bias[c];
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
     float32x4_t vBias = vdupq_n_f32(b);
 
     // We give alignment hints for additional speed, so handle the
@@ -1853,7 +1853,7 @@ void BiasCHW<float, CPUContext>(
     for (int i = 0; i < image_size; ++i) {
       image[i] += b;
     }
-#endif // __ARM_NEON__
+#endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
 
     image += image_size;
   }

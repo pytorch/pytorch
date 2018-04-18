@@ -11,6 +11,7 @@ import tempfile
 import warnings
 
 import torch
+from .file_baton import FileBaton
 
 from setuptools.command.build_ext import build_ext
 
@@ -30,7 +31,8 @@ def _find_cuda_home():
             # Guess #3
             try:
                 which = 'where' if sys.platform == 'win32' else 'which'
-                nvcc = subprocess.check_output([which, 'nvcc']).decode().rstrip('\r\n')
+                nvcc = subprocess.check_output(
+                    [which, 'nvcc']).decode().rstrip('\r\n')
                 cuda_home = os.path.dirname(os.path.dirname(nvcc))
             except Exception:
                 cuda_home = None
@@ -71,7 +73,8 @@ def check_compiler_abi_compatibility(compiler):
     '''
     try:
         check_cmd = '{}' if sys.platform == 'win32' else '{} --version'
-        info = subprocess.check_output(check_cmd.format(compiler).split(), stderr=subprocess.STDOUT)
+        info = subprocess.check_output(
+            check_cmd.format(compiler).split(), stderr=subprocess.STDOUT)
     except Exception:
         _, error, _ = sys.exc_info()
         warnings.warn('Error checking compiler version: {}'.format(error))
@@ -93,7 +96,8 @@ def check_compiler_abi_compatibility(compiler):
             version = re.search(r'(\d+)\.(\d+)\.(\d+)', info)
             if version is not None:
                 major, minor, revision = version.groups()
-                if (int(major), int(minor), int(revision)) >= MINIMUM_MSVC_VERSION:
+                if (int(major), int(minor),
+                        int(revision)) >= MINIMUM_MSVC_VERSION:
                     return True
                 else:
                     # Append the detected version for the warning.
@@ -156,9 +160,14 @@ class BuildExtension(build_ext):
                 # Put the original compiler back in place.
                 self.compiler.set_executable('compiler_so', original_compiler)
 
-        def win_wrap_compile(sources, output_dir=None, macros=None,
-                             include_dirs=None, debug=0, extra_preargs=None,
-                             extra_postargs=None, depends=None):
+        def win_wrap_compile(sources,
+                             output_dir=None,
+                             macros=None,
+                             include_dirs=None,
+                             debug=0,
+                             extra_preargs=None,
+                             extra_postargs=None,
+                             depends=None):
 
             self.cflags = copy.deepcopy(extra_postargs)
             extra_postargs = None
@@ -168,16 +177,22 @@ class BuildExtension(build_ext):
                 # Using regex to match src, obj and include files
 
                 src_regex = re.compile('/T(p|c)(.*)')
-                src_list = [m.group(2) for m in (
-                    src_regex.match(elem) for elem in cmd) if m]
+                src_list = [
+                    m.group(2) for m in (src_regex.match(elem) for elem in cmd)
+                    if m
+                ]
 
                 obj_regex = re.compile('/Fo(.*)')
-                obj_list = [m.group(1) for m in (
-                    obj_regex.match(elem) for elem in cmd) if m]
+                obj_list = [
+                    m.group(1) for m in (obj_regex.match(elem) for elem in cmd)
+                    if m
+                ]
 
                 include_regex = re.compile(r'((\-|\/)I.*)')
-                include_list = [m.group(1) for m in (
-                    include_regex.match(elem) for elem in cmd) if m]
+                include_list = [
+                    m.group(1)
+                    for m in (include_regex.match(elem) for elem in cmd) if m
+                ]
 
                 if len(src_list) >= 1 and len(obj_list) >= 1:
                     src = src_list[0]
@@ -190,8 +205,10 @@ class BuildExtension(build_ext):
                             cflags = self.cflags
                         else:
                             cflags = []
-                        cmd = [nvcc, '-c', src, '-o', obj, '-Xcompiler',
-                               '/wd4819', '-Xcompiler', '/MD'] + include_list + cflags
+                        cmd = [
+                            nvcc, '-c', src, '-o', obj, '-Xcompiler',
+                            '/wd4819', '-Xcompiler', '/MD'
+                        ] + include_list + cflags
                     elif isinstance(self.cflags, dict):
                         cflags = self.cflags['cxx']
                         cmd += cflags
@@ -203,9 +220,9 @@ class BuildExtension(build_ext):
 
             try:
                 self.compiler.spawn = spawn
-                return original_compile(sources,
-                                        output_dir, macros, include_dirs, debug,
-                                        extra_preargs, extra_postargs, depends)
+                return original_compile(sources, output_dir, macros,
+                                        include_dirs, debug, extra_preargs,
+                                        extra_postargs, depends)
             finally:
                 self.compiler.spawn = original_spawn
 
@@ -454,49 +471,38 @@ def load(name,
     if build_directory is None:
         build_directory = _get_build_directory(name, verbose)
 
-    extra_ldflags = extra_ldflags or []
-    if sys.platform == 'win32':
-        python_path = os.path.dirname(sys.executable)
-        python_lib_path = os.path.join(python_path, 'libs')
+    baton = FileBaton(os.path.join(build_directory, 'lock'))
 
-        here = os.path.abspath(__file__)
-        torch_path = os.path.dirname(os.path.dirname(here))
-        lib_path = os.path.join(torch_path, 'lib')
+    if baton.try_acquire():
+        try:
+            with_cuda = any(map(_is_cuda_file, sources))
+            extra_ldflags = _prepare_ldflags(
+                extra_ldflags or [],
+                with_cuda,
+                verbose)
+            build_file_path = os.path.join(build_directory, 'build.ninja')
+            if verbose:
+                print(
+                    'Emitting ninja build file {}...'.format(build_file_path))
+            # NOTE: Emitting a new ninja build file does not cause re-compilation if
+            # the sources did not change, so it's ok to re-emit (and it's fast).
+            _write_ninja_file(
+                path=build_file_path,
+                name=name,
+                sources=sources,
+                extra_cflags=extra_cflags or [],
+                extra_cuda_cflags=extra_cuda_cflags or [],
+                extra_ldflags=extra_ldflags or [],
+                extra_include_paths=extra_include_paths or [],
+                with_cuda=with_cuda)
 
-        extra_ldflags.append('ATen.lib')
-        extra_ldflags.append('_C.lib')
-        extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
-        extra_ldflags.append('/LIBPATH:{}'.format(lib_path))
-
-    with_cuda = any(map(_is_cuda_file, sources))
-    if with_cuda:
-        if verbose:
-            print('Detected CUDA files, patching ldflags')
-        if sys.platform == 'win32':
-            extra_ldflags.append('/LIBPATH:{}'.format(_join_cuda_home('lib/x64')))
-            extra_ldflags.append('cudart.lib')
-        else:
-            extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
-            extra_ldflags.append('-lcudart')
-
-    build_file_path = os.path.join(build_directory, 'build.ninja')
-    if verbose:
-        print('Emitting ninja build file {}...'.format(build_file_path))
-    # NOTE: Emitting a new ninja build file does not cause re-compilation if
-    # the sources did not change, so it's ok to re-emit (and it's fast).
-    _write_ninja_file(
-        path=build_file_path,
-        name=name,
-        sources=sources,
-        extra_cflags=extra_cflags or [],
-        extra_cuda_cflags=extra_cuda_cflags or [],
-        extra_ldflags=extra_ldflags or [],
-        extra_include_paths=extra_include_paths or [],
-        with_cuda=with_cuda)
-
-    if verbose:
-        print('Building extension module {}...'.format(name))
-    _build_extension_module(name, build_directory)
+            if verbose:
+                print('Building extension module {}...'.format(name))
+            _build_extension_module(name, build_directory)
+        finally:
+            baton.release()
+    else:
+        baton.wait()
 
     if verbose:
         print('Loading extension module {}...'.format(name))
@@ -513,6 +519,34 @@ def verify_ninja_availability():
             subprocess.check_call('ninja --version'.split(), stdout=devnull)
         except OSError:
             raise RuntimeError("Ninja is required to load C++ extensions")
+
+
+def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
+    if sys.platform == 'win32':
+        python_path = os.path.dirname(sys.executable)
+        python_lib_path = os.path.join(python_path, 'libs')
+
+        here = os.path.abspath(__file__)
+        torch_path = os.path.dirname(os.path.dirname(here))
+        lib_path = os.path.join(torch_path, 'lib')
+
+        extra_ldflags.append('ATen.lib')
+        extra_ldflags.append('_C.lib')
+        extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
+        extra_ldflags.append('/LIBPATH:{}'.format(lib_path))
+
+    if with_cuda:
+        if verbose:
+            print('Detected CUDA files, patching ldflags')
+        if sys.platform == 'win32':
+            extra_ldflags.append('/LIBPATH:{}'.format(
+                _join_cuda_home('lib/x64')))
+            extra_ldflags.append('cudart.lib')
+        else:
+            extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
+            extra_ldflags.append('-lcudart')
+
+    return extra_ldflags
 
 
 def _get_build_directory(name, verbose):
@@ -631,12 +665,15 @@ def _write_ninja_file(path,
 
     link_rule = ['rule link']
     if sys.platform == 'win32':
-        cl_paths = subprocess.check_output(['where', 'cl']).decode().split('\r\n')
+        cl_paths = subprocess.check_output(['where',
+                                            'cl']).decode().split('\r\n')
         if len(cl_paths) >= 1:
             cl_path = os.path.dirname(cl_paths[0]).replace(':', '$:')
         else:
             raise RuntimeError("MSVC is required to load C++ extensions")
-        link_rule.append('  command = "{}/link.exe" $in /nologo $ldflags /out:$out'.format(cl_path))
+        link_rule.append(
+            '  command = "{}/link.exe" $in /nologo $ldflags /out:$out'.format(
+                cl_path))
     else:
         link_rule.append('  command = $cxx $ldflags $in -o $out')
 
