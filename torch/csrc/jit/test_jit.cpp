@@ -872,8 +872,8 @@ void testControlFlow() {
     return stack;
   };
 
-  auto L = [](long f) { return at::Scalar(f).toTensor(); };
-  auto V = [](at::Tensor t) { return at::Scalar(t).toFloat(); };
+  auto L = [](long l) { return at::Scalar(l).toTensor(); };
+  auto V = [](at::Tensor t) { return at::Scalar(t).toLong(); };
   auto run_binary = [&](const std::string & name, long a, long b) {
     return V(run(name, {L(a), L(b)})[0]);
   };
