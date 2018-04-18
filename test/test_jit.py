@@ -1713,7 +1713,7 @@ class TestScript(TestCase):
                 b = a + 1
             return a + b
 
-        inputs = self._make_scalar_vars([42, 1337], torch.int)
+        inputs = self._make_scalar_vars([42, 1337], torch.long)
         self.checkScript(func, inputs, optimize=True)
 
     def test_while_nest_if(self):
