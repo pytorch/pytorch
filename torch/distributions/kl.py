@@ -205,6 +205,7 @@ def _kl_binomial_binomial(p, q):
     kl[inf_idxs] = _infinite_like(kl[inf_idxs])
     return kl
 
+
 @register_kl(Categorical, Categorical)
 def _kl_categorical_categorical(p, q):
     t = p.probs * (p.logits - q.logits)
