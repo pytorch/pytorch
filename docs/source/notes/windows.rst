@@ -1,4 +1,4 @@
-Windows Usage
+Windows FAQ
 ==========================
 
 Building from source
@@ -7,12 +7,12 @@ Building from source
 Include optional components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-There're two supported components for Windows PyTorch:
+There are two supported components for Windows PyTorch:
 MKL and MAGMA. Here are the steps to build with them.
 
 .. code-block:: bat
 
-    REM Make sure you has 7z and curl installed.
+    REM Make sure you have 7z and curl installed.
 
     REM Download MKL files
     curl https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z -k -O
@@ -34,7 +34,7 @@ Speeding CUDA build for Windows
 
 Visual Studio doesn't support parallel custom task currently.
 As an alternative, we can use ``Ninja`` to parallelize CUDA
-build tasks. It can used by typing only a few lines of code.
+build tasks. It can be used by typing only a few lines of code.
 
 .. code-block:: bat
     
@@ -108,7 +108,7 @@ Cpp Extension
 ^^^^^^^^^^^^^
 
 This type of extension has better support compared with
-the previous one. However, it still need some manual
+the previous one. However, it still needs some manual
 configuration. First, you should open the
 **x86_x64 Cross Tools Command Prompt for VS 2017**
 And then, you can open the Git-Bash in it. It is
@@ -149,7 +149,7 @@ Python 64-bit version.
 Why are there no Python 2 packages for Windows?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Because it's not stable enough. There're some issues that needs to
+Because it's not stable enough. There're some issues that need to
 be solved before we officially release it. You can build it by yourself.
 
 Import error
@@ -252,5 +252,5 @@ They are not supported on Windows. Something like doing multiprocessing on CUDA
 tensors cannot succeed, there are two alternatives for this.
 
 1. Don't use `multiprocessing`. Set the ``num_worker`` of ``DataLoader`` to zero.
-2. Share CPU tensors instead. Remove ``.cuda()`` in your custom DataLoader definetion.
+2. Share CPU tensors instead. Remove ``.cuda()`` in your custom DataLoader definition.
 
