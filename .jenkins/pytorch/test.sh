@@ -28,6 +28,12 @@ fi
 
 time python test/run_test.py --verbose
 
+# Test ATen
+echo "Testing ATen"
+TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
+ln -s "$TORCH_LIB_PATH"/libATen.so aten/build/src/ATen/libATen.so
+aten/tools/run_tests.sh aten/build
+
 rm -rf ninja
 
 echo "Installing torchvision at branch master"
