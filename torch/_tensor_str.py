@@ -189,12 +189,10 @@ def _str(self):
     suffix = ')'
     if not torch._C._is_default_type_cuda():
         if self.device.type == 'cuda':
-            suffix = ', device=' + repr(self.device.index) + suffix
+            suffix = ', device=\'' + str(self.device) + '\'' + suffix
     else:
-        if self.device.type == 'cpu':
-            suffix = ', device=' + repr(self.device.type) + suffix
-        elif torch.cuda.current_device() != self.device.index:
-            suffix = ', device=' + repr(self.device.index) + suffix
+        if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
+            suffix = ', device=\'' + str(self.device) + '\'' + suffix
 
     if self.dtype != torch.get_default_dtype() and self.dtype != torch.int64:
         suffix = ', dtype=' + str(self.dtype) + suffix
