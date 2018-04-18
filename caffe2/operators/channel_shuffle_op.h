@@ -1,6 +1,6 @@
 #pragma once
-#include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/operators/conv_pool_op_base.h"
 
 namespace caffe2 {
 
