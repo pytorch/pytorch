@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <ATen/ATen.h>
 #include "tensor_layouts.h"
 #include "torch/csrc/DynamicTypes.h"
