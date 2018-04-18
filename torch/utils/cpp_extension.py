@@ -476,7 +476,10 @@ def load(name,
     if baton.try_acquire():
         try:
             with_cuda = any(map(_is_cuda_file, sources))
-            extra_ldflags = _prepare_ldflags(extra_ldflags or [], with_cuda)
+            extra_ldflags = _prepare_ldflags(
+                extra_ldflags or [],
+                with_cuda,
+                verbose)
             build_file_path = os.path.join(build_directory, 'build.ninja')
             if verbose:
                 print(
@@ -518,7 +521,7 @@ def verify_ninja_availability():
             raise RuntimeError("Ninja is required to load C++ extensions")
 
 
-def _prepare_ldflags(extra_ldflags, with_cuda):
+def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
     if sys.platform == 'win32':
         python_path = os.path.dirname(sys.executable)
         python_lib_path = os.path.join(python_path, 'libs')
