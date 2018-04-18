@@ -38,6 +38,7 @@ static void setattr(jit::Node* n, jit::Symbol name, SparseTensor s)        { n->
 static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
+static void setattr(jit::Node* n, jit::Symbol name, std::string v)         { n->s_(name, v); }
 template<std::size_t N>
 static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
 

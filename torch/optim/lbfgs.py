@@ -111,7 +111,7 @@ class LBFGS(Optimizer):
         if abs_grad_sum <= tolerance_grad:
             return loss
 
-        # variables cached in state (for tracing)
+        # tensors cached in state (for tracing)
         d = state.get('d')
         t = state.get('t')
         old_dirs = state.get('old_dirs')

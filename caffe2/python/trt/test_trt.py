@@ -155,7 +155,7 @@ class TensorRTTransformTest(TestCase):
                     downloadFromURLToFile(url, dest,
                                           show_progress=False)
                 except TypeError:
-                    # show_progress not supported prior to
+# show_progress not supported prior to
                     # Caffe2 78c014e752a374d905ecfb465d44fa16e02a28f1
                     # (Sep 17, 2017)
                     downloadFromURLToFile(url, dest)
@@ -230,44 +230,42 @@ class TensorRTTransformTest(TestCase):
         Y_c2 = None
         data =  np.random.randn(*input_blob_dims).astype(np.float32)
         c2_time = 1
-        ws = Workspace()
+        workspace.SwitchWorkspace("gpu_test", True)
         with core.DeviceScope(device_option):
-            ws.FeedBlob(input_name, data)
-            ws.RunNetOnce(init_net)
-            ws.CreateNet(pred_net)
+            workspace.FeedBlob(input_name, data)
+            workspace.RunNetOnce(init_net)
+            workspace.CreateNet(pred_net)
             for _ in range(warmup):
-                ws.RunNet(pred_net.name)
+                workspace.RunNet(pred_net.name)
             start = time.time()
             for _ in range(repeat):
-                ws.RunNet(pred_net.name)
+                workspace.RunNet(pred_net.name)
             end = time.time()
             c2_time = end - start
-            output_values = [ws.FetchBlob(name) for name in net_outputs]
+            output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_c2 = namedtupledict('Outputs', net_outputs)(*output_values)
-        ws.ResetWorkspace()
+        workspace.ResetWorkspace()
 
         # Cut the graph
-        init_net_cut, pred_net_cut = transform_caffe2_net(init_net, pred_net, {input_name: input_blob_dims})
+        pred_net_cut = transform_caffe2_net(device_option, init_net, pred_net, {input_name: input_blob_dims})
         del init_net, pred_net
-        #print_net(pred_net_cut)
+        #_print_net(pred_net_cut)
 
         Y_trt = None
         input_name = pred_net_cut.external_input[0]
         print("C2 runtime: {}s".format(c2_time))
-        ws = Workspace()
         with core.DeviceScope(device_option):
-            ws.FeedBlob(input_name, data)
-            ws.RunNetOnce(init_net_cut)
-            ws.CreateNet(pred_net_cut)
+            workspace.FeedBlob(input_name, data)
+            workspace.CreateNet(pred_net_cut)
             for _ in range(warmup):
-                ws.RunNet(pred_net_cut.name)
+                workspace.RunNet(pred_net_cut.name)
             start = time.time()
             for _ in range(repeat):
-                ws.RunNet(pred_net_cut.name)
+                workspace.RunNet(pred_net_cut.name)
             end = time.time()
             trt_time = end - start
             print("TRT runtime: {}s, improvement: {}%".format(trt_time, (c2_time-trt_time)/c2_time*100))
-            output_values = [ws.FetchBlob(name) for name in net_outputs]
+            output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_trt = namedtupledict('Outputs', net_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
 

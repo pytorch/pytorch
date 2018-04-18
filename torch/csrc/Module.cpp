@@ -34,6 +34,7 @@
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
 #include "torch/csrc/jit/python_ir.h"
+#include "torch/csrc/onnx/init.h"
 
 #ifdef WITH_CUDNN
 #include "cudnn.h"
@@ -478,6 +479,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPEngine_initModule(module));
   torch::autograd::initAutogradClosureBindings(module);
   torch::jit::initJITBindings(module);
+  torch::onnx::initONNXBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
 #ifdef WITH_CUDA

@@ -79,18 +79,11 @@ class AsyncNetBase : public NetBase {
   int num_workers_;
 
   // Tracing
-  void initTracer(const std::shared_ptr<const NetDef>& net_def);
-  Timer timer_;
-  bool trace_net_;
-  bool trace_batch_;
-  int batch_iter_;
-  std::unique_ptr<tracing::Tracer> tracer_;
+  std::shared_ptr<tracing::Tracer> tracer_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
-  OperatorBase* op(int op_idx) const;
-
   std::shared_ptr<TaskThreadPool>
   pool_getter(PoolsMap& pools, int device_type, int device_id, int pool_size);
 

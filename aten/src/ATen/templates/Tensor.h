@@ -128,8 +128,8 @@ struct Tensor : public detail::TensorBase {
   ${tensor_method_declarations}
 
   template <typename F, typename... Args> 
-  Tensor m(F func, Args&&... params) {
-    return func(*this, params...);
+  auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
+    return func(*this, std::forward<Args>(params)...);
   } 
 };
 

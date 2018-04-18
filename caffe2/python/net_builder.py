@@ -267,7 +267,7 @@ class Operations(object):
                 ops.stop_if(ops.LE([x, ops.Const(0)]))
                 ops.Print(b, 0)
             In the example, 'b' will only be printed if the value of scalar
-            tensor 'x' lower or equal to 0.
+            tensor 'x' is greater than 0.
         """
         return NetBuilder.current().stop_if(blob)
 

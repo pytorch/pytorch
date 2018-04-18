@@ -22,9 +22,7 @@ TEST(SsaTest, ConvReluInplace) {
   net.add_external_input("X");
   net.add_external_output("Y");
 
-  std::unordered_map<std::string, std::string> input_mapping;
-  std::unordered_map<std::string, std::string> output_mapping;
-  std::tie(input_mapping, output_mapping) =
+  std::unordered_map<std::string, std::string> input_mapping =
       caffe2::onnx::SsaRewrite(nullptr, &net);
   for (const auto& op : net.op()) {
     std::unordered_set<std::string> inputs;
@@ -37,5 +35,5 @@ TEST(SsaTest, ConvReluInplace) {
   }
   EXPECT_EQ(net.op(0).output(0), net.op(1).input(0));
   EXPECT_EQ("X", input_mapping.at(net.external_input(0)));
-  EXPECT_EQ("Y", output_mapping.at(net.external_output(0)));
+  EXPECT_EQ("Y", net.external_output(0));
 }
