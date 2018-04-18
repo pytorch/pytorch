@@ -275,11 +275,12 @@ class Module(object):
         r"""Moves and/or casts the parameters and buffers.
 
         This can be called with a :attr:`device` argument and/or a :attr:`dtype`
-        argument, and has the exact signature as :meth:`torch.Tensor.to`, except
-        that this method only takes in floating point :attr:`dtype`, and will
-        only cast the floating point parameters and buffers to :attr:`dtype`. It
-        will still move the integral parameters and buffers to :attr:`device`,
-        if that is given. See below for examples.
+        argument. It has similar signature as :meth:`torch.Tensor.to`, except
+        that this method doesn't take in :attr:`requires_grad` and only takes in
+        floating point :attr:`dtype` s. In particular, this method will only
+        cast the floating point parameters and buffers to :attr:`dtype`. It will
+        still move the integral parameters and buffers to :attr:`device`, if
+        that is given. See below for examples.
 
         Returns:
             Module: self
