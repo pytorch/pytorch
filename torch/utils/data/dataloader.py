@@ -44,22 +44,22 @@ if IS_WINDOWS:
         def __init__(self):
             self.manager_pid = os.getppid()
 
-            kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-            kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
-            kernel32.OpenProcess.restype = HANDLE
-            kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
-            kernel32.WaitForSingleObject.restype = DWORD
+            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            self.kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
+            self.kernel32.OpenProcess.restype = HANDLE
+            self.kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
+            self.kernel32.WaitForSingleObject.restype = DWORD
 
             # Value obtained from https://msdn.microsoft.com/en-us/library/ms684880.aspx
             SYNCHRONIZE = 0x00100000
-            self.manager_handle = kernel32.OpenProcess(SYNCHRONIZE, 0, manager_pid)
+            self.manager_handle = self.kernel32.OpenProcess(SYNCHRONIZE, 0, self.manager_pid)
 
             if not self.manager_handle:
                 raise ctypes.WinError(ctypes.get_last_error())
 
         def is_alive(self):
             # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
-            return kernel32.WaitForSingleObject(self.manager_handle, 0) != 0
+            return self.kernel32.WaitForSingleObject(self.manager_handle, 0) != 0
 else:
     class ManagerWatchdog(object):
         def __init__(self):
@@ -69,7 +69,7 @@ else:
             return os.getppid() == self.manager_pid
 
 
-def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id, manager_pid):
+def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
     global _use_shared_memory
     _use_shared_memory = True
 
@@ -255,13 +255,12 @@ class _DataLoaderIter(object):
             self.reorder_dict = {}
 
             base_seed = torch.LongTensor(1).random_()[0]
-            manager_pid = os.getpid()
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
                     args=(self.dataset, self.index_queues[i],
                           self.worker_result_queue, self.collate_fn, base_seed + i,
-                          self.worker_init_fn, i, manager_pid))
+                          self.worker_init_fn, i))
                 for i in range(self.num_workers)]
 
             if self.pin_memory or self.timeout > 0:
