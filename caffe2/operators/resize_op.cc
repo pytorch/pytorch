@@ -19,7 +19,7 @@ void resizeNearest2x(
       for (int y = 0; y < output_height; ++y) {
         const int in_y = y / 2;
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
         int vecW = (input_width / 4) * 4; // round down
         int x = 0;
         for (; x < vecW; x += 4) {
