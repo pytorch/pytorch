@@ -113,6 +113,8 @@ EXAMPLES = [
     Example(Binomial, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': 10},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10.])},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10., 10.])},
     ]),
     Example(Multinomial, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
@@ -794,6 +796,14 @@ class TestDistributions(TestCase):
             self._check_log_prob(Binomial(total_count, probs), ref_log_prob)
             logits = probs_to_logits(probs, is_binary=True)
             self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
+
+    def test_binomial_log_prob_inhomogeneous_count(self):
+        probs = torch.tensor([0.2, 0.7, 0.9])
+        for total_count, sample in [(torch.tensor([10.]), torch.tensor([7., 3., 9.])),
+                                    (torch.tensor([1., 2., 10.]), torch.tensor([0., 1., 9.]))]:
+            log_prob = Binomial(total_count, probs).log_prob(sample)
+            expected = scipy.stats.binom(total_count.cpu().numpy(), probs.cpu().numpy()).logpmf(sample)
+            self.assertAlmostEqual(log_prob, expected, places=4)
 
     def test_binomial_extreme_vals(self):
         total_count = 100
@@ -2667,7 +2677,6 @@ class TestKL(TestCase):
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for (p, _), (_, q) in self.finite_examples:
-            actual = kl_divergence(p, q)
             numerator = 0
             denominator = 0
             while denominator < self.max_samples:
