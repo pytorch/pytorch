@@ -163,9 +163,9 @@ void test(Type & T, Type & AccT) {
       auto ct1 = randn(T, {3, 4});
       auto ct2 = randn(T, {3, 4});
       auto t1 = randn(T.toBackend(Backend::CPU), {3, 4});
-      REQUIRE_THROWS_WITH(ct1._standard_gamma_grad(ct2), "not implemented");
-      REQUIRE_THROWS_WITH(ct1._standard_gamma_grad(t1), "not implemented");
-      REQUIRE_THROWS_WITH(t1._standard_gamma_grad(ct2), "CUDA Backend");
+      REQUIRE_THROWS_WITH(ct1._standard_gamma_grad(ct2), Catch::Contains("not implemented"));
+      REQUIRE_THROWS_WITH(ct1._standard_gamma_grad(t1), Catch::Contains("not implemented"));
+      REQUIRE_THROWS_WITH(t1._standard_gamma_grad(ct2), Catch::Contains("CUDA Backend"));
     }
 	}
 
