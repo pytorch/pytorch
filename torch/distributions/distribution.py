@@ -1,6 +1,7 @@
 import torch
 import warnings
 from torch.distributions import constraints
+from torch.distributions.utils import lazy_property
 
 
 class Distribution(object):
@@ -27,9 +28,12 @@ class Distribution(object):
             self._validate_args = validate_args
         if self._validate_args:
             for param, constraint in self.arg_constraints.items():
-                if not constraints.is_dependent(constraint):
-                    if not constraint.check(self.__getattribute__(param)).all():
-                        raise ValueError("The parameter {} has invalid values".format(param))
+                if constraints.is_dependent(constraint):
+                    continue  # skip constraints that cannot be checked
+                if param not in self.__dict__ and isinstance(getattr(type(self), param), lazy_property):
+                    continue  # skip checking lazily-constructed args
+                if not constraint.check(getattr(self, param)).all():
+                    raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
     def batch_shape(self):
