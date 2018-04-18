@@ -120,7 +120,7 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     // while ...
     //   f = f + 1
     if(py::isinstance<py::int_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kInt).scalarTensor(py::cast<int32_t>(self)));
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(py::cast<int64_t>(self)));
     } else if(py::isinstance<py::float_>(self)) {
       return createConstant(loc, m, at::CPU(at::kFloat).scalarTensor(py::cast<float>(self)));
     } else if(py::isinstance<py::bool_>(self)) {
