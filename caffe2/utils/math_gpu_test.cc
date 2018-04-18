@@ -389,6 +389,131 @@ class ReduceTensorGPUTest : public testing::Test {
   Tensor<CUDAContext>* scratch_ptr_ = nullptr;
 };
 
+TEST_F(ReduceTensorGPUTest, ReduceMinGPUTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
+  const auto& reduce_min = [](const int num_dims,
+                              const int* dims,
+                              const int num_axes,
+                              const int* axes,
+                              const float* X,
+                              float* Y,
+                              CUDAContext* context,
+                              Tensor<CUDAContext>* scratch_ptr) {
+    return math::ReduceMin<float, CUDAContext>(
+        num_dims, dims, num_axes, axes, X, Y, context, scratch_ptr);
+  };
+  // Test for 1D tensor.
+  RunRedcueTensorTest(
+      reduce_min,
+      {3},
+      {0},
+      {1.0f, 2.0f, 3.0f},
+      {1.0f});
+
+  // Test for 2D Tensor.
+  RunRedcueTensorTest(
+      reduce_min,
+      {2, 3},
+      {1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {1.0f, 4.0f});
+  RunRedcueTensorTest(
+      reduce_min,
+      {2, 3},
+      {0},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {1.0f, 2.0f, 3.0f});
+  RunRedcueTensorTest(
+      reduce_min,
+      {2, 3},
+      {0, 1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {1.0f});
+
+  // Test for 3D tensor.
+  RunRedcueTensorTest(
+      reduce_min,
+      {2, 2, 2},
+      {1, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {1.0f, 5.0f});
+  RunRedcueTensorTest(
+      reduce_min,
+      {2, 2, 2},
+      {0, 1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {1.0f, 2.0f});
+  RunRedcueTensorTest(
+      reduce_min,
+      {2, 2, 2},
+      {0, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {1.0f, 3.0f});
+}
+
+TEST_F(ReduceTensorGPUTest, ReduceMaxGPUTest) {
+  const auto& reduce_max = [](const int num_dims,
+                              const int* dims,
+                              const int num_axes,
+                              const int* axes,
+                              const float* X,
+                              float* Y,
+                              CUDAContext* context,
+                              Tensor<CUDAContext>* scratch_ptr) {
+    return math::ReduceMax<float, CUDAContext>(
+        num_dims, dims, num_axes, axes, X, Y, context, scratch_ptr);
+  };
+  // Test for 1D tensor.
+  RunRedcueTensorTest(
+      reduce_max,
+      {3},
+      {0},
+      {1.0f, 2.0f, 3.0f},
+      {3.0f});
+
+  // Test for 2D Tensor.
+  RunRedcueTensorTest(
+      reduce_max,
+      {2, 3},
+      {1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {3.0f, 6.0f});
+  RunRedcueTensorTest(
+      reduce_max,
+      {2, 3},
+      {0},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {4.0f, 5.0f, 6.0f});
+  RunRedcueTensorTest(
+      reduce_max,
+      {2, 3},
+      {0, 1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {6.0f});
+
+  // Test for 3D tensor.
+  RunRedcueTensorTest(
+      reduce_max,
+      {2, 2, 2},
+      {1, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {4.0f, 8.0f});
+  RunRedcueTensorTest(
+      reduce_max,
+      {2, 2, 2},
+      {0, 1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {7.0f, 8.0f});
+  RunRedcueTensorTest(
+      reduce_max,
+      {2, 2, 2},
+      {0, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {6.0f, 8.0f});
+}
+
 TEST_F(ReduceTensorGPUTest, ReduceSumGPUTest) {
   if (!HasCudaGPU()) {
     return;

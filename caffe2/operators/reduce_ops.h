@@ -20,7 +20,7 @@ class ReduceOpBase : public Operator<Context> {
   ReduceOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         axes_(OperatorBase::GetRepeatedArgument<int>("axes")),
-        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, 1) {}
+        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
