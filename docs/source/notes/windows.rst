@@ -18,7 +18,7 @@ MKL and MAGMA. Here are the steps to build with them.
     curl https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z -k -O
     7z x -aoa mkl_2018.2.185.7z -omkl
 
-    REM Download MAGMA diles
+    REM Download MAGMA files
     REM cuda90/cuda91 is also available in the following line.
     set CUDA_PREFIX=cuda80 
     curl -k https://s3.amazonaws.com/ossci-windows/magma_%CUDA_PREFIX%_release_mkl_2018.2.185.7z -o magma.7z
