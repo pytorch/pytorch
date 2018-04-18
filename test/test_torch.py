@@ -11,6 +11,7 @@ import tempfile
 import unittest
 import warnings
 import pickle
+import gzip
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from itertools import product, combinations
@@ -6168,7 +6169,7 @@ class TestTorch(TestCase):
             self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
             self.assertRaises(TypeError, lambda: torch.ones((np.array(3, 3))))
 
-    def _test_serialization(self, filecontext_lambda, test_use_filename=True):
+    def _test_serialization(self, filecontext_lambda, filecontext_read_lambda=None, test_use_filename=True):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
@@ -6187,11 +6188,19 @@ class TestTorch(TestCase):
             # which is not supported on Windows
             if sys.platform == "win32" and use_name:
                 continue
-            with filecontext_lambda() as f:
-                handle = f if not use_name else f.name
-                torch.save(b, handle)
-                f.seek(0)
-                c = torch.load(handle)
+            if filecontext_read_lambda:
+                with filecontext_lambda() as f:
+                    handle = f if not use_name else f.name
+                    torch.save(b, handle)
+                with filecontext_read_lambda() as f:
+                    handle = f if not use_name else f.name
+                    c = torch.load(handle)
+            else:
+                with filecontext_lambda() as f:
+                    handle = f if not use_name else f.name
+                    torch.save(b, handle)
+                    f.seek(0)
+                    c = torch.load(handle)
             self.assertEqual(b, c, 0)
             self.assertTrue(isinstance(c[0], torch.FloatTensor))
             self.assertTrue(isinstance(c[1], torch.FloatTensor))
@@ -6223,23 +6232,42 @@ class TestTorch(TestCase):
         # Test serialization (load and save) with a filelike object
         self._test_serialization(BytesIOContext, test_use_filename=False)
 
-    def _test_serialization_offset(self, filecontext_lambda):
+    def test_serialization_gzip(self):
+        f = tempfile.NamedTemporaryFile(delete=False)
+        self._test_serialization(lambda: gzip.open(f.name, mode='w+b'),
+                                 filecontext_read_lambda=lambda: gzip.open(f.name, mode='r+b'),
+                                 test_use_filename=False)
+
+    def _test_serialization_offset(self, filecontext_lambda, filecontext_read_lambda=None):
         a = torch.randn(5, 5)
         i = 41
-        with tempfile.TemporaryFile() as f:
-            pickle.dump(i, f)
-            torch.save(a, f)
-            f.seek(0)
-            j = pickle.load(f)
-            b = torch.load(f)
-            self.assertTrue(torch.equal(a, b))
-            self.assertEqual(i, j)
+        if filecontext_read_lambda:
+            with filecontext_lambda() as f:
+                pickle.dump(i, f)
+                torch.save(a, f)
+            with filecontext_read_lambda() as f:
+                j = pickle.load(f)
+                b = torch.load(f)
+        else:
+            with filecontext_lambda() as f:
+                pickle.dump(i, f)
+                torch.save(a, f)
+                f.seek(0)
+                j = pickle.load(f)
+                b = torch.load(f)
+        self.assertTrue(torch.equal(a, b))
+        self.assertEqual(i, j)
 
     def test_serialization_offset(self):
         self._test_serialization_offset(tempfile.TemporaryFile)
 
     def test_serialization_offset_filelike(self):
         self._test_serialization_offset(BytesIOContext)
+
+    def test_serialization_offset_gzip(self):
+        f = tempfile.NamedTemporaryFile(delete=False)
+        self._test_serialization_offset(lambda: gzip.open(f.name, mode='w+b'),
+                                 filecontext_read_lambda=lambda: gzip.open(f.name, mode='r+b'))
 
     def test_half_tensor(self):
         x = torch.randn(5, 5).float()
