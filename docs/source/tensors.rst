@@ -44,8 +44,9 @@ A tensor can be constructed from a Python :class:`list` or sequence using the
 
 .. warning::
 
-    If :attr:`data` is a :class:`torch.Tensor`, the output tensor
-    will be a copy of :attr:`data`.
+    :func:`torch.tensor` always copies :attr:`data`. If you have a Tensor `tensor`
+    and want to avoid a copy, use `tensor.detach()`. If you have a numpy array
+    and want to avoid a copy, use :func:`torch.from_numpy`.
 
 A tensor of specific data type can be constructed by passing a
 :class:`torch.dtype` and/or a :class:`torch.device` to a
