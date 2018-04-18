@@ -1489,6 +1489,67 @@ Returns:
         - **v** (*Tensor*): the eigenvectors of ``a`` if ``eigenvectors`` is ``True``; otherwise an empty tensor
 """)
 
+add_docstr(torch.einsum,
+           r"""
+einsum(equation, operands) -> Tensor
+
+This function provides a way of computing multilinear expressions (i.e. sums of products) using the
+Einstein summation convention.
+
+Args:
+    equation (string): The equation is given in terms of lower case letters (indices) to be associated
+           with each dimension of the operands and result. The left hand side lists the operands
+           dimensions, separated by commas. There should be one index letter per tensor dimension.
+           The right hand side follows after `->` and gives the indices for the output.
+           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
+           sorted list of all indices appearing exactly once in the left hand side.
+           The indices not apprearing in the output are summed over after multiplying the operands
+           entries.
+           `einsum` does not implement diagonals (multiple occurences of a single index for one tensor,
+           e.g. `ii->i`) and ellipses (`...`).
+    operands (list of Tensors): The operands to compute the Einstein sum of.
+           Note that the operands are passed as a list, not as individual arguments.
+
+Examples::
+
+    >>> x = torch.randn(5)
+    >>> y = torch.randn(4)
+    >>> torch.einsum('i,j->ij', (x,y))  # outer product
+
+    -1.0066 -2.0433 -0.8290  0.8429
+    -0.5106 -1.0365 -0.4205  0.4275
+     0.4174  0.8473  0.3438 -0.3495
+    -0.4578 -0.9292 -0.3770  0.3833
+    -0.8996 -1.8262 -0.7409  0.7533
+    [torch.FloatTensor of size (5,4)]
+
+    >>> A = torch.randn(3,5,4)
+    >>> l = torch.randn(2,5)
+    >>> r = torch.randn(2,4)
+    >>> torch.einsum('bn,anm,bm->ba', (l,A,r)) # compare torch.nn.functional.bilinear
+
+    -1.3778  2.7663 -4.9150
+    -1.7813 -4.9015  2.4149
+    [torch.FloatTensor of size (2,3)]
+
+    >>> As = torch.randn(3,2,5)
+    >>> Bs = torch.randn(3,5,4)
+    >>> torch.einsum('bij,bjk->bik', (As, Bs)) # batch matrix multiplication
+
+    (0 ,.,.) =
+     -2.0810  4.7334  2.9593  0.5268
+      1.8096 -4.6701 -2.4214 -2.2638
+
+    (1 ,.,.) =
+      0.9456 -8.3309 -2.4690 -3.3164
+      1.9580 -1.8447 -1.4268 -2.5414
+
+    (2 ,.,.) =
+     -0.1725  0.7317 -0.2110 -0.0522
+      2.5407 -0.2854  3.8720  0.9073
+    [torch.FloatTensor of size (3,2,4)]
+""")
+
 add_docstr(torch.eq,
            r"""
 eq(input, other, out=None) -> Tensor
