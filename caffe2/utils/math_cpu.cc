@@ -51,7 +51,7 @@ namespace caffe2 {
 
 #if EIGEN_VERSION_AT_LEAST(3, 3, 0)
 template <typename T, int D>
-using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D, Eigen::RowMajor>>;
+using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D>>;
 #endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
 namespace math {
@@ -710,12 +710,13 @@ void EigenReduceTensorImpl(
   Eigen::DSizes<Eigen::DenseIndex, kNumDims> Y_dims;
   Eigen::array<Eigen::DenseIndex, kNumAxes> reduce_dims;
   for (int i = 0; i < kNumDims; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
+    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
+    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
   }
   for (int i = 0; i < kNumAxes; ++i) {
-    Y_dims[axes[i]] = static_cast<Eigen::DenseIndex>(1);
-    reduce_dims[i] = static_cast<Eigen::DenseIndex>(axes[i]);
+    Y_dims[kNumDims - 1 - axes[i]] = static_cast<Eigen::DenseIndex>(1);
+    reduce_dims[kNumAxes - 1 - i] =
+        static_cast<Eigen::DenseIndex>(kNumDims - 1 - axes[i]);
   }
   EigenTensorMap<T, kNumDims>(Y, Y_dims) =
       EigenTensorMap<T, kNumDims>(const_cast<T*>(X), X_dims)
@@ -1786,7 +1787,7 @@ void BiasCHW<float, CPUContext>(
   for (int c = 0; c < bias_channels; ++c) {
     float b = bias[c];
 
-#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+#ifdef __ARM_NEON__
     float32x4_t vBias = vdupq_n_f32(b);
 
     // We give alignment hints for additional speed, so handle the
@@ -1853,7 +1854,7 @@ void BiasCHW<float, CPUContext>(
     for (int i = 0; i < image_size; ++i) {
       image[i] += b;
     }
-#endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
+#endif // __ARM_NEON__
 
     image += image_size;
   }
@@ -2013,9 +2014,9 @@ void EigenTransposeImpl(const int* dims, const int* axes, const T* X, T* Y) {
   Eigen::array<Eigen::DenseIndex, D> axes_array;
 #pragma unroll
   for (int i = 0; i < D; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[axes[i]]);
-    axes_array[i] = static_cast<Eigen::DenseIndex>(axes[i]);
+    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - i]);
+    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - axes[i]]);
+    axes_array[D - 1 - i] = static_cast<Eigen::DenseIndex>(D - 1 - axes[i]);
   }
   EigenTensorMap<T, D>(Y, Y_dims) =
       EigenTensorMap<T, D>(const_cast<T*>(X), X_dims).shuffle(axes_array);
