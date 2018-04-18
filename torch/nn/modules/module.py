@@ -103,6 +103,8 @@ class Module(object):
         """
         if hasattr(self, name) and name not in self._buffers:
             raise KeyError("attribute '{}' already exists".format(name))
+        elif '.' in name:
+            raise KeyError("buffer name can't contain \".\"")
         elif tensor is not None and not isinstance(tensor, torch.Tensor):
             raise TypeError("cannot assign '{}' object to buffer '{}' "
                             "(torch Tensor or None required)"
@@ -126,6 +128,8 @@ class Module(object):
 
         if hasattr(self, name) and name not in self._parameters:
             raise KeyError("attribute '{}' already exists".format(name))
+        if '.' in name:
+            raise KeyError("parameter name can't contain \".\"")
 
         if param is None:
             self._parameters[name] = None
@@ -157,6 +161,8 @@ class Module(object):
                 torch.typename(module)))
         if hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
+        if '.' in name:
+            raise KeyError("module name can't contain \".\"")
         self._modules[name] = module
 
     def _apply(self, fn):
