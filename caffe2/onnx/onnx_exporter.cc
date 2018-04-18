@@ -90,12 +90,10 @@ std::string SsaName(const std::string& n, int version) {
 }
 } // namespace
 
-std::pair<
-    std::unordered_map<std::string, std::string>,
-    std::unordered_map<std::string, std::string>>
-SsaRewrite(caffe2::NetDef* init_net, caffe2::NetDef* pred_net) {
+std::unordered_map<std::string, std::string> SsaRewrite(
+    caffe2::NetDef* init_net,
+    caffe2::NetDef* pred_net) {
   std::unordered_map<std::string, std::string> input_mapping;
-  std::unordered_map<std::string, std::string> output_mapping;
   std::unordered_map<std::string, int> blob_versions;
 
 #define REWRITE_EXTERNAL_IO(net, name)                 \
@@ -121,7 +119,6 @@ SsaRewrite(caffe2::NetDef* init_net, caffe2::NetDef* pred_net) {
       blob_versions.emplace(output, 0);
     }
     REWRITE_EXTERNAL_IO(init_net, input);
-    REWRITE_EXTERNAL_IO(init_net, output);
     blob_versions.clear();
   }
 
@@ -151,11 +148,31 @@ SsaRewrite(caffe2::NetDef* init_net, caffe2::NetDef* pred_net) {
         }
       }
     }
-    REWRITE_EXTERNAL_IO(pred_net, output);
+
+    // Fix the external output name back to original
+    std::unordered_set<std::string> external_outputs;
+    for (const auto& output : pred_net->external_output()) {
+      external_outputs.emplace(output);
+    }
+    for (auto& op : *pred_net->mutable_op()) {
+      for (auto& output : *op.mutable_output()) {
+        auto pos = output.find_last_of('_');
+        CAFFE_ENFORCE_NE(pos, 0);
+        auto basename = output.substr(0, pos);
+        if (!external_outputs.count(basename)) {
+          continue;
+        }
+        auto it = blob_versions.find(basename);
+        if (it != blob_versions.end() &&
+            SsaName(basename, it->second) == output) {
+          output = basename;
+        }
+      }
+    }
   }
 #undef REWRITE_EXTERNAL_IO
 
-  return std::make_pair(std::move(input_mapping), std::move(output_mapping));
+  return input_mapping;
 }
 
 const std::unordered_map<std::string, std::string>&

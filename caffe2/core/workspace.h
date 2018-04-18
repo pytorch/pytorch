@@ -219,7 +219,7 @@ class Workspace {
   /**
    * Renames a local workspace blob. If blob is not found in the local blob list
    * or if the target name is already present in local or any parent blob list
-   * the function will through.
+   * the function will throw.
    */
   Blob* RenameBlob(const string& old_name, const string& new_name);
 
