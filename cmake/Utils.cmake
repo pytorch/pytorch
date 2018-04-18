@@ -239,7 +239,7 @@ function(populate_cmake_property_list)
     # Convert command output into a CMake list
     STRING(REGEX REPLACE ";" "\\\\;" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
     STRING(REGEX REPLACE "\n" ";" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
-  fi
+  endif()
 endfunction()
 
 function(print_target_properties tgt)
