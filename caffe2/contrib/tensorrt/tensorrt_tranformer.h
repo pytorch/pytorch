@@ -45,13 +45,13 @@ class TensorRTTransformer {
       ::ONNX_NAMESPACE::ModelProto* model,
       std::vector<OperatorDef>* new_ops);
 
-  CaffeMap<std::string, TensorShape> SsaRewriteAndMapIO(
+  CaffeMap<std::string, TensorShape> SsaRewriteAndMapNames(
       Workspace* ws,
       NetDef* pred_net,
       const std::unordered_map<std::string, TensorShape>& input_shape_hints);
 
-  // Prune the unused weights in original workspace to save memory
-  void PruneUsedWeights(Workspace* ws, const NetDef& pred_net);
+  // Prune the unreferenced weights in original workspace to save memory
+  void PruneUnusedWeights(Workspace* ws, const NetDef& pred_net);
 
   // Input mapping
   std::unordered_map<std::string, std::string> input_mapping_;

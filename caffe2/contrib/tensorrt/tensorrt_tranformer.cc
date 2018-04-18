@@ -41,7 +41,6 @@ std::unordered_map<std::string, TensorShape> InferShapes(
 }
 
 
-
 // Figuring out the input the tensorrt runnable subgraph
 // `start` and `end` defines the continuous chunk of ops that can be readily
 // converted into an TensorRT op. And this function tries to figure out what's
@@ -413,7 +412,7 @@ void TensorRTTransformer::ClusterToTrtOp(
   model->mutable_graph()->clear_initializer();
 }
 
-CaffeMap<std::string, TensorShape> TensorRTTransformer::SsaRewriteAndMapIO(
+CaffeMap<std::string, TensorShape> TensorRTTransformer::SsaRewriteAndMapNames(
     Workspace* ws,
     NetDef* pred_net,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
@@ -442,7 +441,7 @@ CaffeMap<std::string, TensorShape> TensorRTTransformer::SsaRewriteAndMapIO(
   return shape_hints_ordered;
 }
 
-void TensorRTTransformer::PruneUsedWeights(
+void TensorRTTransformer::PruneUnusedWeights(
     Workspace* ws,
     const NetDef& pred_net) {
   std::unordered_set<std::string> used_weights;
@@ -470,7 +469,7 @@ void TensorRTTransformer::Transform(
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   CAFFE_ENFORCE(ws);
   auto shape_hints_ordered =
-      SsaRewriteAndMapIO(ws, pred_net, input_shape_hints);
+      SsaRewriteAndMapNames(ws, pred_net, input_shape_hints);
   Workspace mapped_ws(ws, input_mapping_);
   auto shape_hints = InferShapes(&mapped_ws, pred_net, &shape_hints_ordered);
 
@@ -570,7 +569,7 @@ void TensorRTTransformer::Transform(
   for (const auto& op : new_ops) {
     pred_net->add_op()->CopyFrom(op);
   }
-  PruneUsedWeights(ws, *pred_net);
+  PruneUnusedWeights(ws, *pred_net);
 }
 
 } // namespace caffe2
