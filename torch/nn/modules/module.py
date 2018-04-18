@@ -605,7 +605,7 @@ class Module(object):
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys):
+    def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
         this module, but not its descendants. This is called on every submodule
         in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
@@ -630,6 +630,9 @@ class Module(object):
                 this list
             unexpected_keys (list of str): if ``strict=False``, add unexpected
                 keys to this list
+            unexpected_keys (list of str): error messages should be added to
+                list, and will be reported together in
+                :meth:`~torch.nn.Module.load_state_dict`
         """
         local_name_params = itertools.chain(self._parameters.items(), self._buffers.items())
         local_state = {k: v.data for k, v in local_name_params if v is not None}
@@ -644,10 +647,10 @@ class Module(object):
                 try:
                     param.copy_(input_param)
                 except Exception:
-                    raise RuntimeError('While copying the parameter named "{}", '
-                                       'whose dimensions in the model are {} and '
-                                       'whose dimensions in the checkpoint are {}.'
-                                       .format(key, param.size(), input_param.size()))
+                    error_msgs.append('While copying the parameter named "{}", '
+                                      'whose dimensions in the model are {} and '
+                                      'whose dimensions in the checkpoint are {}.'
+                                      .format(key, param.size(), input_param.size()))
             elif strict:
                 missing_keys.append(key)
 
@@ -673,6 +676,7 @@ class Module(object):
         """
         missing_keys = []
         unexpected_keys = []
+        error_msgs = []
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, '_metadata', None)
@@ -681,7 +685,8 @@ class Module(object):
             state_dict._metadata = metadata
 
         def load(module, prefix=''):
-            module._load_from_state_dict(state_dict, prefix, strict, missing_keys, unexpected_keys)
+            module._load_from_state_dict(
+                state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
                 if child is not None:
                     load(child, prefix + name + '.')
@@ -691,14 +696,17 @@ class Module(object):
         if strict:
             error_msg = ''
             if len(unexpected_keys) > 0:
-                error_msg += 'Unexpected key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in unexpected_keys))
+                error_msgs.insert(
+                    0, 'Unexpected key(s) in state_dict: {}. '.format(
+                        ', '.join('"{}"'.format(k) for k in unexpected_keys)))
             if len(missing_keys) > 0:
-                error_msg += 'Missing key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in missing_keys))
-            if len(error_msg) > 0:
-                raise KeyError('Error loading state_dict for {}: {}'.format(
-                               self.__class__.__name__, error_msg))
+                error_msgs.insert(
+                    0, 'Missing key(s) in state_dict: {}. '.format(
+                        ', '.join('"{}"'.format(k) for k in missing_keys)))
+
+        if len(error_msgs) > 0:
+            raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+                               self.__class__.__name__, "\n\t".join(error_msgs)))
 
     def parameters(self):
         r"""Returns an iterator over module parameters.

@@ -2589,11 +2589,11 @@ class TestNN(NNTestCase):
 
         state_dict = net.state_dict()
         state_dict.update({'extra': torch.ones(5)})
-        self.assertRaises(KeyError, lambda: net.load_state_dict(state_dict))
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
 
         state_dict = net.state_dict()
         del state_dict['linear1.weight']
-        self.assertRaises(KeyError, lambda: net.load_state_dict(state_dict))
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
 
         state_dict = net.state_dict()
         state_dict.update({'bn.running_mean': torch.rand(14, 4)})  # wrong size
