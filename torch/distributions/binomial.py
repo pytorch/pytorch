@@ -103,7 +103,7 @@ class Binomial(Distribution):
 
     def enumerate_support(self):
         total_count = self._get_homogeneous_count()
-        values = self._new((int(total_count),))
+        values = self._new(total_count,)
         torch.arange(total_count, out=values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
