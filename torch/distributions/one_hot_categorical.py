@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
@@ -85,6 +84,6 @@ class OneHotCategorical(Distribution):
     def enumerate_support(self):
         n = self.event_shape[0]
         values = self._new((n, n))
-        torch.eye(n, out=values.data if isinstance(values, Variable) else values)
+        torch.eye(n, out=values.data)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
         return values.expand((n,) + self.batch_shape + (n,))

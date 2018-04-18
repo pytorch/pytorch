@@ -26,7 +26,7 @@ from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost
-from torch.autograd import Variable, variable
+from torch.autograd import Variable
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
@@ -114,10 +114,7 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    if isinstance(tensor, Variable):
-        return tensor.new_tensor(float('inf')).expand_as(tensor)
-    else:
-        return tensor.new([float('inf')]).expand_as(tensor)
+    return tensor.new_tensor(float('inf')).expand_as(tensor)
 
 
 def _x_log_x(tensor):

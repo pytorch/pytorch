@@ -2,7 +2,6 @@ import math
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all

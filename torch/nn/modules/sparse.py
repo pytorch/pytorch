@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 
 from .module import Module

@@ -1,6 +1,5 @@
 import torch
 from numbers import Number
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution

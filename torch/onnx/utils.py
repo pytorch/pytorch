@@ -54,11 +54,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
         model (torch.nn.Module): the model to be exported.
         args (tuple of arguments): the inputs to
             the model, e.g., such that ``model(*args)`` is a valid
-            invocation of the model.  Any non-Variable arguments will
-            be hard-coded into the exported model; any Variable arguments
+            invocation of the model.  Any non-Tensor arguments will
+            be hard-coded into the exported model; any Tensor arguments
             will become inputs of the exported model, in the order they
-            occur in args.  If args is a Variable, this is equivalent
-            to having called it with a 1-ary tuple of that Variable.
+            occur in args.  If args is a Tensor, this is equivalent
+            to having called it with a 1-ary tuple of that Tensor.
             (Note: passing keyword arguments to the model is not currently
             supported.  Give us a shout if you need it.)
         f: a file-like object (has to implement fileno that returns a file descriptor)
@@ -104,8 +104,8 @@ def _optimize_graph(graph, aten):
 
 
 def _trace(func, args, return_outs=False, aten=False):
-    # Special case for common case of passing a single Variable
-    if isinstance(args, torch.autograd.Variable):
+    # Special case for common case of passing a single Tensor
+    if isinstance(args, torch.Tensor):
         args = (args, )
 
     trace, torch_out = torch.jit.get_trace_graph(func, args)
@@ -117,8 +117,8 @@ def _trace(func, args, return_outs=False, aten=False):
 
 def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE):
-    # Special case for common case of passing a single Variable
-    if isinstance(args, torch.autograd.Variable):
+    # Special case for common case of passing a single Tensor
+    if isinstance(args, torch.Tensor):
         args = (args, )
 
     # A basic sanity check: make sure the state_dict keys are the same
@@ -220,7 +220,9 @@ def _run_symbolic_method(op_name, symbolic_fn, args):
 
 
 def _is_onnx_list(value):
-    if not isinstance(value, string_classes) and not torch.is_tensor(value) and isinstance(value, collections.Iterable):
+    if not isinstance(value, string_classes) and \
+            not isinstance(value, torch.Tensor) and \
+            isinstance(value, collections.Iterable):
         return True
     return False
 
@@ -236,7 +238,7 @@ def _add_attribute(node, key, value, aten):
     if _is_onnx_list(value):
         kind += "s"
     if aten:
-        if torch.is_tensor(value):
+        if isinstance(value, torch.Tensor):
             # Caffe2 proto does not support tensor attribute.
             if value.numel() > 1:
                 raise ValueError("Should not pass tensor attribute")
