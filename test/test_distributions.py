@@ -835,6 +835,13 @@ class TestDistributions(TestCase):
         self.assertEqual(samples.mean(dim=0), bin1.mean, prec=0.02)
         self.assertEqual(samples.var(dim=0), bin1.variance, prec=0.02)
 
+    def test_binomial_enumerate_support(self):
+        set_rng_seed(0)
+        bin0 = Binomial(0, torch.tensor(1.))
+        self.assertEqual(bin0.enumerate_support(), torch.tensor([0.]))
+        bin1 = Binomial(torch.tensor(5), torch.tensor(0.5))
+        self.assertEqual(bin1.enumerate_support(), torch.arange(6))
+
     def test_multinomial_1d(self):
         total_count = 10
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
