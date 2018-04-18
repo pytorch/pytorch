@@ -41,7 +41,7 @@ factory_like_common_args = parse_kwargs("""
     device (:class:`torch.device`, optional): the desired device of returned tensor.
         Default: if None, defaults to the device of :attr:`input`.
     requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: False.
+        returned tensor. Default: ``False``.
 """)
 
 add_docstr(torch.abs,
