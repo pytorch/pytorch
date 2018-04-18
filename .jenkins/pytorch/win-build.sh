@@ -66,6 +66,7 @@ set CUDA_TOOLKIT_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\
 set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 
 set TORCH_CUDA_ARCH_LIST=5.2
+set DEBUG=1
 
 set USE_CLCACHE=1
 set CLCACHE_DIR=%cd%\\clcache_tmp
