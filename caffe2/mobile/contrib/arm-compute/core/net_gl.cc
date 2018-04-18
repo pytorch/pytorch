@@ -173,7 +173,7 @@ vector<float> GLNet::TEST_Benchmark(
             "(",
             op_type,
             ") has failed.");
-        if (opengl_device_[idx] && op_type != "CopyFromGL") {
+        if (opengl_device_[idx] && op_type != "CopyFromGL" && op_type != "Reshape") {
           Blob *gpu_out_blob = ws_->GetBlob(output_blobs_[idx]);
           auto &g_ = gpu_out_blob->Get<GLTensor<DataType>>();
           g_.sync();

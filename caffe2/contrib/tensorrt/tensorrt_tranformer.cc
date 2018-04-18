@@ -1,14 +1,17 @@
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
+
+#include <iostream>
+#include <unordered_set>
+
 #include <NvInfer.h>
+#include <google/protobuf/text_format.h>
 #include <onnx2trt.hpp>
+
 #include "caffe2/contrib/tensorrt/trt_utils.h"
+#include "caffe2/core/context_gpu.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/onnx/onnx_exporter.h"
-
-#include <google/protobuf/text_format.h>
-#include <iostream>
-#include <unordered_set>
 
 namespace caffe2 {
 
@@ -16,23 +19,56 @@ namespace {
 
 // TODO(yinghai): Remove the awkward conversion between unordered_map and map
 std::unordered_map<std::string, TensorShape> InferShapes(
-    NetDef* init_net,
+    Workspace* ws,
     NetDef* pred_net,
-    const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
-  CaffeMap<std::string, TensorShape> shape_hints_ordered;
-  for (const auto& kv : input_shape_hints) {
-    shape_hints_ordered.emplace(kv.first, kv.second);
+    CaffeMap<std::string, TensorShape>* shape_hints_ordered) {
+
+  // Populate shapes from workplace
+  const std::vector<string>& ws_blobs = ws->Blobs();
+  for (const auto& s : ws_blobs) {
+    shape_hints_ordered->emplace(s, GetTensorShapeOfBlob(ws->GetBlob(s)));
   }
+
   std::vector<NetDef*> nets;
-  nets.emplace_back(init_net);
   nets.emplace_back(pred_net);
-  InferBlobShapesAndTypes(shape_hints_ordered, nets);
+  InferBlobShapesAndTypes(*shape_hints_ordered, nets);
   std::unordered_map<std::string, TensorShape> shape_hints;
-  for (const auto& kv : shape_hints_ordered) {
+  for (const auto& kv : *shape_hints_ordered) {
     shape_hints.emplace(kv.first, kv.second);
   }
 
   return shape_hints;
+}
+
+CaffeMap<std::string, TensorShape> SsaRewriteAndMapIO(
+    Workspace* ws,
+    NetDef* pred_net,
+    const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
+  std::unordered_map<std::string, std::string> input_mapping =
+      onnx::SsaRewrite(nullptr, pred_net);
+  std::unordered_map<std::string, std::string> input_reverse_mapping;
+  for (const auto kv : input_mapping) {
+    input_reverse_mapping.emplace(kv.second, kv.first);
+    try {
+      if (ws->GetBlob(kv.second)) {
+        ws->RenameBlob(kv.second, kv.first);
+      }
+    } catch (const EnforceNotMet& e) {
+      LOG(WARNING) << "Cannot rename blob " << kv.second << " to " << kv.first
+                   << ": " << e.what();
+    }
+  }
+  CaffeMap<std::string, TensorShape> shape_hints_ordered;
+  for (const auto& kv : input_shape_hints) {
+    const auto it = input_reverse_mapping.find(kv.first);
+    if (it != input_reverse_mapping.end()) {
+      LOG(INFO) << "Adding input hint: " << it->second;
+      shape_hints_ordered.emplace(it->second, kv.second);
+    } else {
+      shape_hints_ordered.emplace(kv.first, kv.second);
+    }
+  }
+  return shape_hints_ordered;
 }
 
 // Figuring out the input the tensorrt runnable subgraph
@@ -123,6 +159,94 @@ FigureOutputs(const NetDef& pred_net, int start, int end) {
   return all_outputs_vec;
 }
 
+void CPUTensorToTensorProto(
+    const TensorCPU& cpu_tensor,
+    ::ONNX_NAMESPACE::TensorProto* t) {
+  const auto len = cpu_tensor.size();
+  if (cpu_tensor.template IsType<float>()) {
+    t->set_data_type(::ONNX_NAMESPACE::TensorProto::FLOAT);
+    const float* data = cpu_tensor.template data<float>();
+    for (auto i = 0; i < len; ++i) {
+      t->add_float_data(*data++);
+    }
+  } else if (cpu_tensor.template IsType<int64_t>()) {
+    t->set_data_type(::ONNX_NAMESPACE::TensorProto::INT64);
+    const int64_t* data = cpu_tensor.template data<int64_t>();
+    for (auto i = 0; i < len; ++i) {
+      t->add_int64_data(*data++);
+    }
+  } else if (cpu_tensor.template IsType<int32_t>()) {
+    t->set_data_type(::ONNX_NAMESPACE::TensorProto::INT32);
+    const int32_t* data = cpu_tensor.template data<int32_t>();
+    for (auto i = 0; i < len; ++i) {
+      t->add_int32_data(*data++);
+    }
+  } else {
+    CAFFE_THROW(
+        "Don't know how to convert workspace tensor type ",
+        cpu_tensor.meta().name(),
+        " to ONNX TensorProto");
+  }
+}
+
+void BlobToTensorProto(
+    const std::string& name,
+    Workspace* ws,
+    CUDAContext* context,
+    ::ONNX_NAMESPACE::TensorProto* t) {
+  // Set name
+  t->set_name(name);
+  const Blob* blob = ws->GetBlob(name);
+  CAFFE_ENFORCE(blob, "Blob ", name, " doesn't exist");
+
+  // Set dims
+  const auto shape = GetTensorShapeOfBlob(blob);
+  for (const auto i : shape.dims()) {
+    t->add_dims(i);
+  }
+
+  // Set values
+  if (blob->template IsType<TensorCPU>()) {
+    const auto& cpu_tensor = blob->template Get<TensorCPU>();
+    CPUTensorToTensorProto(cpu_tensor, t);
+  } else if (blob->template IsType<TensorCUDA>()) {
+    const auto& cuda_tensor = blob->template Get<TensorCUDA>();
+    const auto cpu_tensor = TensorCPU(cuda_tensor, context);
+    context->FinishDeviceComputation();
+    CPUTensorToTensorProto(cpu_tensor, t);
+  } else {
+    CAFFE_THROW(
+        "Initialization blob ",
+        name,
+        " needs to be either TensorCPU or TensorCUDA");
+  }
+}
+
+void BuildInitializationList(
+    Workspace* ws,
+    ::ONNX_NAMESPACE::GraphProto* g,
+    std::unordered_set<std::string>* initialization_list) {
+  const std::vector<string>& ws_blobs = ws->Blobs();
+
+  // Create a CUDA context and reuse it for potential tensor copies across
+  // devices
+  CUDAContext context;
+
+  for (const auto& s : ws_blobs) {
+    auto it = initialization_list->find(s);
+    if (it != initialization_list->end()) {
+      auto* init_tensor = g->add_initializer();
+      BlobToTensorProto(s, ws, &context, init_tensor);
+      initialization_list->erase(it);
+    }
+  }
+  CAFFE_ENFORCE(
+      initialization_list->empty(), "Unfulfilled initialization list");
+  for (const auto& t : g->initializer()) {
+    VLOG(1) << "Initializer: " << t.name();
+  }
+}
+
 std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
     const std::vector<std::string>& names,
     const std::unordered_map<std::string, TensorShape>& shape_hints) {
@@ -148,7 +272,7 @@ std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
   return r;
 }
 
-void PruneUsedWeights(const NetDef& pred_net, NetDef* init_net) {
+void PruneUsedWeights(Workspace* ws, const NetDef& pred_net) {
   std::unordered_set<std::string> used_weights;
   for (const auto& op : pred_net.op()) {
     for (const auto& i : op.input()) {
@@ -156,22 +280,8 @@ void PruneUsedWeights(const NetDef& pred_net, NetDef* init_net) {
     }
   }
 
-  int last = init_net->op_size();
-  for (int i = 0; i < last;) {
-    if (!used_weights.count(init_net->op(i).output(0))) {
-      if (i != last - 1) {
-        init_net->mutable_op()->SwapElements(i, last - 1);
-      } else {
-        ++i;
-      }
-      --last;
-    } else {
-      ++i;
-    }
-  }
-
-  if (last < init_net->op_size()) {
-    init_net->mutable_op()->DeleteSubrange(last, init_net->op_size() - last);
+  for (const auto& w : used_weights) {
+    ws->RemoveBlob(w);
   }
 }
 
@@ -264,7 +374,7 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
 }
 
 void TensorRTTransformer::ClusterToTrtOp(
-    const NetDef& init_net,
+    Workspace* ws,
     const NetDef& pred_net,
     int start,
     int end,
@@ -318,19 +428,22 @@ void TensorRTTransformer::ClusterToTrtOp(
   }
 
   // Convert weights to initializing tensors
-  onnx::OnnxExporter exporter;
-  for (const auto& op : init_net.op()) {
-    CAFFE_ENFORCE_EQ(op.output_size(), 1);
-    auto it = initialization_list.find(op.output(0));
-    if (it != initialization_list.end()) {
-      auto* init_tensor = model->mutable_graph()->add_initializer();
-      exporter.InitOpToTensorProto(op, init_tensor);
-      initialization_list.erase(it);
+  BuildInitializationList(ws, model->mutable_graph(), &initialization_list);
+
+  if (debug_builder_) {
+    std::ofstream ff("trt.onnx");
+    for (const auto& t : model->graph().initializer()) {
+      ff << "tensor: " << t.name() << std::endl;
+      ff << "  dims: ";
+      for (auto i : t.dims()) {
+        ff << i << " ";
+      }
+      ff << std::endl;
+      for (auto i : t.float_data()) {
+        ff << "    " << i << std::endl;
+      }
     }
-  }
-  CAFFE_ENFORCE(initialization_list.empty(), "Unfulfilled initialization list");
-  for (const auto& t : model->graph().initializer()) {
-    VLOG(1) << "Initializer: " << t.name();
+    ff.close();
   }
 
   // Onnx model is ready. Call onnx-trt to convert to one trt c2 op
@@ -345,24 +458,22 @@ void TensorRTTransformer::ClusterToTrtOp(
 // Cutting off the runnable part and replace with tensor ops. Asssume the nets
 // were topologically sorted
 void TensorRTTransformer::Transform(
-    NetDef* init_net,
+    Workspace* ws,
     NetDef* pred_net,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
-  auto shape_hints = InferShapes(init_net, pred_net, input_shape_hints);
+  CAFFE_ENFORCE(ws);
+
+  auto shape_hints_ordered =
+      SsaRewriteAndMapIO(ws, pred_net, input_shape_hints);
+  auto shape_hints = InferShapes(ws, pred_net, &shape_hints_ordered);
 
   std::unordered_set<std::string> weights;
-  if (init_net) {
-    for (const auto& op : init_net->op()) {
-      CAFFE_ENFORCE_EQ(op.type().find("GivenTensor"), 0);
-      CAFFE_ENFORCE_EQ(op.type().rfind("Fill"), op.type().size() - 4);
-      CAFFE_ENFORCE_EQ(op.output_size(), 1);
-      for (const auto& op_output : op.output()) {
-        weights.emplace(op_output);
-      }
-    }
+  const std::vector<string>& ws_blobs = ws->Blobs();
+  for (const auto& s : ws_blobs) {
+    weights.emplace(s);
   }
 
-  CAFFE_ENFORCE(pred_net, "pred_net cannot be nullptr");
+  CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
   ::ONNX_NAMESPACE::ModelProto onnx_model;
   FillModelInfo(&onnx_model);
 
@@ -372,7 +483,7 @@ void TensorRTTransformer::Transform(
   int op_idx = 0;
   int start = 0;
   int end = 0;
-  onnx::OnnxExporter exporter(true);
+  onnx::OnnxExporter exporter(nullptr, true);
   for (const OperatorDef& op : pred_net->op()) {
     bool support_trt = true;
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
@@ -428,7 +539,7 @@ void TensorRTTransformer::Transform(
     } else {
       end = op_idx;
       ClusterToTrtOp(
-          *init_net,
+          ws,
           *pred_net,
           start,
           end,
@@ -444,14 +555,7 @@ void TensorRTTransformer::Transform(
   if (trt_group) {
     end = op_idx;
     ClusterToTrtOp(
-        *init_net,
-        *pred_net,
-        start,
-        end,
-        weights,
-        shape_hints,
-        &onnx_model,
-        &new_ops);
+        ws, *pred_net, start, end, weights, shape_hints, &onnx_model, &new_ops);
     trt_group = false;
   }
 
@@ -459,7 +563,7 @@ void TensorRTTransformer::Transform(
   for (const auto& op : new_ops) {
     pred_net->add_op()->CopyFrom(op);
   }
-  PruneUsedWeights(*pred_net, init_net);
+  PruneUsedWeights(ws, *pred_net);
 }
 
 } // namespace caffe2

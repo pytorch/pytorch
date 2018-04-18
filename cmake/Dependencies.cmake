@@ -246,7 +246,7 @@ endif()
 # ---[ OpenCV
 if(USE_OPENCV)
   # OpenCV 3
-  find_package(OpenCV 3 QUIET COMPONENTS core highgui imgproc imgcodecs)
+  find_package(OpenCV 3 QUIET COMPONENTS core highgui imgproc imgcodecs videoio video)
   if(NOT OpenCV_FOUND)
     # OpenCV 2
     find_package(OpenCV QUIET COMPONENTS core highgui imgproc)

@@ -146,7 +146,14 @@ def test_distributed(python, test_module, test_directory, options):
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))
                 os.mkdir(os.path.join(tmp_dir, 'test_dir'))
                 if backend == 'mpi':
-                    mpiexec = 'mpiexec -n 3 --noprefix {}'.format(python)
+                    # test mpiexec for --noprefix option
+                    devnull = open(os.devnull, 'w')
+                    noprefix_opt = '--noprefix' if subprocess.call(
+                        'mpiexec -n 1 --noprefix bash -c ""', shell=True,
+                        stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
+
+                    mpiexec = 'mpiexec -n 3 {} {}'.format(noprefix_opt, python)
+
                     return_code = run_test(mpiexec, test_module,
                                            test_directory, options)
                 else:

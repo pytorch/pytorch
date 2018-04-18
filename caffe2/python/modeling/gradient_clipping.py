@@ -19,12 +19,14 @@ class GradientClipping(NetModifier):
     L2_NORM = 'l2_norm'
 
     BY_NORM = 'by_norm'
+    BY_VALUE = 'by_value'
 
-    GRAD_CLIP_METHODS = [BY_NORM]
+    GRAD_CLIP_METHODS = [BY_NORM, BY_VALUE]
     CLIP_GRADIENT_NORM_TYPES = [L2_NORM, L1_NORM]
 
-    def __init__(self, grad_clip_method, clip_norm_type, clip_threshold,
-                 use_parameter_norm=False, compute_norm_ratio=False):
+    def __init__(self, grad_clip_method, clip_norm_type='l2_norm',
+                clip_threshold=0.1, use_parameter_norm=False,
+                compute_norm_ratio=False, clip_max=1, clip_min=-1):
         """
         Clips gradient to avoid gradient magnitude explosion or vanishing gradient.
 
@@ -36,21 +38,27 @@ class GradientClipping(NetModifier):
             the norm of the parameter
         compute_norm_ratio: a boolean to compute the ratio between gradient norm
             and parameter norm explicitly for debugging purpose
+        clip_max: when clipping by_value, any value that is greater than
+            clip_max will be clipped to clip_max
+        clip_min: when clipping by_value, any value that is smaller than
+            clip_min will be clipped to clip_min
         """
 
         assert grad_clip_method in self.GRAD_CLIP_METHODS, (
             "This method of clipping, {}, has not been implemented.".format(
                 clip_norm_type))
-
-        assert clip_norm_type in self.CLIP_GRADIENT_NORM_TYPES, (
-            "This method of clipping, {}, has not been implemented.".format(
-                clip_norm_type))
+        if clip_norm_type is not None:
+            assert clip_norm_type in self.CLIP_GRADIENT_NORM_TYPES, (
+                "This method of clipping, {}, has not been implemented.".format(
+                    clip_norm_type))
 
         self.grad_clip_method = grad_clip_method
         self.clip_norm_type = clip_norm_type
         self.clip_threshold = float(clip_threshold)
         self.use_parameter_norm = use_parameter_norm
         self.compute_norm_ratio = compute_norm_ratio
+        self.clip_max = float(clip_max)
+        self.clip_min = float(clip_min)
 
     def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None,
                    modify_output_record=False):
@@ -115,4 +123,11 @@ class GradientClipping(NetModifier):
                         op_inputs,
                         [grad],
                         threshold=self.clip_threshold,
+                    )
+                elif self.grad_clip_method == self.BY_VALUE:
+                    net.Clip(
+                        [grad],
+                        [grad],
+                        max=self.clip_max,
+                        min=self.clip_min,
                     )

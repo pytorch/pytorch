@@ -24,10 +24,8 @@ bool GLSumOp<T>::RunOnDevice() {
   auto *Ablob = OperatorBase::Inputs()[0];
   auto *Bblob = OperatorBase::Inputs()[1];
 
-  if (first_run_) {
-    A_ = GLContext::getGLTensor<T>(Ablob);
-    B_ = GLContext::getGLTensor<T>(Bblob);
-  }
+  A_ = GLContext::getGLTensor<T>(Ablob, A_.release());
+  B_ = GLContext::getGLTensor<T>(Bblob, B_.release());
 
   GLTensor<T> *Y =
       OperatorBase::Outputs()[0]->template GetMutable<GLTensor<T>>();
@@ -39,7 +37,6 @@ bool GLSumOp<T>::RunOnDevice() {
     A_->lazy_allocate(Ablob, second_run_, true);
     B_->lazy_allocate(Bblob, second_run_, true);
     second_run_ = false;
-    Y->ResizeLike(*A_);
     Y->allocate();
     add_layer_.run();
   } else {

@@ -1489,6 +1489,67 @@ Returns:
         - **v** (*Tensor*): the eigenvectors of ``a`` if ``eigenvectors`` is ``True``; otherwise an empty tensor
 """)
 
+add_docstr(torch.einsum,
+           r"""
+einsum(equation, operands) -> Tensor
+
+This function provides a way of computing multilinear expressions (i.e. sums of products) using the
+Einstein summation convention.
+
+Args:
+    equation (string): The equation is given in terms of lower case letters (indices) to be associated
+           with each dimension of the operands and result. The left hand side lists the operands
+           dimensions, separated by commas. There should be one index letter per tensor dimension.
+           The right hand side follows after `->` and gives the indices for the output.
+           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
+           sorted list of all indices appearing exactly once in the left hand side.
+           The indices not apprearing in the output are summed over after multiplying the operands
+           entries.
+           `einsum` does not implement diagonals (multiple occurences of a single index for one tensor,
+           e.g. `ii->i`) and ellipses (`...`).
+    operands (list of Tensors): The operands to compute the Einstein sum of.
+           Note that the operands are passed as a list, not as individual arguments.
+
+Examples::
+
+    >>> x = torch.randn(5)
+    >>> y = torch.randn(4)
+    >>> torch.einsum('i,j->ij', (x,y))  # outer product
+
+    -1.0066 -2.0433 -0.8290  0.8429
+    -0.5106 -1.0365 -0.4205  0.4275
+     0.4174  0.8473  0.3438 -0.3495
+    -0.4578 -0.9292 -0.3770  0.3833
+    -0.8996 -1.8262 -0.7409  0.7533
+    [torch.FloatTensor of size (5,4)]
+
+    >>> A = torch.randn(3,5,4)
+    >>> l = torch.randn(2,5)
+    >>> r = torch.randn(2,4)
+    >>> torch.einsum('bn,anm,bm->ba', (l,A,r)) # compare torch.nn.functional.bilinear
+
+    -1.3778  2.7663 -4.9150
+    -1.7813 -4.9015  2.4149
+    [torch.FloatTensor of size (2,3)]
+
+    >>> As = torch.randn(3,2,5)
+    >>> Bs = torch.randn(3,5,4)
+    >>> torch.einsum('bij,bjk->bik', (As, Bs)) # batch matrix multiplication
+
+    (0 ,.,.) =
+     -2.0810  4.7334  2.9593  0.5268
+      1.8096 -4.6701 -2.4214 -2.2638
+
+    (1 ,.,.) =
+      0.9456 -8.3309 -2.4690 -3.3164
+      1.9580 -1.8447 -1.4268 -2.5414
+
+    (2 ,.,.) =
+     -0.1725  0.7317 -0.2110 -0.0522
+      2.5407 -0.2854  3.8720  0.9073
+    [torch.FloatTensor of size (3,2,4)]
+""")
+
 add_docstr(torch.eq,
            r"""
 eq(input, other, out=None) -> Tensor
@@ -1628,16 +1689,42 @@ Example::
     [torch.FloatTensor of size (2,)]
 """)
 
+factory_common_args = """
+    out (Tensor, optional): the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
+    layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+        Default: ``torch.strided``.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+""".strip()
+
+factory_like_common_args = """
+    input (Tensor): the size of :attr:`input` will determine size of the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
+        Default: if None, defaults to the dtype of :attr:`input`.
+    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
+        Default: if None, defaults to the layout of :attr:`input`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, defaults to the device of :attr:`input`.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: False.
+""".strip()
+
 add_docstr(torch.eye,
            r"""
-eye(n, m=None, out=None)
+eye(n, m=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a 2-D tensor with ones on the diagonal and zeros elsewhere.
 
 Args:
     n (int): the number of rows
     m (int, optional): the number of columns with default being :attr:`n`
-    out (Tensor, optional): the output tensor
+    {factory_common_args}
 
 Returns:
     Tensor: A 2-D tensor with ones on the diagonal and zeros elsewhere
@@ -1650,7 +1737,8 @@ Example::
      0  1  0
      0  0  1
     [torch.FloatTensor of size (3,3)]
-""")
+
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.floor,
            r"""
@@ -2303,7 +2391,7 @@ Example::
 
 add_docstr(torch.linspace,
            r"""
-linspace(start, end, steps=100, out=None) -> Tensor
+linspace(start, end, steps=100, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a one-dimensional tensor of :attr:`steps`
 equally spaced points between :attr:`start` and :attr:`end`.
@@ -2314,8 +2402,9 @@ Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
     steps (int): number of points to sample between :attr:`start`
-        and :attr:`end`
-    out (Tensor, optional): the output tensor
+        and :attr:`end`. Default: ``100``.
+    {factory_common_args}
+
 
 Example::
 
@@ -2346,7 +2435,7 @@ Example::
      10
     [torch.FloatTensor of size (5,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.log,
            r"""
@@ -2498,19 +2587,19 @@ Example::
 
 add_docstr(torch.logspace,
            r"""
-logspace(start, end, steps=100, out=None) -> Tensor
+logspace(start, end, steps=100, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a one-dimensional tensor of :attr:`steps` points
-logarithmically spaced between :math:`10^{\text{start}}` and :math:`10^{\text{end}}`.
+logarithmically spaced between :math:`10^{{\text{{start}}}}` and :math:`10^{{\text{{end}}}}`.
 
-The output is a 1-D tensor of size :attr:`steps`.
+The output tensor is 1-D of size :attr:`steps`.
 
 Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
-    steps (int): number of points to sample between
-        :attr:`start` and :attr:`end`
-    out (Tensor, optional): the output tensor
+    steps (int): number of points to sample between :attr:`start`
+        and :attr:`end`. Default: ``100``.
+    {factory_common_args}
 
 Example::
 
@@ -2532,7 +2621,7 @@ Example::
      10.0000
     [torch.FloatTensor of size (5,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.lt,
            r"""
@@ -3584,14 +3673,15 @@ Example::
 
 add_docstr(torch.ones,
            r"""
-ones(*sizes, out=None) -> Tensor
+ones(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the shape defined
 by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a set of integers defining the shape of the output tensor
-    out (Tensor, optional): the output tensor
+    sizes (int...): a sequence of integers defining the shape of the output tensor.
+        Can be a variable number of arguments or a collection like a list or tuple.
+    {factory_common_args}
 
 Example::
 
@@ -3610,7 +3700,7 @@ Example::
      1
     [torch.FloatTensor of size (5,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.ones_like,
            r"""
@@ -3626,15 +3716,7 @@ Returns a tensor filled with the scalar value `1`, with the same size as
     ``torch.ones(input.size(), out=output)``.
 
 Args:
-    input (Tensor): the size of :attr:`input` will determine size of the output tensor
-    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
-        Default: if None, defaults to the dtype of :attr:`input`.
-    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
-        Default: if None, defaults to the layout of :attr:`input`.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, defaults to the device of :attr:`input`.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: False.
+    {factory_like_common_args}
 
 Example::
 
@@ -3644,7 +3726,7 @@ Example::
      1  1  1
      1  1  1
     [torch.FloatTensor of size (2,3)]
-""")
+""".format(factory_like_common_args=factory_like_common_args))
 
 add_docstr(torch.orgqr,
            r"""
@@ -4200,20 +4282,21 @@ Example::
 
 add_docstr(torch.randn,
            r"""
-randn(*sizes, out=None) -> Tensor
+randn(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random numbers from a normal distribution
-with zero mean and variance of one (also called the standard normal
+with mean `0` and variance `1` (also called the standard normal
 distribution).
 
 .. math::
-    \text{out}_{i} \sim \mathcal{N}(0, 1)
+    \text{{out}}_{{i}} \sim \mathcal{{N}}(0, 1)
 
 The shape of the tensor is defined by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a set of ints defining the shape of the output tensor.
-    out (Tensor, optional): the output tensor
+    sizes (int...): a sequence of integers defining the shape of the output tensor.
+        Can be a variable number of arguments or a collection like a list or tuple.
+    {factory_common_args}
 
 Example::
 
@@ -4231,7 +4314,7 @@ Example::
      1.5458 -0.9643 -0.3558
     [torch.FloatTensor of size (2,3)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.randn_like,
            r"""
@@ -4243,17 +4326,9 @@ random numbers from a normal distribution with mean 0 and variance 1.
 ``torch.randn(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
-    input (Tensor): the size of :attr:`input` will determine size of the output tensor
-    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
-        Default: if None, defaults to the dtype of :attr:`input`.
-    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
-        Default: if None, defaults to the layout of :attr:`input`.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, defaults to the device of :attr:`input`.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: False.
-""")
+    {factory_like_common_args}
 
+""".format(factory_like_common_args=factory_like_common_args))
 
 add_docstr(torch.randperm,
            r"""
@@ -4276,25 +4351,77 @@ Example::
     [torch.LongTensor of size (4,)]
 """)
 
+add_docstr(torch.tensor,
+           r"""
+tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a tensor with :attr:`data`.
+
+Args:
+    data (array_like): Initial data for the tensor. Can be a list, tuple,
+        numpy array, scalar, and other types.
+    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+        Default: if None, infers data type from :attr:`data`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+
+
+Example::
+
+    >>> torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]])
+
+     0.1000  1.2000
+     2.2000  3.1000
+     4.9000  5.2000
+    [torch.FloatTensor of size (3,2)]
+
+    >>> torch.tensor([0, 1])  # Type inference on data
+
+     0
+     1
+    [torch.LongTensor of size (2,)]
+
+    >>> torch.tensor([[0.11111, 0.222222, 0.3333333]],
+                     dtype=torch.float64,
+                     device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
+
+     0.1111  0.2222  0.3333
+    [torch.cuda.DoubleTensor of size (1,3) (GPU 0)]
+
+    >>> torch.tensor(3.14159)  # Create a scalar (zero-dimensional tensor)
+
+     3.1416
+    [torch.FloatTensor of size ()]
+
+    >>> torch.tensor([])  # Create an empty tensor (of size (0,))
+
+    [torch.FloatTensor of size (0,)]
+
+""")
+
 add_docstr(torch.range,
            r"""
-range(start, end, step=1, out=None) -> Tensor
+range(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a 1-D tensor of size :math:`\left\lfloor \frac{end - start}{step} \right\rfloor + 1`
+Returns a 1-D tensor of size :math:`\left\lfloor \frac{{end - start}}{{step}} \right\rfloor + 1`
 with values from :attr:`start` to :attr:`end` with step :attr:`step`. Step is
 the gap between two values in the tensor.
 
 .. math::
-    \text{out}_{i+1} = \text{out}_i + step.
+    \text{{out}}_{{i+1}} = \text{{out}}_i + step.
 
 .. warning::
     This function is deprecated in favor of :func:`torch.arange`.
 
 Args:
-    start (float): the starting value for the set of points
+    start (float): the starting value for the set of points. Default: ``0``.
     end (float): the ending value for the set of points
-    step (float): the gap between each pair of adjacent points
-    out (Tensor, optional): the output tensor
+    step (float): the gap between each pair of adjacent points. Default: ``1``.
+    {factory_common_args}
 
 Example::
 
@@ -4317,28 +4444,28 @@ Example::
      4.0000
     [torch.FloatTensor of size (7,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.arange,
            r"""
-arange(start=0, end, step=1, out=None) -> Tensor
+arange(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a 1-D tensor of size :math:`\left\lfloor \frac{end - start}{step} \right\rfloor`
+Returns a 1-D tensor of size :math:`\left\lfloor \frac{{end - start}}{{step}} \right\rfloor`
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
-Note that non-integer `step` is subject to floating point rounding errors when
-comparing against `end`; to avoid inconsistency, we advise adding a small epsilon to `end`
+Note that non-integer :attr:`step` is subject to floating point rounding errors when
+comparing against :attr:`end`; to avoid inconsistency, we advise adding a small epsilon to :attr:`end`
 in such cases.
 
 .. math::
-    \text{out}_{i+1} = \text{out}_{i} + \text{step}
+    \text{{out}}_{{i+1}} = \text{{out}}_{{i}} + \text{{step}}
 
 Args:
-    start (float): the starting value for the set of points
+    start (float): the starting value for the set of points. Default: ``0``.
     end (float): the ending value for the set of points
-    step (float): the gap between each pair of adjacent points
-    out (Tensor, optional): the output tensor
+    step (float): the gap between each pair of adjacent points. Default: ``1``.
+    {factory_common_args}
 
 Example::
 
@@ -4365,7 +4492,7 @@ Example::
      2.0000
     [torch.FloatTensor of size (3,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 
 add_docstr(torch.remainder,
@@ -5740,18 +5867,7 @@ by the variable argument :attr:`sizes`.
 Args:
     sizes (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
-    out (Tensor, optional): the output tensor
-    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
-        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
-    layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
-        Default: ``torch.strided``.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
-        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
-        for CPU tensor types and the current CUDA device for CUDA tensor types.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: ``False``.
-
+    {factory_common_args}
 
 Example::
 
@@ -5770,7 +5886,8 @@ Example::
      0
     [torch.FloatTensor of size (5,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
+
 
 add_docstr(torch.zeros_like,
            r"""
@@ -5786,15 +5903,7 @@ Returns a tensor filled with the scalar value `0`, with the same size as
     ``torch.zeros(input.size(), out=output)``.
 
 Args:
-    input (Tensor): the size of :attr:`input` will determine size of the output tensor
-    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
-        Default: if None, defaults to the dtype of :attr:`input`.
-    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
-        Default: if None, defaults to the layout of :attr:`input`.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, defaults to the device of :attr:`input`.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: False.
+    {factory_like_common_args}
 
 Example::
 
@@ -5805,7 +5914,7 @@ Example::
      0  0  0
     [torch.FloatTensor of size (2,3)]
 
-""")
+""".format(factory_like_common_args=factory_like_common_args))
 
 add_docstr(torch.btrifact_with_info,
            r"""
@@ -5862,6 +5971,20 @@ Example::
 
 """)
 
+add_docstr(torch.empty,
+           r"""
+empty(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+
+Returns a tensor filled with uninitialized data. The shape of the tensor is
+defined by the variable argument :attr:`sizes`.
+
+Args:
+    sizes (int...): a sequence of integers defining the shape of the output tensor.
+        Can be a variable number of arguments or a collection like a list or tuple.
+    {factory_common_args}
+
+""".format(factory_common_args=factory_common_args))
+
 add_docstr(torch.empty_like,
            r"""
 empty_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
@@ -5871,15 +5994,7 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
 ``torch.empty(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
-    input (Tensor): the size of :attr:`input` will determine size of the output tensor
-    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
-        Default: if None, defaults to the dtype of :attr:`input`.
-    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
-        Default: if None, defaults to the layout of :attr:`input`.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, defaults to the device of :attr:`input`.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: False.
+    {factory_like_common_args}
 
 Example::
 
@@ -5890,7 +6005,36 @@ Example::
     4.0000e+00  0.0000e+00  0.0000e+00
     [torch.LongTensor of size (2,3)]
 
-""")
+""".format(factory_like_common_args=factory_like_common_args))
+
+add_docstr(torch.full,
+           r"""
+full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+
+Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
+
+Args:
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+    fill_value: the number to fill the output tensor with.
+    {factory_common_args}
+
+""".format(factory_common_args=factory_common_args))
+
+add_docstr(torch.full_like,
+           r"""
+full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+
+Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
+``torch.full_like(input, fill_value)`` is equivalent to
+``torch.full_like(input.size(), fill_value, dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+Args:
+    fill_value: the number to fill the output tensor with.
+    {factory_like_common_args}
+
+""".format(factory_like_common_args=factory_like_common_args))
+
 
 add_docstr(torch.stft,
            r"""

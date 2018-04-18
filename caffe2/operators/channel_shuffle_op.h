@@ -1,5 +1,6 @@
 #pragma once
 #include "caffe2/operators/conv_pool_op_base.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -51,7 +52,6 @@ class ChannelShuffleOp final : public ConvPoolOpBase<Context> {
     for (auto i = 0; i < X.size(); i += C) {
       // Transpose each C = GxK matrix
       math::Transpose(
-          C,
           2,
           dims.data(),
           axes.data(),
@@ -111,7 +111,6 @@ class ChannelShuffleGradientOp final : public ConvPoolOpBase<Context> {
     for (auto i = 0; i < dY.size(); i += C) {
       // Transpose each C = KxG matrix
       math::Transpose(
-          C,
           2,
           dims.data(),
           axes.data(),

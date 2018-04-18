@@ -55,6 +55,10 @@ CAFFE_DEFINE_TYPED_REGISTRY(
 REGISTER_BLOB_FETCHER((TypeMeta::Id<TensorCPU>()), TensorFetcher<CPUContext>);
 REGISTER_BLOB_FEEDER(CPU, TensorFeeder<CPUContext>);
 
+Workspace* GetCurrentWorkspace() {
+  return gWorkspace;
+}
+
 class StringFetcher : public BlobFetcherBase {
  public:
   py::object Fetch(const Blob& blob) override {

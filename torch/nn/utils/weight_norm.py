@@ -1,4 +1,4 @@
-"""
+r"""
 Weight Normalization from https://arxiv.org/abs/1602.07868
 """
 from torch.nn.parameter import Parameter

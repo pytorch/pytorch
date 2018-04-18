@@ -126,6 +126,11 @@ struct Tensor : public detail::TensorBase {
   //example
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
+
+  template <typename F, typename... Args> 
+  auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
+    return func(*this, std::forward<Args>(params)...);
+  } 
 };
 
 } //namespace at
