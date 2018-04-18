@@ -4357,6 +4357,11 @@ tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Constructs a tensor with :attr:`data`.
 
+.. warning::
+
+    If :attr:`data` is a :class:`torch.Tensor`, the output tensor
+    will be a copy of :attr:`data`.
+
 Args:
     data (array_like): Initial data for the tensor. Can be a list, tuple,
         numpy array, scalar, and other types.

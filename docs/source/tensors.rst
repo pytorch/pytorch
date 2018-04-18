@@ -42,7 +42,12 @@ A tensor can be constructed from a Python :class:`list` or sequence using the
      1 -1
     [torch.FloatTensor of size (2,2)]
 
-An tensor of specific data type can be constructed by passing a
+.. warning::
+
+    If :attr:`data` is a :class:`torch.Tensor`, the output tensor
+    will be a copy of :attr:`data`.
+
+A tensor of specific data type can be constructed by passing a
 :class:`torch.dtype` and/or a :class:`torch.device` to a
 constructor or tensor creation op:
 
@@ -54,7 +59,8 @@ constructor or tensor creation op:
     0  0  0  0
     [torch.IntTensor of size 2x4]
 
-    >>> torch.ones([2, 4], dtype=torch.float64, device=torch.device('cuda:0'))
+    >>> cuda0 = torch.device('cuda:0')
+    >>> torch.ones([2, 4], dtype=torch.float64, device=cuda0)
 
     1  1  1  1
     1  1  1  1
