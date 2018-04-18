@@ -15,15 +15,22 @@ from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MANAGER_STATUS_CHECK_INTERVAL
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 
-# We only import the actual values when in __main__, to get around
+# We only import the actual values in the main module, to get around
 # duplicated import issue when using multiprocessing on Windows.
-if __name__ == '__main__':
+TEST_CUDA = False
+if __name__ in ['test_dataloader', '__main__']:
     from common_nn import TEST_CUDA
-else:
-    TEST_CUDA = False
+    # We need spawn start method for test_manager_unclean_exit
+    if sys.version_info[0] == 3:
+        # Without the try-catch block, some tests will complain that
+        # context has already been set.
+        try:
+            multiprocessing.set_start_method('spawn')
+        except RuntimeError:
+            pass
 
 
-JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 4.5
+JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 6.5
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -717,7 +724,4 @@ class TestIndividualWorkerQueue(TestCase):
 
 
 if __name__ == '__main__':
-    if sys.version_info[0] == 3:
-        # We need spawn start method for test_manager_unclean_exit
-        multiprocessing.set_start_method('spawn')
     run_tests()
