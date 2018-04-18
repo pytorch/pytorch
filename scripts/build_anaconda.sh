@@ -102,6 +102,10 @@ if [[ $BUILD_ENVIRONMENT == *full* ]]; then
 fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --name)
+      shift
+      PACKAGE_NAME=$1
+      ;;
     --cuda)
       shift
       CUDA_VERSION="$1"
@@ -198,10 +202,12 @@ portable_sed "s#path:.*#path: $PYTORCH_ROOT#" $META_YAML
 ###########################################################
 # Build the package name and build string depending on gcc and CUDA
 ###########################################################
-PACKAGE_NAME='caffe2'
 BUILD_STRING='py{{py}}'
-if [[ -n $BUILD_INTEGRATED ]]; then
-  PACKAGE_NAME="pytorch-${PACKAGE_NAME}"
+if [[ -z $PACKAGE_NAME ]]; then
+  PACKAGE_NAME='caffe2'
+  if [[ -n $BUILD_INTEGRATED ]]; then
+    PACKAGE_NAME="pytorch-${PACKAGE_NAME}"
+  fi
 fi
 if [[ -n $CUDA_VERSION ]]; then
   # CUDA 9.0 and 9.1 are not in conda, and cuDNN is not in conda, so instead of
@@ -209,18 +215,15 @@ if [[ -n $CUDA_VERSION ]]; then
   # the package name in meta.yaml based off of these values, we let Caffe2
   # take the CUDA and cuDNN versions that it finds in the build environment,
   # and manually set the package name ourself.
-  #PACKAGE_NAME="${PACKAGE_NAME}-cuda${CUDA_VERSION:0:3}-cudnn${CUDNN_VERSION:0:1}"
   BUILD_STRING="${BUILD_STRING}_cuda${CUDA_VERSION}_cudnn${CUDNN_VERSION}_nccl2"
 else
   BUILD_STRING="${BUILD_STRING}_cpu"
 fi
 if [[ "$(uname)" != 'Darwin' && -z $BUILD_INTEGRATED && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
-  #PACKAGE_NAME="${PACKAGE_NAME}-gcc${GCC_VERSION:0:3}"
   BUILD_STRING="${BUILD_STRING}_gcc${GCC_VERSION:0:3}"
 fi
 if [[ -n $BUILD_FULL ]]; then
-  #PACKAGE_NAME="${PACKAGE_NAME}-full"
   BUILD_STRING="${BUILD_STRING}_full"
 fi
 portable_sed "s/name: caffe2.*\$/name: ${PACKAGE_NAME}/" $META_YAML
