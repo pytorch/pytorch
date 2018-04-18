@@ -275,13 +275,13 @@ void test(Type &T) {
 }
 
 TEST_CASE( "scalar tensor test CPU", "[cpu]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   test(CPU(kFloat));
 }
 
 TEST_CASE( "scalar tensor test CUDA", "[cuda]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CUDA);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat));

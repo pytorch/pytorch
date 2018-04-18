@@ -72,7 +72,8 @@ void test_overflow() {
 
 TEST_CASE( "scalar test", "[]" ) {
 
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::Backend::CUDA);
 
   Scalar what = 257;
   Scalar bar = 3.0;

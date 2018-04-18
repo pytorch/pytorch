@@ -189,13 +189,13 @@ void test(Type & T, Type & AccT) {
 }
 
 TEST_CASE( "native test CPU", "[cpu]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   test(CPU(kFloat), CPU(kDouble));
 }
 
 TEST_CASE( "native test CUDA", "[cuda]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CUDA);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat), CUDA(kDouble));
