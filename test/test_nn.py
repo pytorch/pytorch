@@ -2592,6 +2592,10 @@ class TestNN(NNTestCase):
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
 
         state_dict = net.state_dict()
+        state_dict.update({'extra.param': torch.ones(5)})
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+
+        state_dict = net.state_dict()
         del state_dict['linear1.weight']
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
 

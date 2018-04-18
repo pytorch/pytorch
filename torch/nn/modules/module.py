@@ -630,7 +630,7 @@ class Module(object):
                 this list
             unexpected_keys (list of str): if ``strict=False``, add unexpected
                 keys to this list
-            unexpected_keys (list of str): error messages should be added to
+            error_msgs (list of str): error messages should be added to this
                 list, and will be reported together in
                 :meth:`~torch.nn.Module.load_state_dict`
         """
@@ -658,7 +658,8 @@ class Module(object):
             for key, input_param in state_dict.items():
                 if key.startswith(prefix):
                     input_name = key[len(prefix):]
-                    if '.' not in input_name and input_name not in local_state:
+                    input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
+                    if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict, strict=True):
