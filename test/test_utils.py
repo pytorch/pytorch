@@ -13,7 +13,6 @@ import torch.nn as nn
 import torch.utils.data
 import torch.cuda
 import warnings
-from torch.autograd import Variable
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
@@ -69,7 +68,7 @@ class ModelMock(object):
 
     def __init__(self):
         self.num_calls = 0
-        self.output = Variable(torch.ones(1, 1), requires_grad=True)
+        self.output = torch.ones(1, 1, requires_grad=True)
 
     def __call__(self, i):
         self.num_calls += 1

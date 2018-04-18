@@ -19,13 +19,9 @@ private:
 template <typename T>
 bool CopyFromGLOp<T>::RunOnDevice() {
 
-  auto *X0blob = OperatorBase::Inputs()[0];
-  auto X0 = GLContext::getGLTensor<T>(X0blob);
-  VLOG(2) << "[C2DEBUG] Copy X0 " << X0->dims();
   std::vector<const Blob*> inputsBlob;
-  inputsBlob.push_back(X0blob);
 
-  for (int i = 1; i < Inputs().size(); ++i) {
+  for (int i = 0; i < Inputs().size(); ++i) {
     auto *Xblob = OperatorBase::Inputs()[i];
     inputsBlob.push_back(Xblob);
   }
@@ -35,6 +31,12 @@ bool CopyFromGLOp<T>::RunOnDevice() {
       auto *Xblob = inputsBlob[i];
       auto X = GLContext::getGLTensor<T>(Xblob);
       inputs_.push_back(std::move(X));
+    }
+  } else {
+    for (int i = 0; i < Inputs().size(); ++i) {
+      auto *Xblob = inputsBlob[i];
+      auto X = GLContext::getGLTensor<T>(Xblob, inputs_[i].release());
+      inputs_[i] = std::move(X);
     }
   }
 

@@ -2187,8 +2187,8 @@ def update_placeholder_op_output(op, blob_to_device):
     '''
     outputs = []
     for output in op.output:
-        blob_dev = blob_to_device[output]
-        if blob_dev.device_type != caffe2_pb2.CPU:
+        if (output in blob_to_device and
+                blob_to_device[output].device_type != caffe2_pb2.CPU):
             output += '_cpu'
         outputs.append(output)
     del op.output[:]

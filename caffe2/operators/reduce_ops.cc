@@ -5,6 +5,9 @@
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(ReduceSum, ReduceSumOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    ReduceSumGradient,
+    ReduceSumGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(ReduceSum)
     .NumInputs(1)
@@ -21,10 +24,11 @@ OPERATOR_SCHEMA(ReduceSum)
     .Input(0, "data", "An input tensor.")
     .Output(0, "reduced", "Reduced output tensor.");
 
-// TODO: Write gradient for this when needed
-GRADIENT_NOT_IMPLEMENTED_YET(ReduceSum);
 
 REGISTER_CPU_OPERATOR(ReduceMean, ReduceMeanOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    ReduceMeanGradient,
+    ReduceMeanGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(ReduceMean)
     .NumInputs(1)
@@ -41,7 +45,19 @@ OPERATOR_SCHEMA(ReduceMean)
     .Input(0, "data", "An input tensor.")
     .Output(0, "reduced", "Reduced output tensor.");
 
-// TODO: Write gradient for this when needed
-GRADIENT_NOT_IMPLEMENTED_YET(ReduceMean);
+class GetReduceGradient final : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+
+  std::vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        def_.type() + "Gradient",
+        "",
+        std::vector<string>{GO(0), I(0)},
+        std::vector<string>{GI(0)});
+  }
+};
+
+REGISTER_GRADIENT(ReduceSum, GetReduceGradient);
+REGISTER_GRADIENT(ReduceMean, GetReduceGradient);
 
 } // namespace caffe2

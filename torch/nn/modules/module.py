@@ -4,7 +4,6 @@ import functools
 import torch
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
-from torch.autograd import Variable
 import torch.utils.hooks as hooks
 
 
@@ -123,9 +122,9 @@ class Module(object):
                             .format(torch.typename(param), name))
         elif param.grad_fn:
             raise ValueError(
-                "Cannot assign non-leaf Variable to parameter '{0}'. Model "
+                "Cannot assign non-leaf Tensor to parameter '{0}'. Model "
                 "parameters must be created explicitly. To express '{0}' "
-                "as a function of another variable, compute the value in "
+                "as a function of another Tensor, compute the value in "
                 "the forward() method.".format(name))
         else:
             self._parameters[name] = param
@@ -153,7 +152,7 @@ class Module(object):
 
         for param in self._parameters.values():
             if param is not None:
-                # Variables stored in modules are graph leaves, and we don't
+                # Tensors stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
                 param.data = fn(param.data)
                 if param._grad is not None:
@@ -433,7 +432,7 @@ class Module(object):
         return None
 
     def _slow_forward(self, *input, **kwargs):
-        input_vars = tuple(torch.autograd.function._iter_variables(input))
+        input_vars = tuple(torch.autograd.function._iter_tensors(input))
         tracing_state = torch.jit.get_tracing_state(input_vars)
         if not tracing_state:
             return self.forward(*input, **kwargs)
@@ -467,9 +466,9 @@ class Module(object):
                     "didn't return None".format(hook))
         if len(self._backward_hooks) > 0:
             var = result
-            while not isinstance(var, Variable):
+            while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
-                    var = next((v for v in var.values() if isinstance(v, Variable)))
+                    var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
                 else:
                     var = var[0]
             grad_fn = var.grad_fn
@@ -537,7 +536,7 @@ class Module(object):
             else:
                 buffers = self.__dict__.get('_buffers')
                 if buffers is not None and name in buffers:
-                    if value is not None and not torch.is_tensor(value):
+                    if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError("cannot assign '{}' as buffer '{}' "
                                         "(torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
@@ -561,7 +560,7 @@ class Module(object):
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
 
-        When keep_vars is ``True``, it returns a Variable for each parameter
+        When keep_vars is ``True``, it returns a Tensor for each parameter
         (rather than a Tensor).
 
         Args:
@@ -570,7 +569,7 @@ class Module(object):
                 Default: None
             prefix (string, optional): Adds a prefix to the key (name) of every
                 parameter and buffer in the result dictionary. Default: ''
-            keep_vars (bool, optional): if ``True``, returns a Variable for each
+            keep_vars (bool, optional): if ``True``, returns a Tensor for each
                 parameter. If ``False``, returns a Tensor for each parameter.
                 Default: ``False``
 

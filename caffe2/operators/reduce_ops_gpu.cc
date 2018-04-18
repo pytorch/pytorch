@@ -5,6 +5,13 @@
 namespace caffe2 {
 
 REGISTER_CUDA_OPERATOR(ReduceSum, ReduceSumOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ReduceSumGradient,
+    ReduceSumGradientOp<float, CUDAContext>);
+
 REGISTER_CUDA_OPERATOR(ReduceMean, ReduceMeanOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ReduceMeanGradient,
+    ReduceMeanGradientOp<float, CUDAContext>);
 
 } // namespace caffe2

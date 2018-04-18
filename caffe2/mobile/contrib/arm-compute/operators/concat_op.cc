@@ -26,9 +26,12 @@ bool GLConcatOp<T>::RunOnDevice() {
   of input must be between 2 and 4.");
 
   auto *X0blob = OperatorBase::Inputs()[0];
-  auto X0 = GLContext::getGLTensor<T>(X0blob);
   if (first_run_) {
+    auto X0 = GLContext::getGLTensor<T>(X0blob);
     inputs_.push_back(std::move(X0));
+  } else {
+    auto X0 = GLContext::getGLTensor<T>(X0blob, inputs_[0].release());
+    inputs_[0] = std::move(X0);
   }
 
   int N = inputs_[0]->dim32(0);
@@ -48,6 +51,17 @@ bool GLConcatOp<T>::RunOnDevice() {
       CAFFE_ENFORCE_EQ(width, X->dim32(3), X->dim32(3));
       channelCount_ += X->dim32(1);
       inputs_.push_back(std::move(X));
+    }
+  } else {
+    channelCount_ = channels;
+    for (int i = 1; i < Inputs().size(); ++i) {
+      auto *Xblob = OperatorBase::Inputs()[i];
+      auto X = GLContext::getGLTensor<T>(Xblob, inputs_[i].release());
+      CAFFE_ENFORCE_EQ(N, X->dim32(0), X->dim32(0));
+      CAFFE_ENFORCE_EQ(height, X->dim32(2), X->dim32(2));
+      CAFFE_ENFORCE_EQ(width, X->dim32(3), X->dim32(3));
+      channelCount_ += X->dim32(1);
+      inputs_[i] = std::move(X);
     }
   }
 

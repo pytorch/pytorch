@@ -10,53 +10,85 @@ a single data type.
 
 Torch defines eight CPU tensor types and eight GPU tensor types:
 
-======================== ===========================   ================================
-Data type                CPU tensor                    GPU tensor
-======================== ===========================   ================================
-32-bit floating point    :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
-64-bit floating point    :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
-16-bit floating point    :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
-8-bit integer (unsigned) :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
-8-bit integer (signed)   :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
-16-bit integer (signed)  :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
-32-bit integer (signed)  :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
-64-bit integer (signed)  :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
-======================== ===========================   ================================
+========================   ===================   ===========================   ================================
+Data type                  dtype                         CPU tensor                    GPU tensor
+========================   ===================   ===========================   ================================
+32-bit floating point      ``torch.float32``     :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
+64-bit floating point      ``torch.float64``     :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
+16-bit floating point      ``torch.float16``     :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
+8-bit integer (unsigned)   ``torch.uint8``       :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
+8-bit integer (signed)     ``torch.int8``        :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
+16-bit integer (signed)    ``torch.int16``       :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
+32-bit integer (signed)    ``torch.int32``       :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
+64-bit integer (signed)    ``torch.int64``       :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
+========================   ===================   ===========================   ================================
 
-The :class:`torch.Tensor` constructor is an alias for the default tensor type
-(:class:`torch.FloatTensor`).
+:class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
 
-A tensor can be constructed from a Python :class:`list` or sequence:
-
-::
-
-    >>> torch.FloatTensor([[1, 2, 3], [4, 5, 6]])
-    1  2  3
-    4  5  6
-    [torch.FloatTensor of size 2x3]
-
-An empty tensor can be constructed by specifying its size:
+A tensor can be constructed from a Python :class:`list` or sequence using the
+:func:`torch.tensor` constructor:
 
 ::
 
-    >>> torch.IntTensor(2, 4).zero_()
+    >>> torch.tensor([[1., -1.], [1., -1.]])
+
+     1 -1
+     1 -1
+    [torch.FloatTensor of size (2,2)]
+
+    >>> torch.tensor(np.array([[1, 2, 3], [4, 5, 6]]))
+
+     1 -1
+     1 -1
+    [torch.FloatTensor of size (2,2)]
+
+An tensor of specific data type can be constructed by passing a
+:class:`torch.dtype` and/or a :class:`torch.device` to a
+constructor or tensor creation op:
+
+::
+
+    >>> torch.zeros([2, 4], dtype=torch.int32)
+
     0  0  0  0
     0  0  0  0
     [torch.IntTensor of size 2x4]
+
+    >>> torch.ones([2, 4], dtype=torch.float64, device=torch.device('cuda:0'))
+
+    1  1  1  1
+    1  1  1  1
+    [torch.cuda.DoubleTensor of size 2x4]
 
 The contents of a tensor can be accessed and modified using Python's indexing
 and slicing notation:
 
 ::
 
-    >>> x = torch.FloatTensor([[1, 2, 3], [4, 5, 6]])
+    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6]])
     >>> print(x[1][2])
+
     6.0
     >>> x[0][1] = 8
     >>> print(x)
+
      1  8  3
      4  5  6
     [torch.FloatTensor of size 2x3]
+
+A tensor can be created with :attr:`requires_grad=True` so that
+:mod:`torch.autograd` records operations on them for automatic differentiation.
+
+::
+
+    >>> x = torch.tensor([[1., -1.], [1., 1.]], requires_grad=True)
+    >>> out = x.pow(2).sum()
+    >>> out.backward()
+    >>> out.grad
+
+     2 -2
+     2  2
+    [torch.FloatTensor of size (2,2)]
 
 Each tensor has an associated :class:`torch.Storage`, which holds its data.
 The tensor class provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
@@ -69,19 +101,9 @@ view of a storage and defines numeric operations on it.
    computes the result in a new tensor.
 
 .. class:: Tensor()
-           Tensor(*sizes)
-           Tensor(size)
-           Tensor(sequence)
-           Tensor(ndarray)
-           Tensor(tensor)
-           Tensor(storage)
 
-   Creates a new tensor from an optional size or data.
-
-   If no arguments are given, an empty zero-dimensional tensor is returned.
-   If a :class:`numpy.ndarray`, :class:`torch.Tensor`, or :class:`torch.Storage`
-   is given, a new tensor that shares the same data is returned. If a Python
-   sequence is given, a new tensor is created from a copy of the sequence.
+  Create a tensor using the :func:`torch.tensor` constructor or with
+  tensor creation ops (see :ref:`tensor-creation-ops`)
 
    .. automethod:: abs
    .. automethod:: abs_

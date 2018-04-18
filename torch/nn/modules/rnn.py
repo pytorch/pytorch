@@ -161,10 +161,9 @@ class RNNBase(Module):
 
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
-            hx = torch.autograd.Variable(input.data.new(self.num_layers *
-                                                        num_directions,
-                                                        max_batch_size,
-                                                        self.hidden_size).zero_(), requires_grad=False)
+            hx = input.new_zeros(self.num_layers * num_directions,
+                                 max_batch_size, self.hidden_size,
+                                 requires_grad=False)
             if self.mode == 'LSTM':
                 hx = (hx, hx)
 
@@ -248,7 +247,7 @@ class RNN(RNNBase):
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is
     the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
-    previous layer at time `t` or the initial hidden state for the first layer.
+    previous layer at time `t-1` or the initial hidden state at time `0`.
     If :attr:`nonlinearity`='relu', then `ReLU` is used instead of `tanh`.
 
     Args:
@@ -341,10 +340,11 @@ class LSTM(RNNBase):
             \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell
-    state at time `t`, :math:`x_t` is the hidden state of the previous layer at
-    time `t` or :math:`input_t` for the first layer, and :math:`i_t`,
-    :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget, cell,
-    and out gates, respectively. :math:`\sigma` is the sigmoid function.
+    state at time `t`, :math:`x_t` is the input at time `t`, :math:`h_{(t-1)}`
+    is the hidden state of the previous layer at time `t-1` or the initial hidden
+    state at time `0`, and :math:`i_t`, :math:`f_t`, :math:`g_t`,
+    :math:`o_t` are the input, forget, cell, and output gates, respectively.
+    :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input `x`
@@ -425,10 +425,11 @@ class GRU(RNNBase):
             h_t = (1 - z_t) n_t + z_t h_{(t-1)} \\
             \end{array}
 
-    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the hidden
-    state of the previous layer at time `t` or :math:`input_t` for the first
-    layer, and :math:`r_t`, :math:`z_t`, :math:`n_t` are the reset, input,
-    and new gates, respectively. :math:`\sigma` is the sigmoid function.
+    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
+    at time `t`, :math:`h_{(t-1)}` is the hidden state of the previous layer
+    at time `t-1` or the initial hidden state at time `0`, and :math:`r_t`,
+    :math:`z_t`, :math:`n_t` are the reset, update, and new gates, respectively.
+    :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input `x`

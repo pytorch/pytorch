@@ -19,10 +19,6 @@ extern "C" {
 #include "Eigen/Core"
 #include "Eigen/Dense"
 
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-#include "unsupported/Eigen/CXX11/Tensor"
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
 namespace caffe2 {
 
 template <class Context>
@@ -55,13 +51,6 @@ using ConstEigenVectorMap =
 template <typename T>
 using ConstEigenVectorArrayMap =
     Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1> >;
-
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
-template <typename T, int D>
-using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D, Eigen::RowMajor>>;
-
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
 namespace math {
 
@@ -154,9 +143,29 @@ void ReduceMax(
     Context* context);
 
 template <typename T, class Context>
+void ReduceMin(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context,
+    Tensor<Context>* scratch_ptr = nullptr);
+
+template <typename T, class Context>
+void ReduceMax(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context,
+    Tensor<Context>* scratch_ptr = nullptr);
+
+template <typename T, class Context>
 void ReduceSum(
-    const int X_size,
-    const int Y_size,
     const int num_dims,
     const int* dims,
     const int num_axes,
@@ -168,8 +177,6 @@ void ReduceSum(
 
 template <typename T, class Context>
 void ReduceMean(
-    const int X_size,
-    const int Y_size,
     const int num_dims,
     const int* dims,
     const int num_axes,
@@ -178,6 +185,17 @@ void ReduceMean(
     T* Y,
     Context* context,
     Tensor<Context>* scratch_ptr = nullptr);
+
+// Broadcasts X with X_dims to Y with Y_dims and multiply the data by scale.
+template <typename T, class Context>
+void Broadcast(
+    const int X_ndim,
+    const int* X_dims,
+    const int Y_ndim,
+    const int* Y_dims,
+    const T* X,
+    T* Y,
+    Context* context);
 
 // Adds batch sub-tensors elementwise to output. Stripe is the stripe length
 // and N is the number of elements to add (size of Y).
@@ -218,22 +236,8 @@ void Maximum(
 // Transpose tensor X with dims by axes and write the result to tensor Y.
 template <typename T, class Context>
 void Transpose(
-    const int size,
     const int ndim,
     const int* dims,
-    const int* axes,
-    const T* X,
-    T* Y,
-    Context* context);
-
-// Transpose tensor X with x_dims by axes and write the result to tensor Y with
-// y_dims.
-template <typename T, class Context>
-void Transpose(
-    const int size,
-    const int ndim,
-    const int* X_dims,
-    const int* Y_dims,
     const int* axes,
     const T* X,
     T* Y,

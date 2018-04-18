@@ -221,22 +221,17 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
       : flatten_indices->template mutable_data<TIndex>();
 
   if (need_transpose) {
-    const std::array<int, 3> X_dims = {static_cast<int>(prev_size),
-                                       static_cast<int>(inner_size),
-                                       static_cast<int>(next_size)};
-    const std::array<int, 3> Y_dims = {static_cast<int>(prev_size),
-                                       static_cast<int>(next_size),
-                                       static_cast<int>(inner_size)};
+    const std::array<int, 3> dims = {static_cast<int>(prev_size),
+                                     static_cast<int>(inner_size),
+                                     static_cast<int>(next_size)};
     const std::array<int, 3> axes = {0, 2, 1};
     input_transposed_buffer_.Resize(
         std::vector<TIndex>{outer_size, inner_size});
     values_transposed_buffer_.Resize(std::vector<TIndex>{outer_size, k_});
     indices_transposed_buffer_.Resize(std::vector<TIndex>{outer_size, k_});
     math::Transpose(
-        input.size(),
         3,
-        X_dims.data(),
-        Y_dims.data(),
+        dims.data(),
         axes.data(),
         input.template data<T>(),
         input_transposed_buffer_.mutable_data<T>(),
@@ -254,25 +249,19 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
       indices_data,
       &context_);
   if (need_transpose) {
-    const std::array<int, 3> X_dims = {
-        static_cast<int>(prev_size), k_, static_cast<int>(next_size)};
-    const std::array<int, 3> Y_dims = {
+    const std::array<int, 3> dims = {
         static_cast<int>(prev_size), static_cast<int>(next_size), k_};
     const std::array<int, 3> axes = {0, 2, 1};
     math::Transpose(
-        values_transposed_buffer_.size(),
         3,
-        Y_dims.data(),
-        X_dims.data(),
+        dims.data(),
         axes.data(),
         values_transposed_buffer_.data<T>(),
         values->template mutable_data<T>(),
         &context_);
     math::Transpose(
-        indices_transposed_buffer_.size(),
         3,
-        Y_dims.data(),
-        X_dims.data(),
+        dims.data(),
         axes.data(),
         indices_transposed_buffer_.data<TIndex>(),
         indices->template mutable_data<TIndex>(),

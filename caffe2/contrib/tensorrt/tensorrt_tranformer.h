@@ -2,6 +2,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "onnx/onnx_pb.h"
 
@@ -29,13 +30,13 @@ class TensorRTTransformer {
           output_size_hints);
 
   void Transform(
-      NetDef* init_net,
+      Workspace* ws,
       NetDef* pred_net,
       const std::unordered_map<std::string, TensorShape>& shape_hints);
 
  private:
   void ClusterToTrtOp(
-      const NetDef& init_net,
+      Workspace* ws,
       const NetDef& pred_net,
       int start,
       int end,
@@ -44,10 +45,11 @@ class TensorRTTransformer {
       ::ONNX_NAMESPACE::ModelProto* model,
       std::vector<OperatorDef>* new_ops);
 
+
   // TensorRT params
   size_t max_batch_size_{50};
   size_t max_workspace_size_{1024 * 1024 * 2};
   int verbosity_{2};
-  bool debug_builder_{true};
+  bool debug_builder_{false};
 };
 } // namespace caffe2

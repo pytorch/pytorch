@@ -21,7 +21,7 @@ class TestReduceOps(hu.HypothesisTestCase):
         d3=st.integers(1, 5),
         keepdims=st.integers(0, 1),
         seed=st.integers(0, 2**32 - 1),
-        **hu.gcs_cpu_only)
+        **hu.gcs)
     def test_reduce_sum_mean(self, d0, d1, d2, d3, keepdims, seed, gc, dc):
         def reduce_mean_ref(data, axis, keepdims):
             return [np.mean(data, axis=axis, keepdims=keepdims)]
@@ -29,7 +29,7 @@ class TestReduceOps(hu.HypothesisTestCase):
         def reduce_sum_ref(data, axis, keepdims):
             return [np.sum(data, axis=axis, keepdims=keepdims)]
 
-        def reduce_op_test(op_name, op_ref, data, axes, keepdims, device):
+        def reduce_op_test(op_name, op_ref, data, axes, keepdims, gc, dc):
             op = core.CreateOperator(
                 op_name,
                 ["data"],
@@ -37,49 +37,50 @@ class TestReduceOps(hu.HypothesisTestCase):
                 axes=axes,
                 keepdims=keepdims,
             )
-
-            self.assertReferenceChecks(device, op, [data],
+            self.assertReferenceChecks(gc, op, [data],
                                        functools.partial(
                                            op_ref,
                                            axis=axes,
                                            keepdims=keepdims))
+            self.assertDeviceChecks(dc, op, [data], [0])
+            self.assertGradientChecks(gc, op, [data], 0, [0])
 
         np.random.seed(seed)
         for axes in it.combinations(range(4), 2):
             data = np.random.randn(d0, d1, d2, d3).astype(np.float32)
 
             reduce_op_test("ReduceMean", reduce_mean_ref, data, axes, keepdims,
-                           gc)
+                           gc, dc)
 
             reduce_op_test("ReduceSum", reduce_sum_ref, data, axes, keepdims,
-                           gc)
+                           gc, dc)
 
         for axes in it.combinations(range(3), 2):
             data = np.random.randn(d0, d1, d2).astype(np.float32)
 
             reduce_op_test("ReduceMean", reduce_mean_ref, data, axes, keepdims,
-                           gc)
+                           gc, dc)
 
             reduce_op_test("ReduceSum", reduce_sum_ref, data, axes, keepdims,
-                           gc)
+                           gc, dc)
 
         for axes in it.combinations(range(2), 2):
             data = np.random.randn(d0, d1).astype(np.float32)
 
             reduce_op_test("ReduceMean", reduce_mean_ref, data, axes, keepdims,
-                           gc)
+                           gc, dc)
 
             reduce_op_test("ReduceSum", reduce_sum_ref, data, axes, keepdims,
-                           gc)
+                           gc, dc)
 
         for axes in it.combinations(range(1), 1):
             data = np.random.randn(d0).astype(np.float32)
 
             reduce_op_test("ReduceMean", reduce_mean_ref, data, axes, keepdims,
-                           gc)
+                           gc, dc)
 
             reduce_op_test("ReduceSum", reduce_sum_ref, data, axes, keepdims,
-                           gc)
+                           gc, dc)
 
 
 class TestReduceFrontReductions(hu.HypothesisTestCase):

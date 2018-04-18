@@ -44,6 +44,8 @@ bool GLAveragePoolOp<DataType>::RunOnDeviceWithOrderNCHW() {
   auto *Xblob = OperatorBase::Inputs()[0];
   if (first_run_) {
     X_ = GLContext::getGLTensor<DataType>(Xblob);
+  } else {
+    X_ = GLContext::getGLTensor<DataType>(Xblob, X_.release());
   }
 
   int N = X_->dim32(0);
@@ -107,9 +109,7 @@ bool GLAveragePoolOp<DataType>::RunOnDeviceWithOrderNCHW() {
 template <> bool GLMaxPoolOp<DataType>::RunOnDeviceWithOrderNCHW() {
 
   auto *Xblob = OperatorBase::Inputs()[0];
-  if (first_run_) {
-    X_ = GLContext::getGLTensor<DataType>(Xblob);
-  }
+  X_ = GLContext::getGLTensor<DataType>(Xblob, X_.release());
 
   int N = X_->dim32(0);
   int channels = X_->dim32(1);
