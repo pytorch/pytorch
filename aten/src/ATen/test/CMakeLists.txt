@@ -45,6 +45,11 @@ if(NOT NO_CUDA)
   target_link_libraries(integer_divider_test ATen)
 endif()
 
+if(NOT NO_CUDA)
+  cuda_add_executable(cuda_rng_test cuda_rng_test.cpp)
+  target_link_libraries(cuda_rng_test ATen)
+endif()
+
 if (CUDNN_FOUND)
   add_executable(cudnn_test cudnn_test.cpp)
   target_link_libraries(cudnn_test ATen)
