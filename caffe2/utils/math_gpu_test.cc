@@ -454,6 +454,9 @@ TEST_F(ReduceTensorGPUTest, ReduceMinGPUTest) {
 }
 
 TEST_F(ReduceTensorGPUTest, ReduceMaxGPUTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
   const auto& reduce_max = [](const int num_dims,
                               const int* dims,
                               const int num_axes,
