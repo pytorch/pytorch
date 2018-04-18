@@ -1,5 +1,6 @@
-from collections import OrderedDict, namedtuple
+from collections import OrderedDict
 import functools
+import itertools
 
 import torch
 from ..backends.thnn import backend as thnn_backend
@@ -48,27 +49,15 @@ class Module(object):
 
     r"""This allows better BC support for :meth:`load_state_dict`. In
     :meth:`state_dict`, the version number will be saved as in the attribute
-    `_versions` of the returned state dict, and thus pickled. `_versions` is a
-    dictionary. Its keys follow the naming convention of state dict, but ends
-    with key ``"version"`` and is associated with the version number of that
-    submodule. For example, if ``module.state_dict()._version`` is
-
-    {
-        "version":         10,
-        "m1.version":       0,
-        "m1.m2.version":    3,
-        "m1.m3.version":    1,
-    }
-
-    Then ``module`` has version number ``10`` and a submodule named ``m1`` with
-    version number 0, which contains two other submodules with names ``m2`` and
-    ``m3`` and version numbers ``3`` and ``1``.
+    `_metadata` of the returned state dict, and thus pickled. `_metadata` is a
+    dictionary with keys follow the naming convention of state dict. See
+    ``_load_from_state_dict`` on how to use this information in loading.
 
     If new parameters/buffers are added/removed from a module, this number shall
-    be bumped, and the module's `load_local_state_dict` method can compare the
+    be bumped, and the module's `_load_from_state_dict` method can compare the
     version number and do appropriate changes if the state dict is from before
     the change."""
-    _version = 0
+    _version = 1
 
     def __init__(self):
         self._backend = thnn_backend
@@ -579,7 +568,7 @@ class Module(object):
         else:
             object.__delattr__(self, name)
 
-    def state_dict(self, destination=None, prefix='', keep_vars=False, no_child=False):
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
@@ -589,16 +578,8 @@ class Module(object):
         (rather than a Tensor).
 
         Args:
-            destination (dict, optional):
-                if not ``None``, the return dictionary is stored into
-                :attr:`destination`. Default: None
-            prefix (string, optional): Adds a prefix to the key (name) of every
-                parameter and buffer in the result dictionary. Default: ''
             keep_vars (bool, optional): if ``True``, returns a Tensor for each
                 parameter. If ``False``, returns a Tensor for each parameter.
-                Default: ``False``
-            no_child (bool, optional): if ``True``, excludes parameters and
-                buffers of submodules in the returned state dict.
                 Default: ``False``
 
         Returns:
@@ -611,75 +592,81 @@ class Module(object):
             ['bias', 'weight']
 
         """
-        if destination is None:
-            destination = OrderedDict()
-            destination._versions = OrderedDict()
-        if hasattr(destination, '_versions'):
-            destination._versions[prefix + 'version'] = self._version
+        if destination is not None:
+            raise ValueError("destination argument is deprecated")
+        if prefix is not '':
+            raise ValueError("prefix argument is deprecated")
+
+        destination = OrderedDict()
+        destination._metadata = OrderedDict()
+        return self._state_dict(destination, '', keep_vars)
+
+    def _state_dict(self, destination, prefix, keep_vars):
+        r"""Recursive helper of :meth:`~torch.nn.Module.state_dict`."""
+        destination._metadata[prefix] = dict(version=self._version)
         for name, param in self._parameters.items():
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.data
         for name, buf in self._buffers.items():
             if buf is not None:
                 destination[prefix + name] = buf
-        if not no_child:
-            for name, module in self._modules.items():
-                if module is not None:
-                    module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
+        for name, module in self._modules.items():
+            if module is not None:
+                module._state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def load_local_state_dict(self, local_state_dict, version, strict):
-        r"""Copies parameters and buffers from :attr:`local_state_dict` into
-        only this module, but not its descendants. This is called on every
-        submodule in :meth:`~torch.nn.Module.load_state_dict`. This method
-        can be overridden by subclasses to achieve class-specific backward
-        compatible loading using the version number :attr:`version`.
+    def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys):
+        r"""Copies parameters and buffers from :attr:`state_dict` into only
+        this module, but not its descendants. This is called on every submodule
+        in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
+        module in input :attr:`state_dict` is at ``state_dict._metadata[prefix]``.
+        Subclasses can achieve class-specific backward compatible loading using
+        the version number at ``state_dict._metadata[prefix]["version"]``.
 
         .. note::
-            :attr:`local_state_dict` is a different object that the input
+            :attr:`state_dict` is not the same object as the input
             :attr:`state_dict` to :meth:`~torch.nn.Module.load_state_dict`. So
-            it can be modified freely if needed.
+            it can be modified.
 
         Arguments:
-            local_state_dict (dict): A dict containing local parameters and
-                persistent buffers of this module, but not of its descendants.
-            version (int): The version number associated with the input
-                :attr:`local_state_dict`. If the input state dict was created
-                without a version number, this will be ``None``
-            strict (bool): Whether to strictly enforce that the keys in
-                :attr:`state_dict` match the keys returned by this module's
-                :meth:`~torch.nn.Module.state_dict` function.
+            state_dict (dict): a dict containing parameters and
+                persistent buffers.
+            prefix (str): the prefix for parameters and buffers used in this
+                module
+            strict (bool): whether to strictly enforce that the keys in
+                :attr:`state_dict` with :attr:`prefix` match the names of
+                parameters and buffers in this module
+            missing_keys (list of str): if ``strict=False``, add missing keys to
+                this list
+            unexpected_keys (list of str): if ``strict=False``, add unexpected
+                keys to this list
         """
-        own_local_state = self.state_dict(no_child=True)
+        local_name_params = itertools.chain(self._parameters.items(), self._buffers.items())
+        local_state = {k: v.data for k, v in local_name_params if v is not None}
 
-        unexpected = []
-        for name, param in local_state_dict.items():
-            if name in own_local_state:
-                if isinstance(param, Parameter):
+        for name, param in local_state.items():
+            key = prefix + name
+            if key in state_dict:
+                input_param = state_dict[key]
+                if isinstance(input_param, Parameter):
                     # backwards compatibility for serialized parameters
-                    param = param.data
+                    input_param = input_param.data
                 try:
-                    own_local_state[name].copy_(param)
+                    param.copy_(input_param)
                 except Exception:
-                    raise RuntimeError('While copying the parameter named {}, '
+                    raise RuntimeError('While copying the parameter named "{}", '
                                        'whose dimensions in the model are {} and '
                                        'whose dimensions in the checkpoint are {}.'
-                                       .format(name, own_local_state[name].size(), param.size()))
+                                       .format(key, param.size(), input_param.size()))
             elif strict:
-                unexpected.append(name)
+                missing_keys.append(key)
 
         if strict:
-            missing = set(own_local_state.keys()) - set(local_state_dict.keys())
-            error_msg = ''
-            if len(unexpected) > 0:
-                error_msg += 'Unexpected key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in unexpected))
-            if len(missing) > 0:
-                error_msg += 'Missing key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in missing))
-            if len(error_msg) > 0:
-                raise KeyError('Error loading state_dict for {}: {}'.format(
-                               self.__class__.__name__, error_msg))
+            for key, input_param in state_dict.items():
+                if key.startswith(prefix):
+                    input_name = key[len(prefix):]
+                    if '.' not in input_name and input_name not in local_state:
+                        unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict, strict=True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
@@ -688,87 +675,40 @@ class Module(object):
         by this module's :meth:`~torch.nn.Module.state_dict` function.
 
         Arguments:
-            state_dict (dict): A dict containing parameters and
+            state_dict (dict): a dict containing parameters and
                 persistent buffers.
-            strict (bool, optional): Whether to strictly enforce that the keys
+            strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
         """
-        versions = getattr(state_dict, '_versions', {})
+        missing_keys = []
+        unexpected_keys = []
 
-        # build a tree
-        # each node represents a (sub)module as a namedtuple
-        #     (
-        #       module            [nn.Module],
-        #       path              [list<string>],
-        #       local_state_dict  [dict<string, Tensor>],
-        #       children          [dict<string, Node>],
-        #     )
-        #
-        #  e.g. for state_dict with keys {"m1.resblock.weight", "m1.resblock.conv.weight"},
-        #       the Node for m1.resblock might be
-        #       (
-        #           module=ResnetBlock,
-        #           path=["m1", "resblock"],
-        #           local_state_dict={"weight": some_tensor},
-        #           children={"conv": some_node},
-        #        )
-        #
+        # copy state_dict so _load_from_state_dict can modify it
+        metadata = state_dict._metadata if hasattr(state_dict, '_metadata') else None
+        state_dict = state_dict.copy()
+        if metadata is not None:
+            state_dict._metadata = metadata
 
-        Node = namedtuple('Node', ['module', 'path', 'local_state_dict', 'children'])
+        def load(module, prefix=''):
+            module._load_from_state_dict(state_dict, prefix, strict, missing_keys, unexpected_keys)
+            for name, child in module._modules.items():
+                if child is not None:
+                    load(child, prefix + name + '.')
 
-        state_tree = Node(self, [], {}, {})
-
-        unexpected_modules = set()
-
-        def add_to_tree(path, value, idx=0, root=state_tree):
-            if len(path) == idx + 1:  # at [..., name_of_param <- here]
-                root.local_state_dict[path[idx]] = value
-            else:
-                key = path[idx]       # at [..., name_of_submodule <- here, ..., name_of_param]
-                if key not in root.children:
-                    if key in root.module._modules:
-                        # make a subtree for this newly seen submodule
-                        subtree = Node(root.module._modules[key], path[:(idx + 1)], {}, {})
-                        root.children[key] = subtree
-                    elif strict:
-                        unexpected_modules.add('.'.join(path[:(idx + 1)]))
-                        return
-                add_to_tree(path, value, idx + 1, root.children[key])
-
-        for key, value in state_dict.items():
-            add_to_tree(key.split('.'), value)
+        load(self)
 
         if strict:
-            missing_modules = []
-
-            def validate_tree(root=state_tree):
-                for name, module in root.module._modules.items():
-                    if module is not None and (len(module._parameters) > 0 or len(module._buffers) > 0):
-                        if name not in root.children:
-                            missing_modules.append(('.'.join(root.path + [name]), module.__class__.__name__))
-                        else:
-                            validate_tree(root.children[name])
-
-            validate_tree()
             error_msg = ''
-            if len(unexpected_modules) > 0:
-                error_msg += 'Unexpected module key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in unexpected_modules))
-            if len(missing_modules) > 0:
-                error_msg += 'Missing module key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}" of type {}'.format(name, cls) for name, cls in missing_modules))
+            if len(unexpected_keys) > 0:
+                error_msg += 'Unexpected key(s) in state_dict: {}. '.format(
+                    ', '.join('"{}"'.format(k) for k in unexpected_keys))
+            if len(missing_keys) > 0:
+                error_msg += 'Missing key(s) in state_dict: {}. '.format(
+                    ', '.join('"{}"'.format(k) for k in missing_keys))
             if len(error_msg) > 0:
                 raise KeyError('Error loading state_dict for {}: {}'.format(
                                self.__class__.__name__, error_msg))
-
-        def load_tree(root=state_tree):
-            for subtree in root.children.values():
-                load_tree(subtree)
-            version = versions.get('.'.join(root.path + ['version']), None)
-            root.module.load_local_state_dict(root.local_state_dict, version, strict)
-
-        load_tree()
 
     def parameters(self):
         r"""Returns an iterator over module parameters.

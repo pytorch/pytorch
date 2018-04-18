@@ -13,11 +13,15 @@ class _InstanceNorm(_BatchNorm):
     def _check_input_dim(self, input):
         return NotImplemented
 
-    def load_local_state_dict(self, local_state_dict, version, strict):
-        # at version 0: removed running_mean and running_var when
+    def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys):
+        try:
+            version = state_dict._metadata[prefix]["version"]
+        except (AttributeError, KeyError):
+            version = None
+        # at version 1: removed running_mean and running_var when
         # track_running_stats=False (default)
         if version is None and not self.track_running_stats:
-            running_stats_keys = tuple(k for k in ('running_mean', 'running_var') if k in local_state_dict)
+            running_stats_keys = tuple(k for k in ('running_mean', 'running_var') if (prefix + k) in state_dict)
             if len(running_stats_keys) > 0:
                 warnings.warn(
                     'Unexpected running stats buffer(s) {names} in state_dict '
@@ -33,7 +37,7 @@ class _InstanceNorm(_BatchNorm):
                 for key in running_stats_keys:
                     local_state_dict.pop(key)
 
-        super(_InstanceNorm, self).load_local_state_dict(local_state_dict, version, strict)
+        super(_InstanceNorm, self)._load_from_state_dict(state_dict, prefix, strict, missing_keys, unexpected_keys)
 
     def forward(self, input):
         self._check_input_dim(input)
