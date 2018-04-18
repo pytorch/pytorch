@@ -80,9 +80,9 @@ class Binomial(Distribution):
         return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):
-        max_count = int(self.total_count.max().item())
-        shape = self._extended_shape(sample_shape) + (max_count,)
         with torch.no_grad():
+            max_count = int(self.total_count.max().item())
+            shape = self._extended_shape(sample_shape) + (max_count,)
             bernoullis = torch.bernoulli(self.probs.unsqueeze(-1).expand(shape))
             if self.total_count.min() != max_count:
                 arange = torch.arange(max_count, out=self.total_count.new_empty(max_count))

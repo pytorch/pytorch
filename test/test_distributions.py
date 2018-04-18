@@ -799,7 +799,7 @@ class TestDistributions(TestCase):
             logits = probs_to_logits(probs, is_binary=True)
             self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
 
-    def test_binomial_log_prob_inhomogeneous_count(self):
+    def test_binomial_log_prob_vectorized_count(self):
         probs = torch.tensor([0.2, 0.7, 0.9])
         for total_count, sample in [(torch.tensor([10.]), torch.tensor([7., 3., 9.])),
                                     (torch.tensor([1., 2., 10.]), torch.tensor([0., 1., 9.]))]:
@@ -817,6 +817,17 @@ class TestDistributions(TestCase):
         self.assertEqual(bin1.sample(), total_count)
         self.assertAlmostEqual(bin1.log_prob(torch.tensor([float(total_count)]))[0], 0, places=3)
         self.assertEqual(float(bin1.log_prob(torch.tensor([float(total_count - 1)])).exp()), 0, allow_inf=True)
+
+    def test_binomial_vectorized_count(self):
+        set_rng_seed(0)
+        total_count = torch.tensor([[4., 7.], [3., 8.]])
+        bin0 = Binomial(total_count, torch.tensor(1.))
+        self.assertEqual(bin0.sample(), total_count)
+        bin1 = Binomial(total_count, torch.tensor(0.5))
+        samples = bin1.sample(torch.Size((100000,)))
+        self.assertTrue((samples <= total_count).all())
+        self.assertEqual(samples.mean(dim=0), bin1.mean, prec=0.02)
+        self.assertEqual(samples.var(dim=0), bin1.variance, prec=0.02)
 
     def test_multinomial_1d(self):
         total_count = 10
