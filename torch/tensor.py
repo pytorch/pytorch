@@ -228,13 +228,6 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.argmin`"""
         return torch.argmin(self, dim, keepdim)
 
-    def bincount(self, weights=None, minlength=0):
-        r"""Count the frequency of each value in an array of non-negative ints.
-
-        See :func:`torch.bincount`
-        """
-        return self._bincount(weights, minlength)
-
     def btrifact(self, info=None, pivot=True):
         r"""See :func:`torch.btrifact`
         """

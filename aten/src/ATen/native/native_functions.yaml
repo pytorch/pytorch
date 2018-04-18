@@ -109,7 +109,7 @@
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
   variants: function
 
-- func: _bincount(Tensor self, Tensor? weights={}, int64_t minlength=0) -> Tensor
+- func: bincount(Tensor self, Tensor? weights={}, int64_t minlength=0) -> Tensor
   dispatch:
     CPU: _bincount_cpu
     CUDA: _bincount_cuda

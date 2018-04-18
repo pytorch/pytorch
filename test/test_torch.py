@@ -6547,32 +6547,33 @@ class TestTorch(TestCase):
         )
 
     def test_bincount_cpu(self):
+        long_t = torch.int64
         # test weights
-        byte_counts = torch.bincount(torch.ByteTensor([0, 1, 1, 1, 4]),
-                                     torch.FloatTensor([.1, .2, .3, .4, .5]))
-        self.assertEqual(torch.DoubleTensor([0.1, 0.9, 0, 0, 0.5]), byte_counts)
+        byte_counts = torch.bincount(
+            torch.tensor([0, 1, 1, 1, 4], dtype=torch.uint8),
+            torch.tensor([.1, .2, .3, .4, .5]))
+        self.assertEqual(torch.tensor([0.1, 0.9, 0, 0, 0.5]), byte_counts)
         # test tensor method without weights
-        long_counts = torch.LongTensor([0, 3, 2, 1, 3]).bincount()
-        self.assertEqual(torch.LongTensor([1, 1, 1, 2]), long_counts)
+        long_counts = torch.tensor([0, 3, 2, 1, 3]).bincount()
+        self.assertEqual(torch.tensor([1, 1, 1, 2], dtype=long_t), long_counts)
         # test minlength functionality
-        int_counts = torch.bincount(torch.IntTensor([1, 1, 1, 1]), minlength=5)
-        self.assertEqual(torch.DoubleTensor([0, 4, 0, 0, 0]), int_counts)
+        int_counts = torch.bincount(torch.tensor([1, 1, 1, 1]), minlength=5)
+        self.assertEqual(torch.tensor([0, 4, 0, 0, 0], dtype=long_t), int_counts)
 
         # negative input throws
         with self.assertRaises(RuntimeError):
-            torch.bincount(torch.LongTensor([1, -1]))
+            torch.bincount(torch.tensor([1, -1]))
         # n-d input, with n > 1 throws
         with self.assertRaises(RuntimeError):
-            torch.bincount(torch.LongTensor([[1, 2], [3, 4]]))
+            torch.bincount(torch.tensor([[1, 2], [3, 4]]))
         # minlength < 0 throws
         with self.assertRaises(RuntimeError):
-            torch.bincount(torch.LongTensor([1, 3]),
-                           torch.DoubleTensor([.2, .2]),
+            torch.bincount(torch.tensor([1, 3]),
+                           torch.tensor([.2, .2]),
                            minlength=-1)
         # floating input type throws
         with self.assertRaises(RuntimeError):
-            torch.bincount(torch.DoubleTensor([1., 3.]),
-                           torch.DoubleTensor([.2, .2]))
+            torch.bincount(torch.tensor([1., 0.3]))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_bincount_cuda(self):
