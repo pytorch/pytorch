@@ -31,8 +31,8 @@ class _LRScheduler(object):
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
 
-        It contains two entries. One representing all variables passed through
-        kwargs and second representing the last_epoch:
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer:
 
         * state - a dict holding current scheduler variables. Its content
             differs between LR Scheduler classes.
