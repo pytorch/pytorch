@@ -7,10 +7,12 @@ from torch._C import _add_docstr as add_docstr
 def parse_kwargs(desc):
     """Maps a description of args to a dictionary of {argname: description}.
     Input:
-        out (Tensor): the output tensor
-            Some optional description
-    Output: {'out':
-        'out (Tensor): the output tensor\n        Some optional description'}
+        ('    weight (Tensor): a weight tensor\n' +
+         '        Some optional description')
+    Output: {
+        'weight': \
+        'weight (Tensor): a weight tensor\n        Some optional description'
+    }
     """
     # Split by indents. Assumes each arg starts on a new line with 4 spaces.
     kwargs = [section.strip() for section in desc.split('\n   ')]
