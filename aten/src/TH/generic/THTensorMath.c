@@ -1675,7 +1675,7 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #else
     // There is no NAN for integers
     TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data % *src_data;
-                                                     if (modulo_wrap(*r__data, *src_data) < 0) *r__data += *src_data;);
+                                                     if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;);
 #endif
 
   }
