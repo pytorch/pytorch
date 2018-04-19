@@ -1490,6 +1490,23 @@ Args:
     requires_grad (bool): If autograd should record operations on this tensor.
         Default: ``True``.
 
+Example::
+
+    >>> # Let's say we want to preprocess some saved weights and use
+    >>> # the result as new weights.
+    >>> saved_weights = [0.1, 0.2, 0.3, 0.25]
+    >>> loaded_weights = torch.tensor(saved_weights)
+    >>> weights = preprocess(loaded_weights)  # some function
+    >>> weights
+    tensor([-0.5503,  0.4926, -2.1158, -0.8303])
+
+    >>> # Now, start to record operations done to weights
+    >>> weights.requires_grad_()
+    >>> out = weights.pow(2).sum()
+    >>> out.backward()
+    >>> weights.grad
+    tensor([-1.1007,  0.9853, -4.2316, -1.6606])
+
 """)
 
 add_docstr_all('reshape',
