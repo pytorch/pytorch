@@ -21,11 +21,11 @@ yaml_file = os.path.join(amd_build_dir, "disabled_features.yaml")
 shutil.copytree(proj_dir, out_dir)
 
 # Extract (.hip) files.
-for root, directories, files in os.walk(os.path.join(amd_build_dir, "hip_files")):
+for root, _directories, files in os.walk(os.path.join(amd_build_dir, "hip_files")):
     for filename in files:
         if filename.endswith(".hip"):
             source = os.path.join(root, filename)
-            destination = os.path.join(out_dir, source[source.find("hip_files/")+10:])
+            destination = os.path.join(out_dir, source[source.find("hip_files/") + 10:])
 
             # Extract the .hip file.
             shutil.copy(source, destination)
@@ -38,8 +38,7 @@ for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
 # Execute the Hipify Script.
 subprocess.Popen(
     ["/opt/rocm/bin/hipify-python.py",
-    "--project-directory", proj_dir,
-    "--output-directory", out_dir,
-    "--exclude-dirs"] + exclude_dirs + \
-    ["--yaml-settings",  yaml_file,
-    "--add-static-casts", "True"])
+        "--project-directory", proj_dir,
+        "--output-directory", out_dir,
+        "--exclude-dirs"] + exclude_dirs +
+    ["--yaml-settings", yaml_file, "--add-static-casts", "True"])
