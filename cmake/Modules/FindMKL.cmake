@@ -42,8 +42,10 @@ if(MKL_USE_IDEEP)
     else()
 
       # to avoid adding conflicting submodels
+      set(ORIG_WITH_TEST ${WITH_TEST})
       set(WITH_TEST OFF)
       add_subdirectory(${IDEEP_ROOT})
+      set(WITH_TEST ${ORIG_WITH_TEST})
 
       file(GLOB_RECURSE MKL_DIR ${MKLDNN_ROOT}/external/*/mkl_vsl.h)
       if(MKL_DIR)
@@ -63,6 +65,8 @@ if(MKL_USE_IDEEP)
 
         set(IDEEP_LIBRARIES "${PROJECT_BINARY_DIR}/lib/libmkldnn.so")
         set(CAFFE2_USE_IDEEP 1)
+        # Do NOT use MPI if IDEEP is enabled
+        set(USE_MPI OFF)
 
         message(STATUS "Found IDEEP (include: ${IDEEP_INCLUDE_DIR})")
 
