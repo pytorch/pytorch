@@ -74,7 +74,9 @@ int64_t DimProd(const caffe2::TensorShape& shape, int start, int end) {
   return acc;
 }
 
-TensorProto CreateOnnxShapeTensor(std::shared_ptr<DummyName> dummy, const std::vector<int64_t>& shape) {
+TensorProto CreateOnnxShapeTensor(
+    std::shared_ptr<DummyName> dummy,
+    const std::vector<int64_t>& shape) {
   TensorProto tensor;
   tensor.set_name(dummy->NewDummyName());
   tensor.set_data_type(TensorProto::INT64);

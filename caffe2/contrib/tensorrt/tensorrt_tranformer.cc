@@ -471,9 +471,9 @@ void TensorRTTransformer::Transform(
   // same exporter throughout the process to avoid duplicated dummy name
   // generation
   onnx::OnnxExporter exporter2(nullptr, true);
-  auto trt_converter = [this, mapped_ws, &shape_hints, &exporter2](
+  auto trt_converter = [this, &mapped_ws, &shape_hints, &exporter2](
                            const caffe2::NetDef& net) mutable {
-    return SubnetToTrtOp(net, mapped_ws, &exporter2, &shape_hints);
+    return SubnetToTrtOp(net, &mapped_ws, &exporter2, &shape_hints);
   };
 
   NetDef net_opt = opt::OptimizeForBackend(*pred_net, supports, trt_converter);
