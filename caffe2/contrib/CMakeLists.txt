@@ -1,6 +1,7 @@
 add_subdirectory(aten)
 add_subdirectory(gloo)
 add_subdirectory(nccl)
+add_subdirectory(opencl)
 add_subdirectory(prof)
 add_subdirectory(shm_mutex)
 add_subdirectory(script)

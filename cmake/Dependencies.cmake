@@ -185,6 +185,14 @@ if(USE_LMDB)
   endif()
 endif()
 
+if (USE_OPENCL)
+  message(INFO "USING OPENCL")
+  find_package(OpenCL REQUIRED)
+  include_directories(${OpenCV_INCLUDE_DIRS})
+  include_directories(${PROJECT_SOURCE_DIR}/caffe2/contrib/opencl)
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCL_LIBRARIES})
+endif()
+
 # ---[ LevelDB
 # ---[ Snappy
 if(USE_LEVELDB)
