@@ -611,7 +611,7 @@ In-place version of :func:`~threshold`.
 
 
 def relu(input, inplace=False):
-    r"""relu(input, threshold, value, inplace=False) -> Tensor
+    r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
