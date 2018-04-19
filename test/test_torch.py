@@ -924,40 +924,42 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
     def test_remainder(self):
-        # Check the Floating point case
-        m1 = torch.Tensor(10, 10).uniform_(-10., 10.)
-        res1 = m1.clone()
-        res2 = m1.clone()
-        qs = torch.arange(-5.1, 4.1)
-        # Check the case where the divisor is a simple float
-        for col_idx, q in enumerate(qs):
-            # Reference
-            for i in range(m1.size(0)):
-                res2[i, col_idx] = res2[i, col_idx] % q
-            # To test
-            res1[:, col_idx].remainder_(q)
-        self.assertEqual(res1, res2)
-        # Check the case where the divisor is a tensor
-        res1 = m1.clone()
-        res1.remainder_(qs.unsqueeze(0).expand_as(res1))
-        self.assertEqual(res1, res2)
+        # Check the Floating point case, both tensor and scalar overloads
+        for use_item in [True, False]:
+            m1 = torch.Tensor(10, 10).uniform_(-10., 10.)
+            res1 = m1.clone()
+            res2 = m1.clone()
+            qs = torch.arange(-5.1, 4.1)
+            # Check the case where the divisor is a simple float
+            for col_idx, q in enumerate(qs):
+                # Reference
+                for i in range(m1.size(0)):
+                    res2[i, col_idx] = res2[i, col_idx] % q
+                # To test
+                res1[:, col_idx].remainder_(q if not use_item else q.item())
+            self.assertEqual(res1, res2)
+            # Check the case where the divisor is a tensor
+            res1 = m1.clone()
+            res1.remainder_(qs.unsqueeze(0).expand_as(res1))
+            self.assertEqual(res1, res2)
 
-        # Check the LongTensor case
-        long_m1 = torch.LongTensor(10, 10).random_(-10, 10)
-        long_res1 = long_m1.clone()
-        long_res2 = long_m1.clone()
-        long_qs = torch.arange(-5, 5).long()
-        long_qs[5] = 5  # Can't handle the divisor=0 case
-        for col_idx, long_q in enumerate(long_qs):
-            # Reference
-            for i in range(long_m1.size(0)):
-                long_res2[i, col_idx] = long_res2[i, col_idx] % long_q
-            # To test
-            long_res1[:, col_idx].remainder_(long_q)
-        self.assertEqual(long_res1, long_res2)
-        # Divisor is a tensor case
-        long_res1 = long_m1.clone()
-        long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
+        # Check the LongTensor case, both tensor and scalar overloads
+        for use_item in [True, False]:
+            long_m1 = torch.LongTensor(10, 10).random_(-10, 10)
+            long_res1 = long_m1.clone()
+            long_res2 = long_m1.clone()
+            long_qs = torch.arange(-5, 5).long()
+            long_qs[5] = 5  # Can't handle the divisor=0 case
+            for col_idx, long_q in enumerate(long_qs):
+                # Reference
+                for i in range(long_m1.size(0)):
+                    long_res2[i, col_idx] = long_res2[i, col_idx] % long_q
+                # To test
+                long_res1[:, col_idx].remainder_(long_q if not use_item else long_q.item())
+            self.assertEqual(long_res1, long_res2)
+            # Divisor is a tensor case
+            long_res1 = long_m1.clone()
+            long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
     @staticmethod
     def _test_remainder_overflow(self, dtype, device):
@@ -4556,8 +4558,8 @@ class TestTorch(TestCase):
                 return npt
 
             def assert_get_eq(tensor, indexer):
-                self.assertEqual(reference[indexer],
-                                 conv_fn(get_numpy(reference, indexer)))
+                self.assertEqual(tensor[indexer],
+                                 conv_fn(get_numpy(tensor, indexer)))
 
             def assert_set_eq(tensor, indexer, val):
                 pyt = tensor.clone()
@@ -4611,11 +4613,9 @@ class TestTorch(TestCase):
                 [slice(None), [0, 2, 3], [1, 3, 4]],
                 [slice(None), [0], [1, 2, 4]],
                 [slice(None), [0, 1, 3], [4]],
-                [slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
                 [slice(None), [[0, 1], [1, 0]], [[2, 3]]],
                 [slice(None), [[0, 1], [2, 3]], [[0]]],
                 [slice(None), [[5, 6]], [[0, 3], [4, 4]]],
-                [slice(None), [[2]], [[0, 3], [4, 4]]],
                 [[0, 2, 3], [1, 3, 4], slice(None)],
                 [[0], [1, 2, 4], slice(None)],
                 [[0, 1, 3], [4], slice(None)],

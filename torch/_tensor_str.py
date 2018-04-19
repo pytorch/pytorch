@@ -73,6 +73,7 @@ def _get_min_log_scale():
 
 
 def _number_format(tensor, min_sz=-1):
+    int_mode = not tensor.dtype.is_floating_point
     _min_log_scale = _get_min_log_scale()
     min_sz = max(min_sz, 2)
     tensor = torch.DoubleTensor(tensor.size()).copy_(tensor).abs_().view(tensor.nelement())
@@ -88,13 +89,6 @@ def _number_format(tensor, min_sz=-1):
     tensor[invalid_value_mask] = example_value
     if invalid_value_mask.any():
         min_sz = max(min_sz, 3)
-
-    int_mode = True
-    # TODO: use fmod?
-    for value in tensor:
-        if value != math.ceil(value.item()):
-            int_mode = False
-            break
 
     exp_min = tensor.min()
     if exp_min != 0:
@@ -138,178 +132,77 @@ def _number_format(tensor, min_sz=-1):
     return format, scale, sz
 
 
-def _tensor_str(self):
-    n = PRINT_OPTS.edgeitems
-    has_hdots = self.size()[-1] > 2 * n
-    has_vdots = self.size()[-2] > 2 * n
-    print_full_mat = not has_hdots and not has_vdots
-    formatter = _number_format(self, min_sz=3 if not print_full_mat else 0)
-    print_dots = self.numel() >= PRINT_OPTS.threshold
-
-    dim_sz = max(2, max(len(str(x)) for x in self.size()))
-    dim_fmt = "{:^" + str(dim_sz) + "}"
-    dot_fmt = u"{:^" + str(dim_sz + 1) + "}"
-
-    counter_dim = self.ndimension() - 2
-    counter = torch.LongStorage(counter_dim).fill_(0)
-    counter[counter.size() - 1] = -1
-    finished = False
-    strt = ''
-    while True:
-        nrestarted = [False for i in counter]
-        nskipped = [False for i in counter]
-        for i in range(counter_dim - 1, -1, -1):
-            counter[i] += 1
-            if print_dots and counter[i] == n and self.size(i) > 2 * n:
-                counter[i] = self.size(i) - n
-                nskipped[i] = True
-            if counter[i] == self.size(i):
-                if i == 0:
-                    finished = True
-                counter[i] = 0
-                nrestarted[i] = True
-            else:
-                break
-        if finished:
-            break
-        elif print_dots:
-            if any(nskipped):
-                for hdot in nskipped:
-                    strt += dot_fmt.format('...') if hdot \
-                        else dot_fmt.format('')
-                strt += '\n'
-            if any(nrestarted):
-                strt += ' '
-                for vdot in nrestarted:
-                    strt += dot_fmt.format(u'\u22EE' if vdot else '')
-                strt += '\n'
-        if strt != '':
-            strt += '\n'
-        strt += '({},.,.) = \n'.format(
-            ','.join(dim_fmt.format(i) for i in counter))
-        submatrix = reduce(lambda t, i: t.select(0, i), counter, self)
-        strt += _matrix_str(submatrix, ' ', formatter, print_dots)
-    return strt
+def _scalar_str(self, fmt, scale):
+    scalar_str = fmt.format(self.item() / scale)
+    # The leading space for positives is ugly on scalars, so we strip it
+    return scalar_str.lstrip()
 
 
-def __repr_row(row, indent, fmt, scale, sz, truncate=None):
-    if truncate is not None:
-        dotfmt = " {:^5} "
-        return (indent +
-                ' '.join(fmt.format(val.item() / scale) for val in row[:truncate]) +
-                dotfmt.format('...') +
-                ' '.join(fmt.format(val.item() / scale) for val in row[-truncate:]) +
-                '\n')
+def _vector_str(self, indent, fmt, scale, sz, summarize):
+    element_length = sz + 3
+    elements_per_line = int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
+    char_per_line = element_length * elements_per_line
+
+    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
+        data = ([fmt.format(val.item() / scale) for val in self[:PRINT_OPTS.edgeitems]] +
+                [' ...'] +
+                [fmt.format(val.item() / scale) for val in self[-PRINT_OPTS.edgeitems:]])
     else:
-        return indent + ' '.join(fmt.format(val.item() / scale) for val in row) + '\n'
+        data = [fmt.format(val.item() / scale) for val in self]
+
+    data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
+    lines = [', '.join(line) for line in data_lines]
+    return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
 
 
-def _matrix_str(self, indent='', formatter=None, force_truncate=False):
-    n = PRINT_OPTS.edgeitems
-    has_hdots = self.size(1) > 2 * n
-    has_vdots = self.size(0) > 2 * n
-    print_full_mat = not has_hdots and not has_vdots
+def _tensor_str(self, indent, fmt, scale, sz, summarize):
+    dim = self.dim()
 
-    if formatter is None:
-        fmt, scale, sz = _number_format(self,
-                                        min_sz=5 if not print_full_mat else 0)
+    if dim == 0:
+        return _scalar_str(self, fmt, scale)
+    if dim == 1:
+        return _vector_str(self, indent, fmt, scale, sz, summarize)
+
+    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
+        slices = ([_tensor_str(self[i], indent + 1, fmt, scale, sz, summarize)
+                   for i in range(0, PRINT_OPTS.edgeitems)] +
+                  ['...'] +
+                  [_tensor_str(self[i], indent + 1, fmt, scale, sz, summarize)
+                   for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
     else:
-        fmt, scale, sz = formatter
-    nColumnPerLine = int(math.floor((PRINT_OPTS.linewidth - len(indent)) / (sz + 1)))
-    strt = ''
-    firstColumn = 0
+        slices = [_tensor_str(self[i], indent + 1, fmt, scale, sz, summarize) for i in range(0, self.size(0))]
 
-    if not force_truncate and \
-       (self.numel() < PRINT_OPTS.threshold or print_full_mat):
-        while firstColumn < self.size(1):
-            lastColumn = min(firstColumn + nColumnPerLine - 1, self.size(1) - 1)
-            if nColumnPerLine < self.size(1):
-                strt += '\n' if firstColumn != 1 else ''
-                strt += 'Columns {} to {} \n{}'.format(
-                    firstColumn, lastColumn, indent)
-            if scale != 1:
-                strt += SCALE_FORMAT.format(scale)
-            for l in range(self.size(0)):
-                strt += indent + (' ' if scale != 1 else '')
-                row_slice = self[l, firstColumn:lastColumn + 1]
-                strt += ' '.join(fmt.format(val.item() / scale) for val in row_slice)
-                strt += '\n'
-            firstColumn = lastColumn + 1
-    else:
-        if scale != 1:
-            strt += SCALE_FORMAT.format(scale)
-        if has_vdots and has_hdots:
-            vdotfmt = "{:^" + str((sz + 1) * n - 1) + "}"
-            ddotfmt = u"{:^5}"
-            for row in self[:n]:
-                strt += __repr_row(row, indent, fmt, scale, sz, n)
-            strt += indent + ' '.join([vdotfmt.format('...'),
-                                       ddotfmt.format(u'\u22F1'),
-                                       vdotfmt.format('...')]) + "\n"
-            for row in self[-n:]:
-                strt += __repr_row(row, indent, fmt, scale, sz, n)
-        elif not has_vdots and has_hdots:
-            for row in self:
-                strt += __repr_row(row, indent, fmt, scale, sz, n)
-        elif has_vdots and not has_hdots:
-            vdotfmt = u"{:^" + \
-                str(len(__repr_row(self[0], '', fmt, scale, sz))) + \
-                "}\n"
-            for row in self[:n]:
-                strt += __repr_row(row, indent, fmt, scale, sz)
-            strt += vdotfmt.format(u'\u22EE')
-            for row in self[-n:]:
-                strt += __repr_row(row, indent, fmt, scale, sz)
-        else:
-            for row in self:
-                strt += __repr_row(row, indent, fmt, scale, sz)
-    return strt
+    tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
+    return '[' + tensor_str + ']'
 
 
-def _vector_str(self):
-    fmt, scale, sz = _number_format(self)
-    strt = ''
-    ident = ''
-    n = PRINT_OPTS.edgeitems
-    dotfmt = u"{:^" + str(sz) + "}\n"
-    if scale != 1:
-        strt += SCALE_FORMAT.format(scale)
-        ident = ' '
-    if self.numel() < PRINT_OPTS.threshold:
-        return (strt +
-                '\n'.join(ident + fmt.format(val.item() / scale) for val in self) +
-                '\n')
-    else:
-        return (strt +
-                '\n'.join(ident + fmt.format(val.item() / scale) for val in self[:n]) +
-                '\n' + (ident + dotfmt.format(u"\u22EE")) +
-                '\n'.join(ident + fmt.format(val.item() / scale) for val in self[-n:]) +
-                '\n')
-
-
-def _str(self, include_footer=True):
+def _str(self):
     if self.is_sparse:
         size_str = str(tuple(self.shape)).replace(' ', '')
         return '{} of size {} with indices:\n{}and values:\n{}'.format(
             self.type(), size_str, self._indices(), self._values())
 
-    empty = self.numel() == 0
-    dim = self.dim()
+    prefix = 'tensor('
+    indent = len(prefix)
+    summarize = self.numel() > PRINT_OPTS.threshold
 
-    if empty:
-        strt = ''
-    elif dim == 0:
-        strt = _vector_str(self.unsqueeze(0))
-    elif dim == 1:
-        strt = _vector_str(self)
-    elif dim == 2:
-        strt = _matrix_str(self)
+    suffix = ')'
+    if not torch._C._is_default_type_cuda():
+        if self.device.type == 'cuda':
+            suffix = ', device=\'' + str(self.device) + '\'' + suffix
     else:
-        strt = _tensor_str(self)
+        if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
+            suffix = ', device=\'' + str(self.device) + '\'' + suffix
 
-    if include_footer:
-        size_str = str(tuple(self.shape)).replace(' ', '')
-        device_str = '' if not self.is_cuda else \
-            ' (GPU {})'.format(self.get_device())
-        strt += '[{} of size {}{}]\n'.format(self.type(), size_str, device_str)
-    return '\n' + strt
+    if self.dtype != torch.get_default_dtype() and self.dtype != torch.int64:
+        suffix = ', dtype=' + str(self.dtype) + suffix
+
+    if self.numel() == 0:
+        tensor_str = '[]'
+    else:
+        fmt, scale, sz = _number_format(self)
+        if scale != 1:
+            prefix = prefix + SCALE_FORMAT.format(scale) + ' ' * indent
+        tensor_str = _tensor_str(self, indent, fmt, scale, sz, summarize)
+
+    return prefix + tensor_str + suffix
