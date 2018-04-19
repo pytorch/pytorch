@@ -1633,7 +1633,7 @@ class TestScript(TestCase):
             c = a + b
             return c
 
-        inputs = self._make_scalar_vars([1, 1, 10], torch.int)
+        inputs = self._make_scalar_vars([1, 1, 10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_fibb(self):
@@ -1659,7 +1659,7 @@ class TestScript(TestCase):
             fs = first + second
             return third, st, fs
 
-        inputs = self._make_scalar_vars([10], torch.int)
+        inputs = self._make_scalar_vars([10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_if(self):
@@ -1673,7 +1673,7 @@ class TestScript(TestCase):
             c = a + b
             return c
 
-        inputs = self._make_scalar_vars([1, -1], torch.int)
+        inputs = self._make_scalar_vars([1, -1], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_if_noelse(self):
@@ -1683,7 +1683,7 @@ class TestScript(TestCase):
             c = a + b
             return c
 
-        inputs = self._make_scalar_vars([-1, 1], torch.int)
+        inputs = self._make_scalar_vars([-1, 1], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_while_nonexistent_value(self):
@@ -1713,7 +1713,7 @@ class TestScript(TestCase):
                 b = a + 1
             return a + b
 
-        inputs = self._make_scalar_vars([42, 1337], torch.int)
+        inputs = self._make_scalar_vars([42, 1337], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_while_nest_if(self):
@@ -1728,7 +1728,7 @@ class TestScript(TestCase):
                     c = -b
             return c + 1
 
-        inputs = self._make_scalar_vars([-1234, 4321], torch.int)
+        inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_if_nest_while(self):
@@ -1740,7 +1740,7 @@ class TestScript(TestCase):
                     c = -b
             return c
 
-        inputs = self._make_scalar_vars([4321, 1234], torch.int)
+        inputs = self._make_scalar_vars([4321, 1234], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_script_for_in_range(self):
@@ -1796,8 +1796,8 @@ class TestScript(TestCase):
             c = a + b if a > 3 else b
             return c
 
-        inputs_true = self._make_scalar_vars([5, 2], torch.int)
-        inputs_false = self._make_scalar_vars([1, 0], torch.int)
+        inputs_true = self._make_scalar_vars([5, 2], torch.int64)
+        inputs_false = self._make_scalar_vars([1, 0], torch.int64)
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
@@ -2139,6 +2139,8 @@ class TestScript(TestCase):
                 with self.assertRaisesRegex(TypeError, "is not a valid constant"):
                     self.i = (3, 4, {})
 
+    # https://github.com/pytorch/pytorch/issues/6714
+    @unittest.expectedFailure
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['b']
@@ -2513,7 +2515,7 @@ class TestScript(TestCase):
             def foo(self, input):
                 return input + 1
         m = M()
-        self.assertEqual(2, m.call_foo(torch.ones(())))
+        self.assertEqual(2, m.call_foo(torch.ones((), dtype=torch.int64)))
 
     def test_script_define_order_recursive_fail(self):
         class M(torch.jit.ScriptModule):
