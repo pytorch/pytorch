@@ -311,6 +311,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
+   .. automethod:: requires_grad_
    .. automethod:: reshape
    .. automethod:: resize_
    .. automethod:: resize_as_
