@@ -32,10 +32,7 @@ class _LRScheduler(object):
         """Returns the state of the scheduler as a :class:`dict`.
 
         It contains an entry for every variable in self.__dict__ which
-        is not the optimizer:
-
-        * state - a dict holding current scheduler variables. Its content
-            differs between LR Scheduler classes.
+        is not the optimizer.
         """
         return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
 
