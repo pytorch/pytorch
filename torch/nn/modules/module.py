@@ -1,5 +1,6 @@
 from collections import OrderedDict
 import functools
+import itertools
 
 import torch
 from ..backends.thnn import backend as thnn_backend
@@ -46,6 +47,18 @@ class Module(object):
 
     dump_patches = False
 
+    r"""This allows better BC support for :meth:`load_state_dict`. In
+    :meth:`state_dict`, the version number will be saved as in the attribute
+    `_metadata` of the returned state dict, and thus pickled. `_metadata` is a
+    dictionary with keys follow the naming convention of state dict. See
+    ``_load_from_state_dict`` on how to use this information in loading.
+
+    If new parameters/buffers are added/removed from a module, this number shall
+    be bumped, and the module's `_load_from_state_dict` method can compare the
+    version number and do appropriate changes if the state dict is from before
+    the change."""
+    _version = 1
+
     def __init__(self):
         self._backend = thnn_backend
         self._parameters = OrderedDict()
@@ -90,6 +103,10 @@ class Module(object):
         """
         if hasattr(self, name) and name not in self._buffers:
             raise KeyError("attribute '{}' already exists".format(name))
+        elif '.' in name:
+            raise KeyError("buffer name can't contain \".\"")
+        elif name == '':
+            raise KeyError("buffer name can't be empty string \"\"")
         elif tensor is not None and not isinstance(tensor, torch.Tensor):
             raise TypeError("cannot assign '{}' object to buffer '{}' "
                             "(torch Tensor or None required)"
@@ -111,8 +128,12 @@ class Module(object):
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
-        if hasattr(self, name) and name not in self._parameters:
+        elif hasattr(self, name) and name not in self._parameters:
             raise KeyError("attribute '{}' already exists".format(name))
+        elif '.' in name:
+            raise KeyError("parameter name can't contain \".\"")
+        elif name == '':
+            raise KeyError("parameter name can't be empty string \"\"")
 
         if param is None:
             self._parameters[name] = None
@@ -142,8 +163,12 @@ class Module(object):
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        if hasattr(self, name) and name not in self._modules:
+        elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
+        elif '.' in name:
+            raise KeyError("module name can't contain \".\"")
+        elif name == '':
+            raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
     def _apply(self, fn):
@@ -571,19 +596,6 @@ class Module(object):
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
 
-        When keep_vars is ``True``, it returns a Tensor for each parameter
-        (rather than a Tensor).
-
-        Args:
-            destination (dict, optional):
-                if not None, the return dictionary is stored into destination.
-                Default: None
-            prefix (string, optional): Adds a prefix to the key (name) of every
-                parameter and buffer in the result dictionary. Default: ''
-            keep_vars (bool, optional): if ``True``, returns a Tensor for each
-                parameter. If ``False``, returns a Tensor for each parameter.
-                Default: ``False``
-
         Returns:
             dict:
                 a dictionary containing a whole state of the module
@@ -596,6 +608,8 @@ class Module(object):
         """
         if destination is None:
             destination = OrderedDict()
+            destination._metadata = OrderedDict()
+        destination._metadata[prefix[:-1]] = dict(version=self._version)
         for name, param in self._parameters.items():
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.data
@@ -607,76 +621,109 @@ class Module(object):
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def _load_state_dict_key_mismatch(self, full_name, name, is_missing):
-        r"""This is called in :meth:`~torch.nn.Module.load_state_dict` when
-        there is state dict key mismatch in ``strict=True`` mode. This method
-        can be overridden by subclasses to raise class-specific errors.
+    def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs):
+        r"""Copies parameters and buffers from :attr:`state_dict` into only
+        this module, but not its descendants. This is called on every submodule
+        in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
+        module in input :attr:`state_dict` is at ``state_dict._metadata[prefix]``.
+        Subclasses can achieve class-specific backward compatible loading using
+        the version number at ``state_dict._metadata[prefix]["version"]``.
 
-        When :attr:`is_missing` is ``True``, :attr:`full_name` can not be found in
-        the dict being loaded. When :attr:`is_missing` is ``False``,
-        :attr:`full_name` is unexpected in the dict being loaded.
+        .. note::
+            :attr:`state_dict` is not the same object as the input
+            :attr:`state_dict` to :meth:`~torch.nn.Module.load_state_dict`. So
+            it can be modified.
 
-        :attr:`name` is the actual name of the parameter/buffer, i.e., the
-        substring after the last `dot` in :attr:`full_name`.
+        Arguments:
+            state_dict (dict): a dict containing parameters and
+                persistent buffers.
+            prefix (str): the prefix for parameters and buffers used in this
+                module
+            strict (bool): whether to strictly enforce that the keys in
+                :attr:`state_dict` with :attr:`prefix` match the names of
+                parameters and buffers in this module
+            missing_keys (list of str): if ``strict=False``, add missing keys to
+                this list
+            unexpected_keys (list of str): if ``strict=False``, add unexpected
+                keys to this list
+            error_msgs (list of str): error messages should be added to this
+                list, and will be reported together in
+                :meth:`~torch.nn.Module.load_state_dict`
         """
-        pass
+        local_name_params = itertools.chain(self._parameters.items(), self._buffers.items())
+        local_state = {k: v.data for k, v in local_name_params if v is not None}
+
+        for name, param in local_state.items():
+            key = prefix + name
+            if key in state_dict:
+                input_param = state_dict[key]
+                if isinstance(input_param, Parameter):
+                    # backwards compatibility for serialized parameters
+                    input_param = input_param.data
+                try:
+                    param.copy_(input_param)
+                except Exception:
+                    error_msgs.append('While copying the parameter named "{}", '
+                                      'whose dimensions in the model are {} and '
+                                      'whose dimensions in the checkpoint are {}.'
+                                      .format(key, param.size(), input_param.size()))
+            elif strict:
+                missing_keys.append(key)
+
+        if strict:
+            for key, input_param in state_dict.items():
+                if key.startswith(prefix):
+                    input_name = key[len(prefix):]
+                    input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
+                    if input_name not in self._modules and input_name not in local_state:
+                        unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict, strict=True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
-        this module and its descendants. If :attr:`strict` is ``True`` then
+        this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
-        by this module's :func:`state_dict()` function.
+        by this module's :meth:`~torch.nn.Module.state_dict` function.
 
         Arguments:
-            state_dict (dict): A dict containing parameters and
+            state_dict (dict): a dict containing parameters and
                 persistent buffers.
-            strict (bool): Strictly enforce that the keys in :attr:`state_dict`
-                match the keys returned by this module's `:func:`state_dict()`
-                function.
+            strict (bool, optional): whether to strictly enforce that the keys
+                in :attr:`state_dict` match the keys returned by this module's
+                :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
         """
-        def submodule_key_mismatch(full_name, is_missing):
-            module = self
-            names = full_name.split(".")
-            for module_name in names[:-1]:
-                if module_name in module._modules:
-                    module = module._modules[module_name]
-                else:
-                    return
-            module._load_state_dict_key_mismatch(full_name, names[-1], is_missing)
+        missing_keys = []
+        unexpected_keys = []
+        error_msgs = []
 
-        unexpected = []
-        own_state = self.state_dict()
-        for name, param in state_dict.items():
-            if name in own_state:
-                if isinstance(param, Parameter):
-                    # backwards compatibility for serialized parameters
-                    param = param.data
-                try:
-                    own_state[name].copy_(param)
-                except Exception:
-                    raise RuntimeError('While copying the parameter named {}, '
-                                       'whose dimensions in the model are {} and '
-                                       'whose dimensions in the checkpoint are {}.'
-                                       .format(name, own_state[name].size(), param.size()))
-            elif strict:
-                unexpected.append(name)
+        # copy state_dict so _load_from_state_dict can modify it
+        metadata = getattr(state_dict, '_metadata', None)
+        state_dict = state_dict.copy()
+        if metadata is not None:
+            state_dict._metadata = metadata
+
+        def load(module, prefix=''):
+            module._load_from_state_dict(
+                state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs)
+            for name, child in module._modules.items():
+                if child is not None:
+                    load(child, prefix + name + '.')
+
+        load(self)
+
         if strict:
-            missing = set(own_state.keys()) - set(state_dict.keys())
-            # pass the mismatch info to submodules so that they have a chance to
-            # raise a custom class-specific error
-            for name in unexpected:
-                submodule_key_mismatch(name, False)
-            for name in missing:
-                submodule_key_mismatch(name, True)
             error_msg = ''
-            if len(unexpected) > 0:
-                error_msg += 'Unexpected key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in unexpected))
-            if len(missing) > 0:
-                error_msg += 'Missing key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in unexpected))
-            if len(error_msg) > 0:
-                raise KeyError(error_msg)
+            if len(unexpected_keys) > 0:
+                error_msgs.insert(
+                    0, 'Unexpected key(s) in state_dict: {}. '.format(
+                        ', '.join('"{}"'.format(k) for k in unexpected_keys)))
+            if len(missing_keys) > 0:
+                error_msgs.insert(
+                    0, 'Missing key(s) in state_dict: {}. '.format(
+                        ', '.join('"{}"'.format(k) for k in missing_keys)))
+
+        if len(error_msgs) > 0:
+            raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+                               self.__class__.__name__, "\n\t".join(error_msgs)))
 
     def parameters(self):
         r"""Returns an iterator over module parameters.
