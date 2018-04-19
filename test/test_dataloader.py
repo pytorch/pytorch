@@ -496,7 +496,7 @@ class TestDataLoader(TestCase):
         self.assertFalse(worker_manager_thread.is_alive())
 
     @staticmethod
-    def _manager_process(dataset, worker_pids):
+    def _manager_process(dataset, worker_pids, manager_exit_event):
         loader = iter(DataLoader(dataset, batch_size=2, num_workers=4, pin_memory=True))
         workers = loader.workers
         for i in range(len(workers)):
@@ -505,6 +505,7 @@ class TestDataLoader(TestCase):
             if i == 3:
                 break
         # Simulate a dirty exit of the manager process
+        manager_exit_event.set()
         if IS_WINDOWS:
             os.system('taskkill /PID ' + str(os.getpid()) + ' /F')
         else:
@@ -534,10 +535,11 @@ class TestDataLoader(TestCase):
 but they are all safe to ignore'''
         worker_pids = multiprocessing.Array('i', [0] * 4)
 
-        mp = multiprocessing.Process(target=TestDataLoader._manager_process, args=(self.dataset, worker_pids, ))
+        manager_exit_event = multiprocessing.Event()
+        mp = multiprocessing.Process(target=TestDataLoader._manager_process, args=(self.dataset, worker_pids, manager_exit_event))
         mp.start()
 
-        time.sleep(10)
+        manager_exit_event.wait()
 
         exit_status = [False] * len(worker_pids)
         start_time = time.time()
