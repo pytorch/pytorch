@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """Requires the hipify-python.py script (https://github.com/ROCm-Developer-Tools/pyHIPIFY)."""
 import shutil
 import subprocess
@@ -12,21 +11,6 @@ out_dir = os.path.join(os.path.dirname(proj_dir), "pytorch_amd")
 include_dirs = [
     "aten",
     "torch"
-=======
-import shutil
-import subprocess
-import os
-
-amd_build_dir = os.path.dirname(os.path.realpath(__file__))
-proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
-out_dir = os.path.join(os.path.dirname(proj_dir), "/pytorch_amd")
-exclude_dirs = [
-    "aten/src/TH",
-    "aten/src/THNN",
-    "aten/src/THS",
-    "caffe2",
-    "third_party"
->>>>>>> Adding build pytorch amd script
 ]
 
 # List of operators currently disabled
@@ -35,7 +19,6 @@ yaml_file = os.path.join(amd_build_dir, "disabled_features.yaml")
 # Create the pytorch_amd directory
 shutil.copytree(proj_dir, out_dir)
 
-<<<<<<< HEAD
 # Apply patch files.
 patch_folder = os.path.join(amd_build_dir, "patches")
 for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
@@ -79,34 +62,12 @@ for root, _directories, files in os.walk(os.path.join(out_dir, "torch")):
                 f.truncate()
                 f.flush()
                 os.fsync(f)
-=======
-# Extract (.hip) files.
-for root, directories, files in os.walk(os.path.join(amd_build_dir, "hip_files")):
-    for filename in files:
-        if filename.endswith(".hip"):
-            source = os.path.join(root, filename)
-            destination = os.path.join(out_dir, source[source.find("hip_files/")+10:])
-
-            # Extract the .hip file.
-            shutil.copy(source, destination)
-
-# Apply patch files.
-for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
     subprocess.Popen(["git", "apply", os.path.join(amd_build_dir, filename)], amd_build_dir=out_dir)
->>>>>>> Adding build pytorch amd script
 
 # Execute the Hipify Script.
 subprocess.Popen(
     ["/opt/rocm/bin/hipify-python.py",
-<<<<<<< HEAD
         "--project-directory", proj_dir,
         "--output-directory", out_dir,
         "--include-dirs"] + include_dirs +
     ["--yaml-settings", yaml_file, "--add-static-casts", "True"])
-=======
-    "--project-directory", proj_dir,
-    "--output-directory", out_dir,
-    "--exclude-dirs"] + exclude_dirs + \
-    ["--yaml-settings",  yaml_file,
-    "--add-static-casts", "True"])
->>>>>>> Adding build pytorch amd script
