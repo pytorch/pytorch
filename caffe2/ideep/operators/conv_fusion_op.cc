@@ -1,20 +1,4 @@
-/**
- * Copyright (c) 2016-present, Facebook, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-#include <caffe2/ideep/ideep_utils.h>
+#include <caffe2/ideep/operators/conv_pool_base_op.h>
 
 namespace caffe2 {
 
@@ -63,12 +47,12 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
     const auto& filter = Input(FILTER);
     auto* Y = Output(OUTPUT);
     auto Y_dims_conv = CalcOutputDims(X, filter.get_dim(0));
-    auto attr = [&]() {
+    auto attr = [this]() {
       return (fusion_type_ == FUSION_CONV_RELU) ? iattr::fuse_relu() :
         ((fusion_type_ == FUSION_CONV_SUM) ? iattr::fuse_sum() :
          ((fusion_type_ == FUSION_CONV_SUM_RELU) ? iattr::residual() :
           iattr())); };
-    auto last_input = [&]() {
+    auto last_input = [this]() {
       return (fusion_type_ == FUSION_CONV_RELU) ? BIAS_OR_INPUT_S : INPUT_S; };
 
     CAFFE_ENFORCE(4 == X.ndims());

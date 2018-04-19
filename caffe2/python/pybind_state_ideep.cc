@@ -1,19 +1,3 @@
-/**
- * Copyright (c) 2016-present, Facebook, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 // Note(jiayq): the import_array function is done inside
 // caffe2_python.cc. Read
 // http://docs.scipy.org/doc/numpy-1.10.1/reference/c-api.array.html#miscellaneous
@@ -70,7 +54,7 @@ class IDeepFetcher : public BlobFetcherBase {
   FetchedBlob FetchTensor(const itensor& atensor, bool force_copy) {
     FetchedBlob result;
     CAFFE_ENFORCE(atensor.materialized(),
-        "Trying to fetch unitilized tensor");
+        "Trying to fetch uninitialized tensor");
     const int numpy_type = CaffeToNumpyType(type_transform(atensor));
     CAFFE_ENFORCE(
         numpy_type != -1,
