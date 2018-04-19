@@ -801,6 +801,7 @@ class TestDistributions(TestCase):
             logits = probs_to_logits(probs, is_binary=True)
             self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_log_prob_vectorized_count(self):
         probs = torch.tensor([0.2, 0.7, 0.9])
         for total_count, sample in [(torch.tensor([10.]), torch.tensor([7., 3., 9.])),
