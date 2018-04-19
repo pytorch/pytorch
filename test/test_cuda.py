@@ -227,8 +227,6 @@ def new_t(*sizes):
 # - postfix name for the test (must be unique for a given function) (default='')
 # - tensor types to use (default=types)
 # - disable inplace test, if set to True, no inplace test will be done (default=False)
-
-# name, constr, arg_constr, desc, type_subset, no_inplace
 tests = [
     ('add', small_3d, lambda t: [number(3.14, 3, t)]),
     ('add', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
