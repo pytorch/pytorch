@@ -1,5 +1,5 @@
 torch.utils.checkpoint
-===============
+======================
 
 .. currentmodule:: torch.utils.checkpoint
 .. autofunction:: checkpoint

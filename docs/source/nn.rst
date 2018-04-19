@@ -701,12 +701,12 @@ Utilities
 ---------
 
 :hidden:`clip_grad_norm_`
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.clip_grad_norm_
 
 :hidden:`clip_grad_value_`
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.clip_grad_value_
 
@@ -1195,10 +1195,10 @@ Vision functions
 .. autofunction:: affine_grid
 
 DataParallel functions (multi-GPU, distributed)
---------------------------------------------
+-----------------------------------------------
 
 :hidden:`data_parallel`
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.parallel.data_parallel
 
