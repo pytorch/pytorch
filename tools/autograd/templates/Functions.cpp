@@ -717,9 +717,36 @@ Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal)
   return grad_input;
 }
 
-Tensor diagonal_backward(const Tensor & grad, IntList input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+Tensor diagonal_backward(const Tensor & grad, IntList input_sizes, int64_t offset, int64_t dim1_, int64_t dim2_) {
   auto grad_input = at::zeros(grad.type(), input_sizes);
-  auto diag = at::diagonal(grad_input, offset, dim1, dim2);
+  // the following until the assignment of auto diag
+  // copies the diagonal code in aten/src/ATen/native/TensorShape.cpp
+  // that would be equivalent to
+  //        auto diag = grad_input.diagonal(offset, dim1, dim2);
+  // when using diagonal, the output is not differentiable twice
+  // while this works
+  int64_t nDims = input_sizes.size();
+  int64_t dim1 = at::maybe_wrap_dim(dim1_, nDims);
+  int64_t dim2 = at::maybe_wrap_dim(dim2_, nDims);
+  int64_t diag_size;
+  int64_t storage_offset = grad_input.storage_offset();
+  if (offset >= 0) {
+    diag_size = std::min(grad_input.size(dim1), grad_input.size(dim2)-offset);
+    storage_offset += offset * grad_input.stride(dim2);
+  } else {
+    diag_size = std::min(grad_input.size(dim1)+offset, grad_input.size(dim2));
+    storage_offset -= offset * grad_input.stride(dim1);
+  }
+  auto sizes = std::vector<int64_t>(grad_input.sizes());
+  auto strides = std::vector<int64_t>(grad_input.strides());
+  sizes.erase(sizes.begin() + std::max(dim1, dim2));
+  strides.erase(strides.begin() + std::max(dim1, dim2));
+  sizes.erase(sizes.begin() + std::min(dim1, dim2));
+  strides.erase(strides.begin() + std::min(dim1, dim2));
+  sizes.push_back(diag_size);
+  strides.push_back(grad_input.stride(dim1)+grad_input.stride(dim2));
+  auto diag = grad_input.as_strided(sizes, strides, storage_offset);
+
   diag.copy_(grad);
   return grad_input;
 }

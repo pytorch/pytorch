@@ -1928,6 +1928,21 @@ class TestTorch(TestCase):
         expected = xn.diagonal(0, -2, -1)
         self.assertEqual(expected.shape, result.shape)
         self.assertTrue(np.allclose(expected, result.numpy()))
+        # test non-continguous
+        xp = x.permute(1, 2, 3, 0)
+        result = torch.diagonal(xp, 0, -2, -1)
+        expected = xp.numpy().diagonal(0, -2, -1)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertTrue(np.allclose(expected, result.numpy()))
+        # test that the backward requires grad
+        # we do this is because diagonal_backward uses inplace
+        # operations and gradgradcheck does not catch whether
+        # they works as expected
+        a = torch.randn(5, 6, requires_grad=True)
+        b = torch.diagonal(a)**2
+        c = b.sum()
+        d, = torch.autograd.grad(c,a, retain_graph=True, create_graph=True)
+        self.assertTrue(d.requires_grad)
 
     @staticmethod
     def _test_diagflat(self, dtype, device):
