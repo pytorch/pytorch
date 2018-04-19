@@ -6,6 +6,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"
@@ -528,29 +529,56 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+// Cases:
+// 1) arg matches self -> no-op
+// 2) arg is true, self doesn't requires_grad -> do the equivalent of detach() and set_requires_grad.
+// 3) arg is false, self requires_grad -> valid if self is a leaf.
+static Variable as_requires_grad(Tensor self, bool requires_grad) {
+  auto& self_ = static_cast<torch::autograd::Variable&>(self);
+  auto self_requires_grad = self_.requires_grad();
+  if (self_requires_grad == requires_grad) {
+    return self_;
+  } else if (requires_grad) {
+    auto res = make_variable(self_.data(), /*requires_grad=*/true);
+    res.set_version_counter(self_.version_counter());
+    return res;
+  } else {
+    if (!self_.is_leaf()) {
+      throw std::runtime_error(requires_grad_leaf_error(requires_grad));
+    }
+    self_.set_requires_grad(requires_grad);
+    return self_;
+  }
+}
+
 static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "to(Device device, ScalarType dtype=None)",
-    "to(ScalarType dtype)",
-    "to(Tensor other)",
+    "to(*, bool requires_grad)",
+    "to(Device device, ScalarType dtype=None, *, bool requires_grad=None)",
+    "to(ScalarType dtype, *, bool requires_grad=None)",
+    "to(Tensor other)",  // lacks requires_grad because the default is ambiguous between self and other
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
+    return THPVariable_Wrap(as_requires_grad(self_, r.toBool(0)));
+  } else if (r.idx == 1) {
     auto device = r.device(0);
     auto deviceAutoGPU = device.deviceInt64();
     auto scalarType = r.scalartypeWithDefault(1, self_.type().scalarType());
     auto& layout = *torch::getLayout(self_.type().backend());
     auto& type = torch::getType(scalarType, layout, device.type);
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, false));
-  } else if (r.idx == 1) {
+    auto requires_grad = r.toBoolWithDefault(2, self_.requires_grad());
+    return THPVariable_Wrap(as_requires_grad(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, false), requires_grad));
+  } else if (r.idx == 2) {
     auto scalarType = r.scalartype(0);
     auto& type = self_.type().toScalarType(scalarType);
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
-  } else if (r.idx == 2) {
+    auto requires_grad = r.toBoolWithDefault(1, self_.requires_grad());
+    return THPVariable_Wrap(as_requires_grad(torch::utils::dispatch_type_conversion(self_, type), requires_grad));
+  } else if (r.idx == 3) {
     auto other = r.tensor(0);
     auto& type = other.type();
     auto deviceType = torch::getDeviceType(type);
