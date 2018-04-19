@@ -1079,14 +1079,18 @@ def create_derived(backend_type_env, declarations):
             return backend_type_env['AccScalarName'] == 'Long'
         return False
 
-    def get_zero_dim_dispatch_when_scalar(option):
-        # type: (FunctionOption) -> str
-        return option.get('zero_dim_dispatch_when_scalar', False)  # type: ignore
-
     def handle_zero_dim(env, option):
         # type: (Environment, FunctionOption) -> List[str]
-        zero_dim_dispatch = get_zero_dim_dispatch_when_scalar(option)
+        zero_dim_dispatch = option.get('zero_dim_dispatch_when_scalar', '')
         if not zero_dim_dispatch:
+            return []
+        broadcasts_arg = zero_dim_dispatch in option.get('broadcast_actuals', '')
+        zero_dim_only = option.get('zero_dim_tensor_only', False)
+        # this combination doesn't seem to make sense
+        assert not (broadcasts_arg and zero_dim_only)
+        # if the argument broadcasts, then this would only affect cases where all broadcasted
+        # tensors were zero-dim, which is inconsistent with the scalar handling.
+        if broadcasts_arg:
             return []
         zero_dim_actuals = [arg['name']
                             if arg['name'] != zero_dim_dispatch else "Scalar({})".format(arg['name'])
@@ -1096,7 +1100,7 @@ def create_derived(backend_type_env, declarations):
     def handle_only_zero_dim(env, option):
         # type: (Environment, FunctionOption) -> List[str]
         if option.get('zero_dim_tensor_only', False):
-            check_name = get_zero_dim_dispatch_when_scalar(option)
+            check_name = option['zero_dim_dispatch_when_scalar']
             return [ZERO_DIM_ONLY.substitute(env, check_name=check_name)]
         else:
             return None
