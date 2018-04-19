@@ -440,11 +440,25 @@ struct TensorDivOp<half> {
 };
 #endif // CUDA_HALF_TENSOR
 
+template<typename T>
+static __device__ __forceinline__
+typename std::enable_if<std::is_signed<T>::value, bool>::type
+modulo_wrap(T a, T b) {
+  return (a != 0) && (a < 0) != (b < 0);
+}
+
+template<typename T>
+static __device__ __forceinline__
+typename std::enable_if<std::is_unsigned<T>::value, bool>::type
+modulo_wrap(T a, T b) {
+  return false;
+}
+
 template <typename T>
 struct TensorCRemainderOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {
     T val =  *out % *in;
-    if ((val * *in)<0){
+    if (modulo_wrap(val, *in)) {
       val += *in;
     }
     *out = val;
@@ -452,7 +466,7 @@ struct TensorCRemainderOp {
 
   __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
     T val = *in1 % *in2;
-    if ((val * *in2)<0){
+    if (modulo_wrap(val, *in2)) {
       val += *in2;
     }
     *out = val;
@@ -462,22 +476,22 @@ struct TensorCRemainderOp {
 template <>
 struct TensorCRemainderOp<float> {
   __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = *in != 0 ? *out - *in * floorf(*out / *in) : NAN;
+    *out = *in != 0.f ? *out - *in * floorf(*out / *in) : NAN;
   }
 
   __device__ __forceinline__ void operator()(float* out, float* in1, float* in2) {
-    *out = *in2 != 0 ? *in1 - *in2 * floorf(*in1 / *in2) : NAN;
+    *out = *in2 != 0.f ? *in1 - *in2 * floorf(*in1 / *in2) : NAN;
   }
 };
 
 template <>
 struct TensorCRemainderOp<double> {
   __device__ __forceinline__ void operator()(double* out, double* in) {
-    *out = *in != 0 ? *out - *in * floor(*out / *in) : NAN;
+    *out = *in != 0. ? *out - *in * floor(*out / *in) : NAN;
   }
 
   __device__ __forceinline__ void operator()(double* out, double* in1, double* in2) {
-    *out = *in2 != 0 ? *in1 - *in2 * floor(*in1 / *in2) : NAN;
+    *out = *in2 != 0. ? *in1 - *in2 * floor(*in1 / *in2) : NAN;
   }
 };
 
