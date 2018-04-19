@@ -1,5 +1,3 @@
-#define EIGEN_USE_THREADS
-
 #include "caffe2/operators/reduce_ops.h"
 
 namespace caffe2 {

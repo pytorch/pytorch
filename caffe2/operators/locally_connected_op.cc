@@ -1,5 +1,3 @@
-#define EIGEN_USE_THREADS
-
 #include "caffe2/operators/locally_connected_op.h"
 
 #include <functional>
