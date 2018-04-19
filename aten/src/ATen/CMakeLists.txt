@@ -9,10 +9,10 @@ ENDIF()
 
 IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
   SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
-  SET(VCOMP_LIB_NAME "vcompd")
+  SET(VCOMP_LIB "vcomp")
 ELSE()
   SET(MSVC_OPT_FLAG " ")
-  SET(VCOMP_LIB_NAME "vcomp")
+  SET(VCOMP_LIB "vcompd")
 ENDIF()
 
 ########################
