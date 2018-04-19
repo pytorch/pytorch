@@ -4,6 +4,7 @@ import torch._C
 from torch._C import _add_docstr as add_docstr
 from ._torch_docs import parse_kwargs
 
+
 def add_docstr_all(method, docstr):
     add_docstr(getattr(torch._C._TensorBase, method), docstr)
 
