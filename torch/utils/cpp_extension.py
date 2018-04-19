@@ -80,7 +80,7 @@ def check_compiler_abi_compatibility(compiler):
         warnings.warn('Error checking compiler version: {}'.format(error))
     else:
         info = info.decode().lower()
-        if 'gcc' or 'g++' in info:
+        if 'gcc' in info or 'g++' in info:
             # Sometimes the version is given as "major.x" instead of semver.
             version = re.search(r'(\d+)\.(\d+|x)', info)
             if version is not None:
