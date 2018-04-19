@@ -533,6 +533,7 @@ class RNNCell(RNNCellBase):
         - **input** of shape `(batch, input_size)`: tensor containing input features
         - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden
           state for each element in the batch.
+          Defaults to zero if not provided.
 
     Outputs: h'
         - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
@@ -625,6 +626,8 @@ class LSTMCell(RNNCellBase):
         - **c_0** of shape `(batch, hidden_size)`: tensor containing the initial cell state
           for each element in the batch.
 
+          If `(h_0, c_0)` is not provided, both **h_0** and **c_0** default to zero.
+
     Outputs: h_1, c_1
         - **h_1** of shape `(batch, hidden_size)`: tensor containing the next hidden state
           for each element in the batch
@@ -706,6 +709,7 @@ class GRUCell(RNNCellBase):
         - **input** of shape `(batch, input_size)`: tensor containing input features
         - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden
           state for each element in the batch.
+          Defaults to zero if not provided.
 
     Outputs: h'
         - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
