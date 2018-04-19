@@ -247,6 +247,76 @@ static PyObject* applyBoolGetitem(const Variable& self, bool index) {
   }
 }
 
+static bool canDispatchToLegacyIndexing(const Variable& self, const variable_list& vars) {
+  // mask indexing
+  if (vars.size() == 1 && vars[0].type().scalarType() == ScalarType::Byte && vars[0].is_same_size(self)) {
+    return true;
+  }
+
+  // single tensor indexing
+  int num_defined_variables = 0;
+  for (auto& variable : vars) {
+    auto is_defined = variable.defined();
+    num_defined_variables += is_defined;
+    if (is_defined && (variable.dim() != 1 || variable.type().scalarType() != ScalarType::Long || variable.numel() == 0)) {
+      num_defined_variables = -1;
+      break;
+    }
+  }
+  if (num_defined_variables == 1) {
+    return true;
+  }
+  // advanced indexing
+  return false;
+}
+
+static Variable dispatch_legacy_index(const Variable& self, const variable_list& vars) {
+  if (vars.size() == 1 && vars[0].type().scalarType() == ScalarType::Byte && vars[0].is_same_size(self)) {
+    auto mask = vars[0];
+    if (self.type().backend() != mask.type().backend())
+      mask = mask.toBackend(self.type().backend());
+    return self.masked_select(mask);
+  }
+
+  int64_t index_dim = -1;
+  for (size_t i = 0; i < vars.size(); i++) {
+    if (vars[i].defined()) {
+      index_dim = i;
+      break;
+    }
+  }
+  auto index = vars[index_dim];
+  if (self.type().backend() != index.type().backend())
+    index = index.toBackend(self.type().backend());
+  return self.index_select(index_dim, index);
+}
+
+static Variable dispatch_legacy_index_put(Variable& self, const variable_list& vars, const Variable& value) {
+  auto value_ = value;
+  if (self.type().backend() != value_.type().backend())
+    value_ = value_.toBackend(self.type().backend());
+
+  if (vars.size() == 1 && vars[0].type().scalarType() == ScalarType::Byte && vars[0].is_same_size(self)) {
+    auto mask = vars[0];
+    if (self.type().backend() != mask.type().backend())
+      mask = mask.toBackend(self.type().backend());
+    return self.masked_fill_(mask, value_);
+  }
+
+  int64_t index_dim = -1;
+  for (size_t i = 0; i < vars.size(); i++) {
+    if (vars[i].defined()) {
+      index_dim = i;
+      break;
+    }
+  }
+
+  auto index = vars[index_dim];
+  if (self.type().backend() != index.type().backend())
+    index = index.toBackend(self.type().backend());
+  return self.index_fill_(index_dim, index, value_);
+}
+
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
@@ -279,6 +349,11 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   }
   if (isSingleBoolScalar(variableIndices)) {
     return applyBoolGetitem(self_, variableIndices[0].toCByte());
+  }
+
+  // TODO move this to ATen
+  if (canDispatchToLegacyIndexing(sliced, variableIndices)) {
+    return wrap(dispatch_legacy_index(sliced, variableIndices));
   }
 
   // indexing by tensors ("advanced" indexing)
@@ -344,6 +419,15 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     if (variableIndices[0].toCByte()) {
       copy_to(self_.unsqueeze(0), value);
     }
+    return 0;
+  }
+
+  // TODO move this to ATen
+  // we are being overly cautious here and only considering the *_fill_ variants
+  // (value is a scalar), as there could be broadcasting in the value that could
+  // happen and is not handled by masked_scatter_ and index_copy_
+  if (canDispatchToLegacyIndexing(sliced, variableIndices) && value.dim() == 0) {
+    dispatch_legacy_index_put(sliced, variableIndices, value);
     return 0;
   }
 
