@@ -97,7 +97,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
 
   int64_t dims_len = dims.size(), shape_len = self.dim(), N = self.numel();
 
-  // check len of dims 
+  // check len of dims
   if (dims_len > shape_len) {
     std::stringstream ss;
     ss << "expected dims to have size <= total tensor dims, "
