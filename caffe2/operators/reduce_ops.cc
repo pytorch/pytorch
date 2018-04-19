@@ -4,30 +4,11 @@
 #include <functional>
 #include <vector>
 
+#include "caffe2/utils/math.h"
+
 namespace caffe2 {
 
 namespace {
-
-void IncreaseIndexInDims(const int n, const int* dims, int* index) {
-  for (int i = n - 1; i >= 0; --i) {
-    ++index[i];
-    if (index[i] >= dims[i]) {
-      index[i] -= dims[i];
-    } else {
-      break;
-    }
-  }
-}
-
-int GetIndexFromDims(const int n, const int* dims, const int* index) {
-  int sum = 0;
-  for (int i = 0; i < n; ++i) {
-    if (dims[i] > 1) {
-      sum = sum * dims[i] + index[i];
-    }
-  }
-  return sum;
-}
 
 template <typename T>
 void ComputeReduceMinMaxGradient(
@@ -42,10 +23,11 @@ void ComputeReduceMinMaxGradient(
   const int ndim = dX_dims.size();
   std::vector<int> index(ndim, 0);
   for (int dX_index = 0; dX_index < dX_size; ++dX_index) {
-    const int dY_index = GetIndexFromDims(ndim, dY_dims.data(), index.data());
+    const int dY_index =
+        math::internal::GetIndexFromDims(ndim, dY_dims.data(), index.data());
     dX_data[dX_index] =
         Y_data[dY_index] == X_data[dX_index] ? dY_data[dY_index] : T(0);
-    IncreaseIndexInDims(ndim, dX_dims.data(), index.data());
+    math::internal::IncreaseIndexInDims(ndim, dX_dims.data(), index.data());
   }
 }
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <vector>
 
 #include "caffe2/core/context_gpu.h"
 
