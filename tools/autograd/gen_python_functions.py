@@ -599,7 +599,48 @@ def group_declarations(declarations):
         if 'base' not in dictionary:
             raise RuntimeError('\'base\' not in dictionary', dictionary)
         result.append(dictionary)
-    return result
+    return sort_declarations(result)
+
+
+# This function declares a partial order on declarations, and sorts them according
+# to its linear extension. This is necessary, because there's some ambiguity in the
+# choice of overload, and we want a different order.
+def sort_declarations(grouped_decls):
+    def is_coord_smaller(arg1, arg2):
+        return arg1['dynamic_type'] == 'real' and arg2['dynamic_type'] == 'Tensor'
+
+    def is_smaller(d1, d2):
+        """Returns True if d1 < d2 in the partial order."""
+        args1, args2 = d1['base']['arguments'], d2['base']['arguments']
+        if len(args1) != len(args2):
+            return False
+        any_smaller = any(is_coord_smaller(arg1, arg2) for arg1, arg2 in zip(args1, args2))
+        all_smaller_or_equal = all(arg1['dynamic_type'] == arg2['dynamic_type'] or is_coord_smaller(arg1, arg2)
+                                   for arg1, arg2 in zip(args1, args2))
+        return any_smaller and all_smaller_or_equal
+
+    # Construct the relation graph
+    larger_than = defaultdict(set)
+    for i1, decl1 in enumerate(grouped_decls):
+        for i2, decl2 in enumerate(grouped_decls):
+            if is_smaller(decl1, decl2):
+                larger_than[i1].add(i2)
+
+    if not larger_than:
+        return grouped_decls
+
+    # Use a topological sort to sort decls according to the partial order.
+    sorted_deps = [(i, decl) for i, decl in enumerate(grouped_decls)
+                   if i not in larger_than]
+    for i, decl in sorted_deps:
+        for i2 in sorted(larger_than.keys()):
+            larger = larger_than[i2]
+            larger.discard(i)
+            if not larger:
+                del larger_than[i2]
+                sorted_deps.append((i2, grouped_decls[i2]))
+
+    return [decl for i, decl in sorted_deps]
 
 
 def get_python_signature(declaration, include_out):

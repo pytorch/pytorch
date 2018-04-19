@@ -1051,8 +1051,9 @@ void THTensor_(fmod)(THTensor *r_, THTensor *t, real value)
   }
 }
 
-static inline bool has_different_sign(real a, real b) {
-  return (a < 0) != (b < 0);
+// Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
+static inline bool modulo_wrap(real a, real b) {
+  return (a != 0) && (a < 0) != (b < 0);
 }
 
 void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
@@ -1073,7 +1074,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
       // There is no NAN for integers
       rp[i] = tp[i] % value;
-      if (has_different_sign(rp[i], value))
+      if (modulo_wrap(rp[i], value))
         rp[i] += value;
 #endif
     }
@@ -1088,7 +1089,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
       // There is no NAN for integers
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data % value;
-                                        if (has_different_sign(*r__data, value)) *r__data += value;);
+                                        if (modulo_wrap(*r__data, value)) *r__data += value;);
 #endif
     }
 #else
@@ -1101,7 +1102,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
     // There is no NAN for integers
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data % value;
-                                          if (has_different_sign(*r__data, value)) *r__data += value;);
+                                          if (modulo_wrap(*r__data, value)) *r__data += value;);
 #endif
   }
 }
@@ -1644,7 +1645,7 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #else
         // There is no NAN for integers
         rp[i] = tp[i] % sp[i];
-        if (rp[i] * sp[i] < 0)
+        if (modulo_wrap(rp[i], sp[i]))
           rp[i] += sp[i];
 #endif
       }
@@ -1658,7 +1659,7 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
         TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data););
 #else
         TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data % *src_data;
-                                                     if (*r__data * *src_data < 0) *r__data += *src_data;);
+                                                     if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;);
 #endif
       }
 #else
@@ -1674,7 +1675,7 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #else
     // There is no NAN for integers
     TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data % *src_data;
-                                                     if (*r__data * *src_data < 0) *r__data += *src_data;);
+                                                     if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;);
 #endif
 
   }
