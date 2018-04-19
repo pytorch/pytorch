@@ -140,8 +140,10 @@ THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 #ifdef USE_MAGMA
   THArgCheck(a_->nDimension == 2, 1, "A should be 2 dimensional");
   THArgCheck(b_->nDimension == 2, 1, "b should be 2 dimensional");
-  THArgCheck(a_->size[0] == b_->size[0], 2, "size incompatible A,b");
-  THArgCheck(a_->size[0] >= a_->size[1], 2, "A should have m >= n");
+  THArgCheck(a_->size[0] == b_->size[0], 2, "Expected A and b to have same size "
+      "at dim 0, but they have incompatible sizes");
+  THArgCheck(a_->size[0] >= a_->size[1], 2, "Expected A with shape (m x n) to have "
+      "m >= n. The case for m < n is not implemented yet.");
 
   THCTensor *a = THCTensor_(newColumnMajor)(state, ra_, a_);
   THCTensor *b = THCTensor_(newColumnMajor)(state, rb_, b_);
