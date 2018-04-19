@@ -727,8 +727,8 @@ class LPPool1d(_LPPoolNd):
     - At p = infinity, one gets Max Pooling
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
-    .. note:: If the sum to the power of `p` is zero, the gradient of this function is 
-              not defined. This implementation will set the gradient to zero in this case. 
+    .. note:: If the sum to the power of `p` is zero, the gradient of this function is
+              not defined. This implementation will set the gradient to zero in this case.
 
     Args:
         kernel_size: a single int, the size of the window
@@ -772,9 +772,9 @@ class LPPool2d(_LPPoolNd):
         - a single ``int`` -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
-    
-    .. note:: If the sum to the power of `p` is zero, the gradient of this function is 
-              not defined. This implementation will set the gradient to zero in this case. 
+
+    .. note:: If the sum to the power of `p` is zero, the gradient of this function is
+              not defined. This implementation will set the gradient to zero in this case.
 
     Args:
         kernel_size: the size of the window

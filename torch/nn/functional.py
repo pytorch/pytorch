@@ -446,8 +446,8 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
 
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     r"""Applies a 2D power-average pooling over an input signal composed of
-    several input planes. If the sum of all inputs to the power of `p` is 
-    zero, the gradient is set to zero as well. 
+    several input planes. If the sum of all inputs to the power of `p` is
+    zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
@@ -458,8 +458,8 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     r"""Applies a 1D power-average pooling over an input signal composed of
-    several input planes. If the sum of all inputs to the power of `p` is 
-    zero, the gradient is set to zero as well. 
+    several input planes. If the sum of all inputs to the power of `p` is
+    zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
