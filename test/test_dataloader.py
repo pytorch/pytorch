@@ -15,19 +15,16 @@ from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MANAGER_STATUS_CHECK_INTERVAL
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 
-# We only import the actual values in the main module, to get around
-# duplicated import issue when using multiprocessing on Windows.
-TEST_CUDA = False
-if __name__ in ['test_dataloader', '__main__']:
-    from common_nn import TEST_CUDA
-    # We need spawn start method for test_manager_unclean_exit
-    if sys.version_info[0] == 3:
-        # Without the try-catch block, some tests will complain that
-        # context has already been set.
-        try:
-            multiprocessing.set_start_method('spawn')
-        except RuntimeError:
-            pass
+TEST_CUDA = torch.cuda.is_available()
+
+# We need spawn start method for test_manager_unclean_exit
+if sys.version_info[0] == 3:
+    # Without the try-catch block, some tests will complain that
+    # context has already been set.
+    try:
+        multiprocessing.set_start_method('spawn')
+    except RuntimeError:
+        pass
 
 
 JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 6.5
