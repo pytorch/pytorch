@@ -54,11 +54,14 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
   {
     auto engine_string =
         OperatorBase::GetSingleArgument<std::string>("serialized_engine", "");
-    CAFFE_ENFORCE(!engine_string.empty(), "Empty serialized TensorRT engine!");
-    auto trt_runtime = tensorrt::TrtObject(nvinfer1::createInferRuntime(logger_));
-    // TODO(support trt plugin factory)
-    trt_engine_ = tensorrt::TrtObject(trt_runtime->deserializeCudaEngine(
-        engine_string.data(), engine_string.size(), nullptr));
+    if (!engine_string.empty()) {
+      auto trt_runtime =
+          tensorrt::TrtObject(nvinfer1::createInferRuntime(logger_));
+      // TODO(support trt plugin factory)
+      trt_engine_ = tensorrt::TrtObject(trt_runtime->deserializeCudaEngine(
+          engine_string.data(), engine_string.size(), nullptr));
+    } else {
+    }
   }
 
   CAFFE_ENFORCE(trt_engine_, "Cannot deserialize TensorRT engine!");

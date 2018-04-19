@@ -40,6 +40,21 @@ std::unordered_map<std::string, TensorShape> InferShapes(
   return shape_hints;
 }
 
+void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model) {
+  std::ofstream ff("trt.onnx");
+  for (const auto& t : model.graph().initializer()) {
+    ff << "tensor: " << t.name() << std::endl;
+    ff << "  dims: ";
+    for (auto i : t.dims()) {
+      ff << i << " ";
+    }
+    ff << std::endl;
+    for (auto i : t.float_data()) {
+      ff << "    " << i << std::endl;
+    }
+  }
+  ff.close();
+}
 
 void CPUTensorToTensorProto(
     const TensorCPU& cpu_tensor,
@@ -165,56 +180,71 @@ void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
 
 OperatorDef TensorRTTransformer::BuildTrtOp(
     const std::string& onnx_model_str,
-    const std::unordered_map<std::string, std::vector<int>>&
-        output_size_hints) {
+    const std::unordered_map<std::string, std::vector<int>>& output_size_hints,
+    const std::unordered_set<std::string>* initializtion_list) {
   OperatorDef op;
   op.set_type("TensorRT");
 
-  tensorrt::TrtLogger logger((nvinfer1::ILogger::Severity)(verbosity_));
-  auto trt_builder = tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
-  auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
-  auto importer =
-      tensorrt::TrtObject(onnx2trt::createImporter(trt_network.get()));
-  auto status =
-      importer->import(onnx_model_str.data(), onnx_model_str.size(), false);
-  if (status.is_error()) {
-    CAFFE_THROW(
-        "TensorRTTransformer ERROR: ",
-        status.file(),
-        ":",
-        status.line(),
-        " In function ",
-        status.func(),
-        ":\n",
-        "[",
-        status.code(),
-        "] ",
-        status.desc());
-  }
-  trt_builder->setMaxBatchSize(max_batch_size_);
-  trt_builder->setMaxWorkspaceSize(max_workspace_size_);
-  trt_builder->setDebugSync(debug_builder_);
-  auto trt_engine =
-      tensorrt::TrtObject(trt_builder->buildCudaEngine(*trt_network.get()));
+  if (build_serializable_op_) {
+    tensorrt::TrtLogger logger((nvinfer1::ILogger::Severity)(verbosity_));
+    auto trt_builder =
+        tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
+    auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
+    auto importer =
+        tensorrt::TrtObject(onnx2trt::createImporter(trt_network.get()));
+    auto status =
+        importer->import(onnx_model_str.data(), onnx_model_str.size(), false);
+    if (status.is_error()) {
+      CAFFE_THROW(
+          "TensorRTTransformer ERROR: ",
+          status.file(),
+          ":",
+          status.line(),
+          " In function ",
+          status.func(),
+          ":\n",
+          "[",
+          status.code(),
+          "] ",
+          status.desc());
+    }
+    trt_builder->setMaxBatchSize(max_batch_size_);
+    trt_builder->setMaxWorkspaceSize(max_workspace_size_);
+    trt_builder->setDebugSync(debug_builder_);
+    auto trt_engine =
+        tensorrt::TrtObject(trt_builder->buildCudaEngine(*trt_network.get()));
 
-  // Set up inputs/outputs in the order of they appearnce in getNbBindings
-  int num_bindings = trt_engine->getNbBindings();
-  for (int b = 0; b < num_bindings; ++b) {
-    const auto& name = trt_engine->getBindingName(b);
-    if (trt_engine->bindingIsInput(b)) {
-      op.add_input(name);
-    } else {
-      op.add_output(name);
+    // Set up inputs/outputs in the order of they appearnce in getNbBindings
+    int num_bindings = trt_engine->getNbBindings();
+    for (int b = 0; b < num_bindings; ++b) {
+      const auto& name = trt_engine->getBindingName(b);
+      if (trt_engine->bindingIsInput(b)) {
+        op.add_input(name);
+      } else {
+        op.add_output(name);
+      }
+    }
+
+    auto engine_plan = tensorrt::TrtObject(trt_engine->serialize());
+    auto* serialized_engine_arg = op.add_arg();
+    serialized_engine_arg->set_s("");
+    serialized_engine_arg->set_name("serialized_engine");
+    auto* s = serialized_engine_arg->mutable_s();
+    s->assign((char*)engine_plan->data(), engine_plan->size());
+  } else {
+    auto* onnx_model_arg = op.add_arg();
+    onnx_model_arg->set_name("onnx_model");
+    onnx_model_arg->set_s(onnx_model_str);
+
+    // Add the names of the initializer blobs that we want to fetch from the workspace later
+    if (initializtion_list) {
+      auto* initializers_arg = op.add_arg();
+      initializers_arg->set_name("initializers");
+      for (const auto& s: *initializtion_list) {
+        initializers_arg->add_strings(input_mapping_.at(s));
+      }
     }
   }
-
-  auto engine_plan = tensorrt::TrtObject(trt_engine->serialize());
-
-  auto* serialized_engine_arg = op.add_arg();
-  serialized_engine_arg->set_s("");
-  serialized_engine_arg->set_name("serialized_engine");
-  auto* s = serialized_engine_arg->mutable_s();
-  s->assign((char*)engine_plan->data(), engine_plan->size());
 
   auto* max_batch_size_arg = op.add_arg();
   max_batch_size_arg->set_name("max_batch_size");
@@ -344,24 +374,16 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
     onnx_model.mutable_graph()->add_input()->CopyFrom(i);
   }
 
-  // Convert weights to initializing tensors
-  BuildInitializationList(ws, onnx_model.mutable_graph(), &initialization_list);
+  // Convert weights to initializing tensors if we are building serializable trt
+  // op or defer it to construction time of trt op
+  if (build_serializable_op_) {
+    BuildInitializationList(
+        ws, onnx_model.mutable_graph(), &initialization_list);
+  }
 
   // Debug stuff
   if (debug_builder_) {
-    std::ofstream ff("trt.onnx");
-    for (const auto& t : onnx_model.graph().initializer()) {
-      ff << "tensor: " << t.name() << std::endl;
-      ff << "  dims: ";
-      for (auto i : t.dims()) {
-        ff << i << " ";
-      }
-      ff << std::endl;
-      for (auto i : t.float_data()) {
-        ff << "    " << i << std::endl;
-      }
-    }
-    ff.close();
+    DumpModel(onnx_model);
   }
 
   // Onnx model is ready. Call onnx-trt to convert to one trt c2 op
@@ -369,7 +391,7 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
   onnx_model.SerializeToString(&model_str);
   NetDef net_opt;
   auto* op = net_opt.add_op();
-  *op = BuildTrtOp(model_str, output_shape_hints);
+  *op = BuildTrtOp(model_str, output_shape_hints, &initialization_list);
   for (const auto& i : op->input()) {
     net_opt.add_external_input(i);
   }
@@ -482,7 +504,9 @@ void TensorRTTransformer::Transform(
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
   pred_net->Swap(&net_opt);
 
-  PruneUnusedWeights(ws, *pred_net);
+  if (build_serializable_op_) {
+    PruneUnusedWeights(ws, *pred_net);
+  }
 }
 
 } // namespace caffe2
