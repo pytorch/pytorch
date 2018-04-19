@@ -1,0 +1,22 @@
+diff --git a/aten/src/THCUNN/ClassNLLCriterion.cu b/aten/src/THCUNN/ClassNLLCriterion.cu
+index 1043454ff..cedd36021 100644
+--- a/aten/src/THCUNN/ClassNLLCriterion.cu
++++ b/aten/src/THCUNN/ClassNLLCriterion.cu
+@@ -56,7 +56,7 @@ __global__ void ClassNLLCriterion_updateOutput_no_reduce_kernel(
+     assert(cur_target  >= 0 && cur_target  < n_classes);
+     Dtype weight =
+        weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1);
+-    output[index] = -weight * input[index][cur_target];
++    output[index] = -weight * input[index][cur_target].template as<Dtype>();
+   }
+ }
+ 
+@@ -78,7 +78,7 @@ __global__ void ClassNLLCriterion_updateGradInput_no_reduce_kernel(
+     assert(cur_target  >= 0 && cur_target  < n_classes);
+     Dtype weight =
+        weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1);
+-    gradInput[index][cur_target] = -weight * gradOutput[index];
++    gradInput[index][cur_target] = -weight * gradOutput[index].template as<Dtype>();
+   }
+ }
+ 

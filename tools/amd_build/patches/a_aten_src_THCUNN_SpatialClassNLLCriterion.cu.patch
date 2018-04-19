@@ -1,0 +1,13 @@
+diff --git a/aten/src/THCUNN/SpatialClassNLLCriterion.cu b/aten/src/THCUNN/SpatialClassNLLCriterion.cu
+index 83addd09a..80cdfb753 100644
+--- a/aten/src/THCUNN/SpatialClassNLLCriterion.cu
++++ b/aten/src/THCUNN/SpatialClassNLLCriterion.cu
+@@ -62,7 +62,7 @@ __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
+     }
+     Dtype value =
+         -(weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1));
+-    gradInput[b][cur_target][h][w] = value * gradOutput[b][h][w];
++    gradInput[b][cur_target][h][w] = value * gradOutput[b][h][w].template as<Dtype>();
+   }
+ }
+ 

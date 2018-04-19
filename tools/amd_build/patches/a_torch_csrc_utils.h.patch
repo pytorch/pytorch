@@ -1,0 +1,22 @@
+diff --git a/torch/csrc/utils.h b/torch/csrc/utils.h
+index 5756954bc..b3d3b0cd6 100644
+--- a/torch/csrc/utils.h
++++ b/torch/csrc/utils.h
+@@ -9,7 +9,7 @@
+ #include "torch/csrc/utils/python_numbers.h"
+ #include "torch/csrc/utils/python_compat.h"
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ #include <THC/THC.h>
+ #endif
+ 
+@@ -177,7 +177,7 @@ void setBackCompatKeepdimWarn(bool warn);
+ bool getBackCompatKeepdimWarn();
+ bool maybeThrowBackCompatKeepdimWarn(char *func);
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj);
+ #endif
+ 

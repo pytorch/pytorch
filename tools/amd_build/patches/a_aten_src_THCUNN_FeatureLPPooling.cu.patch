@@ -1,0 +1,36 @@
+diff --git a/aten/src/THCUNN/FeatureLPPooling.cu b/aten/src/THCUNN/FeatureLPPooling.cu
+index 4ad190fbe..08c277064 100644
+--- a/aten/src/THCUNN/FeatureLPPooling.cu
++++ b/aten/src/THCUNN/FeatureLPPooling.cu
+@@ -468,6 +468,7 @@ runFeatureLPPoolingUpdateOutput(THCState* state,
+       LP_STRIDE_CASE(4, WIDTH);                 \
+     }
+ 
++#if !defined(__HIP_PLATFORM_HCC__)
+   if (power == 2.0f) {
+     switch (width) {
+       L2_WIDTH_CASE(2);
+@@ -505,6 +506,7 @@ runFeatureLPPoolingUpdateOutput(THCState* state,
+       LP_WIDTH_CASE(16);
+     }
+   }
++#endif
+ 
+   // Otherwise, we have an unhandled width and/or stride.
+   return false;
+@@ -602,6 +604,7 @@ runFeatureLPPoolingUpdateGradInput(THCState* state,
+       LP_STRIDE_CASE(4, WIDTH);                 \
+     }
+ 
++#if !defined(__HIP_PLATFORM_HCC__)
+   if (power == 2.0f) {
+     switch (width) {
+       L2_WIDTH_CASE(2);
+@@ -639,6 +642,7 @@ runFeatureLPPoolingUpdateGradInput(THCState* state,
+       LP_WIDTH_CASE(16);
+     }
+   }
++#endif
+ 
+   // Otherwise, we have an unhandled width and/or stride.
+   return false;

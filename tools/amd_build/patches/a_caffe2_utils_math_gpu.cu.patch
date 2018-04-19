@@ -1,0 +1,258 @@
+diff --git a/caffe2/utils/math_gpu.cu b/caffe2/utils/math_gpu.cu
+index 1b45108ef..a7c73c352 100644
+--- a/caffe2/utils/math_gpu.cu
++++ b/caffe2/utils/math_gpu.cu
+@@ -2013,7 +2013,6 @@ void Im2colNd<float, CUDAContext, StorageOrder::NCHW>(
+       break;
+     case 4:
+       IM2COL_ND_KERNEL(4);
+-      break;
+     case 5:
+       IM2COL_ND_KERNEL(5);
+       break;
+@@ -2418,6 +2417,38 @@ namespace {
+ 
+ constexpr int kCUDATransposeMaxDims = 8;
+ 
++__device__ int GetXIndex(
++    const int ndim,
++    const int* X_strides,
++    const int* Y_dims,
++    int Y_index) {
++  int X_index = 0;
++#pragma unroll
++  for (int i = ndim - 1; i >= 0 && Y_index > 0; --i) {
++    X_index += (Y_index % Y_dims[i]) * X_strides[i];
++    Y_index /= Y_dims[i];
++  }
++  return X_index;
++}
++
++template <typename T, int D>
++__global__ void TransposeCUDAKernel(
++    const int size,
++    const SimpleArray<int, D> X_strides,
++    const SimpleArray<int, D> Y_dims,
++    const T* X,
++    T* Y) {
++  const int ndim = X_strides.size;
++  CUDA_1D_KERNEL_LOOP(Y_index, size) {
++    const int X_index = GetXIndex(ndim, X_strides.data, Y_dims.data, Y_index);
++#if __CUDA_ARCH__ >= 350
++    Y[Y_index] = __ldg(X + X_index);
++#else
++    Y[Y_index] = X[X_index];
++#endif
++  }
++}
++
+ template <typename T, int D>
+ void EigenTransposeCUDAImpl(
+     const int* X_dims,
+@@ -2429,6 +2460,7 @@ void EigenTransposeCUDAImpl(
+   Eigen::DSizes<Eigen::DenseIndex, D> X_dims_array;
+   Eigen::DSizes<Eigen::DenseIndex, D> Y_dims_array;
+   Eigen::array<Eigen::DenseIndex, D> axes_array;
++#pragma unroll
+   for (int i = 0; i < D; ++i) {
+     X_dims_array[i] = static_cast<Eigen::DenseIndex>(X_dims[i]);
+     Y_dims_array[i] = static_cast<Eigen::DenseIndex>(
+@@ -2492,41 +2524,19 @@ bool EigenTransposeCUDA(
+   return false;
+ }
+ 
+-template <typename T, int D>
+-__global__ void TransposeCUDAKernel(
+-    const int size,
+-    const SimpleArray<int, D> X_strides,
+-    const SimpleArray<int, D> Y_dims,
+-    const T* X,
+-    T* Y) {
+-  CUDA_1D_KERNEL_LOOP(Y_index, size) {
+-    int X_index = 0;
+-    int Y_index_val = Y_index;
+-#pragma unroll
+-    for (int i = D - 1; i >= 0; --i) {
+-      X_index += (Y_index_val % Y_dims.data[i]) * X_strides.data[i];
+-      Y_index_val /= Y_dims.data[i];
+-    }
+-#if __CUDA_ARCH__ >= 350
+-    Y[Y_index] = __ldg(X + X_index);
+-#else
+-    Y[Y_index] = X[X_index];
+-#endif
+-  }
+-}
+-
+ template <int D>
+ void ComputeXStride(
++    const int ndim,
+     const int* X_dims,
+     const int* axes,
+     int* X_strides) {
+   int buff[D];
+   int cur_stride = 1;
+-  for (int i = D - 1; i >= 0; --i) {
++  for (int i = ndim - 1; i >= 0; --i) {
+     buff[i] = cur_stride;
+     cur_stride *= X_dims[i];
+   }
+-  for (int i = 0; i < D; ++i) {
++  for (int i = 0; i < ndim; ++i) {
+     X_strides[i] = buff[axes[i]];
+   }
+ }
+@@ -2534,6 +2544,7 @@ void ComputeXStride(
+ template <typename T, int D>
+ void TransposeCUDAImpl(
+     const int size,
++    const int ndim,
+     const int* X_dims,
+     const int* Y_dims,
+     const int* axes,
+@@ -2542,8 +2553,10 @@ void TransposeCUDAImpl(
+     CUDAContext* context) {
+   SimpleArray<int, D> X_strides_array;
+   SimpleArray<int, D> Y_dims_array;
+-  ComputeXStride<D>(X_dims, axes, X_strides_array.data);
+-  for (int i = 0; i < D; ++i) {
++  X_strides_array.size = ndim;
++  ComputeXStride<D>(ndim, X_dims, axes, X_strides_array.data);
++  Y_dims_array.size = ndim;
++  for (int i = 0; i < ndim; ++i) {
+     Y_dims_array.data[i] = Y_dims == nullptr ? X_dims[axes[i]] : Y_dims[i];
+   }
+   TransposeCUDAKernel<T, D>
+@@ -2553,88 +2566,52 @@ void TransposeCUDAImpl(
+          context->cuda_stream()>>>(size, X_strides_array, Y_dims_array, X, Y);
+ }
+ 
+-template <typename T>
+-void TransposeCUDA(
+-    const int size,
+-    const int ndim,
+-    const int* X_dims,
+-    const int* Y_dims,
+-    const int* axes,
+-    const T* X,
+-    T* Y,
+-    CUDAContext* context) {
+-  switch (ndim) {
+-    case 1: {
+-      TransposeCUDAImpl<T, 1>(size, X_dims, Y_dims, axes, X, Y, context);
+-      break;
+-    }
+-    case 2: {
+-      TransposeCUDAImpl<T, 2>(size, X_dims, Y_dims, axes, X, Y, context);
+-      break;
+-    }
+-    case 3: {
+-      TransposeCUDAImpl<T, 3>(size, X_dims, Y_dims, axes, X, Y, context);
+-      break;
+-    }
+-    case 4: {
+-      TransposeCUDAImpl<T, 4>(size, X_dims, Y_dims, axes, X, Y, context);
+-      break;
+-    }
+-    case 5: {
+-      TransposeCUDAImpl<T, 5>(size, X_dims, Y_dims, axes, X, Y, context);
+-      break;
+-    }
+-    case 6: {
+-      TransposeCUDAImpl<T, 6>(size, X_dims, Y_dims, axes, X, Y, context);
+-      break;
+-    }
+-    case 7: {
+-      TransposeCUDAImpl<T, 7>(size, X_dims, Y_dims, axes, X, Y, context);
+-      break;
+-    }
+-    case 8: {
+-      TransposeCUDAImpl<T, 8>(size, X_dims, Y_dims, axes, X, Y, context);
+-      break;
+-    }
+-    default: { break; }
+-  }
+-}
+-
+ } // namespace
+ 
+-#define CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(T)                             \
+-  template <>                                                            \
+-  void Transpose<T, CUDAContext>(                                        \
+-      const int size,                                                    \
+-      const int ndim,                                                    \
+-      const int* dims,                                                   \
+-      const int* axes,                                                   \
+-      const T* X,                                                        \
+-      T* Y,                                                              \
+-      CUDAContext* context) {                                            \
+-    CAFFE_ENFORCE_LE(                                                    \
+-        ndim, kCUDATransposeMaxDims, "ndim exceeds compile time max.");  \
+-    if (EigenTransposeCUDA(ndim, dims, nullptr, axes, X, Y, context)) {  \
+-      return;                                                            \
+-    }                                                                    \
+-    TransposeCUDA<T>(size, ndim, dims, nullptr, axes, X, Y, context);    \
+-  }                                                                      \
+-  template <>                                                            \
+-  void Transpose<T, CUDAContext>(                                        \
+-      const int size,                                                    \
+-      const int ndim,                                                    \
+-      const int* X_dims,                                                 \
+-      const int* Y_dims,                                                 \
+-      const int* axes,                                                   \
+-      const T* X,                                                        \
+-      T* Y,                                                              \
+-      CUDAContext* context) {                                            \
+-    CAFFE_ENFORCE_LE(                                                    \
+-        ndim, kCUDATransposeMaxDims, "ndim exceeds compile time max.");  \
+-    if (EigenTransposeCUDA(ndim, X_dims, Y_dims, axes, X, Y, context)) { \
+-      return;                                                            \
+-    }                                                                    \
+-    TransposeCUDA<T>(size, ndim, X_dims, Y_dims, axes, X, Y, context);   \
++#define CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(T)                                   \
++  template <>                                                                  \
++  void Transpose<T, CUDAContext>(                                              \
++      const int size,                                                          \
++      const int ndim,                                                          \
++      const int* dims,                                                         \
++      const int* axes,                                                         \
++      const T* X,                                                              \
++      T* Y,                                                                    \
++      CUDAContext* context) {                                                  \
++    CAFFE_ENFORCE_LE(                                                          \
++        ndim, kCUDATransposeMaxDims, "ndim exceeds compile time max.");        \
++    if (EigenTransposeCUDA(ndim, dims, nullptr, axes, X, Y, context)) {        \
++      return;                                                                  \
++    }                                                                          \
++    if (ndim <= 4) {                                                           \
++      TransposeCUDAImpl<T, 4>(size, ndim, dims, nullptr, axes, X, Y, context); \
++    } else {                                                                   \
++      TransposeCUDAImpl<T, kCUDATransposeMaxDims>(                             \
++          size, ndim, dims, nullptr, axes, X, Y, context);                     \
++    }                                                                          \
++  }                                                                            \
++  template <>                                                                  \
++  void Transpose<T, CUDAContext>(                                              \
++      const int size,                                                          \
++      const int ndim,                                                          \
++      const int* X_dims,                                                       \
++      const int* Y_dims,                                                       \
++      const int* axes,                                                         \
++      const T* X,                                                              \
++      T* Y,                                                                    \
++      CUDAContext* context) {                                                  \
++    CAFFE_ENFORCE_LE(                                                          \
++        ndim, kCUDATransposeMaxDims, "ndim exceeds compile time max.");        \
++    if (EigenTransposeCUDA(ndim, X_dims, Y_dims, axes, X, Y, context)) {       \
++      return;                                                                  \
++    }                                                                          \
++    if (ndim <= 4) {                                                           \
++      TransposeCUDAImpl<T, 4>(                                                 \
++          size, ndim, X_dims, Y_dims, axes, X, Y, context);                    \
++    } else {                                                                   \
++      TransposeCUDAImpl<T, kCUDATransposeMaxDims>(                             \
++          size, ndim, X_dims, Y_dims, axes, X, Y, context);                    \
++    }                                                                          \
+   }
+ CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(float)
+ CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(double)

@@ -1,0 +1,12 @@
+diff --git a/aten/src/THCUNN/SmoothL1Criterion.cu b/aten/src/THCUNN/SmoothL1Criterion.cu
+index 8e35599ba..8b32c9246 100644
+--- a/aten/src/THCUNN/SmoothL1Criterion.cu
++++ b/aten/src/THCUNN/SmoothL1Criterion.cu
+@@ -70,6 +70,7 @@ struct smoothl1_updateGradInput_functor
+   const Dtype norm;
+   const Dtype gradOutput;
+ 
++  __host__ __device__
+   smoothl1_updateGradInput_functor(Dtype norm_, Dtype gradOutput_)
+     : norm(norm_), gradOutput(gradOutput_)
+   {}

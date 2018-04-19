@@ -1,0 +1,12 @@
+diff --git a/aten/src/ATen/test/scalar_test.cpp b/aten/src/ATen/test/scalar_test.cpp
+index ca3c865f4..83da70e0b 100644
+--- a/aten/src/ATen/test/scalar_test.cpp
++++ b/aten/src/ATen/test/scalar_test.cpp
+@@ -146,5 +146,7 @@ TEST_CASE( "scalar test", "[]" ) {
+   auto float_one = ones(T, {});
+   REQUIRE(float_one.toCFloat() == 1);
+   REQUIRE(float_one.toCInt() == 1);
++#if !defined(__HIP_PLATFORM_HCC__)
+   REQUIRE((float_one.toCHalf() == 1));
++#endif
+ }

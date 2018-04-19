@@ -1,0 +1,89 @@
+diff --git a/tools/build_pytorch_libs.sh b/tools/build_pytorch_libs.sh
+index cf856421a..cd85e05b2 100755
+--- a/tools/build_pytorch_libs.sh
++++ b/tools/build_pytorch_libs.sh
+@@ -12,9 +12,13 @@ set -ex
+ 
+ # Options for building only a subset of the libraries
+ WITH_CUDA=0
++WITH_ROCM=0
+ if [[ "$1" == "--with-cuda" ]]; then
+   WITH_CUDA=1
+   shift
++elif [[ "$1" == "--with-rocm" ]]; then
++  WITH_ROCM=1
++  shift
+ fi
+ 
+ WITH_NNPACK=0
+@@ -74,13 +78,13 @@ C_FLAGS="${C_FLAGS} -DOMPI_SKIP_MPICXX=1"
+ LDFLAGS="-L\"$INSTALL_DIR/lib\" "
+ LD_POSTFIX=".so.1"
+ LD_POSTFIX_UNVERSIONED=".so"
+-if [[ $(uname) == 'Darwin' ]]; then
+-    LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
+-    LD_POSTFIX=".1.dylib"
+-    LD_POSTFIX_UNVERSIONED=".dylib"
+-else
+-    LDFLAGS="$LDFLAGS -Wl,-rpath,\$ORIGIN"
+-fi
++# if [[ $(uname) == 'Darwin' ]]; then
++#     LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
++#     LD_POSTFIX=".1.dylib"
++#     LD_POSTFIX_UNVERSIONED=".dylib"
++# else
++#     LDFLAGS="$LDFLAGS -Wl,-rpath,\$ORIGIN"
++# fi
+ CPP_FLAGS=" -std=c++11 "
+ GLOO_FLAGS=""
+ THD_FLAGS=""
+@@ -179,6 +183,36 @@ function build() {
+   fi
+ }
+ 
++function build_rocm_aten() {
++  mkdir -p build
++  pushd build
++  ${CMAKE_VERSION} .. \
++  ${CMAKE_GENERATOR} \
++      -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
++      -DNO_CUDA=$((1-$WITH_CUDA)) \
++      -DNO_NNPACK=$((1-$WITH_NNPACK)) \
++      -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
++      -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
++      -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
++      -DNO_MKLDNN=$((1-$WITH_MKLDNN)) \
++      -DMKLDNN_INCLUDE_DIR=$MKLDNN_INCLUDE_DIR \
++      -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
++      -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
++      -DATEN_NO_CONTRIB=1 \
++      -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
++      -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
++      -DCMAKE_C_FLAGS="$USER_CFLAGS" \
++      -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
++      -DCMAKE_EXE_LINKER_FLAGS="$USER_LDFLAGS" \
++      -DWITH_ROCM=1 \
++      -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
++      # STOP!!! Are you trying to add a C or CXX flag?  Add it
++      # to aten/CMakeLists.txt, not here.  We need the vanilla
++      # cmake build to work.
++  ${CMAKE_INSTALL} -j"$NUM_JOBS"
++  popd
++}
++
+ function build_nccl() {
+   mkdir -p build/nccl
+   pushd build/nccl
+@@ -250,7 +284,11 @@ for arg in "$@"; do
+         popd
+     elif [[ "$arg" == "ATen" ]]; then
+         pushd "$BASE_DIR/aten"
+-        build_aten
++        if [[ $WITH_ROCM -eq 1 ]]; then
++          build_rocm_aten
++        else
++          build_aten
++        fi
+         popd
+     elif [[ "$arg" == "THD" ]]; then
+         pushd "$TORCH_LIB_DIR"

@@ -1,0 +1,12 @@
+diff --git a/torch/lib/THD/base/Cuda.hpp b/torch/lib/THD/base/Cuda.hpp
+index 260eea69f..3c7516ff8 100644
+--- a/torch/lib/THD/base/Cuda.hpp
++++ b/torch/lib/THD/base/Cuda.hpp
+@@ -1,6 +1,6 @@
+ #pragma once
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ #include <THC/THC.h>
+ #include "Cuda.h"
+ 

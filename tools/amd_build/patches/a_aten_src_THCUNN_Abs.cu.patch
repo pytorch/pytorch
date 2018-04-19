@@ -1,0 +1,13 @@
+diff --git a/aten/src/THCUNN/Abs.cu b/aten/src/THCUNN/Abs.cu
+index f3c7592e2..8a5346879 100644
+--- a/aten/src/THCUNN/Abs.cu
++++ b/aten/src/THCUNN/Abs.cu
+@@ -8,7 +8,7 @@ struct absupdateOutput_functor
+ {
+   __device__ void operator()(T* output, const T* input) const
+   {
+-    *output = abs(*input);
++    *output = fabs(*input);
+   }
+ };
+ 

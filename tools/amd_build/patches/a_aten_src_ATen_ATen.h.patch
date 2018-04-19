@@ -1,0 +1,9 @@
+diff --git a/aten/src/ATen/ATen.h b/aten/src/ATen/ATen.h
+index e41c2d956..0c94ab2e1 100644
+--- a/aten/src/ATen/ATen.h
++++ b/aten/src/ATen/ATen.h
+@@ -1,3 +1,4 @@
++#include "hip/hip_runtime.h" 
+ #pragma once
+ 
+ #include "ATen/ATenGeneral.h"

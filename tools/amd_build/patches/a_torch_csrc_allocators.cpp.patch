@@ -1,0 +1,13 @@
+diff --git a/torch/csrc/allocators.cpp b/torch/csrc/allocators.cpp
+index 15e4f8712..fa1d0173f 100644
+--- a/torch/csrc/allocators.cpp
++++ b/torch/csrc/allocators.cpp
+@@ -59,7 +59,7 @@ THAllocator THStorageWeakRefAllocator = {
+   free_wrapper<StorageWeakRefAllocator>,
+ };
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ cudaError_t CudaStorageWeakRefAllocator::malloc(void** ptr, size_t size, cudaStream_t stream) {
+   THError("CudaStorageWeakRefAllocator: malloc not supported");
+   return cudaSuccess;

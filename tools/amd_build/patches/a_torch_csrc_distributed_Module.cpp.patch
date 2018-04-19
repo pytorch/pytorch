@@ -1,0 +1,66 @@
+diff --git a/torch/csrc/distributed/Module.cpp b/torch/csrc/distributed/Module.cpp
+index a04fdf1bc..2c8b71d49 100644
+--- a/torch/csrc/distributed/Module.cpp
++++ b/torch/csrc/distributed/Module.cpp
+@@ -9,7 +9,7 @@
+ #include "torch/csrc/PythonTypes.h"
+ #include "torch/csrc/autograd/python_variable.h"
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ #include "torch/csrc/cuda/Stream.h"
+ #endif
+ 
+@@ -82,7 +82,7 @@ static bool THDPModule_assignStateless(PyObject *self)
+ static std::unordered_map<PyObject*, THDReduceOp> obj2reduceop;
+ static std::unordered_map<PyObject*, THDGroup> obj2group;
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ extern THCState* state;
+ #endif
+ 
+@@ -109,7 +109,7 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *args)
+     AutoNoGIL nogil;
+     THDProcessGroupInit(channel_type, init_method, world_size, group_name, rank);
+   }
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+   THDSetCudaStatePtr(&state);
+ #endif
+   Py_RETURN_NONE;
+@@ -149,14 +149,14 @@ PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
+     AutoNoGIL nogil;
+     THDMasterWorkerInit(channel_type, init_method, world_size, group_name, rank);
+   }
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+   THDSetCudaStatePtr(&state);
+ #endif
+   Py_RETURN_NONE;
+   END_HANDLE_TH_ERRORS
+ }
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ PyObject* THDPModule_registerStream(PyObject *_unused, PyObject *_stream)
+ {
+   HANDLE_TH_ERRORS
+@@ -183,7 +183,7 @@ PyObject* THDPModule_getNumProcesses(PyObject *_unused)
+   END_HANDLE_TH_ERRORS
+ }
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ extern PyObject* THCPDoubleTensorClass;
+ extern PyObject* THCPFloatTensorClass;
+ extern PyObject* THCPHalfTensorClass;
+@@ -981,7 +981,7 @@ static struct PyMethodDef _THDPModule_methods[] = {
+   {"_dist_destroy_process_group", (PyCFunction)THDPModule_destroyProcessGroup, METH_NOARGS, NULL},
+   {"_dist_clear_group_cache", (PyCFunction)THDPModule_clearGroupCache, METH_VARARGS, NULL},
+   {"_dist_init_master_worker", (PyCFunction)THDPModule_initMasterWorker, METH_VARARGS, NULL},
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+   {"_dist_register_stream", (PyCFunction)THDPModule_registerStream, METH_O, NULL},
+ #endif
+   {"_dist_get_rank", (PyCFunction)THDPModule_getRank, METH_NOARGS, NULL},

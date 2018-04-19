@@ -1,0 +1,13 @@
+diff --git a/torch/lib/THD/base/Cuda.cpp b/torch/lib/THD/base/Cuda.cpp
+index 5e83aaffb..879240896 100644
+--- a/torch/lib/THD/base/Cuda.cpp
++++ b/torch/lib/THD/base/Cuda.cpp
+@@ -1,7 +1,7 @@
+ #include "Cuda.hpp"
+ #include <unordered_map>
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ THCState** _THDCudaState;
+ 
+ void THDSetCudaStatePtr(THCState **state) {
