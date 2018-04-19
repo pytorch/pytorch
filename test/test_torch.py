@@ -4558,8 +4558,8 @@ class TestTorch(TestCase):
                 return npt
 
             def assert_get_eq(tensor, indexer):
-                self.assertEqual(reference[indexer],
-                                 conv_fn(get_numpy(reference, indexer)))
+                self.assertEqual(tensor[indexer],
+                                 conv_fn(get_numpy(tensor, indexer)))
 
             def assert_set_eq(tensor, indexer, val):
                 pyt = tensor.clone()
@@ -4613,11 +4613,9 @@ class TestTorch(TestCase):
                 [slice(None), [0, 2, 3], [1, 3, 4]],
                 [slice(None), [0], [1, 2, 4]],
                 [slice(None), [0, 1, 3], [4]],
-                [slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
                 [slice(None), [[0, 1], [1, 0]], [[2, 3]]],
                 [slice(None), [[0, 1], [2, 3]], [[0]]],
                 [slice(None), [[5, 6]], [[0, 3], [4, 4]]],
-                [slice(None), [[2]], [[0, 3], [4, 4]]],
                 [[0, 2, 3], [1, 3, 4], slice(None)],
                 [[0], [1, 2, 4], slice(None)],
                 [[0, 1, 3], [4], slice(None)],
