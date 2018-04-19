@@ -1,5 +1,5 @@
 torch.utils.bottleneck
-===============
+======================
 
 .. currentmodule:: torch.utils.bottleneck
 
