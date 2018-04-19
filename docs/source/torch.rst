@@ -16,6 +16,18 @@ Tensors
 
 Creation Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+    Random sampling creation ops are listed under :ref:`random-sampling` and
+    include:
+    :func:`torch.rand`
+    :func:`torch.rand_like`
+    :func:`torch.randn`
+    :func:`torch.randn_like`
+    :func:`torch.randint`
+    :func:`torch.randint_like`
+    :func:`torch.randperm`
+
 .. autofunction:: tensor
 .. autofunction:: from_numpy
 .. autofunction:: zeros
@@ -51,6 +63,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: unsqueeze
 .. autofunction:: where
 
+.. _random-sampling:
 
 Random sampling
 ----------------------------------
@@ -63,7 +76,9 @@ Random sampling
 .. autofunction:: multinomial
 .. autofunction:: normal
 .. autofunction:: rand
+.. autofunction:: rand_like
 .. autofunction:: randint
+.. autofunction:: randint_like
 .. autofunction:: randn
 .. autofunction:: randn_like
 .. autofunction:: randperm
