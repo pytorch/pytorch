@@ -1652,7 +1652,8 @@ class TestTorch(TestCase):
         self.assertNotEqual(a.requires_grad, a.to(requires_grad=True))
         self.assertIs(a, a.to(requires_grad=False))
         b = torch.tensor(5., requires_grad=True) * 5
-        self.assertRaises(RuntimeError, lambda: b.to(requires_grad=False))
+        self.assertFalse(b.to(requires_grad=False).requires_grad)
+        self.assertIsNot(b, b.to(requires_grad=False))
         self.assertIs(b, b.to(requires_grad=True))
 
         # requires grad with dtype
@@ -1662,7 +1663,8 @@ class TestTorch(TestCase):
             self.assertNotEqual(a.requires_grad, a.to(dtype, requires_grad=True))
             self.assertEqual(a.requires_grad, a.to(dtype, requires_grad=False).requires_grad)
             b = torch.tensor(5., requires_grad=True) * 5
-            self.assertRaises(RuntimeError, lambda: b.to(dtype, requires_grad=False))
+            self.assertFalse(b.to(dtype, requires_grad=False).requires_grad)
+            self.assertTrue(b.requires_grad)
             self.assertEqual(b.requires_grad, b.to(dtype, requires_grad=True).requires_grad)
 
         # requires_grad with device
@@ -1672,8 +1674,9 @@ class TestTorch(TestCase):
             self.assertEqual(a.requires_grad, a.to(device, requires_grad=False).requires_grad)
             self.assertEqual(a.requires_grad, a.to(device, other_dtype, requires_grad=False).requires_grad)
             b = torch.tensor(5., requires_grad=True) * 5
-            self.assertRaises(RuntimeError, lambda: b.to(device, requires_grad=False))
-            self.assertRaises(RuntimeError, lambda: b.to(device, other_dtype, requires_grad=False))
+            self.assertFalse(b.to(device, requires_grad=False).requires_grad)
+            self.assertFalse(b.to(device, other_dtype, requires_grad=False).requires_grad)
+            self.assertTrue(b.requires_grad)
             self.assertEqual(b.requires_grad, b.to(device, requires_grad=True).requires_grad)
             self.assertEqual(b.requires_grad, b.to(device, other_dtype, requires_grad=True).requires_grad)
 

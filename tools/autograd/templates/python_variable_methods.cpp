@@ -531,23 +531,16 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
 
 // Cases:
 // 1) arg matches self -> no-op
-// 2) arg is true, self doesn't requires_grad -> do the equivalent of detach() and set_requires_grad.
-// 3) arg is false, self requires_grad -> valid if self is a leaf.
+// 2) else-> do the equivalent of detach() and set_requires_grad.
 static Variable as_requires_grad(Tensor self, bool requires_grad) {
   auto& self_ = static_cast<torch::autograd::Variable&>(self);
   auto self_requires_grad = self_.requires_grad();
   if (self_requires_grad == requires_grad) {
     return self_;
-  } else if (requires_grad) {
-    auto res = make_variable(self_.data(), /*requires_grad=*/true);
+  } else {
+    auto res = make_variable(self_.data(), requires_grad);
     res.set_version_counter(self_.version_counter());
     return res;
-  } else {
-    if (!self_.is_leaf()) {
-      throw std::runtime_error(requires_grad_leaf_error(requires_grad));
-    }
-    self_.set_requires_grad(requires_grad);
-    return self_;
   }
 }
 
