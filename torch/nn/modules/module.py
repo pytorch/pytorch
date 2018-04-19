@@ -274,13 +274,28 @@ class Module(object):
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
 
-        This can be called with a :attr:`device` argument and/or a :attr:`dtype`
-        argument. It has similar signature as :meth:`torch.Tensor.to`, except
-        that this method doesn't take in :attr:`requires_grad` and only takes in
-        floating point :attr:`dtype` s. In particular, this method will only
-        cast the floating point parameters and buffers to :attr:`dtype`. It will
-        still move the integral parameters and buffers to :attr:`device`, if
-        that is given. See below for examples.
+        This can be called as
+
+        .. function:: to(device)
+
+        .. function:: to(dtype)
+
+        .. function:: to(device, dtype)
+
+        It has similar signature as :meth:`torch.Tensor.to`, but does not take
+        a Tensor and only takes in floating point :attr:`dtype` s. In
+        particular, this method will only cast the floating point parameters and
+        buffers to :attr:`dtype`. It will still move the integral parameters and
+        buffers to :attr:`device`, if that is given. See below for examples.
+
+        .. note::
+            This method modifies the module in-place.
+
+        Args:
+            device (:class:`torch.device`): the desired device of the parameters
+                and buffers in this module
+            dtype (:class:`torch.dtype`): the desired floating point type of
+                the floating point parameters and buffers in this module
 
         Returns:
             Module: self
@@ -289,34 +304,29 @@ class Module(object):
 
             >>> linear = nn.Linear(2, 2)
             >>> linear.weight
-
-            -0.1106  0.0493
-             0.1250 -0.5175
-            [torch.FloatTensor of size (2,2)]
-
+            Parameter containing:
+            tensor([[ 0.1913, -0.3420],
+                    [-0.5113, -0.2325]])
             >>> linear.to(torch.double)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
-
-            -0.1106  0.0493
-             0.1250 -0.5175
-            [torch.DoubleTensor of size (2,2)]
-
-            >>> linear.to(torch.device("cuda"), dtype=torch.half)
+            Parameter containing:
+            tensor([[ 0.1913, -0.3420],
+                    [-0.5113, -0.2325]], dtype=torch.float64)
+            >>> gpu1 = torch.device("cuda:1")
+            >>> linear.to(gpu1, dtype=torch.half)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
-
-            -0.1107  0.0493
-             0.1250 -0.5176
-            [torch.cuda.HalfTensor of size (2,2) (GPU 0)]
-
-            >>> linear.to("cpu")  # can also use string to represent device
+            Parameter containing:
+            tensor([[ 0.1914, -0.3420],
+                    [-0.5112, -0.2324]], dtype=torch.float16, device='cuda:1')
+            >>> cpu = torch.device("cpu")
+            >>> linear.to(cpu)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
-
-            -0.1107  0.0493
-             0.1250 -0.5176
-            [torch.HalfTensor of size (2,2)]
+            Parameter containing:
+            tensor([[ 0.1914, -0.3420],
+                    [-0.5112, -0.2324]], dtype=torch.float16)
 
         """
         def arg_error():
