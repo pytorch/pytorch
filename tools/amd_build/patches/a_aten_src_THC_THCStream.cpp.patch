@@ -1,0 +1,15 @@
+diff --git a/aten/src/THC/THCStream.cpp b/aten/src/THC/THCStream.cpp
+index 49fe680a3..0e8c29fcf 100644
+--- a/aten/src/THC/THCStream.cpp
++++ b/aten/src/THC/THCStream.cpp
+@@ -37,7 +37,9 @@ THCStream* THCStream_newWithPriority(int flags, int priority)
+   THCStream* self = (THCStream*) malloc(sizeof(THCStream));
+   self->refcount = 1;
+   THCudaCheck(cudaGetDevice(&self->device));
+-  THCudaCheck(cudaStreamCreateWithPriority(&self->stream, flags, priority));
++#if !defined(__HIP_PLATFORM_HCC__)
++  THCudaCheck(cudaStreamCreateWithFlags(&self->stream, flags));
++#endif
+   return self;
+ }
+ 

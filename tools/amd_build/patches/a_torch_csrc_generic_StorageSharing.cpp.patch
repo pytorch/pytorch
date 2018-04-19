@@ -1,0 +1,28 @@
+diff --git a/torch/csrc/generic/StorageSharing.cpp b/torch/csrc/generic/StorageSharing.cpp
+index 5de9e7e4d..333bc803a 100644
+--- a/torch/csrc/generic/StorageSharing.cpp
++++ b/torch/csrc/generic/StorageSharing.cpp
+@@ -1,8 +1,14 @@
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ #include <cuda.h>
+ #include <cuda_runtime.h>
+ #endif
+ 
++#if defined(__HIP_PLATFORM_HCC__)
++  #undef PyBytes_AS_STRING(op)
++  #undef PyBytes_GET_SIZE(op)
++  #define PyBytes_AS_STRING(op) (((PyBytesObject *)(op))->ob_sval)
++  #define PyBytes_GET_SIZE(op)  Py_SIZE(op)
++#endif
+ 
+ static PyObject * THPStorage_(sharedDecref)(THPStorage *self)
+ {
+@@ -253,6 +259,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
+     THCudaCheck(cudaIpcGetMemHandle(&handle, base_ptr));
+ 
+     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
++
+     _offset = PyLong_FromSsize_t((Py_ssize_t)offset);
+     size = PyLong_FromSize_t(base_size / sizeof(real));
+   }

@@ -1,0 +1,23 @@
+diff --git a/aten/src/ATen/native/cuda/CuFFTUtils.h b/aten/src/ATen/native/cuda/CuFFTUtils.h
+index 9048734ef..56c3c565a 100644
+--- a/aten/src/ATen/native/cuda/CuFFTUtils.h
++++ b/aten/src/ATen/native/cuda/CuFFTUtils.h
+@@ -6,8 +6,9 @@
+ #include <string>
+ #include <stdexcept>
+ #include <sstream>
+-#include <cufft.h>
+-#include <cufftXt.h>
++
++
++#if !defined(__HIP_PLATFORM_HCC__)
+ 
+ 
+ namespace at { namespace native {
+@@ -82,3 +83,5 @@ private:
+ };
+ 
+ }} // at::native
++
++#endif
+\ No newline at end of file

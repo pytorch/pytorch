@@ -1,0 +1,20 @@
+diff --git a/aten/src/THCUNN/SparseLinear.cu b/aten/src/THCUNN/SparseLinear.cu
+index 9110bbcac..596c970f7 100644
+--- a/aten/src/THCUNN/SparseLinear.cu
++++ b/aten/src/THCUNN/SparseLinear.cu
+@@ -2,6 +2,7 @@
+ #include "THCHalf.h"
+ #include "THCHalfAutoNumerics.cuh"
+ 
++#if defined(__NVCC__)
+ #include <cusparse.h>
+ 
+ static cusparseHandle_t cusparse_handle = 0;
+@@ -14,6 +15,7 @@ static void init_cusparse() {
+     }
+   }
+ }
++#endif
+ 
+ #ifdef CUDA_HALF_TENSOR
+ void THNN_CudaHalfSparseLinear_updateOutput(

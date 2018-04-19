@@ -1,0 +1,11 @@
+diff --git a/aten/src/ATen/native/cuda/TensorCompare.cu b/aten/src/ATen/native/cuda/TensorCompare.cu
+index b4c551132..4600aa03f 100644
+--- a/aten/src/ATen/native/cuda/TensorCompare.cu
++++ b/aten/src/ATen/native/cuda/TensorCompare.cu
+@@ -1,5 +1,5 @@
+ #include "ATen/NativeFunctions.h"
+-#include "ATen/Dispatch.h"
++
+ 
+ #include "ATen/cuda/CUDAApplyUtils.cuh"
+ #include "ATen/cuda/CUDATensorMethods.cuh"

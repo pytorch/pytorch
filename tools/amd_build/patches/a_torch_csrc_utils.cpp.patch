@@ -1,0 +1,22 @@
+diff --git a/torch/csrc/utils.cpp b/torch/csrc/utils.cpp
+index 48d04ac14..3517ecab1 100644
+--- a/torch/csrc/utils.cpp
++++ b/torch/csrc/utils.cpp
+@@ -17,7 +17,7 @@
+ #include "generic/utils.cpp"
+ #include <TH/THGenerateHalfType.h>
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ #include "torch/csrc/cuda/THCP.h"
+ #endif
+ 
+@@ -232,7 +232,7 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
+   return true;
+ }
+ 
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj) {
+   if (!PySequence_Check(obj)) {
+     throw std::runtime_error("Expected a sequence in THPUtils_PySequence_to_THCStreamList");

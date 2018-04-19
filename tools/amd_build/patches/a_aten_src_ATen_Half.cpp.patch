@@ -1,0 +1,16 @@
+diff --git a/aten/src/ATen/Half.cpp b/aten/src/ATen/Half.cpp
+index 465799194..9761a9718 100644
+--- a/aten/src/ATen/Half.cpp
++++ b/aten/src/ATen/Half.cpp
+@@ -25,6 +25,11 @@ template<> AT_API double convert(Half f) {
+   return convert<float, Half>(f);
+ }
+ 
++template<> AT_API __fp16 convert(Half f) {
++  __fp16 h = reinterpret_cast<__fp16&>(f.x);
++  return h;
++}
++
+ template<> AT_API Half convert(int64_t f) {
+   return convert<Half,double>(static_cast<double>(f));
+ }

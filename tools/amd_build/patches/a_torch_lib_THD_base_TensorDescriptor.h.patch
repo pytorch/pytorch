@@ -1,0 +1,22 @@
+diff --git a/torch/lib/THD/base/TensorDescriptor.h b/torch/lib/THD/base/TensorDescriptor.h
+index 66ef02ca3..46b6badbd 100644
+--- a/torch/lib/THD/base/TensorDescriptor.h
++++ b/torch/lib/THD/base/TensorDescriptor.h
+@@ -2,7 +2,7 @@
+ 
+ #include "../THD.h"
+ #include <TH/TH.h>
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ #include <THC/THC.h>
+ #endif
+ 
+@@ -18,7 +18,7 @@ THDTensorDescriptor THDTensorDescriptor_newFromTHIntTensor(THIntTensor *tensor);
+ THDTensorDescriptor THDTensorDescriptor_newFromTHShortTensor(THShortTensor *tensor);
+ THDTensorDescriptor THDTensorDescriptor_newFromTHCharTensor(THCharTensor *tensor);
+ THDTensorDescriptor THDTensorDescriptor_newFromTHByteTensor(THByteTensor *tensor);
+-#ifdef WITH_CUDA
++#ifdef WITH_ROCM
+ THDTensorDescriptor THDTensorDescriptor_newFromTHCudaDoubleTensor(THCudaDoubleTensor *tensor);
+ THDTensorDescriptor THDTensorDescriptor_newFromTHCudaFloatTensor(THCudaTensor *tensor);
+ THDTensorDescriptor THDTensorDescriptor_newFromTHCudaHalfTensor(THCudaHalfTensor *tensor);
