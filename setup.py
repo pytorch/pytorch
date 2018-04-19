@@ -133,6 +133,8 @@ if check_env_flag('WITH_ROCM'):
 
     # If using ROCM stack disable distributed for now
     WITH_DISTRIBUTED = False
+else:
+    WITH_ROCM = False
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")

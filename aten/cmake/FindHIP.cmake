@@ -1,6 +1,3 @@
-# Find the HIP Package
-FIND_PACKAGE(HIP 1.0 REQUIRED)
-
 # HIP_PATH
 IF(NOT DEFINED $ENV{HIP_PATH})
   SET(HIP_PATH /opt/rocm/hip)
@@ -43,3 +40,6 @@ set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
 
 # Disable Asserts In Code
 ADD_DEFINITIONS(-DNDEBUG)
+
+# Find the HIP Package
+FIND_PACKAGE(HIP 1.0 REQUIRED)

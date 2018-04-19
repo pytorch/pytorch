@@ -4,7 +4,7 @@ import os
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
-out_dir = os.path.join(os.path.dirname(proj_dir), "/pytorch_amd")
+out_dir = os.path.join(os.path.dirname(proj_dir), "pytorch_amd")
 exclude_dirs = [
     "aten/src/TH",
     "aten/src/THNN",
@@ -30,8 +30,9 @@ for root, directories, files in os.walk(os.path.join(amd_build_dir, "hip_files")
             shutil.copy(source, destination)
 
 # Apply patch files.
+patch_folder = os.path.join(amd_build_dir, "patches")
 for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
-    subprocess.Popen(["git", "apply", os.path.join(amd_build_dir, filename)], amd_build_dir=out_dir)
+    subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=out_dir)
 
 # Execute the Hipify Script.
 subprocess.Popen(
