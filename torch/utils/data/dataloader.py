@@ -366,17 +366,21 @@ class _DataLoaderIter(object):
             if not self.shutdown:
                 self.shutdown = True
                 self.done_event.set()
-                # if worker_manager_thread is waiting to put, make place for it
-                try:
-                    while not self.data_queue.empty():
-                        self.data_queue.get()
-                except FileNotFoundError:
-                    # FileNotFoundError can happen when we rebuild the fd
-                    # fetched from the queue but the socket is already closed
-                    # from the worker side (e.g. due to Python shutting down).
-                    pass
                 for q in self.index_queues:
                     q.put(None)
+                # if some workers are waiting to put, make place for them
+                try:
+                    while not self.worker_result_queue.empty():
+                        self.worker_result_queue.get()
+                except (FileNotFoundError, ImportError):
+                    # Many weird errors can happen here due to Python
+                    # shutting down. These are more like obscure Python bugs.
+                    # FileNotFoundError can happen when we rebuild the fd
+                    # fetched from the queue but the socket is already closed
+                    # from the worker side.
+                    # ImportError can happen when the unpickler loads the
+                    # resource from `get`.
+                    pass
                 # done_event should be sufficient to exit worker_manager_thread,
                 # but be safe here and put another None
                 self.worker_result_queue.put(None)
