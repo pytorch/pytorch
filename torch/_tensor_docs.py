@@ -1797,6 +1797,115 @@ t_() -> Tensor
 In-place version of :meth:`~Tensor.t`
 """)
 
+add_docstr_all('to',
+               r"""
+to(*args, **kwargs) -> Tensor
+
+Performs Tensor dtype and/or device conversion. A ``dtype`` and ``device`` are
+inferred from the arguments of ``self.to(*args, **kwargs)``.
+
+.. note::
+
+    If the ``self`` Tensor already
+    has the correct ``dtype`` and ``device``, then ``self`` is returned.
+    Otherwise, the returned tensor is a copy of ``self`` with the desired
+    ``dtype`` and ``device``.
+
+Here are the ways to call ``to``:
+
+.. function:: to(dtype) -> Tensor
+
+    Returns a Tensor with the specified :attr:`dtype`
+
+.. function:: to(device, dtype=None) -> Tensor
+
+    Returns a Tensor with the specified :attr:`device` and (optional)
+    :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
+
+.. function:: to(other) -> Tensor
+
+    Returns a Tensor with same ``dtype`` and ``device`` as the Tensor
+    :attr:`other`.
+
+Example::
+
+    >>> tensor = torch.randn(2, 2)  # Initially dtype=float32, device=cpu
+    >>> tensor.to(torch.float64)
+    tensor([[ 0.4358,  2.3592],
+            [-0.7368,  0.2106]], dtype=torch.float64)
+
+    >>> cuda0 = torch.device('cuda:0')
+    >>> tensor.to(cuda0)
+    tensor([[ 0.4358,  2.3592],
+            [-0.7368,  0.2106]], device='cuda:0')
+
+    >>> tensor.to(cuda0, dtype=torch.float64)
+    tensor([[ 0.4358,  2.3592],
+            [-0.7368,  0.2106]], dtype=torch.float64, device='cuda:0')
+
+    >>> other = torch.randn((), dtype=torch.float64, device=cuda0)
+    >>> tensor.to(other)
+    tensor([[ 0.4358,  2.3592],
+            [-0.7368,  0.2106]], dtype=torch.float64, device='cuda:0')
+
+""")
+
+add_docstr_all('byte',
+               r"""
+byte() -> Tensor
+
+``self.byte()`` is equivalent to ``self.to(torch.uint8)``. See :func:`to`.
+""")
+
+add_docstr_all('char',
+               r"""
+char() -> Tensor
+
+``self.char()`` is equivalent to ``self.to(torch.int8)``. See :func:`to`.
+""")
+
+add_docstr_all('double',
+               r"""
+double() -> Tensor
+
+``self.double()`` is equivalent to ``self.to(torch.float64)``. See :func:`to`.
+""")
+
+add_docstr_all('float',
+               r"""
+float() -> Tensor
+
+``self.float()`` is equivalent to ``self.to(torch.float32)``. See :func:`to`.
+""")
+
+add_docstr_all('half',
+               r"""
+half() -> Tensor
+
+``self.half()`` is equivalent to ``self.to(torch.float16)``. See :func:`to`.
+""")
+
+add_docstr_all('int',
+               r"""
+int() -> Tensor
+
+``self.int()`` is equivalent to ``self.to(torch.int32)``. See :func:`to`.
+""")
+
+add_docstr_all('long',
+               r"""
+long() -> Tensor
+
+``self.long()`` is equivalent to ``self.to(torch.int64)``. See :func:`to`.
+""")
+
+add_docstr_all('short',
+               r"""
+short() -> Tensor
+
+``self.short()`` is equivalent to ``self.to(torch.int16)``. See :func:`to`.
+""")
+
 add_docstr_all('take',
                r"""
 take(indices) -> Tensor

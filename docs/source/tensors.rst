@@ -103,7 +103,7 @@ view of a storage and defines numeric operations on it.
 .. class:: Tensor()
 
    There are a few main ways to create a tensor, depending on your use case.
-   
+
    - To create a tensor with pre-existing data, use :func:`torch.tensor`.
    - To create a tensor with specific size, use ``torch.*`` tensor creation
      ops (see :ref:`tensor-creation-ops`).
@@ -342,6 +342,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_
+   .. automethod:: to
    .. automethod:: take
    .. automethod:: tan
    .. automethod:: tan_
