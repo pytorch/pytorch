@@ -2620,7 +2620,7 @@ class TestNN(NNTestCase):
         del old_state_dict['block.conv1.bias']
         del old_state_dict['bn.running_mean']
         for k, v, in old_state_dict.items():
-            self.assertEqual(v, new_state_dict[k])
+            self.assertTrue(v.equal(new_state_dict[k]))
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
