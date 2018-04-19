@@ -31,22 +31,18 @@ A tensor can be constructed from a Python :class:`list` or sequence using the
 ::
 
     >>> torch.tensor([[1., -1.], [1., -1.]])
-
-     1 -1
-     1 -1
-    [torch.FloatTensor of size (2,2)]
-
+    tensor([[ 1.0000, -1.0000],
+            [ 1.0000, -1.0000]])
     >>> torch.tensor(np.array([[1, 2, 3], [4, 5, 6]]))
-
-     1 -1
-     1 -1
-    [torch.FloatTensor of size (2,2)]
+    tensor([[ 1,  2,  3],
+            [ 4,  5,  6]])
 
 .. warning::
 
     :func:`torch.tensor` always copies :attr:`data`. If you have a Tensor
-    ``data`` and want to avoid a copy, use :func:`torch.Tensor.requires_grad_`
-    or :func:`torch.Tensor.detach`.
+    :attr:`data` and just want to change its ``requires_grad`` flag, use
+    :meth:`~torch.Tensor.requires_grad_` or
+    :meth:`~torch.Tensor.detach` to avoid a copy.
     If you have a numpy array and want to avoid a copy, use
     :func:`torch.from_numpy`.
 
@@ -57,17 +53,12 @@ constructor or tensor creation op:
 ::
 
     >>> torch.zeros([2, 4], dtype=torch.int32)
-
-    0  0  0  0
-    0  0  0  0
-    [torch.IntTensor of size 2x4]
-
+    tensor([[ 0,  0,  0,  0],
+            [ 0,  0,  0,  0]], dtype=torch.int32)
     >>> cuda0 = torch.device('cuda:0')
     >>> torch.ones([2, 4], dtype=torch.float64, device=cuda0)
-
-    1  1  1  1
-    1  1  1  1
-    [torch.cuda.DoubleTensor of size 2x4]
+    tensor([[ 1.0000,  1.0000,  1.0000,  1.0000],
+            [ 1.0000,  1.0000,  1.0000,  1.0000]], dtype=torch.float64, device='cuda:0')
 
 The contents of a tensor can be accessed and modified using Python's indexing
 and slicing notation:
@@ -76,14 +67,27 @@ and slicing notation:
 
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6]])
     >>> print(x[1][2])
-
-    6.0
+    tensor(6)
     >>> x[0][1] = 8
     >>> print(x)
+    tensor([[ 1,  8,  3],
+            [ 4,  5,  6]])
 
-     1  8  3
-     4  5  6
-    [torch.FloatTensor of size 2x3]
+Use :meth:`torch.Tensor.item` to get a Python number from a tensor containing a
+single value:
+
+::
+
+    >>> x = torch.tensor([[1]])
+    >>> x
+    tensor([[ 1]])
+    >>> x.item()
+    1
+    >>> x = torch.tensor(2.5)
+    >>> x
+    tensor(2.5000)
+    >>> x.item()
+    2.5
 
 A tensor can be created with :attr:`requires_grad=True` so that
 :mod:`torch.autograd` records operations on them for automatic differentiation.
@@ -93,11 +97,9 @@ A tensor can be created with :attr:`requires_grad=True` so that
     >>> x = torch.tensor([[1., -1.], [1., 1.]], requires_grad=True)
     >>> out = x.pow(2).sum()
     >>> out.backward()
-    >>> out.grad
-
-     2 -2
-     2  2
-    [torch.FloatTensor of size (2,2)]
+    >>> x.grad
+    tensor([[ 2.0000, -2.0000],
+            [ 2.0000,  2.0000]])
 
 Each tensor has an associated :class:`torch.Storage`, which holds its data.
 The tensor class provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
@@ -108,6 +110,10 @@ view of a storage and defines numeric operations on it.
    For example, :func:`torch.FloatTensor.abs_` computes the absolute value
    in-place and returns the modified tensor, while :func:`torch.FloatTensor.abs`
    computes the result in a new tensor.
+
+.. note::
+    To change an existing tensor's ``device`` and/or ``dtype``, consider using
+    :meth:`~torch.Tensor.to` method on the tensor.
 
 .. class:: Tensor()
 
