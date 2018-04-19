@@ -170,17 +170,18 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
 }
 
 static std::vector<Tensor> typeConvertIndices(const Variable& self, const variable_list& indices) {
-  std::vector<Tensor> converted_indices(indices.size());
+  std::vector<Tensor> converted_inds(indices.size());
   int64_t device = self.is_cuda() ? self.get_device() : -1;
-  for(size_t i = 0; i < indices.size(); ++i) {
-    if (indices[i].defined()) {
-      converted_indices[i] = torch::utils::dispatch_type_conversion(indices[i], indices[i].type().toBackend(self.type().backend()), 
-                                                                    device, false);
+  for (size_t i = 0; i < indices.size(); ++i) {
+    const auto &ind = indices[i];
+    if (ind.defined()) {
+      auto& new_type = ind.type().toBackend(self.type().backend());
+      converted_inds[i] = torch::utils::dispatch_type_conversion(ind, new_type, device, false);
     } else {
-      converted_indices[i] = indices[i];
+      converted_inds[i] = indices[i];
     }
   }
-  return converted_indices;
+  return converted_inds;
 }
 
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
