@@ -789,7 +789,6 @@ if WITH_ROCM:
     extra_link_args.append('-Wl,-rpath,' + hip_lib_path)
     extra_compile_args += ['-DWITH_ROCM']
     extra_compile_args += ['-D__HIP_PLATFORM_HCC__']
-
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
