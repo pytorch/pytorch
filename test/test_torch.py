@@ -1650,11 +1650,10 @@ class TestTorch(TestCase):
         a = torch.tensor(5.)
         self.assertEqual(a, a.to(requires_grad=True))
         self.assertNotEqual(a.requires_grad, a.to(requires_grad=True))
-        self.assertEqual(a.requires_grad, a.to(requires_grad=False).requires_grad)
+        self.assertIs(a, a.to(requires_grad=False))
         b = torch.tensor(5., requires_grad=True) * 5
         self.assertRaises(RuntimeError, lambda: b.to(requires_grad=False))
-        self.assertEqual(b, b.to(requires_grad=True))
-        self.assertEqual(b.requires_grad, b.to(requires_grad=True).requires_grad)
+        self.assertIs(b, b.to(requires_grad=True))
 
         # requires grad with dtype
         a = torch.tensor(5.)
