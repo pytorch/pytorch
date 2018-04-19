@@ -1,3 +1,4 @@
+"""Requires the hipify-python.py script (https://github.com/ROCm-Developer-Tools/pyHIPIFY)."""
 import shutil
 import subprocess
 import os
