@@ -30,6 +30,14 @@
  * loops.
  */
 
+#ifdef _MSC_VER
+# define PRAGMA_IVDEP PRAGMA(loop(hint_parallel(0))) PRAGMA(loop(ivdep))
+# define PRAGMA_SIMD PRAGMA(loop(hint_parallel(0)))
+#else
+# define PRAGMA_IVDEP PRAGMA(ivdep)
+# define PRAGMA_SIMD PRAGMA(simd)
+#endif
+
 #define __TH_TENSOR_APPLYX_PREAMBLE(TYPE, TENSOR, DIM, ALLOW_CONTIGUOUS) \
   TYPE *TENSOR##_data = NULL; \
   int64_t *TENSOR##_counter = NULL, *TENSOR##_sizes = NULL, *TENSOR##_strides = NULL, *TENSOR##_dimOffset = NULL; \
@@ -371,7 +379,7 @@
     TYPE2 *tp = TENSOR2->storage->data+TENSOR2->storageOffset;                                    \
     ptrdiff_t iter = 0;                                                                        \
     if(tp != rp) {                                                                             \
-      PRAGMA(ivdep) \
+      PRAGMA_IVDEP \
       PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp)) \
       for (iter = 0; iter < SIZE; iter++) {                             \
         TYPE2 *TENSOR2##_data = tp+iter;                                \
@@ -379,7 +387,7 @@
         CODE                                                            \
       }\
     } else {\
-      PRAGMA(simd) \
+      PRAGMA_SIMD \
       PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE2* TENSOR2##_data = tp+iter;\
@@ -451,7 +459,7 @@
     TYPE3 *srcp = TENSOR3->storage->data+TENSOR3->storageOffset;                                           \
     ptrdiff_t iter = 0;\
     if (rp != tp) { \
-      PRAGMA(ivdep) \
+      PRAGMA_IVDEP \
       PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE1 *TENSOR1##_data = rp+iter;\
@@ -460,7 +468,7 @@
         CODE                                \
       } \
     } else {\
-      PRAGMA(simd) \
+      PRAGMA_SIMD \
       PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE1 *TENSOR1##_data = rp+iter;\
