@@ -2597,8 +2597,8 @@ class TestScript(TestCase):
                 return x + x
 
         mte = ModuleToExport()
-        f = io.BytesIO()
-        torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
 
     def test_onnx_export_script_python_fail(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2642,8 +2642,8 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
-        str = torch.onnx._export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), None, verbose=False)
-
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
 
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2665,8 +2665,8 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
-        f = io.BytesIO()
-        torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
 
     def test_onnx_export_script_module_loop(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -2681,9 +2681,8 @@ class TestScript(TestCase):
 
         mte = ModuleToExport()
         f = io.BytesIO()
-        str = torch.onnx._export_to_pretty_string(mte, (torch.zeros(1, 2, 3),), None, verbose=False)
-        print(str)
-
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -2697,8 +2696,8 @@ class TestScript(TestCase):
                 return x
 
         mte = ModuleToExport()
-        f = io.BytesIO()
-        torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
 
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2726,8 +2725,8 @@ class TestScript(TestCase):
         result = mte(torch.zeros(2, 3))
         reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
         self.assertEqual(result, reference)
-        f = io.BytesIO()
-        torch.onnx._export(mte, (torch.ones(2, 3),), f, verbose=False)
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.ones(2, 3),), None, verbose=False))
 
 
 # Smoke tests for export methods

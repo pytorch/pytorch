@@ -32,13 +32,17 @@ std::string value_name(Value* n) {
   return n->uniqueName();
 }
 
+struct ExportContext {
+  size_t num_blocks = 0;
+};
+
 void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g,
                  const std::vector<at::Tensor> & initializers,
-                 RawDataExportMap* raw_data_export_map=nullptr);
+                 ExportContext *ctx, RawDataExportMap* raw_data_export_map=nullptr);
 
 void encodeBlock(onnx::GraphProto * p_g, Block *b,
                 const std::vector<at::Tensor> & initializers,
-                RawDataExportMap* raw_data_export_map);
+                ExportContext *ctx, RawDataExportMap* raw_data_export_map);
 
 void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor,
                   at::optional<std::string> external_ref={},
@@ -93,7 +97,7 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor,
   }
 }
 
-void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
+void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name, ExportContext *ctx) {
   auto attr = n_p->add_attribute();
   JIT_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
@@ -140,13 +144,13 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
     case AttributeKind::g: {
       attr->set_type(onnx::aGRAPH);
       auto g = attr->mutable_g();
-      encodeGraph(g, n->g(name), {});
+      encodeGraph(g, n->g(name), {}, ctx);
     } break;
     case AttributeKind::gs:
       attr->set_type(onnx::aGRAPHS);
       for(auto & v : n->gs(name)) {
         auto g = attr->add_graphs();
-        encodeGraph(g, v, {});
+        encodeGraph(g, v, {}, ctx);
       }
       break;
   }
@@ -199,15 +203,20 @@ void encodeValueInfo(onnx::ValueInfoProto* v, Value* n) {
 
 void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph>& g,
                  const std::vector<at::Tensor> & initializers,
-                 RawDataExportMap* raw_data_export_map) {
-  encodeBlock(p_g, g->block(), initializers, raw_data_export_map);
+                 ExportContext *ctx, RawDataExportMap* raw_data_export_map) {
+  encodeBlock(p_g, g->block(), initializers, ctx, raw_data_export_map);
 }
 
 void encodeBlock(onnx::GraphProto * p_g, Block *b,
                  const std::vector<at::Tensor> & initializers,
-                 RawDataExportMap* raw_data_export_map) {
+                 ExportContext *ctx, RawDataExportMap* raw_data_export_map) {
   JIT_ASSERT(p_g != nullptr);
-  p_g->set_name("torch-jit-export");
+  std::string block_name = "torch-jit-export";
+  if (ctx->num_blocks) {
+    block_name += std::to_string(ctx->num_blocks);
+  }
+  ctx->num_blocks++;
+  p_g->set_name(block_name);
 
   for (auto input : b->inputs()) {
     onnx::ValueInfoProto* v = p_g->add_input();
@@ -243,7 +252,7 @@ void encodeBlock(onnx::GraphProto * p_g, Block *b,
     JIT_ASSERT(node->kind().is_onnx());
     p_n->set_op_type(node->kind().toUnqualString());
     for(auto attr_name : node->attributeNames()) {
-      addAttribute(p_n, node, attr_name);
+      addAttribute(p_n, node, attr_name, ctx);
     }
     if (node->kind() == torch::jit::onnx::Loop) {
       JIT_ASSERT(node->blocks().size() == 1);
@@ -252,7 +261,7 @@ void encodeBlock(onnx::GraphProto * p_g, Block *b,
       body->set_name("body");
       body->set_type(onnx::aGRAPH);
       auto g = body->mutable_g();
-      encodeBlock(g, node->blocks()[0], initializers, raw_data_export_map);
+      encodeBlock(g, node->blocks()[0], initializers, ctx, raw_data_export_map);
     }
     if (node->kind() == torch::jit::onnx::If) {
       JIT_ASSERT(node->blocks().size() == 2);
@@ -261,13 +270,13 @@ void encodeBlock(onnx::GraphProto * p_g, Block *b,
       true_branch->set_name("then_branch");
       true_branch->set_type(onnx::aGRAPH);
       auto true_g = true_branch->mutable_g();
-      encodeBlock(true_g, node->blocks()[0], initializers, raw_data_export_map);
+      encodeBlock(true_g, node->blocks()[0], initializers, ctx, raw_data_export_map);
 
       auto false_branch = p_n->add_attribute();
       false_branch->set_name("else_branch");
       false_branch->set_type(onnx::aGRAPH);
       auto false_g = false_branch->mutable_g();
-      encodeBlock(false_g, node->blocks()[1], initializers, raw_data_export_map);
+      encodeBlock(false_g, node->blocks()[1], initializers, ctx, raw_data_export_map);
     }
   }
   auto num_initializers = initializers.size();
@@ -290,7 +299,8 @@ void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
                  const std::vector<at::Tensor>& initializers,
                  RawDataExportMap* raw_data_export_map = nullptr) {
   onnx::GraphProto* p_g = p_m->mutable_graph();
-  encodeGraph(p_g, g, initializers, raw_data_export_map);
+  ExportContext ctx;
+  encodeGraph(p_g, g, initializers, &ctx, raw_data_export_map);
 }
 
 namespace {
