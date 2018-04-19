@@ -206,7 +206,7 @@ your code into the following structure.
     import torch
 
     def main()
-        for i, (x, y) in dataloader:
+        for i, data in enumerate(dataloader):
             # do something here
 
     if __name__ == '__main__':
