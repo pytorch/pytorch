@@ -4454,6 +4454,12 @@ tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Constructs a tensor with :attr:`data`.
 
+.. warning::
+
+    :func:`torch.tensor` always copies :attr:`data`. If you have a Tensor `tensor`
+    and want to avoid a copy, use `tensor.detach()`. If you have a numpy array
+    and want to avoid a copy, use :func:`torch.from_numpy`.
+
 Args:
     data (array_like): Initial data for the tensor. Can be a list, tuple,
         numpy array, scalar, and other types.
