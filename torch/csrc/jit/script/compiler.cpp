@@ -9,6 +9,7 @@
 #include "ATen/optional.h"
 
 #include <climits>
+#include <set>
 
 namespace torch {
 namespace jit {
@@ -82,9 +83,13 @@ struct Environment {
   }
 
   SugaredValuePtr findInParentFrame(const std::string& name) {
-    for (auto runner = next; runner; runner = runner->next) {
-      if (runner->value_table.count(name)) {
-        return runner->value_table.at(name);
+    return next ? next->findInAnyFrame(name) : nullptr;
+  }
+
+  SugaredValuePtr findInAnyFrame(const std::string& name) {
+    for (auto runner = this; runner; runner = runner->next.get()) {
+      if(auto r = runner->findInThisFrame(name)) {
+        return r;
       }
     }
     return nullptr;
@@ -440,17 +445,10 @@ private:
 
   std::shared_ptr<Environment> emitSingleIfBranch(
       Block* b,
-      const List<Stmt> branch,
-      std::unordered_set<std::string>* mutated_parent_values) {
+      const List<Stmt> branch) {
     pushFrame(b);
     WithInsertPoint guard(b);
     emitStatements(branch);
-
-    for (const auto & n : environment_stack->definedVariables()) {
-      if (environment_stack->findInParentFrame(n)) {
-        mutated_parent_values->insert(n);
-      }
-    }
     return popFrame();
   }
 
@@ -494,18 +492,49 @@ private:
     auto* false_block = n->addBlock();
 
     // Emit both blocks once to get the union of all mutated values
-    std::unordered_set<std::string> mutated_parent_values;
-    auto save_true = emitSingleIfBranch(
-        true_block, stmt.trueBranch(), &mutated_parent_values);
-    auto save_false = emitSingleIfBranch(
-        false_block, stmt.falseBranch(), &mutated_parent_values);
+    auto save_true = emitSingleIfBranch(true_block, stmt.trueBranch());
+    auto save_false = emitSingleIfBranch(false_block, stmt.falseBranch());
 
-    std::vector<std::string> sorted_mutations(
-        mutated_parent_values.begin(), mutated_parent_values.end());
-    std::sort(sorted_mutations.begin(), sorted_mutations.end());
+    // In python, every variable assigned in an if statement escapes
+    // the scope of the if statement (all variables are scoped to the function).
+    // Script is a subset of python: we consider variables to be in scope
+    // as long as there is a definition of the variable along all paths
+    // through the if statemnent
+    // ----
+    // if ...:
+    //   a =
+    // else:
+    //   ...
+    // ... = a  # error, a is not defined along all paths
+    // ----
+    // if ...:
+    //   a =
+    // else:
+    //   a =
+    // ... = a # OK, a is defined along all paths
+    // ----
+    // a = ...
+    // if ...:
+    //   a =
+    // ... = a # OK, a is defined along all paths
+
+
+    //ordered set, because we want deterministic graph output
+    std::set<std::string> mutated_variables;
+
+    for(auto & v : save_true->definedVariables()) {
+      if(save_false->findInAnyFrame(v)) {
+        mutated_variables.insert(v);
+      }
+    }
+    for(auto & v : save_false->definedVariables()) {
+      if(save_true->findInAnyFrame(v)) {
+        mutated_variables.insert(v);
+      }
+    }
 
     // Register outputs in each block
-    for (const auto& x : sorted_mutations) {
+    for (const auto& x : mutated_variables) {
       auto tv = save_true->getVar(x, stmt.range());
       true_block->registerOutput(tv);
       auto fv = save_false->getVar(x, stmt.range());
