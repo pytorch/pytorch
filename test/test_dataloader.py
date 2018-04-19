@@ -536,7 +536,8 @@ but they are all safe to ignore'''
         worker_pids = multiprocessing.Array('i', [0] * 4)
 
         manager_exit_event = multiprocessing.Event()
-        mp = multiprocessing.Process(target=TestDataLoader._manager_process, args=(self.dataset, worker_pids, manager_exit_event))
+        mp = multiprocessing.Process(target=TestDataLoader._manager_process,
+                                     args=(self.dataset, worker_pids, manager_exit_event))
         mp.start()
 
         manager_exit_event.wait()
