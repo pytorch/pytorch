@@ -6267,7 +6267,7 @@ class TestTorch(TestCase):
     def test_serialization_offset_gzip(self):
         f = tempfile.NamedTemporaryFile(delete=False)
         self._test_serialization_offset(lambda: gzip.open(f.name, mode='w+b'),
-                                 filecontext_read_lambda=lambda: gzip.open(f.name, mode='r+b'))
+                                        filecontext_read_lambda=lambda: gzip.open(f.name, mode='r+b'))
 
     def test_half_tensor(self):
         x = torch.randn(5, 5).float()
