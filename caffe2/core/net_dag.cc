@@ -227,7 +227,6 @@ void DAGNetBase::WorkerFunction() {
         "Can't find chain ",
         idx,
         ".");
-    const auto& chain = execution_chains_[idx];
     bool this_success = false;
     try {
       this_success = RunAt(idx, execution_chains_[idx]);
@@ -249,6 +248,7 @@ void DAGNetBase::WorkerFunction() {
 
     // Do book-keeping
     std::vector<int> chains_to_queue;
+    const auto& chain = execution_chains_[idx];
     for (const auto idx : chain) {
       for (const auto child : operator_nodes_[idx].children_) {
         const int count = --operator_nodes_[child].runtime_parent_count_;
