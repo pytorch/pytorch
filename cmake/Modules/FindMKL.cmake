@@ -22,64 +22,68 @@ option(MKL_USE_MKLML "Use MKLML interface" ON)
 if(MKL_USE_IDEEP)
   set(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   set(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
+  set(__ideep_looked_for IDEEP_ROOT)
 
   find_path(IDEEP_INCLUDE_DIR ideep.hpp PATHS ${IDEEP_ROOT} PATH_SUFFIXES include)
-  if (NOT IDEEP_INCLUDE_DIR)
-    message(FATAL_ERROR "Did not find IDEEP files!")
-
-  else()
-
+  find_path(MKLDNN_INCLUDE_DIR mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
+  if (NOT MKLDNN_INCLUDE_DIR)
+    execute_process(COMMAND git submodule update --init mkl-dnn WORKING_DIRECTORY ${IDEEP_ROOT})
     find_path(MKLDNN_INCLUDE_DIR mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
-    if (NOT MKLDNN_INCLUDE_DIR)
-      execute_process(COMMAND git submodule update --init mkl-dnn
-        WORKING_DIRECTORY ${IDEEP_ROOT})
-    endif()
+  endif()
 
-    find_path(MKLDNN_INCLUDE_DIR mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
-    if (NOT MKLDNN_INCLUDE_DIR)
-      message(FATAL_ERROR "Did not find MKLDNN files. Please update submodules recursively.")
+  if (MKLDNN_INCLUDE_DIR)
+    # to avoid adding conflicting submodels
+    set(ORIG_WITH_TEST ${WITH_TEST})
+    set(WITH_TEST OFF)
+    add_subdirectory(${IDEEP_ROOT})
+    set(WITH_TEST ${ORIG_WITH_TEST})
 
-    else()
+    file(GLOB_RECURSE MKLML_INCLUDE_DIR ${MKLDNN_ROOT}/external/*/mkl_vsl.h)
+    if(MKLML_INCLUDE_DIR)
+      # if user has multiple version under external/ then guess last
+      # one alphabetically is "latest" and warn
+      list(LENGTH MKLML_INCLUDE_DIR MKLINCLEN)
+      if(MKLINCLEN GREATER 1)
+        list(SORT MKLML_INCLUDE_DIR)
+        list(REVERSE MKLML_INCLUDE_DIR)
+        list(GET MKLML_INCLUDE_DIR 0 MKLINCLST)
+        set(MKLML_INCLUDE_DIR "${MKLINCLST}")
+      endif()
+      get_filename_component(MKLML_INCLUDE_DIR ${MKLML_INCLUDE_DIR} DIRECTORY)
+      list(APPEND IDEEP_INCLUDE_DIR ${MKLDNN_INCLUDE_DIR} ${MKLML_INCLUDE_DIR})
+      list(APPEND __ideep_looked_for IDEEP_INCLUDE_DIR)
 
-      # to avoid adding conflicting submodels
-      set(ORIG_WITH_TEST ${WITH_TEST})
-      set(WITH_TEST OFF)
-      add_subdirectory(${IDEEP_ROOT})
-      set(WITH_TEST ${ORIG_WITH_TEST})
+      set(__mklml_libs mklml_intel iomp5)
+      set(IDEEP_LIBRARIES "")
+      foreach (__mklml_lib ${__mklml_libs})
+        string(TOUPPER ${__mklml_lib} __mklml_lib_upper)
+        find_library(${__mklml_lib_upper}_LIBRARY
+              NAMES ${__mklml_lib}
+              PATHS  "${MKLML_INCLUDE_DIR}/../lib"
+              DOC "The path to Intel(R) MKLML ${__mklml_lib} library")
+        mark_as_advanced(${__mklml_lib_upper}_LIBRARY)
+        list(APPEND IDEEP_LIBRARIES ${${__mklml_lib_upper}_LIBRARY})
+        list(APPEND __ideep_looked_for ${__mklml_lib_upper}_LIBRARY)
+      endforeach()
 
-      file(GLOB_RECURSE MKL_DIR ${MKLDNN_ROOT}/external/*/mkl_vsl.h)
-      if(MKL_DIR)
-        # if user has multiple version under external/ then guess last
-        # one alphabetically is "latest" and warn
-        list(LENGTH MKL_DIR MKLINCLEN)
-        if(MKLINCLEN GREATER 1)
-            list(SORT MKL_DIR)
-            list(REVERSE MKL_DIR)
-            list(GET MKL_DIR 0 MKLINCLST)
-            set(MKL_DIR "${MKLINCLST}")
-        endif()
-        get_filename_component(MKL_DIR ${MKL_DIR} DIRECTORY)
+      include(FindPackageHandleStandardArgs)
+      find_package_handle_standard_args(IDEEP DEFAULT_MSG ${__ideep_looked_for})
 
-        list(APPEND IDEEP_INCLUDE_DIR ${MKLDNN_INCLUDE_DIR})
-        list(APPEND IDEEP_INCLUDE_DIR ${MKL_DIR})
-
-        set(IDEEP_LIBRARIES "${PROJECT_BINARY_DIR}/lib/libmkldnn.so")
+      if(IDEEP_FOUND)
+        list(APPEND IDEEP_LIBRARIES "${PROJECT_BINARY_DIR}/lib/libmkldnn.so")
         set(CAFFE2_USE_IDEEP 1)
         # Do NOT use MPI if IDEEP is enabled
         set(USE_MPI OFF)
-
-        message(STATUS "Found IDEEP (include: ${IDEEP_INCLUDE_DIR})")
-
-      else()
-
-        message(FATAL_ERROR "Did not find MKL files!")
-
+        message(STATUS "Found IDEEP (include: ${IDEEP_INCLUDE_DIR}, lib: ${IDEEP_LIBRARIES})")
       endif()
 
+      caffe_clear_vars(__ideep_looked_for __mklml_libs)
     endif()
-
   endif()
 
+  if(NOT IDEEP_FOUND)
+    message(FATAL_ERROR "Did not find IDEEP files!")
+  endif()
 endif()
 
 if(MKL_USE_MKLML)
@@ -189,7 +193,7 @@ if(MKL_USE_MKLML)
 
 endif()
 
-if(CAFFE2_USE_IDEEP)
+if(IDEEP_FOUND)
   set(MKL_FOUND True)
   list(APPEND MKL_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
   list(APPEND MKL_LIBRARIES ${IDEEP_LIBRARIES})
