@@ -11,14 +11,7 @@ import re
 import sys
 import threading
 import traceback
-import os
-import time
 from torch._six import string_classes, int_classes
-
-IS_WINDOWS = sys.platform == "win32"
-if IS_WINDOWS:
-    import ctypes
-    from ctypes.wintypes import DWORD, BOOL, HANDLE
 
 if sys.version_info[0] == 2:
     import Queue as queue
@@ -36,37 +29,6 @@ class ExceptionWrapper(object):
 
 _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
-
-MANAGER_STATUS_CHECK_INTERVAL = 5.0
-
-if IS_WINDOWS:
-    class ManagerWatchdog(object):
-        def __init__(self):
-            self.manager_pid = os.getppid()
-
-            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-            self.kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
-            self.kernel32.OpenProcess.restype = HANDLE
-            self.kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
-            self.kernel32.WaitForSingleObject.restype = DWORD
-
-            # Value obtained from https://msdn.microsoft.com/en-us/library/ms684880.aspx
-            SYNCHRONIZE = 0x00100000
-            self.manager_handle = self.kernel32.OpenProcess(SYNCHRONIZE, 0, self.manager_pid)
-
-            if not self.manager_handle:
-                raise ctypes.WinError(ctypes.get_last_error())
-
-        def is_alive(self):
-            # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
-            return self.kernel32.WaitForSingleObject(self.manager_handle, 0) != 0
-else:
-    class ManagerWatchdog(object):
-        def __init__(self):
-            self.manager_pid = os.getppid()
-
-        def is_alive(self):
-            return os.getppid() == self.manager_pid
 
 
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
@@ -86,16 +48,8 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     if init_fn is not None:
         init_fn(worker_id)
 
-    watchdog = ManagerWatchdog()
-
     while True:
-        try:
-            r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
-        except queue.Empty:
-            if watchdog.is_alive():
-                continue
-            else:
-                break
+        r = index_queue.get()
         if r is None:
             break
         idx, batch_indices = r
@@ -245,7 +199,7 @@ class _DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
+            self.index_queues = [multiprocessing.SimpleQueue() for _ in range(self.num_workers)]
             self.worker_queue_idx = 0
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
@@ -366,17 +320,21 @@ class _DataLoaderIter(object):
             if not self.shutdown:
                 self.shutdown = True
                 self.done_event.set()
-                # if worker_manager_thread is waiting to put, make place for it
-                try:
-                    while not self.data_queue.empty():
-                        self.data_queue.get()
-                except FileNotFoundError:
-                    # FileNotFoundError can happen when we rebuild the fd
-                    # fetched from the queue but the socket is already closed
-                    # from the worker side (e.g. due to Python shutting down).
-                    pass
                 for q in self.index_queues:
                     q.put(None)
+                # if some workers are waiting to put, make place for them
+                try:
+                    while not self.worker_result_queue.empty():
+                        self.worker_result_queue.get()
+                except (FileNotFoundError, ImportError):
+                    # Many weird errors can happen here due to Python
+                    # shutting down. These are more like obscure Python bugs.
+                    # FileNotFoundError can happen when we rebuild the fd
+                    # fetched from the queue but the socket is already closed
+                    # from the worker side.
+                    # ImportError can happen when the unpickler loads the
+                    # resource from `get`.
+                    pass
                 # done_event should be sufficient to exit worker_manager_thread,
                 # but be safe here and put another None
                 self.worker_result_queue.put(None)

@@ -2550,6 +2550,42 @@ class TestScript(TestCase):
         self.assertEqual(3, use(torch.ones(1, dtype=torch.long)))
         self.assertEqual(2, use(torch.zeros(1, dtype=torch.long)))
 
+    def test_if_define(self):
+        @torch.jit.script
+        def foo(a):
+            if a == 0:
+                b = 1
+            else:
+                b = 0
+            return b + 1
+
+        @torch.jit.script
+        def foo2(a):
+            b = 0
+            if a == 0:
+                b = 1
+
+            return b + 1
+
+        @torch.jit.script
+        def foo3(a):
+            b = 1
+            if a == 0:
+                c = 4
+            else:
+                b = 0
+
+            return b + 1
+
+        a = torch.ones(1, dtype=torch.long)
+        b = torch.zeros(1, dtype=torch.long)
+        self.assertEqual(1, foo(a))
+        self.assertEqual(2, foo(b))
+        self.assertEqual(1, foo2(a))
+        self.assertEqual(2, foo2(b))
+        self.assertEqual(1, foo3(a))
+        self.assertEqual(2, foo3(b))
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):

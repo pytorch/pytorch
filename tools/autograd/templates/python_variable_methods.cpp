@@ -6,6 +6,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"
@@ -408,6 +409,26 @@ static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "requires_grad_(bool requires_grad=True)",
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto requires_grad = r.toBool(0);
+  // should we throw if requires_grad is true?  var.requires_grad = True throws here
+  // but it's nice to let this be a no-op.
+  if (!self_.is_leaf() && !requires_grad) {
+    throw std::runtime_error(autograd::utils::requires_grad_leaf_error(requires_grad));
+  }
+  self_.set_requires_grad(requires_grad);
+  return THPVariable_Wrap(self_);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_item(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -661,6 +682,7 @@ PyMethodDef variable_methods[] = {
   {"new_zeros", (PyCFunction)THPVariable_new_zeros, METH_VARARGS | METH_KEYWORDS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
+  {"requires_grad_", (PyCFunction)THPVariable_requires_grad_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", (PyCFunction)THPVariable_short, METH_NOARGS, NULL},
   {"size", (PyCFunction)THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},
