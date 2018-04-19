@@ -102,8 +102,22 @@ view of a storage and defines numeric operations on it.
 
 .. class:: Tensor()
 
-  Create a tensor using the :func:`torch.tensor` constructor or with
-  tensor creation ops (see :ref:`tensor-creation-ops`)
+   There are a few main ways to create a tensor, depending on your use case.
+   
+   - To create a tensor with pre-existing data, use :func:`torch.tensor`.
+   - To create a tensor with specific size, use ``torch.*`` tensor creation
+     ops (see :ref:`tensor-creation-ops`).
+   - To create a tensor with the same size (and similar types) as another tensor,
+     use ``torch.*_like`` tensor creation ops
+     (see :ref:`tensor-creation-ops`).
+   - To create a tensor with similar type but different size as another tensor,
+     use ``tensor.new_*`` creation ops.
+
+   .. automethod:: new_tensor
+   .. automethod:: new_full
+   .. automethod:: new_empty
+   .. automethod:: new_ones
+   .. automethod:: new_zeros
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -262,7 +276,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: neg
    .. automethod:: neg_
    .. automethod:: nelement
-   .. automethod:: new
    .. automethod:: nonzero
    .. automethod:: norm
    .. automethod:: normal_

@@ -2,11 +2,97 @@
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
-
+from ._torch_docs import parse_kwargs
 
 def add_docstr_all(method, docstr):
     add_docstr(getattr(torch._C._TensorBase, method), docstr)
 
+new_common_args = parse_kwargs("""
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+        Default: if None, same ``dtype`` as this tensor.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, same ``device`` as this tensor.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+""")
+
+add_docstr_all('new_tensor',
+               r"""
+new_tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Returns a new Tensor with :attr:`data` as the tensor data.
+By default, the returned Tensor has the same :class:`torch.dtype` and
+:class:`torch.device` as this tensor.
+
+Args:
+    data (array_like): The returned Tensor copies :attr:`data`.
+    {dtype}
+    {device}
+    {requires_grad}
+""".format(**new_common_args))
+
+add_docstr_all('new_full',
+               r"""
+new_full(size, fill_value, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Returns a Tensor of size :attr:`size` filled with :attr:`fill_value`.
+By default, the returned Tensor has the same :class:`torch.dtype` and
+:class:`torch.device` as this tensor.
+
+Args:
+    fill_value (scalar): the number to fill the output tensor with.
+    {dtype}
+    {device}
+    {requires_grad}
+""".format(**new_common_args))
+
+add_docstr_all('new_empty',
+               r"""
+new_empty(size, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Returns a Tensor of size :attr:`size` filled with uninitialized data.
+By default, the returned Tensor has the same :class:`torch.dtype` and
+:class:`torch.device` as this tensor.
+
+Args:
+    {dtype}
+    {device}
+    {requires_grad}
+""".format(**new_common_args))
+
+add_docstr_all('new_ones',
+               r"""
+new_ones(size, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Returns a Tensor of size :attr:`size` filled with ``1``.
+By default, the returned Tensor has the same :class:`torch.dtype` and
+:class:`torch.device` as this tensor.
+
+Args:
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+    {dtype}
+    {device}
+    {requires_grad}
+""".format(**new_common_args))
+
+add_docstr_all('new_zeros',
+               r"""
+new_zeros(size, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Returns a Tensor of size :attr:`size` filled with ``0``.
+By default, the returned Tensor has the same :class:`torch.dtype` and
+:class:`torch.device` as this tensor.
+
+Args:
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+    {dtype}
+    {device}
+    {requires_grad}
+""".format(**new_common_args))
 
 add_docstr_all('abs',
                r"""
