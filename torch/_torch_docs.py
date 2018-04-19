@@ -3,6 +3,49 @@
 import torch._C
 from torch._C import _add_docstr as add_docstr
 
+
+def parse_kwargs(desc):
+    """Maps a description of args to a dictionary of {argname: description}.
+    Input:
+        ('    weight (Tensor): a weight tensor\n' +
+         '        Some optional description')
+    Output: {
+        'weight': \
+        'weight (Tensor): a weight tensor\n        Some optional description'
+    }
+    """
+    # Split by indents. Assumes each arg starts on a new line with 4 spaces.
+    kwargs = [section.strip() for section in desc.split('\n   ')]
+    kwargs = [section for section in kwargs if len(section) > 0]
+    return {desc.split(' ')[0]: desc for desc in kwargs}
+
+
+factory_common_args = parse_kwargs("""
+    out (Tensor, optional): the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
+    layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+        Default: ``torch.strided``.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+""")
+
+factory_like_common_args = parse_kwargs("""
+    input (Tensor): the size of :attr:`input` will determine size of the output tensor
+    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
+        Default: if None, defaults to the layout of :attr:`input`.
+    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
+        Default: if None, defaults to the dtype of :attr:`input`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, defaults to the device of :attr:`input`.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+""")
+
 add_docstr(torch.abs,
            r"""
 abs(input, out=None) -> Tensor
@@ -1689,32 +1732,6 @@ Example::
     [torch.FloatTensor of size (2,)]
 """)
 
-factory_common_args = """
-    out (Tensor, optional): the output tensor
-    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
-        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
-    layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
-        Default: ``torch.strided``.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
-        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
-        for CPU tensor types and the current CUDA device for CUDA tensor types.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: ``False``.
-""".strip()
-
-factory_like_common_args = """
-    input (Tensor): the size of :attr:`input` will determine size of the output tensor
-    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
-        Default: if None, defaults to the dtype of :attr:`input`.
-    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
-        Default: if None, defaults to the layout of :attr:`input`.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, defaults to the device of :attr:`input`.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: False.
-""".strip()
-
 add_docstr(torch.eye,
            r"""
 eye(n, m=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -1724,7 +1741,11 @@ Returns a 2-D tensor with ones on the diagonal and zeros elsewhere.
 Args:
     n (int): the number of rows
     m (int, optional): the number of columns with default being :attr:`n`
-    {factory_common_args}
+    {out}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
 
 Returns:
     Tensor: A 2-D tensor with ones on the diagonal and zeros elsewhere
@@ -1738,7 +1759,7 @@ Example::
      0  0  1
     [torch.FloatTensor of size (3,3)]
 
-""".format(factory_common_args=factory_common_args))
+""".format(**factory_common_args))
 
 add_docstr(torch.floor,
            r"""
@@ -2403,7 +2424,10 @@ Args:
     end (float): the ending value for the set of points
     steps (int): number of points to sample between :attr:`start`
         and :attr:`end`. Default: ``100``.
-    {factory_common_args}
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
 
 Example::
@@ -2435,7 +2459,7 @@ Example::
      10
     [torch.FloatTensor of size (5,)]
 
-""".format(factory_common_args=factory_common_args))
+""".format(**factory_common_args))
 
 add_docstr(torch.log,
            r"""
@@ -2599,7 +2623,10 @@ Args:
     end (float): the ending value for the set of points
     steps (int): number of points to sample between :attr:`start`
         and :attr:`end`. Default: ``100``.
-    {factory_common_args}
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
 Example::
 
@@ -2621,7 +2648,7 @@ Example::
      10.0000
     [torch.FloatTensor of size (5,)]
 
-""".format(factory_common_args=factory_common_args))
+""".format(**factory_common_args))
 
 add_docstr(torch.lt,
            r"""
@@ -3681,7 +3708,10 @@ by the variable argument :attr:`sizes`.
 Args:
     sizes (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
-    {factory_common_args}
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
 Example::
 
@@ -3700,7 +3730,7 @@ Example::
      1
     [torch.FloatTensor of size (5,)]
 
-""".format(factory_common_args=factory_common_args))
+""".format(**factory_common_args))
 
 add_docstr(torch.ones_like,
            r"""
@@ -3716,7 +3746,11 @@ Returns a tensor filled with the scalar value `1`, with the same size as
     ``torch.ones(input.size(), out=output)``.
 
 Args:
-    {factory_like_common_args}
+    {input}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
 
 Example::
 
@@ -3726,7 +3760,7 @@ Example::
      1  1  1
      1  1  1
     [torch.FloatTensor of size (2,3)]
-""".format(factory_like_common_args=factory_like_common_args))
+""".format(**factory_like_common_args))
 
 add_docstr(torch.orgqr,
            r"""
@@ -4212,7 +4246,7 @@ Example::
 
 add_docstr(torch.rand,
            r"""
-rand(*sizes, out=None) -> Tensor
+rand(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random numbers from a uniform distribution
 on the interval :math:`[0, 1)`
@@ -4220,8 +4254,12 @@ on the interval :math:`[0, 1)`
 The shape of the tensor is defined by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a set of ints defining the shape of the output tensor.
-    out (Tensor, optional): the output tensor
+    sizes (int...): a sequence of integers defining the shape of the output tensor.
+        Can be a variable number of arguments or a collection like a list or tuple.
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
 Example::
 
@@ -4241,21 +4279,45 @@ Example::
 
 """)
 
+add_docstr(torch.rand_like,
+           r"""
+rand_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+
+Returns a tensor with the same size as :attr:`input` that is filled with
+random numbers from a uniform distribution on the interval :math:`[0, 1)`.
+``torch.rand_like(input)`` is equivalent to
+``torch.rand(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+Args:
+    {input}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+""".format(**factory_like_common_args))
+
 add_docstr(torch.randint,
            r"""
-randint(low=0, high, sizes, out=None, dtype=torch.float32) -> Tensor
+randint(low=0, high, size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
 between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 
-The shape of the tensor is defined by the variable argument :attr:`sizes`.
+The shape of the tensor is defined by the variable argument :attr:`size`.
+
+.. note:
+    With the global dtype default (`torch.float32`), this function returns
+    a tensor with dtype `torch.float32`, NOT an integer dtype.
 
 Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
-    sizes (tuple): a tuple defining the shape of the output tensor.
-    out (Tensor, optional): the output tensor
-    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor. Default: torch.float32
+    size (tuple): a tuple defining the shape of the output tensor.
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
 Example::
 
@@ -4278,7 +4340,30 @@ Example::
      9  4
     [torch.FloatTensor of size (2,2)]
 
-""")
+""".format(**factory_common_args))
+
+add_docstr(torch.randint_like,
+           r"""
+randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+
+Returns a tensor with the same shape as Tensor :attr:`input` filled with
+random integers generated uniformly between :attr:`low` (inclusive) and
+:attr:`high` (exclusive).
+
+.. note:
+    With the global dtype default (`torch.float32`), this function returns
+    a tensor with dtype `torch.float32`, NOT an integer dtype.
+
+Args:
+    {input}
+    low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
+    high (int): One above the highest integer to be drawn from the distribution.
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+""".format(**factory_like_common_args))
 
 add_docstr(torch.randn,
            r"""
@@ -4296,7 +4381,10 @@ The shape of the tensor is defined by the variable argument :attr:`sizes`.
 Args:
     sizes (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
-    {factory_common_args}
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
 Example::
 
@@ -4314,7 +4402,7 @@ Example::
      1.5458 -0.9643 -0.3558
     [torch.FloatTensor of size (2,3)]
 
-""".format(factory_common_args=factory_common_args))
+""".format(**factory_common_args))
 
 add_docstr(torch.randn_like,
            r"""
@@ -4326,19 +4414,28 @@ random numbers from a normal distribution with mean 0 and variance 1.
 ``torch.randn(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
-    {factory_like_common_args}
+    {input}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
 
-""".format(factory_like_common_args=factory_like_common_args))
+""".format(**factory_like_common_args))
 
 add_docstr(torch.randperm,
            r"""
-randperm(n, out=None) -> LongTensor
+randperm(n, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False) -> LongTensor
 
 Returns a random permutation of integers from ``0`` to ``n - 1``.
 
 Args:
     n (int): the upper bound (exclusive)
-    out (Tensor, optional): the output tensor
+    {out}
+    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+        Default: ``torch.int64``.
+    {layout}
+    {device}
+    {requires_grad}
 
 Example::
 
@@ -4349,7 +4446,7 @@ Example::
      3
      0
     [torch.LongTensor of size (4,)]
-""")
+""".format(**factory_common_args))
 
 add_docstr(torch.tensor,
            r"""
@@ -4421,7 +4518,10 @@ Args:
     start (float): the starting value for the set of points. Default: ``0``.
     end (float): the ending value for the set of points
     step (float): the gap between each pair of adjacent points. Default: ``1``.
-    {factory_common_args}
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
 Example::
 
@@ -4444,7 +4544,7 @@ Example::
      4.0000
     [torch.FloatTensor of size (7,)]
 
-""".format(factory_common_args=factory_common_args))
+""".format(**factory_common_args))
 
 add_docstr(torch.arange,
            r"""
@@ -4465,7 +4565,10 @@ Args:
     start (float): the starting value for the set of points. Default: ``0``.
     end (float): the ending value for the set of points
     step (float): the gap between each pair of adjacent points. Default: ``1``.
-    {factory_common_args}
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
 Example::
 
@@ -4492,7 +4595,7 @@ Example::
      2.0000
     [torch.FloatTensor of size (3,)]
 
-""".format(factory_common_args=factory_common_args))
+""".format(**factory_common_args))
 
 
 add_docstr(torch.remainder,
@@ -5867,7 +5970,10 @@ by the variable argument :attr:`sizes`.
 Args:
     sizes (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
-    {factory_common_args}
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
 Example::
 
@@ -5886,7 +5992,7 @@ Example::
      0
     [torch.FloatTensor of size (5,)]
 
-""".format(factory_common_args=factory_common_args))
+""".format(**factory_common_args))
 
 
 add_docstr(torch.zeros_like,
@@ -5903,7 +6009,11 @@ Returns a tensor filled with the scalar value `0`, with the same size as
     ``torch.zeros(input.size(), out=output)``.
 
 Args:
-    {factory_like_common_args}
+    {input}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
 
 Example::
 
@@ -5914,7 +6024,7 @@ Example::
      0  0  0
     [torch.FloatTensor of size (2,3)]
 
-""".format(factory_like_common_args=factory_like_common_args))
+""".format(**factory_like_common_args))
 
 add_docstr(torch.btrifact_with_info,
            r"""
@@ -5981,9 +6091,12 @@ defined by the variable argument :attr:`sizes`.
 Args:
     sizes (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
-    {factory_common_args}
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
-""".format(factory_common_args=factory_common_args))
+""".format(**factory_common_args))
 
 add_docstr(torch.empty_like,
            r"""
@@ -5994,7 +6107,11 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
 ``torch.empty(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
-    {factory_like_common_args}
+    {input}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
 
 Example::
 
@@ -6005,7 +6122,7 @@ Example::
     4.0000e+00  0.0000e+00  0.0000e+00
     [torch.LongTensor of size (2,3)]
 
-""".format(factory_like_common_args=factory_like_common_args))
+""".format(**factory_like_common_args))
 
 add_docstr(torch.full,
            r"""
@@ -6017,9 +6134,12 @@ Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
     fill_value: the number to fill the output tensor with.
-    {factory_common_args}
+    {out}
+    {dtype}
+    {layout}
+    {requires_grad}
 
-""".format(factory_common_args=factory_common_args))
+""".format(**factory_common_args))
 
 add_docstr(torch.full_like,
            r"""
@@ -6030,10 +6150,14 @@ Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_val
 ``torch.full_like(input.size(), fill_value, dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
+    {input}
     fill_value: the number to fill the output tensor with.
-    {factory_like_common_args}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
 
-""".format(factory_like_common_args=factory_like_common_args))
+""".format(**factory_like_common_args))
 
 
 add_docstr(torch.stft,
