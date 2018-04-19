@@ -26,7 +26,7 @@ namespace caffe2 {
 
 #if EIGEN_VERSION_AT_LEAST(3, 3, 0)
 template <typename T, int D>
-using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D, Eigen::RowMajor>>;
+using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D>>;
 #endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
 namespace math {
@@ -2172,15 +2172,14 @@ void EigenReduceTensorCUDAImpl(
   Eigen::DSizes<Eigen::DenseIndex, kNumDims> X_dims;
   Eigen::DSizes<Eigen::DenseIndex, kNumDims> Y_dims;
   Eigen::array<Eigen::DenseIndex, kNumAxes> reduce_dims;
-#pragma unroll
   for (int i = 0; i < kNumDims; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
+    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
+    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
   }
-#pragma unroll
   for (int i = 0; i < kNumAxes; ++i) {
-    Y_dims[axes[i]] = static_cast<Eigen::DenseIndex>(1);
-    reduce_dims[i] = static_cast<Eigen::DenseIndex>(axes[i]);
+    Y_dims[kNumDims - 1 - axes[i]] = static_cast<Eigen::DenseIndex>(1);
+    reduce_dims[kNumAxes - 1 - i] =
+        static_cast<Eigen::DenseIndex>(kNumDims - 1 - axes[i]);
   }
   const cudaStream_t cuda_stream = context->cuda_stream();
   const Eigen::CudaStreamDevice stream_device(
@@ -2694,9 +2693,9 @@ void EigenTransposeCUDAImpl(
   Eigen::DSizes<Eigen::DenseIndex, D> Y_dims;
   Eigen::array<Eigen::DenseIndex, D> axes_array;
   for (int i = 0; i < D; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[axes[i]]);
-    axes_array[i] = static_cast<Eigen::DenseIndex>(axes[i]);
+    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - i]);
+    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - axes[i]]);
+    axes_array[D - 1 - i] = static_cast<Eigen::DenseIndex>(D - 1 - axes[i]);
   }
   const cudaStream_t cuda_stream = context->cuda_stream();
   const Eigen::CudaStreamDevice stream_device(
