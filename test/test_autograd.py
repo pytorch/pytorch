@@ -811,6 +811,29 @@ class TestAutograd(TestCase):
         y._backward_hooks['test'] = error
         b.backward(torch.ones(5, 5))
 
+    def test_requires_grad_(self):
+        x = torch.randn(5, 5)
+        y = torch.randn(5, 5, requires_grad=True)
+        self.assertIs(x, x.requires_grad_())
+        self.assertTrue(x.requires_grad)
+        self.assertIs(y, y.requires_grad_())
+        self.assertTrue(y.requires_grad)
+        self.assertIs(x, x.requires_grad_(True))
+        self.assertTrue(x.requires_grad)
+        self.assertIs(y, y.requires_grad_(True))
+        self.assertTrue(y.requires_grad)
+        z = x * y
+        self.assertRaises(RuntimeError, lambda: z.requires_grad_(False))
+        self.assertIs(z, z.requires_grad_())
+        self.assertTrue(z.requires_grad)
+        self.assertIs(z, z.requires_grad_(True))
+        self.assertTrue(z.requires_grad)
+
+        self.assertIs(x, x.requires_grad_(False))
+        self.assertFalse(x.requires_grad)
+        self.assertIs(y, y.requires_grad_(False))
+        self.assertFalse(y.requires_grad)
+
     def test_requires_grad_inplace(self):
         a = torch.randn(5, 5)
         b = torch.randn(5, 5, requires_grad=True)
