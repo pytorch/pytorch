@@ -26,9 +26,12 @@ where [args] are any number of arguments to `script.py`, or run
     not show correct timings: the reported CPU time reports the amount of time
     used to launch the kernels but does not include the time the kernel
     spent executing on a GPU unless the operation does a synchronize.
-    In this case, the CUDA-mode autograd profiler may be helpful.
+    Ops that do synchronize appear to be extremely expensive under regular
+    CPU-mode profilers.
+    In these case where timings are incorrect, the CUDA-mode autograd profiler
+    may be helpful.
 
-.. warning::
+.. note::
     To decide which (CPU-only-mode or CUDA-mode) autograd profiler output to
     look at, you should first check if your script is CPU-bound
     ("CPU total time is much greater than CUDA total time").
@@ -42,6 +45,8 @@ where [args] are any number of arguments to `script.py`, or run
     in one of those two extremes depending on the part of the model you're
     evaluating. If the profiler outputs don't help, you could try looking at
     the result of :func:`torch.autograd.profiler.emit_nvtx()` with ``nvprof``.
+    However, please take into account that the NVTX overhead is very high and
+    often gives a heavily skewed timeline.
 
 .. warning::
     If you are profiling CUDA code, the first profiler that ``bottleneck`` runs
