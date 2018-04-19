@@ -1,3 +1,9 @@
+IF (MSVC)
+  IF (MSVC_VERSION LESS 1911)
+    return()
+  ENDIF()
+ENDIF(MSVC)
+
 ADD_EXECUTABLE(scalar_test scalar_test.cpp)
 target_link_libraries(scalar_test ATen)
 
@@ -37,6 +43,11 @@ target_link_libraries(tbb_init_test ATen)
 if(NOT NO_CUDA)
   cuda_add_executable(integer_divider_test integer_divider_test.cu)
   target_link_libraries(integer_divider_test ATen)
+endif()
+
+if(NOT NO_CUDA)
+  cuda_add_executable(cuda_rng_test cuda_rng_test.cpp)
+  target_link_libraries(cuda_rng_test ATen)
 endif()
 
 if (CUDNN_FOUND)

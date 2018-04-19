@@ -5,7 +5,7 @@ from torch._C import _add_docstr as add_docstr
 
 
 def add_docstr_all(method, docstr):
-    add_docstr(getattr(torch._C._VariableBase, method), docstr)
+    add_docstr(getattr(torch._C._TensorBase, method), docstr)
 
 
 add_docstr_all('abs',
@@ -351,6 +351,23 @@ add_docstr_all('cross',
 cross(other, dim=-1) -> Tensor
 
 See :func:`torch.cross`
+""")
+
+add_docstr_all('cuda',
+               r"""
+cuda(device=None, non_blocking=False) -> Tensor
+
+Returns a copy of this object in CUDA memory.
+
+If this object is already in CUDA memory and on the correct device,
+then no copy is performed and the original object is returned.
+
+Args:
+    device (:class:`torch.device`): The destination GPU device.
+        Defaults to the current CUDA device.
+    non_blocking (bool): If ``True`` and the source is in pinned memory,
+        the copy will be asynchronous with respect to the host.
+        Otherwise, the argument has no effect. Default: ``False``.
 """)
 
 add_docstr_all('cumprod',
@@ -749,6 +766,20 @@ Example::
 
 """)
 
+add_docstr_all('index_put_',
+               r"""
+index_put_(indices, value) -> Tensor
+
+Puts values from the tensor :attr:`value` into the tensor :attr:`self` using
+the indices specified in :attr:`indices` (which is a tuple of Tensors). The
+expression ``tensor.index_put_(indices, value)`` is equivalent to
+``tensor[indices] = value``. Returns :attr:`self`.
+
+Args:
+    indices (tuple of LongTensor): tensors used to index into `self`.
+    value (Tensor): tensor of same dtype as `self`.
+""")
+
 add_docstr_all('index_select',
                r"""
 index_select(dim, index) -> Tensor
@@ -836,6 +867,26 @@ log() -> Tensor
 See :func:`torch.log`
 """)
 
+add_docstr_all('log_', r"""
+log_() -> Tensor
+
+In-place version of :meth:`~Tensor.log`
+""")
+
+add_docstr_all('log10',
+               r"""
+log10() -> Tensor
+
+See :func:`torch.log10`
+""")
+
+add_docstr_all('log10_',
+               r"""
+log10_() -> Tensor
+
+In-place version of :meth:`~Tensor.log10`
+""")
+
 add_docstr_all('log1p',
                r"""
 log1p() -> Tensor
@@ -850,10 +901,18 @@ log1p_() -> Tensor
 In-place version of :meth:`~Tensor.log1p`
 """)
 
-add_docstr_all('log_', r"""
-log_() -> Tensor
+add_docstr_all('log2',
+               r"""
+log2() -> Tensor
 
-In-place version of :meth:`~Tensor.log`
+See :func:`torch.log2`
+""")
+
+add_docstr_all('log2_',
+               r"""
+log2_() -> Tensor
+
+In-place version of :meth:`~Tensor.log2`
 """)
 
 add_docstr_all('log_normal_', u"""
@@ -1191,7 +1250,7 @@ it were a 1-D tensor.
 
 If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
 :attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
-contains duplicate elements.
+contain duplicate elements.
 
 Args:
     indices (LongTensor): the indices into self
@@ -2017,6 +2076,34 @@ add_docstr_all('stft',
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
 
 See :func:`torch.stft`
+""")
+
+add_docstr_all('fft',
+               r"""
+fft(signal_ndim, normalized=False) -> Tensor
+
+See :func:`torch.fft`
+""")
+
+add_docstr_all('ifft',
+               r"""
+ifft(signal_ndim, normalized=False) -> Tensor
+
+See :func:`torch.ifft`
+""")
+
+add_docstr_all('rfft',
+               r"""
+rfft(signal_ndim, normalized=False, onesided=True) -> Tensor
+
+See :func:`torch.rfft`
+""")
+
+add_docstr_all('irfft',
+               r"""
+irfft(signal_ndim, normalized=False, onesided=True, signal_sizes=None) -> Tensor
+
+See :func:`torch.irfft`
 """)
 
 add_docstr_all('det',

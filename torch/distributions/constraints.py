@@ -216,7 +216,8 @@ class _PositiveDefinite(Constraint):
         # TODO: replace with batched linear algebra routine when one becomes available
         # note that `symeig()` returns eigenvalues in ascending order
         flattened_value = value.contiguous().view((-1,) + matrix_shape)
-        return torch.stack([v.symeig()[0][:1] > 0.0 for v in flattened_value]).view(batch_shape)
+        return torch.stack([v.symeig(eigenvectors=False)[0][:1] > 0.0
+                            for v in flattened_value]).view(batch_shape)
 
 
 class _RealVector(Constraint):
@@ -237,10 +238,10 @@ positive_integer = _IntegerGreaterThan(1)
 integer_interval = _IntegerInterval
 real = _Real()
 real_vector = _RealVector()
-positive = _GreaterThan(0)
+positive = _GreaterThan(0.)
 greater_than = _GreaterThan
 less_than = _LessThan
-unit_interval = _Interval(0, 1)
+unit_interval = _Interval(0., 1.)
 interval = _Interval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()

@@ -1,9 +1,10 @@
 import warnings
-from torch.autograd import NestedIOFunction, Variable
+from torch.autograd import NestedIOFunction
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
 import itertools
+from functools import partial
 
 try:
     import torch.backends.cudnn.rnn
@@ -270,14 +271,15 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
             cx = None
 
         handle = cudnn.get_handle()
-        dropout_ts = cudnn.rnn.init_dropout_state(torch.cuda.uint8, dropout, train, dropout_seed, dropout_state)
+        dropout_ts = cudnn.rnn.init_dropout_state(torch.uint8, torch.device('cuda'), dropout,
+                                                  train, dropout_seed, dropout_state)
 
         weight_arr = list(itertools.chain.from_iterable(weight))
         weight_stride0 = len(weight[0])
 
         output, hy, cy, reserve, new_weight_buf = torch._cudnn_rnn(
             input, weight_arr, weight_stride0,
-            Variable(flat_weight) if flat_weight is not None else None,
+            flat_weight,
             hx, cx,
             mode, hidden_size, num_layers,
             batch_first, dropout, train, bool(bidirectional),
@@ -309,8 +311,13 @@ def RNN(*args, **kwargs):
         import torch
         if torch._C._jit_is_tracing(input):
             import torch.onnx.symbolic
-            decorator = torch.onnx.symbolic_override_first_arg_based(
-                torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs))
+            sym = torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs)
+            cell_type = args[0]
+
+            bound_symbolic = partial(torch.onnx.symbolic.rnn_trace_override_symbolic,
+                                     cell_type, func, sym)
+
+            decorator = torch.onnx.symbolic_override_first_arg_based(bound_symbolic)
             func = decorator(func)
 
         return func(input, *fargs, **fkwargs)

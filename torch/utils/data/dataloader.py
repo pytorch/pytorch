@@ -11,7 +11,14 @@ import re
 import sys
 import threading
 import traceback
+import os
+import time
 from torch._six import string_classes, int_classes
+
+IS_WINDOWS = sys.platform == "win32"
+if IS_WINDOWS:
+    import ctypes
+    from ctypes.wintypes import DWORD, BOOL, HANDLE
 
 if sys.version_info[0] == 2:
     import Queue as queue
@@ -29,6 +36,37 @@ class ExceptionWrapper(object):
 
 _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
+
+MANAGER_STATUS_CHECK_INTERVAL = 5.0
+
+if IS_WINDOWS:
+    class ManagerWatchdog(object):
+        def __init__(self):
+            self.manager_pid = os.getppid()
+
+            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            self.kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
+            self.kernel32.OpenProcess.restype = HANDLE
+            self.kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
+            self.kernel32.WaitForSingleObject.restype = DWORD
+
+            # Value obtained from https://msdn.microsoft.com/en-us/library/ms684880.aspx
+            SYNCHRONIZE = 0x00100000
+            self.manager_handle = self.kernel32.OpenProcess(SYNCHRONIZE, 0, self.manager_pid)
+
+            if not self.manager_handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+
+        def is_alive(self):
+            # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
+            return self.kernel32.WaitForSingleObject(self.manager_handle, 0) != 0
+else:
+    class ManagerWatchdog(object):
+        def __init__(self):
+            self.manager_pid = os.getppid()
+
+        def is_alive(self):
+            return os.getppid() == self.manager_pid
 
 
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
@@ -48,8 +86,16 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     if init_fn is not None:
         init_fn(worker_id)
 
+    watchdog = ManagerWatchdog()
+
     while True:
-        r = index_queue.get()
+        try:
+            r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
+        except queue.Empty:
+            if watchdog.is_alive():
+                continue
+            else:
+                break
         if r is None:
             break
         idx, batch_indices = r
@@ -59,6 +105,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
             data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
             data_queue.put((idx, samples))
+            del samples
 
 
 def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
@@ -103,7 +150,7 @@ def default_collate(batch):
 
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
-    if torch.is_tensor(batch[0]):
+    if isinstance(batch[0], torch.Tensor):
         out = None
         if _use_shared_memory:
             # If we're in a background process, concatenate directly into a
@@ -140,7 +187,7 @@ def default_collate(batch):
 
 
 def pin_memory_batch(batch):
-    if torch.is_tensor(batch):
+    if isinstance(batch, torch.Tensor):
         return batch.pin_memory()
     elif isinstance(batch, string_classes):
         return batch
@@ -198,7 +245,7 @@ class _DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queues = [multiprocessing.SimpleQueue() for _ in range(self.num_workers)]
+            self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
             self.worker_queue_idx = 0
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
@@ -378,13 +425,19 @@ class DataLoader(object):
 
     .. note:: By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
-              by main process using its RNG. You may use ``torch.initial_seed()`` to access
-              this value in :attr:`worker_init_fn`, which can be used to set other seeds
-              (e.g. NumPy) before data loading.
+              by main process using its RNG. However, seeds for other libraies
+              may be duplicated upon initializing workers (w.g., NumPy), causing
+              each worker to return identical random numbers. (See
+              :ref:`dataloader-workers-random-seed` section in FAQ.) You may
+              use ``torch.initial_seed()`` to access the PyTorch seed for each
+              worker in :attr:`worker_init_fn`, and use it to set other seeds
+              before data loading.
 
     .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.
     """
+
+    __initialized = False
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
                  num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
@@ -403,18 +456,19 @@ class DataLoader(object):
 
         if batch_sampler is not None:
             if batch_size > 1 or shuffle or sampler is not None or drop_last:
-                raise ValueError('batch_sampler is mutually exclusive with '
-                                 'batch_size, shuffle, sampler, and drop_last')
+                raise ValueError('batch_sampler option is mutually exclusive '
+                                 'with batch_size, shuffle, sampler, and '
+                                 'drop_last')
+            self.batch_size = None
+            self.drop_last = None
 
         if sampler is not None and shuffle:
-            raise ValueError('sampler is mutually exclusive with shuffle')
+            raise ValueError('sampler option is mutually exclusive with '
+                             'shuffle')
 
         if self.num_workers < 0:
-            raise ValueError('num_workers cannot be negative; '
+            raise ValueError('num_workers option cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
-
-        if sys.platform == "win32" and self.num_workers > 0:
-            raise ValueError('num_workers > 0 is not supported on Windows')
 
         if batch_sampler is None:
             if sampler is None:
@@ -426,6 +480,14 @@ class DataLoader(object):
 
         self.sampler = sampler
         self.batch_sampler = batch_sampler
+        self.__initialized = True
+
+    def __setattr__(self, attr, val):
+        if self.__initialized and attr in ('batch_size', 'sampler', 'drop_last'):
+            raise ValueError('{} attribute should not be set after {} is '
+                             'initialized'.format(attr, self.__class__.__name__))
+
+        super(DataLoader, self).__setattr__(attr, val)
 
     def __iter__(self):
         return _DataLoaderIter(self)

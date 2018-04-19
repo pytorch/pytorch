@@ -14,6 +14,10 @@ void PeepholeOptimize(Block * block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto* n = *it;
 
+    for (Block * sub_block : n->blocks()) {
+        PeepholeOptimize(sub_block);
+    }
+
     // XXX: remember that if you want to simplify an expression by combining multiple nodes
     // into a different one, then you need to check that they all belong to the given block
     switch (n->kind()) {
@@ -41,10 +45,6 @@ void PeepholeOptimize(Block * block) {
           }
         }
         break;
-    }
-
-    for (Block * sub_block : n->blocks()) {
-      PeepholeOptimize(sub_block);
     }
   }
 }

@@ -4,6 +4,8 @@ from functools import reduce
 import math
 
 __all__ = [
+    'argmax',
+    'argmin',
     'bartlett_window',
     'btrifact',
     'btriunpack',
@@ -36,7 +38,7 @@ def split(tensor, split_size_or_sections, dim=0):
     """
     # Overwriting reason:
     # This dispatches to two ATen functions depending on the type of
-    # split_size_or_sections. The branching code is in variable.py, which we
+    # split_size_or_sections. The branching code is in tensor.py, which we
     # call here.
     return tensor.split(split_size_or_sections, dim)
 
@@ -91,7 +93,7 @@ def btrifact(A, info=None, pivot=True):
     """
     # Overwriting reason:
     # `info` is being deprecated in favor of `btrifact_with_info`. This warning
-    # is in variable.py, which we call here.
+    # is in tensor.py, which we call here.
     return A.btrifact(info, pivot)
 
 
@@ -116,7 +118,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         LU_data (Tensor): the packed LU factorization data
         LU_pivots (Tensor): the packed LU factorization pivots
         unpack_data (bool): flag indicating if the data should be unpacked
-        unpack_pivots (bool): tlag indicating if the pivots should be unpacked
+        unpack_pivots (bool): flag indicating if the pivots should be unpacked
 
     Example::
 
@@ -157,14 +159,14 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
-def hann_window(window_length, periodic=True):
+def hann_window(window_length, periodic=True, dtype=torch.float32):
     r"""Hann window function.
 
     This method computes the Hann window function:
 
     .. math::
         w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] =
-                \sin^2 \left( \frac{\pi n}{N - 1} \right)
+                \sin^2 \left( \frac{\pi n}{N - 1} \right),
 
     where :math:`N` is the full window size.
 
@@ -173,33 +175,37 @@ def hann_window(window_length, periodic=True):
     window trims off the last duplicate value from the symmetric window and is
     ready to be used as a periodic window with functions like
     :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`\textt{window_length} + 1`. Also, we always have
+    above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
     ``torch.hann_window(L, periodic=True)`` equal to
     ``torch.hann_window(L + 1, periodic=False)[:-1])``.
 
     .. note::
-        If :attr:`window_length` :math:`\leq 2`, the returned window contains a single value 1.
+        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
 
     Arguments:
         window_length (int): the size of returned window
         periodic (bool, optional): If True, returns a window to be used as periodic
             function. If False, return a symmetric window.
+        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
+            Default: `torch.float32`
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(\text{window_length})` containing the window
+        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
     """
+    if not dtype.is_floating_point:
+        raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
     if window_length <= 0:
         raise ValueError('window_length must be positive')
-    return hamming_window(window_length, periodic=periodic, alpha=0.5, beta=0.5)
+    return hamming_window(window_length, periodic=periodic, alpha=0.5, beta=0.5, dtype=dtype)
 
 
-def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46):
+def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=torch.float32):
     r"""Hamming window function.
 
     This method computes the Hamming window function:
 
     .. math::
-        w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right)
+        w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right),
 
     where :math:`N` is the full window size.
 
@@ -213,7 +219,7 @@ def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46):
     ``torch.hamming_window(L + 1, periodic=False)[:-1])``.
 
     .. note::
-        If :attr:`window_length` :math:`\leq 2`, the returned window contains a single value 1.
+        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
 
     .. note::
         This is a generalized version of :meth:`torch.hann_window`.
@@ -222,23 +228,28 @@ def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46):
         window_length (int): the size of returned window
         periodic (bool, optional): If True, returns a window to be used as periodic
             function. If False, return a symmetric window.
+        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
+            Default: `torch.float32`
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(window\_length)` containing the window
+        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
     """
+    if not dtype.is_floating_point:
+        raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
     if window_length <= 0:
         raise ValueError('window_length must be positive')
     if window_length == 1:
-        return torch.ones(window_length)
+        return torch.ones(window_length, dtype=dtype)
     window_length += int(periodic)
-    window = torch.arange(window_length).mul_(math.pi * 2 / (window_length - 1)).cos_().mul_(-beta).add_(alpha)
+    window = torch.arange(window_length, dtype=dtype)
+    window = window.mul_(math.pi * 2 / (window_length - 1)).cos_().mul_(-beta).add_(alpha)
     if periodic:
         return window[:-1]
     else:
         return window
 
 
-def bartlett_window(window_length, periodic=True):
+def bartlett_window(window_length, periodic=True, dtype=torch.float32):
     r"""Bartlett window function.
 
     This method computes the Bartlett window function:
@@ -247,9 +258,9 @@ def bartlett_window(window_length, periodic=True):
         w[n] = 1 - \left| \frac{2n}{N-1} - 1 \right| = \begin{cases}
             \frac{2n}{N - 1} & \text{if } 0 \leq n \leq \frac{N - 1}{2} \\
             2 - \frac{2n}{N - 1} & \text{if } \frac{N - 1}{2} < n < N \\
-        \end{cases}
+        \end{cases},
 
-    , where :math:`N` is the full window size.
+    where :math:`N` is the full window size.
 
     The input :attr:`window_length` is a positive integer controlling the
     returned window size. :attr:`periodic` flag determines whether the returned
@@ -261,22 +272,26 @@ def bartlett_window(window_length, periodic=True):
     ``torch.bartlett_window(L + 1, periodic=False)[:-1])``.
 
     .. note::
-        If :attr:`window_length` :math:`\leq 2`, the returned window contains a single value 1.
+        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
 
     Arguments:
         window_length (int): the size of returned window
         periodic (bool, optional): If True, returns a window to be used as periodic
             function. If False, return a symmetric window.
+        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
+            Default: `torch.float32`
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(window\_length)` containing the window
+        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
     """
+    if not dtype.is_floating_point:
+        raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
     if window_length <= 0:
         raise ValueError('window_length must be positive')
     if window_length == 1:
-        return torch.ones(window_length)
+        return torch.ones(window_length, dtype=dtype)
     window_length += int(periodic)
-    window = torch.arange(window_length).mul_(2.0 / (window_length - 1))
+    window = torch.arange(window_length, dtype=dtype).mul_(2.0 / (window_length - 1))
     first_half_size = ((window_length - 1) >> 1) + 1
     window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2)
     if periodic:
@@ -302,7 +317,7 @@ def isnan(tensor):
          0
         [torch.ByteTensor of size 3]
     """
-    if not torch.is_tensor(tensor):
+    if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor")
     return tensor != tensor
 
@@ -369,7 +384,7 @@ def unique(input, sorted=False, return_inverse=False):
          1  2
         [torch.LongTensor of size (2,2)]
     """
-    output, inverse_indices = torch._C._VariableBase._unique(
+    output, inverse_indices = torch._unique(
         input,
         sorted=sorted,
         return_inverse=return_inverse,
@@ -378,3 +393,75 @@ def unique(input, sorted=False, return_inverse=False):
         return output, inverse_indices
     else:
         return output
+
+
+def argmax(input, dim=None, keepdim=False):
+    """Returns the indices of the maximum values of a tensor across a dimension.
+
+    This is the second value returned by :meth:`torch.max`. See its
+    documentation for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int): the dimension to reduce. If ``None``, the argmax of the
+            flattened input is returned.
+        keepdim (bool): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if ``dim=None``.
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+
+         2.3461  0.0056  1.4846  0.3911
+        -1.3584 -1.0066  0.0530  1.1754
+        -0.7929 -0.3194 -1.4865  0.4020
+         0.1101  0.6694  1.3456  0.8235
+        [torch.FloatTensor of size (4,4)]
+
+        >>> torch.argmax(a, dim=1)
+        0
+        3
+        3
+        2
+        [torch.LongTensor of size (4,)]
+    """
+    if dim is None:
+        return torch._argmax(input.contiguous().view(-1), dim=0, keepdim=False)
+    return torch._argmax(input, dim, keepdim)
+
+
+def argmin(input, dim=None, keepdim=False):
+    """Returns the indices of the minimum values of a tensor across a dimension.
+
+    This is the second value returned by :meth:`torch.min`. See its
+    documentation for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int): the dimension to reduce. If ``None``, the argmin of the
+            flattened input is returned.
+        keepdim (bool): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if ``dim=None``.
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+
+         2.3461  0.0056  1.4846  0.3911
+        -1.3584 -1.0066  0.0530  1.1754
+        -0.7929 -0.3194 -1.4865  0.4020
+         0.1101  0.6694  1.3456  0.8235
+        [torch.FloatTensor of size (4,4)]
+
+        >>> torch.argmin(a, dim=1)
+         1
+         0
+         2
+         0
+        [torch.LongTensor of size (4,)]
+    """
+    if dim is None:
+        return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
+    return torch._argmin(input, dim, keepdim)

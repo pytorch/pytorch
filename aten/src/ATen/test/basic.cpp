@@ -16,7 +16,7 @@ extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 
 using namespace at;
 
-
+using Catch::Matchers::StartsWith;
 
 static void test(Type & type) {
   SECTION( "resize" ) {
@@ -225,8 +225,7 @@ static void test(Type & type) {
     std::string expect = "1e-07 *";
     REQUIRE(s.str().substr(0,expect.size()) == expect);
   }
-  {
-    // Indexing by Scalar
+  SECTION("indexing by Scalar") {
     Tensor tensor = CPU(kInt).arange(0, 10);
     Tensor one = CPU(kInt).ones({1});
     for (int64_t i = 0; i < tensor.numel(); ++i) {
@@ -244,33 +243,46 @@ static void test(Type & type) {
     for (int8_t i = 0; i < tensor.numel(); ++i) {
       REQUIRE(tensor[i].equal(one * i));
     }
-    REQUIRE_THROWS_WITH(tensor[Scalar(3.14)].equal(one), "Can only index tensors with integral scalars (got CPUDoubleType)");
+    REQUIRE_THROWS_WITH(
+        tensor[Scalar(3.14)].equal(one),
+        StartsWith(
+            "Can only index tensors with integral scalars (got CPUDoubleType)"));
   }
-  {
-    // Indexing by zero-dim tensor
+  SECTION("indexing by zero-dim tensor") {
     Tensor tensor = CPU(kInt).arange(0, 10);
     Tensor one = CPU(kInt).ones({});
     for (int i = 0; i < tensor.numel(); ++i) {
       REQUIRE(tensor[one * i].equal(one * i));
     }
-    REQUIRE_THROWS_WITH(tensor[CPU(kFloat).ones({}) * 3.14].equal(one), "Can only index tensors with integral scalars (got CPUFloatType)");
-    REQUIRE_THROWS_WITH(tensor[Tensor()].equal(one), "Can only index with tensors that are defined");
-    REQUIRE_THROWS_WITH(tensor[CPU(kInt).ones({2, 3, 4})].equal(one), "Can only index with tensors that are scalars (zero-dim)");
+    REQUIRE_THROWS_WITH(
+        tensor[CPU(kFloat).ones({}) * 3.14].equal(one),
+        StartsWith(
+            "Can only index tensors with integral scalars (got CPUFloatType)"));
+    REQUIRE_THROWS_WITH(
+        tensor[Tensor()].equal(one),
+        StartsWith("Can only index with tensors that are defined"));
+    REQUIRE_THROWS_WITH(
+        tensor[CPU(kInt).ones({2, 3, 4})].equal(one),
+        StartsWith("Can only index with tensors that are scalars (zero-dim)"));
+  }
+  SECTION("dispatch") {
+    Tensor tensor = CPU(kFloat).randn({20, 20});
+    Tensor other = CPU(kFloat).randn({20, 20});
+    auto result = tensor.m(relu).m(mse_loss, other, true, true);
+    REQUIRE(result.allclose(mse_loss(relu(tensor), other)));
   }
 }
 
 TEST_CASE( "basic tests CPU", "[cpu]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   test(CPU(kFloat));
 }
 
 TEST_CASE( "basic tests GPU", "[cuda]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CUDA);
 
   if(at::hasCUDA()) {
     test(CUDA(kFloat));
   }
 }
-
-

@@ -23,7 +23,11 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
   {"PyObject*", ParameterType::PYOBJECT},
-  {"Type", ParameterType::TYPE},
+  {"ScalarType", ParameterType::SCALARTYPE},
+  {"optional<ScalarType>", ParameterType::SCALARTYPE},
+  {"Layout", ParameterType::LAYOUT},
+  {"Device", ParameterType::DEVICE},
+  {"std::string", ParameterType::STRING},
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
@@ -81,7 +85,8 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::TENSOR: {
       return THPVariable_Check(obj);
     }
-    case ParameterType::SCALAR: {
+    case ParameterType::SCALAR:
+    case ParameterType::DOUBLE: {
       // NOTE: we don't currently accept most NumPy types as Scalars. np.float64
       // is okay because it's a subclass of PyFloat. We may want to change this
       // in the future.
@@ -94,8 +99,16 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       return false;
     }
-    case ParameterType::INT64: return THPUtils_checkLong(obj);
-    case ParameterType::DOUBLE: return THPUtils_checkDouble(obj);
+    case ParameterType::INT64: {
+      if (THPUtils_checkLong(obj)) {
+        return true;
+      }
+      if (THPVariable_Check(obj)) {
+        auto& var = ((THPVariable*)obj)->cdata;
+        return at::isIntegralType(var.type().scalarType()) && !var.requires_grad() && var.dim() == 0;
+      }
+      return false;
+    }
     case ParameterType::TENSOR_LIST: return PyTuple_Check(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -108,7 +121,11 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
-    case ParameterType::TYPE: return THPDtype_Check(obj);
+    case ParameterType::SCALARTYPE: return THPDtype_Check(obj);
+    case ParameterType::LAYOUT: return THPLayout_Check(obj);
+    case ParameterType::DEVICE:
+      return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
+    case ParameterType::STRING: return THPUtils_checkString(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -125,7 +142,10 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
     case ParameterType::PYOBJECT: return "object";
-    case ParameterType::TYPE: return "torch.dtype";
+    case ParameterType::SCALARTYPE: return "torch.dtype";
+    case ParameterType::LAYOUT: return "torch.layout";
+    case ParameterType::DEVICE: return "torch.device";
+    case ParameterType::STRING: return "str";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -156,13 +176,31 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str != "None") {
       default_intlist.assign(size, std::stoi(str));
     }
-  } else if (type_ == ParameterType::TYPE) {
+  } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
-      default_type = nullptr;
+      default_scalartype = at::ScalarType::Undefined;
     } else if (str == "torch.int64") {
-      default_type = torch::autograd::VariableType::getType(CPU(kLong));
+      default_scalartype = at::ScalarType::Long;
     } else {
-      throw std::runtime_error("invalid default value for dtype: " + str);
+      throw std::runtime_error("invalid default value for ScalarType: " + str);
+    }
+  } else if (type_ == ParameterType::LAYOUT) {
+    if (str == "None") {
+      default_layout = nullptr;
+    } else if (str == "torch.strided") {
+      default_layout = torch::getLayout(at::Backend::CPU);
+    } else if (str == "torch.sparse_coo") {
+      default_layout = torch::getLayout(at::Backend::SparseCPU);
+    } else {
+      throw std::runtime_error("invalid default value for layout: " + str);
+    }
+  } else if (type_ == ParameterType::DEVICE) {
+    if (str != "None") {
+      throw std::runtime_error("invalid device: " + str);
+    }
+  } else if (type_ == ParameterType::STRING) {
+    if (str != "None" || str != "") {
+      throw std::runtime_error("invalid default string: " + str);
     }
   }
 }

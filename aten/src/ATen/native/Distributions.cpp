@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/Dispatch.h"
+#include "ATen/Error.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 
@@ -9,6 +10,7 @@
 #include "ATen/Generator.h"
 
 #include "TH/THRandom.h"
+#include "TH/THMath.h"
 
 namespace {
 /*
@@ -98,11 +100,19 @@ int64_t sample_poisson(double lambda, THGenerator* generator) {
   }
 }
 
-// TODO Replace this with more accurate digamma().
-template <typename scalar_t>
-scalar_t digamma_one(scalar_t x) {
-  const double eps = x * 1e-3;
-  return (std::lgamma(x + eps) - std::lgamma(x - eps)) / (eps + eps);
+template <typename scalar>
+static inline scalar digamma_one(scalar x) {
+  throw std::runtime_error("digamma is only implemented for float, double");
+}
+
+template <>
+inline double digamma_one<double>(double x) {
+  return TH_digamma(x);
+}
+
+template <>
+inline float digamma_one<float>(float x) {
+  return TH_digammaf(x);
 }
 
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
@@ -196,7 +206,7 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
 }
 
 Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
-  runtime_error("_standard_gamma_grad is not implemented for CUDA types");
+  AT_ERROR("_standard_gamma_grad is not implemented for CUDA types");
 }
 
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {

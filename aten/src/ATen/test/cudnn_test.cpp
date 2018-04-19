@@ -10,7 +10,7 @@ using namespace at;
 using namespace at::native;
 
 TEST_CASE( "cudnn", "[cuda]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CUDA);
 
 #if CUDNN_VERSION < 7000
   auto handle = getCudnnHandle();

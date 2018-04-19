@@ -22,7 +22,7 @@ __all__ = [
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor',
 ]
 
 ################################################################################
@@ -131,6 +131,8 @@ def is_storage(obj):
 def set_default_tensor_type(t):
     r"""Sets the default ``torch.Tensor`` type to type :attr:`t`.
 
+    The default tensor type is initially ``"torch.FloatTensor"``.
+
     Args:
         t (type or string): the tensor type or its name
 
@@ -143,35 +145,29 @@ def set_default_tensor_type(t):
          3.0000
         [torch.FloatTensor of size (2,)]
 
+    """
+    if isinstance(t, _string_classes):
+        t = _import_dotted_name(t)
+    _C._set_default_tensor_type(t)
+
+
+def set_default_dtype(d):
+    r"""Sets the default ``torch.dtype`` type to type :attr:`d`.
+
+    Args:
+        d (dtype): the dtype to make the default
+
+    Example::
+
         >>> torch.set_default_tensor_type(torch.double)
-        >>> torch.Tensor([1.2, 3])
+        >>> torch.tensor([1.2, 3], device='cpu')
 
          1.2000
          3.0000
         [torch.DoubleTensor of size (2,)]
 
-        >>> torch.set_default_tensor_type(torch.cuda.uint8)
-        >>> torch.Tensor([2, 3])
-
-         2
-         3
-        [torch.cuda.ByteTensor of size (2,) (GPU 0)]
-
-        >>> torch.set_default_tensor_type(torch.cuda.LongTensor)
-        >>> torch.Tensor([3, 4])
-
-         3
-         4
-        [torch.cuda.LongTensor of size (2,) (GPU 0)]
-
     """
-    if isinstance(t, globals()['dtype']):
-        _C._set_default_tensor_type(t)
-    else:
-        if not isinstance(t, _string_classes):
-            raise ValueError("t must be a string or a dtype, but got: {}".format(repr(t)))
-        Tensor = _import_dotted_name(t)
-        _C._set_default_tensor_type(Tensor)
+    _C._set_default_dtype(d)
 
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
 from .serialization import save, load
@@ -181,6 +177,7 @@ from ._tensor_str import set_printoptions
 # Define Storage and Tensor classes
 ################################################################################
 
+from .tensor import Tensor
 from .storage import _StorageBase
 
 
@@ -246,7 +243,6 @@ del manager_path
 for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
 
-
 ################################################################################
 # Import interface functions defined in Python
 ################################################################################
@@ -283,6 +279,7 @@ import torch.jit
 import torch.random
 import torch.distributions
 import torch.testing
+import torch.backends.mkl
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
 
 _C._init_names(list(torch._storage_classes))

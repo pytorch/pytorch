@@ -35,7 +35,6 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
 Tensor embedding_backward(
     const Tensor & grad, const Tensor & indices, int64_t num_weights,
     int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
-
   if (sparse) {
     return at::embedding_sparse_backward(
         grad, indices, num_weights, padding_idx, scale_grad_by_freq);
@@ -55,7 +54,8 @@ Tensor embedding_sparse_backward(
 
   // TODO: implement scale_grad_by_freq
   if (scale_grad_by_freq) {
-    runtime_error("embedding_backward: scale_grad_by_freq not supported with sparse gradients");
+    AT_ERROR(
+        "embedding_backward: scale_grad_by_freq not supported with sparse gradients");
   }
 
   Tensor indices = indices_;
@@ -66,14 +66,20 @@ Tensor embedding_sparse_backward(
     grad = grad.index(c);
   }
 
-  int64_t num_features = grad.size(-1);
+  int64_t num_features = grad_.size(-1);
   auto weight_size = std::array<int64_t, 2>{{ num_weights, num_features }};
+  auto& dense_type = grad.type();
+  auto& sparse_type = dense_type.toBackend(grad.is_cuda() ? kSparseCUDA : kSparseCPU);
+
+  // check if all our grad come from padding_idx
+  if (grad.numel() == 0) {
+    return sparse_type._sparse_coo_tensor_unsafe(indices_.type().tensor(),
+                                         dense_type.tensor(), weight_size);
+  }
 
   auto index = indices.view({1, -1});
   auto values = grad.contiguous().view({-1, num_features});
-
-  auto& sparse_type = grad.type().toBackend(grad.is_cuda() ? kSparseCUDA : kSparseCPU);
-  return sparse_type.sparse_coo_tensor(index, values, weight_size);
+  return sparse_type._sparse_coo_tensor_unsafe(index, values, weight_size);
 }
 
 Tensor embedding_backward_cpu(

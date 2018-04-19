@@ -872,10 +872,10 @@ void testControlFlow() {
     return stack;
   };
 
-  auto F = [](float f) { return at::Scalar(f).toTensor(); };
-  auto V = [](at::Tensor t) { return at::Scalar(t).toFloat(); };
-  auto run_binary = [&](const std::string & name, float a, float b) {
-    return V(run(name, {F(a), F(b)})[0]);
+  auto L = [](int64_t l) { return at::Scalar(l).toTensor(); };
+  auto V = [](at::Tensor t) { return at::Scalar(t).toLong(); };
+  auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
+    return V(run(name, {L(a), L(b)})[0]);
   };
   REQUIRE(2 == run_binary("if_test", 1, 2));
   REQUIRE(3 == run_binary("if_test", 3, 2));

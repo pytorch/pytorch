@@ -2,6 +2,7 @@ import math
 import torch
 import warnings
 import itertools
+import numbers
 
 from .module import Module
 from ..parameter import Parameter
@@ -24,6 +25,17 @@ class RNNBase(Module):
         self.dropout_state = {}
         self.bidirectional = bidirectional
         num_directions = 2 if bidirectional else 1
+
+        if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
+                isinstance(dropout, bool):
+            raise ValueError("dropout should be a number in range [0, 1] "
+                             "representing the probability of an element being "
+                             "zeroed")
+        if dropout > 0 and num_layers == 1:
+            warnings.warn("dropout option adds dropout after all but last "
+                          "recurrent layer, so non-zero dropout expects "
+                          "num_layers greater than 1, but got dropout={} and "
+                          "num_layers={}".format(dropout, num_layers))
 
         if mode == 'LSTM':
             gate_size = 4 * hidden_size
@@ -149,10 +161,9 @@ class RNNBase(Module):
 
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
-            hx = torch.autograd.Variable(input.data.new(self.num_layers *
-                                                        num_directions,
-                                                        max_batch_size,
-                                                        self.hidden_size).zero_(), requires_grad=False)
+            hx = input.new_zeros(self.num_layers * num_directions,
+                                 max_batch_size, self.hidden_size,
+                                 requires_grad=False)
             if self.mode == 'LSTM':
                 hx = (hx, hx)
 
@@ -183,8 +194,8 @@ class RNNBase(Module):
             output = PackedSequence(output, batch_sizes)
         return output, hidden
 
-    def __repr__(self):
-        s = '{name}({input_size}, {hidden_size}'
+    def extra_repr(self):
+        s = '{input_size}, {hidden_size}'
         if self.num_layers != 1:
             s += ', num_layers={num_layers}'
         if self.bias is not True:
@@ -195,8 +206,7 @@ class RNNBase(Module):
             s += ', dropout={dropout}'
         if self.bidirectional is not False:
             s += ', bidirectional={bidirectional}'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
     def __setstate__(self, d):
         super(RNNBase, self).__setstate__(d)
@@ -235,22 +245,26 @@ class RNN(RNNBase):
 
         h_t = \tanh(w_{ih} x_t + b_{ih}  +  w_{hh} h_{(t-1)} + b_{hh})
 
-    where :math:`h_t` is the hidden state at time `t`, and :math:`x_t` is
-    the hidden state of the previous layer at time `t` or :math:`input_t`
-    for the first layer. If :attr:`nonlinearity`='relu', then `ReLU` is used instead
-    of `tanh`.
+    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is
+    the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
+    previous layer at time `t-1` or the initial hidden state at time `0`.
+    If :attr:`nonlinearity`='relu', then `ReLU` is used instead of `tanh`.
 
     Args:
         input_size: The number of expected features in the input `x`
         hidden_size: The number of features in the hidden state `h`
-        num_layers: Number of recurrent layers.
+        num_layers: Number of recurrent layers. E.g., setting ``num_layers=2``
+            would mean stacking two RNNs together to form a `stacked RNN`,
+            with the second RNN taking in outputs of the first RNN and
+            computing the final results. Default: 1
         nonlinearity: The non-linearity to use. Can be either 'tanh' or 'relu'. Default: 'tanh'
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
             as `(batch, seq, feature)`
-        dropout: If non-zero, introduces a `dropout` layer on the outputs of each
-            RNN layer except the last layer
+        dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
+            RNN layer except the last layer, with dropout probability equal to
+            :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
     Inputs: input, h_0
@@ -326,22 +340,27 @@ class LSTM(RNNBase):
             \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell
-    state at time `t`, :math:`x_t` is the hidden state of the previous layer at
-    time `t` or :math:`input_t` for the first layer, and :math:`i_t`,
-    :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget, cell,
-    and out gates, respectively. :math:`\sigma` is the sigmoid function.
+    state at time `t`, :math:`x_t` is the input at time `t`, :math:`h_{(t-1)}`
+    is the hidden state of the previous layer at time `t-1` or the initial hidden
+    state at time `0`, and :math:`i_t`, :math:`f_t`, :math:`g_t`,
+    :math:`o_t` are the input, forget, cell, and output gates, respectively.
+    :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input `x`
         hidden_size: The number of features in the hidden state `h`
-        num_layers: Number of recurrent layers.
+        num_layers: Number of recurrent layers. E.g., setting ``num_layers=2``
+            would mean stacking two LSTMs together to form a `stacked LSTM`,
+            with the second LSTM taking in outputs of the first LSTM and
+            computing the final results. Default: 1
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
-        dropout: If non-zero, introduces a `dropout` layer on the outputs of each
-            RNN layer except the last layer
-        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
+        dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
+            LSTM layer except the last layer, with dropout probability equal to
+            :attr:`dropout`. Default: 0
+        bidirectional: If ``True``, becomes a bidirectional LSTM. Default: ``False``
 
     Inputs: input, (h_0, c_0)
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
@@ -359,7 +378,7 @@ class LSTM(RNNBase):
 
     Outputs: output, (h_n, c_n)
         - **output** of shape `(seq_len, batch, hidden_size * num_directions)`: tensor
-          containing the output features `(h_t)` from the last layer of the RNN,
+          containing the output features `(h_t)` from the last layer of the LSTM,
           for each t. If a :class:`torch.nn.utils.rnn.PackedSequence` has been
           given as the input, the output will also be a packed sequence.
         - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
@@ -406,22 +425,27 @@ class GRU(RNNBase):
             h_t = (1 - z_t) n_t + z_t h_{(t-1)} \\
             \end{array}
 
-    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the hidden
-    state of the previous layer at time `t` or :math:`input_t` for the first
-    layer, and :math:`r_t`, :math:`z_t`, :math:`n_t` are the reset, input,
-    and new gates, respectively. :math:`\sigma` is the sigmoid function.
+    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
+    at time `t`, :math:`h_{(t-1)}` is the hidden state of the previous layer
+    at time `t-1` or the initial hidden state at time `0`, and :math:`r_t`,
+    :math:`z_t`, :math:`n_t` are the reset, update, and new gates, respectively.
+    :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input `x`
         hidden_size: The number of features in the hidden state `h`
-        num_layers: Number of recurrent layers.
+        num_layers: Number of recurrent layers. E.g., setting ``num_layers=2``
+            would mean stacking two GRUs together to form a `stacked GRU`,
+            with the second GRU taking in outputs of the first GRU and
+            computing the final results. Default: 1
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
-        dropout: If non-zero, introduces a `dropout` layer on the outputs of each
-            RNN layer except the last layer
-        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
+        dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
+            GRU layer except the last layer, with dropout probability equal to
+            :attr:`dropout`. Default: 0
+        bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``
 
     Inputs: input, h_0
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
@@ -434,7 +458,7 @@ class GRU(RNNBase):
 
     Outputs: output, h_n
         - **output** of shape `(seq_len, batch, hidden_size * num_directions)`: tensor
-          containing the output features h_t from the last layer of the RNN,
+          containing the output features h_t from the last layer of the GRU,
           for each t. If a :class:`torch.nn.utils.rnn.PackedSequence` has been
           given as the input, the output will also be a packed sequence.
         - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
@@ -463,14 +487,13 @@ class GRU(RNNBase):
 
 class RNNCellBase(Module):
 
-    def __repr__(self):
-        s = '{name}({input_size}, {hidden_size}'
+    def extra_repr(self):
+        s = '{input_size}, {hidden_size}'
         if 'bias' in self.__dict__ and self.bias is not True:
             s += ', bias={bias}'
         if 'nonlinearity' in self.__dict__ and self.nonlinearity != "tanh":
             s += ', nonlinearity={nonlinearity}'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
     def check_forward_input(self, input):
         if input.size(1) != self.input_size:

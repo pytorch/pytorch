@@ -1,6 +1,7 @@
 #pragma once
 
 #include "THC/THC.h"
+#include "ATen/Error.h"
 
 // This file creates a fake allocator that just throws exceptions if
 // it is actually used.
@@ -11,11 +12,11 @@
 namespace at {
 
 static cuda_fixed_malloc(void *, void**, size_t, cudaStream_t) {
-  runtime_error("attempting to resize a tensor view of an external blob");
+  AT_ERROR("attempting to resize a tensor view of an external blob");
 }
 
 static cpu_fixed_realloc(void*, void**, size_t, size_t, cudaStream_t) {
-  runtime_error("attempting to resize a tensor view of an external blob");
+  AT_ERROR("attempting to resize a tensor view of an external blob");
 }
 
 static cuda_fixed_free(void * state, void * allocation) {
@@ -25,11 +26,11 @@ static cuda_fixed_free(void * state, void * allocation) {
 }
 
 static cuda_fixed_emptyCache(void*) {
-  runtime_error("?? attempting to resize a tensor view of an external blob");
+  AT_ERROR("?? attempting to resize a tensor view of an external blob");
 }
 
 static cuda_fixed_cacheInfo(void*, int, size_t*, size_t*) {
-  runtime_error("?? attempting to resize a tensor view of an external blob");
+  AT_ERROR("?? attempting to resize a tensor view of an external blob");
 }
 
 

@@ -39,5 +39,5 @@ class PixelShuffle(Module):
     def forward(self, input):
         return F.pixel_shuffle(input, self.upscale_factor)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(upscale_factor=' + str(self.upscale_factor) + ')'
+    def extra_repr(self):
+        return 'upscale_factor={}'.format(self.upscale_factor)

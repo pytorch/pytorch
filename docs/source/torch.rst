@@ -7,24 +7,30 @@ Tensors
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
 .. autofunction:: set_default_tensor_type
+.. autofunction:: set_default_dtype
 .. autofunction:: numel
 .. autofunction:: set_printoptions
 .. autofunction:: set_flush_denormal
 
+.. _tensor-creation-ops:
 
 Creation Ops
 ~~~~~~~~~~~~~~~~~~~~~~
-.. autofunction:: eye
+.. autofunction:: tensor
 .. autofunction:: from_numpy
-.. autofunction:: linspace
-.. autofunction:: logspace
+.. autofunction:: zeros
+.. autofunction:: zeros_like
 .. autofunction:: ones
 .. autofunction:: ones_like
 .. autofunction:: arange
 .. autofunction:: range
-.. autofunction:: zeros
-.. autofunction:: zeros_like
+.. autofunction:: linspace
+.. autofunction:: logspace
+.. autofunction:: eye
+.. autofunction:: empty
 .. autofunction:: empty_like
+.. autofunction:: full
+.. autofunction:: full_like
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -57,7 +63,9 @@ Random sampling
 .. autofunction:: multinomial
 .. autofunction:: normal
 .. autofunction:: rand
+.. autofunction:: randint
 .. autofunction:: randn
+.. autofunction:: randn_like
 .. autofunction:: randperm
 
 In-place random sampling
@@ -115,7 +123,9 @@ Pointwise Ops
 .. autofunction:: frac
 .. autofunction:: lerp
 .. autofunction:: log
+.. autofunction:: log10
 .. autofunction:: log1p
+.. autofunction:: log2
 .. autofunction:: mul
 .. autofunction:: neg
 .. autofunction:: pow
@@ -135,6 +145,8 @@ Pointwise Ops
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: argmax
+.. autofunction:: argmin
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: dist
@@ -168,6 +180,10 @@ Comparison Ops
 
 Spectral Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: fft
+.. autofunction:: ifft
+.. autofunction:: rfft
+.. autofunction:: irfft
 .. autofunction:: stft
 .. autofunction:: hann_window
 .. autofunction:: hamming_window
@@ -178,6 +194,9 @@ Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: cross
 .. autofunction:: diag
+.. autofunction:: diagflat
+.. autofunction:: diagonal
+.. autofunction:: einsum
 .. autofunction:: histc
 .. autofunction:: renorm
 .. autofunction:: trace

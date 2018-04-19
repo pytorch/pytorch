@@ -1,19 +1,21 @@
 #pragma once
 
-#include "ArrayRef.h"
-#include "ATenGeneral.h"
-#include "UndefinedTensor.h"
+#include "ATen/ATenGeneral.h"
+#include "ATen/ArrayRef.h"
+#include "ATen/Error.h"
+#include "ATen/UndefinedTensor.h"
+
 #include <algorithm>
 #include <sstream>
 #include <typeinfo>
-#include "ATenAssert.h"
+#include <numeric>
 
 namespace at {
 
 template <typename T, typename Base>
 static inline T* checked_cast_storage(Base* expr, const char * name, int pos) {
   if (typeid(*expr) != typeid(T))
-    runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
+    AT_ERROR("Expected object of type %s but found type %s for argument #%d '%s'",
       T::typeString(),expr->type().toString(),pos,name);
   return static_cast<T*>(expr);
 }
@@ -24,7 +26,7 @@ inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allow
     return nullptr;
   }
   if (typeid(*expr) != typeid(T))
-    runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
+    AT_ERROR("Expected object of type %s but found type %s for argument #%d '%s'",
       T::typeString(),expr->type().toString(),pos,name);
   return static_cast<T*>(expr);
 }
@@ -39,7 +41,7 @@ static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors,
     if (result) {
       casted[i] = result->tensor;
     } else {
-      runtime_error("Expected a Tensor of type %s but found a type %s for sequence element %u "
+      AT_ERROR("Expected a Tensor of type %s but found a type %s for sequence element %u "
                     " in sequence argument at position #%d '%s'",
                     T::typeString(),expr->type().toString(),i,pos,name);
 
@@ -59,11 +61,19 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
     return res;
   }
   if (list.size() != N) {
-    runtime_error("Expected a list of %zd ints but got %zd for argument #%d '%s'",
+    AT_ERROR("Expected a list of %zd ints but got %zd for argument #%d '%s'",
         N, list.size(), pos, name);
   }
   std::copy_n(list.begin(), N, res.begin());
   return res;
+}
+
+inline int64_t sum_intlist(ArrayRef<int64_t> list) {
+  return std::accumulate(list.begin(), list.end(), 0);
+}
+
+inline int64_t prod_intlist(ArrayRef<int64_t> list) {
+  return std::accumulate(list.begin(), list.end(), 1, std::multiplies<int64_t>());
 }
 
 } // at

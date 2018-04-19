@@ -35,7 +35,7 @@ def is_floating(t):
 
 def is_half(t):
     if isinstance(t, torch.Tensor):
-        return t.dtype in [torch.float16, torch.cuda.float16]
+        return t.dtype == torch.float16
     assert isinstance(t, type)
     assert t != torch.autograd.Variable
     return t in [torch.HalfTensor, torch.cuda.HalfTensor]
@@ -450,7 +450,9 @@ custom_half_precision = {
     'lerp': 1e-2,
     'lgamma': 1e-2,
     'log': 1e-2,
+    'log10': 1e-2,
     'log1p': 1e-3,
+    'log2': 1e-2,
     'mean': 1e-3,
     'mul': 1e-2,
     'norm': 1e-1,
@@ -482,7 +484,9 @@ for fn in simple_pointwise:
 
 simple_pointwise_float = [
     'log',
+    'log10',
     'log1p',
+    'log2',
     'sigmoid',
     'sin',
     'sqrt',
@@ -536,7 +540,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         gpu_args = [to_gpu(arg) for arg in cpu_args]
         if t.__name__ == 'HalfTensor':
             cpu_tensor = cpu_tensor.float()
-            cpu_args = [arg.float() if torch.is_tensor(arg) and is_half(arg) else arg for arg in cpu_args]
+            cpu_args = [arg.float() if isinstance(arg, torch.Tensor) and is_half(arg) else arg for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
         try:
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
@@ -752,23 +756,6 @@ class TestCuda(TestCase):
         self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
         self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
 
-        y = x.new(dtype=torch.cuda.int64, device=1)
-        self.assertEqual(y.get_device(), 1)
-        self.assertIs(y.dtype, torch.cuda.int64)
-        y = x.new(dtype=torch.int64)
-        self.assertIs(y.dtype, torch.int64)
-
-        y = x.new(1, 2, 3, dtype=torch.cuda.int64, device=1)
-        self.assertEqual(y.get_device(), 1)
-        self.assertIs(y.dtype, torch.cuda.int64)
-        y = x.new(1, 2, 3, dtype=torch.int64)
-        self.assertIs(y.dtype, torch.int64)
-
-        y = x.new([0, 1, 2], dtype=torch.cuda.int64, device=1)
-        self.assertEqual(y.get_device(), 1)
-        self.assertIs(y.dtype, torch.cuda.int64)
-        y = x.new([0, 1, 2], dtype=torch.int64)
-        self.assertIs(y.dtype, torch.int64)
         with torch.cuda.device(1):
             self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
             self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
@@ -1082,7 +1069,7 @@ class TestCuda(TestCase):
         TestTorch._test_cat_empty(self, use_cuda=True)
 
     def test_bernoulli(self):
-        x = torch.tensor([0, 1], dtype=torch.cuda.float32)
+        x = torch.tensor([0, 1], dtype=torch.float32, device='cuda')
         self.assertEqual(x.bernoulli().tolist(), [0, 1])
 
     def test_cat_bad_input_sizes(self):
@@ -1322,8 +1309,15 @@ class TestCuda(TestCase):
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
 
+    def test_fft_ifft_rfft_irfft(self):
+        def cuda_randn_double(*sizes):
+            return torch.cuda.DoubleTensor(*sizes).normal_()
+        TestTorch._test_fft_ifft_rfft_irfft(self, build_fn=cuda_randn_double)
+
     def test_stft(self):
-        TestTorch._test_stft(self, lambda t: t.cuda())
+        def cuda_randn_double(*sizes):
+            return torch.cuda.DoubleTensor(*sizes).normal_()
+        TestTorch._test_stft(self, build_fn=cuda_randn_double)
 
     def test_multinomial(self):
         TestTorch._test_multinomial(self, torch.cuda.FloatTensor)
@@ -1438,7 +1432,7 @@ class TestCuda(TestCase):
         TestTorch._test_int_pow(self, lambda x: x.cuda())
 
     def test_remainder_overflow(self):
-        TestTorch._test_remainder_overflow(self, dtype=torch.cuda.int64)
+        TestTorch._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
 
     def test_var(self):
         cpu_tensor = torch.randn(2, 3, 3)
@@ -1506,6 +1500,18 @@ class TestCuda(TestCase):
         test(True)
         test(False)
 
+        # Test float32 behavior near and at poles.
+        cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
+                                  -100.99999994, -1931.99999994, 0.000000111,
+                                  -0.000000111, 0, -1, -2, -931])
+        nan = float('nan')
+        expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan])
+        gpu_tensor = cpu_tensor.cuda()
+        cpu_out = cpu_tensor.digamma()
+        gpu_out = gpu_tensor.digamma()
+        norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
+        self.assertEqual(norm_errors, expected_errors)
+
     def test_polygamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
@@ -1547,10 +1553,14 @@ class TestCuda(TestCase):
             self.assertEqual(a, b.cuda())
 
     def test_diagonal(self):
-        TestTorch._test_diagonal(self, dtype=torch.cuda.float32)
+        TestTorch._test_diagonal(self, dtype=torch.float32, device='cuda')
 
     def test_diagflat(self):
-        TestTorch._test_diagflat(self, dtype=torch.cuda.float32)
+        TestTorch._test_diagflat(self, dtype=torch.float32, device='cuda')
+
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_trtrs(self):
+        TestTorch._test_trtrs(self, lambda t: t.cuda())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_get_set_rng_state_all(self):
@@ -1568,6 +1578,9 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.range_push("foo")
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
+
+    def test_random_neg_values(self):
+        TestTorch._test_random_neg_values(self, use_cuda=True)
 
 
 def load_ignore_file():
@@ -1633,4 +1646,17 @@ if __name__ == '__main__':
     if HAS_CUDA:
         load_ignore_file()
         generate_tests()
+
+    # skip TestTorch tests
+    # hide in __name__ == '__main__' because we don't want this to be run when
+    # someone imports test_cuda
+    def load_tests(loader, tests, pattern):
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                if test.__class__.__name__ == 'TestTorch':
+                    continue
+                test_suite.addTest(test)
+        return test_suite
+
     run_tests()

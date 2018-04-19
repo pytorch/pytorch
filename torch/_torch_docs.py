@@ -1223,7 +1223,7 @@ Args:
     offset (int, optional): the diagonal to consider. Default: 0 (main
         diagonal).
 
-Examples:
+Examples::
 
     >>> a = torch.randn(3)
     >>> a
@@ -1282,7 +1282,8 @@ Args:
     offset (int, optional): which diagonal to consider. Default: 0
         (main diagonal).
 
-Examples:
+Examples::
+
     >>> a = torch.randn(3, 3)
     >>> a
 
@@ -1488,6 +1489,67 @@ Returns:
         - **v** (*Tensor*): the eigenvectors of ``a`` if ``eigenvectors`` is ``True``; otherwise an empty tensor
 """)
 
+add_docstr(torch.einsum,
+           r"""
+einsum(equation, operands) -> Tensor
+
+This function provides a way of computing multilinear expressions (i.e. sums of products) using the
+Einstein summation convention.
+
+Args:
+    equation (string): The equation is given in terms of lower case letters (indices) to be associated
+           with each dimension of the operands and result. The left hand side lists the operands
+           dimensions, separated by commas. There should be one index letter per tensor dimension.
+           The right hand side follows after `->` and gives the indices for the output.
+           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
+           sorted list of all indices appearing exactly once in the left hand side.
+           The indices not apprearing in the output are summed over after multiplying the operands
+           entries.
+           `einsum` does not implement diagonals (multiple occurences of a single index for one tensor,
+           e.g. `ii->i`) and ellipses (`...`).
+    operands (list of Tensors): The operands to compute the Einstein sum of.
+           Note that the operands are passed as a list, not as individual arguments.
+
+Examples::
+
+    >>> x = torch.randn(5)
+    >>> y = torch.randn(4)
+    >>> torch.einsum('i,j->ij', (x,y))  # outer product
+
+    -1.0066 -2.0433 -0.8290  0.8429
+    -0.5106 -1.0365 -0.4205  0.4275
+     0.4174  0.8473  0.3438 -0.3495
+    -0.4578 -0.9292 -0.3770  0.3833
+    -0.8996 -1.8262 -0.7409  0.7533
+    [torch.FloatTensor of size (5,4)]
+
+    >>> A = torch.randn(3,5,4)
+    >>> l = torch.randn(2,5)
+    >>> r = torch.randn(2,4)
+    >>> torch.einsum('bn,anm,bm->ba', (l,A,r)) # compare torch.nn.functional.bilinear
+
+    -1.3778  2.7663 -4.9150
+    -1.7813 -4.9015  2.4149
+    [torch.FloatTensor of size (2,3)]
+
+    >>> As = torch.randn(3,2,5)
+    >>> Bs = torch.randn(3,5,4)
+    >>> torch.einsum('bij,bjk->bik', (As, Bs)) # batch matrix multiplication
+
+    (0 ,.,.) =
+     -2.0810  4.7334  2.9593  0.5268
+      1.8096 -4.6701 -2.4214 -2.2638
+
+    (1 ,.,.) =
+      0.9456 -8.3309 -2.4690 -3.3164
+      1.9580 -1.8447 -1.4268 -2.5414
+
+    (2 ,.,.) =
+     -0.1725  0.7317 -0.2110 -0.0522
+      2.5407 -0.2854  3.8720  0.9073
+    [torch.FloatTensor of size (3,2,4)]
+""")
+
 add_docstr(torch.eq,
            r"""
 eq(input, other, out=None) -> Tensor
@@ -1627,16 +1689,42 @@ Example::
     [torch.FloatTensor of size (2,)]
 """)
 
+factory_common_args = """
+    out (Tensor, optional): the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
+    layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+        Default: ``torch.strided``.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+""".strip()
+
+factory_like_common_args = """
+    input (Tensor): the size of :attr:`input` will determine size of the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
+        Default: if None, defaults to the dtype of :attr:`input`.
+    layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
+        Default: if None, defaults to the layout of :attr:`input`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, defaults to the device of :attr:`input`.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: False.
+""".strip()
+
 add_docstr(torch.eye,
            r"""
-eye(n, m=None, out=None)
+eye(n, m=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a 2-D tensor with ones on the diagonal and zeros elsewhere.
 
 Args:
     n (int): the number of rows
     m (int, optional): the number of columns with default being :attr:`n`
-    out (Tensor, optional): the output tensor
+    {factory_common_args}
 
 Returns:
     Tensor: A 2-D tensor with ones on the diagonal and zeros elsewhere
@@ -1649,7 +1737,8 @@ Example::
      0  1  0
      0  0  1
     [torch.FloatTensor of size (3,3)]
-""")
+
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.floor,
            r"""
@@ -2302,7 +2391,7 @@ Example::
 
 add_docstr(torch.linspace,
            r"""
-linspace(start, end, steps=100, out=None) -> Tensor
+linspace(start, end, steps=100, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a one-dimensional tensor of :attr:`steps`
 equally spaced points between :attr:`start` and :attr:`end`.
@@ -2313,8 +2402,9 @@ Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
     steps (int): number of points to sample between :attr:`start`
-        and :attr:`end`
-    out (Tensor, optional): the output tensor
+        and :attr:`end`. Default: ``100``.
+    {factory_common_args}
+
 
 Example::
 
@@ -2345,7 +2435,7 @@ Example::
      10
     [torch.FloatTensor of size (5,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.log,
            r"""
@@ -2382,6 +2472,42 @@ Example::
     -0.5349
     [torch.FloatTensor of size (5,)]
 
+""")
+
+add_docstr(torch.log10,
+           r"""
+log10(input, out=None) -> Tensor
+
+Returns a new tensor with the logarithm to the base 10 of the elements
+of :attr:`input`.
+
+.. math::
+    y_{i} = \log_{10} (x_{i})
+
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> a = torch.rand(5)
+    >>> a
+
+     0.4496
+     0.1608
+     0.6884
+     0.8989
+     0.1774
+    [torch.FloatTensor of size (5,)]
+
+    >>> torch.log10(a)
+
+    -0.3472
+    -0.7937
+    -0.1622
+    -0.0463
+    -0.7511
+    [torch.FloatTensor of size (5,)]
 """)
 
 add_docstr(torch.log1p,
@@ -2423,21 +2549,57 @@ Example::
 
 """)
 
+add_docstr(torch.log2,
+           r"""
+log2(input, out=None) -> Tensor
+
+Returns a new tensor with the logarithm to the base 2 of the elements
+of :attr:`input`.
+
+.. math::
+    y_{i} = \log_{2} (x_{i})
+
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> a = torch.rand(5)
+    >>> a
+
+     0.2260
+     0.0541
+     0.3393
+     0.7210
+     0.0058
+    [torch.FloatTensor of size (5,)]
+
+    >>> torch.log2(a)
+
+    -2.1458
+    -4.2070
+    -1.5593
+    -0.4719
+    -7.4246
+    [torch.FloatTensor of size (5,)]
+""")
+
 add_docstr(torch.logspace,
            r"""
-logspace(start, end, steps=100, out=None) -> Tensor
+logspace(start, end, steps=100, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a one-dimensional tensor of :attr:`steps` points
-logarithmically spaced between :math:`10^{\text{start}}` and :math:`10^{\text{end}}`.
+logarithmically spaced between :math:`10^{{\text{{start}}}}` and :math:`10^{{\text{{end}}}}`.
 
-The output is a 1-D tensor of size :attr:`steps`.
+The output tensor is 1-D of size :attr:`steps`.
 
 Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
-    steps (int): number of points to sample between
-        :attr:`start` and :attr:`end`
-    out (Tensor, optional): the output tensor
+    steps (int): number of points to sample between :attr:`start`
+        and :attr:`end`. Default: ``100``.
+    {factory_common_args}
 
 Example::
 
@@ -2459,7 +2621,7 @@ Example::
      10.0000
     [torch.FloatTensor of size (5,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.lt,
            r"""
@@ -3161,7 +3323,7 @@ of tensor :attr:`input`.
 Indices are ordered from left to right according to when each was sampled
 (first samples are placed in first column).
 
-If :attr:`input` is a vector, :attr:`out` is a vector of size :math:`num_samples`.
+If :attr:`input` is a vector, :attr:`out` is a vector of size :attr:`num_samples`.
 
 If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape
 :math:`(m \times num\_samples)`.
@@ -3511,14 +3673,15 @@ Example::
 
 add_docstr(torch.ones,
            r"""
-ones(*sizes, out=None) -> Tensor
+ones(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the shape defined
 by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a set of integers defining the shape of the output tensor
-    out (Tensor, optional): the output tensor
+    sizes (int...): a sequence of integers defining the shape of the output tensor.
+        Can be a variable number of arguments or a collection like a list or tuple.
+    {factory_common_args}
 
 Example::
 
@@ -3537,18 +3700,23 @@ Example::
      1
     [torch.FloatTensor of size (5,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.ones_like,
            r"""
-ones_like(input, out=None) -> Tensor
+ones_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the same size as
-:attr:`input`.
+:attr:`input`. ``torch.ones_like(input)`` is equivalent to
+``torch.ones(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+.. warning::
+    As of 0.4, this function does not support an :attr:`out` keyword. As an alternative,
+    the old ``torch.ones_like(input, out=output)`` is equivalent to
+    ``torch.ones(input.size(), out=output)``.
 
 Args:
-    input (Tensor): the size of :attr:`input` will determine size of the output tensor
-    out (Tensor, optional): the output tensor
+    {factory_like_common_args}
 
 Example::
 
@@ -3558,7 +3726,7 @@ Example::
      1  1  1
      1  1  1
     [torch.FloatTensor of size (2,3)]
-""")
+""".format(factory_like_common_args=factory_like_common_args))
 
 add_docstr(torch.orgqr,
            r"""
@@ -4073,22 +4241,62 @@ Example::
 
 """)
 
-add_docstr(torch.randn,
+add_docstr(torch.randint,
            r"""
-randn(*sizes, out=None) -> Tensor
+randint(low=0, high, sizes, out=None, dtype=torch.float32) -> Tensor
 
-Returns a tensor filled with random numbers from a normal distribution
-with zero mean and variance of one (also called the standard normal
-distirbution).
-
-.. math::
-    \text{out}_{i} \sim \mathcal{N}(0, 1)
+Returns a tensor filled with random integers generated uniformly
+between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 
 The shape of the tensor is defined by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a set of ints defining the shape of the output tensor.
+    low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
+    high (int): One above the highest integer to be drawn from the distribution.
+    sizes (tuple): a tuple defining the shape of the output tensor.
     out (Tensor, optional): the output tensor
+    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor. Default: torch.float32
+
+Example::
+
+    >>> torch.randint(3, 5, (3,))
+
+     4
+     4
+     3
+    [torch.FloatTensor of size (3,)]
+
+    >>> torch.randint(3, 10, (2,2), dtype=torch.long)
+
+     7  5
+     9  4
+    [torch.LongTensor of size (2,2)]
+
+    >>> torch.randint(3, 10, (2,2))
+
+     6  8
+     9  4
+    [torch.FloatTensor of size (2,2)]
+
+""")
+
+add_docstr(torch.randn,
+           r"""
+randn(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+
+Returns a tensor filled with random numbers from a normal distribution
+with mean `0` and variance `1` (also called the standard normal
+distribution).
+
+.. math::
+    \text{{out}}_{{i}} \sim \mathcal{{N}}(0, 1)
+
+The shape of the tensor is defined by the variable argument :attr:`sizes`.
+
+Args:
+    sizes (int...): a sequence of integers defining the shape of the output tensor.
+        Can be a variable number of arguments or a collection like a list or tuple.
+    {factory_common_args}
 
 Example::
 
@@ -4106,7 +4314,21 @@ Example::
      1.5458 -0.9643 -0.3558
     [torch.FloatTensor of size (2,3)]
 
-""")
+""".format(factory_common_args=factory_common_args))
+
+add_docstr(torch.randn_like,
+           r"""
+randn_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+
+Returns a tensor with the same size as :attr:`input` that is filled with
+random numbers from a normal distribution with mean 0 and variance 1.
+``torch.randn_like(input)`` is equivalent to
+``torch.randn(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+Args:
+    {factory_like_common_args}
+
+""".format(factory_like_common_args=factory_like_common_args))
 
 add_docstr(torch.randperm,
            r"""
@@ -4129,25 +4351,77 @@ Example::
     [torch.LongTensor of size (4,)]
 """)
 
+add_docstr(torch.tensor,
+           r"""
+tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a tensor with :attr:`data`.
+
+Args:
+    data (array_like): Initial data for the tensor. Can be a list, tuple,
+        numpy array, scalar, and other types.
+    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+        Default: if None, infers data type from :attr:`data`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+
+
+Example::
+
+    >>> torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]])
+
+     0.1000  1.2000
+     2.2000  3.1000
+     4.9000  5.2000
+    [torch.FloatTensor of size (3,2)]
+
+    >>> torch.tensor([0, 1])  # Type inference on data
+
+     0
+     1
+    [torch.LongTensor of size (2,)]
+
+    >>> torch.tensor([[0.11111, 0.222222, 0.3333333]],
+                     dtype=torch.float64,
+                     device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
+
+     0.1111  0.2222  0.3333
+    [torch.cuda.DoubleTensor of size (1,3) (GPU 0)]
+
+    >>> torch.tensor(3.14159)  # Create a scalar (zero-dimensional tensor)
+
+     3.1416
+    [torch.FloatTensor of size ()]
+
+    >>> torch.tensor([])  # Create an empty tensor (of size (0,))
+
+    [torch.FloatTensor of size (0,)]
+
+""")
+
 add_docstr(torch.range,
            r"""
-range(start, end, step=1, out=None) -> Tensor
+range(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a 1-D tensor of size :math:`\left\lfloor \frac{end - start}{step} \right\rfloor + 1`
+Returns a 1-D tensor of size :math:`\left\lfloor \frac{{end - start}}{{step}} \right\rfloor + 1`
 with values from :attr:`start` to :attr:`end` with step :attr:`step`. Step is
 the gap between two values in the tensor.
 
 .. math::
-    \text{out}_{i+1} = \text{out}_i + step.
+    \text{{out}}_{{i+1}} = \text{{out}}_i + step.
 
 .. warning::
     This function is deprecated in favor of :func:`torch.arange`.
 
 Args:
-    start (float): the starting value for the set of points
+    start (float): the starting value for the set of points. Default: ``0``.
     end (float): the ending value for the set of points
-    step (float): the gap between each pair of adjacent points
-    out (Tensor, optional): the output tensor
+    step (float): the gap between each pair of adjacent points. Default: ``1``.
+    {factory_common_args}
 
 Example::
 
@@ -4170,28 +4444,28 @@ Example::
      4.0000
     [torch.FloatTensor of size (7,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 add_docstr(torch.arange,
            r"""
-arange(start=0, end, step=1, out=None) -> Tensor
+arange(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a 1-D tensor of size :math:`\left\lfloor \frac{end - start}{step} \right\rfloor`
+Returns a 1-D tensor of size :math:`\left\lfloor \frac{{end - start}}{{step}} \right\rfloor`
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
-Note that non-integer `step` is subject to floating point rounding errors when
-comparing against `end`; to avoid inconsistency, we advise adding a small epsilon to `end`
+Note that non-integer :attr:`step` is subject to floating point rounding errors when
+comparing against :attr:`end`; to avoid inconsistency, we advise adding a small epsilon to :attr:`end`
 in such cases.
 
 .. math::
-    \text{out}_{i+1} = \text{out}_{i} + \text{step}
+    \text{{out}}_{{i+1}} = \text{{out}}_{{i}} + \text{{step}}
 
 Args:
-    start (float): the starting value for the set of points
+    start (float): the starting value for the set of points. Default: ``0``.
     end (float): the ending value for the set of points
-    step (float): the gap between each pair of adjacent points
-    out (Tensor, optional): the output tensor
+    step (float): the gap between each pair of adjacent points. Default: ``1``.
+    {factory_common_args}
 
 Example::
 
@@ -4218,7 +4492,7 @@ Example::
      2.0000
     [torch.FloatTensor of size (3,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
 
 
 add_docstr(torch.remainder,
@@ -5585,14 +5859,15 @@ Example::
 
 add_docstr(torch.zeros,
            r"""
-zeros(*sizes, out=None) -> Tensor
+zeros(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the shape defined
 by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a set of integers defining the shape of the output tensor
-    out (Tensor, optional): the output tensor
+    sizes (int...): a sequence of integers defining the shape of the output tensor.
+        Can be a variable number of arguments or a collection like a list or tuple.
+    {factory_common_args}
 
 Example::
 
@@ -5611,18 +5886,24 @@ Example::
      0
     [torch.FloatTensor of size (5,)]
 
-""")
+""".format(factory_common_args=factory_common_args))
+
 
 add_docstr(torch.zeros_like,
            r"""
-zeros_like(input, out=None) -> Tensor
+zeros_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the same size as
-:attr:`input`.
+:attr:`input`. ``torch.zeros_like(input)`` is equivalent to
+``torch.zeros(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+.. warning::
+    As of 0.4, this function does not support an :attr:`out` keyword. As an alternative,
+    the old ``torch.zeros_like(input, out=output)`` is equivalent to
+    ``torch.zeros(input.size(), out=output)``.
 
 Args:
-    input (Tensor): the size of the input will determine the size of the output.
-    out (Tensor, optional): the output tensor
+    {factory_like_common_args}
 
 Example::
 
@@ -5633,7 +5914,7 @@ Example::
      0  0  0
     [torch.FloatTensor of size (2,3)]
 
-""")
+""".format(factory_like_common_args=factory_like_common_args))
 
 add_docstr(torch.btrifact_with_info,
            r"""
@@ -5690,14 +5971,30 @@ Example::
 
 """)
 
-add_docstr(torch.empty_like,
+add_docstr(torch.empty,
            r"""
-empty_like(input) -> Tensor
+empty(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns an uninitialized tensor with the same size as :attr:`input`.
+Returns a tensor filled with uninitialized data. The shape of the tensor is
+defined by the variable argument :attr:`sizes`.
 
 Args:
-    input (Tensor): the size of :attr:`input` will determine size of the output tensor
+    sizes (int...): a sequence of integers defining the shape of the output tensor.
+        Can be a variable number of arguments or a collection like a list or tuple.
+    {factory_common_args}
+
+""".format(factory_common_args=factory_common_args))
+
+add_docstr(torch.empty_like,
+           r"""
+empty_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+
+Returns an uninitialized tensor with the same size as :attr:`input`.
+``torch.empty_like(input)`` is equivalent to
+``torch.empty(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+Args:
+    {factory_like_common_args}
 
 Example::
 
@@ -5708,19 +6005,48 @@ Example::
     4.0000e+00  0.0000e+00  0.0000e+00
     [torch.LongTensor of size (2,3)]
 
-""")
+""".format(factory_like_common_args=factory_like_common_args))
+
+add_docstr(torch.full,
+           r"""
+full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+
+Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
+
+Args:
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+    fill_value: the number to fill the output tensor with.
+    {factory_common_args}
+
+""".format(factory_common_args=factory_common_args))
+
+add_docstr(torch.full_like,
+           r"""
+full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+
+Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
+``torch.full_like(input, fill_value)`` is equivalent to
+``torch.full_like(input.size(), fill_value, dtype=input.dtype, layout=input.layout, device=input.device)``.
+
+Args:
+    fill_value: the number to fill the output tensor with.
+    {factory_like_common_args}
+
+""".format(factory_like_common_args=factory_like_common_args))
+
 
 add_docstr(torch.stft,
            r"""
-stft(signal, frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
+stft(signal, frame_length, hop, fft_size=None, normalized=False, onesided=True, window=None, pad_end=0) -> Tensor
 
 Short-time Fourier transform (STFT).
 
 Ignoring the batch dimension, this method computes the following expression:
 
 .. math::
-    X[m, \omega] = \sum_{k = 0}^{frame\_length}%
-                        window[k]\ signal[m \times hop + k]\ e^{- j \frac{2 \pi \cdot \omega k}{\text{frame_length}}}
+    X[m, \omega] = \sum_{k = 0}^{\text{frame_length}}%
+                        window[k]\ signal[m \times hop + k]\ e^{- j \frac{2 \pi \cdot \omega k}{\text{frame_length}}},
 
 where :math:`m` is the index of the sliding window, and :math:`\omega` is
 the frequency that :math:`0 \leq \omega <` :attr:`fft_size`. When
@@ -5736,7 +6062,9 @@ default to same value as  :attr:`frame_length`. :attr:`window` can be a
 :meth:`torch.hann_window`. If :attr:`window` is the default value ``None``,
 it is treated as if having :math:`1` everywhere in the frame.
 :attr:`pad_end` indicates the amount of zero padding at the end of
-:attr:`signal` before STFT.
+:attr:`signal` before STFT. If :attr:`normalized` is set to ``True``, the
+function returns the normalized STFT results, i.e., multiplied by
+:math:`(frame\_length)^{-0.5}`.
 
 Returns the real and the imaginary parts together as one tensor of size
 :math:`(* \times N \times 2)`, where :math:`*` is the shape of input :attr:`signal`,
@@ -5749,7 +6077,10 @@ Arguments:
     frame_length (int): the size of window frame and STFT filter
     hop (int): the distance between neighboring sliding window frames
     fft_size (int, optional): size of Fourier transform. Default: ``None``
-    return_onesided (bool, optional): controls whether to avoid redundancy in the return value. Default: ``True``
+    normalized (bool, optional): controls whether to return the normalized STFT results
+         Default: ``False``
+    onesided (bool, optional): controls whether to return half of results to
+        avoid redundancy Default: ``True``
     window (Tensor, optional): the optional window function. Default: ``None``
     pad_end (int, optional): implicit zero padding at the end of :attr:`signal`. Default: 0
 
@@ -5807,7 +6138,7 @@ Arguments:
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
 
-Excemple::
+Example::
 
     >>> x = torch.randn(3, 2)
     >>> y = torch.ones(3, 2)
@@ -5904,5 +6235,346 @@ Example::
     -1.0402
     [torch.FloatTensor of size ()]
     )
+
+""")
+
+add_docstr(torch.fft,
+           r"""
+fft(input, signal_ndim, normalized=False) -> Tensor
+
+Complex-to-complex Discrete Fourier Transform
+
+This method computes the complex-to-complex discrete Fourier transform.
+Ignoring the batch dimensions, it computes the following expression:
+
+.. math::
+    X[\omega_1, \dots, \omega_d] =
+        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+         e^{-j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
+
+where :math:`d` = :attr:`signal_ndim` is number of dimensions for the
+signal, and :math:`N_i` is the size of signal dimension :math:`i`.
+
+This method supports 1D, 2D and 3D complex-to-complex transforms, indicated
+by :attr:`signal_ndim`. :attr:`input` must be a tensor with last dimension
+of size 2, representing the real and imaginary components of complex
+numbers, and should have at least ``signal_ndim + 1`` dimensions with optionally
+arbitrary number of leading batch dimensions. If :attr:`normalized` is set to
+``True``, this normalizes the result by dividing it with
+:math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is unitary.
+
+Returns the real and the imaginary parts together as one tensor of the same
+shape of :attr:`input`.
+
+The inverse of this function is :func:`~torch.ifft`.
+
+.. warning::
+    For CPU tensors, this method is currently only available with MKL. Check
+    :func:`torch.backends.mkl.is_available` to check if MKL is installed.
+
+Arguments:
+    input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
+        dimensions
+    signal_ndim (int): the number of dimensions in each signal.
+        :attr:`signal_ndim` can only be 1, 2 or 3
+    normalized (bool, optional): controls whether to return normalized results.
+        Default: ``False``
+
+Returns:
+    Tensor: A tensor containing the complex-to-complex Fourier transform result
+
+Example::
+
+    >>> # unbatched 2D FFT
+    >>> x = torch.randn(4, 3, 2)
+    >>> torch.fft(x, 2)
+
+    (0 ,.,.) =
+      6.8901 -1.7571
+      0.4166 -1.1500
+      3.9736  0.5400
+
+    (1 ,.,.) =
+     -0.3050  0.4976
+      0.2072  1.1015
+      1.3850 -0.0566
+
+    (2 ,.,.) =
+      3.1463  3.3727
+      1.4051 -3.3523
+      1.5072 -4.1700
+
+    (3 ,.,.) =
+      5.1215 -2.5402
+      5.1859  1.4077
+      2.0077  1.3137
+    [torch.FloatTensor of size (4,3,2)]
+
+    >>> # batched 1D FFT
+    >>> torch.fft(x, 1)
+
+    (0 ,.,.) =
+      3.7132 -0.1067
+      1.8037 -0.4983
+      2.2184 -0.5932
+
+    (1 ,.,.) =
+      0.1765 -2.6391
+     -0.1705 -0.6941
+      0.9592  1.0218
+
+    (2 ,.,.) =
+      1.3050  0.9145
+     -0.8929 -1.7529
+      0.5220 -1.2218
+
+    (3 ,.,.) =
+      1.6954  0.0742
+     -0.3237  1.7953
+      0.2740  1.3332
+    [torch.FloatTensor of size (4,3,2)]
+
+    >>> # arbitrary number of batch dimensions, 2D FFT
+    >>> x = torch.randn(3, 3, 5, 5, 2)
+    >>> y = torch.fft(x, 2)
+    >>> y.shape
+    torch.Size([3, 3, 5, 5, 2])
+
+""")
+
+add_docstr(torch.ifft,
+           r"""
+ifft(input, signal_ndim, normalized=False) -> Tensor
+
+Complex-to-complex Inverse Discrete Fourier Transform
+
+This method computes the complex-to-complex inverse discrete Fourier
+transform. Ignoring the batch dimensions, it computes the following
+expression:
+
+.. math::
+    X[\omega_1, \dots, \omega_d] =
+        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+         e^{\ j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
+
+where :math:`d` = :attr:`signal_ndim` is number of dimensions for the
+signal, and :math:`N_i` is the size of signal dimension :math:`i`.
+
+The argument specifications are almost identical with :func:`~torch.fft`.
+However, if :attr:`normalized` is set to ``True``, this instead returns the
+results multiplied by :math:`\sqrt{\prod_{i=1}^d N_i}`, to become a unitary
+operator. Therefore, to invert a :func:`~torch.fft`, the :attr:`normalized`
+argument should be set identically for :func:`~torch.fft`.
+
+Returns the real and the imaginary parts together as one tensor of the same
+shape of :attr:`input`.
+
+The inverse of this function is :func:`~torch.fft`.
+
+.. warning::
+    For CPU tensors, this method is currently only available with MKL. Check
+    :func:`torch.backends.mkl.is_available` to check if MKL is installed.
+
+Arguments:
+    input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
+        dimensions
+    signal_ndim (int): the number of dimensions in each signal.
+        :attr:`signal_ndim` can only be 1, 2 or 3
+    normalized (bool, optional): controls whether to return normalized results.
+        Default: ``False``
+
+Returns:
+    Tensor: A tensor containing the complex-to-complex inverse Fourier transform result
+
+Example::
+
+    >>> x = torch.randn(3, 3, 2)
+    >>> x
+
+    (0 ,.,.) =
+      1.2735 -0.9441
+     -1.0940  0.2728
+      0.8997  0.4231
+
+    (1 ,.,.) =
+     -0.5239 -1.4942
+      0.5248  3.3432
+      1.0976 -2.0426
+
+    (2 ,.,.) =
+      1.1039  1.9541
+     -0.2774  0.2631
+      0.3102  0.8129
+    [torch.FloatTensor of size (3,3,2)]
+
+    >>> y = torch.fft(x, 2)
+    >>> torch.ifft(y, 2)  # recover x
+
+    (0 ,.,.) =
+      1.2735 -0.9441
+     -1.0940  0.2728
+      0.8997  0.4231
+
+    (1 ,.,.) =
+     -0.5239 -1.4942
+      0.5248  3.3432
+      1.0976 -2.0426
+
+    (2 ,.,.) =
+      1.1039  1.9541
+     -0.2774  0.2631
+      0.3102  0.8129
+    [torch.FloatTensor of size (3,3,2)]
+
+""")
+
+add_docstr(torch.rfft,
+           r"""
+rfft(input, signal_ndim, normalized=False, onesided=True) -> Tensor
+
+Real-to-complex Discrete Fourier Transform
+
+This method computes the real-to-complex discrete Fourier transform. It is
+mathematically equivalent with :func:`~torch.fft` with differences only in
+formats of the input and output.
+
+This method supports 1D, 2D and 3D real-to-complex transforms, indicated
+by :attr:`signal_ndim`. :attr:`input` must be a tensor with at least
+``signal_ndim`` dimensions with optionally arbitrary number of leading batch
+dimensions. If :attr:`normalized` is set to ``True``, this normalizes the result
+by multiplying it with :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is
+unitary, where :math:`N_i` is the size of signal dimension :math:`i`.
+
+The real-to-complex Fourier transform results follow conjugate symmetry:
+
+.. math::
+    X[\omega_1, \dots, \omega_d] = X^*[N_1 - \omega_1, \dots, N_d - \omega_d],
+
+where the index arithmetic is computed modulus the size of the corresponding
+dimension, :math:`\ ^*` is the conjugate operator, and
+:math:`d` = :attr:`signal_ndim`. :attr:`onesided` flag controls whether to avoid
+redundancy in the output results. If set to ``True`` (default), the output will
+not be full complex result of shape :math:`(*, 2)`, where :math:`*` is the shape
+of :attr:`input`, but instead the last dimension will be halfed as of size
+:math:`\lfloor \frac{N_d}{2} \rfloor + 1`.
+
+The inverse of this function is :func:`~torch.irfft`.
+
+.. warning::
+    For CPU tensors, this method is currently only available with MKL. Check
+    :func:`torch.backends.mkl.is_available` to check if MKL is installed.
+
+Arguments:
+    input (Tensor): the input tensor of at least :attr:`signal_ndim` dimensions
+    signal_ndim (int): the number of dimensions in each signal.
+        :attr:`signal_ndim` can only be 1, 2 or 3
+    normalized (bool, optional): controls whether to return normalized results.
+        Default: ``False``
+    onesided (bool, optional): controls whether to return half of results to
+        avoid redundancy Default: ``True``
+
+Returns:
+    Tensor: A tensor containing the real-to-complex Fourier transform result
+
+Example::
+
+    >>> x = torch.randn(5, 5)
+    >>> torch.rfft(x, 2).shape
+    torch.Size([5, 3, 2])
+    >>> torch.rfft(x, 2, onesided=False).shape
+    torch.Size([5, 5, 2])
+
+""")
+
+
+add_docstr(torch.irfft,
+           r"""
+irfft(input, signal_ndim, normalized=False, onesided=True, signal_sizes=None) -> Tensor
+
+Complex-to-real Inverse Discrete Fourier Transform
+
+This method computes the complex-to-real inverse discrete Fourier transform.
+It is mathematically equivalent with :func:`ifft` with differences only in
+formats of the input and output.
+
+The argument specifications are almost identical with :func:`~torch.ifft`.
+Similar to :func:`~torch.ifft`, if :attr:`normalized` is set to ``True``,
+this normalizes the result by multiplying it with
+:math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is unitary, where
+:math:`N_i` is the size of signal dimension :math:`i`.
+
+Due to the conjugate symmetry, :attr:`input` do not need to contain the full
+complex frequency values. Roughly half of the values will be sufficient, as
+is the case when :attr:`input` is given by :func:`~torch.rfft` with
+``rfft(signal, onesided=True)``. In such case, set the :attr:`onesided`
+argument of this method to ``True``. Moreover, the original signal shape
+information can sometimes be lost, optionally set :attr:`signal_sizes` to be
+the size of the original signal (without the batch dimensions if in batched
+mode) to recover it with correct shape.
+
+Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
+:attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
+and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
+example below for a case of size mismatch.
+
+See :func:`~torch.rfft` for details on conjugate symmetry.
+
+The inverse of this function is :func:`~torch.rfft`.
+
+.. warning::
+    Generally speaking, the input of this function should contain values
+    following conjugate symmetry. Note that even if :attr:`onesided` is
+    ``True``, often symmetry on some part is still needed. When this
+    requirement is not satisfied, the behavior of :func:`~torch.irfft` is
+    undefined. Since :func:`torch.autograd.gradcheck` estimates numerical
+    Jacobian with point perturbations, :func:`~torch.irfft` will almost
+    certainly fail the check.
+
+.. warning::
+    For CPU tensors, this method is currently only available with MKL. Check
+    :func:`torch.backends.mkl.is_available` to check if MKL is installed.
+
+Arguments:
+    input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
+        dimensions
+    signal_ndim (int): the number of dimensions in each signal.
+        :attr:`signal_ndim` can only be 1, 2 or 3
+    normalized (bool, optional): controls whether to return normalized results.
+        Default: ``False``
+    onesided (bool, optional): controls whether :attr:`input` was halfed to avoid
+        redundancy, e.g., by :func:`rfft`. Default: ``True``
+    signal_sizes (list or :class:`torch.Size`, optional): the size of the original
+        signal (without batch dimension). Default: ``None``
+
+Returns:
+    Tensor: A tensor containing the complex-to-real inverse Fourier transform result
+
+Example::
+
+    >>> x = torch.randn(4, 4)
+    >>> torch.rfft(x, 2, onesided=True).shape
+    torch.Size([4, 3, 2])
+    >>>
+    >>> # notice that with onesided=True, output size does not determine the original signal size
+    >>> x = torch.randn(4, 5)
+    >>> torch.rfft(x, 2, onesided=True).shape
+    torch.Size([4, 3, 2])
+    >>>
+    >>> x
+
+    -0.5052 -0.0420  0.5773 -0.2224  1.8413
+    -0.0873 -0.7571 -0.1982  0.5722 -1.8076
+    -1.5447  0.4344  0.8692  1.7930  2.6886
+     0.4674  0.0517 -0.7564 -0.5118 -0.7023
+    [torch.FloatTensor of size (4,5)]
+
+    >>> y = torch.rfft(x, 2, onesided=True)
+    >>> torch.irfft(y, 2, onesided=True, signal_sizes=x.shape)  # recover x
+
+    -0.5052 -0.0420  0.5773 -0.2224  1.8413
+    -0.0873 -0.7571 -0.1982  0.5722 -1.8076
+    -1.5447  0.4344  0.8692  1.7930  2.6886
+     0.4674  0.0517 -0.7564 -0.5118 -0.7023
+    [torch.FloatTensor of size (4,5)]
 
 """)

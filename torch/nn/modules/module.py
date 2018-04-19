@@ -4,7 +4,6 @@ import functools
 import torch
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
-from torch.autograd import Variable
 import torch.utils.hooks as hooks
 
 
@@ -60,7 +59,7 @@ class Module(object):
     def forward(self, *input):
         r"""Defines the computation performed at every call.
 
-        Should be overriden by all subclasses.
+        Should be overridden by all subclasses.
 
         .. note::
             Although the recipe for forward pass needs to be defined within
@@ -123,9 +122,9 @@ class Module(object):
                             .format(torch.typename(param), name))
         elif param.grad_fn:
             raise ValueError(
-                "Cannot assign non-leaf Variable to parameter '{0}'. Model "
+                "Cannot assign non-leaf Tensor to parameter '{0}'. Model "
                 "parameters must be created explicitly. To express '{0}' "
-                "as a function of another variable, compute the value in "
+                "as a function of another Tensor, compute the value in "
                 "the forward() method.".format(name))
         else:
             self._parameters[name] = param
@@ -153,7 +152,7 @@ class Module(object):
 
         for param in self._parameters.values():
             if param is not None:
-                # Variables stored in modules are graph leaves, and we don't
+                # Tensors stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
                 param.data = fn(param.data)
                 if param._grad is not None:
@@ -272,6 +271,97 @@ class Module(object):
         """
         return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
+    def to(self, *args, **kwargs):
+        r"""Moves and/or casts the parameters and buffers.
+
+        This can be called with a :attr:`device` argument and/or a :attr:`dtype`
+        argument. It has similar signature as :meth:`torch.Tensor.to`, except
+        that this method doesn't take in :attr:`requires_grad` and only takes in
+        floating point :attr:`dtype` s. In particular, this method will only
+        cast the floating point parameters and buffers to :attr:`dtype`. It will
+        still move the integral parameters and buffers to :attr:`device`, if
+        that is given. See below for examples.
+
+        Returns:
+            Module: self
+
+        Example::
+
+            >>> linear = nn.Linear(2, 2)
+            >>> linear.weight
+
+            -0.1106  0.0493
+             0.1250 -0.5175
+            [torch.FloatTensor of size (2,2)]
+
+            >>> linear.to(torch.double)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+
+            -0.1106  0.0493
+             0.1250 -0.5175
+            [torch.DoubleTensor of size (2,2)]
+
+            >>> linear.to(torch.device("cuda"), dtype=torch.half)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+
+            -0.1107  0.0493
+             0.1250 -0.5176
+            [torch.cuda.HalfTensor of size (2,2) (GPU 0)]
+
+            >>> linear.to("cpu")  # can also use string to represent device
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+
+            -0.1107  0.0493
+             0.1250 -0.5176
+            [torch.HalfTensor of size (2,2)]
+
+        """
+        def arg_error():
+            arg_reprs = list(repr(arg) for arg in args)
+            for key, val in kwargs.items():
+                arg_reprs.append("{}={}".format(key, val))
+            return ValueError('module.to expects .to(device), .to(dtype) or '
+                              '.to(device, dtype), where dtype is a floating '
+                              'point type, but got .to({})'
+                              .format(", ".join(arg_reprs)))
+
+        nargs = len(args) + len(kwargs)
+        device = dtype = None
+        if nargs < 1 or nargs > 2:
+            raise arg_error()
+        else:
+            for key, val in kwargs.items():
+                if key == 'dtype':
+                    dtype = kwargs['dtype']
+                elif 'device' in kwargs:
+                    device = kwargs['device']
+                else:
+                    raise arg_error()
+            for arg in args:
+                if isinstance(arg, torch.dtype):
+                    if dtype is not None:
+                        raise arg_error()
+                    dtype = arg
+                else:
+                    if device is not None:
+                        raise arg_error()
+                    device = arg
+
+        if dtype is not None:
+            if not dtype.is_floating_point:
+                raise arg_error()
+
+            if device is None:
+                return self._apply(lambda t: t.to(dtype) if t.is_floating_point() else t)
+            else:
+                return self._apply(lambda t: t.to(device, dtype) if t.is_floating_point() else t.to(device))
+
+        else:
+            return self._apply(lambda t: t.to(device))
+
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.
 
@@ -343,7 +433,7 @@ class Module(object):
         return None
 
     def _slow_forward(self, *input, **kwargs):
-        input_vars = tuple(torch.autograd.function._iter_variables(input))
+        input_vars = tuple(torch.autograd.function._iter_tensors(input))
         tracing_state = torch.jit.get_tracing_state(input_vars)
         if not tracing_state:
             return self.forward(*input, **kwargs)
@@ -377,9 +467,9 @@ class Module(object):
                     "didn't return None".format(hook))
         if len(self._backward_hooks) > 0:
             var = result
-            while not isinstance(var, Variable):
+            while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
-                    var = next((v for v in var.values() if isinstance(v, Variable)))
+                    var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
                 else:
                     var = var[0]
             grad_fn = var.grad_fn
@@ -447,7 +537,7 @@ class Module(object):
             else:
                 buffers = self.__dict__.get('_buffers')
                 if buffers is not None and name in buffers:
-                    if value is not None and not torch.is_tensor(value):
+                    if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError("cannot assign '{}' as buffer '{}' "
                                         "(torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
@@ -471,7 +561,7 @@ class Module(object):
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
 
-        When keep_vars is ``True``, it returns a Variable for each parameter
+        When keep_vars is ``True``, it returns a Tensor for each parameter
         (rather than a Tensor).
 
         Args:
@@ -480,7 +570,7 @@ class Module(object):
                 Default: None
             prefix (string, optional): Adds a prefix to the key (name) of every
                 parameter and buffer in the result dictionary. Default: ''
-            keep_vars (bool, optional): if ``True``, returns a Variable for each
+            keep_vars (bool, optional): if ``True``, returns a Tensor for each
                 parameter. If ``False``, returns a Tensor for each parameter.
                 Default: ``False``
 
@@ -507,6 +597,20 @@ class Module(object):
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
+    def _load_state_dict_key_mismatch(self, full_name, name, is_missing):
+        r"""This is called in :meth:`~torch.nn.Module.load_state_dict` when
+        there is state dict key mismatch in ``strict=True`` mode. This method
+        can be overridden by subclasses to raise class-specific errors.
+
+        When :attr:`is_missing` is ``True``, :attr:`full_name` can not be found in
+        the dict being loaded. When :attr:`is_missing` is ``False``,
+        :attr:`full_name` is unexpected in the dict being loaded.
+
+        :attr:`name` is the actual name of the parameter/buffer, i.e., the
+        substring after the last `dot` in :attr:`full_name`.
+        """
+        pass
+
     def load_state_dict(self, state_dict, strict=True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True`` then
@@ -520,6 +624,17 @@ class Module(object):
                 match the keys returned by this module's `:func:`state_dict()`
                 function.
         """
+        def submodule_key_mismatch(full_name, is_missing):
+            module = self
+            names = full_name.split(".")
+            for module_name in names[:-1]:
+                if module_name in module._modules:
+                    module = module._modules[module_name]
+                else:
+                    return
+            module._load_state_dict_key_mismatch(full_name, names[-1], is_missing)
+
+        unexpected = []
         own_state = self.state_dict()
         for name, param in state_dict.items():
             if name in own_state:
@@ -534,12 +649,24 @@ class Module(object):
                                        'whose dimensions in the checkpoint are {}.'
                                        .format(name, own_state[name].size(), param.size()))
             elif strict:
-                raise KeyError('unexpected key "{}" in state_dict'
-                               .format(name))
+                unexpected.append(name)
         if strict:
             missing = set(own_state.keys()) - set(state_dict.keys())
+            # pass the mismatch info to submodules so that they have a chance to
+            # raise a custom class-specific error
+            for name in unexpected:
+                submodule_key_mismatch(name, False)
+            for name in missing:
+                submodule_key_mismatch(name, True)
+            error_msg = ''
+            if len(unexpected) > 0:
+                error_msg += 'Unexpected key(s) in state_dict: {}. '.format(
+                    ', '.join('"{}"'.format(k) for k in unexpected))
             if len(missing) > 0:
-                raise KeyError('missing keys in state_dict: "{}"'.format(missing))
+                error_msg += 'Missing key(s) in state_dict: {}. '.format(
+                    ', '.join('"{}"'.format(k) for k in unexpected))
+            if len(error_msg) > 0:
+                raise KeyError(error_msg)
 
     def parameters(self):
         r"""Returns an iterator over module parameters.
@@ -729,14 +856,39 @@ class Module(object):
     def _get_name(self):
         return self.__class__.__name__
 
+    def extra_repr(self):
+        r"""Set the extra representation of the module
+
+        To print customized extra information, you should reimplement
+        this method in your own modules. Both single-line and multi-line
+        strings are acceptable.
+        """
+        return ''
+
     def __repr__(self):
-        tmpstr = self._get_name() + '(\n'
+        # We treat the extra repr like the sub-module, one item per line
+        extra_lines = []
+        extra_repr = self.extra_repr()
+        # empty string will be split into list ['']
+        if extra_repr:
+            extra_lines = extra_repr.split('\n')
+        child_lines = []
         for key, module in self._modules.items():
-            modstr = module.__repr__()
-            modstr = _addindent(modstr, 2)
-            tmpstr = tmpstr + '  (' + key + '): ' + modstr + '\n'
-        tmpstr = tmpstr + ')'
-        return tmpstr
+            mod_str = repr(module)
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
+        lines = extra_lines + child_lines
+
+        main_str = self._get_name() + '('
+        if lines:
+            # simple one-liner info, which most builtin Modules will use
+            if len(extra_lines) == 1 and not child_lines:
+                main_str += extra_lines[0]
+            else:
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
+
+        main_str += ')'
+        return main_str
 
     def __dir__(self):
         module_attrs = dir(self.__class__)
