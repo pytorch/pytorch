@@ -831,6 +831,10 @@ class TestNN(NNTestCase):
         l4 = nn.Linear(2, 2)
         subnet = nn.Sequential(l3, l4)
         s = nn.Sequential()
+        with self.assertRaises(KeyError):
+            s.add_module('', l1)
+        with self.assertRaises(KeyError):
+            s.add_module('name.with.dot', l1)
         s.add_module('layer1', l1)
         s.add_module('layer2', l2)
         s.add_module('layer3', l1)
@@ -2528,13 +2532,20 @@ class TestNN(NNTestCase):
 
         state_dict = net.state_dict()
         self.assertEqual(len(state_dict), 9)
+        self.assertEqual(len(state_dict._metadata), 6)
+        self.assertIn('', state_dict._metadata)
+        self.assertIn('linear1', state_dict._metadata)
         self.assertIn('linear1.weight', state_dict)
         self.assertIn('linear1.bias', state_dict)
+        self.assertIn('linear2', state_dict._metadata)
         self.assertIn('linear2.weight', state_dict)
         self.assertIn('linear2.bias', state_dict)
+        self.assertIn('block', state_dict._metadata)
+        self.assertIn('block.conv', state_dict._metadata)
         self.assertIn('block.conv.weight', state_dict)
         self.assertIn('block.conv.weight', state_dict)
         self.assertNotIn('block.conv.bias', state_dict)
+        self.assertIn('bn', state_dict._metadata)
         self.assertIn('bn.weight', state_dict)
         self.assertIn('bn.bias', state_dict)
         self.assertIn('bn.running_var', state_dict)
@@ -2551,6 +2562,9 @@ class TestNN(NNTestCase):
         l = nn.Linear(5, 5)
         state_dict = l.state_dict()
         self.assertEqual(len(state_dict), 2)
+        self.assertEqual(len(state_dict._metadata), 1)
+        self.assertIn('', state_dict._metadata)
+        self.assertTrue(state_dict._metadata['']['version'] >= 0)
         self.assertEqual(state_dict['weight'].data_ptr(), l.weight.data_ptr())
         self.assertEqual(state_dict['bias'].data_ptr(), l.bias.data_ptr())
 
@@ -2579,11 +2593,15 @@ class TestNN(NNTestCase):
 
         state_dict = net.state_dict()
         state_dict.update({'extra': torch.ones(5)})
-        self.assertRaises(KeyError, lambda: net.load_state_dict(state_dict))
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+
+        state_dict = net.state_dict()
+        state_dict.update({'extra.param': torch.ones(5)})
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
 
         state_dict = net.state_dict()
         del state_dict['linear1.weight']
-        self.assertRaises(KeyError, lambda: net.load_state_dict(state_dict))
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
 
         state_dict = net.state_dict()
         state_dict.update({'bn.running_mean': torch.rand(14, 4)})  # wrong size

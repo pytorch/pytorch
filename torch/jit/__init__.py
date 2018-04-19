@@ -557,6 +557,7 @@ def script_method(fn):
 #  del view[name]
 #  view.items()
 #  view.keys()
+#  len(view)
 
 class OrderedDictWrapper(object):
     def __init__(self, module):
@@ -774,9 +775,9 @@ def _get_methods(cls):
 _compiled_methods_whitelist = {
     'forward', 'register_buffer', 'register_parameter', 'add_module',
     '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
-    'state_dict', 'load_state_dict', 'parameters', 'named_parameters',
-    '_all_buffers', 'children', 'named_children', 'modules', 'named_modules',
-    'zero_grad', 'share_memory', '_get_name'
+    'state_dict', 'load_state_dict', '_load_from_state_dict', 'parameters',
+    'named_parameters', '_all_buffers', 'children', 'named_children', 'modules',
+    'named_modules', 'zero_grad', 'share_memory', '_get_name'
 }
 
 
