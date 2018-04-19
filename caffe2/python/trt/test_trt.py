@@ -246,8 +246,13 @@ class TensorRTTransformTest(TestCase):
             Y_c2 = namedtupledict('Outputs', net_outputs)(*output_values)
         workspace.ResetWorkspace()
 
+        # Fill the workspace with the weights
+        with core.DeviceScope(device_option):
+            workspace.RunNetOnce(init_net)
+
         # Cut the graph
-        pred_net_cut = transform_caffe2_net(device_option, init_net, pred_net, {input_name: input_blob_dims})
+        pred_net_cut = transform_caffe2_net(pred_net,
+                                            {input_name: input_blob_dims})
         del init_net, pred_net
         #_print_net(pred_net_cut)
 

@@ -1,17 +1,19 @@
 #pragma once
 
-#include "caffe2/core/common.h"
-#include "caffe2/core/operator.h"
-#include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
-#include "onnx/onnx_pb.h"
-
 #include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "caffe2/core/common.h"
+#include "caffe2/core/operator.h"
+#include "caffe2/core/workspace.h"
+#include "caffe2/onnx/onnx_exporter.h"
+#include "caffe2/proto/caffe2.pb.h"
+#include "onnx/onnx_pb.h"
+
 namespace caffe2 {
+
 class TensorRTTransformer {
  public:
   TensorRTTransformer(
@@ -35,15 +37,11 @@ class TensorRTTransformer {
       const std::unordered_map<std::string, TensorShape>& shape_hints);
 
  private:
-  void ClusterToTrtOp(
+  caffe2::NetDef SubnetToTrtOp(
+      const caffe2::NetDef& net,
       Workspace* ws,
-      const NetDef& pred_net,
-      int start,
-      int end,
-      const std::unordered_set<std::string>& weights,
-      const std::unordered_map<std::string, TensorShape>& shape_hints,
-      ::ONNX_NAMESPACE::ModelProto* model,
-      std::vector<OperatorDef>* new_ops);
+      onnx::OnnxExporter* exporter,
+      std::unordered_map<std::string, TensorShape>* shape_hints);
 
   CaffeMap<std::string, TensorShape> SsaRewriteAndMapNames(
       Workspace* ws,
