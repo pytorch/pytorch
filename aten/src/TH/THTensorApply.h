@@ -30,14 +30,6 @@
  * loops.
  */
 
-#ifdef _MSC_VER
-# define PRAGMA_IVDEP PRAGMA(loop(hint_parallel(0))) PRAGMA(loop(ivdep))
-# define PRAGMA_SIMD PRAGMA(loop(hint_parallel(0)))
-#else
-# define PRAGMA_IVDEP PRAGMA(ivdep)
-# define PRAGMA_SIMD PRAGMA(simd)
-#endif
-
 #define __TH_TENSOR_APPLYX_PREAMBLE(TYPE, TENSOR, DIM, ALLOW_CONTIGUOUS) \
   TYPE *TENSOR##_data = NULL; \
   int64_t *TENSOR##_counter = NULL, *TENSOR##_sizes = NULL, *TENSOR##_strides = NULL, *TENSOR##_dimOffset = NULL; \
@@ -265,6 +257,19 @@
 #define TH_OMP_OVERHEAD_THRESHOLD_OMP 5000
 #include <omp.h>
 
+// Because OpenMP 3.0 is not supported by MSVC, we cannot use auto parallelizer
+// and the original OpenMP clauses at the same time. So we choose to use the
+// faster auto parallelizer to accelerate speed.
+#ifdef _MSC_VER
+# define DISABLE_MSC(x)
+# define PRAGMA_IVDEP PRAGMA(loop(hint_parallel(0))) PRAGMA(loop(ivdep))
+# define PRAGMA_SIMD PRAGMA(loop(hint_parallel(0)))
+#else
+# define DISABLE_MSC(x) x
+# define PRAGMA_IVDEP PRAGMA(ivdep)
+# define PRAGMA_SIMD PRAGMA(simd)
+#endif
+
 /*
  * Calcuate the memory offset of an element in a tensor. The strategy is below:
  *
@@ -380,7 +385,7 @@
     ptrdiff_t iter = 0;                                                                        \
     if(tp != rp) {                                                                             \
       PRAGMA_IVDEP \
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp)) \
+      DISABLE_MSC(PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp))) \
       for (iter = 0; iter < SIZE; iter++) {                             \
         TYPE2 *TENSOR2##_data = tp+iter;                                \
         TYPE1 *TENSOR1##_data = rp+iter;                                \
@@ -388,7 +393,7 @@
       }\
     } else {\
       PRAGMA_SIMD \
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp) )  \
+      DISABLE_MSC(PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp) ))  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE2* TENSOR2##_data = tp+iter;\
         TYPE1* TENSOR1##_data = rp+iter;\
@@ -460,7 +465,7 @@
     ptrdiff_t iter = 0;\
     if (rp != tp) { \
       PRAGMA_IVDEP \
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) )  \
+      DISABLE_MSC(PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) ))  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE1 *TENSOR1##_data = rp+iter;\
         TYPE2 *TENSOR2##_data = tp+iter; \
@@ -469,7 +474,7 @@
       } \
     } else {\
       PRAGMA_SIMD \
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) )  \
+      DISABLE_MSC(PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) ))  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE1 *TENSOR1##_data = rp+iter;\
         TYPE2 *TENSOR2##_data = tp+iter; \
