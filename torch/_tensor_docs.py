@@ -26,6 +26,14 @@ Returns a new Tensor with :attr:`data` as the tensor data.
 By default, the returned Tensor has the same :class:`torch.dtype` and
 :class:`torch.device` as this tensor.
 
+.. warning::
+
+    :func:`new_tensor` always copies :attr:`data`. If you have a Tensor
+    ``data`` and want to avoid a copy, use :func:`torch.Tensor.requires_grad_`
+    or :func:`torch.Tensor.detach`.
+    If you have a numpy array and want to avoid a copy, use
+    :func:`torch.from_numpy`.
+
 Args:
     data (array_like): The returned Tensor copies :attr:`data`.
     {dtype}
