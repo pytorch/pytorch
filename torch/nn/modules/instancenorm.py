@@ -13,7 +13,7 @@ class _InstanceNorm(_BatchNorm):
 
     def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs):
         try:
-            version = state_dict._metadata[prefix]["version"]
+            version = state_dict._metadata[prefix[:-1]]["version"]
         except (AttributeError, KeyError):
             version = None
         # at version 1: removed running_mean and running_var when

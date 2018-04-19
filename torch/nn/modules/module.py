@@ -105,6 +105,8 @@ class Module(object):
             raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
             raise KeyError("buffer name can't contain \".\"")
+        elif name == '':
+            raise KeyError("buffer name can't be empty string \"\"")
         elif tensor is not None and not isinstance(tensor, torch.Tensor):
             raise TypeError("cannot assign '{}' object to buffer '{}' "
                             "(torch Tensor or None required)"
@@ -126,10 +128,12 @@ class Module(object):
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
-        if hasattr(self, name) and name not in self._parameters:
+        elif hasattr(self, name) and name not in self._parameters:
             raise KeyError("attribute '{}' already exists".format(name))
-        if '.' in name:
+        elif '.' in name:
             raise KeyError("parameter name can't contain \".\"")
+        elif name == '':
+            raise KeyError("parameter name can't be empty string \"\"")
 
         if param is None:
             self._parameters[name] = None
@@ -159,10 +163,12 @@ class Module(object):
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        if hasattr(self, name) and name not in self._modules:
+        elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
-        if '.' in name:
+        elif '.' in name:
             raise KeyError("module name can't contain \".\"")
+        elif name == '':
+            raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
     def _apply(self, fn):
@@ -593,7 +599,7 @@ class Module(object):
         if destination is None:
             destination = OrderedDict()
             destination._metadata = OrderedDict()
-        destination._metadata[prefix] = dict(version=self._version)
+        destination._metadata[prefix[:-1]] = dict(version=self._version)
         for name, param in self._parameters.items():
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.data
