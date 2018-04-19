@@ -40,36 +40,6 @@ std::unordered_map<std::string, TensorShape> InferShapes(
   return shape_hints;
 }
 
-CaffeMap<std::string, TensorShape> SsaRewriteAndMapIO(
-    Workspace* ws,
-    NetDef* pred_net,
-    const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
-  std::unordered_map<std::string, std::string> input_mapping =
-      onnx::SsaRewrite(nullptr, pred_net);
-  std::unordered_map<std::string, std::string> input_reverse_mapping;
-  for (const auto kv : input_mapping) {
-    input_reverse_mapping.emplace(kv.second, kv.first);
-    try {
-      if (ws->GetBlob(kv.second)) {
-        ws->RenameBlob(kv.second, kv.first);
-      }
-    } catch (const EnforceNotMet& e) {
-      LOG(WARNING) << "Cannot rename blob " << kv.second << " to " << kv.first
-                   << ": " << e.what();
-    }
-  }
-  CaffeMap<std::string, TensorShape> shape_hints_ordered;
-  for (const auto& kv : input_shape_hints) {
-    const auto it = input_reverse_mapping.find(kv.first);
-    if (it != input_reverse_mapping.end()) {
-      LOG(INFO) << "Adding input hint: " << it->second;
-      shape_hints_ordered.emplace(it->second, kv.second);
-    } else {
-      shape_hints_ordered.emplace(kv.first, kv.second);
-    }
-  }
-  return shape_hints_ordered;
-}
 
 // Figuring out the input the tensorrt runnable subgraph
 // `start` and `end` defines the continuous chunk of ops that can be readily
@@ -272,19 +242,6 @@ std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
   return r;
 }
 
-void PruneUsedWeights(Workspace* ws, const NetDef& pred_net) {
-  std::unordered_set<std::string> used_weights;
-  for (const auto& op : pred_net.op()) {
-    for (const auto& i : op.input()) {
-      used_weights.emplace(i);
-    }
-  }
-
-  for (const auto& w : used_weights) {
-    ws->RemoveBlob(w);
-  }
-}
-
 void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
   model->set_ir_version(::ONNX_NAMESPACE::Version::IR_VERSION);
   model->set_producer_name("caffe2");
@@ -455,6 +412,55 @@ void TensorRTTransformer::ClusterToTrtOp(
   model->mutable_graph()->clear_initializer();
 }
 
+CaffeMap<std::string, TensorShape> TensorRTTransformer::SsaRewriteAndMapNames(
+    Workspace* ws,
+    NetDef* pred_net,
+    const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
+  input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
+  std::unordered_map<std::string, std::string> input_reverse_mapping;
+  std::vector<std::string> external_inputs;
+  for (const auto kv : input_mapping_) {
+    input_reverse_mapping.emplace(kv.second, kv.first);
+    if (!ws->HasBlob(kv.second)) {
+      external_inputs.emplace_back(kv.first);
+    }
+  }
+  for (const auto& i: external_inputs) {
+    input_mapping_.erase(i);
+  }
+  CaffeMap<std::string, TensorShape> shape_hints_ordered;
+  for (const auto& kv : input_shape_hints) {
+    const auto it = input_reverse_mapping.find(kv.first);
+    if (it != input_reverse_mapping.end()) {
+      LOG(INFO) << "Adding input hint: " << it->second;
+      shape_hints_ordered.emplace(it->second, kv.second);
+    } else {
+      shape_hints_ordered.emplace(kv.first, kv.second);
+    }
+  }
+  return shape_hints_ordered;
+}
+
+void TensorRTTransformer::PruneUnusedWeights(
+    Workspace* ws,
+    const NetDef& pred_net) {
+  std::unordered_set<std::string> used_weights;
+  for (const auto& op : pred_net.op()) {
+    for (const auto& i : op.input()) {
+      used_weights.emplace(i);
+    }
+  }
+
+  for (const auto kv: input_mapping_) {
+    // for weights that are not referenced anywhere, we remove it from the
+    // original workspace
+    if (!used_weights.count(kv.first)) {
+      VLOG(2) << "Removing unused weight blob: " << kv.second << " (" << kv.first << ")";
+      ws->RemoveBlob(kv.second);
+    }
+  }
+}
+
 // Cutting off the runnable part and replace with tensor ops. Asssume the nets
 // were topologically sorted
 void TensorRTTransformer::Transform(
@@ -462,13 +468,13 @@ void TensorRTTransformer::Transform(
     NetDef* pred_net,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   CAFFE_ENFORCE(ws);
-
   auto shape_hints_ordered =
-      SsaRewriteAndMapIO(ws, pred_net, input_shape_hints);
-  auto shape_hints = InferShapes(ws, pred_net, &shape_hints_ordered);
+      SsaRewriteAndMapNames(ws, pred_net, input_shape_hints);
+  Workspace mapped_ws(ws, input_mapping_);
+  auto shape_hints = InferShapes(&mapped_ws, pred_net, &shape_hints_ordered);
 
   std::unordered_set<std::string> weights;
-  const std::vector<string>& ws_blobs = ws->Blobs();
+  const std::vector<string>& ws_blobs = mapped_ws.Blobs();
   for (const auto& s : ws_blobs) {
     weights.emplace(s);
   }
@@ -539,7 +545,7 @@ void TensorRTTransformer::Transform(
     } else {
       end = op_idx;
       ClusterToTrtOp(
-          ws,
+          &mapped_ws,
           *pred_net,
           start,
           end,
@@ -555,7 +561,7 @@ void TensorRTTransformer::Transform(
   if (trt_group) {
     end = op_idx;
     ClusterToTrtOp(
-        ws, *pred_net, start, end, weights, shape_hints, &onnx_model, &new_ops);
+        &mapped_ws, *pred_net, start, end, weights, shape_hints, &onnx_model, &new_ops);
     trt_group = false;
   }
 
@@ -563,7 +569,7 @@ void TensorRTTransformer::Transform(
   for (const auto& op : new_ops) {
     pred_net->add_op()->CopyFrom(op);
   }
-  PruneUsedWeights(ws, *pred_net);
+  PruneUnusedWeights(ws, *pred_net);
 }
 
 } // namespace caffe2

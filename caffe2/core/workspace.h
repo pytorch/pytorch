@@ -122,7 +122,7 @@ class Workspace {
       bool skip_defined_blobs = false);
 
   /**
-   * Converts prevously mapped tensor blobs to local blobs, copies values from
+   * Converts previously mapped tensor blobs to local blobs, copies values from
    * parent workspace blobs into new local blobs. Ignores undefined blobs.
    */
   template <class Context>
