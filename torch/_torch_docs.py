@@ -2926,6 +2926,7 @@ Example::
 
     >>> torch.ones(5)
     tensor([ 1, 1, 1, 1, 1])
+
 """.format(**factory_common_args))
 
 add_docstr(torch.ones_like,
@@ -4778,6 +4779,12 @@ Args:
     {device}
     {requires_grad}
 
+Example::
+
+    >>> torch.empty(2, 3)
+    tensor([[ 0.0000e+00, -1.5846e+29,  0.0000e+00],
+            [-1.5846e+29,  3.1673e+35,  4.5786e-41]])
+
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,
@@ -4818,6 +4825,13 @@ Args:
     {layout}
     {device}
     {requires_grad}
+
+Example::
+
+    >>> torch.full((2, 3), 3.141592)
+    tensor([[ 3.1416,  3.1416,  3.1416],
+            [ 3.1416,  3.1416,  3.1416]])
+
 """.format(**factory_common_args))
 
 add_docstr(torch.full_like,

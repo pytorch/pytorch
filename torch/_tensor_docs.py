@@ -31,6 +31,15 @@ Args:
     {dtype}
     {device}
     {requires_grad}
+
+Example::
+
+    >>> tensor = torch.ones((2,), dtype=torch.int8)
+    >>> data = [[0, 1], [2, 3]]
+    >>> tensor.new_tensor(data)
+    tensor([[ 0,  1],
+            [ 2,  3]], dtype=torch.int8)
+
 """.format(**new_common_args))
 
 add_docstr_all('new_full',
@@ -46,6 +55,15 @@ Args:
     {dtype}
     {device}
     {requires_grad}
+
+Example::
+
+    >>> tensor = torch.ones((2,), dtype=torch.float64)
+    >>> tensor.new_full((3, 4), 3.141592)
+    tensor([[ 3.1416,  3.1416,  3.1416,  3.1416],
+            [ 3.1416,  3.1416,  3.1416,  3.1416],
+            [ 3.1416,  3.1416,  3.1416,  3.1416]], dtype=torch.float64)
+
 """.format(**new_common_args))
 
 add_docstr_all('new_empty',
@@ -60,6 +78,14 @@ Args:
     {dtype}
     {device}
     {requires_grad}
+
+Example::
+
+    >>> tensor = torch.ones(())
+    >>> tensor.new_empty((2, 3))
+    tensor([[ 0.0000e+00,  1.0842e-19, -6.0217e+37],
+            [-2.5250e-29, -6.3411e+19,  4.5782e-41]])
+
 """.format(**new_common_args))
 
 add_docstr_all('new_ones',
@@ -76,6 +102,14 @@ Args:
     {dtype}
     {device}
     {requires_grad}
+
+Example::
+
+    >>> tensor = torch.tensor((), dtype=torch.int32)
+    >>> tensor.new_ones((2, 3))
+    tensor([[ 1,  1,  1],
+            [ 1,  1,  1]], dtype=torch.int32)
+
 """.format(**new_common_args))
 
 add_docstr_all('new_zeros',
@@ -92,6 +126,14 @@ Args:
     {dtype}
     {device}
     {requires_grad}
+
+Example::
+
+    >>> tensor = torch.tensor((), dtype=torch.float64)
+    >>> tensor.new_ones((2, 3))
+    tensor([[ 1.0000,  1.0000,  1.0000],
+            [ 1.0000,  1.0000,  1.0000]], dtype=torch.float64)
+
 """.format(**new_common_args))
 
 add_docstr_all('abs',
