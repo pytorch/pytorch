@@ -45,13 +45,13 @@ __global__ void ComputeArgCUDAKernel(
 
 } // namespace
 
-template <typename T>
-class ArgMaxOp<T, CUDAContext> final : public ArgOpBase<T, CUDAContext> {
+template <typename T, typename Context>
+class ArgMaxCudaOp final : public ArgOpBase<T, Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
+  USE_OPERATOR_FUNCTIONS(Context);
 
-  ArgMaxOp(const OperatorDef& operator_def, Workspace* ws)
-      : ArgOpBase<T, CUDAContext>(operator_def, ws) {}
+  ArgMaxCudaOp(const OperatorDef& operator_def, Workspace* ws)
+      : ArgOpBase<T, Context>(operator_def, ws) {}
 
  protected:
   bool Compute(
@@ -62,8 +62,8 @@ class ArgMaxOp<T, CUDAContext> final : public ArgOpBase<T, CUDAContext> {
       TIndex* Y) override;
 };
 
-template <typename T>
-bool ArgMaxOp<T, CUDAContext>::Compute(
+template <typename T, typename Context>
+bool ArgMaxCudaOp<T, Context>::Compute(
     const T* X,
     const TIndex prev_size,
     const TIndex next_size,
@@ -85,13 +85,13 @@ bool ArgMaxOp<T, CUDAContext>::Compute(
   return true;
 }
 
-template <typename T>
-class ArgMinOp<T, CUDAContext> final : public ArgOpBase<T, CUDAContext> {
+template <typename T, typename Context>
+class ArgMinCudaOp final : public ArgOpBase<T, Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
+  USE_OPERATOR_FUNCTIONS(Context);
 
-  ArgMinOp(const OperatorDef& operator_def, Workspace* ws)
-      : ArgOpBase<T, CUDAContext>(operator_def, ws) {}
+  ArgMinCudaOp(const OperatorDef& operator_def, Workspace* ws)
+      : ArgOpBase<T, Context>(operator_def, ws) {}
 
  protected:
   bool Compute(
@@ -102,8 +102,8 @@ class ArgMinOp<T, CUDAContext> final : public ArgOpBase<T, CUDAContext> {
       TIndex* Y) override;
 };
 
-template <typename T>
-bool ArgMinOp<T, CUDAContext>::Compute(
+template <typename T, typename Context>
+bool ArgMinCudaOp<T, Context>::Compute(
     const T* X,
     const TIndex prev_size,
     const TIndex next_size,
@@ -125,7 +125,7 @@ bool ArgMinOp<T, CUDAContext>::Compute(
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(ArgMax, ArgMaxOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(ArgMin, ArgMinOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(ArgMax, ArgMaxCudaOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(ArgMin, ArgMinCudaOp<float, CUDAContext>);
 
 } // namespace caffe2
