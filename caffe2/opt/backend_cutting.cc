@@ -39,10 +39,10 @@ struct VisitorContext {
 
 std::string ShowNode(NodeRef node) {
   if (nn::is<NeuralNetData>(node)) {
-    const auto* nn_tensor = nn::get<NeuralNetData>(node); 
+    const auto* nn_tensor = nn::get<NeuralNetData>(node);
     return MakeString("Tensor: ", nn_tensor->getName());
   } else if (nn::is<NeuralNetOperator>(node)) {
-    const auto* nn_op = nn::get<NeuralNetOperator>(node); 
+    const auto* nn_op = nn::get<NeuralNetOperator>(node);
     const auto* op_def = reinterpret_cast<const caffe2::OperatorDef*>(
         nn_op->getAnnotation()->getSaved());
     CAFFE_ENFORCE(op_def);
@@ -194,7 +194,7 @@ caffe2::NetDef ConvertToC2Net(
       const auto* op_def = reinterpret_cast<const caffe2::OperatorDef*>(
           nn_op->getAnnotation()->getSaved());
       net.add_op()->CopyFrom(*op_def);
-    } 
+    }
   }
   for (const auto kv : sub.external_input_refs) {
     net.add_external_input(kv.first);
@@ -218,7 +218,7 @@ void DetectBoundaryReferences(
       const auto& info = infos.at(parent_node);
       if (info.group != subgraph->group_id &&
           nn::is<NeuralNetData>(parent_node)) {
-        const auto* nn_tensor = nn::get<const NeuralNetData>(parent_node); 
+        const auto* nn_tensor = nn::get<const NeuralNetData>(parent_node);
         subgraph->external_input_refs.emplace(
             nn_tensor->getName(), parent_node);
       }
@@ -383,7 +383,15 @@ caffe2::NetDef OptimizeForBackend(
   // absorbed
   PruneUnrefereredNodes(&dfg);
 
-  return nom::converters::convertToCaffe2Proto(nn);
+  auto new_net = nom::converters::convertToCaffe2Proto(nn);
+  for (const auto& i: net.external_input()) {
+    new_net.add_external_input(i);
+  }
+  for (const auto& i: net.external_output()) {
+    new_net.add_external_output(i);
+  }
+  new_net.set_name(net.name() + "_opt");
+  return new_net;
 }
 
 } // namespace opt
