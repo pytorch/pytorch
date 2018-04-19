@@ -70,6 +70,60 @@ class ReduceOpBase : public Operator<Context> {
 };
 
 template <typename T, class Context>
+class ReduceMinOp final : public ReduceOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  ReduceMinOp(const OperatorDef& operator_def, Workspace* ws)
+      : ReduceOpBase<T, Context>(operator_def, ws) {}
+
+ protected:
+  bool Compute(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data) override {
+    math::ReduceMin<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        X_data,
+        Y_data,
+        &context_,
+        &this->buffer_);
+    return true;
+  }
+};
+
+template <typename T, class Context>
+class ReduceMaxOp final : public ReduceOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  ReduceMaxOp(const OperatorDef& operator_def, Workspace* ws)
+      : ReduceOpBase<T, Context>(operator_def, ws) {}
+
+ protected:
+  bool Compute(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data) override {
+    math::ReduceMax<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        X_data,
+        Y_data,
+        &context_,
+        &this->buffer_);
+    return true;
+  }
+};
+
+template <typename T, class Context>
 class ReduceSumOp final : public ReduceOpBase<T, Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -135,6 +189,7 @@ class ReduceGradientOpBase : public Operator<Context> {
   bool RunOnDevice() override {
     const auto& dY = Input(0);
     const auto& X = Input(1);
+    const auto& Y = Input(2);
     auto* dX = Output(0);
     const int ndim = X.ndim();
     if (axes_.empty()) {
@@ -158,6 +213,8 @@ class ReduceGradientOpBase : public Operator<Context> {
         dY_dims,
         dX_dims,
         dY.template data<T>(),
+        X.template data<T>(),
+        Y.template data<T>(),
         dX->template mutable_data<T>());
   }
 
@@ -165,10 +222,30 @@ class ReduceGradientOpBase : public Operator<Context> {
   virtual bool Compute(
       const std::vector<int>& dY_dims,
       const std::vector<int>& dX_dims,
-      const T* dY,
-      T* dX) = 0;
+      const T* dY_data,
+      const T* X_data,
+      const T* Y_data,
+      T* dX_data) = 0;
 
   std::vector<int> axes_;
+};
+
+template <typename T, class Context>
+class ReduceMinMaxGradientOp final : public ReduceGradientOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  ReduceMinMaxGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : ReduceGradientOpBase<T, Context>(operator_def, ws) {}
+
+ protected:
+  bool Compute(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* X_data,
+      const T* Y_data,
+      T* dX_data) override;
 };
 
 template <typename T, class Context>
@@ -183,15 +260,17 @@ class ReduceSumGradientOp final : public ReduceGradientOpBase<T, Context> {
   bool Compute(
       const std::vector<int>& dY_dims,
       const std::vector<int>& dX_dims,
-      const T* dY,
-      T* dX) override {
+      const T* dY_data,
+      const T* /* X_data */,
+      const T* /* Y_data */,
+      T* dX_data) override {
     math::Broadcast(
         dY_dims.size(),
         dY_dims.data(),
         dX_dims.size(),
         dX_dims.data(),
-        dY,
-        dX,
+        dY_data,
+        dX_data,
         &context_);
     return true;
   }
@@ -209,15 +288,17 @@ class ReduceMeanGradientOp final : public ReduceGradientOpBase<T, Context> {
   bool Compute(
       const std::vector<int>& dY_dims,
       const std::vector<int>& dX_dims,
-      const T* dY,
-      T* dX) override {
+      const T* dY_data,
+      const T* /* X_data */,
+      const T* /* Y_data */,
+      T* dX_data) override {
     math::Broadcast(
         dY_dims.size(),
         dY_dims.data(),
         dX_dims.size(),
         dX_dims.data(),
-        dY,
-        dX,
+        dY_data,
+        dX_data,
         &context_);
     const int dX_size = std::accumulate(
         dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
@@ -226,7 +307,7 @@ class ReduceMeanGradientOp final : public ReduceGradientOpBase<T, Context> {
       scale *= dX_dims[axis];
     }
     math::Scale<T, Context>(
-        dX_size, 1.0 / static_cast<float>(scale), dX, dX, &context_);
+        dX_size, 1.0 / static_cast<float>(scale), dX_data, dX_data, &context_);
     return true;
   }
 };

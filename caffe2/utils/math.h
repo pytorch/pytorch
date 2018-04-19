@@ -127,6 +127,16 @@ CAFFE2_DECLARE_BINARY_OP(Div);
 
 #undef CAFFE2_DECLARE_BINARY_OP
 
+namespace internal {
+
+// Increase the index digits by one based on dims.
+void IncreaseIndexInDims(const int n, const int* dims, int* index);
+
+// Get index value from dims and index digits.
+int GetIndexFromDims(const int n, const int* dims, const int* index);
+
+} // namespace internal
+
 template <typename T, class Context>
 void ReduceMin(
     const int N,

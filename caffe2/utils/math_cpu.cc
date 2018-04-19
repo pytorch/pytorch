@@ -674,7 +674,7 @@ CAFFE2_SPECIALIZED_REDUCEMAX(int64_t)
 
 #undef CAFFE2_SPECIALIZED_REDUCEMAX
 
-namespace {
+namespace internal {
 
 void IncreaseIndexInDims(const int n, const int* dims, int* index) {
   for (int i = n - 1; i >= 0; --i) {
@@ -696,6 +696,10 @@ int GetIndexFromDims(const int n, const int* dims, const int* index) {
   }
   return sum;
 }
+
+} // namespace internal
+
+namespace {
 
 #if EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
@@ -821,9 +825,10 @@ void ReduceTensor(
   Set<T, CPUContext>(Y_size, init, Y, context);
   std::vector<int> index(num_dims, 0);
   for (int X_index = 0; X_index < X_size; ++X_index) {
-    const int Y_index = GetIndexFromDims(num_dims, Y_dims.data(), index.data());
+    const int Y_index =
+        internal::GetIndexFromDims(num_dims, Y_dims.data(), index.data());
     Y[Y_index] = reducer(Y[Y_index], X[X_index]);
-    IncreaseIndexInDims(num_dims, dims, index.data());
+    internal::IncreaseIndexInDims(num_dims, dims, index.data());
   }
 }
 
@@ -1044,9 +1049,9 @@ void BroadcastImpl(
   std::vector<int> index(Y_ndim, 0);
   for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
     const int X_index =
-        GetIndexFromDims(Y_ndim, X_dims_ex.data(), index.data());
+        internal::GetIndexFromDims(Y_ndim, X_dims_ex.data(), index.data());
     Y[Y_index] = X[X_index];
-    IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
+    internal::IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
   }
 }
 
@@ -2003,7 +2008,7 @@ void TransposeCPUImpl(
           X + block_size * X_index,
           block_size * sizeof(T));
     }
-    IncreaseIndexInDims(itr_axes, Y_dims.data(), index.data());
+    internal::IncreaseIndexInDims(itr_axes, Y_dims.data(), index.data());
   }
 }
 
