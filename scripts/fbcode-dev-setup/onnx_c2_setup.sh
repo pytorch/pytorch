@@ -105,7 +105,7 @@ if [ -f "$CUDA_NVCC_EXECUTABLE" ] && [[ "$ccache_root/cuda/nvcc" != "$CUDA_NVCC_
     own_ccache=false
   fi
 fi
-if $own_ccache; then
+if [ "$own_ccache" = true ]; then
   echo "export CUDA_NVCC_EXECUTABLE=$ccache_root/cuda/nvcc" >> "$onnx_init_file"
 fi
 
