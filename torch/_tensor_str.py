@@ -73,7 +73,7 @@ def _get_min_log_scale():
 
 
 def _number_format(tensor, min_sz=-1):
-    int_mode = not tensor.dtype.is_floating_point
+    floating_dtype = tensor.dtype.is_floating_point  # save this because we cast later
     _min_log_scale = _get_min_log_scale()
     min_sz = max(min_sz, 2)
     tensor = torch.DoubleTensor(tensor.size()).copy_(tensor).abs_().view(tensor.nelement())
@@ -90,6 +90,13 @@ def _number_format(tensor, min_sz=-1):
     if invalid_value_mask.any():
         min_sz = max(min_sz, 3)
 
+    int_mode = True
+    # TODO: use fmod?
+    for value in tensor:
+        if value != math.ceil(value.item()):
+            int_mode = False
+            break
+
     exp_min = tensor.min()
     if exp_min != 0:
         exp_min = math.floor(math.log10(exp_min)) + 1
@@ -100,6 +107,7 @@ def _number_format(tensor, min_sz=-1):
         exp_max = math.floor(math.log10(exp_max)) + 1
     else:
         exp_max = 1
+    include_decimal_int_mode = floating_dtype and int_mode
 
     scale = 1
     exp_max = int(exp_max)
@@ -111,6 +119,9 @@ def _number_format(tensor, min_sz=-1):
         else:
             sz = max(min_sz, exp_max + 1)
             format = '{:' + str(sz) + '.0f}'
+            if include_decimal_int_mode:
+                format += '.'
+                sz += 1
     else:
         if exp_max - exp_min > prec:
             sz = 7 + prec
