@@ -139,7 +139,7 @@ def set_default_tensor_type(t):
     Example::
 
         >>> torch.set_default_tensor_type("torch.FloatTensor")
-        >>> torch.Tensor([1.2, 3])
+        >>> torch.tensor([1.2, 3])
         tensor([ 1.2000,  3.0000])
 
     """
