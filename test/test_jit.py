@@ -121,16 +121,17 @@ class TestJit(TestCase):
     # index-2 is not implemented in interpreter
     @unittest.expectedFailure
     def test_index(self):
-        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        x = Variable(torch.rand(2, 2, 2), requires_grad=True)
         y = Variable(torch.LongTensor([0]), requires_grad=True)
+        y2 = Variable(torch.LongTensor([1]), requires_grad=True)
 
         @torch.jit.compile(nderivs=0)
-        def fn(x, y):
-            return x[y]
+        def fn(x, y, y2):
+            return x[y, y2]
 
-        z = fn(x, y)
+        z = fn(x, y, y2)
         with self.assertCompiled(fn):
-            z2 = fn(x, y)
+            z2 = fn(x, y, y2)
         self.assertEqual(z, z2)
 
     # Backwards tracing was broken for indexing by a constant,
@@ -2139,8 +2140,6 @@ class TestScript(TestCase):
                 with self.assertRaisesRegex(TypeError, "is not a valid constant"):
                     self.i = (3, 4, {})
 
-    # https://github.com/pytorch/pytorch/issues/6714
-    @unittest.expectedFailure
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['b']
