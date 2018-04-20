@@ -92,8 +92,8 @@ Example::
 
     >>> tensor = torch.ones(())
     >>> tensor.new_empty((2, 3))
-    tensor([[ 1.8090e+15,  4.5555e-41, -5.5923e-22],
-            [ 3.0883e-41,  4.4842e-44,  0.0000e+00]])
+    tensor([[ 1.7427e+17,  4.5558e-41,  2.7991e-31],
+            [ 3.0896e-41,  4.4842e-44,  0.0000e+00]])
 
 """.format(**new_common_args))
 
@@ -1208,12 +1208,12 @@ Example::
 
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
     >>> x.narrow(0, 0, 2)
-    tensor([[ 1.0000,  2.0000,  3.0000],
-            [ 4.0000,  5.0000,  6.0000]])
+    tensor([[ 1,  2,  3],
+            [ 4,  5,  6]])
     >>> x.narrow(1, 1, 2)
-    tensor([[ 2.0000,  3.0000],
-            [ 5.0000,  6.0000],
-            [ 8.0000,  9.0000]])
+    tensor([[ 2,  3],
+            [ 5,  6],
+            [ 8,  9]])
 """)
 
 add_docstr_all('ndimension',
@@ -1381,8 +1381,8 @@ Example::
     >>> src = torch.tensor([[4, 3, 5],
                             [6, 7, 8]])
     >>> src.put_(torch.tensor([1, 3]), torch.tensor([9, 10]))
-    tensor([[  4.0000,   9.0000,   5.0000],
-            [ 10.0000,   7.0000,   8.0000]])
+    tensor([[  4,   9,   5],
+            [ 10,   7,   8]])
 """)
 
 add_docstr_all('qr',
@@ -1462,10 +1462,10 @@ Example::
 
     >>> x = torch.tensor([1, 2, 3])
     >>> x.repeat(4, 2)
-    tensor([[ 1.0000,  2.0000,  3.0000,  1.0000,  2.0000,  3.0000],
-            [ 1.0000,  2.0000,  3.0000,  1.0000,  2.0000,  3.0000],
-            [ 1.0000,  2.0000,  3.0000,  1.0000,  2.0000,  3.0000],
-            [ 1.0000,  2.0000,  3.0000,  1.0000,  2.0000,  3.0000]])
+    tensor([[ 1,  2,  3,  1,  2,  3],
+            [ 1,  2,  3,  1,  2,  3],
+            [ 1,  2,  3,  1,  2,  3],
+            [ 1,  2,  3,  1,  2,  3]])
     >>> x.repeat(4, 2, 1).size()
     torch.Size([4, 2, 3])
 """)
@@ -1537,8 +1537,8 @@ Example::
 
     >>> x = torch.tensor([[1, 2], [3, 4], [5, 6]])
     >>> x.resize_(2, 2)
-    tensor([[ 1.0000,  2.0000],
-            [ 3.0000,  4.0000]])
+    tensor([[ 1,  2],
+            [ 3,  4]])
 """)
 
 add_docstr_all('resize_as_',
@@ -1613,12 +1613,12 @@ Example::
 
     >>> x = torch.rand(2, 5)
     >>> x
-    tensor([[ 0.1348,  0.1148,  0.7940,  0.1095,  0.0319],
-            [ 0.3435,  0.0840,  0.3380,  0.8191,  0.3475]])
+    tensor([[ 0.2176,  0.2159,  0.8764,  0.6712,  0.0771],
+            [ 0.3809,  0.1157,  0.4695,  0.7550,  0.3339]])
     >>> torch.zeros(3, 5).scatter_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]]), x)
-    tensor([[ 0.1348,  0.0840,  0.3380,  0.1095,  0.0319],
-            [ 0.0000,  0.1148,  0.0000,  0.8191,  0.0000],
-            [ 0.3435,  0.0000,  0.7940,  0.0000,  0.3475]])
+    tensor([[ 0.2176,  0.1157,  0.4695,  0.6712,  0.0771],
+            [ 0.0000,  0.2159,  0.0000,  0.7550,  0.0000],
+            [ 0.3809,  0.0000,  0.8764,  0.0000,  0.3339]])
 
     >>> z = torch.zeros(2, 4).scatter_(1, torch.tensor([[2], [3]]), 1.23)
     >>> z
@@ -1728,7 +1728,7 @@ Returns the size of the :attr:`self` tensor. The returned value is a subclass of
 
 Example::
 
-    >>> torch.tensor(3, 4, 5).size()
+    >>> torch.empty(3, 4, 5).size()
     torch.Size([3, 4, 5])
 
 """)
@@ -1915,22 +1915,22 @@ Example::
 
     >>> tensor = torch.randn(2, 2)  # Initially dtype=float32, device=cpu
     >>> tensor.to(torch.float64)
-    tensor([[ 1.7472, -1.3270],
-            [ 0.4774, -0.0237]], dtype=torch.float64)
+    tensor([[-0.0337,  0.7409],
+            [-0.2161, -0.4975]], dtype=torch.float64)
 
     >>> cuda0 = torch.device('cuda:0')
     >>> tensor.to(cuda0)
-    tensor([[ 1.7472, -1.3270],
-            [ 0.4774, -0.0237]], device='cuda:0')
+    tensor([[-0.0337,  0.7409],
+            [-0.2161, -0.4975]], device='cuda:0')
 
     >>> tensor.to(cuda0, dtype=torch.float64)
-    tensor([[ 1.7472, -1.3270],
-            [ 0.4774, -0.0237]], dtype=torch.float64, device='cuda:0')
+    tensor([[-0.0337,  0.7409],
+            [-0.2161, -0.4975]], dtype=torch.float64, device='cuda:0')
 
     >>> other = torch.randn((), dtype=torch.float64, device=cuda0)
     >>> tensor.to(other)
-    tensor([[ 1.7472, -1.3270],
-            [ 0.4774, -0.0237]], dtype=torch.float64, device='cuda:0')
+    tensor([[-0.0337,  0.7409],
+            [-0.2161, -0.4975]], dtype=torch.float64, device='cuda:0')
 
 """)
 
@@ -2266,13 +2266,13 @@ Example::
     >>> x.size()
     torch.Size([3, 1])
     >>> x.expand(3, 4)
-    tensor([[ 1.0000,  1.0000,  1.0000,  1.0000],
-            [ 2.0000,  2.0000,  2.0000,  2.0000],
-            [ 3.0000,  3.0000,  3.0000,  3.0000]])
+    tensor([[ 1,  1,  1,  1],
+            [ 2,  2,  2,  2],
+            [ 3,  3,  3,  3]])
     >>> x.expand(-1, 4)   # -1 means not changing the size of that dimension
-    tensor([[ 1.0000,  1.0000,  1.0000,  1.0000],
-            [ 2.0000,  2.0000,  2.0000,  2.0000],
-            [ 3.0000,  3.0000,  3.0000,  3.0000]])
+    tensor([[ 1,  1,  1,  1],
+            [ 2,  2,  2,  2],
+            [ 3,  3,  3,  3]])
 """)
 
 add_docstr_all('zero_',
