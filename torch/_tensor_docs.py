@@ -585,9 +585,9 @@ Returns the size in bytes of an individual element.
 
 Example::
 
-    >>> torch.FloatTensor().element_size()
+    >>> torch.tensor([]).element_size()
     4
-    >>> torch.ByteTensor().element_size()
+    >>> torch.tensor([], dtype=torch.uint8).element_size()
     1
 
 """)
@@ -828,8 +828,8 @@ Args:
 
 Example::
 
-    >>> x = torch.Tensor(5, 3).fill_(1)
-    >>> t = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> x = torch.ones(5, 3)
+    >>> t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float)
     >>> index = torch.tensor([0, 4, 2])
     >>> x.index_add_(0, index, t)
     tensor([[  2.0000,   3.0000,   4.0000],
@@ -860,7 +860,7 @@ Args:
 Example::
 
     >>> x = torch.zeros(5, 3)
-    >>> t = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float)
     >>> index = torch.tensor([0, 4, 2])
     >>> x.index_copy_(0, index, t)
     tensor([[ 1.0000,  2.0000,  3.0000],
@@ -883,7 +883,7 @@ Args:
     val (float): the value to fill with
 
 Example::
-    >>> x = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float)
     >>> index = torch.tensor([0, 2])
     >>> x.index_fill_(1, index, -1)
     tensor([[-1.0000,  2.0000, -1.0000],
@@ -944,7 +944,7 @@ This operation is not differentiable.
 
 Example::
 
-    >>> x = torch.Tensor([1.0])
+    >>> x = torch.tensor([1.0])
     >>> x.item()
     1.0
 
@@ -1206,7 +1206,7 @@ Args:
 
 Example::
 
-    >>> x = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
     >>> x.narrow(0, 0, 2)
     tensor([[ 1.0000,  2.0000,  3.0000],
             [ 4.0000,  5.0000,  6.0000]])
@@ -1378,9 +1378,9 @@ Args:
 
 Example::
 
-    >>> src = torch.Tensor([[4, 3, 5],
+    >>> src = torch.tensor([[4, 3, 5],
                             [6, 7, 8]])
-    >>> src.put_(torch.tensor([1, 3]), torch.Tensor([9, 10]))
+    >>> src.put_(torch.tensor([1, 3]), torch.tensor([9, 10]))
     tensor([[  4.0000,   9.0000,   5.0000],
             [ 10.0000,   7.0000,   8.0000]])
 """)
@@ -1400,8 +1400,8 @@ Fills :attr:`self` tensor with numbers sampled from the discrete uniform
 distribution over ``[from, to - 1]``. If not specified, the values are usually
 only bounded by :attr:`self` tensor's data type. However, for floating point
 types, if unspecified, range will be ``[0, 2^mantissa]`` to ensure that every
-value is representable. For example, `torch.DoubleTensor(1).random_()` will be
-uniform in ``[0, 2^53]``.
+value is representable. For example, `torch.tensor(1, dtype=torch.double).random_()`
+will be uniform in ``[0, 2^53]``.
 """)
 
 add_docstr_all('reciprocal',
@@ -1460,7 +1460,7 @@ Args:
 
 Example::
 
-    >>> x = torch.Tensor([1, 2, 3])
+    >>> x = torch.tensor([1, 2, 3])
     >>> x.repeat(4, 2)
     tensor([[ 1.0000,  2.0000,  3.0000,  1.0000,  2.0000,  3.0000],
             [ 1.0000,  2.0000,  3.0000,  1.0000,  2.0000,  3.0000],
@@ -1535,7 +1535,7 @@ Args:
 
 Example::
 
-    >>> x = torch.Tensor([[1, 2], [3, 4], [5, 6]])
+    >>> x = torch.tensor([[1, 2], [3, 4], [5, 6]])
     >>> x.resize_(2, 2)
     tensor([[ 1.0000,  2.0000],
             [ 3.0000,  4.0000]])
@@ -1728,7 +1728,7 @@ Returns the size of the :attr:`self` tensor. The returned value is a subclass of
 
 Example::
 
-    >>> torch.Tensor(3, 4, 5).size()
+    >>> torch.tensor(3, 4, 5).size()
     torch.Size([3, 4, 5])
 
 """)
@@ -1791,7 +1791,7 @@ number of storage elements (not bytes).
 
 Example::
 
-    >>> x = torch.Tensor([1, 2, 3, 4, 5])
+    >>> x = torch.tensor([1, 2, 3, 4, 5])
     >>> x.storage_offset()
     0
     >>> x[3:].storage_offset()
@@ -1815,7 +1815,7 @@ Args:
 
 Example::
 
-    >>> x = torch.Tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
+    >>> x = torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
     >>> x.stride()
     (5, 1)
     >>>x.stride(0)
@@ -2262,7 +2262,7 @@ Args:
 
 Example::
 
-    >>> x = torch.Tensor([[1], [2], [3]])
+    >>> x = torch.tensor([[1], [2], [3]])
     >>> x.size()
     torch.Size([3, 1])
     >>> x.expand(3, 4)
