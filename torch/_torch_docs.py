@@ -22,7 +22,7 @@ def parse_kwargs(desc):
 
 factory_common_args = parse_kwargs("""
     out (Tensor, optional): the output tensor
-    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
     layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
         Default: ``torch.strided``.
@@ -38,7 +38,7 @@ factory_like_common_args = parse_kwargs("""
     input (Tensor): the size of :attr:`input` will determine size of the output tensor
     layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
         Default: if None, defaults to the layout of :attr:`input`.
-    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
         Default: if None, defaults to the dtype of :attr:`input`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
         Default: if None, defaults to the device of :attr:`input`.
@@ -2427,6 +2427,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 
@@ -2626,6 +2627,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 Example::
@@ -3711,6 +3713,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 Example::
@@ -4259,6 +4262,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 Example::
@@ -4317,6 +4321,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 Example::
@@ -4384,6 +4389,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 Example::
@@ -4431,7 +4437,7 @@ Returns a random permutation of integers from ``0`` to ``n - 1``.
 Args:
     n (int): the upper bound (exclusive)
     {out}
-    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: ``torch.int64``.
     {layout}
     {device}
@@ -4457,7 +4463,7 @@ Constructs a tensor with :attr:`data`.
 Args:
     data (array_like): Initial data for the tensor. Can be a list, tuple,
         numpy array, scalar, and other types.
-    dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if None, infers data type from :attr:`data`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
         Default: if None, uses the current device for the default tensor type
@@ -4521,6 +4527,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 Example::
@@ -4568,6 +4575,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 Example::
@@ -5973,6 +5981,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 Example::
@@ -6094,6 +6103,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 """.format(**factory_common_args))
@@ -6137,6 +6147,7 @@ Args:
     {out}
     {dtype}
     {layout}
+    {device}
     {requires_grad}
 
 """.format(**factory_common_args))
