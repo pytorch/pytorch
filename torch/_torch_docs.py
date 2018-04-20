@@ -1805,13 +1805,17 @@ Args:
 
 Example::
 
-    >>> x = torch.rand(10, 10)
+    >>> x = torch.rand(4, 4)
     >>> y = torch.inverse(x)
     >>> z = torch.mm(x, y)
     >>> z
-    >>> torch.max(torch.abs(z - torch.eye(10))) # Max nonzero
-    tensor(1.00000e-06 *
-           7.7914)
+    tensor([[ 1.0000, -0.0000,  0.0000, -0.0000],
+            [ 0.0000,  1.0000,  0.0000,  0.0000],
+            [ 0.0000, -0.0000,  1.0000, -0.0000],
+            [ 0.0000, -0.0000,  0.0000,  1.0000]])
+    >>> torch.max(torch.abs(z - torch.eye(4))) # Max nonzero
+    tensor(1.00000e-07 *
+           7.1526)
 """)
 
 add_docstr(torch.kthvalue,

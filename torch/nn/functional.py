@@ -234,7 +234,7 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
         >>> # pool of square window of size=3, stride=2
         >>> input = torch.Tensor([[[1,2,3,4,5,6,7]]])
         >>> F.avg_pool1d(input, kernel_size=3, stride=2)
-        tensor([[[ 2, 4, 6]]])
+        tensor([[[ 2.0000,  4.0000,  6.0000]]])
     """
     if input.dim() != 3:
         raise ValueError('expected 3D input (got {} dimensions)'
@@ -1040,15 +1040,15 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
         >>> # an embedding matrix containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
         >>> F.embedding(input, embedding_matrix)
-        tensor([[[ 0.1017, 0.7109, 0.3379],
-                 [ 0.3897, 0.6505, 0.2666],
-                 [ 0.5327, 0.9413, 0.5085],
-                 [ 0.1448, 0.3220, 0.1903]],
+        tensor([[[ 0.8490,  0.9625,  0.6753],
+                 [ 0.9666,  0.7761,  0.6108],
+                 [ 0.6246,  0.9751,  0.3618],
+                 [ 0.4161,  0.2419,  0.7383]],
 
-                [[ 0.5327, 0.9413, 0.5085],
-                 [ 0.2052, 0.3100, 0.0597],
-                 [ 0.3897, 0.6505, 0.2666],
-                 [ 0.1133, 0.5739, 0.5993]]])
+                [[ 0.6246,  0.9751,  0.3618],
+                 [ 0.0237,  0.7794,  0.0528],
+                 [ 0.9666,  0.7761,  0.6108],
+                 [ 0.3385,  0.8612,  0.1867]]])
 
         >>> # example with padding_idx
         >>> weights = torch.rand(10, 3)
@@ -1056,10 +1056,10 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
         >>> embedding_matrix = weights
         >>> input = torch.LongTensor([[0,2,0,5]])
         >>> F.embedding(input, embedding_matrix, padding_idx=0)
-        tensor([[[ 0.0000, 0.0000, 0.0000],
-                 [ 0.0521, 0.6230, 0.5479],
-                 [ 0.0000, 0.0000, 0.0000],
-                 [ 0.7936, 0.6146, 0.2058]]])
+        tensor([[[ 0.0000,  0.0000,  0.0000],
+                 [ 0.5609,  0.5384,  0.8720],
+                 [ 0.0000,  0.0000,  0.0000],
+                 [ 0.6262,  0.2438,  0.7471]]])
     """
     input = input.contiguous()
     if padding_idx is not None:
@@ -1125,9 +1125,9 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
             >>> # a batch of 2 samples of 4 indices each
             >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
             >>> offsets = torch.LongTensor([0,4])
-            >>> embedding_bag(embedding_matrix, input, offsets)
-            tensor([[ 0.2692, 0.8753, 0.4608],
-                    [ 0.4912, 0.5876, 0.5705]])
+            >>> F.embedding_bag(embedding_matrix, input, offsets)
+            tensor([[ 0.3397,  0.3552,  0.5545],
+                    [ 0.5893,  0.4386,  0.5882]])
         """
     if indices.dim() == 2:
         if offsets is not None:

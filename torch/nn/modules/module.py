@@ -211,11 +211,13 @@ class Module(object):
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
             >>> net.apply(init_weights)
             Linear(in_features=2, out_features=2, bias=True)
-            tensor([[ 1, 1],
-                    [ 1, 1]])
+            Parameter containing:
+            tensor([[ 1.0000,  1.0000],
+                    [ 1.0000,  1.0000]])
             Linear(in_features=2, out_features=2, bias=True)
-            tensor([[ 1, 1],
-                    [ 1, 1]])
+            Parameter containing:
+            tensor([[ 1.0000,  1.0000],
+                    [ 1.0000,  1.0000]])
             Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)
               (1): Linear(in_features=2, out_features=2, bias=True)
@@ -224,7 +226,6 @@ class Module(object):
               (0): Linear(in_features=2, out_features=2, bias=True)
               (1): Linear(in_features=2, out_features=2, bias=True)
             )
-
         """
         for module in self.children():
             module.apply(fn)
