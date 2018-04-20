@@ -232,7 +232,7 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
 
     Example::
         >>> # pool of square window of size=3, stride=2
-        >>> input = torch.Tensor([[[1,2,3,4,5,6,7]]])
+        >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
         >>> F.avg_pool1d(input, kernel_size=3, stride=2)
         tensor([[[ 2.0000,  4.0000,  6.0000]]])
     """
@@ -1036,7 +1036,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
     Examples::
 
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
+        >>> input = torch.tensor([[1,2,4,5],[4,3,2,9]])
         >>> # an embedding matrix containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
         >>> F.embedding(input, embedding_matrix)
@@ -1054,7 +1054,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
         >>> weights = torch.rand(10, 3)
         >>> weights[0, :].zero_()
         >>> embedding_matrix = weights
-        >>> input = torch.LongTensor([[0,2,0,5]])
+        >>> input = torch.tensor([[0,2,0,5]])
         >>> F.embedding(input, embedding_matrix, padding_idx=0)
         tensor([[[ 0.0000,  0.0000,  0.0000],
                  [ 0.5609,  0.5384,  0.8720],
@@ -1123,8 +1123,8 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
             >>> # an Embedding module containing 10 tensors of size 3
             >>> embedding_matrix = torch.rand(10, 3)
             >>> # a batch of 2 samples of 4 indices each
-            >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
-            >>> offsets = torch.LongTensor([0,4])
+            >>> input = torch.tensor([1,2,4,5,4,3,2,9])
+            >>> offsets = torch.tensor([0,4])
             >>> F.embedding_bag(embedding_matrix, input, offsets)
             tensor([[ 0.3397,  0.3552,  0.5545],
                     [ 0.5893,  0.4386,  0.5882]])
@@ -1317,7 +1317,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         >>> # input is of size N x C = 3 x 5
         >>> input = torch.randn(3, 5)
         >>> # each element in target has to have 0 <= value < C
-        >>> target = torch.LongTensor([1, 0, 4])
+        >>> target = torch.tensor([1, 0, 4])
         >>> output = F.nll_loss(F.log_softmax(input), target)
         >>> output.backward()
     """
@@ -1435,7 +1435,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
     Examples::
 
         >>> input = torch.randn(3, 5, requires_grad=True)
-        >>> target = torch.LongTensor(3).random_(5)
+        >>> target = torch.randint(5, (3,), dtype=torch.int64)
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
@@ -1464,8 +1464,8 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
 
     Examples::
 
-        >>> input = torch.randn(3, requires_grad=True)
-        >>> target = torch.LongTensor(3).random_(2)
+        >>> input = torch.randn((3, 2), requires_grad=True)
+        >>> target = torch.rand((3, 2), requires_grad=False)
         >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
         >>> loss.backward()
     """
@@ -1506,7 +1506,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
     Examples::
 
          >>> input = torch.randn(3, requires_grad=True)
-         >>> target = torch.FloatTensor(3).random_(2)
+         >>> target = torch.empty(3).random_(2)
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
          >>> loss.backward()
     """
@@ -1644,7 +1644,7 @@ def pixel_shuffle(input, upscale_factor):
     Examples::
 
         >>> ps = nn.PixelShuffle(3)
-        >>> input = torch.Tensor(1, 9, 4, 4)
+        >>> input = torch.empty(1, 9, 4, 4)
         >>> output = ps(input)
         >>> print(output.size())
         torch.Size([1, 1, 12, 12])
@@ -1907,7 +1907,7 @@ def pad(input, pad, mode='constant', value=0):
 
     Examples::
 
-        >>> t4d = torch.Tensor(3, 3, 4, 2)
+        >>> t4d = torch.empty(3, 3, 4, 2)
         >>> p1d = (1, 1) # pad last dim by 1 on each side
         >>> out = F.pad(t4d, p1d, "constant", 0)  # effectively zero padding
         >>> print(out.data.size())
@@ -1916,7 +1916,7 @@ def pad(input, pad, mode='constant', value=0):
         >>> out = F.pad(t4d, p2d, "constant", 0)
         >>> print(out.data.size())
         torch.Size([3, 3, 8, 4])
-        >>> t4d = torch.Tensor(3, 3, 4, 2)
+        >>> t4d = torch.empty(3, 3, 4, 2)
         >>> p3d = (0, 1, 2, 1, 3, 3) # pad by (0, 1), (2, 1), and (3, 3)
         >>> out = F.pad(t4d, p3d, "constant", 0)
         >>> print(out.data.size())
