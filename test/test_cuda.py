@@ -1370,10 +1370,21 @@ class TestCuda(TestCase):
             # test setitem
             x_clone1 = x.clone()
             x_clone2 = x.clone()
+            x_clone3 = x.clone()
             first_shape = x[:, ia, None, ib, 0].shape
             second_shape = x[ia].shape
             x_clone1[:, ia, None, ib, 0] = torch.randn(first_shape).to(x_clone1)
             x_clone2[ia] = torch.randn(second_shape).to(x_clone2)
+
+            # fill equivalents
+            x_clone1[:, ia, None, ib, 0] = 5
+            x_clone2[ia] = 7
+
+            # mask equivalents
+            mask = (torch.randn(x_clone3.size()) < 0).to(ia.device)
+            x_clone3[mask]
+            self.assertEqual(x_clone3[mask].cpu(), x_clone3.cpu()[mask.cpu()])
+            x_clone3[mask] = 6
 
         cpu = torch.device('cpu')
         for device in ['cuda:0', 'cuda:1'] if torch.cuda.device_count() > 1 else ['cuda']:
