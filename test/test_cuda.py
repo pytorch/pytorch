@@ -1363,33 +1363,62 @@ class TestCuda(TestCase):
 
     def test_advancedindex_mixed_cpu_cuda(self):
         def test(x, ia, ib):
+            # test getitem
             self.assertEqual(x[:, ia, None, ib, 0].cpu(),
                              x.cpu()[:, ia.cpu(), None, ib.cpu(), 0])
             self.assertEqual(x[ia], x.cpu()[ia.cpu()])
+            # test setitem
+            x_clone1 = x.clone()
+            x_clone2 = x.clone()
+            x_clone3 = x.clone()
+            first_shape = x[:, ia, None, ib, 0].shape
+            second_shape = x[ia].shape
+            x_clone1[:, ia, None, ib, 0] = torch.randn(first_shape).to(x_clone1)
+            x_clone2[ia] = torch.randn(second_shape).to(x_clone2)
 
-        # Index cpu tensor with cuda tensor
-        x = torch.randn(3, 4, 4, 4, 3)
-        ia = torch.cuda.LongTensor([0, 2, 1])
-        ib = torch.cuda.LongTensor([0, 2, 1])
-        test(x, ia, ib)
+            # fill equivalents
+            x_clone1[:, ia, None, ib, 0] = 5
+            x_clone2[ia] = 7
 
-        # Index cuda tensor with cpu tensor
-        x = x.cuda()
-        ia = ia.cpu()
-        ib = ib.cpu()
-        test(x, ia, ib)
+            # mask equivalents
+            mask = (torch.randn(x_clone3.size()) < 0).to(ia.device)
+            x_clone3[mask]
+            self.assertEqual(x_clone3[mask].cpu(), x_clone3.cpu()[mask.cpu()])
+            x_clone3[mask] = 6
 
-        # Index cpu tensor with mixed cpu, cuda tensors
-        x = x.cpu()
-        ia = ia.cpu()
-        ib = ib.cuda()
-        test(x, ia, ib)
+        cpu = torch.device('cpu')
+        for device in ['cuda:0', 'cuda:1'] if torch.cuda.device_count() > 1 else ['cuda']:
+            # Index cpu tensor with cuda tensor
+            x = torch.randn(3, 4, 4, 4, 3)
+            ia = torch.tensor([0, 2, 1]).to(device)
+            ib = torch.tensor([0, 2, 1]).to(device)
+            test(x, ia, ib)
 
-        # Index cuda tensor with mixed cpu, cuda tensors
-        x = x.cuda()
-        ia = ia.cpu()
-        ib = ib.cuda()
-        test(x, ia, ib)
+            # Index cuda tensor with cpu tensor
+            x = x.to(device)
+            ia = ia.to(cpu)
+            ib = ib.to(cpu)
+            test(x, ia, ib)
+
+            # Index cpu tensor with mixed cpu, cuda tensors
+            x = x.to(cpu)
+            ia = ia.to(cpu)
+            ib = ib.to(device)
+            test(x, ia, ib)
+
+            # Index cuda tensor with mixed cpu, cuda tensors
+            x = x.to(device)
+            ia = ia.to(cpu)
+            ib = ib.to(device)
+            test(x, ia, ib)
+
+            if torch.cuda.device_count() > 1:
+                other_device = 'cuda:0' if device != 'cuda:0' else 'cuda:1'
+                # Index cuda tensor with mixed cpu, cuda tensors on different devices
+                x = x.to(device)
+                ia = ia.to(cpu)
+                ib = ib.to(other_device)
+                test(x, ia, ib)
 
     def test_advancedindex_big(self):
         TestTorch._test_advancedindex_big(self, lambda t: t.cuda())
