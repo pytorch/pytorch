@@ -1503,7 +1503,7 @@ Args:
 Example::
 
     >>> t = torch.Tensor([[1,2],[3,4]])
-    >>> torch.gather(t, 1, torch.LongTensor([[0,0],[1,0]]))
+    >>> torch.gather(t, 1, torch.tensor([[0,0],[1,0]]))
     tensor([[ 1.0000,  1.0000],
             [ 4.0000,  3.0000]])
 """)
@@ -1778,7 +1778,7 @@ Example::
     tensor([[-1.6727, -1.2638, -0.3851,  0.9598],
             [-0.6904, -0.6232,  1.4447,  0.1557],
             [-0.6359, -0.0336, -1.5539,  1.3314]])
-    >>> indices = torch.LongTensor([0, 2])
+    >>> indices = torch.tensor([0, 2])
     >>> torch.index_select(x, 0, indices)
     tensor([[-1.6727, -1.2638, -0.3851,  0.9598],
             [-0.6359, -0.0336, -1.5539,  1.3314]])
@@ -4200,7 +4200,7 @@ Example::
 
     >>> src = torch.Tensor([[4, 3, 5],
                             [6, 7, 8]])
-    >>> torch.take(src, torch.LongTensor([0, 2, 5]))
+    >>> torch.take(src, torch.tensor([0, 2, 5]))
     tensor([ 4.0000,  5.0000,  8.0000])
 """)
 
@@ -4747,7 +4747,7 @@ Args:
 
 Example::
 
-    >>> input = torch.LongTensor(2,3)
+    >>> input = torch.empty((2,3), dtype=torch.int64)
     >>> input.new(input.size())
     tensor([[ 9.3962e+13,  2.8000e+01,  9.3965e+13],
             [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
