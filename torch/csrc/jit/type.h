@@ -137,7 +137,12 @@ struct TensorType : public Type {
            device() == rt->device();
   }
   virtual std::string name() const override {
-    return "Tensor";
+    std::string retval = std::string(at::toString(scalarType())) + "Tensor[";
+    for (size_t i=0; i < sizes_.size(); ++i) {
+      retval += std::to_string(sizes_[i]) + (i == sizes_.size() - 1 ? "" : ",");
+    }
+    retval += "]";
+    return retval;
   }
 private:
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
