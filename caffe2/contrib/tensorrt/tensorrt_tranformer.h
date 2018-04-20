@@ -14,6 +14,11 @@
 
 namespace caffe2 {
 
+void BuildInitializationList(
+    Workspace* ws,
+    ::ONNX_NAMESPACE::GraphProto* g,
+    std::unordered_set<std::string>* initialization_list);
+
 class TensorRTTransformer {
  public:
   TensorRTTransformer(

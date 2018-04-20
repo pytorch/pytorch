@@ -1,8 +1,11 @@
 #include "caffe2/contrib/tensorrt/tensorrt_op_trt.h"
-#include "caffe2/core/logging.h"
 
 #include <numeric>
 #include <unordered_map>
+
+#include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
+#include "caffe2/core/logging.h"
+#include "onnx/onnx_pb.h"
 
 namespace caffe2 {
 
@@ -67,6 +70,28 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
       auto debug_builder = OperatorBase::GetSingleArgument<int>("debug_builder", 0);
       auto max_workspace_size = OperatorBase::GetSingleArgument<int>(
           "max_workspace_size", 1024 * 1024 * 2);
+
+      // Pull the weights from workspace and assembly it back to the onnx model,
+      // notice that since we may have rewritten the net, we need to map the
+      // weight names
+      auto initializers = OperatorBase::GetRepeatedArgument<std::string>("initializers");
+      CAFFE_ENFORCE_EQ(
+          initializers.size() % 2, 0, "initializers should come in pairs");
+      std::unordered_set<std::string> initializer_set;
+      std::unordered_map<std::string, std::string> input_mapping;
+      for (auto it = initializers.begin(); it != initializers.end(); ++it)  {
+        auto key = *it++;
+        input_mapping.emplace(key, *it);
+        initializer_set.emplace(key);
+      }
+      Workspace mapped_ws(ws, input_mapping);
+      ::ONNX_NAMESPACE::ModelProto onnx_model;
+      ParseProtoFromLargeString(onnx_model_str, &onnx_model);
+      BuildInitializationList(&mapped_ws, onnx_model.mutable_graph(), &initializer_set);
+      onnx_model_str.clear();
+      onnx_model.SerializeToString(&onnx_model_str);
+
+      // Build the trt engine
       trt_engine_ = tensorrt::BuildTrtEngine(
           onnx_model_str,
           &logger_,
@@ -76,7 +101,7 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
     }
   }
 
-  CAFFE_ENFORCE(trt_engine_, "Cannot deserialize TensorRT engine!");
+  CAFFE_ENFORCE(trt_engine_, "Cannot build TensorRT engine!");
 
   // match and bind the input/output
   const int num_bindings = trt_engine_->getNbBindings();

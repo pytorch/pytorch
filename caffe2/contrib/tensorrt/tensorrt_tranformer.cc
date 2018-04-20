@@ -119,31 +119,6 @@ void BlobToTensorProto(
   }
 }
 
-void BuildInitializationList(
-    Workspace* ws,
-    ::ONNX_NAMESPACE::GraphProto* g,
-    std::unordered_set<std::string>* initialization_list) {
-  const std::vector<string>& ws_blobs = ws->Blobs();
-
-  // Create a CUDA context and reuse it for potential tensor copies across
-  // devices
-  CUDAContext context;
-
-  for (const auto& s : ws_blobs) {
-    auto it = initialization_list->find(s);
-    if (it != initialization_list->end()) {
-      auto* init_tensor = g->add_initializer();
-      BlobToTensorProto(s, ws, &context, init_tensor);
-      initialization_list->erase(it);
-    }
-  }
-  CAFFE_ENFORCE(
-      initialization_list->empty(), "Unfulfilled initialization list");
-  for (const auto& t : g->initializer()) {
-    VLOG(2) << "Initializer: " << t.name();
-  }
-}
-
 std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
     const std::vector<std::string>& names,
     const std::unordered_map<std::string, TensorShape>& shape_hints) {
@@ -177,6 +152,31 @@ void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
   opset_id->set_version(3);
 }
 } // namespace
+
+void BuildInitializationList(
+    Workspace* ws,
+    ::ONNX_NAMESPACE::GraphProto* g,
+    std::unordered_set<std::string>* initialization_list) {
+  const std::vector<string>& ws_blobs = ws->Blobs();
+
+  // Create a CUDA context and reuse it for potential tensor copies across
+  // devices
+  CUDAContext context;
+
+  for (const auto& s : ws_blobs) {
+    auto it = initialization_list->find(s);
+    if (it != initialization_list->end()) {
+      auto* init_tensor = g->add_initializer();
+      BlobToTensorProto(s, ws, &context, init_tensor);
+      initialization_list->erase(it);
+    }
+  }
+  CAFFE_ENFORCE(
+      initialization_list->empty(), "Unfulfilled initialization list");
+  for (const auto& t : g->initializer()) {
+    VLOG(2) << "Initializer: " << t.name();
+  }
+}
 
 void TensorRTTransformer::AddTrtOptions(
     OperatorDef* op,
@@ -222,12 +222,15 @@ OperatorDef TensorRTTransformer::BuildTrtOpLazy(
   auto* initializers_arg = op.add_arg();
   initializers_arg->set_name("initializers");
   for (const auto& s : initialization_list) {
+    initializers_arg->add_strings(s);
     initializers_arg->add_strings(input_mapping_.at(s));
   }
 
   // Add the input/output
   for (const auto& input : net.external_input()) {
-    op.add_input(input);
+    if (!initialization_list.count(input)) {
+      op.add_input(input);
+    }
   }
   for (const auto& output : net.external_output()) {
     op.add_output(output);
