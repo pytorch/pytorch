@@ -50,7 +50,7 @@ class Beta(ExponentialFamily):
     def rsample(self, sample_shape=()):
         value = self._dirichlet.rsample(sample_shape).select(-1, 0)
         if isinstance(value, Number):
-            value = self._dirichlet.concentration.new([value])
+            value = self._dirichlet.concentration.new_tensor(value)
         return value
 
     def log_prob(self, value):
