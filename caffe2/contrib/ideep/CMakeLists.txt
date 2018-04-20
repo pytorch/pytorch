@@ -1,4 +1,4 @@
-if(MKL_USE_IDEEP)
+if(USE_MKL AND MKL_USE_IDEEP)
   message(STATUS "Including IDEEP operators")
 
   # ---[ Enable AVX2
