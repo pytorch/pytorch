@@ -1,5 +1,6 @@
 #include "torch/csrc/onnx/init.h"
 #include "torch/csrc/onnx/onnx.pb.h"
+#include "torch/csrc/onnx/onnx.h"
 
 namespace torch { namespace onnx {
 void initONNXBindings(PyObject* module) {
@@ -22,5 +23,8 @@ void initONNXBindings(PyObject* module) {
       .value("UINT64", onnx_TensorProto_DataType_UINT64)
       .value("COMPLEX64", onnx_TensorProto_DataType_COMPLEX64)
       .value("COMPLEX128", onnx_TensorProto_DataType_COMPLEX128);
+
+  py::class_<ModelProto>(onnx, "ModelProto")
+      .def("prettyPrint", &ModelProto::prettyPrint);
 }
 }} // namespace torch::onnx

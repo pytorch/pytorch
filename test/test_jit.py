@@ -2585,6 +2585,148 @@ class TestScript(TestCase):
         self.assertEqual(1, foo3(a))
         self.assertEqual(2, foo3(b))
 
+    def test_onnx_export_script_module(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                y = x - x
+                return x + x
+
+        mte = ModuleToExport()
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+
+    def test_onnx_export_script_python_fail(self):
+        class ModuleToInline(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToInline, self).__init__()
+
+            def forward(self, x):
+                return torch.neg(x)
+
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+                self.mod = ModuleToInline()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                y = self.mod(x)
+                return y + y
+
+        mte = ModuleToExport()
+        f = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, "Couldn't export Python operator"):
+            torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+
+    def test_onnx_export_script_inline_trace(self):
+        class ModuleToInline(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToInline, self).__init__()
+
+            def forward(self, x):
+                return torch.neg(x)
+
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+                self.mod = torch.jit.trace(torch.zeros(1, 2, 3))(ModuleToInline())
+
+            @torch.jit.script_method
+            def forward(self, x):
+                y = self.mod(x)
+                return y + y
+
+        mte = ModuleToExport()
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+
+    def test_onnx_export_script_inline_script(self):
+        class ModuleToInline(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToInline, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.neg(x)
+
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+                self.mod = ModuleToInline()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                y = self.mod(x)
+                return y + y
+
+        mte = ModuleToExport()
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+
+    def test_onnx_export_script_module_loop(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for _ in range(100):
+                    x = x + x
+                return x
+
+        mte = ModuleToExport()
+        f = io.BytesIO()
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+
+    def test_onnx_export_script_module_if(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                if torch.sum(x) > 0:
+                    x = torch.neg(x)
+                return x
+
+        mte = ModuleToExport()
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+
+    def test_onnx_export_script_inline_params(self):
+        class ModuleToInline(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToInline, self).__init__()
+                self.m = torch.nn.Parameter(torch.ones(3, 3))
+                self.unused = torch.nn.Parameter(torch.ones(1, 2, 3))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.mm(x, self.m)
+
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+                self.mod = ModuleToInline()
+                self.param = torch.nn.Parameter(torch.ones(3, 4))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                y = self.mod(x)
+                return torch.mm(y, self.param)
+
+        mte = ModuleToExport()
+        result = mte(torch.zeros(2, 3))
+        reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
+        self.assertEqual(result, reference)
+        self.assertExpected(torch.onnx._export_to_pretty_string(
+            mte, (torch.ones(2, 3),), None, verbose=False))
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):

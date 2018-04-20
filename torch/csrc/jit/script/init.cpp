@@ -381,7 +381,9 @@ void initJitScriptBindings(PyObject* module) {
       auto inputs = createVariableTensorList(args);
       auto outputs = m.run(std::move(inputs));
       return unpackVariableTensorList(std::move(outputs));
-    });
+    })
+    .def("propagate_shapes", &Method::propagate_shapes)
+    .def("params", &Method::params);
 
   m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
     return compileFunction(def, pythonResolver(rcb));

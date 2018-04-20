@@ -103,6 +103,8 @@ _(onnx, Squeeze) \
 _(onnx, Sub) \
 _(onnx, Transpose) \
 _(onnx, Unsqueeze) \
+_(onnx, Loop) \
+_(onnx, If)
 /* end */
 
 // These symbols are attribute keys.  They are shared between both ONNX and ATen
