@@ -81,7 +81,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             all the ops original exported by the functions in symbolic.py are exported
             as ATen ops.
     """
-    _export(model, args, f, export_params, verbose, training, input_names, output_names)
+    _export(model, args, f, export_params, verbose, training, input_names, output_names, aten)
 
 
 def _optimize_graph(graph, aten):
