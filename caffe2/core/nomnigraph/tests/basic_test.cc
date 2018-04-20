@@ -1,3 +1,4 @@
+#if 0
 #include "nomnigraph/Graph/Algorithms.h"
 #include "nomnigraph/Graph/Graph.h"
 
@@ -690,3 +691,4 @@ int main(int argc, char *argv[]) {
 
   return 0;
 }
+#endif

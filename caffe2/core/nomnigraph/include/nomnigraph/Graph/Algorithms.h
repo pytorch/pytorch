@@ -26,6 +26,10 @@ template <typename T, typename U>
 std::vector<Subgraph<T, U>> tarjans(Graph<T, U> *g);
 #include "nomnigraph/Graph/TarjansImpl.h"
 
+template <typename T, typename U, typename F>
+std::vector<Subgraph<T, U>> binaryMatch(Graph<T, U> *g, F condition);
+#include "nomnigraph/Graph/BinaryMatchImpl.h"
+
 /// \brief Helper for dominator tree finding.
 template <typename G>
 void reachable(typename G::NodeRef root, typename G::NodeRef ignored,
