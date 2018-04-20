@@ -77,11 +77,11 @@ class Dirichlet(ExponentialFamily):
 
     @property
     def mean(self):
-        return self.concentration / self.concentration.sum(-1)
+        return self.concentration / self.concentration.sum(-1, True)
 
     @property
     def variance(self):
-        con0 = self.concentration.sum(-1)
+        con0 = self.concentration.sum(-1, True)
         return self.concentration * (con0 - self.concentration) / (con0.pow(2) * (con0 + 1))
 
     def entropy(self):
