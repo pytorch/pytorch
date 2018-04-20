@@ -38,6 +38,7 @@ protected:
 
 public:
   virtual bool operator==(const Type& rhs) const = 0;
+  virtual std::string name() const = 0;
   TypeKind kind() const {
     return kind_;
   }
@@ -78,6 +79,9 @@ struct DynamicType : public Type {
   : Type(TypeKind::DynamicType) {}
   virtual bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
+  }
+  virtual std::string name() const override {
+    return "Dynamic";
   }
   static const TypeKind Kind = TypeKind::DynamicType;
   // global singleton
@@ -132,6 +136,9 @@ struct TensorType : public Type {
            strides() == rt->strides() &&
            device() == rt->device();
   }
+  virtual std::string name() const override {
+    return "Tensor";
+  }
 private:
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
@@ -173,6 +180,9 @@ struct HandleType : public Type {
   virtual bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
+  virtual std::string name() const override {
+    return "Handle";
+  }
   static const TypeKind Kind = TypeKind::HandleType;
   // global singleton
   static TypePtr get();
@@ -191,6 +201,9 @@ struct TupleType : public Type {
     if(rhs.kind() != kind())
       return false;
     return rhs.cast<TupleType>()->elements().equals(elements());
+  }
+  virtual std::string name() const override {
+    return "Tuple";
   }
 private:
   std::vector<TypePtr> elements_;

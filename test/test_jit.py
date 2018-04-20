@@ -2494,7 +2494,7 @@ class TestScript(TestCase):
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
-        with self.assertRaisesRegex(RuntimeError, "variable 'a' previously has type"):
+        with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Dynamic, Dynamic\)"):
             @torch.jit.script
             def mixtypes():
                 a = torch.chunk(1, dim=0, chunks=2)
