@@ -2,16 +2,16 @@
 #
 # Options:
 #
-#   MKL_USE_SINGLE_DYNAMIC_LIBRARY  : use single dynamic library interface
-#   MKL_USE_STATIC_LIBS             : use static libraries
-#   MKL_MULTI_THREADED              : use multi-threading
-#   MKL_USE_IDEEP                   : use IDEEP interface
-#   MKL_USE_MKLML                   : use MKLML interface
+#   MKL_USE_IDEEP                     : use IDEEP interface
+#   MKL_USE_MKLML                     : use MKLML interface
+#   MKLML_USE_SINGLE_DYNAMIC_LIBRARY  : use single dynamic library interface
+#   MKLML_USE_STATIC_LIBS             : use static libraries
+#   MKLML_MULTI_THREADED              : use multi-threading
 #
 # This module defines the following variables:
 #
 #   MKL_FOUND            : True mkl is found
-#   MKL_INCLUDE_DIR      : unclude directory
+#   MKL_INCLUDE_DIR      : include directory
 #   MKL_LIBRARIES        : the libraries to link against.
 
 # ---[ Options
