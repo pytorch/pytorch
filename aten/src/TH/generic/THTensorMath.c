@@ -3836,11 +3836,11 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
  * The macro will discard the invalid openmp threshold if openmp is unavailable. The macro will give a default threshold even if you forget to pass one. 
  * In other word,
  * (A), If openmp is UNavailable, the two usage below is both right.
- *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD) // discard the invalid openmp threshold
- *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity)
+ *      (1) LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD) // discard the invalid openmp threshold
+ *      (2) LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity)
  * (B), If openmp is available, the two usage below is also both right.
- *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD)
- *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity) // pass the default openmp threshold
+ *      (1) LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD)
+ *      (2) LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity) // pass the default openmp threshold
  * So do LAB_IMPLEMENT_VECTORIZED_FUNCTION.
 */
 
