@@ -135,8 +135,8 @@ def _trace_and_get_graph_from_model(model, args, training):
     return trace.graph(), torch_out
 
 
-def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
-                             input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE):
+def _model_to_graph(model, args, f, verbose=False, training=False,
+                    input_names=None, output_names=None, aten=False):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.Tensor):
         args = (args, )
@@ -157,9 +157,17 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     graph = _optimize_graph(graph, aten)
 
     _set_input_and_output_names(graph, input_names, output_names)
-
     if verbose:
         print(graph)
+
+    return graph, params, torch_out
+
+
+def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
+                             input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE):
+    graph, params, torch_out = _model_to_graph(model, args, f, verbose,
+                                               training, input_names,
+                                               output_names, aten)
 
     from torch.onnx.symbolic import _onnx_opset_version
     return graph.prettyPrintExport(params, _onnx_opset_version, False)
@@ -171,29 +179,9 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 # directly extracting the graph.
 def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE):
-    # Special case for common case of passing a single Variable
-    if isinstance(args, torch.Tensor):
-        args = (args, )
-
-    if isinstance(model, torch.jit.ScriptModule):
-        torch_out = None
-        try:
-            method = model.__getattr__('forward')
-            graph = method.propagate_shapes(args, False)
-            params = method.params()
-        except AttributeError:
-            # TODO: just trace it
-            raise RuntimeError('\'forward\' method must be a script method')
-    else:
-        graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
-        params = list(_unique_state_dict(model).values())
-
-    graph = _optimize_graph(graph, aten)
-
-    _set_input_and_output_names(graph, input_names, output_names)
-
-    if verbose:
-        print(graph)
+    graph, params, torch_out = _model_to_graph(model, args, f, verbose,
+                                               training, input_names,
+                                               output_names, aten)
 
     # TODO: Don't allocate a in-memory string for the protobuf
     from torch.onnx.symbolic import _onnx_opset_version
