@@ -4961,11 +4961,11 @@ Example::
 
     >>> A = torch.randn(3, 3)
     >>> torch.det(A)
-    tensor(2.1376)
+    tensor(-3.9515)
     >>> torch.logdet(A)
-    tensor(0.7597)
+    tensor(nan)
     >>> torch.slogdet(A)
-    (tensor(1.0000), tensor(0.7597))
+    (tensor(-1.0000), tensor(1.3741))
 """)
 
 add_docstr(torch.fft,
