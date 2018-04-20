@@ -61,6 +61,18 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
       trt_engine_ = tensorrt::TrtObject(trt_runtime->deserializeCudaEngine(
           engine_string.data(), engine_string.size(), nullptr));
     } else {
+      auto onnx_model_str =
+          OperatorBase::GetSingleArgument<std::string>("onnx_model", "");
+      CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
+      auto debug_builder = OperatorBase::GetSingleArgument<int>("debug_builder", 0);
+      auto max_workspace_size = OperatorBase::GetSingleArgument<int>(
+          "max_workspace_size", 1024 * 1024 * 2);
+      trt_engine_ = tensorrt::BuildTrtEngine(
+          onnx_model_str,
+          &logger_,
+          max_batch_size_,
+          max_workspace_size,
+          debug_builder);
     }
   }
 

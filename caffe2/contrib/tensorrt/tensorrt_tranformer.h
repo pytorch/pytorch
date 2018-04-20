@@ -31,8 +31,7 @@ class TensorRTTransformer {
   OperatorDef BuildTrtOp(
       const std::string& onnx_model_str,
       const std::unordered_map<std::string, std::vector<int>>&
-          output_size_hints,
-      const std::unordered_set<std::string>* initializtion_list = nullptr);
+          output_size_hints);
 
   void Transform(
       Workspace* ws,
@@ -45,6 +44,24 @@ class TensorRTTransformer {
       Workspace* ws,
       onnx::OnnxExporter* exporter,
       std::unordered_map<std::string, TensorShape>* shape_hints);
+
+  void AddTrtOptions(
+      caffe2::OperatorDef* op,
+      const std::unordered_map<std::string, std::vector<int>>&
+          output_size_hints);
+
+  // A lazy version of Trt op building function, where instead of invoking the
+  // trt build engine and serialize the trt runtime, we just attach the
+  // serialized trt model string. The runtime will be built when trt op is
+  // constructed, during which the weights will be pulled from the workspace.
+  // The benefit of doing so is that we can avoid serialize/deserialize the
+  // weights across OperatorDef.
+  OperatorDef BuildTrtOpLazy(
+      const std::string& onnx_model_str,
+      const std::unordered_map<std::string, std::vector<int>>&
+          output_size_hints,
+      const std::unordered_set<std::string>& initialization_list,
+      const caffe2::NetDef& net);
 
   CaffeMap<std::string, TensorShape> SsaRewriteAndMapNames(
       Workspace* ws,
