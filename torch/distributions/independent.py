@@ -52,6 +52,8 @@ class Independent(Distribution):
 
     @property
     def has_enumerate_support(self):
+        if self.reinterpreted_batch_ndims > 0:
+            return False
         return self.base_dist.has_enumerate_support
 
     @constraints.dependent_property
@@ -70,7 +72,7 @@ class Independent(Distribution):
         return self.base_dist.sample(sample_shape)
 
     def rsample(self, sample_shape=torch.Size()):
-        return self.base_dist.rsample(self, sample_shape)
+        return self.base_dist.rsample(sample_shape)
 
     def log_prob(self, value):
         log_prob = self.base_dist.log_prob(value)
@@ -81,4 +83,6 @@ class Independent(Distribution):
         return _sum_rightmost(entropy, self.reinterpreted_batch_ndims)
 
     def enumerate_support(self):
+        if self.reinterpreted_batch_ndims > 0:
+            raise NotImplementedError("Enumeration over cartesian product is not implemented")
         return self.base_dist.enumerate_support()
