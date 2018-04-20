@@ -830,7 +830,7 @@ Example::
 
     >>> x = torch.Tensor(5, 3).fill_(1)
     >>> t = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    >>> index = torch.LongTensor([0, 4, 2])
+    >>> index = torch.tensor([0, 4, 2])
     >>> x.index_add_(0, index, t)
     tensor([[  2.0000,   3.0000,   4.0000],
             [  1.0000,   1.0000,   1.0000],
@@ -861,7 +861,7 @@ Example::
 
     >>> x = torch.zeros(5, 3)
     >>> t = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    >>> index = torch.LongTensor([0, 4, 2])
+    >>> index = torch.tensor([0, 4, 2])
     >>> x.index_copy_(0, index, t)
     tensor([[ 1.0000,  2.0000,  3.0000],
             [ 0.0000,  0.0000,  0.0000],
@@ -884,7 +884,7 @@ Args:
 
 Example::
     >>> x = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    >>> index = torch.LongTensor([0, 2])
+    >>> index = torch.tensor([0, 2])
     >>> x.index_fill_(1, index, -1)
     tensor([[-1.0000,  2.0000, -1.0000],
             [-1.0000,  5.0000, -1.0000],
@@ -1380,7 +1380,7 @@ Example::
 
     >>> src = torch.Tensor([[4, 3, 5],
                             [6, 7, 8]])
-    >>> src.put_(torch.LongTensor([1, 3]), torch.Tensor([9, 10]))
+    >>> src.put_(torch.tensor([1, 3]), torch.Tensor([9, 10]))
     tensor([[  4.0000,   9.0000,   5.0000],
             [ 10.0000,   7.0000,   8.0000]])
 """)
@@ -1615,12 +1615,12 @@ Example::
     >>> x
     tensor([[ 0.1348,  0.1148,  0.7940,  0.1095,  0.0319],
             [ 0.3435,  0.0840,  0.3380,  0.8191,  0.3475]])
-    >>> torch.zeros(3, 5).scatter_(0, torch.LongTensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]]), x)
+    >>> torch.zeros(3, 5).scatter_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]]), x)
     tensor([[ 0.1348,  0.0840,  0.3380,  0.1095,  0.0319],
             [ 0.0000,  0.1148,  0.0000,  0.8191,  0.0000],
             [ 0.3435,  0.0000,  0.7940,  0.0000,  0.3475]])
 
-    >>> z = torch.zeros(2, 4).scatter_(1, torch.LongTensor([[2], [3]]), 1.23)
+    >>> z = torch.zeros(2, 4).scatter_(1, torch.tensor([[2], [3]]), 1.23)
     >>> z
     tensor([[ 0.0000,  0.0000,  1.2300,  0.0000],
             [ 0.0000,  0.0000,  0.0000,  1.2300]])
