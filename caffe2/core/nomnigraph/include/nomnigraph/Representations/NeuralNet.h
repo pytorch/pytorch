@@ -235,6 +235,7 @@ private:
 };
 
 using NNGraph = nom::Graph<std::unique_ptr<nom::repr::Value>, int>;
+using NNSubgraph = nom::Subgraph<std::unique_ptr<nom::repr::Value>, int>;
 using NNCFGraph = nom::repr::ControlFlowGraph<NNGraph>;
 
 struct NNModule {
