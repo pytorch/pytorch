@@ -3,7 +3,6 @@
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
-#include "cpu/ReduceOpsKernel.h"
 
 #include <algorithm>
 #include <functional>
@@ -92,11 +91,6 @@ Tensor sum(const Tensor &self) {
 }
 
 Tensor _sum_cpu(const Tensor& self) {
-  if (self.is_contiguous()) {
-    Tensor result = self.type().tensor({});
-    sum_kernel(result, self, at::nullopt);
-    return result;
-  }
   return self._sumall();
 }
 
@@ -113,11 +107,6 @@ Tensor prod(const Tensor &self) {
 }
 
 Tensor _prod_cpu(const Tensor &self) {
-  if (self.is_contiguous()) {
-    Tensor result = self.type().tensor({});
-    prod_kernel(result, self, at::nullopt);
-    return result;
-  }
   return self._prodall();
 }
 
@@ -180,12 +169,6 @@ Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   if (_dimreduce_return_trivial(result, self, 0))
     return result;
-  if (self.is_contiguous() && result.is_contiguous()) {
-    _dimreduce_setup(result, self, dim);
-    sum_kernel(result, self, dim);
-    if (!keepdim) result.squeeze_(dim);
-    return result;
-  }
   return at::_th_sum_out(result, self, dim, keepdim);
 }
 
@@ -214,12 +197,6 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   if (_dimreduce_return_trivial(result, self, 1))
     return result;
-  if (self.is_contiguous() && result.is_contiguous()) {
-    _dimreduce_setup(result, self, dim);
-    prod_kernel(result, self, dim);
-    if (!keepdim) result.squeeze_(dim);
-    return result;
-  }
   return at::_th_prod_out(result, self, dim, keepdim);
 }
 
