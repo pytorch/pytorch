@@ -170,7 +170,7 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
   OperatorDef op;
   op.set_type("TensorRT");
 
-  tensorrt::TrtLogger logger;
+  tensorrt::TrtLogger logger((nvinfer1::ILogger::Severity)(verbosity_));
   auto trt_builder = tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
   auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
   auto importer =
