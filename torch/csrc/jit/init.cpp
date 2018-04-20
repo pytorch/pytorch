@@ -81,7 +81,8 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_unflatten", [](autograd::variable_list vars, python::IODescriptor& desc) {
      return py::reinterpret_steal<py::object>(python::unflatten(vars, desc));
-   });
+   })
+   .def("_jit_pass_onnx_block", BlockToONNX);
 
   py::class_<GraphExecutor>(m, "GraphExecutor")
       .def(
