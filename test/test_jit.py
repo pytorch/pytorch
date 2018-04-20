@@ -2140,8 +2140,6 @@ class TestScript(TestCase):
                 with self.assertRaisesRegex(TypeError, "is not a valid constant"):
                     self.i = (3, 4, {})
 
-    # https://github.com/pytorch/pytorch/issues/6714
-    @unittest.expectedFailure
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['b']
