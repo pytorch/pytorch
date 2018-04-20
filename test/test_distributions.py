@@ -1775,7 +1775,6 @@ class TestDistributions(TestCase):
                     except NotImplementedError:
                         pass
 
-
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
         for Dist, params in EXAMPLES:
