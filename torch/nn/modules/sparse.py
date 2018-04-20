@@ -51,24 +51,25 @@ class Embedding(Module):
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
         >>> embedding(input)
-        tensor([[[-0.9321, 0.2183, 0.3267],
-                 [ 0.3290,-0.0612, 0.2794],
-                 [-0.0571, 0.8861, 0.4537],
-                 [-0.5902, 1.5721, 0.7866]],
+        tensor([[[-0.0251, -1.6902,  0.7172],
+                 [-0.6431,  0.0748,  0.6969],
+                 [ 1.4970,  1.3448, -0.9685],
+                 [-0.3677, -2.7265, -0.1685]],
+        
+                [[ 1.4970,  1.3448, -0.9685],
+                 [ 0.4362, -0.4004,  0.9400],
+                 [-0.6431,  0.0748,  0.6969],
+                 [ 0.9124, -2.3616,  1.1151]]])
 
-                [[-0.0571, 0.8861, 0.4537],
-                 [-0.1890,-1.5922, 0.5439],
-                 [ 0.3290,-0.0612, 0.2794],
-                 [-0.5061,-0.7330,-0.2972]]])
 
         >>> # example with padding_idx
         >>> embedding = nn.Embedding(10, 3, padding_idx=0)
         >>> input = torch.LongTensor([[0,2,0,5]])
         >>> embedding(input)
-        tensor([[[ 0.0000, 0.0000, 0.0000],
-                 [ 1.5722,-0.0539, 1.2831],
-                 [ 0.0000, 0.0000, 0.0000],
-                 [-1.8942, 0.0883, 1.4724]]])
+        tensor([[[ 0.0000,  0.0000,  0.0000],
+                 [ 0.1535, -2.0309,  0.9315],
+                 [ 0.0000,  0.0000,  0.0000],
+                 [-0.1655,  0.9897,  0.0635]]])
     """
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
@@ -138,7 +139,7 @@ class Embedding(Module):
             >>> # Get embeddings for index 1
             >>> input = torch.LongTensor([1])
             >>> embedding(input)
-            tensor([[ 4.0000, 5.1000, 6.3000]])
+            tensor([[ 4.0000,  5.1000,  6.3000]])
         """
         assert embeddings.dim() == 2, \
             'Embeddings parameter is expected to be 2-dimensional'
@@ -205,8 +206,8 @@ class EmbeddingBag(Module):
         >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.LongTensor([0,4])
         >>> embedding_sum(input, offsets)
-        tensor([[-1.5422, 1.3255,-2.5289],
-                [-1.7700, 3.1333,-3.7989]])
+        tensor([[-0.8861, -5.4350, -0.0523],
+                [ 1.1306, -2.5798, -1.0044]])
     """
 
     def __init__(self, num_embeddings, embedding_dim,
