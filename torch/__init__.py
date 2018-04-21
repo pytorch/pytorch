@@ -152,7 +152,7 @@ def set_default_dtype(d):
     r"""Sets the default ``torch.dtype`` type to type :attr:`d`.
 
     Args:
-        d (dtype): the dtype to make the default
+        d (torch.dtype): the dtype to make the default
 
     Example::
 
