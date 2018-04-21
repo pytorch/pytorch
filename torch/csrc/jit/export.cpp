@@ -279,18 +279,21 @@ void encodeBlock(onnx::GraphProto * p_g, Block *b,
       encodeBlock(false_g, node->blocks()[1], initializers, ctx, raw_data_export_map);
     }
   }
-  auto num_initializers = initializers.size();
-  int inputs_count = b->inputs().size() - num_initializers;
-  for (auto & tensor : initializers) {
-    // TODO: stop using positions to determine which initializers
-    // match to which inputs
-    std::string name = p_g->get_input_name(inputs_count++);
-    auto p = p_g->add_initializer();
-    p->set_name(name);
-    if (raw_data_export_map) {
-      encodeTensor(p, tensor, name, raw_data_export_map);
-    } else {
-      encodeTensor(p, tensor, {});
+  // Only emit initializers for the base graph, not for any nested graphs
+  if (!b->owningNode()) {
+    auto num_initializers = initializers.size();
+    int inputs_count = b->inputs().size() - num_initializers;
+    for (auto & tensor : initializers) {
+      // TODO: stop using positions to determine which initializers
+      // match to which inputs
+      std::string name = p_g->get_input_name(inputs_count++);
+      auto p = p_g->add_initializer();
+      p->set_name(name);
+      if (raw_data_export_map) {
+        encodeTensor(p, tensor, name, raw_data_export_map);
+      } else {
+        encodeTensor(p, tensor, {});
+      }
     }
   }
 }
