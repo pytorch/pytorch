@@ -42,7 +42,7 @@ class Dirichlet(ExponentialFamily):
 
     Example::
 
-        >>> m = Dirichlet(torch.Tensor([0.5, 0.5]))
+        >>> m = Dirichlet(torch.tensor([0.5, 0.5]))
         >>> m.sample()  # Dirichlet distributed with concentrarion concentration
          0.1046
          0.8954

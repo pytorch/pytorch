@@ -139,11 +139,8 @@ def set_default_tensor_type(t):
     Example::
 
         >>> torch.set_default_tensor_type("torch.FloatTensor")
-        >>> torch.Tensor([1.2, 3])
-
-         1.2000
-         3.0000
-        [torch.FloatTensor of size (2,)]
+        >>> torch.tensor([1.2, 3])
+        tensor([ 1.2000,  3.0000])
 
     """
     if isinstance(t, _string_classes):
@@ -155,17 +152,13 @@ def set_default_dtype(d):
     r"""Sets the default ``torch.dtype`` type to type :attr:`d`.
 
     Args:
-        d (dtype): the dtype to make the default
+        d (torch.dtype): the dtype to make the default
 
     Example::
 
-        >>> torch.set_default_tensor_type(torch.double)
+        >>> torch.set_default_dtype(torch.double)
         >>> torch.tensor([1.2, 3], device='cpu')
-
-         1.2000
-         3.0000
-        [torch.DoubleTensor of size (2,)]
-
+        tensor([ 1.2000,  3.0000])
     """
     _C._set_default_dtype(d)
 

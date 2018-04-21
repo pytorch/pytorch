@@ -166,7 +166,7 @@ class NLLLoss(_WeightedLoss):
         >>> # input is of size N x C = 3 x 5
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> # each element in target has to have 0 <= value < C
-        >>> target = torch.LongTensor([1, 0, 4])
+        >>> target = torch.tensor([1, 0, 4])
         >>> output = loss(m(input), target)
         >>> output.backward()
         >>>
@@ -178,7 +178,7 @@ class NLLLoss(_WeightedLoss):
         >>> data = torch.randn(N, 16, 10, 10)
         >>> m = nn.Conv2d(16, C, (3, 3))
         >>> # each element in target has to have 0 <= value < C
-        >>> target = torch.LongTensor(N, 8, 8).random_(0, C)
+        >>> target = torch.tensor(N, 8, 8).random_(0, C)
         >>> output = loss(m(data), target)
         >>> output.backward()
     """
@@ -419,7 +419,7 @@ class BCELoss(_WeightedLoss):
         >>> m = nn.Sigmoid()
         >>> loss = nn.BCELoss()
         >>> input = torch.randn(3, requires_grad=True)
-        >>> target = torch.FloatTensor(3).random_(2)
+        >>> target = torch.empty(3).random_(2)
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
@@ -480,7 +480,7 @@ class BCEWithLogitsLoss(_Loss):
 
         >>> loss = nn.BCEWithLogitsLoss()
         >>> input = torch.randn(3, requires_grad=True)
-        >>> target = torch.FloatTensor(3).random_(2)
+        >>> target = torch.empty(3).random_(2)
         >>> output = loss(input, target)
         >>> output.backward()
     """
@@ -744,7 +744,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
         >>> loss = nn.CrossEntropyLoss()
         >>> input = torch.randn(3, 5, requires_grad=True)
-        >>> target = torch.LongTensor(3).random_(5)
+        >>> target = torch.empty(3, dtype=torch.long).random_(5)
         >>> output = loss(input, target)
         >>> output.backward()
     """

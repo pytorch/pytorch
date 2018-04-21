@@ -80,8 +80,8 @@ class RelaxedOneHotCategorical(TransformedDistribution):
 
     Example::
 
-        >>> m = RelaxedOneHotCategorical(torch.Tensor([2.2]),
-                                         torch.Tensor([0.1, 0.2, 0.3, 0.4]))
+        >>> m = RelaxedOneHotCategorical(torch.tensor([2.2]),
+                                         torch.tensor([0.1, 0.2, 0.3, 0.4]))
         >>> m.sample()  # equal probability of 1, 1, 2, 3
          0.1294
          0.2324

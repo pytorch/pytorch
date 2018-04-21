@@ -14,7 +14,7 @@ class Uniform(Distribution):
 
     Example::
 
-        >>> m = Uniform(torch.Tensor([0.0]), torch.Tensor([5.0]))
+        >>> m = Uniform(torch.tensor([0.0]), torch.tensor([5.0]))
         >>> m.sample()  # uniformly distributed in the range [0.0, 5.0)
          2.3418
         [torch.FloatTensor of size 1]

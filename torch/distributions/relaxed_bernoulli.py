@@ -82,8 +82,8 @@ class RelaxedBernoulli(TransformedDistribution):
 
     Example::
 
-        >>> m = RelaxedBernoulli(torch.Tensor([2.2]),
-                                 torch.Tensor([0.1, 0.2, 0.3, 0.99]))
+        >>> m = RelaxedBernoulli(torch.tensor([2.2]),
+                                 torch.tensor([0.1, 0.2, 0.3, 0.99]))
         >>> m.sample()
          0.2951
          0.3442

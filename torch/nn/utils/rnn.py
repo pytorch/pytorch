@@ -318,19 +318,11 @@ def pack_sequence(sequences):
 
     Example:
         >>> from torch.nn.utils.rnn import pack_sequence
-        >>> a = torch.Tensor([1,2,3])
-        >>> b = torch.Tensor([4,5])
-        >>> c = torch.Tensor([6])
+        >>> a = torch.tensor([1,2,3])
+        >>> b = torch.tensor([4,5])
+        >>> c = torch.tensor([6])
         >>> pack_sequence([a, b, c]])
-        PackedSequence(data=
-         1
-         4
-         6
-         2
-         5
-         3
-        [torch.FloatTensor of size 6]
-        , batch_sizes=[3, 2, 1])
+        PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
 
 
     Arguments:

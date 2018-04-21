@@ -16,7 +16,7 @@ class Bernoulli(ExponentialFamily):
 
     Example::
 
-        >>> m = Bernoulli(torch.Tensor([0.3]))
+        >>> m = Bernoulli(torch.tensor([0.3]))
         >>> m.sample()  # 30% chance 1; 70% chance 0
          0.0
         [torch.FloatTensor of size 1]

@@ -9,7 +9,7 @@ class Chi2(Gamma):
 
     Example::
 
-        >>> m = Chi2(torch.Tensor([1.0]))
+        >>> m = Chi2(torch.tensor([1.0]))
         >>> m.sample()  # Chi2 distributed with shape df=1
          0.1046
         [torch.FloatTensor of size 1]
