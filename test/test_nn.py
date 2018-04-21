@@ -4926,30 +4926,30 @@ class TestNN(NNTestCase):
     def test_adaptive_log_softmax(self):
         # args validation
         with self.assertRaises(ValueError):
-            _ = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 15, 15], div_value=2.)
+            _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 15, 15], div_value=2.)
 
         with self.assertRaises(ValueError):
-            _ = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 15, 10], div_value=2.)
+            _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 15, 10], div_value=2.)
 
         with self.assertRaises(ValueError):
-            _ = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 10, 25], div_value=2.)
+            _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 25], div_value=2.)
 
         # input shapes
         with self.assertRaisesRegex(RuntimeError, "Input and target should have the same size"):
-            asfm = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 10, 15], div_value=2.)
+            asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
             x = Variable(torch.randn(2, 16))
             y = Variable(torch.LongTensor([0, 5, 10]))
             asfm(x, y)
 
         # out-of-bound targets
         with self.assertRaisesRegex(RuntimeError, "Target values should be in"):
-            asfm = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 10, 15], div_value=2.)
+            asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
             x = Variable(torch.randn(2, 16))
             y = Variable(torch.LongTensor([0, 20]))
             asfm(x, y)
 
         # cluster sizes
-        asfm = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 10, 15], div_value=2.)
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
         x = Variable(torch.randn(2, 16))
         y = Variable(torch.LongTensor([0, 17]))
 
@@ -4961,7 +4961,7 @@ class TestNN(NNTestCase):
         self.assertEqual(asfm(x, y).output.size(), (2, ))
 
         # log_probs actually returns log_proba
-        asfm = nn.AdaptiveLogSoftmaxWIthLoss(8, 4, [2], div_value=2.)
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 4, [2], div_value=2.)
         x = Variable(torch.randn(4, 8))
         logprob_out = asfm.log_prob(x)
 
@@ -7351,14 +7351,14 @@ add_test(NewModuleTest(
     check_gradgrad=False,))
 
 
-class _AdaptiveLogSoftmaxWIthLoss(nn.AdaptiveLogSoftmaxWIthLoss):
+class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
     def __call__(self, input):
         t = Variable(torch.LongTensor([0, 1, 4, 8]).type_as(input).long())
-        return nn.AdaptiveLogSoftmaxWIthLoss.__call__(self, input, t).output
+        return nn.AdaptiveLogSoftmaxWithLoss.__call__(self, input, t).output
 
 
 add_test(NewModuleTest(
-    constructor=lambda: _AdaptiveLogSoftmaxWIthLoss(16, 10, [2, 6]),
+    constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax'))
 

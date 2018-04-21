@@ -10,10 +10,10 @@ from ..functional import log_softmax
 _ASMoutput = namedtuple('ASMoutput', ['output', 'loss'])
 
 
-class AdaptiveLogSoftmaxWIthLoss(Module):
+class AdaptiveLogSoftmaxWithLoss(Module):
     r"""Efficient softmax approximation as described in
     `Efficient softmax approximation for GPUs`_ by Edouard Grave, Armand Joulin,
-     Moustapha Cissé, David Grangier, and Hervé Jégou.
+    Moustapha Cissé, David Grangier, and Hervé Jégou.
 
     Adaptive softmax is an approximate strategy for training models with large
     output spaces. It is most effective when the label distribution is highly
@@ -26,35 +26,44 @@ class AdaptiveLogSoftmaxWIthLoss(Module):
     Additionally, clusters containig less frequent labels assign lower
     dimensional embeddings to those labels, which speeds up the computation.
     For each minibatch, only clusters for which at least one target is
-    present are used.
+    present are evaluated.
 
-    The idea is that the cluster that the clusters that are accessed often
+    The idea is that the clusters which are accessed frequently
     (like the first one, containing most frequent labels), should also be cheap
-    to compute -- that is, contain a small number of assigned targets.
+    to compute -- that is, contain a small number of assigned labels.
 
     We highly recommend taking a look at the original paper for more details.
 
-    ``cutoffs`` should be a Sequence of integers. It controls number of clusters
-    and the partitioning of targets into clusters. For example setting
-    ``cutoffs = [10, 100, 1000]`` means that first `10` targets will be assigned
-    to the 'head' of the adaptive softmax, targets `11, 12, ..., 100` will be
-    assigned to the first cluster, and targets `101, 102, ..., 1000` will be
-    assigned to the second cluster, while targets
-    `1001, 1002, ..., n_classes - 1` will be assigned to the last, third cluster
+    * :attr:`cutoffs` should be an ordered Sequence of integers sorted
+      in the increasing order.
+      It controls number of clusters and the partitioning of targets into
+      clusters. For example setting ``cutoffs = [10, 100, 1000]``
+      means that first `10` targets will be assigned
+      to the 'head' of the adaptive softmax, targets `11, 12, ..., 100` will be
+      assigned to the first cluster, and targets `101, 102, ..., 1000` will be
+      assigned to the second cluster, while targets
+      `1001, 1002, ..., n_classes - 1` will be assigned
+      to the last, third cluster
 
-    ``div_value`` is used to compute the size of each additional cluster,
-    which is given as :math:`\lfloor \frac{in\_features}{div\_value^i} \rfloor`,
-    where :math:`i` is the cluster index (with clusters for less frequent words
-    having larger indices, and indices starting at :math:`1`).
+    * :attr:`div_value` is used to compute the size of each additional cluster,
+      which is given as
+      :math:`\left\lfloor\frac{in\_features}{div\_value^{idx}}\right\rfloor`,
+      where :math:`idx` is the cluster index (with clusters
+      for less frequent words having larger indices,
+      and indices starting from :math:`1`).
 
     .. warning::
-        Targets passed as inputs to this module should be sorted accoridng to
-        their frequency. This means that the most frequent target should be
+        Labels passed as inputs to this module should be sorted accoridng to
+        their frequency. This means that the most frequent label should be
         represented by the index `0`, and the least frequent
-        target should be represented by the index `n_classes - 1`.
+        label should be represented by the index `n_classes - 1`.
 
     .. note::
-        To compute log-probabilities for all classes, the `predict_log_proba`
+        This module returns a ``NamedTuple`` with ``output``
+        and ``loss`` fields. See further documentation for details.
+
+    .. note::
+        To compute log-probabilities for all classes, the ``log_prob``
         method can be used.
 
     Args:
@@ -62,16 +71,21 @@ class AdaptiveLogSoftmaxWIthLoss(Module):
         n_classes (int): Number of classes in the dataset.
         cutoffs (Sequence): Cutoffs used to assign targets to their buckets.
         div_value (float, optional): value used as an exponent to compute sizes
-        of the clusters. Default: 4.0
+            of the clusters. Default: 4.0
 
     Returns:
-        A Variable of size ``N``, containing computed target log probabilities
-        for each example
+        ``NamedTuple`` with ``output`` and ``loss`` fields:
+            * **output** is a Tensor of size ``N`` containing computed target
+              log probabilities for each example
+            * **loss** is a Scalar representing the computed negative
+              log likelihood loss
 
     Shape:
-        - Input: :math:`(N, in\_features)`
-        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C - 1`
-        - Output: :math:`(N)`
+        - input: :math:`(N, in\_features)`
+        - target: :math:`(N)` where each value satisfies :math:`0 <= target[i] <= n\_classes`
+        - output: :math:`(N)`
+        - loss: ``Scalar``
+
 
     .. _Efficient softmax approximation for GPUs:
         https://arxiv.org/abs/1609.04309
@@ -81,7 +95,7 @@ class AdaptiveLogSoftmaxWIthLoss(Module):
     """
 
     def __init__(self, in_features, n_classes, cutoffs, div_value=4.):
-        super(AdaptiveLogSoftmaxWIthLoss, self).__init__()
+        super(AdaptiveLogSoftmaxWithLoss, self).__init__()
 
         cutoffs = list(cutoffs)
 
@@ -162,9 +176,6 @@ class AdaptiveLogSoftmaxWIthLoss(Module):
 
                 cluster_logprob = log_softmax(cluster_output, dim=1)
                 local_logprob = cluster_logprob.gather(1, relative_target.unsqueeze(1))
-                print(output.size())
-                print(row_indices)
-                print(local_logprob.size())
                 output.index_copy_(0, row_indices, local_logprob.squeeze(1))
 
             used_rows += row_indices.numel()
@@ -184,7 +195,21 @@ class AdaptiveLogSoftmaxWIthLoss(Module):
         return _ASMoutput(output, loss)
 
     def log_prob(self, input):
-        """ TODO(elanmart) """
+        """ Computes log probabilities for all :math:`n\_classes`
+
+        Args:
+            input (Tensor): a minibatch of examples
+
+        Returns:
+            log-probabilities of for each class :math:`c`
+            in range :math:`0 <= c <= n\_classes`, where :math:`n\_classes` is a
+            parameter passed to ``AdaptiveLogSoftmaxWithLoss`` constructor.
+
+        Shape:
+            - Input: :math:`(N, in\_features)`
+            - Output: :math:`(N, n\_classes)`
+
+        """
 
         with torch.no_grad():
             out = input.new(input.size(0), self.n_classes).zero_()

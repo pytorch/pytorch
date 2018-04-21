@@ -383,6 +383,12 @@ Non-linear activations (other)
 .. autoclass:: LogSoftmax
     :members:
 
+:hidden:`AdaptiveLogSoftmaxWithLoss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveLogSoftmaxWithLoss
+    :members:
+
 Normalization layers
 ----------------------------------
 
@@ -656,12 +662,6 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: TripletMarginLoss
-    :members:
-
-:hidden:`AdaptiveLogSoftmax`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: AdaptiveLogSoftmax
     :members:
 
 
