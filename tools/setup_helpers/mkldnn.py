@@ -77,5 +77,5 @@ if IS_LINUX and not check_env_flag('NO_MKLDNN'):
         real_mkldnn_library = os.path.realpath(MKLDNN_LIBRARY)
         real_mkldnn_lib_dir = os.path.realpath(MKLDNN_LIB_DIR)
         assert os.path.dirname(real_mkldnn_library) == real_mkldnn_lib_dir, (
-            'cudnn library and lib_dir must agree')
+            'mkldnn library and lib_dir must agree')
         WITH_MKLDNN = True
