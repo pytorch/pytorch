@@ -10,18 +10,18 @@ a single data type.
 
 Torch defines eight CPU tensor types and eight GPU tensor types:
 
-========================   ===================   ===========================   ================================
-Data type                  dtype                         CPU tensor                    GPU tensor
-========================   ===================   ===========================   ================================
-32-bit floating point      ``torch.float32``     :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
-64-bit floating point      ``torch.float64``     :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
-16-bit floating point      ``torch.float16``     :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
-8-bit integer (unsigned)   ``torch.uint8``       :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
-8-bit integer (signed)     ``torch.int8``        :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
-16-bit integer (signed)    ``torch.int16``       :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
-32-bit integer (signed)    ``torch.int32``       :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
-64-bit integer (signed)    ``torch.int64``       :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
-========================   ===================   ===========================   ================================
+========================   ===========================================   ===========================   ================================
+Data type                  dtype                                         CPU tensor                    GPU tensor
+========================   ===========================================   ===========================   ================================
+32-bit floating point      ``torch.float32`` or ``torch.float``          :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
+64-bit floating point      ``torch.float64`` or ``torch.double``         :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
+16-bit floating point      ``torch.float16`` or ``torch.half``           :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
+8-bit integer (unsigned)   ``torch.uint8``                               :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
+8-bit integer (signed)     ``torch.int8``                                :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
+16-bit integer (signed)    ``torch.int16`` or ``torch.short``            :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
+32-bit integer (signed)    ``torch.int32`` or ``torch.int``              :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
+64-bit integer (signed)    ``torch.int64`` or ``torch.long``             :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
+========================   ===========================================   ===========================   ================================
 
 :class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
 
