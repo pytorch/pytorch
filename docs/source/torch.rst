@@ -27,6 +27,9 @@ Creation Ops
     :func:`torch.randint`
     :func:`torch.randint_like`
     :func:`torch.randperm`
+    You may also use :func:`torch.empty` with the :ref:`inplace-random-sampling`
+    methods to create :class:`torch.Tensor` s with values sampled from a broader
+    range of distributions.
 
 .. autofunction:: tensor
 .. autofunction:: from_numpy
@@ -82,6 +85,8 @@ Random sampling
 .. autofunction:: randn
 .. autofunction:: randn_like
 .. autofunction:: randperm
+
+.. _inplace-random-sampling:
 
 In-place random sampling
 ~~~~~~~~~~~~~~~~~~~~~~~~
