@@ -207,6 +207,18 @@ void Broadcast(
     T* Y,
     Context* context);
 
+template <typename T, class Context>
+void Moments(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* mean,
+    T* variance,
+    Context* context,
+    Tensor<Context>* scratch_ptr = nullptr);
+
 // Adds batch sub-tensors elementwise to output. Stripe is the stripe length
 // and N is the number of elements to add (size of Y).
 template <typename T, class Context>

@@ -1072,6 +1072,64 @@ void BroadcastImpl(
 CAFFE2_SPECIALIZED_BROADCAST(float)
 #undef CAFFE2_SPECIALIZED_BROADCAST
 
+namespace {
+
+template <typename T>
+void MomentsImpl(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* mean,
+    T* variance,
+    CPUContext* context) {
+  std::vector<int> Y_dims(dims, dims + num_dims);
+  for (int i = 0; i < num_axes; ++i) {
+    Y_dims[axes[i]] = 1;
+  }
+  const int X_size =
+      std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
+  const int Y_size = std::accumulate(
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  const int scale = X_size / Y_size;
+  Set<T, CPUContext>(Y_size, T(0), mean, context);
+  Set<T, CPUContext>(Y_size, T(0), variance, context);
+  std::vector<int> index(num_dims, 0);
+  for (int X_index = 0; X_index < X_size; ++X_index) {
+    const int Y_index =
+        internal::GetIndexFromDims(num_dims, Y_dims.data(), index.data());
+    mean[Y_index] += X[X_index];
+    variance[Y_index] += X[X_index] * X[X_index];
+    internal::IncreaseIndexInDims(num_dims, dims, index.data());
+  }
+  for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
+    mean[Y_index] /= static_cast<T>(scale);
+    variance[Y_index] = variance[Y_index] / static_cast<T>(scale) -
+        mean[Y_index] * mean[Y_index];
+  }
+}
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_MOMENTS(T)                                \
+  template <>                                                        \
+  void Moments<T, CPUContext>(                                       \
+      const int num_dims,                                            \
+      const int* dims,                                               \
+      const int num_axes,                                            \
+      const int* axes,                                               \
+      const T* X,                                                    \
+      T* mean,                                                       \
+      T* variance,                                                   \
+      CPUContext* context,                                           \
+      Tensor<CPUContext>* /* scratch_ptr */) {                       \
+    MomentsImpl<T>(                                                  \
+        num_dims, dims, num_axes, axes, X, mean, variance, context); \
+  }
+CAFFE2_SPECIALIZED_MOMENTS(float)
+#undef CAFFE2_SPECIALIZED_MOMENTS
+
 #define CAFFE2_SPECIALIZED_ROWWISEMAX(T)                         \
   template <>                                                    \
   void RowwiseMax<T, CPUContext>(                                \
