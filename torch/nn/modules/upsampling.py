@@ -52,15 +52,15 @@ class Upsample(Module):
 
         >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
         >>> input
-        tensor([[[[ 1.0000,  2.0000],
-                  [ 3.0000,  4.0000]]]])
+        tensor([[[[ 1.,  2.],
+                  [ 3.,  4.]]]])
 
         >>> m = nn.Upsample(scale_factor=2, mode='nearest')
         >>> m(input)
-        tensor([[[[ 1.0000,  1.0000,  2.0000,  2.0000],
-                  [ 1.0000,  1.0000,  2.0000,  2.0000],
-                  [ 3.0000,  3.0000,  4.0000,  4.0000],
-                  [ 3.0000,  3.0000,  4.0000,  4.0000]]]])
+        tensor([[[[ 1.,  1.,  2.,  2.],
+                  [ 1.,  1.,  2.,  2.],
+                  [ 3.,  3.,  4.,  4.],
+                  [ 3.,  3.,  4.,  4.]]]])
 
         >>> m = nn.Upsample(scale_factor=2, mode='bilinear')  # align_corners=False
         >>> m(input)
@@ -80,12 +80,12 @@ class Upsample(Module):
         >>>
         >>> input_3x3 = torch.zeros(3, 3).view(1, 1, 3, 3)
         >>> input_3x3[:, :, :2, :2].copy_(input)
-        tensor([[[[ 1.0000,  2.0000],
-                  [ 3.0000,  4.0000]]]])
+        tensor([[[[ 1.,  2.],
+                  [ 3.,  4.]]]])
         >>> input_3x3
-        tensor([[[[ 1.0000,  2.0000,  0.0000],
-                  [ 3.0000,  4.0000,  0.0000],
-                  [ 0.0000,  0.0000,  0.0000]]]])
+        tensor([[[[ 1.,  2.,  0.],
+                  [ 3.,  4.,  0.],
+                  [ 0.,  0.,  0.]]]])
 
         >>> m = nn.Upsample(scale_factor=2, mode='bilinear')  # align_corners=False
         >>> # Notice that values in top left corner are the same with the small input (except at boundary)
@@ -156,15 +156,15 @@ class UpsamplingNearest2d(Upsample):
 
         >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
         >>> input
-        tensor([[[[ 1.0000,  2.0000],
-                  [ 3.0000,  4.0000]]]])
+        tensor([[[[ 1.,  2.],
+                  [ 3.,  4.]]]])
 
         >>> m = nn.UpsamplingNearest2d(scale_factor=2)
         >>> m(input)
-        tensor([[[[ 1.0000,  1.0000,  2.0000,  2.0000],
-                  [ 1.0000,  1.0000,  2.0000,  2.0000],
-                  [ 3.0000,  3.0000,  4.0000,  4.0000],
-                  [ 3.0000,  3.0000,  4.0000,  4.0000]]]])
+        tensor([[[[ 1.,  1.,  2.,  2.],
+                  [ 1.,  1.,  2.,  2.],
+                  [ 3.,  3.,  4.,  4.],
+                  [ 3.,  3.,  4.,  4.]]]])
     """
     def __init__(self, size=None, scale_factor=None):
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
@@ -204,8 +204,8 @@ class UpsamplingBilinear2d(Upsample):
 
         >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
         >>> input
-        tensor([[[[ 1.0000,  2.0000],
-                  [ 3.0000,  4.0000]]]])
+        tensor([[[[ 1.,  2.],
+                  [ 3.,  4.]]]])
 
         >>> m = nn.UpsamplingBilinear2d(scale_factor=2)
         >>> m(input)
