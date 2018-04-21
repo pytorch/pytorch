@@ -19,7 +19,7 @@ namespace native {
 template <class scalar_t>
 void sspaddmm_TH_dispatch(Tensor & result, Scalar beta, const Tensor& self,
     Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
-  runtime_error("sspaddmm NYI for types %s %s %s",
+ AT_ERROR("sspaddmm NYI for types %s %s %s",
       self.type().toString(), mat1.type().toString(), mat2.type().toString());
 }
 
@@ -66,7 +66,7 @@ Tensor& _sspaddmm_out_cpu(
 // sparse, sparse, sparse, dense, real, real -> sparse
 Tensor& _sspaddmm_out_only_sparse(Tensor& result, const Tensor& self,
     const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  runtime_error("tensor.sspaddmm(...) can only be called on sparse tensors");
+ AT_ERROR("tensor.sspaddmm(...) can only be called on sparse tensors");
   return result;
 }
 

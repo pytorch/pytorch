@@ -1,6 +1,5 @@
 import torch
 from numbers import Number
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -26,7 +25,7 @@ class LogitRelaxedBernoulli(Distribution):
     [2] Categorical Reparametrization with Gumbel-Softmax
     (Jang et al, 2017)
     """
-    params = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval}
     support = constraints.real
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
@@ -83,8 +82,8 @@ class RelaxedBernoulli(TransformedDistribution):
 
     Example::
 
-        >>> m = RelaxedBernoulli(torch.Tensor([2.2]),
-                                 torch.Tensor([0.1, 0.2, 0.3, 0.99]))
+        >>> m = RelaxedBernoulli(torch.tensor([2.2]),
+                                 torch.tensor([0.1, 0.2, 0.3, 0.99]))
         >>> m.sample()
          0.2951
          0.3442
@@ -97,7 +96,7 @@ class RelaxedBernoulli(TransformedDistribution):
         probs (Number, Tensor): the probabilty of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
-    params = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval}
     support = constraints.unit_interval
     has_rsample = True
 

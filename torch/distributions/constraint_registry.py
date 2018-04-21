@@ -16,13 +16,13 @@ bijectivity.
 
 The ``transform_to()`` registry is useful for performing unconstrained
 optimization on constrained parameters of probability distributions, which are
-indicated by each distribution's ``.params`` dict. These transforms often
+indicated by each distribution's ``.arg_constraints`` dict. These transforms often
 overparameterize a space in order to avoid rotation; they are thus more
 suitable for coordinate-wise optimization algorithms like Adam::
 
-    loc = Variable(torch.zeros(100), requires_grad=True)
-    unconstrained = Variable(torch.zeros(100), requires_grad=True)
-    scale = transform_to(Normal.params['scale'])(unconstrained)
+    loc = torch.zeros(100, requires_grad=True)
+    unconstrained = torch.zeros(100, requires_grad=True)
+    scale = transform_to(Normal.arg_constraints['scale'])(unconstrained)
     loss = -Normal(loc, scale).log_prob(data).sum()
 
 The ``biject_to()`` registry is useful for Hamiltonian Monte Carlo, where
@@ -31,7 +31,7 @@ propagated in an unconstrained space, and algorithms are typically rotation
 invariant.::
 
     dist = Exponential(rate)
-    unconstrained = Variable(torch.zeros(100), requires_grad=True)
+    unconstrained = torch.zeros(100, requires_grad=True)
     sample = biject_to(dist.support)(unconstrained)
     potential_energy = -dist.log_prob(sample).sum()
 
@@ -68,7 +68,6 @@ object.
 import numbers
 
 from torch.distributions import constraints, transforms
-from torch.distributions.utils import broadcast_all
 
 __all__ = [
     'ConstraintRegistry',
@@ -92,7 +91,7 @@ class ConstraintRegistry(object):
             @my_registry.register(MyConstraintClass)
             def construct_transform(constraint):
                 assert isinstance(constraint, MyConstraint)
-                return MyTransform(constraint.params)
+                return MyTransform(constraint.arg_constraints)
 
         Args:
             constraint (subclass of :class:`~torch.distributions.constraints.Constraint`):
@@ -121,7 +120,7 @@ class ConstraintRegistry(object):
         Looks up a transform to constrained space, given a constraint object.
         Usage::
 
-            constraint = Normal.params['scale']
+            constraint = Normal.arg_constraints['scale']
             scale = transform_to(constraint)(torch.zeros(1))  # constrained
             u = transform_to(constraint).inv(scale)           # unconstrained
 
@@ -167,17 +166,15 @@ def _transform_to_positive(constraint):
 @biject_to.register(constraints.greater_than)
 @transform_to.register(constraints.greater_than)
 def _transform_to_greater_than(constraint):
-    loc, scale = broadcast_all(constraint.lower_bound, 1)
     return transforms.ComposeTransform([transforms.ExpTransform(),
-                                        transforms.AffineTransform(loc, scale)])
+                                        transforms.AffineTransform(constraint.lower_bound, 1)])
 
 
 @biject_to.register(constraints.less_than)
 @transform_to.register(constraints.less_than)
 def _transform_to_less_than(constraint):
-    loc, scale = broadcast_all(constraint.upper_bound, -1)
     return transforms.ComposeTransform([transforms.ExpTransform(),
-                                        transforms.AffineTransform(loc, scale)])
+                                        transforms.AffineTransform(constraint.upper_bound, -1)])
 
 
 @biject_to.register(constraints.interval)

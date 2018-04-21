@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 
 from .module import Module
@@ -16,25 +15,34 @@ class Embedding(Module):
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
-        padding_idx (int, optional): If given, pads the output with zeros whenever it encounters the index.
+        padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
+                                         (initialized to zeros) whenever it encounters the index.
         max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
+        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the frequency of
                                                 the words in the mini-batch.
-        sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+        sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
                                     more details regarding sparse gradients.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
 
     Shape:
-        - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
-        - Output: `(N, W, embedding_dim)`
+        - Input: LongTensor of arbitrary shape containing the indices to extract
+        - Output: `(*, embedding_dim)`, where `*` is the input shape
 
-    Notes:
+    .. note::
         Keep in mind that only a limited number of optimizers support
         sparse gradients: currently it's :class:`optim.SGD` (`CUDA` and `CPU`),
         :class:`optim.SparseAdam` (`CUDA` and `CPU`) and :class:`optim.Adagrad` (`CPU`)
+
+    .. note::
+        With :attr:`padding_idx` set, the embedding vector at
+        :attr:`padding_idx` is initialized to all zeros. However, note that this
+        vector can be modified afterwards, e.g., using a customized
+        initialization method, and thus changing the vector used to pad the
+        output. The gradient for this vector from :class:`~torch.nn.Embedding`
+        is always zero.
 
     Examples::
 
@@ -43,32 +51,25 @@ class Embedding(Module):
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
         >>> embedding(input)
+        tensor([[[-0.0251, -1.6902,  0.7172],
+                 [-0.6431,  0.0748,  0.6969],
+                 [ 1.4970,  1.3448, -0.9685],
+                 [-0.3677, -2.7265, -0.1685]],
 
-        (0 ,.,.) =
-         -1.0822  1.2522  0.2434
-          0.8393 -0.6062 -0.3348
-          0.6597  0.0350  0.0837
-          0.5521  0.9447  0.0498
+                [[ 1.4970,  1.3448, -0.9685],
+                 [ 0.4362, -0.4004,  0.9400],
+                 [-0.6431,  0.0748,  0.6969],
+                 [ 0.9124, -2.3616,  1.1151]]])
 
-        (1 ,.,.) =
-          0.6597  0.0350  0.0837
-         -0.1527  0.0877  0.4260
-          0.8393 -0.6062 -0.3348
-         -0.8738 -0.9054  0.4281
-        [torch.FloatTensor of size (2,4,3)]
 
         >>> # example with padding_idx
         >>> embedding = nn.Embedding(10, 3, padding_idx=0)
         >>> input = torch.LongTensor([[0,2,0,5]])
         >>> embedding(input)
-
-        (0 ,.,.) =
-          0.0000  0.0000  0.0000
-          0.3452  0.4937 -0.9361
-          0.0000  0.0000  0.0000
-          0.0706 -2.1962 -0.6276
-        [torch.FloatTensor of size (1,4,3)]
-
+        tensor([[[ 0.0000,  0.0000,  0.0000],
+                 [ 0.1535, -2.0309,  0.9315],
+                 [ 0.0000,  0.0000,  0.0000],
+                 [-0.1655,  0.9897,  0.0635]]])
     """
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
@@ -106,8 +107,8 @@ class Embedding(Module):
             input, self.weight, self.padding_idx, self.max_norm,
             self.norm_type, self.scale_grad_by_freq, self.sparse)
 
-    def __repr__(self):
-        s = '{name}({num_embeddings}, {embedding_dim}'
+    def extra_repr(self):
+        s = '{num_embeddings}, {embedding_dim}'
         if self.padding_idx is not None:
             s += ', padding_idx={padding_idx}'
         if self.max_norm is not None:
@@ -118,8 +119,7 @@ class Embedding(Module):
             s += ', scale_grad_by_freq={scale_grad_by_freq}'
         if self.sparse is not False:
             s += ', sparse=True'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
     @classmethod
     def from_pretrained(cls, embeddings, freeze=True):
@@ -133,15 +133,13 @@ class Embedding(Module):
 
         Examples::
 
-            >> # FloatTensor containing pretrained weights
-            >> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
-            >> embedding = nn.Embedding.from_pretrained(weight)
-            >> # Get embeddings for index 1
-            >> input = torch.LongTensor([1])
-            >> embedding(input)
-
-             4.0000  5.1000  6.3000
-            [torch.FloatTensor of size (1,3)]
+            >>> # FloatTensor containing pretrained weights
+            >>> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
+            >>> embedding = nn.Embedding.from_pretrained(weight)
+            >>> # Get embeddings for index 1
+            >>> input = torch.LongTensor([1])
+            >>> embedding(input)
+            tensor([[ 4.0000,  5.1000,  6.3000]])
         """
         assert embeddings.dim() == 2, \
             'Embeddings parameter is expected to be 2-dimensional'
@@ -167,10 +165,10 @@ class EmbeddingBag(Module):
         embedding_dim (int): the size of each embedding vector
         max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
+        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the frequency of
                                                 the words in the dictionary.
         mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
-        sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+        sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
                                     more details regarding sparse gradients.
 
     Attributes:
@@ -208,11 +206,8 @@ class EmbeddingBag(Module):
         >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.LongTensor([0,4])
         >>> embedding_sum(input, offsets)
-
-        -0.7296 -4.6926  0.3295
-        -0.5186 -0.5631 -0.2792
-        [torch.FloatTensor of size (2,3)]
-
+        tensor([[-0.8861, -5.4350, -0.0523],
+                [ 1.1306, -2.5798, -1.0044]])
     """
 
     def __init__(self, num_embeddings, embedding_dim,
@@ -238,8 +233,8 @@ class EmbeddingBag(Module):
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse)
 
-    def __repr__(self):
-        s = '{name}({num_embeddings}, {embedding_dim}'
+    def extra_repr(self):
+        s = '{num_embeddings}, {embedding_dim}'
         if self.max_norm is not None:
             s += ', max_norm={max_norm}'
         if self.norm_type != 2:
@@ -247,7 +242,6 @@ class EmbeddingBag(Module):
         if self.scale_grad_by_freq is not False:
             s += ', scale_grad_by_freq={scale_grad_by_freq}'
         s += ', mode={mode}'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
 # TODO: SparseLinear

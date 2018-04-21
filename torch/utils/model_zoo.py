@@ -39,7 +39,7 @@ def load_url(url, model_dir=None, map_location=None, progress=True):
 
     The default value of `model_dir` is ``$TORCH_HOME/models`` where
     ``$TORCH_HOME`` defaults to ``~/.torch``. The default directory can be
-    overriden with the ``$TORCH_MODEL_ZOO`` environment variable.
+    overridden with the ``$TORCH_MODEL_ZOO`` environment variable.
 
     Args:
         url (string): URL of the object to download

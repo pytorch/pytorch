@@ -13,7 +13,7 @@ class StudentT(Distribution):
 
     Example::
 
-        >>> m = StudentT(torch.Tensor([2.0]))
+        >>> m = StudentT(torch.tensor([2.0]))
         >>> m.sample()  # Student's t-distributed with degrees of freedom=2
          0.1046
         [torch.FloatTensor of size 1]
@@ -21,7 +21,7 @@ class StudentT(Distribution):
     Args:
         df (float or Tensor): degrees of freedom
     """
-    params = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
     has_rsample = True
 

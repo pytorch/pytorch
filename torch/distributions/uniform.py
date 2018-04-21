@@ -2,7 +2,6 @@ import math
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
@@ -15,7 +14,7 @@ class Uniform(Distribution):
 
     Example::
 
-        >>> m = Uniform(torch.Tensor([0.0]), torch.Tensor([5.0]))
+        >>> m = Uniform(torch.tensor([0.0]), torch.tensor([5.0]))
         >>> m.sample()  # uniformly distributed in the range [0.0, 5.0)
          2.3418
         [torch.FloatTensor of size 1]
@@ -25,7 +24,7 @@ class Uniform(Distribution):
         high (float or Tensor): upper range (exclusive).
     """
     # TODO allow (loc,scale) parameterization to allow independent constraints.
-    params = {'low': constraints.dependent, 'high': constraints.dependent}
+    arg_constraints = {'low': constraints.dependent, 'high': constraints.dependent}
     has_rsample = True
 
     @property

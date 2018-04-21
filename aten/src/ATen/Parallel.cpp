@@ -4,15 +4,15 @@
 #include <tbb/parallel_reduce.h>
 #include <tbb/partitioner.h>
 #include <tbb/tbb.h>
-#include <thread>
 #include <cassert>
+#include <thread>
 
-namespace at {
-namespace internal {
+namespace at { namespace internal {
 
 // thread_local variable with internal linkage
 // requires no guarding as it's storage duration is defined to be per thread
-static thread_local tbb::task_scheduler_init tbbinit(tbb::task_scheduler_init::deferred);
+static thread_local tbb::task_scheduler_init tbbinit(
+    tbb::task_scheduler_init::deferred);
 // Tracks number of threads uses which TBB doesn't track.
 static thread_local int num_threads_ = -1;
 
@@ -22,9 +22,9 @@ void init_tbb_num_threads() {
   int num_threads = at::get_num_threads();
   // In order to have control over the number of threads this function
   // must be called first before any other tbb parallel construct is
-  // excercised within a particular thread. Otherwise the default 
-  // scheduler will be created over which we do not have control. 
-  // The following code will and must throw an error if tbb has 
+  // excercised within a particular thread. Otherwise the default
+  // scheduler will be created over which we do not have control.
+  // The following code will and must throw an error if tbb has
   // already been initialized before this function was called.
   if (!tbbinit.is_active() && !first_call)
     throw std::runtime_error(
@@ -51,5 +51,4 @@ void init_tbb_num_threads() {
     num_threads_ = num_threads;
   }
 }
-}
-}
+}} // namespace at::internal

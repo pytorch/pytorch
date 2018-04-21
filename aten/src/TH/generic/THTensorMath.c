@@ -426,11 +426,11 @@ static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) 
   return dataOffset;
 }
 
-static void THTensor_(checkLinearIndex)(int64_t linearIndex, int64_t numel) {
+static inline void THTensor_(checkLinearIndex)(int64_t linearIndex, int64_t numel) {
   THArgCheck(linearIndex < numel && linearIndex >= -numel, 2, "out of range: %d out of %d", (int)linearIndex, (int)numel);
 }
 
-static int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
+static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
 }
 
@@ -448,9 +448,9 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
   int isContiguous = THTensor_(isContiguous)(src);
 
   // Exceptions must not be thrown across OpenMP parallel sections, so we
-  // record the value of the invalid index and throw the exception after the
+  // record the position of the invalid index and throw the exception after the
   // loop.
-  int64_t invalidIdx = -1;
+  int64_t invalidIdxPos = -1;
 
   ptrdiff_t i;
   #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD) private(i)
@@ -464,12 +464,12 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
         dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
       }
     } else {
-      THAtomicCompareAndSwapLong(&invalidIdx, -1, idx);
+      THAtomicCompareAndSwapLong(&invalidIdxPos, -1, i);
     }
   }
 
-  if (invalidIdx >= 0) {
-    THTensor_(checkLinearIndex)(invalidIdx, srcElements);
+  if (invalidIdxPos >= 0) {
+    THTensor_(checkLinearIndex)(index_data[invalidIdxPos], srcElements);
   }
 
   THLongTensor_free(index);
@@ -1051,8 +1051,9 @@ void THTensor_(fmod)(THTensor *r_, THTensor *t, real value)
   }
 }
 
-static inline bool has_different_sign(real a, real b) {
-  return (a < 0) != (b < 0);
+// Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
+static inline bool modulo_wrap(real a, real b) {
+  return (a != 0) && (a < 0) != (b < 0);
 }
 
 void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
@@ -1073,7 +1074,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
       // There is no NAN for integers
       rp[i] = tp[i] % value;
-      if (has_different_sign(rp[i], value))
+      if (modulo_wrap(rp[i], value))
         rp[i] += value;
 #endif
     }
@@ -1088,7 +1089,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
       // There is no NAN for integers
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data % value;
-                                        if (has_different_sign(*r__data, value)) *r__data += value;);
+                                        if (modulo_wrap(*r__data, value)) *r__data += value;);
 #endif
     }
 #else
@@ -1101,7 +1102,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
     // There is no NAN for integers
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data % value;
-                                          if (has_different_sign(*r__data, value)) *r__data += value;);
+                                          if (modulo_wrap(*r__data, value)) *r__data += value;);
 #endif
   }
 }
@@ -1644,7 +1645,7 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #else
         // There is no NAN for integers
         rp[i] = tp[i] % sp[i];
-        if (rp[i] * sp[i] < 0)
+        if (modulo_wrap(rp[i], sp[i]))
           rp[i] += sp[i];
 #endif
       }
@@ -1658,7 +1659,7 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
         TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data););
 #else
         TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data % *src_data;
-                                                     if (*r__data * *src_data < 0) *r__data += *src_data;);
+                                                     if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;);
 #endif
       }
 #else
@@ -1674,7 +1675,7 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #else
     // There is no NAN for integers
     TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = *t_data % *src_data;
-                                                     if (*r__data * *src_data < 0) *r__data += *src_data;);
+                                                     if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;);
 #endif
 
   }
@@ -3840,7 +3841,9 @@ LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(log10,TH_MATH_NAME(log10))
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
+LAB_IMPLEMENT_BASIC_FUNCTION(log2,TH_MATH_NAME(log2))
 LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp))
 LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1))
 LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos))
@@ -4254,7 +4257,7 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
 // Assumes x is close to zero and uses a Taylor expansion.
 static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
-  const real factor = TH_digamma(alpha) - TH_digamma(alpha + beta) - TH_MATH_NAME(log)(x);
+  const real factor = TH_MATH_NAME(TH_digamma)(alpha) - TH_MATH_NAME(TH_digamma)(alpha + beta) - TH_MATH_NAME(log)(x);
   real numer = 1;
   real series = numer / alpha * (factor + 1 / alpha);
   for (int i = 1; i <= 10; ++i) {
@@ -4269,7 +4272,7 @@ static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real bet
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
 // Assumes x is close to zero and uses a Taylor expansion.
 static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
-  const real factor = TH_digamma(alpha+beta) - TH_digamma(beta);
+  const real factor = TH_MATH_NAME(TH_digamma)(alpha+beta) - TH_MATH_NAME(TH_digamma)(beta);
   real numer = 1;
   real betas = 1;
   real dbetas = 0;
@@ -4380,7 +4383,7 @@ static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total)
       q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
     }
   }
-  const real approx = x * (TH_digamma(total) - TH_digamma(alpha)) / beta;
+  const real approx = x * (TH_MATH_NAME(TH_digamma)(total) - TH_MATH_NAME(TH_digamma)(alpha)) / beta;
   return p / q * approx;
 }
 

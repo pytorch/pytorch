@@ -1,19 +1,17 @@
 import torch
-from torch.autograd import Variable
 from ._functions import Scatter, Gather
 
 
 def scatter(inputs, target_gpus, dim=0):
     r"""
-    Slices variables into approximately equal chunks and
+    Slices tensors into approximately equal chunks and
     distributes them across given GPUs. Duplicates
-    references to objects that are not variables. Does not
+    references to objects that are not tensors. Does not
     support Tensors.
     """
     def scatter_map(obj):
-        if isinstance(obj, Variable):
+        if isinstance(obj, torch.Tensor):
             return Scatter.apply(target_gpus, None, dim, obj)
-        assert not torch.is_tensor(obj), "Tensors not supported in scatter."
         if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(scatter_map, obj)))
         if isinstance(obj, list) and len(obj) > 0:
@@ -48,15 +46,20 @@ def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
 
 def gather(outputs, target_device, dim=0):
     r"""
-    Gathers variables from different GPUs on a specified device
+    Gathers tensors from different GPUs on a specified device
       (-1 means the CPU).
     """
     def gather_map(outputs):
         out = outputs[0]
-        if isinstance(out, Variable):
+        if isinstance(out, torch.Tensor):
             return Gather.apply(target_device, dim, *outputs)
         if out is None:
             return None
+        if isinstance(out, dict):
+            if not all((len(out) == len(d) for d in outputs)):
+                raise ValueError('All dicts must have the same number of keys')
+            return type(out)(((k, gather_map([d[k] for d in outputs]))
+                              for k in out))
         return type(out)(map(gather_map, zip(*outputs)))
 
     # Recursive function calls like this create reference cycles.

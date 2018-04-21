@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0)
 set(CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix
   /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
   ${CMAKE_MODULE_PATH})
@@ -9,6 +9,9 @@ SET(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 project(ATen)
 
 cmake_policy(SET CMP0012 NEW)
+
+# Polyfill for upstream FindCUDA
+include(CMakeInitializeConfigs)
 
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
@@ -26,11 +29,19 @@ if("${isSystemDir}" STREQUAL "-1")
 endif()
 
 IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wextra -Wno-missing-field-initializers -Wno-type-limits -Wno-unused-parameter -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
   set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
+  if ($ENV{WERROR})
+    set(CMAKE_CXX_FLAGS "-Werror ${CMAKE_CXX_FLAGS}")
+  endif()
 ENDIF(NOT MSVC)
 
 INCLUDE(CheckCXXSourceCompiles)
+
+# disable some verbose warnings
+IF (MSVC)
+  set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 /wd4275 ${CMAKE_CXX_FLAGS}")
+ENDIF(MSVC)
 
 # windef.h will define max/min macros if NOMINMAX is not defined
 IF(MSVC)
@@ -68,14 +79,20 @@ endif()
 
 # Detect CUDA architecture and get best NVCC flags
 # finding cuda must be first because other things depend on the result
-IF(NOT CUDA_FOUND)
+#
+# NB: We MUST NOT run this find_package if NO_CUDA is set, because upstream
+# FindCUDA has a bug where it will still attempt to make use of NOTFOUND
+# compiler variables to run various probe tests.  We could try to fix
+# this, but since FindCUDA upstream is subsumed by first-class support
+# for CUDA language, it seemed not worth fixing.
+IF(NOT CUDA_FOUND AND NOT NO_CUDA)
   FIND_PACKAGE(CUDA 5.5)
 ENDIF()
 
 IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
-  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503")
+  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
   ADD_DEFINITIONS(-DTH_EXPORTS)
   IF (NOT NO_CUDA)
     ADD_DEFINITIONS(-DTHC_EXPORTS)
@@ -381,16 +398,22 @@ ENDMACRO(Install_Required_Library libname)
 
 FIND_PACKAGE(BLAS)
 SET(AT_MKL_ENABLED 0)
+SET(AT_MKL_MT 0)
 IF(BLAS_FOUND)
   SET(USE_BLAS 1)
   IF(BLAS_INFO STREQUAL "mkl")
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
     IF(NOT BLAS_INCLUDE_DIR)
       MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
-        You can get them by `conda install mkl-include` if using conda, and \
+        You can get them by `conda install mkl-include` if using conda (if \
+        it is missing, run `conda upgrade -n root conda` first), and \
         `pip install mkl-devel` if using pip. If build fails with header files \
         available in the system, please make sure that CMake will search the \
         directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
+    ENDIF()
+    IF(MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
+      ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
+      SET(AT_MKL_MT 1)
     ENDIF()
     INCLUDE_DIRECTORIES(${BLAS_INCLUDE_DIR})  # include MKL headers
     SET(AT_MKL_ENABLED 1)
@@ -454,18 +477,18 @@ ELSE()
   set(AT_CUDNN_ENABLED 1)
 ENDIF()
 
-if(NO_NNPACK)
-  message("disabling NNPACK because NO_NNPACK is set")
-  set(AT_NNPACK_ENABLED 0)
+if(NO_MKLDNN)
+  message("disabling MKLDNN because NO_MKLDNN is set")
+  set(AT_MKLDNN_ENABLED 0)
 else()
-  find_package(NNPACK)
-  if(NOT NNPACK_FOUND)
-    MESSAGE(STATUS "NNPACK not found. Compiling without NNPACK support")
-    set(AT_NNPACK_ENABLED 0)
-  ELSE()
-    INCLUDE_DIRECTORIES(${NNPACK_INCLUDE_DIRS})
-    set(AT_NNPACK_ENABLED 1)
-  ENDIF()
+  find_package(MKLDNN)
+  if(NOT MKLDNN_FOUND)
+    message(STATUS "MKLDNN not found. Compiling without MKLDNN support")
+    set(AT_MKLDNN_ENABLED 0)
+  else()
+    INCLUDE_DIRECTORIES(${MKLDNN_INCLUDE_DIRS})
+    set(AT_MKLDNN_ENABLED 1)
+  endif()
 endif()
 
 set(cwrap_files

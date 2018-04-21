@@ -24,26 +24,23 @@ class Dataset(object):
 
 
 class TensorDataset(Dataset):
-    """Dataset wrapping data and target tensors.
+    """Dataset wrapping tensors.
 
-    Each sample will be retrieved by indexing both tensors along the first
-    dimension.
+    Each sample will be retrieved by indexing tensors along the first dimension.
 
     Arguments:
-        data_tensor (Tensor): contains sample data.
-        target_tensor (Tensor): contains sample targets (labels).
+        *tensors (Tensor): tensors that have the same size of the first dimension.
     """
 
-    def __init__(self, data_tensor, target_tensor):
-        assert data_tensor.size(0) == target_tensor.size(0)
-        self.data_tensor = data_tensor
-        self.target_tensor = target_tensor
+    def __init__(self, *tensors):
+        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
+        self.tensors = tensors
 
     def __getitem__(self, index):
-        return self.data_tensor[index], self.target_tensor[index]
+        return tuple(tensor[index] for tensor in self.tensors)
 
     def __len__(self):
-        return self.data_tensor.size(0)
+        return self.tensors[0].size(0)
 
 
 class ConcatDataset(Dataset):

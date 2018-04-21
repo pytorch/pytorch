@@ -27,6 +27,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "Handle";
   } else if(t.kind() == TypeKind::DynamicType) {
     out << "Dynamic";
+  } else if(t.kind() == TypeKind::TupleType) {
+    out << "Tuple";
   } else {
     barf("unknown type kind");
   }

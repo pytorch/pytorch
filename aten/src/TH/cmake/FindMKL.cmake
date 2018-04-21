@@ -39,7 +39,7 @@ SET(INTEL_MKL_SEQUENTIAL OFF CACHE BOOL
 # Checks
 CHECK_TYPE_SIZE("void*" SIZE_OF_VOIDP)
 IF ("${SIZE_OF_VOIDP}" EQUAL 8)
-  SET(mklvers "em64t")
+  SET(mklvers "intel64")
   SET(iccvers "intel64")
   SET(mkl64s "_lp64")
 ELSE ("${SIZE_OF_VOIDP}" EQUAL 8)
@@ -63,7 +63,6 @@ ENDIF (CMAKE_COMPILER_IS_GNUCC)
 # Kernel libraries dynamically loaded
 SET(mklkerlibs "mc" "mc3" "nc" "p4n" "p4m" "p4m3" "p4p" "def")
 SET(mklseq)
-
 
 
 # Paths
@@ -154,8 +153,10 @@ ENDMACRO(CHECK_ALL_LIBRARIES)
 
 if(WIN32)
   set(mkl_m "")
+  set(mkl_pthread "")
 else(WIN32)
   set(mkl_m "m")
+  set(mkl_pthread "pthread")
 endif(WIN32)
 
 if(UNIX AND NOT APPLE)
@@ -174,7 +175,7 @@ FOREACH(mklrtl ${mklrtls} "")
       FOREACH(mklthread ${mklthreads})
         IF (NOT MKL_LIBRARIES AND NOT INTEL_MKL_SEQUENTIAL)
           CHECK_ALL_LIBRARIES(MKL_LIBRARIES cblas_sgemm
-            "mkl_${mkliface}${mkl64};${mklthread};mkl_core;${mklrtl};pthread;${mkl_m};${mkl_dl}" "")
+            "mkl_${mkliface}${mkl64};${mklthread};mkl_core;${mklrtl};${mkl_pthread};${mkl_m};${mkl_dl}" "")
         ENDIF (NOT MKL_LIBRARIES AND NOT INTEL_MKL_SEQUENTIAL)
       ENDFOREACH(mklthread)
     ENDFOREACH(mkl64)

@@ -10,6 +10,7 @@
 #include "gloo/transport/tcp/device.h"
 
 #include <algorithm>
+#include <unistd.h>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -64,9 +65,12 @@ void DataChannelGloo::RequestGloo::wait() {
   _request.wait();
 }
 
-DataChannelGloo::Group::Group(const std::string& addr, port_type port,
-                                      std::vector<rank_type> ranks, rank_type max_rank,
-                                      int store_socket)
+
+DataChannelGloo::Group::Group(const std::string& addr,
+                              port_type port,
+                              std::vector<rank_type> ranks,
+                              rank_type max_rank,
+                              int store_socket)
   : DataChannel::Group(std::move(ranks), max_rank)
   , _store(new Store(addr, port, store_socket)) {}
 
@@ -119,7 +123,11 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
 }
 
 
-DataChannelGloo::~DataChannelGloo() {}
+DataChannelGloo::~DataChannelGloo() {
+  if (_listen_socket != -1) {
+    ::close(_listen_socket);
+  }
+}
 
 void DataChannelGloo::destroy() {}
 

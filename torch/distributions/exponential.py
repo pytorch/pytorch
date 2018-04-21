@@ -12,7 +12,7 @@ class Exponential(ExponentialFamily):
 
     Example::
 
-        >>> m = Exponential(torch.Tensor([1.0]))
+        >>> m = Exponential(torch.tensor([1.0]))
         >>> m.sample()  # Exponential distributed with rate=1
          0.1046
         [torch.FloatTensor of size 1]
@@ -20,7 +20,7 @@ class Exponential(ExponentialFamily):
     Args:
         rate (float or Tensor): rate = 1 / scale of the distribution
     """
-    params = {'rate': constraints.positive}
+    arg_constraints = {'rate': constraints.positive}
     support = constraints.positive
     has_rsample = True
     _mean_carrier_measure = 0

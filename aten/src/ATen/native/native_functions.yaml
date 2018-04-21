@@ -29,13 +29,35 @@
 - func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
+- func: _cudnn_rnn_flatten_weight(TensorList weight_arr, int64_t weight_stride0, int64_t input_size, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, bool bidirectional) -> Tensor
+  variants: function
+
+- func: _cudnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  variants: function
+
+- func: _cudnn_rnn_backward(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor grad_output, Tensor grad_hy, Tensor? grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state, Tensor reserve, std::array<bool,4> output_mask) -> (Tensor, Tensor, Tensor, TensorList)
+  variants: function
+
+- func: _cudnn_init_dropout_state(Type ty, double dropout, bool train, int64_t dropout_seed) -> Tensor
+  variants: function
+
+- func: abs(Tensor self) -> Tensor
+
+- func: abs_(Tensor self) -> Tensor
+
+- func: abs_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _abs_out_cpu
+    CUDA: _abs_out_cuda
+
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
 
 - func: adaptive_max_pool1d(Tensor self, IntList[1] output_size) -> (Tensor, Tensor)
   variants: function
 
-- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8) -> bool
+- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> bool
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
@@ -61,8 +83,21 @@
 - func: arange(Type dtype, Scalar end) -> Tensor
   variants: function
 
-- func: arange_out(Tensor reuslt, Scalar end) -> Tensor
+- func: arange_out(Tensor result, Scalar end) -> Tensor
   variants: function
+
+# `argmin` and `argmax` are exposed in C++ but not in Python, where we only
+# expose `_argmin` and `_argmax` (which call the first versions). In Python, we
+# then define our own `argmax` and `argmin` that handle passing `dim=None`,
+# which gets the argmax/argmin of the flattened array.
+
+- func: argmax(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+- func: argmax(Tensor self) -> Tensor
+- func: _argmax(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
+- func: argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+- func: argmin(Tensor self) -> Tensor
+- func: _argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
@@ -79,6 +114,16 @@
 
 - func: cat_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
+
+- func: ceil(Tensor self) -> Tensor
+
+- func: ceil_(Tensor self) -> Tensor
+
+- func: ceil_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _ceil_out_cpu
+    CUDA: _ceil_out_cuda
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
@@ -122,7 +167,17 @@
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
   variants: function
 
-- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+- func: cos(Tensor self) -> Tensor
+
+- func: cos_(Tensor self) -> Tensor
+
+- func: cos_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _cos_out_cpu
+    CUDA: _cos_out_cuda
+
+- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
@@ -195,6 +250,28 @@
       name: grad_grid
   variants: function
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: cumsum(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: cumsum(Tensor self, int64_t dim) -> Tensor
+
+- func: cumsum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: cumsum_out(Tensor result, Tensor self, int64_t dim) -> Tensor
+  variants: function
+
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: cumprod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: cumprod(Tensor self, int64_t dim) -> Tensor
+
+- func: cumprod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: cumprod_out(Tensor result, Tensor self, int64_t dim) -> Tensor
+  variants: function
+
 - func: det(Tensor self) -> Tensor
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
@@ -204,6 +281,9 @@
   variants: function
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
+
+- func: einsum(std::string equation, TensorList tensors) -> Tensor
+  variants: function
 
 - func: embedding(Tensor weight, IndexTensor indices, int64_t padding_idx=-1, bool scale_grad_by_freq=false, bool sparse=false) -> Tensor
   variants: function
@@ -255,6 +335,18 @@
 
 - func: empty_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
+
+- func: exp(Tensor self) -> Tensor
+
+- func: exp_(Tensor self) -> Tensor
+
+- func: exp_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _exp_out_cpu
+    CUDA: _exp_out_cuda
 
 - func: expand(Tensor self, IntList size) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -271,6 +363,16 @@
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
+- func: floor(Tensor self) -> Tensor
+
+- func: floor_(Tensor self) -> Tensor
+
+- func: floor_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _floor_out_cpu
+    CUDA: _floor_out_cuda
+
 - func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
   variants: function
 
@@ -282,8 +384,10 @@
 
 - func: full_like(Tensor self, Scalar fill_value, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
-- func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+- func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
@@ -291,8 +395,23 @@
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
   variants: function
 
-- func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5) -> Tensor
+- func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enabled=True) -> Tensor
   variants: function
+
+# FFT
+
+- func: fft(Tensor self, int64_t signal_ndim, bool normalized=false) -> Tensor
+
+- func: ifft(Tensor self, int64_t signal_ndim, bool normalized=false) -> Tensor
+
+- func: rfft(Tensor self, int64_t signal_ndim, bool normalized=false, bool onesided=true) -> Tensor
+
+- func: irfft(Tensor self, int64_t signal_ndim, bool normalized=false, bool onesided=true, IntList signal_sizes={}) -> Tensor
+
+- func: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes) -> Tensor
+  dispatch:
+    CPU: _fft_mkl
+    CUDA: _fft_cufft
 
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
@@ -301,6 +420,8 @@
   variants: method
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
+
+- func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
 
 - func: is_cuda(Tensor self) -> bool
 
@@ -316,11 +437,24 @@
 
 - func: is_sparse(Tensor self) -> bool
 
+- func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
+  variants: function
+
 - func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
 
 - func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
+
+- func: log(Tensor self) -> Tensor
+
+- func: log_(Tensor self) -> Tensor
+
+- func: log_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _log_out_cpu
+    CUDA: _log_out_cuda
 
 - func: logdet(Tensor self) -> Tensor
 
@@ -330,13 +464,17 @@
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
 
-- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
+- func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
+
+- func: min_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
 
@@ -350,20 +488,6 @@
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
 
-# TODO: Why does kW come before kH?  Hella confusing, because it
-# doesn't match the input layout.
-- func: nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
-  variants: function
-
-- func: nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
-  variants: function
-
-- func: nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
-  variants: function
-
-- func: nnpack_spatial_convolution_backward_weight(Tensor input, IntList weight_size, Tensor grad_output, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
-  variants: function
-
 - func: ones(Type dtype, IntList size) -> Tensor
   variants: function
 
@@ -375,6 +499,8 @@
 
 - func: ones_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
@@ -395,6 +521,37 @@
 
 - func: rand_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
+
+
+- func: randint(Type dtype, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randint(Type dtype, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randint_out(Tensor result, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randint_out(Tensor result, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function  
+
+- func: randint_like(Tensor self, int64_t high) -> Tensor
+  variants: function
+
+- func: randint_like(Tensor self, int64_t low, int64_t high) -> Tensor
+  variants: function  
+
+- func: randint_like(Tensor self, int64_t high, *, Type dtype) -> Tensor
+  variants: function
+  python_default_init:
+    dtype: self.type()
+
+- func: randint_like(Tensor self, int64_t low, int64_t high, *, Type dtype) -> Tensor
+  variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
   variants: function
@@ -407,6 +564,8 @@
 
 - func: randn_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
   variants: function
@@ -437,23 +596,43 @@
     CPU: RoiPooling2d_backward_cpu
     CUDA: RoiPooling2d_backward_cuda
 
+- func: round(Tensor self) -> Tensor
+
+- func: round_(Tensor self) -> Tensor
+
+- func: round_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _round_out_cpu
+    CUDA: _round_out_cuda
+
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr) -> Tensor
   variants: function
 
 - func: rrelu_(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr) -> Tensor
   variants: function
 
-- func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
-
 - func: relu(Tensor self) -> Tensor
 
 - func: relu_(Tensor self) -> Tensor
+
+- func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
 
 - func: selu(Tensor self) -> Tensor
   variants: function
 
 - func: selu_(Tensor self) -> Tensor
   variants: function
+
+- func: sin(Tensor self) -> Tensor
+
+- func: sin_(Tensor self) -> Tensor
+
+- func: sin_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sin_out_cpu
+    CUDA: _sin_out_cuda
 
 - func: size(Tensor self, int64_t dim) -> int64_t
 
@@ -493,46 +672,109 @@
 - func: stack_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
-- func: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool return_onesided=true, Tensor window={}, int64_t pad_end=0) -> Tensor
+- func: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool normalized=false, bool onesided=true, Tensor? window={}, int64_t pad_end=0) -> Tensor
   python_default_init:
     fft_size: frame_length
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: sum(Tensor self, *, ScalarType dtype) -> Tensor
+
 - func: sum(Tensor self) -> Tensor
+
+- func: _sum(Tensor self) -> Tensor
   dispatch:
     CPU: _sum_cpu
     CUDA: _sum_cuda
 
+- func: sum(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+
 - func: sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
+- func: sum(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: _sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function
+
 - func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: sum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: _sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
   dispatch:
     CPU: _sum_out_cpu
     CUDA: _sum_out_cuda
 
+- func: sqrt(Tensor self) -> Tensor
+
+- func: sqrt_(Tensor self) -> Tensor
+
+- func: sqrt_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sqrt_out_cpu
+    CUDA: _sqrt_out_cuda
+
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: prod(Tensor self, *, ScalarType dtype) -> Tensor
+
 - func: prod(Tensor self) -> Tensor
+
+- func: _prod(Tensor self) -> Tensor
   dispatch:
     CPU: _prod_cpu
     CUDA: _prod_cuda
 
+- func: prod(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+
 - func: prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
+- func: prod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: _prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function
+
 - func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: prod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: _prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
   dispatch:
     CPU: _prod_out_cpu
     CUDA: _prod_out_cuda
 
+- func: t_(Tensor self) -> Tensor
+  variants: method
+
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
+
+- func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
+  variants: function
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
-- func: t_(Tensor self) -> Tensor
-  variants: method
+- func: trunc(Tensor self) -> Tensor
+
+- func: trunc_(Tensor self) -> Tensor
+
+- func: trunc_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _trunc_out_cpu
+    CUDA: _trunc_out_cuda
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -573,6 +815,8 @@
 
 - func: zeros_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   dispatch:
@@ -585,14 +829,14 @@
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
 
-- func: _cudnn_rnn_flatten_weight(TensorList weight_arr, int64_t weight_stride0, int64_t input_size, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, bool bidirectional) -> Tensor
+- func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList stride, IntList dilation) -> Tensor
   variants: function
 
-- func: _cudnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+- func: mkldnn_convolution_backward_input(IntList self_size, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, bool bias_defined) -> Tensor
   variants: function
 
-- func: _cudnn_rnn_backward(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor grad_output, Tensor grad_hy, Tensor? grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state, Tensor reserve, std::array<bool,4> output_mask) -> (Tensor, Tensor, Tensor, TensorList)
+- func: mkldnn_convolution_backward_weights(IntList weight_size, Tensor grad_output, Tensor self, IntList padding, IntList stride, IntList dilation, bool bias_defined) -> (Tensor, Tensor)
   variants: function
 
-- func: _cudnn_init_dropout_state(Type ty, double dropout, bool train, int64_t dropout_seed) -> Tensor
+- func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
   variants: function

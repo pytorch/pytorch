@@ -8,7 +8,7 @@ from torch.distributions.utils import lazy_property
 
 
 def _get_batch_shape(bmat, bvec):
-    """
+    r"""
     Given a batch of matrices and a batch of vectors, compute the combined `batch_shape`.
     """
     try:
@@ -33,25 +33,35 @@ def _batch_mv(bmat, bvec):
     batch_shape = _get_batch_shape(bmat, bvec)
 
     # to conform with `torch.bmm` interface, both bmat and bvec should have `.dim() == 3`
-    bmat = bmat.expand(batch_shape + (n, n)).contiguous().view((-1, n, n))
-    bvec = bvec.unsqueeze(-1).expand(batch_shape + (n, 1)).contiguous().view((-1, n, 1))
-    return torch.bmm(bmat, bvec).squeeze(-1).view(batch_shape + (n,))
+    bmat = bmat.expand(batch_shape + (n, n)).reshape((-1, n, n))
+    bvec = bvec.unsqueeze(-1).expand(batch_shape + (n, 1)).reshape((-1, n, 1))
+    return torch.bmm(bmat, bvec).view(batch_shape + (n,))
 
 
 def _batch_potrf_lower(bmat):
-    """
+    r"""
     Applies a Cholesky decomposition to all matrices in a batch of arbitrary shape.
     """
     n = bmat.size(-1)
-    cholesky = torch.stack([C.potrf(upper=False) for C in bmat.unsqueeze(0).contiguous().view((-1, n, n))])
+    cholesky = torch.stack([C.potrf(upper=False) for C in bmat.reshape((-1, n, n))])
     return cholesky.view(bmat.shape)
 
 
 def _batch_diag(bmat):
-    """
+    r"""
     Returns the diagonals of a batch of square matrices.
     """
-    return bmat.contiguous().view(bmat.shape[:-2] + (-1,))[..., ::bmat.size(-1) + 1]
+    return bmat.reshape(bmat.shape[:-2] + (-1,))[..., ::bmat.size(-1) + 1]
+
+
+def _batch_inverse(bmat):
+    r"""
+    Returns the inverses of a batch of square matrices.
+    """
+    n = bmat.size(-1)
+    flat_bmat = bmat.reshape(-1, n, n)
+    flat_inv_bmat = torch.stack([m.inverse() for m in flat_bmat], 0)
+    return flat_inv_bmat.view(bmat.shape)
 
 
 def _batch_mahalanobis(L, x):
@@ -62,7 +72,7 @@ def _batch_mahalanobis(L, x):
     Accepts batches for both L and x.
     """
     # TODO: use `torch.potrs` or similar once a backwards pass is implemented.
-    flat_L = L.unsqueeze(0).contiguous().view((-1,) + L.shape[-2:])
+    flat_L = L.unsqueeze(0).reshape((-1,) + L.shape[-2:])
     L_inv = torch.stack([torch.inverse(Li.t()) for Li in flat_L]).view(L.shape)
     return (x.unsqueeze(-1) * L_inv).sum(-2).pow(2.0).sum(-1)
 
@@ -74,6 +84,7 @@ class MultivariateNormal(Distribution):
 
     The multivariate normal distribution can be parameterized either
     in terms of a positive definite covariance matrix :math:`\mathbf{\Sigma}`
+    or a positive definite precition matrix :math:`\mathbf{\Sigma}^{-1}`
     or a lower-triangular matrix :math:`\mathbf{L}` with positive-valued
     diagonal entries, such that
     :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`. This triangular matrix
@@ -90,36 +101,48 @@ class MultivariateNormal(Distribution):
     Args:
         loc (Tensor): mean of the distribution
         covariance_matrix (Tensor): positive-definite covariance matrix
+        precision_matrix (Tensor): positive-definite precision matrix
         scale_tril (Tensor): lower-triangular factor of covariance, with positive-valued diagonal
 
     Note:
-        Only one of `covariance_matrix` or `scale_tril` can be specified.
+        Only one of :attr:`covariance_matrix` or :attr:`precision_matrix` or
+        :attr:`scale_tril` can be specified.
 
-        Using `scale_tril` will be more efficient: all computations internally
-        are based on `scale_tril`. If `covariance_matrix` is passed instead,
-        this is only used to compute the corresponding lower triangular
-        matrices using a Cholesky decomposition.
+        Using :attr:`scale_tril` will be more efficient: all computations internally
+        are based on :attr:`scale_tril`. If :attr:`covariance_matrix` or
+        :attr:`precision_matrix` is passed instead, it is only used to compute
+        the corresponding lower triangular matrices using a Cholesky decomposition.
     """
-    params = {'loc': constraints.real_vector,
-              'covariance_matrix': constraints.positive_definite,
-              'scale_tril': constraints.lower_cholesky}
+    arg_constraints = {'loc': constraints.real_vector,
+                       'covariance_matrix': constraints.positive_definite,
+                       'precision_matrix': constraints.positive_definite,
+                       'scale_tril': constraints.lower_cholesky}
     support = constraints.real
     has_rsample = True
 
-    def __init__(self, loc, covariance_matrix=None, scale_tril=None, validate_args=None):
+    def __init__(self, loc, covariance_matrix=None, precision_matrix=None, scale_tril=None, validate_args=None):
         event_shape = torch.Size(loc.shape[-1:])
-        if (covariance_matrix is None) == (scale_tril is None):
-            raise ValueError("Exactly one of covariance_matrix or scale_tril may be specified (but not both).")
-        if scale_tril is None:
+        if (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) != 1:
+            raise ValueError("Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified.")
+        if scale_tril is not None:
+            if scale_tril.dim() < 2:
+                raise ValueError("scale_tril matrix must be at least two-dimensional, "
+                                 "with optional leading batch dimensions")
+            self.scale_tril = scale_tril
+            batch_shape = _get_batch_shape(scale_tril, loc)
+        elif covariance_matrix is not None:
             if covariance_matrix.dim() < 2:
-                raise ValueError("covariance_matrix must be two-dimensional, with optional leading batch dimensions")
+                raise ValueError("covariance_matrix must be at least two-dimensional, "
+                                 "with optional leading batch dimensions")
             self.covariance_matrix = covariance_matrix
             batch_shape = _get_batch_shape(covariance_matrix, loc)
         else:
-            if scale_tril.dim() < 2:
-                raise ValueError("scale_tril matrix must be two-dimensional, with optional leading batch dimensions")
-            self.scale_tril = scale_tril
-            batch_shape = _get_batch_shape(scale_tril, loc)
+            if precision_matrix.dim() < 2:
+                raise ValueError("precision_matrix must be at least two-dimensional, "
+                                 "with optional leading batch dimensions")
+            self.precision_matrix = precision_matrix
+            self.covariance_matrix = _batch_inverse(precision_matrix)
+            batch_shape = _get_batch_shape(precision_matrix, loc)
         self.loc = loc
         super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
@@ -129,9 +152,23 @@ class MultivariateNormal(Distribution):
 
     @lazy_property
     def covariance_matrix(self):
-        # To use torch.bmm, we first squash the batch_shape into a single dimension
-        flat_scale_tril = self.scale_tril.unsqueeze(0).contiguous().view((-1,) + self._event_shape * 2)
-        return torch.bmm(flat_scale_tril, flat_scale_tril.transpose(-1, -2)).view(self.scale_tril.shape)
+        return torch.matmul(self.scale_tril, self.scale_tril.transpose(-1, -2))
+
+    @lazy_property
+    def precision_matrix(self):
+        # TODO: use `torch.potri` on `scale_tril` once a backwards pass is implemented.
+        scale_tril_inv = _batch_inverse(self.scale_tril)
+        return torch.matmul(scale_tril_inv.transpose(-1, -2), scale_tril_inv)
+
+    @property
+    def mean(self):
+        return self.loc
+
+    @property
+    def variance(self):
+        n = self.covariance_matrix.size(-1)
+        var = torch.stack([cov.diag() for cov in self.covariance_matrix.view(-1, n, n)])
+        return var.view(self.covariance_matrix.size()[:-1])
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)

@@ -1,12 +1,3 @@
-[submodule "torch/lib/gloo"]
-	path = torch/lib/gloo
-	url = https://github.com/facebookincubator/gloo
-[submodule "torch/lib/pybind11"]
-	path = torch/lib/pybind11
-	url = https://github.com/pybind/pybind11
-[submodule "torch/lib/nanopb"]
-	path = torch/lib/nanopb
-	url = https://github.com/nanopb/nanopb.git
 [submodule "aten/src/ATen/cpu/cpuinfo"]
 	path = aten/src/ATen/cpu/cpuinfo
 	url = https://github.com/Maratyszcza/cpuinfo
@@ -17,3 +8,72 @@
 [submodule "aten/src/ATen/utils/catch"]
 	path = aten/src/ATen/utils/catch
 	url = https://github.com/catchorg/Catch2.git
+[submodule "third_party/nanopb"]
+	path = third_party/nanopb
+	url = https://github.com/nanopb/nanopb.git
+[submodule "third_party/pybind11"]
+	path = third_party/pybind11
+	url = https://github.com/pybind/pybind11.git
+[submodule "third_party/nccl"]
+	path = third_party/nccl
+	url = https://github.com/nvidia/nccl.git
+[submodule "third_party/cub"]
+	path = third_party/cub
+	url = https://github.com/NVlabs/cub.git
+[submodule "third_party/eigen"]
+	path = third_party/eigen
+	url = https://github.com/RLovelett/eigen.git
+[submodule "third_party/googletest"]
+	path = third_party/googletest
+	url = https://github.com/google/googletest.git
+[submodule "third_party/nervanagpu"]
+	path = third_party/nervanagpu
+	url = https://github.com/NervanaSystems/nervanagpu.git
+[submodule "third_party/benchmark"]
+	path = third_party/benchmark
+	url = https://github.com/google/benchmark.git
+[submodule "third_party/protobuf"]
+	path = third_party/protobuf
+	url = https://github.com/google/protobuf.git
+[submodule "third_party/ios-cmake"]
+	path = third_party/ios-cmake
+	url = https://github.com/Yangqing/ios-cmake.git
+[submodule "third_party/NNPACK"]
+	path = third_party/NNPACK
+	url = https://github.com/Maratyszcza/NNPACK.git
+[submodule "third_party/gloo"]
+	path = third_party/gloo
+	url = https://github.com/facebookincubator/gloo
+[submodule "third_party/NNPACK_deps/pthreadpool"]
+	path = third_party/pthreadpool
+	url = https://github.com/Maratyszcza/pthreadpool.git
+[submodule "third_party/NNPACK_deps/FXdiv"]
+	path = third_party/FXdiv
+	url = https://github.com/Maratyszcza/FXdiv.git
+[submodule "third_party/NNPACK_deps/FP16"]
+	path = third_party/FP16
+	url = https://github.com/Maratyszcza/FP16.git
+[submodule "third_party/NNPACK_deps/psimd"]
+	path = third_party/psimd
+	url = https://github.com/Maratyszcza/psimd.git
+[submodule "third_party/zstd"]
+	path = third_party/zstd
+	url = https://github.com/facebook/zstd.git
+[submodule "third-party/cpuinfo"]
+	path = third_party/cpuinfo
+	url = https://github.com/Maratyszcza/cpuinfo.git
+[submodule "third_party/python-enum"]
+	path = third_party/python-enum
+	url = https://github.com/PeachPy/enum34.git
+[submodule "third_party/python-peachpy"]
+	path = third_party/python-peachpy
+	url = https://github.com/Maratyszcza/PeachPy.git
+[submodule "third_party/python-six"]
+	path = third_party/python-six
+	url = https://github.com/benjaminp/six.git
+[submodule "third_party/ComputeLibrary"]
+	path = third_party/ComputeLibrary
+	url = https://github.com/ARM-software/ComputeLibrary.git
+[submodule "third_party/onnx"]
+	path = third_party/onnx
+	url = https://github.com/onnx/onnx.git

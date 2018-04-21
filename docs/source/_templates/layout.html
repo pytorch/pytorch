@@ -1,5 +1,15 @@
 {% extends "!layout.html" %}
 
+{% block menu %}
+<div>
+  <a style="color:#F05732" href=http://pytorch.org/docs/0.3.1/>
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+{{ super() }}
+{% endblock %}
+
 {% block footer %}
 {{ super() }}
 <script>

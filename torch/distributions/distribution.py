@@ -1,7 +1,7 @@
 import torch
-from torch.autograd import Variable
 import warnings
 from torch.distributions import constraints
+from torch.distributions.utils import lazy_property
 
 
 class Distribution(object):
@@ -13,7 +13,7 @@ class Distribution(object):
     has_enumerate_support = False
     _validate_args = False
     support = None
-    params = {}
+    arg_constraints = {}
 
     @staticmethod
     def set_default_validate_args(value):
@@ -27,11 +27,13 @@ class Distribution(object):
         if validate_args is not None:
             self._validate_args = validate_args
         if self._validate_args:
-            if not constraints.is_dependent(self.params):
-                for param, constraint in self.params.items():
-                    if not constraints.is_dependent(constraint):
-                        if not constraint.check(self.__getattribute__(param)).all():
-                            raise ValueError("The parameter {} has invalid values".format(param))
+            for param, constraint in self.arg_constraints.items():
+                if constraints.is_dependent(constraint):
+                    continue  # skip constraints that cannot be checked
+                if param not in self.__dict__ and isinstance(getattr(type(self), param), lazy_property):
+                    continue  # skip checking lazily-constructed args
+                if not constraint.check(getattr(self, param)).all():
+                    raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
     def batch_shape(self):
@@ -48,19 +50,20 @@ class Distribution(object):
         return self._event_shape
 
     @property
-    def params(self):
+    def arg_constraints(self):
         """
-        Returns a dictionary from param names to `Constraint` objects that
-        should be satisfied by each parameter of this distribution. For
-        distributions with multiple parameterization, only one complete
-        set of parameters should be specified in `.params`.
+        Returns a dictionary from argument names to
+        :class:`~torch.distributions.constraints.Constraint` objects that
+        should be satisfied by each argument of this distribution. Args that
+        are not tensors need not appear in this dict.
         """
         raise NotImplementedError
 
     @property
     def support(self):
         """
-        Returns a `Constraint` object representing this distribution's support.
+        Returns a :class:`~torch.distributions.constraints.Constraint` object
+        representing this distribution's support.
         """
         raise NotImplementedError
 
@@ -146,7 +149,7 @@ class Distribution(object):
         of the result will be `(cardinality,) + batch_shape + event_shape`
         (where `event_shape = ()` for univariate distributions).
 
-        Note that this enumerates over all batched variables in lock-step
+        Note that this enumerates over all batched tensors in lock-step
         `[[0, 0], [1, 1], ...]`. To iterate over the full Cartesian product
         use `itertools.product(m.enumerate_support())`.
 
@@ -163,6 +166,15 @@ class Distribution(object):
             Tensor of shape batch_shape.
         """
         raise NotImplementedError
+
+    def perplexity(self):
+        """
+        Returns perplexity of distribution, batched over batch_shape.
+
+        Returns:
+            Tensor of shape batch_shape.
+        """
+        return torch.exp(self.entropy())
 
     def _extended_shape(self, sample_shape=torch.Size()):
         """

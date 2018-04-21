@@ -25,18 +25,16 @@ bool hasUsedHandle(Node *node) {
 
 // Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
 // Argument aten indicates whether we should export ops as "ATen" ONNX ops if possible.
-void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
-  // Check that the tracing state is live (it should be, because
-  // you were supposed to request zero derivatives.)
-  if (state->is_expired()) {
-    throw std::logic_error("ToONNX: tracing state is expired");
-  }
-
-  auto new_graph = std::make_shared<Graph>(state->graph->scope_root());
-
-  torch::autograd::SymbolicContext ctx;
-  ctx.graph = new_graph.get();
+std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, bool aten) {
+  auto new_graph = std::make_shared<Graph>(graph->scope_root());
   std::unordered_map<Value*, Value*> env;
+  BlockToONNX(graph->block(), new_graph->block(), aten, env);
+  return new_graph;
+}
+
+void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_map<Value*, Value*> env) {
+  torch::autograd::SymbolicContext ctx;
+  ctx.block = new_block;
 
   py::object onnx = py::module::import("torch.onnx");
   py::object onnx_symbolic = py::module::import("torch.onnx.symbolic");
@@ -50,8 +48,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
   };
 
   // Initialize context and environment
-  for (auto input : state->graph->inputs()) {
-    auto n = ctx.graph->addInput()->copyMetadata(input);
+  for (auto input : old_block->inputs()) {
+    auto n = ctx.block->addInput()->copyMetadata(input);
     n->setStage(input->stage());
     env[input] = n;
   }
@@ -102,7 +100,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
 
   // Clone the node and add it to the new graph
   auto cloneNode = [&](Node * node) {
-    auto n_ = ctx.graph->appendNode(ctx.graph->createClone(node, envFn));
+    auto n_ = ctx.block->appendNode(ctx.block->owningGraph()->createClone(node, envFn));
     for(size_t i = 0; i < node->outputs().size(); i++) {
       env[node->outputs()[i]] = n_->outputs()[i];
     }
@@ -143,8 +141,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
         py_inputs[input_nr++] = py::cast(envFn(input));
     }
 
-    WithCurrentScope scope_guard(*ctx.graph, n->scope());
-    py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs, aten);
+    WithInsertPoint insert_point_guard(ctx.block);
+    WithCurrentScope scope_guard(*ctx.block->owningGraph(), n->scope());
+    py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.block->owningGraph(), n, py_inputs, env, aten);
 
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
@@ -164,7 +163,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
     // by regular args, with Variables replaced by corresponding nodes.
     Py_ssize_t input_nr = 0;
     py::tuple py_symbolic_args(1 + op->cconv.size());
-    py_symbolic_args[input_nr++] = py::cast(ctx.graph);
+    py_symbolic_args[input_nr++] = py::cast(ctx.block->owningGraph());
     auto inputs = op->inputs();
     auto node_it = inputs.begin();
     auto scalar_it = op->scalar_args.begin();
@@ -182,7 +181,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
       py_symbolic_args[input_nr++] = obj;
     }
 
-    WithCurrentScope scope_guard(*ctx.graph, op->scope());
+    WithInsertPoint insert_point_guard(ctx.block);
+    WithCurrentScope scope_guard(*ctx.block->owningGraph(), op->scope());
     // Call the symbolic function
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
@@ -192,7 +192,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
   };
 
   // Finally, visit all nodes in the graph
-  for (auto node : state->graph->nodes()) {
+  for (auto node : old_block->nodes()) {
     if (hasUsedHandle(node)) {
       // Nothing we can do here. The handle is used, so we'll need to capture the
       // original state and can't do anything with this op (we don't know what the
@@ -201,7 +201,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
       continue;
     }
     // Needed so that symbolic calls create nodes with correct stages.
-    auto stage_guard = new_graph->setStageTemporary(node->stage());
+    auto stage_guard = ctx.block->owningGraph()->setStageTemporary(node->stage());
     IR_IFM(node, CppOp)
       cloneNode(node);
     IR_ELSEIFM(PythonOp)
@@ -210,13 +210,12 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
       callPySymbolicFunction(node);
     IR_END()
   }
-  for (auto output : state->graph->outputs()) {
-    ctx.graph->registerOutput(env.at(output));
+  for (auto output : old_block->outputs()) {
+    ctx.block->registerOutput(env.at(output));
   }
 
   // Copy stage from original graph
-  new_graph->setStage(state->graph->stage());
-  state->graph = std::move(new_graph);
+  ctx.block->owningGraph()->setStage(old_block->owningGraph()->stage());
 }
 
 }}

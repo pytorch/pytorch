@@ -54,11 +54,10 @@ class Linear(Module):
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'in_features=' + str(self.in_features) \
-            + ', out_features=' + str(self.out_features) \
-            + ', bias=' + str(self.bias is not None) + ')'
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, self.bias is not None
+        )
 
 
 class Bilinear(Module):
@@ -115,11 +114,9 @@ class Bilinear(Module):
     def forward(self, input1, input2):
         return F.bilinear(input1, input2, self.weight, self.bias)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'in1_features=' + str(self.in1_features) \
-            + ', in2_features=' + str(self.in2_features) \
-            + ', out_features=' + str(self.out_features) \
-            + ', bias=' + str(self.bias is not None) + ')'
+    def extra_repr(self):
+        return 'in1_features={}, in2_features={}, out_features={}, bias={}'.format(
+            self.in1_features, self.in2_features, self.out_features, self.bias is not None
+        )
 
 # TODO: PartialLinear - maybe in sparse?

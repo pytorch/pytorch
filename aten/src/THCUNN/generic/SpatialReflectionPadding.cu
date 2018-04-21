@@ -30,13 +30,13 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
   int inputH = THCTensor_(size)(state, input, dimh);
   int inputW = THCTensor_(size)(state, input, dimw);
 
-  THArgCheck(padL <= inputW && padR <= inputW, 4,
-             "Padding size should not exceed corresponding input dimension, "
+  THArgCheck(padL < inputW && padR < inputW, 4,
+             "Padding size should be less than the corresponding input dimension, "
              "but got: padding (%d, %d) at dimension %d of input %s",
              padL, padR, dimw, THCTensor_(sizeDesc)(state, input).str);
 
-  THArgCheck(padT <= inputH && padB <= inputH, 6,
-             "Padding size should not exceed corresponding input dimension, "
+  THArgCheck(padT < inputH && padB < inputH, 6,
+             "Padding size should be less than the corresponding input dimension, "
              "but got: padding (%d, %d) at dimension %d of input %s",
              padT, padB, dimh, THCTensor_(sizeDesc)(state, input).str);
 

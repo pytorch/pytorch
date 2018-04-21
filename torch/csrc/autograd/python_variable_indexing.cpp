@@ -9,6 +9,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/python_compat.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/tensor_conversion_dispatch.h"
 #include "torch/csrc/utils/tensor_new.h"
 
 #include <ATen/ExpandUtils.h>
@@ -147,7 +148,13 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       result = result.unsqueeze(dim);
       dim++;
     } else if (THPVariable_Check(obj)) {
-      handle_var(reinterpret_cast<THPVariable*>(obj)->cdata);
+      auto& var = THPVariable_Unpack(obj);
+      auto scalar_type = var.type().scalarType();
+      if (var.dim() == 0 && at::isIntegralType(scalar_type) && scalar_type != at::kByte) {
+        result = applySelect(result, dim, THPUtils_unpackLong(obj));
+      } else {
+        handle_var(var);
+      }
     } else if (PySequence_Check(obj)) {
       handle_var(sequenceToVariable(self.type(), obj));
     } else {
@@ -162,20 +169,43 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
   return result;
 }
 
-static std::vector<Tensor> asTensorList(const variable_list& v) {
-  return std::vector<Tensor>(v.begin(), v.end());
+static Tensor typeConvertIndex(const Variable& self, const Variable& ind) {
+  int64_t device = self.is_cuda() ? self.get_device() : -1;
+  if (ind.defined()) {
+    auto& new_type = ind.type().toBackend(self.type().backend());
+    return torch::utils::dispatch_type_conversion(ind, new_type, device, false);
+  } else {
+    return ind;
+  }
+}
+
+static std::vector<Tensor> typeConvertIndices(const Variable& self, const variable_list& indices) {
+  std::vector<Tensor> converted_inds(indices.size());
+  int64_t device = self.is_cuda() ? self.get_device() : -1;
+  for (size_t i = 0; i < indices.size(); ++i) {
+    const auto &ind = indices[i];
+    if (ind.defined()) {
+      auto& new_type = ind.type().toBackend(self.type().backend());
+      converted_inds[i] = torch::utils::dispatch_type_conversion(ind, new_type, device, false);
+    } else {
+      converted_inds[i] = indices[i];
+    }
+  }
+  return converted_inds;
 }
 
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
+  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
-  return self.index(asTensorList(indices));
+  return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
+  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
-  return self.index_put_(asTensorList(indices), value);
+  return self.index_put_(converted_indices, value);
 }
 
 static bool treatSequenceAsTuple(PyObject* index) {
@@ -241,6 +271,97 @@ static PyObject* applyBoolGetitem(const Variable& self, bool index) {
   }
 }
 
+enum class LegacyIndexingType {
+  None,
+  Mask,
+  Index,
+};
+
+static std::pair<LegacyIndexingType, int64_t>
+getLegacyIndexingType(const Variable& self, const variable_list& vars) {
+  // TODO: this could be that the broadcasted size is the same.
+  if (vars.size() == 1 && vars[0].type().scalarType() == ScalarType::Byte && vars[0].is_same_size(self)) {
+    return std::make_pair(LegacyIndexingType::Mask, -1);
+  }
+
+  // single tensor indexing
+  int num_defined_variables = 0;
+  int64_t index_dim = -1;
+  for (size_t i = 0; i < vars.size(); i++) {
+    auto& variable = vars[i];
+    auto is_defined = variable.defined();
+    num_defined_variables += is_defined;
+    if (is_defined) {
+      index_dim = (int64_t)i;
+      if (num_defined_variables > 1) {
+        break;
+      }
+      if (variable.dim() != 1 || variable.type().scalarType() != ScalarType::Long || variable.numel() == 0) {
+        num_defined_variables = -1;
+        break;
+      }
+    }
+  }
+
+  if (num_defined_variables == 1) {
+    return std::make_pair(LegacyIndexingType::Index, index_dim);
+  }
+  // advanced indexing
+  return std::make_pair(LegacyIndexingType::None, -1);
+}
+
+static Variable dispatch_legacy_index(const Variable& self, const variable_list& vars,
+                                      std::pair<LegacyIndexingType, int64_t> legacyIndex) {
+  LegacyIndexingType indexingType = std::get<0>(legacyIndex);
+  switch(indexingType) {
+    case LegacyIndexingType::Mask: {
+      auto mask = vars[0];
+      auto mask_convert = typeConvertIndex(self, mask);
+      AutoNoGIL no_gil;
+      AutoGPU auto_gpu(self);
+      return self.masked_select(mask_convert);
+    }
+    case LegacyIndexingType::Index: {
+      int64_t index_dim = std::get<1>(legacyIndex);
+      auto index = vars[index_dim];
+      auto index_convert = typeConvertIndex(self, index);
+      AutoNoGIL no_gil;
+      AutoGPU auto_gpu(self);
+      return self.index_select(index_dim, index_convert);
+    }
+    case LegacyIndexingType::None:
+    default: {
+      throw std::runtime_error("Unexpected indexing type");
+    }
+  }
+}
+
+static Variable dispatch_legacy_index_put_(Variable& self, const variable_list& vars, const Variable& value,
+                                           std::pair<LegacyIndexingType, int64_t> legacyIndex) {
+  LegacyIndexingType indexingType = std::get<0>(legacyIndex);
+  switch(indexingType) {
+    case LegacyIndexingType::Mask: {
+      auto mask = vars[0];
+      auto mask_convert = typeConvertIndex(self, mask);
+      AutoNoGIL no_gil;
+      AutoGPU auto_gpu(self);
+      return self.masked_fill_(mask_convert, value);
+    }
+    case LegacyIndexingType::Index: {
+      int64_t index_dim = std::get<1>(legacyIndex);
+      auto index = vars[index_dim];
+      auto index_convert = typeConvertIndex(self, index);
+      AutoNoGIL no_gil;
+      AutoGPU auto_gpu(self);
+      return self.index_fill_(index_dim, index_convert, value);
+    }
+    case LegacyIndexingType::None:
+    default: {
+      throw std::runtime_error("Unexpected indexing type");
+    }
+  }
+}
+
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
@@ -273,6 +394,12 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   }
   if (isSingleBoolScalar(variableIndices)) {
     return applyBoolGetitem(self_, variableIndices[0].toCByte());
+  }
+
+  // TODO move this to ATen
+  auto legacy_index = getLegacyIndexingType(sliced, variableIndices);
+  if (std::get<0>(legacy_index) != LegacyIndexingType::None) {
+    return wrap(dispatch_legacy_index(sliced, variableIndices, legacy_index));
   }
 
   // indexing by tensors ("advanced" indexing)
@@ -338,6 +465,16 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     if (variableIndices[0].toCByte()) {
       copy_to(self_.unsqueeze(0), value);
     }
+    return 0;
+  }
+
+  // TODO move this to ATen
+  // we are being overly cautious here and only considering the *_fill_ variants
+  // (value is a scalar), as there could be broadcasting in the value that could
+  // happen and is not handled by masked_scatter_ and index_copy_
+  auto legacy_index = getLegacyIndexingType(sliced, variableIndices);
+  if (std::get<0>(legacy_index) != LegacyIndexingType::None && value.dim() == 0) {
+    dispatch_legacy_index_put_(sliced, variableIndices, value, legacy_index);
     return 0;
   }
 

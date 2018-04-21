@@ -14,7 +14,7 @@ class Normal(ExponentialFamily):
 
     Example::
 
-        >>> m = Normal(torch.Tensor([0.0]), torch.Tensor([1.0]))
+        >>> m = Normal(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # normally distributed with loc=0 and scale=1
          0.1046
         [torch.FloatTensor of size 1]
@@ -24,7 +24,7 @@ class Normal(ExponentialFamily):
         scale (float or Tensor): standard deviation of the distribution
             (often referred to as sigma)
     """
-    params = {'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
     has_rsample = True
     _mean_carrier_measure = 0

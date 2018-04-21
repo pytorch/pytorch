@@ -27,7 +27,7 @@ class ExponentialFamily(Distribution):
     @property
     def _natural_params(self):
         """
-        Abstract method for natural parameters. Returns a tuple of Variables based
+        Abstract method for natural parameters. Returns a tuple of Tensors based
         on the distribution
         """
         raise NotImplementedError

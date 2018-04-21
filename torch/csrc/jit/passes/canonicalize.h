@@ -4,6 +4,6 @@
 
 namespace torch { namespace jit {
 
-void Canonicalize(std::shared_ptr<Graph>& graph);
+std::shared_ptr<Graph> Canonicalize(const std::shared_ptr<Graph>& graph);
 
 }}

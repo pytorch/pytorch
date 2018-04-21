@@ -40,9 +40,8 @@ void initPythonTracerBindings(PyObject* module_) {
       ASSERT_UNEXPIRED("pop_scope");
       s.pop_scope();
     })
-    .def("export", [](TracingState& s, const std::vector<at::Tensor>& initializers, int64_t onnx_opset_version) {
-      ASSERT_UNEXPIRED("export");
-      return py::bytes(ExportGraph(s.graph, initializers, onnx_opset_version));
+    .def("set_graph", [](TracingState& s, std::shared_ptr<Graph> g) {
+      s.graph = g;
     })
     .def("graph", [](TracingState& s) {
       return s.graph;

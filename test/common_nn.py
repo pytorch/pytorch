@@ -6,7 +6,6 @@ from itertools import product
 
 import torch
 import torch.cuda
-from torch.autograd import Variable
 from common import TestCase, to_gpu, freeze_rng_state, is_iterable
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, contiguous
 import torch.backends.cudnn
@@ -723,23 +722,19 @@ class NNTestCase(TestCase):
             return torch.zeros(input.nelement(), num_out)
 
     def _flatten_tensors(self, x):
-        if torch.is_tensor(x):
+        if isinstance(x, torch.Tensor):
             if x.is_sparse:
                 return x.to_dense().view(-1)
             else:
                 return x.view(-1)
-        elif isinstance(x, Variable):
-            return self._flatten_tensors(x.data)
         else:
             return tuple(self._flatten_tensors(a) for a in x)
 
     def _zero_grad_input(self, input):
-        if isinstance(input, Variable):
+        if isinstance(input, torch.Tensor):
             if input.requires_grad and input.grad is not None:
-                input.grad.data.zero_()
+                input.grad.zero_()
                 input.grad.detach_()
-        elif torch.is_tensor(input):
-            return
         else:
             for i in input:
                 self._zero_grad_input(i)
@@ -764,7 +759,7 @@ class NNTestCase(TestCase):
 
             if jacobian_parameters:
                 self._zero_grad_parameters(module)
-            # Variables will accumulate gradient from multiple steps
+            # Tensors will accumulate gradient from multiple steps
             if jacobian_input:
                 self._zero_grad_input(input)
             d_input = self._backward(module, input, output, d_out)
@@ -785,10 +780,7 @@ class NNTestCase(TestCase):
 
     def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         def fw(input):
-            out = self._forward(module, input)
-            if isinstance(out, Variable):
-                return out.data
-            return out
+            return self._forward(module, input).detach()
 
         res = tuple()
         input = contiguous(input)
@@ -872,9 +864,7 @@ class TestBase(object):
         return test_name
 
     def _unpack(self, value):
-        if isinstance(value, Variable):
-            return value.data
-        elif torch.is_tensor(value):
+        if isinstance(value, torch.Tensor):
             return value
         elif is_iterable(value):
             return type(value)(self._unpack(v) for v in value)
@@ -892,27 +882,18 @@ class TestBase(object):
             fn_name = name + '_fn'
             size_name = name + '_size'
 
-            def convert_tensors_to_vars(args):
-                def tensor_to_var(t):
-                    return Variable(t) if torch.is_tensor(t) else t
-
-                if isinstance(args, tuple):
-                    return tuple(tensor_to_var(x) for x in args)
-                else:
-                    return tensor_to_var(args)
-
             if name in self._extra_kwargs:
-                self._arg_cache[name] = convert_tensors_to_vars(self._extra_kwargs[name])
+                self._arg_cache[name] = self._extra_kwargs[name]
             elif fn_name in self._extra_kwargs:
-                self._arg_cache[name] = convert_tensors_to_vars(self._extra_kwargs[fn_name]())
+                self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
                 assert size_name in self._extra_kwargs
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):
                         return [map_tensor_sizes(s) for s in sizes]
-                    elif torch.is_tensor(sizes):
-                        return Variable(sizes.double())
+                    elif isinstance(sizes, torch.Tensor):
+                        return sizes.double()
                     else:
                         return torch.randn(sizes)
 
@@ -964,19 +945,18 @@ class ModuleTest(TestBase):
     def noncontiguize(self, obj):
         if isinstance(obj, list):
             return [self.noncontiguize(o) for o in obj]
-        tensor = obj.data if isinstance(obj, Variable) else obj
+        tensor = obj
         ndim = tensor.dim()
-        noncontig = torch.stack([tensor.clone().zero_(), tensor], ndim).select(ndim, 1)
+        noncontig = torch.stack([torch.zeros_like(tensor), tensor], ndim).select(ndim, 1).detach()
         assert noncontig.numel() == 1 or not noncontig.is_contiguous()
-        if isinstance(obj, Variable):
-            return Variable(noncontig, requires_grad=obj.requires_grad)
+        noncontig.requires_grad = tensor.requires_grad
         return noncontig
 
     def test_noncontig(self, test_case, module, input):
         # check no scalars, can't make non-contig
-        if isinstance(input, Variable) and input.dim() == 0:
+        if isinstance(input, torch.Tensor) and input.dim() == 0:
             return
-        if any(i.dim() == 0 for i in input if isinstance(i, Variable)):
+        if any(i.dim() == 0 for i in input if isinstance(i, torch.Tensor)):
             return
 
         test_case._zero_grad_parameters(module)
@@ -1020,11 +1000,7 @@ class ModuleTest(TestBase):
             cpu_param = test_case._get_parameters(cpu_module)
             gpu_param = test_case._get_parameters(gpu_module)
             for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
-                if isinstance(cpu_p, Variable):
-                    cpu_p = cpu_p.data
-                if isinstance(gpu_p, Variable):
-                    gpu_p = gpu_p.data
-                gpu_p.copy_(cpu_p)
+                gpu_p.data.copy_(cpu_p)
 
             test_case._zero_grad_input(cpu_input)
             test_case._zero_grad_input(gpu_input)
@@ -1049,8 +1025,9 @@ class ModuleTest(TestBase):
                 cpu_output = cpu_module(cpu_input)
                 gpu_output = gpu_module(gpu_input)
 
-                cpu_gradOutput = Variable(cpu_output.data.clone().normal_(), requires_grad=True)
-                gpu_gradOutput = Variable(cpu_gradOutput.data.type_as(gpu_output), requires_grad=True)
+                cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
+                gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()
+                gpu_gradOutput.requires_grad = True
 
                 cpu_gradInputs = torch.autograd.grad(
                     cpu_output,
@@ -1119,7 +1096,7 @@ class CriterionTest(TestBase):
             out = test_case._forward_criterion(module, input, target)
             expected_out = self.reference_fn(deepcopy(input),
                                              deepcopy(target), module)
-            if isinstance(expected_out, Variable):
+            if isinstance(expected_out, torch.Tensor):
                 expected_out = expected_out.item()
             test_case.assertEqual(out, expected_out)
 

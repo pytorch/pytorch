@@ -1,7 +1,6 @@
 from numbers import Number
 import torch
 import math
-from torch.autograd import variable, Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
@@ -18,7 +17,7 @@ class Binomial(Distribution):
 
     Example::
 
-        >>> m = Binomial(100, torch.Tensor([0 , .2, .8, 1]))
+        >>> m = Binomial(100, torch.tensor([0 , .2, .8, 1]))
         >>> x = m.sample()
          0
          22
@@ -31,7 +30,7 @@ class Binomial(Distribution):
         probs (Tensor): Event probabilities
         logits (Tensor): Event log-odds
     """
-    params = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval}
     has_enumerate_support = True
 
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
@@ -100,7 +99,7 @@ class Binomial(Distribution):
 
     def enumerate_support(self):
         values = self._new((self.total_count,))
-        torch.arange(self.total_count, out=values.data if isinstance(values, Variable) else values)
+        torch.arange(self.total_count, out=values.data)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
         return values

@@ -13,7 +13,7 @@ class FisherSnedecor(Distribution):
 
     Example::
 
-        >>> m = FisherSnedecor(torch.Tensor([1.0]), torch.Tensor([2.0]))
+        >>> m = FisherSnedecor(torch.tensor([1.0]), torch.tensor([2.0]))
         >>> m.sample()  # Fisher-Snedecor-distributed with df1=1 and df2=2
          0.2453
         [torch.FloatTensor of size 1]
@@ -22,7 +22,7 @@ class FisherSnedecor(Distribution):
         df1 (float or Tensor): degrees of freedom parameter 1
         df2 (float or Tensor): degrees of freedom parameter 2
     """
-    params = {'df1': constraints.positive, 'df2': constraints.positive}
+    arg_constraints = {'df1': constraints.positive, 'df2': constraints.positive}
     support = constraints.positive
     has_rsample = True
 

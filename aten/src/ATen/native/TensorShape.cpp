@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/Error.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
@@ -13,7 +14,7 @@ static void check_cat_no_zero_dim(TensorList tensors) {
   for(size_t i = 0; i < tensors.size(); ++i) {
     auto& t = tensors[i];
     if (t.dim() == 0) {
-      runtime_error("zero-dimensional tensor (at position %zu) cannot be concatenated", i);
+      AT_ERROR("zero-dimensional tensor (at position %zu) cannot be concatenated", i);
     }
   }
 }
@@ -32,7 +33,11 @@ Tensor cat(TensorList tensors, int64_t dim) {
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   if (self.dim() == 0) {
-    throw std::runtime_error("chunk expects at least a 1-dimensional tensor");
+    AT_ERROR("chunk expects at least a 1-dimensional tensor");
+  }
+  if (chunks <= 0) {
+    AT_ERROR("chunk expects `chunks` to be greater than 0, got: %lld",
+             (long long)chunks);
   }
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
   // ensure this is dispatched through Tensor/Type, rather than the native function directly.
@@ -75,10 +80,10 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AT_ASSERT(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
   if (start < 0 || start >= cur_size) {
-    runtime_error("start out of range");
+    AT_ERROR("start out of range");
   }
   if (length <= 0 || start > cur_size - length) {
-    runtime_error("length out of range");
+    AT_ERROR("length out of range");
   }
   return at::native::slice(self, dim, start, start + length, 1);
 }
@@ -86,7 +91,7 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 Tensor permute(const Tensor& self, IntList dims) {
   auto nDims = self.dim();
   if (dims.size() != (size_t)nDims) {
-    runtime_error("number of dims don't match in permute");
+    AT_ERROR("number of dims don't match in permute");
   }
   auto oldSizes = self.sizes();
   auto oldStrides = self.strides();
@@ -96,7 +101,7 @@ Tensor permute(const Tensor& self, IntList dims) {
   for (int64_t i = 0; i < nDims; i++) {
     auto dim = maybe_wrap_dim(dims[i], nDims);
     if (seen[dim]) {
-      runtime_error("repeated dim in permute");
+      AT_ERROR("repeated dim in permute");
     }
     seen[dim] = true;
     newSizes[i] = oldSizes[dim];
@@ -107,7 +112,7 @@ Tensor permute(const Tensor& self, IntList dims) {
 
 Tensor repeat(const Tensor& self, IntList repeats) {
   if (repeats.size() < (size_t)self.dim()) {
-    runtime_error("Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
+    AT_ERROR("Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
   }
 
   // Add new leading dimensions to the tensor if the
@@ -149,7 +154,7 @@ static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
     } else if (shape[dim] >= 0) {
       newsize *= shape[dim];
     } else {
-      runtime_error("invalid shape dimension %zd", shape[dim]);
+      AT_ERROR("invalid shape dimension %zd", shape[dim]);
     }
   }
 
@@ -214,7 +219,7 @@ compute_stride(const Tensor& self, IntList newshape) {
 
 Tensor reshape(const Tensor& self, IntList proposed_shape) {
   if (self.type().is_sparse()) {
-    runtime_error("reshape is not implemented for sparse tensors");
+    AT_ERROR("reshape is not implemented for sparse tensors");
   }
   auto shape = infer_size(proposed_shape, self.numel());
   if (auto stride = compute_stride(self, shape)) {
@@ -361,7 +366,7 @@ Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   int64_t ndimI = self._indices().size(0);
   if (dim0 >= ndimI || dim1 >= ndimI) {
-    runtime_error(
+    AT_ERROR(
         "sparse transpose_: transposed dimensions must be sparse ",
         "Got nDimI: %llu, d0: %llu, d1: %llu",
         (long long)ndimI, (long long)dim0, (long long)dim1);
@@ -404,7 +409,7 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
 
 Tensor & t_(Tensor & self) {
   if (self.ndimension() != 2) {
-    runtime_error("t_() expects a 2D tensor, but self is %llu",
+    AT_ERROR("t_() expects a 2D tensor, but self is %llu",
                   (long long)self.ndimension());
   }
   return self.transpose_(0, 1);
