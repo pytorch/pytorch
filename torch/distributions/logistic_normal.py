@@ -22,7 +22,7 @@ class LogisticNormal(TransformedDistribution):
 
         >>> # logistic-normal distributed with mean=(0, 0, 0) and stddev=(1, 1, 1)
         >>> # of the base Normal distribution
-        >>> m = distributions.LogisticNormal(torch.Tensor([0.0] * 3), torch.Tensor([1.0] * 3))
+        >>> m = distributions.LogisticNormal(torch.tensor([0.0] * 3), torch.tensor([1.0] * 3))
         >>> m.sample()
         tensor([ 0.7653,  0.0341,  0.0579,  0.1427])
 

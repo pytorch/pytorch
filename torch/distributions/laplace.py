@@ -11,7 +11,7 @@ class Laplace(Distribution):
 
     Example::
 
-        >>> m = Laplace(torch.Tensor([0.0]), torch.Tensor([1.0]))
+        >>> m = Laplace(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # Laplace distributed with loc=0, scale=1
          0.1046
         [torch.FloatTensor of size 1]
