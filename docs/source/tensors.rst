@@ -106,6 +106,11 @@ The tensor class provides multi-dimensional, `strided <https://en.wikipedia.org/
 view of a storage and defines numeric operations on it.
 
 .. note::
+   For more information on the :class:`torch.dtype`, :class:`torch.device`, and
+   :class:`torch.layout` attributes of a :class:`torch.Tensor`, see
+   :ref:`tensor-attributes-doc`.
+
+.. note::
    Methods which mutate a tensor are marked with an underscore suffix.
    For example, :func:`torch.FloatTensor.abs_` computes the absolute value
    in-place and returns the modified tensor, while :func:`torch.FloatTensor.abs`
