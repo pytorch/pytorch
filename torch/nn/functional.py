@@ -234,7 +234,7 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
         >>> # pool of square window of size=3, stride=2
         >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
         >>> F.avg_pool1d(input, kernel_size=3, stride=2)
-        tensor([[[ 2.0000,  4.0000,  6.0000]]])
+        tensor([[[ 2.,  4.,  6.]]])
     """
     if input.dim() != 3:
         raise ValueError('expected 3D input (got {} dimensions)'

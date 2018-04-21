@@ -212,12 +212,12 @@ class Module(object):
             >>> net.apply(init_weights)
             Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-            tensor([[ 1.0000,  1.0000],
-                    [ 1.0000,  1.0000]])
+            tensor([[ 1.,  1.],
+                    [ 1.,  1.]])
             Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-            tensor([[ 1.0000,  1.0000],
-                    [ 1.0000,  1.0000]])
+            tensor([[ 1.,  1.],
+                    [ 1.,  1.]])
             Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)
               (1): Linear(in_features=2, out_features=2, bias=True)

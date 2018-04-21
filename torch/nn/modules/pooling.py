@@ -259,19 +259,16 @@ class MaxUnpool1d(_MaxUnpoolNd):
         >>> input = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices)
-        tensor([[[ 0.0000,  2.0000,  0.0000,  4.0000,  0.0000,  6.0000,  0.0000,
-                   8.0000]]])
+        tensor([[[ 0.,  2.,  0.,  4.,  0.,  6.,  0., 8.]]])
 
         >>> # Example showcasing the use of output_size
         >>> input = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8, 9]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices, output_size=input.size())
-        tensor([[[ 0.0000,  2.0000,  0.0000,  4.0000,  0.0000,  6.0000,  0.0000,
-                   8.0000,  0.0000]]])
+        tensor([[[ 0.,  2.,  0.,  4.,  0.,  6.,  0., 8.,  0.]]])
 
         >>> unpool(output, indices)
-        tensor([[[ 0.0000,  2.0000,  0.0000,  4.0000,  0.0000,  6.0000,  0.0000,
-                   8.0000]]])
+        tensor([[[ 0.,  2.,  0.,  4.,  0.,  6.,  0., 8.]]])
     """
 
     def __init__(self, kernel_size, stride=None, padding=0):
@@ -332,18 +329,18 @@ class MaxUnpool2d(_MaxUnpoolNd):
                                     [13, 14, 15, 16]]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices)
-        tensor([[[[  0.0000,   0.0000,   0.0000,   0.0000],
-                  [  0.0000,   6.0000,   0.0000,   8.0000],
-                  [  0.0000,   0.0000,   0.0000,   0.0000],
-                  [  0.0000,  14.0000,   0.0000,  16.0000]]]])
+        tensor([[[[  0.,   0.,   0.,   0.],
+                  [  0.,   6.,   0.,   8.],
+                  [  0.,   0.,   0.,   0.],
+                  [  0.,  14.,   0.,  16.]]]])
 
         >>> # specify a different output size than input size
         >>> unpool(output, indices, output_size=torch.Size([1, 1, 5, 5]))
-        tensor([[[[  0.0000,   0.0000,   0.0000,   0.0000,   0.0000],
-                  [  6.0000,   0.0000,   8.0000,   0.0000,   0.0000],
-                  [  0.0000,   0.0000,   0.0000,  14.0000,   0.0000],
-                  [ 16.0000,   0.0000,   0.0000,   0.0000,   0.0000],
-                  [  0.0000,   0.0000,   0.0000,   0.0000,   0.0000]]]])
+        tensor([[[[  0.,   0.,   0.,   0.,   0.],
+                  [  6.,   0.,   8.,   0.,   0.],
+                  [  0.,   0.,   0.,  14.,   0.],
+                  [ 16.,   0.,   0.,   0.,   0.],
+                  [  0.,   0.,   0.,   0.,   0.]]]])
     """
 
     def __init__(self, kernel_size, stride=None, padding=0):
@@ -466,7 +463,7 @@ class AvgPool1d(_AvgPoolNd):
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
         >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
-        tensor([[[ 2.0000,  4.0000,  6.0000]]])
+        tensor([[[ 2.,  4.,  6.]]])
     """
 
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
