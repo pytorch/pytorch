@@ -1289,6 +1289,12 @@ class TestAutograd(TestCase):
         Identity.apply(v).backward()
         self.assertEqual(device[0], 1)
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    def test_inputbuffer_add_multigpu(self):
+        input = torch.randn(1).cuda(0).requires_grad_()
+        output = input.cuda(1) + input.cuda(1)
+        output.backward()
+
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
         y = x + 2
