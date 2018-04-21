@@ -72,6 +72,12 @@ def _get_min_log_scale():
     return math.ceil(math.log(min_positive, 10))
 
 
+def _get_format_fn(format, nonfinite_format=None):
+    if nonfinite_format:
+        return lambda x: nonfinite_format.format(x) if math.isfinite(x) else format.format(x)
+    return lambda x: format.format(x)
+
+
 def _number_format(tensor, min_sz=-1):
     floating_dtype = tensor.dtype.is_floating_point  # save this because we cast later
     _min_log_scale = _get_min_log_scale()
@@ -115,17 +121,16 @@ def _number_format(tensor, min_sz=-1):
     if int_mode:
         if exp_max > prec + 1:
             format = '{{:11.{}e}}'.format(prec)
-            fmt_fn = lambda x: format.format(x)
+            fmt_fn = _get_format_fn(format)
             sz = max(min_sz, 7 + prec)
         else:
-            sz = max(min_sz, exp_max + 1)
+            sz = max(min_sz, exp_max + 1 + include_decimal_int_mode)
             format = '{:' + str(sz) + '.0f}'
-            fmt_fn = lambda x: format.format(x)
+            fmt_fn = _get_format_fn(format)
             if include_decimal_int_mode:
-                format_decimal = format + '.'
-                sz += 1
-                format = '{:' + str(sz) + '.0f}'
-                fmt_fn = lambda x: format_decimal.format(x) if math.isfinite(x) else format.format(x)
+                format = '{:' + str(sz - 1) + '.0f}'
+                nonfinite_format = format + '.'
+                fmt_fn = _get_format_fn(format, nonfinite_format)
     else:
         if exp_max - exp_min > prec:
             sz = 7 + prec
@@ -133,7 +138,7 @@ def _number_format(tensor, min_sz=-1):
                 sz = sz + 1
             sz = max(min_sz, sz)
             format = '{{:{}.{}e}}'.format(sz, prec)
-            fmt_fn = lambda x: format.format(x)
+            fmt_fn = _get_format_fn(format)
         else:
             if exp_max > prec + 1 or exp_max < 0:
                 sz = max(min_sz, 7)
@@ -145,7 +150,7 @@ def _number_format(tensor, min_sz=-1):
                     sz = exp_max + 6
                 sz = max(min_sz, sz)
             format = '{{:{}.{}f}}'.format(sz, prec)
-            fmt_fn = lambda x: format.format(x)
+            fmt_fn = _get_format_fn(format)
     return fmt_fn, scale, sz
 
 
