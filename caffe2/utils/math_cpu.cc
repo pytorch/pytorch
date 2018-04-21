@@ -1092,7 +1092,7 @@ void MomentsImpl(
       std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
   const int Y_size = std::accumulate(
       Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
-  const T scale = static_cast<T>(Y_size) / static_cast<T>(X_size);
+  const T scale = static_cast<float>(Y_size) / static_cast<float>(X_size);
   Set<T, CPUContext>(Y_size, T(0), mean, context);
   Set<T, CPUContext>(Y_size, T(0), variance, context);
   std::vector<int> index(num_dims, 0);
@@ -1104,9 +1104,9 @@ void MomentsImpl(
     internal::IncreaseIndexInDims(num_dims, dims, index.data());
   }
   for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
-    mean[Y_index] *= scale;
-    variance[Y_index] =
-        variance[Y_index] * scale - mean[Y_index] * mean[Y_index];
+    mean[Y_index] = static_cast<T>(mean[Y_index] * scale);
+    variance[Y_index] = static_cast<T>(
+        variance[Y_index] * scale - mean[Y_index] * mean[Y_index]);
   }
 }
 
