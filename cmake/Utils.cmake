@@ -117,6 +117,11 @@ endfunction()
 # Helper function to automatically generate __init__.py files where python
 # sources reside but there are no __init__.py present.
 function(caffe_autogen_init_py_files)
+  if (CAFFE2_AUTOGEN_INIT_PY_ALREADY_RUN)
+    message(STATUS
+        "A previous caffe2 cmake run already created the __init__.py files.")
+    return()
+  endif()
   file(GLOB_RECURSE all_python_files RELATIVE ${PROJECT_SOURCE_DIR}
        "${PROJECT_SOURCE_DIR}/caffe2/*.py")
   set(python_paths_need_init_py)
@@ -142,6 +147,8 @@ function(caffe_autogen_init_py_files)
       file(WRITE ${tmp}/__init__.py "")
     endif()
   endforeach()
+  set(CAFFE2_AUTOGEN_INIT_PY_ALREADY_RUN TRUE CACHE INTERNAL
+      "Helper variable to record if autogen_init_py is already run or not.")
 endfunction()
 
 ###
