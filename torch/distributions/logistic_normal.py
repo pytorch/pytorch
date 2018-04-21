@@ -14,20 +14,18 @@ class LogisticNormal(TransformedDistribution):
         X ~ LogisticNormal(loc, scale)
         Y = log(X / (1 - X.cumsum(-1)))[..., :-1] ~ Normal(loc, scale)
 
-    Example::
-
-        >>> m = LogisticNormal(torch.Tensor([0.0] * 3), torch.Tensor([1.0] * 3))
-        >>> m.sample()  # logistic-normal distributed with mean=(0, 0, 0) and
-                        # stddev=(1, 1, 1) of the base Normal distribution
-         0.4163
-         0.1386
-         0.3539
-         0.0912
-        [torch.FloatTensor of size (4,)]
-
     Args:
         loc (float or Tensor): mean of the base distribution
         scale (float or Tensor): standard deviation of the base distribution
+
+    Example::
+
+        >>> # logistic-normal distributed with mean=(0, 0, 0) and stddev=(1, 1, 1)
+        >>> # of the base Normal distribution
+        >>> m = distributions.LogisticNormal(torch.tensor([0.0] * 3), torch.tensor([1.0] * 3))
+        >>> m.sample()
+        tensor([ 0.7653,  0.0341,  0.0579,  0.1427])
+
     """
     arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.simplex

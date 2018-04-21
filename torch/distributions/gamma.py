@@ -18,7 +18,7 @@ class Gamma(ExponentialFamily):
 
     Example::
 
-        >>> m = Gamma(torch.Tensor([1.0]), torch.Tensor([1.0]))
+        >>> m = Gamma(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # Gamma distributed with concentration=1 and rate=1
          0.1046
         [torch.FloatTensor of size 1]

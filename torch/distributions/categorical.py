@@ -27,7 +27,7 @@ class Categorical(Distribution):
 
     Example::
 
-        >>> m = Categorical(torch.Tensor([ 0.25, 0.25, 0.25, 0.25 ]))
+        >>> m = Categorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
          3
         [torch.LongTensor of size 1]
