@@ -1470,19 +1470,18 @@ Example::
     torch.Size([4, 2, 3])
 """)
 
-# FIXME: Uncomment after rebasing pass the requires_grad_ PR (#6771)
-# add_docstr_all('requires_grad_',
-(r"""
+add_docstr_all('requires_grad_',
+               r"""
 requires_grad_(requires_grad=True) -> Tensor
 
-Change if autograd should record operations on this tensor.
-Returns this tensor.
+Change if autograd should record operations on this tensor: sets this tensor's
+:attr:`requires_grad` attribute in-place. Returns this tensor.
 
-Its main use case is to tell autograd to begin recording operations on a
-Tensor ``tensor``. If ``tensor`` has ``requires_grad=False`` (because it was
-obtained through a DataLoader, or required preprocessing or initialization),
-``tensor.requires_grad_()`` makes it so that autograd will begin to record
-operations on ``tensor``.
+:func:`require_grad_`'s main use case is to tell autograd to begin recording
+operations on a Tensor ``tensor``. If ``tensor`` has ``requires_grad=False``
+(because it was obtained through a DataLoader, or required preprocessing or
+initialization), ``tensor.requires_grad_()`` makes it so that autograd will
+begin to record operations on ``tensor``.
 
 Args:
     requires_grad (bool): If autograd should record operations on this tensor.
