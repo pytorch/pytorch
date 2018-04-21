@@ -117,7 +117,7 @@ view of a storage and defines numeric operations on it.
    computes the result in a new tensor.
 
 .. note::
-    To change an existing tensor's ``device`` and/or ``dtype``, consider using
+    To change an existing tensor's :class:`torch.device` and/or :class:`torch.dtype`, consider using
     :meth:`~torch.Tensor.to` method on the tensor.
 
 .. class:: Tensor()

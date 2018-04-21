@@ -12,9 +12,9 @@ new_common_args = parse_kwargs("""
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
     dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
-        Default: if None, same ``dtype`` as this tensor.
+        Default: if None, same :class:`torch.dtype` as this tensor.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, same ``device`` as this tensor.
+        Default: if None, same :class:`torch.device` as this tensor.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
 """)
@@ -1884,15 +1884,15 @@ add_docstr_all('to',
                r"""
 to(*args, **kwargs) -> Tensor
 
-Performs Tensor dtype and/or device conversion. A ``dtype`` and ``device`` are
+Performs Tensor dtype and/or device conversion. A :class:`torch.dtype` and :class:`torch.device` are
 inferred from the arguments of ``self.to(*args, **kwargs)``.
 
 .. note::
 
     If the ``self`` Tensor already
-    has the correct ``dtype`` and ``device``, then ``self`` is returned.
+    has the correct :class:`torch.dtype` and :class:`torch.device`, then ``self`` is returned.
     Otherwise, the returned tensor is a copy of ``self`` with the desired
-    ``dtype`` and ``device``.
+    :class:`torch.dtype` and :class:`torch.device`.
 
 Here are the ways to call ``to``:
 
@@ -1907,7 +1907,7 @@ Here are the ways to call ``to``:
 
 .. function:: to(other) -> Tensor
 
-    Returns a Tensor with same ``dtype`` and ``device`` as the Tensor
+    Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as the Tensor
     :attr:`other`.
 
 Example::

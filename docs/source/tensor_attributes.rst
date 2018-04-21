@@ -5,12 +5,14 @@
 Tensor Attributes
 =================
 
-Each ``torch.Tensor`` has a ``dtype``, ``device``, and ``layout``.
+Each ``torch.Tensor`` has a :class:`torch.dtype`, :class:`torch.device`, and :class:`torch.layout`.
 
 .. _dtype-doc:
 
 torch.dtype
 -----------
+
+.. class:: torch.dtype
 
 A :class:`torch.dtype` is an object that represents the data type of a
 :class:`torch.Tensor`. PyTorch has eight different data types:
@@ -32,6 +34,8 @@ Data type                  dtype                                         Tensor 
 
 torch.device
 ------------
+
+.. class:: torch.device
 
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
@@ -88,6 +92,9 @@ Via a string and device ordinal:
 
 torch.layout
 ------------
+
+.. class:: torch.layout
+
 A :class:`torch.layout` is an object that represents the memory layout of a
 :class:`torch.Tensor`. Currently, we support ``torch.strided`` (dense Tensors)
 and have experimental support for ``torch.sparse_coo`` (sparse COO Tensors).
