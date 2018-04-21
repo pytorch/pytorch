@@ -1087,7 +1087,7 @@ Example::
     >>> torch.dist(x, y, 3)
     tensor(1.6973)
     >>> torch.dist(x, y, 0)
-    tensor(inf.)
+    tensor(inf)
     >>> torch.dist(x, y, 1)
     tensor(2.6537)
 """)
@@ -1970,7 +1970,7 @@ Example::
     >>> a
     tensor([-0.7168, -0.5471, -0.8933, -1.4428, -0.1190])
     >>> torch.log(a)
-    tensor([nan., nan., nan., nan., nan.])
+    tensor([ nan,  nan,  nan,  nan,  nan])
 """)
 
 add_docstr(torch.log10,
@@ -4967,7 +4967,7 @@ Example::
     >>> torch.det(A)
     tensor(-4.8215)
     >>> torch.logdet(A)
-    tensor(nan.)
+    tensor(nan)
     >>> torch.slogdet(A)
     (tensor(-1.), tensor(1.5731))
 """)
