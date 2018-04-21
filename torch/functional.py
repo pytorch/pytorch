@@ -303,7 +303,7 @@ def isnan(tensor):
 
     Example::
 
-        >>> torch.isnan(torch.Tensor([1, float('nan'), 2]))
+        >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
         tensor([ 0,  1,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):

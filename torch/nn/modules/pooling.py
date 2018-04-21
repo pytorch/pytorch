@@ -256,14 +256,14 @@ class MaxUnpool1d(_MaxUnpoolNd):
 
         >>> pool = nn.MaxPool1d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool1d(2, stride=2)
-        >>> input = torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8]]])
+        >>> input = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices)
         tensor([[[ 0.0000,  2.0000,  0.0000,  4.0000,  0.0000,  6.0000,  0.0000,
                    8.0000]]])
 
         >>> # Example showcasing the use of output_size
-        >>> input = torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8, 9]]])
+        >>> input = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8, 9]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices, output_size=input.size())
         tensor([[[ 0.0000,  2.0000,  0.0000,  4.0000,  0.0000,  6.0000,  0.0000,
@@ -326,7 +326,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
 
         >>> pool = nn.MaxPool2d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool2d(2, stride=2)
-        >>> input = torch.Tensor([[[[ 1,  2,  3,  4],
+        >>> input = torch.tensor([[[[ 1.,  2,  3,  4],
                                     [ 5,  6,  7,  8],
                                     [ 9, 10, 11, 12],
                                     [13, 14, 15, 16]]]])
@@ -465,7 +465,7 @@ class AvgPool1d(_AvgPoolNd):
 
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
-        >>> m(torch.Tensor([[[1,2,3,4,5,6,7]]]))
+        >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
         tensor([[[ 2.0000,  4.0000,  6.0000]]])
     """
 
