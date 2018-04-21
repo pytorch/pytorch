@@ -16,7 +16,7 @@ class Gumbel(TransformedDistribution):
 
     Examples::
 
-        >>> m = Gumbel(torch.Tensor([1.0]), torch.Tensor([2.0]))
+        >>> m = Gumbel(torch.tensor([1.0]), torch.tensor([2.0]))
         >>> m.sample()  # sample from Gumbel distribution with loc=1, scale=2
          1.0124
         [torch.FloatTensor of size 1]

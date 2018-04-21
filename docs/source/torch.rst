@@ -27,6 +27,9 @@ Creation Ops
     :func:`torch.randint`
     :func:`torch.randint_like`
     :func:`torch.randperm`
+    You may also use :func:`torch.empty` with the :ref:`inplace-random-sampling`
+    methods to create :class:`torch.Tensor` s with values sampled from a broader
+    range of distributions.
 
 .. autofunction:: tensor
 .. autofunction:: from_numpy
@@ -83,6 +86,8 @@ Random sampling
 .. autofunction:: randn_like
 .. autofunction:: randperm
 
+.. _inplace-random-sampling:
+
 In-place random sampling
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -108,6 +113,37 @@ Parallelism
 ----------------------------------
 .. autofunction:: get_num_threads
 .. autofunction:: set_num_threads
+
+Locally disabling gradient computation
+--------------------------------------
+The context managers :func:`torch.no_grad`, :func:`torch.enable_grad`, and
+:func:`torch.set_grad_enabled` are helpful for locally disabling and enabling
+gradient computation. See :ref:`locally-disable-grad` for more details on
+their usage.
+
+Examples::
+
+  >>> x = torch.zeros(1, requires_grad=True)
+  >>> with torch.no_grad():
+  ...     y = x * 2
+  >>> y.requires_grad
+  False
+
+  >>> is_train = False
+  >>> with torch.set_grad_enabled(is_train):
+  ...     y = x * 2
+  >>> y.requires_grad
+  False
+
+  >>> torch.set_grad_enabled(True)  # this can also be used as a function
+  >>> y = x * 2
+  >>> y.requires_grad
+  True
+
+  >>> torch.set_grad_enabled(False)
+  >>> y = x * 2
+  >>> y.requires_grad
+  False
 
 
 Math operations
