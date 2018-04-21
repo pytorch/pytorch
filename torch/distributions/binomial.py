@@ -17,7 +17,7 @@ class Binomial(Distribution):
 
     Example::
 
-        >>> m = Binomial(100, torch.Tensor([0 , .2, .8, 1]))
+        >>> m = Binomial(100, torch.tensor([0 , .2, .8, 1]))
         >>> x = m.sample()
          0
          22
