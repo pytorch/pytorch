@@ -100,4 +100,21 @@ A :class:`torch.layout` is an object that represents the memory layout of a
 and have experimental support for ``torch.sparse_coo`` (sparse COO Tensors).
 
 ``torch.strided`` represents dense Tensors and is the memory layout that
-is most commonly used.
+is most commonly used. Each strided tensor has an associated
+:class:`torch.Storage`, which holds its data. These tensors provide
+multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
+view of a storage. Strides are a list of integers: the k-th stride
+represents the jump in the memory necessary to go from one element to the
+next one in the k-th dimension of the Tensor. This concept makes it possible
+to perform many tensor operations efficiently.
+
+Example::
+
+    >>> x = torch.Tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
+    >>> x.stride()
+    (5, 1)
+
+    >>> x.t().stride()
+    (1, 5)
+
+For more information on ``torch.sparse_coo`` tensors, see :ref:`sparse-docs`.
