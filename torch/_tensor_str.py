@@ -190,7 +190,7 @@ def _tensor_str(self, indent, fmt, scale, sz, summarize):
 def _str(self):
     if self.is_sparse:
         size_str = str(tuple(self.shape)).replace(' ', '')
-        return '{} of size {} with indices:\n{}and values:\n{}'.format(
+        return '{} of size {} with indices:\n{}\nand values:\n{}'.format(
             self.type(), size_str, self._indices(), self._values())
 
     prefix = 'tensor('
