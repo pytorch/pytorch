@@ -115,13 +115,17 @@ def _number_format(tensor, min_sz=-1):
     if int_mode:
         if exp_max > prec + 1:
             format = '{{:11.{}e}}'.format(prec)
+            fmt_fn = lambda x: format.format(x)
             sz = max(min_sz, 7 + prec)
         else:
             sz = max(min_sz, exp_max + 1)
             format = '{:' + str(sz) + '.0f}'
+            fmt_fn = lambda x: format.format(x)
             if include_decimal_int_mode:
-                format += '.'
+                format_decimal = format + '.'
                 sz += 1
+                format = '{:' + str(sz) + '.0f}'
+                fmt_fn = lambda x: format_decimal.format(x) if math.isfinite(x) else format.format(x)
     else:
         if exp_max - exp_min > prec:
             sz = 7 + prec
@@ -129,6 +133,7 @@ def _number_format(tensor, min_sz=-1):
                 sz = sz + 1
             sz = max(min_sz, sz)
             format = '{{:{}.{}e}}'.format(sz, prec)
+            fmt_fn = lambda x: format.format(x)
         else:
             if exp_max > prec + 1 or exp_max < 0:
                 sz = max(min_sz, 7)
@@ -140,11 +145,12 @@ def _number_format(tensor, min_sz=-1):
                     sz = exp_max + 6
                 sz = max(min_sz, sz)
             format = '{{:{}.{}f}}'.format(sz, prec)
-    return format, scale, sz
+            fmt_fn = lambda x: format.format(x)
+    return fmt_fn, scale, sz
 
 
 def _scalar_str(self, fmt, scale):
-    scalar_str = fmt.format(self.item() / scale)
+    scalar_str = fmt(self.item() / scale)
     # The leading space for positives is ugly on scalars, so we strip it
     return scalar_str.lstrip()
 
@@ -155,11 +161,11 @@ def _vector_str(self, indent, fmt, scale, sz, summarize):
     char_per_line = element_length * elements_per_line
 
     if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        data = ([fmt.format(val / scale) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
+        data = ([fmt(val / scale) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
                 [' ...'] +
-                [fmt.format(val / scale) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
+                [fmt(val / scale) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
-        data = [fmt.format(val) for val in self.tolist()]
+        data = [fmt(val) for val in self.tolist()]
 
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
     lines = [', '.join(line) for line in data_lines]
