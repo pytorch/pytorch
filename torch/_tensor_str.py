@@ -74,7 +74,7 @@ def _get_min_log_scale():
 
 def _get_format_fn(format, nonfinite_format=None):
     if nonfinite_format:
-        return lambda x: nonfinite_format.format(x) if math.isfinite(x) else format.format(x)
+        return lambda x: format.format(x) if math.isinf(x) or math.isnan(x) else nonfinite_format.format(x)
     return lambda x: format.format(x)
 
 
