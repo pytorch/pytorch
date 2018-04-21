@@ -243,6 +243,8 @@ TEST(MathUtilGPUTest, testCopyVector) {
 
 namespace {
 
+constexpr float kEps = 1e-5;
+
 class GemmBatchedGPUTest
     : public testing::TestWithParam<testing::tuple<bool, bool>> {
  protected:
@@ -684,6 +686,9 @@ class BroadcastGPUTest : public testing::Test {
 };
 
 TEST_F(BroadcastGPUTest, BroadcastGPUFloatTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
   RunBroadcastTest({2}, {2}, {1.0f, 2.0f}, {1.0f, 2.0f});
   RunBroadcastTest({1}, {2}, {1.0f}, {1.0f, 1.0f});
   RunBroadcastTest({1}, {2, 2}, {1.0f}, {1.0f, 1.0f, 1.0f, 1.0f});
@@ -693,6 +698,139 @@ TEST_F(BroadcastGPUTest, BroadcastGPUFloatTest) {
       {2, 2, 2},
       {1.0f, 2.0f},
       {1.0f, 1.0f, 2.0f, 2.0f, 1.0f, 1.0f, 2.0f, 2.0f});
+}
+
+class MomentsGPUTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    if (!HasCudaGPU()) {
+      return;
+    }
+    option_.set_device_type(CUDA);
+    cuda_context_ = make_unique<CUDAContext>(option_);
+    Blob* blob_x = ws_.CreateBlob("X");
+    Blob* blob_mean = ws_.CreateBlob("mean");
+    Blob* blob_variance = ws_.CreateBlob("variance");
+    Blob* blob_scratch = ws_.CreateBlob("scratch");
+    X_ = blob_x->GetMutable<Tensor<CUDAContext>>();
+    mean_ = blob_mean->GetMutable<Tensor<CUDAContext>>();
+    variance_ = blob_variance->GetMutable<Tensor<CUDAContext>>();
+    scratch_ptr_ = blob_scratch->GetMutable<Tensor<CUDAContext>>();
+  }
+
+  void SetUpData(
+      const std::vector<int>& X_dims,
+      const std::vector<int>& axes,
+      const std::vector<float>& X_data) {
+    std::vector<int> Y_dims = X_dims;
+    for (const int axis : axes) {
+      Y_dims[axis] = 1;
+    }
+    X_->Resize(X_dims);
+    mean_->Resize(Y_dims);
+    variance_->Resize(Y_dims);
+    ASSERT_EQ(X_data.size(), X_->size());
+    cuda_context_->Copy<float, CPUContext, CUDAContext>(
+        X_data.size(), X_data.data(), X_->mutable_data<float>());
+  }
+
+  void VerifyResult(
+      const std::vector<float>& mean_data,
+      const std::vector<float>& variance_data) {
+    Blob* blob_mean_host = ws_.CreateBlob("mean_host");
+    auto* mean_host = blob_mean_host->GetMutable<TensorCPU>();
+    mean_host->CopyFrom<CUDAContext, CUDAContext>(*mean_, cuda_context_.get());
+    Blob* blob_variance_host = ws_.CreateBlob("variance_host");
+    auto* variance_host = blob_variance_host->GetMutable<TensorCPU>();
+    variance_host->CopyFrom<CUDAContext, CUDAContext>(
+        *variance_, cuda_context_.get());
+    cuda_context_->FinishDeviceComputation();
+
+    ASSERT_EQ(mean_data.size(), mean_host->size());
+    for (std::size_t i = 0; i < mean_data.size(); ++i) {
+      EXPECT_FLOAT_EQ(mean_data[i], mean_host->data<float>()[i]);
+    }
+    ASSERT_EQ(variance_data.size(), variance_host->size());
+    for (std::size_t i = 0; i < variance_data.size(); ++i) {
+      EXPECT_NEAR(variance_data[i], variance_host->data<float>()[i], kEps);
+    }
+  }
+
+  void RunMomentsTest(
+      const std::vector<int>& X_dims,
+      const std::vector<int>& axes,
+      const std::vector<float>& X_data,
+      const std::vector<float>& mean_data,
+      const std::vector<float>& variance_data) {
+    SetUpData(X_dims, axes, X_data);
+    math::Moments<float, CUDAContext>(
+        X_dims.size(),
+        X_dims.data(),
+        axes.size(),
+        axes.data(),
+        X_->data<float>(),
+        mean_->mutable_data<float>(),
+        variance_->mutable_data<float>(),
+        cuda_context_.get(),
+        scratch_ptr_);
+    VerifyResult(mean_data, variance_data);
+  }
+
+  Workspace ws_;
+  DeviceOption option_;
+  std::unique_ptr<CUDAContext> cuda_context_;
+  Tensor<CUDAContext>* X_ = nullptr;
+  Tensor<CUDAContext>* mean_ = nullptr;
+  Tensor<CUDAContext>* variance_ = nullptr;
+  Tensor<CUDAContext>* scratch_ptr_ = nullptr;
+};
+
+TEST_F(MomentsGPUTest, MomentsGPUFloatTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
+  // Test for 1D tensor.
+  RunMomentsTest({3}, {0}, {1.0f, 2.0f, 3.0f}, {2.0f}, {2.0f / 3.0f});
+
+  // Test for 2D Tensor.
+  RunMomentsTest(
+      {2, 3},
+      {1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {2.0f, 5.0f},
+      {2.0f / 3.0f, 2.0f / 3.0f});
+  RunMomentsTest(
+      {2, 3},
+      {0},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {2.5f, 3.5f, 4.5f},
+      {2.25f, 2.25f, 2.25f});
+  RunMomentsTest(
+      {2, 3},
+      {0, 1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+      {3.5f},
+      {35.0f / 12.0f});
+
+  // Test for 3D tensor.
+  RunMomentsTest(
+      {2, 2, 2},
+      {1, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {2.5f, 6.5f},
+      {1.25, 1.25});
+  RunMomentsTest(
+      {2, 2, 2},
+      {0, 1},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {4.0f, 5.0f},
+      {5.0f, 5.0f});
+  RunMomentsTest(
+      {2, 2, 2},
+      {0, 2},
+      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
+      {3.5f, 5.5f},
+      {4.25, 4.25});
 }
 
 class TransposeGPUTest : public testing::Test {
