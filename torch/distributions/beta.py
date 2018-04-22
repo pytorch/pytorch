@@ -13,7 +13,7 @@ class Beta(ExponentialFamily):
 
     Example::
 
-        >>> m = Beta(torch.Tensor([0.5]), torch.Tensor([0.5]))
+        >>> m = Beta(torch.tensor([0.5]), torch.tensor([0.5]))
         >>> m.sample()  # Beta distributed with concentration concentration1 and concentration0
          0.1046
         [torch.FloatTensor of size 1]
