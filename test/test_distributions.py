@@ -967,7 +967,7 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_gpu_sample(self):
-        set_rng_seed(1)
+        set_rng_seed(0)
         for rate in [0.12, 0.9, 4.0]:
             self._check_sampler_discrete(Poisson(torch.Tensor([rate]).cuda()),
                                          scipy.stats.poisson(rate),

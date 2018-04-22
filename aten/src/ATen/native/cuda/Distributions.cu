@@ -9,8 +9,7 @@
 #include <functional>
 #include <nvfunctional>
 
-#include "ATen/SharedDist.cu"
-#include "ATen/native/Distributions.cpp"
+#include "ATen/native/Distributions.h"
 
 #include <TH/THAtomic.h>
 
@@ -52,38 +51,32 @@ void poisson_cuda_kernel(
       });
 }
 
-  template <typename scalar>
-  struct GammaOpCUDA {
-    static void apply(Tensor& ret, const Tensor& alpha, std::pair<uint64_t, uint64_t> seeds) {
-      at::cuda::CUDA_tensor_apply2<scalar, float>(ret, alpha,
-        [seeds] __device__ (scalar& ret_val, const float& alpha, bool early_exit) {
-          curandStatePhilox4_32_10_t state;
-          curand_init(seeds.first, blockIdx.x * blockDim.x + threadIdx.x, seeds.second, &state);
-          baseSampler<float> standard_uniform([&state] __device__ () {
-            return curand_uniform(&state);
-          });
-          baseSampler<float> standard_normal([&state] __device__ () {
-            return curand_normal(&state);
-          });
-          auto sample = scalar_cast<scalar>(sample_gamma<float>(alpha, standard_uniform, standard_normal));
-          ret_val = ::max(THCNumerics<scalar>::min(), (scalar) sample);
-        }
-      );
-    }
-  };
-
-  template <typename scalar>
-  struct PoissonOpCUDA {
-    static void apply(Tensor& ret, const Tensor& lambda, std::pair<uint64_t, uint64_t> seeds) {
-      at::cuda::CUDA_tensor_apply2<scalar, float>(ret, lambda,
-        [seeds] __device__ (scalar& ret_val, const float& lambda, bool early_exit) {
-          curandStatePhilox4_32_10_t state;
-          curand_init(seeds.first, blockIdx.x * blockDim.x + threadIdx.x, seeds.second, &state);
-          ret_val = scalar_cast<scalar>(curand_poisson(&state, lambda));
-        }
-      );
-    }
-  };
+template <typename scalar_t>
+void gamma_cuda_kernel(
+    at::Tensor& ret,
+    const at::Tensor& alpha,
+    std::pair<uint64_t, uint64_t> seeds) {
+  at::cuda::CUDA_tensor_apply2<scalar_t, float>(
+      ret,
+      alpha,
+      [seeds] __device__(
+          scalar_t & ret_val, const float& alpha, bool early_exit) {
+        curandStatePhilox4_32_10_t state;
+        curand_init(
+            seeds.first,
+            blockIdx.x * blockDim.x + threadIdx.x,
+            seeds.second,
+            &state);
+	at::native::BaseSampler<float> standard_uniform([&state] __device__ () {
+	  return curand_uniform(&state);
+        });
+	at::native::BaseSampler<float> standard_normal([&state] __device__ () {
+          return curand_normal(&state);
+        });
+	auto sample = at::native::sample_gamma<float>(alpha, standard_uniform, standard_normal);
+	ret_val = ::max(THCNumerics<scalar_t>::min(), scalar_cast<scalar_t>(sample));
+      });
+}
 
 } // namespace
 
@@ -100,7 +93,9 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
 Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
   Tensor ret = alpha.type().tensor(alpha.sizes());
   auto alpha_ = alpha.toType(ScalarType::Float);
-  dispatch_floating_types<void, dist::GammaOpCUDA>(ret.type(), "gamma", ret, alpha_, dist::next_philox_seed(gen));
+  AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
+     gamma_cuda_kernel<scalar_t>(ret, alpha_, next_philox_seed(gen));
+   });
   return ret;
 }
 
