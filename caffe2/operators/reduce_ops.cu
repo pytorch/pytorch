@@ -180,14 +180,14 @@ void ComputeReduceMinMaxGradientCUDA(
 
 } // namespace
 
-template <typename T>
-class ReduceMinMaxGradientOp<T, CUDAContext> final
-    : public ReduceGradientOpBase<T, CUDAContext> {
+template <typename T, typename Context>
+class ReduceMinMaxGradientCudaOp final
+    : public ReduceGradientOpBase<T, Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
+  USE_OPERATOR_FUNCTIONS(Context);
 
-  ReduceMinMaxGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ReduceGradientOpBase<T, CUDAContext>(operator_def, ws) {}
+  ReduceMinMaxGradientCudaOp(const OperatorDef& operator_def, Workspace* ws)
+      : ReduceGradientOpBase<T, Context>(operator_def, ws) {}
 
  protected:
   bool Compute(
@@ -207,12 +207,12 @@ class ReduceMinMaxGradientOp<T, CUDAContext> final
 REGISTER_CUDA_OPERATOR(ReduceMin, ReduceMinOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     ReduceMinGradient,
-    ReduceMinMaxGradientOp<float, CUDAContext>);
+    ReduceMinMaxGradientCudaOp<float, CUDAContext>);
 
 REGISTER_CUDA_OPERATOR(ReduceMax, ReduceMaxOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     ReduceMaxGradient,
-    ReduceMinMaxGradientOp<float, CUDAContext>);
+    ReduceMinMaxGradientCudaOp<float, CUDAContext>);
 
 REGISTER_CUDA_OPERATOR(ReduceSum, ReduceSumOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
