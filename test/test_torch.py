@@ -1373,20 +1373,63 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
-        def check_sum_dim(tensor, dim):
-            expected = tensor.numpy().sum(dim)
-            actual = tensor.sum(dim)
-            self.assertEqual(expected.shape, actual.shape)
-            self.assertTrue(np.allclose(expected, actual.numpy()))
+        def check_sum_dim(tensors, dim):
+            for tensor in tensors:
+                expected = tensor.numpy().sum(dim)
+                actual = tensor.sum(dim)
+                self.assertEqual(expected.shape, actual.shape)
+                if actual.dtype == torch.float:
+                    self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
+                else:
+                    self.assertTrue(np.allclose(expected, actual.numpy()))
 
-        check_sum_dim(torch.randn(3, 5, 7), 0)
-        check_sum_dim(torch.randn(3, 5, 7), 1)
-        check_sum_dim(torch.randn(3, 5, 7), 2)
-        check_sum_dim(torch.randn(100000), -1)
-        check_sum_dim(torch.randn(5, 400000), 1)
-        check_sum_dim(torch.randn(50, 50, 50), 0)
-        check_sum_dim(torch.randn(50, 50, 50), 1)
-        check_sum_dim(torch.randn(50, 50, 50), 2)
+        float_types = [torch.double,
+                       torch.float]
+        int_types = [torch.int64,
+                     torch.int32,
+                     torch.int16]
+
+        def make_contiguous(shape, dtype):
+            if dtype in float_types:
+                return torch.randn(*shape, dtype=dtype)
+            result = torch.zeros(*shape, dtype=dtype)
+            result.apply_(lambda x: random.randint(-100, 100))
+            return result
+
+        def make_non_contiguous(shape, dtype):
+            contig = make_contiguous(shape, dtype)
+            non_contig = torch.empty(shape + (2,), dtype=dtype)[..., 0]
+            non_contig.copy_(contig)
+            self.assertFalse(non_contig.is_contiguous())
+            return non_contig
+
+        def make_tensors(*shape):
+            tensors = []
+            for dtype in float_types + int_types:
+                tensors.append(make_contiguous(shape, dtype))
+                tensors.append(make_non_contiguous(shape, dtype))
+            return tensors
+
+        check_sum_dim(make_tensors(5, 400000), 1)
+        check_sum_dim(make_tensors(3, 5, 7), 0)
+        check_sum_dim(make_tensors(3, 5, 7), 1)
+        check_sum_dim(make_tensors(3, 5, 7), 2)
+        check_sum_dim(make_tensors(100000), -1)
+        check_sum_dim(make_tensors(50, 50, 50), 0)
+        check_sum_dim(make_tensors(50, 50, 50), 1)
+        check_sum_dim(make_tensors(50, 50, 50), 2)
+
+        def make_contiguous_slice(size, dtype):
+            contig = make_contiguous((1, size), dtype)
+            non_contig = contig[:1, 1:size - 1]
+            self.assertTrue(non_contig.is_contiguous())
+            return contig
+
+        for dtype in float_types + int_types:
+            check_sum_dim(make_contiguous_slice(5, dtype), 0)
+            check_sum_dim(make_contiguous_slice(50, dtype), 0)
+            check_sum_dim(make_contiguous_slice(500, dtype), 0)
+            check_sum_dim(make_contiguous_slice(100000, dtype), 0)
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
