@@ -15,9 +15,14 @@ from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MANAGER_STATUS_CHECK_INTERVAL
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 
+# We cannot import TEST_CUDA from common_nn here, because if we do that,
+# the TEST_CUDNN line from common_nn will be executed multiple times
+# as well during the execution of this test suite, and it will cause
+# CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
 
-# We need spawn start method for test_manager_unclean_exit
+# We need spawn start method for test_manager_unclean_exit, but
+# Python 2.7 doesn't allow it.
 if sys.version_info[0] == 3:
     # Without the try-catch block, some tests will complain that
     # context has already been set.

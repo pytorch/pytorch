@@ -40,6 +40,9 @@ r"""Whether to use shared memory in default_collate"""
 MANAGER_STATUS_CHECK_INTERVAL = 5.0
 
 if IS_WINDOWS:
+    # On Windows, the parent ID of the worker process remains unchanged when the manager process
+    # is gone, and the only way to check it through OS is to let the worker have a process handle
+    # of the manager and ask if the process status has changed.
     class ManagerWatchdog(object):
         def __init__(self):
             self.manager_pid = os.getppid()
