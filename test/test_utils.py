@@ -515,7 +515,6 @@ class TestBottleneck(TestCase):
         return (rc, output, err)
 
     def _run_bottleneck(self, test_file, scriptargs=''):
-        import os
         curdir = os.path.dirname(os.path.abspath(__file__))
         filepath = '{}/{}'.format(curdir, test_file)
         if scriptargs != '':
@@ -594,6 +593,53 @@ class TestBottleneck(TestCase):
         self._check_autograd_summary(out)
         self._check_cprof_summary(out)
         self._check_cuda(out)
+
+
+from torch.utils.collect_env import get_pretty_env_info
+
+
+class TestCollectEnv(TestCase):
+
+    def _build_env_to_expect(self, build_env):
+        return 'expect/TestCollectEnv.test_{}.expect'.format(
+            build_env.replace('.', '').replace('-', '_'))
+
+    def _preprocess_info_for_test(self, info_output):
+        # Remove the version hash
+        version_hash_regex = re.compile(r'(a\d+)\+.......')
+        return re.sub(version_hash_regex, r'\1', info_output).strip()
+
+    def assertExpectedOutput(self, info_output, build_env):
+        processed_info = self._preprocess_info_for_test(info_output)
+        expect_filename = self._build_env_to_expect(build_env)
+
+        ci_warning = ('This test will error out if the CI config was recently '
+                      'updated. If this is the case, please update the expect '
+                      'files to match the CI machines\' system config.')
+
+        with open(expect_filename, 'r') as f:
+            expected_info = f.read().strip()
+            self.assertEqual(processed_info, expected_info, ci_warning)
+
+    def test_smoke(self):
+        info_output = get_pretty_env_info()
+        self.assertTrue(info_output.count('\n') >= 17)
+
+    @unittest.skipIf('BUILD_ENVIRONMENT' not in os.environ.keys(), 'CI-only test')
+    def test_expect(self):
+        info_output = get_pretty_env_info()
+
+        ci_build_envs = [
+            'pytorch-linux-trusty-py2.7',
+            'pytorch-linux-xenial-cuda9-cudnn7-py3',
+            'pytorch-macos-10.13-py3',
+            'pytorch-win-ws2016-cuda9-cudnn7-py3'
+        ]
+        build_env = os.environ['BUILD_ENVIRONMENT']
+        if build_env not in ci_build_envs:
+            return
+
+        self.assertExpectedOutput(info_output, build_env)
 
 
 class TestONNXUtils(TestCase):
