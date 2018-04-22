@@ -1465,9 +1465,9 @@ from_numpy(ndarray) -> Tensor
 
 Creates a :class:`Tensor` from a :class:`numpy.ndarray`.
 
-The returned tensor and `ndarray` share the same memory. Modifications to the
-tensor will be reflected in the `ndarray` and vice versa. The returned tensor
-is not resizable.
+The returned tensor and :attr:`ndarray` share the same memory. Modifications to
+the tensor will be reflected in the :attr:`ndarray` and vice versa. The returned
+tensor is not resizable.
 
 Example::
 
@@ -3476,12 +3476,12 @@ Constructs a tensor with :attr:`data`.
     :func:`torch.tensor` always copies :attr:`data`. If you have a Tensor
     ``data`` and want to avoid a copy, use :func:`torch.Tensor.requires_grad_`
     or :func:`torch.Tensor.detach`.
-    If you have a numpy array and want to avoid a copy, use
+    If you have a NumPy ``ndarray`` and want to avoid a copy, use
     :func:`torch.from_numpy`.
 
 Args:
     data (array_like): Initial data for the tensor. Can be a list, tuple,
-        numpy array, scalar, and other types.
+        NumPy ``ndarray``, scalar, and other types.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if None, infers data type from :attr:`data`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
