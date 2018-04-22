@@ -334,12 +334,55 @@ ENDIF()
 TARGET_LINK_LIBRARIES(ATen cpuinfo)
 
 IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(ATen
-    ${CUDA_LIBRARIES}
-    ${CUDA_cusparse_LIBRARY}
-    ${CUDA_curand_LIBRARY})
-  CUDA_ADD_CUBLAS_TO_TARGET(ATen)
-  CUDA_ADD_CUFFT_TO_TARGET(ATen)
+  IF ($ENV{ATEN_STATIC_CUDA})
+    # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
+    # we first have to build a fake lib that links with no device callbacks,
+    # and then we link against this object file.
+    # This was recommended by the CuFFT team at NVIDIA
+
+    # build fake CuFFT lib in build dir
+    EXECUTE_PROCESS(COMMAND touch ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc)
+    if(${CUDA_VERSION_MAJOR} EQUAL "8")
+      SET(CUFFT_FAKELINK_OPTIONS
+	--generate-code arch=compute_35,code=sm_35
+	--generate-code arch=compute_50,code=sm_50
+	--generate-code arch=compute_60,code=sm_60)
+    elseif(${CUDA_VERSION_MAJOR} EQUAL "9")
+      SET(CUFFT_FAKELINK_OPTIONS
+	--generate-code arch=compute_35,code=sm_35
+	--generate-code arch=compute_50,code=sm_50
+	--generate-code arch=compute_60,code=sm_60
+	--generate-code arch=compute_70,code=sm_70)
+    else()
+      MESSAGE(FATAL_ERROR "Unhandled major cuda version ${CUDA_VERSION_MAJOR}")
+    endif()
+    ADD_CUSTOM_COMMAND(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a
+      COMMAND "${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc" -o ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a -Xcompiler -fPIC
+      ${CUFFT_FAKELINK_OPTIONS}
+      --device-link ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc -lcufft_static -lculibos
+      )
+    ADD_CUSTOM_TARGET(FAKELINKED_CUFFT_TARGET DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a)
+    add_library(FAKELINKED_CUFFT STATIC IMPORTED GLOBAL)
+    add_dependencies(FAKELINKED_CUFFT FAKELINKED_CUFFT_TARGET)
+    set_target_properties(FAKELINKED_CUFFT PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a)
+
+    TARGET_LINK_LIBRARIES(ATen
+      ${CUDA_LIBRARIES}
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
+      FAKELINKED_CUFFT
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a
+      )
+  ELSE()
+    TARGET_LINK_LIBRARIES(ATen
+      ${CUDA_LIBRARIES}
+      ${CUDA_cusparse_LIBRARY}
+      ${CUDA_curand_LIBRARY})
+    CUDA_ADD_CUBLAS_TO_TARGET(ATen)
+    CUDA_ADD_CUFFT_TO_TARGET(ATen)
+  ENDIF()
 
   if(CUDNN_FOUND)
     target_link_libraries(ATen ${CUDNN_LIBRARIES})
