@@ -129,18 +129,22 @@ def is_storage(obj):
 
 
 def set_default_tensor_type(t):
-    r"""Sets the default ``torch.Tensor`` type to type :attr:`t`.
+    r"""Sets the default ``torch.Tensor`` type to floating point tensor type
+    :attr:`t`. This type will also be used as default floating point type for
+    type inference in :func:`torch.tensor`.
 
-    The default tensor type is initially ``"torch.FloatTensor"``.
+    The default tensor type is initially ``torch.FloatTensor``
 
     Args:
-        t (type or string): the tensor type or its name
+        t (type or string): the floating point tensor type or its name
 
     Example::
 
-        >>> torch.set_default_tensor_type("torch.FloatTensor")
-        >>> torch.tensor([1.2, 3])
-        tensor([ 1.2000,  3.0000])
+        >>> torch.tensor([1.2, 3]).dtype  # default is float32
+        torch.float32
+        >>> torch.set_default_tensor_type(torch.DoubleTensor)
+        >>> torch.tensor([1.2, 3]).dtype  # floating point tensor
+        torch.float64
 
     """
     if isinstance(t, _string_classes):
@@ -149,16 +153,20 @@ def set_default_tensor_type(t):
 
 
 def set_default_dtype(d):
-    r"""Sets the default ``torch.dtype`` type to type :attr:`d`.
+    r"""Sets the default floating point dtype to :attr:`d`. This type will be
+    used as default floating point type for type inference in
+    :func:`torch.tensor`.
 
     Args:
-        d (torch.dtype): the dtype to make the default
+        d (:class:`torch.dtype`): the floating point dtype to make the default
 
     Example::
 
+        >>> torch.tensor([1.2, 3]).dtype  # default is float32
+        torch.float32
         >>> torch.set_default_dtype(torch.double)
-        >>> torch.tensor([1.2, 3], device='cpu')
-        tensor([ 1.2000,  3.0000])
+        >>> torch.tensor([1.2, 3]).dtype
+        torch.float64
     """
     _C._set_default_dtype(d)
 
