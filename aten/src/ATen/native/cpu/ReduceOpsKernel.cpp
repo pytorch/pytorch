@@ -54,6 +54,14 @@ struct Reduction {
 
     int64_t n = self.size(*dim);
     int64_t stride = self.stride(*dim);
+    // A contiguous tensor does not need to hold a meaningful stride
+    // if the corresponding size is 1
+    if (n == 1) {
+      stride = 1;
+      for (int64_t i = self.ndimension() - 1; i > *dim; i--) {
+        stride *= self.size(i);
+      }
+    }
     int64_t batch = numel / (n * stride);
     bool paralellize = batch * n > internal::TBB_GRAIN_SIZE;
     parallel_for(batch, 1, paralellize, [=](int64_t b) {
