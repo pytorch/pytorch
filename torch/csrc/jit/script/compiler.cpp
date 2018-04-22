@@ -33,7 +33,7 @@ static std::string diagnosticType(TypePtr ptr) {
     ss << ")";
     return ss.str();
   } else {
-    return "Tensor";
+    return ptr->name();
   }
 }
 
