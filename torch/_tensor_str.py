@@ -206,6 +206,8 @@ def _str(self):
             suffix = ', device=\'' + str(self.device) + '\'' + suffix
 
     if self.numel() == 0:
+        # In an empty tensor, there are no elements to infer if the dtype should be int64,
+        # so it must be shown explicitly.
         if self.dtype != torch.get_default_dtype():
             suffix = ', dtype=' + str(self.dtype) + suffix
         tensor_str = '[]'
