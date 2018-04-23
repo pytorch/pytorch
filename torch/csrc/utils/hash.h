@@ -48,6 +48,23 @@ std::size_t simple_get_hash(const T& o);
 template<typename T, typename V>
 using type_if_not_enum = typename std::enable_if<!std::is_enum<T>::value, V>::type;
 
+
+struct CheckTHashHelper {
+	static std::nullptr_t hash(const CheckTHashHelper& m) {
+		return 0;
+    }
+};
+
+template<typename T>
+struct CheckTHash: CheckTHashHelper, T {
+};
+
+template<typename T, typename V>
+using type_if_not_thash = typename std::enable_if<!std::is_same<decltype(CheckTHash<T>.hash()), std::nullptr_t>::value, V>::type;
+
+template<typename T, typename V>
+using type_if_not_hash = typename std::enable_if<!std::is_class<std::hash<T>>::value, V>::type;
+
 // Use SFINAE to dispatch to std::hash if possible, cast enum types to int automatically,
 // and fall back to T::hash otherwise.
 // NOTE: C++14 added support for hashing enum types to the standard, and some compilers
@@ -65,7 +82,7 @@ typename std::enable_if<std::is_enum<T>::value, std::size_t>::type dispatch_hash
 }
 
 template<typename T>
-auto dispatch_hash(const T& o) -> decltype(T::hash(o), std::size_t()) {
+auto dispatch_hash(const T& o) -> decltype(T::hash(o), type_if_not_hash<T, std::size_t>()) {
   return T::hash(o);
 }
 

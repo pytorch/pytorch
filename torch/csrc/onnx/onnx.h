@@ -30,7 +30,11 @@ using unique_vector = std::vector<std::unique_ptr<T>>;
 // Helper function for encoding inside callbacks
 template<typename T, const pb_field_t* Field>
 bool micropb_encode(pb_ostream_t *stream, T* arg) {
-  static_assert(Field != nullptr, "no overload in micropb_encode");
+  #ifndef _MSC_VER
+	static_assert(Field != nullptr, "no overload in micropb_encode");
+  #else
+	assert(Field != nullptr, "no overload in micropb_encode");
+  #endif
   return pb_encode_submessage(stream, Field, static_cast<void*>(&arg->proto));
 }
 template <> bool micropb_encode<std::string, nullptr>(pb_ostream_t *stream, std::string* arg);

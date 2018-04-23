@@ -98,16 +98,15 @@ void PropagateShapeOnNode(Node * node) {
   using AKind = AttributeKind;
   // These don't require the types and present flag. Return early after we
   // process them
-  switch(node->kind()) {
-    case prim::If: {
+  {
+    IR_IF(node, If)
       auto then_block = node->blocks().at(0);
       auto else_block = node->blocks().at(1);
       PropagateShapeOnBlock(then_block);
       PropagateShapeOnBlock(else_block);
       mergeTypes(then_block->outputs(), else_block->outputs(), node->outputs());
       return;
-    }
-    case prim::Loop: {
+    IR_ELSEIF(Loop)
       auto body_block = node->blocks().at(0);
       // propagate counter type
       body_block->inputs().at(0)->setType(node->inputs().at(0)->type());
@@ -127,10 +126,9 @@ void PropagateShapeOnNode(Node * node) {
         node->outputs()[i]->setType(loop_carried_block[i]->type());
       }
       return;
-    }
-    default: ; // fall-through
+   IR_ELSE()
+   IR_END()
   }
-
   std::vector<TensorType*> types;
   bool present;
   std::tie(types, present) = gatherTypes(node->inputs());
@@ -154,53 +152,52 @@ void PropagateShapeOnNode(Node * node) {
     return true;
   };
 
-  switch(node->kind()) {
+  {
     //TODO: for expensive ops we can directly encode their shape propagation
     // here, otherwise we fallback to running a fake version of the op
     // to get a quick and dirty propagation
-    case aten::add:
-    case aten::sub:
-    case aten::mul:
-    case aten::div:
-    case aten::pow:
-    case aten::min:
-    case aten::max:
-    case aten::lt:
-    case aten::le:
-    case aten::gt:
-    case aten::ge:
-    case aten::eq:
-    case aten::ne: {
+	IR_IFC_MULTI1(node, aten::add)
+	IR_IFC_MULTI2(aten::sub)
+	IR_IFC_MULTI2(aten::mul)
+	IR_IFC_MULTI2(aten::div)
+	IR_IFC_MULTI2(aten::pow)
+	IR_IFC_MULTI2(aten::min)
+	IR_IFC_MULTI2(aten::max)
+	IR_IFC_MULTI2(aten::lt)
+	IR_IFC_MULTI2(aten::le)
+	IR_IFC_MULTI2(aten::gt)
+	IR_IFC_MULTI2(aten::ge)
+	IR_IFC_MULTI2(aten::eq)
+	IR_IFC_MULTI3(aten::ne)
       if (node->inputs().size() == 2) {
         broadcastPointwise(node, types);
       }
       // NB: we don't handle the nodes in any other way, because the type casting
       // logic in scalar cases is non-trivial. It's better to just run them.
-    } break;
-    case aten::neg: {
-      if (!check_overload(/*num_inputs=*/1, /*num_outputs=*/1)) break;
-      node->output()->setType(types.at(0)->contiguous());
-    } break;
-    case aten::mm: {
-      if (!check_overload(/*num_inputs=*/2, /*num_outputs=*/1)) break;
-      auto lhs_type = types.at(0);
-      auto rhs_type = types.at(1);
-      SHAPE_ASSERT(lhs_type->sizes().size() == 2 && rhs_type->sizes().size() == 2);
-      node->output()->setType(std::make_shared<TensorType>(
-        lhs_type->scalarType(), lhs_type->device(),
-        at::IntList{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
-    } break;
-    case aten::t: {
-      if (!check_overload(/*num_inputs=*/1, /*num_outputs=*/1)) break;
-      auto tp = types.at(0);
-      auto sizes = tp->sizes();
-      auto strides = tp->strides();
-      SHAPE_ASSERT(sizes.size() == 2);
-      std::swap(sizes.at(0), sizes.at(1));
-      std::swap(strides.at(0), strides.at(1));
-      node->output()->setType(tp->withSizesStrides(sizes, strides));
-    } break;
-    case aten::narrow: {
+	IR_ELSEIFC(aten::neg)
+      if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1)){
+		node->output()->setType(types.at(0)->contiguous());
+	  }
+	IR_ELSEIFC(aten::mm)
+      if (check_overload(/*num_inputs=*/2, /*num_outputs=*/1)){
+		  auto lhs_type = types.at(0);
+		  auto rhs_type = types.at(1);
+		  SHAPE_ASSERT(lhs_type->sizes().size() == 2 && rhs_type->sizes().size() == 2);
+		  node->output()->setType(std::make_shared<TensorType>(
+			lhs_type->scalarType(), lhs_type->device(),
+			at::IntList{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
+	  }
+	IR_ELSEIFC(aten::t)
+      if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1)){
+		  auto tp = types.at(0);
+		  auto sizes = tp->sizes();
+		  auto strides = tp->strides();
+		  SHAPE_ASSERT(sizes.size() == 2);
+		  std::swap(sizes.at(0), sizes.at(1));
+		  std::swap(strides.at(0), strides.at(1));
+		  node->output()->setType(tp->withSizesStrides(sizes, strides));
+	  }
+	IR_ELSEIFC(aten::narrow)
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
                          {{AKind::i, attr::dim},
                           {AKind::i, attr::length}})) {
@@ -212,8 +209,7 @@ void PropagateShapeOnNode(Node * node) {
         sizes.at(dim) = length;
         node->output()->setType(tp->withSizesStrides(sizes, tp->strides()));
       }
-    } break;
-    case aten::sum: {
+	IR_ELSEIFC(aten::sum)
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
                          {{AKind::i, attr::dim},
                           {AKind::i, attr::keepdim}})) {
@@ -230,8 +226,7 @@ void PropagateShapeOnNode(Node * node) {
       } else if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1)) {
         node->output()->setType(types.at(0)->withSizes({}));
       }
-    } break;
-    case aten::squeeze: {
+	IR_ELSEIFC(aten::squeeze)
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
                          {{AKind::i, attr::dim}})) {
         auto tp = types.at(0);
@@ -245,8 +240,7 @@ void PropagateShapeOnNode(Node * node) {
         }
         node->output()->setType(tp->withSizesStrides(sizes, strides));
       }
-    } break;
-    case aten::unsqueeze: {
+	IR_ELSEIFC(aten::unsqueeze)
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
                          {{AKind::i, attr::dim}})) {
         auto tp = types.at(0);
@@ -258,8 +252,7 @@ void PropagateShapeOnNode(Node * node) {
         strides.insert(strides.begin() + dim, 1);
         node->output()->setType(tp->withSizesStrides(sizes, strides));
       }
-    } break;
-    case aten::view: {
+	IR_ELSEIFC(aten::view)
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
                          {{AKind::is, attr::size}})) {
         auto sizes = node->is(attr::size);
@@ -284,40 +277,33 @@ void PropagateShapeOnNode(Node * node) {
         }
         node->output()->setType(types.at(0)->withSizes(sizes));
       }
-    } break;
-    case aten::expand: {
+	IR_ELSEIFC(aten::expand)
       if(check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
                          {{AKind::is, attr::size}})) {
         // it is safe to run this, even if we have an integer input tensor
         PropagateShapeOnNodeByRunningIt(node, types);
       }
-    } break;
-    case prim::ReplaceIfUndef: {
+	IR_ELSEIFC(prim::ReplaceIfUndef)
       // If types[0] has a type, then it is not defined, and the type will
       // get set to types[0] because that will be the value propagated.
       // If its type is not defined, then unification is an undefined type.
       SHAPE_ASSERT(types.size() == 1);
       node->output()->setType(types.at(0)->shared_from_this());
       handled = true;
-    } break;
-    case prim::Constant: {
+	IR_ELSEIFC(prim::Constant)
       node->output()->inferTypeFrom(node->t(attr::value));
       handled = true;
-    } break;
-    case prim::Undefined: {
+	IR_ELSEIFC(prim::Undefined)
       node->output()->setType(DynamicType::get());
       handled = true;
-    } break;
-    case prim::PythonOp: {
+	IR_ELSEIFC(prim::PythonOp)
       setDynamicType(node);
       handled = true;
-    } break;
-    case prim::Print: {
+	IR_ELSEIFC(prim::Print)
       setDynamicType(node);
       handled = true;
-    } break;
-    default: {
-    } break;
+	IR_ELSE()
+	IR_END()
   }
 
   // If we haven't manage to handle the op so far, we fall back to inferring the

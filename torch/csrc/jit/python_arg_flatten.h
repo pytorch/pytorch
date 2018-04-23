@@ -9,6 +9,7 @@
 #include <vector>
 #include <functional>
 
+
 namespace torch { namespace jit { namespace python {
 
 struct IODescriptor {
@@ -108,3 +109,15 @@ PyObject* unflatten(at::ArrayRef<autograd::Variable> outputs,
                     const IODescriptor& structure);
 
 }}} // namespace torch::jit::python
+
+
+namespace std {
+  template <>
+  struct hash<::torch::jit::python::IODescriptor::VariableMetadata>
+  {
+    ::std::size_t operator()(const ::torch::jit::python::IODescriptor::VariableMetadata& k) const
+    {
+		return ::torch::jit::python::IODescriptor::VariableMetadata::hash(k);
+    }
+  };
+}

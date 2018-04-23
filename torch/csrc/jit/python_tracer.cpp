@@ -53,13 +53,13 @@ void initPythonTracerBindings(PyObject* module_) {
       return s.is_complete();
     });
 
-  m.def("_tracer_enter", [](variable_list trace_inputs, std::size_t num_backwards) {
+  m.def("_tracer_enter", [](jit::tracer::variable_list trace_inputs, std::size_t num_backwards) {
     return tracer::enter(std::move(trace_inputs), num_backwards + 1);
   });
-  m.def("_tracer_exit", [](variable_list var_outputs) {
+  m.def("_tracer_exit", [](jit::tracer::variable_list var_outputs) {
     tracer::exit(var_outputs);
   });
-  m.def("_get_tracing_state", [](const variable_list& vars) {
+  m.def("_get_tracing_state", [](const jit::tracer::variable_list& vars) {
     return getTracingState(vars);
   });
   m.def("_get_value_trace", [](std::shared_ptr<TracingState>& state, const Variable& var) {
@@ -68,7 +68,7 @@ void initPythonTracerBindings(PyObject* module_) {
   m.def("_set_value_trace", [](std::shared_ptr<TracingState>& state, const Variable& var, Value* value) {
     return setValueTrace(state, var, value);
   });
-  m.def("_is_tracing", [](const variable_list& vars) {
+  m.def("_is_tracing", [](const jit::tracer::variable_list& vars) {
     return isTracingVar(vars);
   });
 }

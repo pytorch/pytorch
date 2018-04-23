@@ -102,14 +102,22 @@ struct InternedStrings {
     // we can bypass the need to acquire a lock
     // to read the map for Builtins because we already
     // know their string value
-    switch(sym) {
-      #define DEFINE_CASE(ns, s) \
-        case ns::s: return #ns "::" #s;
-      FORALL_BUILTIN_SYMBOLS(DEFINE_CASE)
+  #ifndef _MSC_VER
+	  #define DEFINE_CASE(ns, s) \
+		case ns::s: return #ns "::" #s;
+	  switch(sym) {
+		FORALL_BUILTIN_SYMBOLS(DEFINE_CASE)
       #undef DEFINE_CASE
         default:
           return customString(sym);
-    }
+	  }
+  #else
+	  #define DEFINE_CASE(ns, s) \
+		if(sym==ns::s){return #ns "::" #s;}
+		FORALL_BUILTIN_SYMBOLS(DEFINE_CASE)
+      #undef DEFINE_CASE
+	  return customString(sym);
+  #endif
   }
 private:
   const char * customString(Symbol sym) {

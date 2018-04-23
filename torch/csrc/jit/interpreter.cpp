@@ -823,8 +823,7 @@ struct CodeImpl {
   void insertNodesFromBlock(Block* block) {
     for(auto node : block->nodes()) {
       const auto & source_location = node->getSourceLocation();
-      switch(node->kind()) {
-        case prim::If: {
+	  IR_IF(node, If)
           // x = if c:
           //   <then_block>
           //   -> (vt)
@@ -855,8 +854,7 @@ struct CodeImpl {
           insertAssign(source_location, then_block->outputs(), moveFlags(then_block), node->outputs());
           createJump(jump, instructions.size());
           createJumpNZ(cond_branch, then_block_start);
-        } break;
-        case prim::Loop: {
+		IR_ELSEIF(Loop)
           // o0 = while c i0
           //        block 0: l0
           //          <body>
@@ -891,11 +889,9 @@ struct CodeImpl {
           aliasRegistersTo(node->outputs(), body_block->inputs());
           createJumpZ(cond_branch, instructions.size());
           createJumpNZ(cond_branch_end, entry);
-        } break;
-        default: {
+		IR_ELSE()
           insertInstruction(node);
-        } break;
-      }
+		IR_END()
       // each stage ends with a load instruction
       // we record where these instructions occur, and use them to
       // exit the interpreter
