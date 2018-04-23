@@ -14,17 +14,24 @@
 
 namespace caffe2 {
 
+void BuildInitializationList(
+    Workspace* ws,
+    ::ONNX_NAMESPACE::GraphProto* g,
+    std::unordered_set<std::string>* initialization_list);
+
 class TensorRTTransformer {
  public:
   TensorRTTransformer(
       size_t max_batch_size,
       size_t max_workspace_size,
       int verbosity,
-      bool debug_builder)
+      bool debug_builder,
+      bool build_serializable_op = true)
       : max_batch_size_(max_batch_size),
         max_workspace_size_(max_workspace_size),
         verbosity_(verbosity),
-        debug_builder_(debug_builder) {}
+        debug_builder_(debug_builder),
+        build_serializable_op_(build_serializable_op) {}
 
   OperatorDef BuildTrtOp(
       const std::string& onnx_model_str,
@@ -43,6 +50,24 @@ class TensorRTTransformer {
       onnx::OnnxExporter* exporter,
       std::unordered_map<std::string, TensorShape>* shape_hints);
 
+  void AddTrtOptions(
+      caffe2::OperatorDef* op,
+      const std::unordered_map<std::string, std::vector<int>>&
+          output_size_hints);
+
+  // A lazy version of Trt op building function, where instead of invoking the
+  // trt build engine and serialize the trt runtime, we just attach the
+  // serialized trt model string. The runtime will be built when trt op is
+  // constructed, during which the weights will be pulled from the workspace.
+  // The benefit of doing so is that we can avoid serialize/deserialize the
+  // weights across OperatorDef.
+  OperatorDef BuildTrtOpLazy(
+      const std::string& onnx_model_str,
+      const std::unordered_map<std::string, std::vector<int>>&
+          output_size_hints,
+      const std::unordered_set<std::string>& initialization_list,
+      const caffe2::NetDef& net);
+
   CaffeMap<std::string, TensorShape> SsaRewriteAndMapNames(
       Workspace* ws,
       NetDef* pred_net,
@@ -53,6 +78,9 @@ class TensorRTTransformer {
 
   // Input mapping
   std::unordered_map<std::string, std::string> input_mapping_;
+
+  // Generate serializable trt op or defer the onnx->trt process to ctor of the Trt op
+  bool build_serializable_op_{true};
 
   // TensorRT params
   size_t max_batch_size_{50};
