@@ -36,7 +36,7 @@ def build_pipeline(node_id):
 
         epoch_reader = ReaderWithLimit(full_reader, num_iter=3)
         pipe(epoch_reader, processor=inc_total)
-        Job.current().add_stop_signal(epoch_reader.data_finished())
+        Job.current().add_stop_condition(epoch_reader.data_finished())
     return [total]
 
 
