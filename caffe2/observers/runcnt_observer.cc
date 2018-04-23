@@ -5,7 +5,7 @@ namespace caffe2 {
 RunCountOperatorObserver::RunCountOperatorObserver(
     OperatorBase* op,
     RunCountNetObserver* netObserver)
-    : RNNCapableOperatorObserver(op), netObserver_(netObserver) {
+    : ObserverBase<OperatorBase>(op), netObserver_(netObserver) {
   CAFFE_ENFORCE(netObserver_, "Observers can't operate outside of the net");
 }
 
