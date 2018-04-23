@@ -1,5 +1,6 @@
 add_subdirectory(aten)
 add_subdirectory(gloo)
+add_subdirectory(ideep)
 add_subdirectory(nccl)
 add_subdirectory(opencl)
 add_subdirectory(prof)
