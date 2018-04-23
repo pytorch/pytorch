@@ -373,8 +373,6 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
     throw std::runtime_error(ss.str());
   }
 
-
-
   Tensor res = self.clone();
   for (auto d : dims) {
     res.copy_(reverse_dim(res, d));
