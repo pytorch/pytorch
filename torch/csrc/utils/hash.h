@@ -48,20 +48,6 @@ std::size_t simple_get_hash(const T& o);
 template<typename T, typename V>
 using type_if_not_enum = typename std::enable_if<!std::is_enum<T>::value, V>::type;
 
-
-struct CheckTHashHelper {
-	static std::nullptr_t hash(const CheckTHashHelper& m) {
-		return 0;
-    }
-};
-
-template<typename T>
-struct CheckTHash: CheckTHashHelper, T {
-};
-
-template<typename T, typename V>
-using type_if_not_thash = typename std::enable_if<!std::is_same<decltype(CheckTHash<T>.hash()), std::nullptr_t>::value, V>::type;
-
 template<typename T, typename V>
 using type_if_not_hash = typename std::enable_if<!std::is_class<std::hash<T>>::value, V>::type;
 
