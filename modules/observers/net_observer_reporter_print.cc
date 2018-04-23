@@ -5,18 +5,6 @@
 
 namespace caffe2 {
 
-namespace {
-bool registerGlobalPerfNetObserverReporter(int* /*pargc*/, char*** /*pargv*/) {
-  ObserverConfig::setReporter(make_unique<NetObserverReporterPrint>());
-  return true;
-}
-} // namespace
-
-REGISTER_CAFFE2_EARLY_INIT_FUNCTION(
-    registerGlobalPerfNetObserverReporter,
-    &registerGlobalPerfNetObserverReporter,
-    "Caffe2 print net observer reporter");
-
 const std::string NetObserverReporterPrint::IDENTIFIER = "Caffe2Observer ";
 
 void NetObserverReporterPrint::reportDelay(
