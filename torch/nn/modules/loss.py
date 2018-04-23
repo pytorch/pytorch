@@ -458,10 +458,26 @@ class BCEWithLogitsLoss(_Loss):
     an auto-encoder. Note that the targets `t[i]` should be numbers
     between 0 and 1.
 
+    It's possible to trade off recall and precision by adding weights to positive examples.
+    In this case the loss can be described as:
+    .. math::
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = - w_n \left[ p_n t_n \cdot \log \sigma(x_n)
+        + (1 - t_n) \cdot \log (1 - \sigma(x_n)) \right],
+
+    where :math:`p_n` is the positive weight of class :math:`n`.
+    :math:`p_n > 1` increases the recall, :math:`p_n < 1` increases the precision.
+
+    For example, if a dataset contains 100 positive and 300 negative examples of a single class,
+    then `pos_weight` for the class should be equal to math:`\frac{300}{100}=3`.
+    The loss would act as if the dataset contains math:`3\times 100=300` positive examples.
+
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
             of each batch element. If given, has to be a Tensor of size
             "nbatch".
+        pos_weight (Tensor, optional): a weight of positive examples.
+                Must be a vector with length equal to the number of classes.
         size_average (bool, optional): By default, the losses are averaged
             over observations for each minibatch. However, if the field
             size_average is set to ``False``, the losses are instead summed for
@@ -484,20 +500,17 @@ class BCEWithLogitsLoss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-    def __init__(self, weight=None, size_average=True, reduce=True):
+    def __init__(self, weight=None, size_average=True, reduce=True, pos_weight=None):
         super(BCEWithLogitsLoss, self).__init__(size_average, reduce)
         self.register_buffer('weight', weight)
+        self.register_buffer('pos_weight', pos_weight)
 
     def forward(self, input, target):
-        if self.weight is not None:
-            return F.binary_cross_entropy_with_logits(input, target,
-                                                      self.weight,
-                                                      self.size_average,
-                                                      reduce=self.reduce)
-        else:
-            return F.binary_cross_entropy_with_logits(input, target,
-                                                      size_average=self.size_average,
-                                                      reduce=self.reduce)
+        return F.binary_cross_entropy_with_logits(input, target,
+                                                  self.weight,
+                                                  pos_weight=self.pos_weight,
+                                                  size_average=self.size_average,
+                                                  reduce=self.reduce)
 
 
 class HingeEmbeddingLoss(_Loss):

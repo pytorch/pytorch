@@ -1496,7 +1496,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
     return torch._C._nn.binary_cross_entropy(input, target, weight, size_average, reduce)
 
 
-def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True, reduce=True):
+def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True, reduce=True, pos_weight=None):
     r"""Function that measures Binary Cross Entropy between target and output
     logits.
 
@@ -1507,6 +1507,8 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         target: Tensor of the same shape as input
         weight (Tensor, optional): a manual rescaling weight
                 if provided it's repeated to match input tensor shape
+        pos_weight (Tensor, optional): a weight of positive examples.
+                Must be a vector with length equal to the number of classes.
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 :attr:`size_average` is set to ``False``, the losses are instead summed
@@ -1527,7 +1529,12 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
     max_val = (-input).clamp(min=0)
-    loss = input - input * target + max_val + ((-max_val).exp() + (-input - max_val).exp()).log()
+
+    if pos_weight is None:
+        loss = input - input * target + max_val + ((-max_val).exp() + (-input - max_val).exp()).log()
+    else:
+        log_weight = 1 + (pos_weight - 1) * target
+        loss = input - input * target + log_weight * (max_val + ((-max_val).exp() + (-input - max_val).exp()).log())
 
     if weight is not None:
         loss = loss * weight
