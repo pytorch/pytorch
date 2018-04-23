@@ -1,5 +1,5 @@
 #include "TH/THMath.h"
-
+#include "ATen/Half.h"
 #ifdef __CUDA_ARCH__
 #include <nvfunctional>
 #endif
@@ -17,11 +17,11 @@ namespace {
 #define isnan std::isnan
 #endif
 
-template<typename precision_t>
+template<typename scalar_t>
 struct BaseSampler {
-  nvfunction_or_function<precision_t(void)> sampler;
-  deviceforcuda BaseSampler(nvfunction_or_function<precision_t(void)> sampler): sampler(sampler) {}
-  deviceforcuda precision_t sample() {
+  nvfunction_or_function<scalar_t(void)> sampler;
+  deviceforcuda BaseSampler(nvfunction_or_function<scalar_t(void)> sampler): sampler(sampler) {}
+  deviceforcuda scalar_t sample() {
     return sampler();
   }
 };
@@ -52,29 +52,29 @@ struct BaseSampler {
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-template<typename precision_t>
-deviceforcuda precision_t sample_gamma(precision_t alpha, BaseSampler<precision_t>& standard_uniform, BaseSampler<precision_t>& standard_normal) {
-  precision_t scale = 1.0;
+template<typename scalar_t>
+deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<scalar_t>& standard_uniform, BaseSampler<scalar_t>& standard_normal) {
+  scalar_t scale = 1.0;
 
   // Boost alpha for higher acceptance probability.
   if (alpha < 1.0) {
-    scale *= std::pow(1 - standard_uniform.sample(), 1.0 / alpha);
+    scale *= std::pow(1 - standard_uniform.sample(), static_cast<scalar_t>(1.0) / alpha);
     alpha += 1.0;
   }
 
   // This implements the acceptance-rejection method of Marsaglia and Tsang (2000)
   // doi:10.1145/358407.358414
-  const precision_t d = alpha - 1.0 / 3.0;
-  const precision_t c = 1.0 / std::sqrt(9.0 * d);
+  const scalar_t d = alpha - 1.0 / 3.0;
+  const scalar_t c = 1.0 / std::sqrt(9.0 * d);
   for (;;) {
-    precision_t x, y;
+    scalar_t x, y;
     do {
       x = standard_normal.sample();
       y = 1.0 + c * x;
     } while (y <= 0);
-    const precision_t v = y * y * y;
-    const precision_t u = 1 - standard_uniform.sample();
-    const precision_t xx = x * x;
+    const scalar_t v = y * y * y;
+    const scalar_t u = 1 - standard_uniform.sample();
+    const scalar_t xx = x * x;
     if (u < 1.0 - 0.0331 * xx * xx)
       return scale * d * v;
     if (std::log(u) < 0.5 * xx + d * (1.0 - v + std::log(v)))
@@ -101,11 +101,12 @@ deviceforcuda static inline scalar_t polevl(const scalar_t x,  const scalar_t A[
  */
 template <typename scalar_t>
 deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
-  constexpr scalar_t PSI_10 = 2.25175258906672110764;
+  using acc_scalar_t = typename std::conditional<std::is_same<scalar_t, at::Half>::value, float, scalar_t>::type;
+  constexpr acc_scalar_t PSI_10 = 2.25175258906672110764;
   if (x == 0) {
     return INFINITY;
   }
-  scalar_t additional_summand = 0;
+  acc_scalar_t additional_summand = 0;
   int x_is_integer = x == std::floor(x);
   if (x < 0) {
     if (x_is_integer) {
@@ -118,7 +119,7 @@ deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
   }
 
   // Push x to be >= 10
-  scalar_t result = 0;
+  acc_scalar_t result = 0;
   while (x < 10) {
     result -= 1 / x;
     x += 1;
@@ -128,7 +129,7 @@ deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
   }
 
   // Compute asymptotic digamma
-  static const scalar_t A[] = {
+  static const acc_scalar_t A[] = {
      8.33333333333333333333E-2,
     -2.10927960927960927961E-2,
      7.57575757575757575758E-3,
@@ -138,12 +139,12 @@ deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
      8.33333333333333333333E-2,
   };
 
-  scalar_t y = 0;
+  acc_scalar_t y = 0;
   if (x < 1.0e17) {
-    scalar_t z = 1.0 / (x * x);
-    y = z * polevl<scalar_t>(z, A, 6);
+    acc_scalar_t z = 1.0 / (x * x);
+    y = z * polevl<acc_scalar_t>(z, A, 6);
   }
-  return result + std::log(x) - (0.5 / x) - y + additional_summand;
+  return static_cast<scalar_t>(result + std::log(x) - (0.5 / x) - y + additional_summand);
 }
 
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
@@ -182,7 +183,7 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha, scalar_t x) {
     }
     const auto denom = std::sqrt(8 * alpha);
     const auto term2 = denom / (alpha - x);
-    const auto term3 = std::pow(x - alpha - alpha * std::log(x / alpha), -1.5f);
+    const auto term3 = std::pow(x - alpha - alpha * std::log(x / alpha), static_cast<scalar_t>(-1.5));
     const auto term23 = (x < alpha) ? term2 - term3 : term2 + term3;
     const auto term1 = std::log(x / alpha) * term23
                      - std::sqrt(2 / alpha) * (alpha + x) / ((alpha - x) * (alpha - x));
