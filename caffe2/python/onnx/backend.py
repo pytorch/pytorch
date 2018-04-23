@@ -15,6 +15,13 @@ import collections
 from subprocess import Popen, PIPE
 import zipfile
 
+# When onnx is built against a version of protobuf that is older than
+# that which is vendored with caffe2, onnx will crash if caffe2's
+# vendored protobuf is loaded first. We can work around this by
+# importing onnx first, which will cause it to go out and pick up the
+# system protobuf.
+import onnx.backend
+
 import caffe2
 from caffe2.python import core, workspace, rnn_cell, gru_cell
 from caffe2.python.model_helper import ModelHelper
