@@ -72,13 +72,13 @@ def _get_min_log_scale():
     return math.ceil(math.log(min_positive, 10))
 
 
-def _get_format_fn(format, nonfinite_format=None):
-    if nonfinite_format:
-        return lambda x: format.format(x) if math.isinf(x) or math.isnan(x) else nonfinite_format.format(x)
-    return lambda x: format.format(x)
-
-
 def _number_format(tensor, min_sz=-1):
+    def _get_format_fn(format):
+        return lambda x: format.format(x)
+
+    def _get_format_fn_nonfinite(format, nonfinite_format):
+        return lambda x: format.format(x) if math.isinf(x) or math.isnan(x) else nonfinite_format.format(x)
+
     floating_dtype = tensor.dtype.is_floating_point  # save this because we cast later
     _min_log_scale = _get_min_log_scale()
     min_sz = max(min_sz, 2)
@@ -130,7 +130,7 @@ def _number_format(tensor, min_sz=-1):
             if include_decimal_int_mode:
                 format = '{:' + str(sz - 1) + '.0f}'
                 nonfinite_format = format + '.'
-                fmt_fn = _get_format_fn(format, nonfinite_format)
+                fmt_fn = _get_format_fn_nonfinite(format, nonfinite_format)
     else:
         if exp_max - exp_min > prec:
             sz = 7 + prec
