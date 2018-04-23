@@ -50,9 +50,9 @@ struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
     int64_t last_dim_to_fill_size;
     cnt_to_dst_idx_functor& operator= (const cnt_to_dst_idx_functor &t)
     {
-	  this->last_dim_size=t.last_dim_size;
-	  this->last_dim_start_slice=t.last_dim_start_slice;
-	  this->last_dim_to_fill_size=t.last_dim_to_fill_size;
+      this->last_dim_size=t.last_dim_size;
+      this->last_dim_start_slice=t.last_dim_start_slice;
+      this->last_dim_to_fill_size=t.last_dim_to_fill_size;
       return *this;
     }
   #endif
