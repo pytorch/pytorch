@@ -65,6 +65,7 @@ First, specify additional ``libraries`` in ``Extension``
 object to make it build on Windows.
 
 .. code-block:: python
+
    ffi = create_extension(
        '_ext.my_lib',
        headers=headers,
@@ -77,11 +78,12 @@ object to make it build on Windows.
    )
 
 Second, here is a workground for "unresolved external symbol 
-state caused by``extern THCState *state;``"
+state caused by ``extern THCState *state;``"
 
 Change the source code from C to C++. An example is listed below.
 
 .. code-block:: cpp
+
     #include <THC/THC.h>
     #include <ATen/ATen.h>
 
@@ -110,7 +112,7 @@ Cpp Extension
 This type of extension has better support compared with
 the previous one. However, it still needs some manual
 configuration. First, you should open the
-**x86_x64 Cross Tools Command Prompt for VS 2017**
+**x86_x64 Cross Tools Command Prompt for VS 2017**.
 And then, you can open the Git-Bash in it. It is
 usually located in ``C:\Program Files\Git\git-bash.exe``.
 Finally, you can start your compiling process.
@@ -224,8 +226,8 @@ Multiprocessing error "Broken pipe"
 
 This issue happens when the child process ends before the parent process
 finishes sending data. There may be something wrong with your code. You
-can debug your code by reducing the ``num_worker`` of ``DataLoader`` to zero
-and see if the issue persists.
+can debug your code by reducing the ``num_worker`` of 
+:class:`~torch.utils.data.DataLoader` to zero and see if the issue persists.
 
 Multiprocessing error "driver shut down"
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -253,6 +255,7 @@ tensors cannot succeed, there are two alternatives for this.
 
 1. Don't use ``multiprocessing``. Set the ``num_worker`` of 
 :class:`~torch.utils.data.DataLoader` to zero.
+
 2. Share CPU tensors instead. Make sure your custom
 :class:`~torch.utils.data.DataSet` returns CPU tensors.
 
