@@ -92,8 +92,8 @@ def _number_format(tensor, min_sz=-1):
 
     int_mode = True
     # TODO: use fmod?
-    for value in tensor:
-        if value != math.ceil(value.item()):
+    for value in tensor.tolist():
+        if value != math.ceil(value):
             int_mode = False
             break
 
@@ -155,11 +155,11 @@ def _vector_str(self, indent, fmt, scale, sz, summarize):
     char_per_line = element_length * elements_per_line
 
     if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        data = ([fmt.format(val.item() / scale) for val in self[:PRINT_OPTS.edgeitems]] +
+        data = ([fmt.format(val / scale) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
                 [' ...'] +
-                [fmt.format(val.item() / scale) for val in self[-PRINT_OPTS.edgeitems:]])
+                [fmt.format(val / scale) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
-        data = [fmt.format(val.item() / scale) for val in self]
+        data = [fmt.format(val) for val in self.tolist()]
 
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
     lines = [', '.join(line) for line in data_lines]
@@ -186,6 +186,20 @@ def _tensor_str(self, indent, fmt, scale, sz, summarize):
     tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
     return '[' + tensor_str + ']'
 
+def get_summarized_data(self):
+    dim = self.dim()
+    if dim == 0:
+        return self
+    if dim == 1:
+        if self.size(0) > 2 * PRINT_OPTS.edgeitems:
+            return torch.cat((self[:PRINT_OPTS.edgeitems], self[-PRINT_OPTS.edgeitems:]))
+        else:
+            return self
+    if self.size(0) > 2 * PRINT_OPTS.edgeitems:
+        start = [get_summarized_data(self[i]).view(-1) for i in range(0, PRINT_OPTS.edgeitems)]
+        end = ([get_summarized_data(self[i]).view(-1)
+               for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
+        return torch.cat((start + end))
 
 def _str(self):
     if self.is_sparse:
@@ -211,7 +225,7 @@ def _str(self):
     if self.numel() == 0:
         tensor_str = '[]'
     else:
-        fmt, scale, sz = _number_format(self)
+        fmt, scale, sz = _number_format(get_summarized_data(self) if summarize else self)
         if scale != 1:
             prefix = prefix + SCALE_FORMAT.format(scale) + ' ' * indent
         tensor_str = _tensor_str(self, indent, fmt, scale, sz, summarize)
