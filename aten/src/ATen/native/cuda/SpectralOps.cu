@@ -40,11 +40,7 @@ static bool is_pow_of_two(long long int  x) {
 // counting_iterator => index to fill
 struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
 {
-  #ifndef _MSC_VER
-    const int64_t last_dim_size;
-    const int64_t last_dim_start_slice;
-    const int64_t last_dim_to_fill_size;
-  #else
+  #if (_MSC_VER <= 1900)
     int64_t last_dim_size;
     int64_t last_dim_start_slice;
     int64_t last_dim_to_fill_size;
@@ -55,6 +51,10 @@ struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
       this->last_dim_to_fill_size=t.last_dim_to_fill_size;
       return *this;
     }
+  #else
+    const int64_t last_dim_size;
+    const int64_t last_dim_start_slice;
+    const int64_t last_dim_to_fill_size;
   #endif
   cnt_to_dst_idx_functor(int64_t last_dim_size, int64_t last_dim_start_slice) :
     last_dim_size(last_dim_size), last_dim_start_slice(last_dim_start_slice),

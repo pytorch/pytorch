@@ -9,7 +9,6 @@
 #include <vector>
 #include <functional>
 
-
 namespace torch { namespace jit { namespace python {
 
 struct IODescriptor {
@@ -110,7 +109,7 @@ PyObject* unflatten(at::ArrayRef<autograd::Variable> outputs,
 
 }}} // namespace torch::jit::python
 
-#ifdef _MSC_VER
+#if (_MSC_VER <= 1900)
   namespace std {
     template <>
     struct hash<::torch::jit::python::IODescriptor::VariableMetadata>

@@ -1247,7 +1247,7 @@ inline void Block::destroy() {
 #define IR_IFM_CONST(x,Kind) GENERIC_IF(const,prim::Kind,x,Kind)
 #define IR_ELSEIFM_CONST(Kind) GENERIC_ELSEIF(const,prim::Kind,Kind)
 
-#ifndef _MSC_VER
+#ifndef _USE_IF_STATEMENTS
   #define IR_IFC(x, Kind) \
     auto && __match_key = x; \
     switch(__match_key->kind()) { \

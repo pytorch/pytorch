@@ -102,7 +102,12 @@ struct InternedStrings {
     // we can bypass the need to acquire a lock
     // to read the map for Builtins because we already
     // know their string value
-    #ifndef _MSC_VER
+    #if (_MSC_VER <= 1900)
+      #define DEFINE_CASE(ns, s) \
+        if(sym==ns::s){return #ns "::" #s;}
+      FORALL_BUILTIN_SYMBOLS(DEFINE_CASE)
+      #undef DEFINE_CASE
+    #else
       #define DEFINE_CASE(ns, s) \
         case ns::s: return #ns "::" #s;
       switch(sym) {
@@ -110,11 +115,6 @@ struct InternedStrings {
         default:
           break;
       }
-      #undef DEFINE_CASE
-    #else
-      #define DEFINE_CASE(ns, s) \
-        if(sym==ns::s){return #ns "::" #s;}
-      FORALL_BUILTIN_SYMBOLS(DEFINE_CASE)
       #undef DEFINE_CASE
     #endif
     return customString(sym);

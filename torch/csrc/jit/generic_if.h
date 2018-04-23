@@ -1,6 +1,11 @@
 // TODO: I'm pretty sure Constness can be done with C++ templates, ala
 // std::is_const, but no time to work it out...
-#ifndef _MSC_VER
+#if (_MSC_VER <= 1900)
+  #define _MSC_14
+  #define _USE_IF_STATEMENTS
+#endif
+
+#ifndef _USE_IF_STATEMENTS
   #define GENERIC_IF(Constness, FullKind, x, Kind) \
     auto && __match_key = x; \
     switch(__match_key->kind()) { \
