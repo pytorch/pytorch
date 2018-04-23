@@ -10,7 +10,6 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/operators/rnn/recurrent_network_executor_incl.h"
-#include "caffe2/operators/rnn/rnn_capable_operator_observer.h"
 
 namespace caffe2 {
 
@@ -136,16 +135,9 @@ class RecurrentNetworkExecutorBase {
 
           rnn_op.op = CreateOperator(op_copy, ws);
           for (const auto& observer : observers_list) {
-            auto rnn_observer =
-                dynamic_cast_if_rtti<const RNNCapableOperatorObserver*>(
-                    observer.get());
-            if (rnn_observer) {
-              std::unique_ptr<ObserverBase<OperatorBase>> rnn_observer_copy =
-                  rnn_observer->rnnCopy(rnn_op.op.get(), rnn_op.order);
-              CAFFE_ENFORCE(
-                  rnn_observer_copy,
-                  "Observers without rnnCopy() implemented cannot be attached "
-                  "to RNN using RNNExecutor.");
+            std::unique_ptr<ObserverBase<OperatorBase>> rnn_observer_copy =
+                observer.get()->rnnCopy(rnn_op.op.get(), rnn_op.order);
+            if (rnn_observer_copy) {
               rnn_op.op->AttachObserver(std::move(rnn_observer_copy));
             }
           }
@@ -161,16 +153,9 @@ class RecurrentNetworkExecutorBase {
             // owned by this timestep.
             rnn_op.op = CreateOperator(step_net_def_.op(rnn_op.order), ws);
             for (const auto& observer : observers_list) {
-              auto rnn_observer =
-                  dynamic_cast_if_rtti<const RNNCapableOperatorObserver*>(
-                      observer.get());
-              if (rnn_observer) {
-                std::unique_ptr<ObserverBase<OperatorBase>> rnn_observer_copy =
-                    rnn_observer->rnnCopy(rnn_op.op.get(), rnn_op.order);
-                CAFFE_ENFORCE(
-                    rnn_observer_copy,
-                    "Observers without rnnCopy() implemented cannot be attached "
-                    "to RNN using RNNExecutor.");
+              std::unique_ptr<ObserverBase<OperatorBase>> rnn_observer_copy =
+                  observer.get()->rnnCopy(rnn_op.op.get(), rnn_op.order);
+              if (rnn_observer_copy) {
                 rnn_op.op->AttachObserver(std::move(rnn_observer_copy));
               }
             }
