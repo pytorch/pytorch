@@ -32,7 +32,7 @@ if(NOT CUDNN_FOUND)
 endif()
 
 # Optionally, find TensorRT
-if (${USE_TENSORRT} AND DEFINED TENSORRT_ROOT)
+if (${USE_TENSORRT})
   find_path(TENSORRT_INCLUDE_DIR NvInfer.h
     HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES include)
