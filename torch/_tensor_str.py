@@ -186,6 +186,7 @@ def _tensor_str(self, indent, fmt, scale, sz, summarize):
     tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
     return '[' + tensor_str + ']'
 
+
 def get_summarized_data(self):
     dim = self.dim()
     if dim == 0:
@@ -200,6 +201,7 @@ def get_summarized_data(self):
         end = ([get_summarized_data(self[i]).view(-1)
                for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
         return torch.cat((start + end))
+
 
 def _str(self):
     if self.is_sparse:
