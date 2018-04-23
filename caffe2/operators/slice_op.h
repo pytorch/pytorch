@@ -209,9 +209,11 @@ class SliceOp : public Operator<Context> {
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
-    auto* output = Output(0);
-    auto& data = Input(0);
+    return RunOnDeviceImpl(Input(0), Output(0));
+  }
 
+ protected:
+  bool RunOnDeviceImpl(const Tensor<Context>& data, Tensor<Context>* output) {
     if (InputSize() > 1) {
       starts_host_.template CopyFrom<Context>(Input(1));
       ends_host_.template CopyFrom<Context>(Input(2));
