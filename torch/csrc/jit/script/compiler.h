@@ -129,7 +129,7 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
 std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values);
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
-
+void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
 
 } // namespace script
 } // namespace jit

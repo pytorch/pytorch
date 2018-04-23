@@ -11,6 +11,7 @@ void placeholderCreator(Method&) {
 }
 
 std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, ArrayRef<Value*> inputs) {
+  ensureTensors(loc, inputs);
   JIT_ASSERT(!executor);
   try {
     callee.ensure_defined();
