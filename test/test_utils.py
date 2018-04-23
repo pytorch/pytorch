@@ -607,7 +607,22 @@ class TestCollectEnv(TestCase):
     def _preprocess_info_for_test(self, info_output):
         # Remove the version hash
         version_hash_regex = re.compile(r'(a\d+)\+.......')
-        return re.sub(version_hash_regex, r'\1', info_output).strip()
+        result = re.sub(version_hash_regex, r'\1', info_output).strip()
+
+        # Substitutions to lower the specificity of the versions listed
+        substitutions = [
+            (r'(?<=CUDA used to build PyTorch: )(\d+)\.(\d+)\.(\d+)', r'\1.\2.X'),
+            (r'(?<=CUDA runtime version: )(\d+)\.(\d+)\.(\d+)', r'\1.\2.X'),
+            (r'(?<=Ubuntu )(\d+)\.(\d+)\.(\d+) ', r'\1.\2.X '),
+            (r'(?<=CMake version: version )(\d+)\.(\d+)\.(\d+)', r'\1.\2.X'),
+            (r'(?<=Nvidia driver version: )(\d+)\.(\d+)', r'\1.X'),
+            (r'(?<=Mac OSX )(\d+)\.(\d+).(\d+)', r'\1.\2.X'),
+            (r'(?<=numpy \()(\d+)\.(\d+).(\d+)', r'\1.\2.X'),
+        ]
+
+        for regex, substitute in substitutions:
+            result = re.sub(regex, substitute, result)
+        return result
 
     def assertExpectedOutput(self, info_output, build_env):
         processed_info = self._preprocess_info_for_test(info_output)
@@ -619,7 +634,8 @@ class TestCollectEnv(TestCase):
 
         with open(expect_filename, 'r') as f:
             expected_info = f.read().strip()
-            self.assertEqual(processed_info, expected_info, ci_warning)
+            self.assertEqual(ci_warning + '\n' + processed_info,
+                             ci_warning + '\n' + expected_info, ci_warning)
 
     def test_smoke(self):
         info_output = get_pretty_env_info()
