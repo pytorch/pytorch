@@ -1,3 +1,5 @@
+#include "TH/THMath.h"
+
 #ifdef __CUDA_ARCH__
 #include <nvfunctional>
 #endif
