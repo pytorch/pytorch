@@ -67,13 +67,13 @@ void gamma_cuda_kernel(
             blockIdx.x * blockDim.x + threadIdx.x,
             seeds.second,
             &state);
-	at::native::BaseSampler<float> standard_uniform([&state] __device__ () {
+	BaseSampler<float> standard_uniform([&state] __device__ () {
 	  return curand_uniform(&state);
         });
-	at::native::BaseSampler<float> standard_normal([&state] __device__ () {
+	BaseSampler<float> standard_normal([&state] __device__ () {
           return curand_normal(&state);
         });
-	auto sample = at::native::sample_gamma<float>(alpha, standard_uniform, standard_normal);
+	auto sample = sample_gamma<float>(alpha, standard_uniform, standard_normal);
 	ret_val = ::max(THCNumerics<scalar_t>::min(), scalar_cast<scalar_t>(sample));
       });
 }
@@ -96,6 +96,18 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
      gamma_cuda_kernel<scalar_t>(ret, alpha_, next_philox_seed(gen));
    });
+  return ret;
+}
+
+Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
+  Tensor ret = self.type().tensor(self.sizes());
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "_standard_gamma_grad", [&] {
+      at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, self, output,
+      [] __device__ (scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {
+         ret_val = standard_gamma_grad_one(self_val, output_val);
+      }
+    );
+  });
   return ret;
 }
 
