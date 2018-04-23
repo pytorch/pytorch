@@ -201,6 +201,8 @@ def get_summarized_data(self):
         end = ([get_summarized_data(self[i]).view(-1)
                for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
         return torch.cat((start + end))
+    else:
+        return self
 
 
 def _str(self):
