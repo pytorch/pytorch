@@ -58,14 +58,14 @@ deviceforcuda precision_t sample_gamma(precision_t alpha, BaseSampler<precision_
 
   // Boost alpha for higher acceptance probability.
   if (alpha < 1.0) {
-    scale *= ::pow(1 - standard_uniform.sample(), 1.0 / alpha);
+    scale *= std::pow(1 - standard_uniform.sample(), 1.0 / alpha);
     alpha += 1.0;
   }
 
   // This implements the acceptance-rejection method of Marsaglia and Tsang (2000)
   // doi:10.1145/358407.358414
   const precision_t d = alpha - 1.0 / 3.0;
-  const precision_t c = 1.0 / ::sqrt(9.0 * d);
+  const precision_t c = 1.0 / std::sqrt(9.0 * d);
   for (;;) {
     precision_t x, y;
     do {
@@ -77,7 +77,7 @@ deviceforcuda precision_t sample_gamma(precision_t alpha, BaseSampler<precision_
     const precision_t xx = x * x;
     if (u < 1.0 - 0.0331 * xx * xx)
       return scale * d * v;
-    if (::log(u) < 0.5 * xx + d * (1.0 - v + ::log(v)))
+    if (std::log(u) < 0.5 * xx + d * (1.0 - v + std::log(v)))
       return scale * d * v;
   }
 }
