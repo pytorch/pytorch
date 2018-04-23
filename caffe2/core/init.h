@@ -96,5 +96,8 @@ class InitRegisterer {
  */
 bool GlobalInit(int* pargc, char*** argv);
 
+#if CAFFE2_MOBILE
+bool GlobalInit();
+#endif
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_INIT_H_

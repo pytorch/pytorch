@@ -264,7 +264,7 @@ __device__ void radixSelect(const DataType* data,
   // We are looking for the top kToFind-th element when iterating over
   // digits; this count gets reduced by elimination when counting
   // successive digits
-  int kToFind = k;
+  int kToFind = k <= sliceSize ? k : sliceSize;
 
   // We start at the most significant digit in our radix, scanning
   // through to the least significant digit

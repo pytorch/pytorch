@@ -1933,7 +1933,8 @@ class Net(object):
         for blob in record.field_blobs():
             assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
         for blob in record.field_blobs():
-            self.AddExternalOutput(blob)
+            if blob not in self.external_outputs:
+                self.AddExternalOutput(blob)
         self._output_record = record
 
     def recover_output_record_by_prefix(self, prefix):

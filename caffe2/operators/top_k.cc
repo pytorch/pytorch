@@ -37,7 +37,7 @@ void GetTopK(
   const T* src_ptr = input + src_offset;
   std::vector<std::pair<T, TIndex>> heap_data;
   heap_data.reserve(k);
-  for (TIndex i = 0; i < k; ++i) {
+  for (TIndex i = 0; i < k && i < n; ++i) {
     heap_data.emplace_back(*src_ptr, i);
     src_ptr += stride;
   }
@@ -53,7 +53,7 @@ void GetTopK(
     }
     src_ptr += stride;
   }
-  TIndex dst_pos = dst_offset + (k - 1) * stride;
+  TIndex dst_pos = dst_offset + (std::min(k, n) - 1) * stride;
   while (!pq.empty()) {
     const auto& item = pq.top();
     values[dst_pos] = item.first;
@@ -77,6 +77,9 @@ void SetTopKGradient(
     T* gradient) {
   TIndex src_pos = src_offset;
   for (int i = 0; i < k; ++i) {
+    if (indices[src_pos] < 0) {
+      continue;
+    }
     gradient[dst_offset + indices[src_pos] * stride] = values[src_pos];
     src_pos += stride;
   }
@@ -97,10 +100,6 @@ bool TopKOp<T, Context>::RunOnDevice() {
   }
   CAFFE_ENFORCE_GE(axis_, 0);
   CAFFE_ENFORCE_LT(axis_, input_dims.size());
-  CAFFE_ENFORCE_LE(
-      k_,
-      input_dims[axis_],
-      "k argument should not be greater than the axis dim.");
 
   std::vector<TIndex> output_dims = input_dims;
   output_dims[axis_] = k_;
@@ -115,6 +114,14 @@ bool TopKOp<T, Context>::RunOnDevice() {
   TIndex* flatten_indices_data = flatten_indices == nullptr
       ? nullptr
       : flatten_indices->template mutable_data<TIndex>();
+  // init values as the default value
+  math::Set<T, Context>(values->size(), T(0), values_data, &context_);
+  math::Set<TIndex, Context>(
+      indices->size(), TIndex(-1), indices_data, &context_);
+  if (flatten_indices_data != nullptr) {
+    math::Set<TIndex, Context>(
+        flatten_indices->size(), TIndex(-1), flatten_indices_data, &context_);
+  }
 
   const TIndex prev_size = std::accumulate(
       input_dims.cbegin(),
@@ -231,9 +238,11 @@ OPERATOR_SCHEMA(TopK)
 Retrieve the top-K elements for the last dimension. Given an input tensor of
 shape [a_1, a_2, ..., a_n, r] and integer argument k, return two outputs:
 -Value tensor of shape [a_1, a_2, ..., a_n, k] which contains the values of
- the top k elements along the last dimension
+ the top k elements along the last dimension. When k > r, the value tensor is
+ padded with 0 values.
 -Index tensor of shape [a_1, a_2, ..., a_n, k] which contains the indices
- of the top k elements (original indices from the input tensor).
+ of the top k elements (original indices from the input tensor). When k > r,
+ the Index tensor is padded with -1 values.
 
 Given two equivalent values, this operator uses the indices along the last dim-
 ension as a tiebreaker. That is, the element with the lower index will appear

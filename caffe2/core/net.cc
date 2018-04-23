@@ -100,6 +100,11 @@ void AddGlobalNetObserverCreator(NetObserverCreator creator) {
   VLOG(1) << "Have set a custom GlobalNetObserverCreator";
 }
 
+void ClearGlobalNetObservers() {
+  GetNetObserverCreators()->clear();
+  VLOG(1) << "All net observers cleared";
+}
+
 unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws) {
   std::shared_ptr<NetDef> tmp_net_def(new NetDef(net_def));
   return CreateNet(tmp_net_def, ws);

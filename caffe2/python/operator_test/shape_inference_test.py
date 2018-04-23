@@ -397,6 +397,19 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
+    def testLengthsPad(self):
+        model = model_helper.ModelHelper(name="test_model")
+        model.LengthsPad(
+            ["X", "length"],
+            ["X_padded"],
+            target_length=10,
+            padding_value=-1.0,
+        )
+        workspace.FeedBlob("X", np.random.rand(6, 32).astype(np.float32))
+        workspace.FeedBlob("length", np.array([1, 2, 3], dtype=np.int32))
+
+        self.InferTensorRunAndCompare(model)
+
     def testConcat(self):
         net = core.Net("concat")
 

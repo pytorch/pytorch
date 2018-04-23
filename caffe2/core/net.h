@@ -156,6 +156,8 @@ unique_ptr<NetBase> CreateNet(
 
 void AddGlobalNetObserverCreator(NetObserverCreator creator);
 
+void ClearGlobalNetObservers();
+
 } // namespace caffe2
 
 #endif // CAFFE2_CORE_NET_H_

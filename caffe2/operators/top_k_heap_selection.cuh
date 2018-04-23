@@ -276,7 +276,7 @@ __global__ void selectRowsViaHeap(
 
   // Write out the final k-selected values; they should be all
   // together
-  for (int i = threadIdx.x; i < k; i += blockDim.x) {
+  for (int i = threadIdx.x; i < n && i < k; i += blockDim.x) {
     outKeysStart[i] = heapK[i];
     outIndicesStart[i] = (OutIndexType)heapV[i];
   }
