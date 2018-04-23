@@ -13,6 +13,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <deque>
 
 namespace torch { namespace autograd {
 
@@ -104,6 +105,68 @@ void Function::set_up_context_edge(
   auto backward_eval = Eval::getBackwardEval(inputs, outputs);
   if (backward_eval)
     backward_eval->forward_ctx_select = ctx_select;
+}
+
+/*
+ * Fix for #5534: prevent stack overflow on deletion of deep computation graph
+ *
+ * Sometimes one can end up with a very big computation graph of Functions
+ * and Edges. Each std::shared_ptr<Function> contains a list of Edge, and
+ * each Edge contains a std::shared_ptr<Function>. Deleting a
+ * std::shared_ptr<Function> can trigger the recursive deletion of other
+ * std::shared_ptr<Function>'s: this can stack overflow if the graph
+ * is deep enough. Here is an example of such a graph:
+ *
+ * shared_ptr<Function> -> Edge -> shared_ptr<Function> -> Edge -> ... -> shared_ptr<Function>
+ *
+ * The solution here is to use a custom deleter with each
+ * std::shared_ptr<Function>. The custom deleter keeps track of how many
+ * nested deleters it is in. When this number exceeds the maximum allowed
+ * depth, the Function* to be deleted are accumulated in a per-thread
+ * delete queue and handled by one of the deleters.
+ */
+using function_queue = std::deque<Function*>;
+thread_local function_queue kDeleteFunctionQueue;
+
+const ssize_t kDeleteFunctionMaxRecursionDepth = 50000;
+thread_local ssize_t kDeleteFunctionRecursionDepth = 0;
+
+struct RecursionDepthCounter {
+ public:
+  explicit RecursionDepthCounter() {
+    ++kDeleteFunctionRecursionDepth;
+    value_ = kDeleteFunctionRecursionDepth;
+  }
+  ~RecursionDepthCounter() {
+    --kDeleteFunctionRecursionDepth;
+  }
+
+  ssize_t value() {
+    return value_;
+  }
+
+ private:
+  ssize_t value_;
+};
+
+void deleteFunction(Function* function) {
+  RecursionDepthCounter recursion_depth;
+
+  if (recursion_depth.value() > kDeleteFunctionMaxRecursionDepth) {
+    kDeleteFunctionQueue.push_back(function);
+    return;
+  }
+
+  delete function;
+  while (kDeleteFunctionQueue.size() > 0) {
+    if (recursion_depth.value() != kDeleteFunctionMaxRecursionDepth) {
+      AT_ERROR("Only one deleter per thread should be able to process "
+               "the delete queue. Please open an issue.");
+    }
+    auto function = kDeleteFunctionQueue.front();
+    kDeleteFunctionQueue.pop_front();
+    delete function;
+  }
 }
 
 }} // namespace torch::autograd
