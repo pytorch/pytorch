@@ -1248,6 +1248,10 @@ inline void Block::destroy() {
 #define IR_ELSEIFM_CONST(Kind) GENERIC_ELSEIF(const,prim::Kind,Kind)
 
 #ifndef _MSC_VER
+ 	#define IR_IFC(x, Kind) \
+	  auto && __match_key = x; \
+	  switch(__match_key->kind()) { \
+		case Kind: {
  	#define IR_IFC_MULTI1(x, Kind) \
 	  auto && __match_key = x; \
 	  switch(__match_key->kind()) { \
@@ -1271,6 +1275,9 @@ inline void Block::destroy() {
 	#define IR_ELSE() GENERIC_ELSE()
 	#define IR_END() GENERIC_END()
 #else
+ 	#define IR_IFC(x, Kind) \
+	  auto && __match_key = x; \
+	  if(__match_key->kind()==Kind) {
  	#define IR_IFC_MULTI1(x, Kind) \
 	  auto && __match_key = x; \
 	  if( (__match_key->kind() == Kind) || 
