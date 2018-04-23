@@ -72,6 +72,17 @@ Via a string and device ordinal:
     device(type='cpu', index=0)
 
 .. note::
+   The :class:`torch.device` argument in functions can generally be substituted with a string.
+   This allows for fast prototyping of code.
+
+   >>> # Example of a function that takes in a torch.device
+   >>> cuda1 = torch.device('cuda:1')
+   >>> torch.randn((2,3), device=cuda1)
+
+   >>> # You can substitute the torch.device with a string
+   >>> torch.randn((2,3), 'cuda:1')
+
+.. note::
    For legacy reasons, a device can be constructed via a single device ordinal, which is treated
    as a cuda device.  This matches :meth:`Tensor.get_device`, which returns an ordinal for cuda
    tensors and is not supported for cpu tensors.
