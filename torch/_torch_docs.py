@@ -1696,6 +1696,25 @@ Example::
            7.0977)
 """)
 
+add_docstr(torch.get_default_dtype,
+           r"""
+get_default_dtype() -> :class:`torch.dtype`
+
+Get the current default floating point :class:`torch.dtype`.
+
+Example::
+
+    >>> torch.get_default_dtype()  # initial default for floating point is torch.float32
+    torch.float32
+    >>> torch.set_default_dtype(torch.float64)
+    >>> torch.get_default_dtype()  # default is now changed to torch.float64
+    torch.float64
+    >>> torch.set_default_tensor_type(torch.FloatTensor)  # setting tensor type also affects this
+    >>> torch.get_default_dtype()  # changed to torch.float32, the dtype for torch.FloatTensor
+    torch.float32
+
+""")
+
 add_docstr(torch.get_num_threads,
            r"""
 get_num_threads() -> int
