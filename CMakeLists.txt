@@ -67,6 +67,8 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+option(MKL_USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
+option(MKL_USE_MKLML "Use MKLML interface in MKL BLAS" ON)
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
