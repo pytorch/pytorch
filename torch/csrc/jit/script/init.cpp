@@ -25,6 +25,8 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_binders) override {
+    ensureTensors(loc, inputs);
+    
     if (attributes.size() > 0)
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
     Graph& g = *m.graph();
