@@ -254,32 +254,6 @@ class TestIndexing(TestCase):
             self.assertEqual(x, x[0])
             self.assertEqual(len(w), 1)
 
-    def test_legacy_dispatch(self):
-        # compare with indexing using index_select / index_fill etc
-        x = torch.arange(0, 9).view(3, 3)
-        idx = torch.tensor([0, 2])
-        self.assertEqual(x[idx], x.index_select(0, idx))
-        self.assertEqual(x[:, idx], x.index_select(1, idx))
-
-        mask = x > 4
-        self.assertEqual(x[mask], x.masked_select(mask))
-
-        y = x.clone()
-        yr = x.clone()
-        y[idx] = 0
-        yr.index_fill_(0, idx, 0)
-        self.assertEqual(y, yr)
-        y[:, idx] = 2
-        yr.index_fill_(1, idx, 2)
-        self.assertEqual(y, yr)
-
-        mask = x > 4
-        y = x.clone()
-        yr = x.clone()
-        y[mask] = 10
-        yr.masked_fill_(mask, 10)
-        self.assertEqual(y, yr)
-
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
