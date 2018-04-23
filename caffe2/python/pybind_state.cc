@@ -877,6 +877,14 @@ void addGlobalMethods(py::module& m) {
 #endif // CAFFE2_HAS_MKL_DNN
       );
 
+  m.attr("use_ideep") = py::bool_(
+#ifdef CAFFE2_USE_IDEEP
+      true
+#else // CAFFE2_USE_IDEEP
+      false
+#endif // CAFFE2_USE_IDEEP
+      );
+
   m.attr("define_caffe2_no_operator_schema") = py::bool_(
 #ifdef CAFFE2_NO_OPERATOR_SCHEMA
       true
