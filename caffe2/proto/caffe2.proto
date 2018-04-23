@@ -115,8 +115,9 @@ enum DeviceType {
   MKLDNN = 2;                 // Reserved for explicit MKLDNN
   OPENGL = 3;                 // OpenGL
   OPENCL = 4;                 // OpenCL
+  IDEEP = 5;                  // IDEEP.
   // Change the following number if you add more devices in the code.
-  COMPILE_TIME_MAX_DEVICE_TYPES = 5;
+  COMPILE_TIME_MAX_DEVICE_TYPES = 6;
   ONLY_FOR_TEST = 20901701;   // This device type is only for test.
 }
 

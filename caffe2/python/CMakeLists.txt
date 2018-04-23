@@ -2,8 +2,24 @@
 set(Caffe2_CPU_PYTHON_SRCS
     "/pybind_state.cc"
     "/pybind_state_dlpack.cc"
-    "/pybind_state_mkl.cc"
 )
+
+if(USE_MKL)
+  if(MKL_USE_IDEEP)
+  set(Caffe2_CPU_PYTHON_SRCS
+      ${Caffe2_CPU_PYTHON_SRCS}
+      "/pybind_state_ideep.cc"
+  )
+  endif()
+
+  if(MKL_USE_MKLML)
+  set(Caffe2_CPU_PYTHON_SRCS
+      ${Caffe2_CPU_PYTHON_SRCS}
+      "/pybind_state_mkl.cc"
+  )
+  endif()
+endif()
+
 # ---[ GPU files
 set(Caffe2_GPU_PYTHON_SRCS
     ${Caffe2_CPU_PYTHON_SRCS}
