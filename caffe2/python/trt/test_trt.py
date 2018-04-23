@@ -285,8 +285,10 @@ class TensorRTTransformTest(TestCase):
             workspace.RunNetOnce(init_net)
 
         # Cut the graph
+        start = time.time()
         pred_net_cut = transform_caffe2_net(pred_net,
-                                            {input_name: input_blob_dims})
+                                            {input_name: input_blob_dims},
+                                            build_serializable_op=True)
         del init_net, pred_net
         #_print_net(pred_net_cut)
 
@@ -296,6 +298,9 @@ class TensorRTTransformTest(TestCase):
         with core.DeviceScope(device_option):
             workspace.FeedBlob(input_name, data)
             workspace.CreateNet(pred_net_cut)
+            end = time.time()
+            print("Conversion time: {:.2f}s".format(end -start))
+
             for _ in range(warmup):
                 workspace.RunNet(pred_net_cut.name)
             start = time.time()
