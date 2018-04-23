@@ -161,7 +161,7 @@ Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
           return THRandom_normal(generator, 0.0, 1.0);
         });
         auto sample = sample_gamma<double>(alpha, standard_uniform, standard_normal);
-	ret_val = std::max(std::numeric_limits<scalar_t>::min(), (scalar_t) sample);
+        ret_val = std::max(std::numeric_limits<scalar_t>::min(), (scalar_t) sample);
       }
     );
     });
