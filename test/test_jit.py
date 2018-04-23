@@ -121,17 +121,16 @@ class TestJit(TestCase):
     # index-2 is not implemented in interpreter
     @unittest.expectedFailure
     def test_index(self):
-        x = Variable(torch.rand(2, 2, 2), requires_grad=True)
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.LongTensor([0]), requires_grad=True)
-        y2 = Variable(torch.LongTensor([1]), requires_grad=True)
 
         @torch.jit.compile(nderivs=0)
-        def fn(x, y, y2):
-            return x[y, y2]
+        def fn(x, y):
+            return x[y]
 
-        z = fn(x, y, y2)
+        z = fn(x, y)
         with self.assertCompiled(fn):
-            z2 = fn(x, y, y2)
+            z2 = fn(x, y)
         self.assertEqual(z, z2)
 
     # Backwards tracing was broken for indexing by a constant,
