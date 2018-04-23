@@ -40,6 +40,25 @@ std::unordered_map<std::string, TensorShape> InferShapes(
   return shape_hints;
 }
 
+void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model, const std::string& fname) {
+  std::ofstream ff(fname);
+  for (const auto& t : model.graph().initializer()) {
+    ff << "tensor: " << t.name() << std::endl;
+    ff << "  dims: ";
+    for (auto i : t.dims()) {
+      ff << i << " ";
+    }
+    ff << std::endl;
+    int i = 0;
+    for (auto i : t.float_data()) {
+      ff << "    " << i << std::endl;
+      if (++i > 10) {
+        break;
+      }
+    }
+  }
+  ff.close();
+}
 
 void CPUTensorToTensorProto(
     const TensorCPU& cpu_tensor,
@@ -104,31 +123,6 @@ void BlobToTensorProto(
   }
 }
 
-void BuildInitializationList(
-    Workspace* ws,
-    ::ONNX_NAMESPACE::GraphProto* g,
-    std::unordered_set<std::string>* initialization_list) {
-  const std::vector<string>& ws_blobs = ws->Blobs();
-
-  // Create a CUDA context and reuse it for potential tensor copies across
-  // devices
-  CUDAContext context;
-
-  for (const auto& s : ws_blobs) {
-    auto it = initialization_list->find(s);
-    if (it != initialization_list->end()) {
-      auto* init_tensor = g->add_initializer();
-      BlobToTensorProto(s, ws, &context, init_tensor);
-      initialization_list->erase(it);
-    }
-  }
-  CAFFE_ENFORCE(
-      initialization_list->empty(), "Unfulfilled initialization list");
-  for (const auto& t : g->initializer()) {
-    VLOG(2) << "Initializer: " << t.name();
-  }
-}
-
 std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
     const std::vector<std::string>& names,
     const std::unordered_map<std::string, TensorShape>& shape_hints) {
@@ -163,39 +157,113 @@ void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
 }
 } // namespace
 
-OperatorDef TensorRTTransformer::BuildTrtOp(
-    const std::string& onnx_model_str,
+void BuildInitializationList(
+    Workspace* ws,
+    ::ONNX_NAMESPACE::GraphProto* g,
+    std::unordered_set<std::string>* initialization_list) {
+  const std::vector<string>& ws_blobs = ws->Blobs();
+
+  // Create a CUDA context and reuse it for potential tensor copies across
+  // devices
+  CUDAContext context;
+
+  for (const auto& s : ws_blobs) {
+    auto it = initialization_list->find(s);
+    if (it != initialization_list->end()) {
+      auto* init_tensor = g->add_initializer();
+      BlobToTensorProto(s, ws, &context, init_tensor);
+      initialization_list->erase(it);
+    }
+  }
+  CAFFE_ENFORCE(
+      initialization_list->empty(), "Unfulfilled initialization list");
+  for (const auto& t : g->initializer()) {
+    VLOG(2) << "Initializer: " << t.name();
+  }
+}
+
+void TensorRTTransformer::AddTrtOptions(
+    OperatorDef* op,
     const std::unordered_map<std::string, std::vector<int>>&
         output_size_hints) {
+  auto* max_batch_size_arg = op->add_arg();
+  max_batch_size_arg->set_name("max_batch_size");
+  max_batch_size_arg->set_i(max_batch_size_);
+
+  auto* verbosity_arg = op->add_arg();
+  verbosity_arg->set_name("log_verbosity");
+  verbosity_arg->set_i(verbosity_);
+
+  for (int i = 0; i < op->output_size(); ++i) {
+    const auto& o = op->output(i);
+    const auto it = output_size_hints.find(o);
+    if (it != output_size_hints.end()) {
+      const auto& dims = it->second;
+      auto* output_size_hint_arg = op->add_arg();
+      output_size_hint_arg->set_name(MakeString("output_size_hint_", i));
+      for (const auto& d : dims) {
+        output_size_hint_arg->add_ints(d);
+      }
+
+      LOG(INFO) << "Adding output hint: " << o;
+    }
+  }
+}
+
+OperatorDef TensorRTTransformer::BuildTrtOpLazy(
+    const std::string& onnx_model_str,
+    const std::unordered_map<std::string, std::vector<int>>& output_size_hints,
+    const std::unordered_set<std::string>& initialization_list,
+    const caffe2::NetDef& net) {
+  OperatorDef op;
+  op.set_type("TensorRT");
+  auto* onnx_model_arg = op.add_arg();
+  onnx_model_arg->set_name("onnx_model");
+  onnx_model_arg->set_s(onnx_model_str);
+
+  // Add the names of the initializer blobs that we want to fetch from the
+  // workspace later
+  auto* initializers_arg = op.add_arg();
+  initializers_arg->set_name("initializers");
+  for (const auto& s : initialization_list) {
+    initializers_arg->add_strings(s);
+    initializers_arg->add_strings(input_mapping_.at(s));
+  }
+
+  // Add the input/output
+  for (const auto& input : net.external_input()) {
+    if (!initialization_list.count(input)) {
+      op.add_input(input);
+    }
+  }
+  for (const auto& output : net.external_output()) {
+    op.add_output(output);
+  }
+
+  // Additional arguments for TRT builder
+  auto* debug_builder_arg = op.add_arg();
+  debug_builder_arg->set_name("debug_builder");
+  debug_builder_arg->set_i(debug_builder_);
+  auto* max_workspace_size_arg = op.add_arg();
+  max_workspace_size_arg->set_name("max_workspace_size");
+  max_workspace_size_arg->set_i(max_workspace_size_);
+  AddTrtOptions(&op, output_size_hints);
+  return op;
+}
+
+OperatorDef TensorRTTransformer::BuildTrtOp(
+    const std::string& onnx_model_str,
+    const std::unordered_map<std::string, std::vector<int>>& output_size_hints) {
   OperatorDef op;
   op.set_type("TensorRT");
 
-  tensorrt::TrtLogger logger((nvinfer1::ILogger::Severity)(verbosity_));
-  auto trt_builder = tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
-  auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
-  auto importer =
-      tensorrt::TrtObject(onnx2trt::createImporter(trt_network.get()));
-  auto status =
-      importer->import(onnx_model_str.data(), onnx_model_str.size(), false);
-  if (status.is_error()) {
-    CAFFE_THROW(
-        "TensorRTTransformer ERROR: ",
-        status.file(),
-        ":",
-        status.line(),
-        " In function ",
-        status.func(),
-        ":\n",
-        "[",
-        status.code(),
-        "] ",
-        status.desc());
-  }
-  trt_builder->setMaxBatchSize(max_batch_size_);
-  trt_builder->setMaxWorkspaceSize(max_workspace_size_);
-  trt_builder->setDebugSync(debug_builder_);
-  auto trt_engine =
-      tensorrt::TrtObject(trt_builder->buildCudaEngine(*trt_network.get()));
+  tensorrt::TrtLogger logger;
+  auto trt_engine = tensorrt::BuildTrtEngine(
+      onnx_model_str,
+      &logger,
+      max_batch_size_,
+      max_workspace_size_,
+      debug_builder_);
 
   // Set up inputs/outputs in the order of they appearnce in getNbBindings
   int num_bindings = trt_engine->getNbBindings();
@@ -209,35 +277,13 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
   }
 
   auto engine_plan = tensorrt::TrtObject(trt_engine->serialize());
-
   auto* serialized_engine_arg = op.add_arg();
   serialized_engine_arg->set_s("");
-  serialized_engine_arg->set_name("serialized_engine");
+  serialized_engine_arg->set_name("backend_buffer");
   auto* s = serialized_engine_arg->mutable_s();
   s->assign((char*)engine_plan->data(), engine_plan->size());
 
-  auto* max_batch_size_arg = op.add_arg();
-  max_batch_size_arg->set_name("max_batch_size");
-  max_batch_size_arg->set_i(max_batch_size_);
-
-  auto* verbosity_arg = op.add_arg();
-  verbosity_arg->set_name("log_verbosity");
-  verbosity_arg->set_i(verbosity_);
-
-  for (int i = 0; i < op.output_size(); ++i) {
-    const auto& o = op.output(i);
-    const auto it = output_size_hints.find(o);
-    if (it != output_size_hints.end()) {
-      const auto& dims = it->second;
-      auto* output_size_hint_arg = op.add_arg();
-      output_size_hint_arg->set_name(MakeString("output_size_hint_", i));
-      for (const auto& d : dims) {
-        output_size_hint_arg->add_ints(d);
-      }
-
-      LOG(INFO) << "Adding output hint: " << o;
-    }
-  }
+  AddTrtOptions(&op, output_size_hints);
 
   return op;
 }
@@ -344,24 +390,16 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
     onnx_model.mutable_graph()->add_input()->CopyFrom(i);
   }
 
-  // Convert weights to initializing tensors
-  BuildInitializationList(ws, onnx_model.mutable_graph(), &initialization_list);
+  // Convert weights to initializing tensors if we are building serializable trt
+  // op or defer it to construction time of trt op
+  if (build_serializable_op_) {
+    BuildInitializationList(
+        ws, onnx_model.mutable_graph(), &initialization_list);
+  }
 
   // Debug stuff
   if (debug_builder_) {
-    std::ofstream ff("trt.onnx");
-    for (const auto& t : onnx_model.graph().initializer()) {
-      ff << "tensor: " << t.name() << std::endl;
-      ff << "  dims: ";
-      for (auto i : t.dims()) {
-        ff << i << " ";
-      }
-      ff << std::endl;
-      for (auto i : t.float_data()) {
-        ff << "    " << i << std::endl;
-      }
-    }
-    ff.close();
+    DumpModel(onnx_model, "debug.onnx");
   }
 
   // Onnx model is ready. Call onnx-trt to convert to one trt c2 op
@@ -369,7 +407,12 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
   onnx_model.SerializeToString(&model_str);
   NetDef net_opt;
   auto* op = net_opt.add_op();
-  *op = BuildTrtOp(model_str, output_shape_hints);
+  if (build_serializable_op_) {
+    *op = BuildTrtOp(model_str, output_shape_hints);
+  } else {
+    *op =
+        BuildTrtOpLazy(model_str, output_shape_hints, initialization_list, net);
+  }
   for (const auto& i : op->input()) {
     net_opt.add_external_input(i);
   }
@@ -393,7 +436,7 @@ CaffeMap<std::string, TensorShape> TensorRTTransformer::SsaRewriteAndMapNames(
       external_inputs.emplace_back(kv.first);
     }
   }
-  for (const auto& i: external_inputs) {
+  for (const auto& i : external_inputs) {
     input_mapping_.erase(i);
   }
   CaffeMap<std::string, TensorShape> shape_hints_ordered;
@@ -419,7 +462,7 @@ void TensorRTTransformer::PruneUnusedWeights(
     }
   }
 
-  for (const auto kv: input_mapping_) {
+  for (const auto kv : input_mapping_) {
     // for weights that are not referenced anywhere, we remove it from the
     // original workspace
     if (!used_weights.count(kv.first)) {
@@ -482,7 +525,9 @@ void TensorRTTransformer::Transform(
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
   pred_net->Swap(&net_opt);
 
-  PruneUnusedWeights(ws, *pred_net);
+  if (build_serializable_op_) {
+    PruneUnusedWeights(ws, *pred_net);
+  }
 }
 
 } // namespace caffe2

@@ -1,8 +1,11 @@
 #include "caffe2/contrib/tensorrt/tensorrt_op_trt.h"
-#include "caffe2/core/logging.h"
 
 #include <numeric>
 #include <unordered_map>
+
+#include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
+#include "caffe2/core/logging.h"
+#include "onnx/onnx_pb.h"
 
 namespace caffe2 {
 
@@ -53,15 +56,52 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
           OperatorBase::GetSingleArgument<int>("max_batch_size", 1)) {
   {
     auto engine_string =
-        OperatorBase::GetSingleArgument<std::string>("serialized_engine", "");
-    CAFFE_ENFORCE(!engine_string.empty(), "Empty serialized TensorRT engine!");
-    auto trt_runtime = tensorrt::TrtObject(nvinfer1::createInferRuntime(logger_));
-    // TODO(support trt plugin factory)
-    trt_engine_ = tensorrt::TrtObject(trt_runtime->deserializeCudaEngine(
-        engine_string.data(), engine_string.size(), nullptr));
+        OperatorBase::GetSingleArgument<std::string>("backend_buffer", "");
+    if (!engine_string.empty()) {
+      auto trt_runtime =
+          tensorrt::TrtObject(nvinfer1::createInferRuntime(logger_));
+      // TODO(support trt plugin factory)
+      trt_engine_ = tensorrt::TrtObject(trt_runtime->deserializeCudaEngine(
+          engine_string.data(), engine_string.size(), nullptr));
+    } else {
+      auto onnx_model_str =
+          OperatorBase::GetSingleArgument<std::string>("onnx_model", "");
+      CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
+      auto debug_builder = OperatorBase::GetSingleArgument<int>("debug_builder", 0);
+      auto max_workspace_size = OperatorBase::GetSingleArgument<int>(
+          "max_workspace_size", 1024 * 1024 * 2);
+
+      // Pull the weights from workspace and assembly it back to the onnx model,
+      // notice that since we may have rewritten the net, we need to map the
+      // weight names
+      auto initializers = OperatorBase::GetRepeatedArgument<std::string>("initializers");
+      CAFFE_ENFORCE_EQ(
+          initializers.size() % 2, 0, "initializers should come in pairs");
+      std::unordered_set<std::string> initializer_set;
+      std::unordered_map<std::string, std::string> input_mapping;
+      for (auto it = initializers.begin(); it != initializers.end(); ++it)  {
+        auto key = *it++;
+        input_mapping.emplace(key, *it);
+        initializer_set.emplace(key);
+      }
+      Workspace mapped_ws(ws, input_mapping);
+      ::ONNX_NAMESPACE::ModelProto onnx_model;
+      ParseProtoFromLargeString(onnx_model_str, &onnx_model);
+      BuildInitializationList(&mapped_ws, onnx_model.mutable_graph(), &initializer_set);
+      onnx_model_str.clear();
+      onnx_model.SerializeToString(&onnx_model_str);
+
+      // Build the trt engine
+      trt_engine_ = tensorrt::BuildTrtEngine(
+          onnx_model_str,
+          &logger_,
+          max_batch_size_,
+          max_workspace_size,
+          debug_builder);
+    }
   }
 
-  CAFFE_ENFORCE(trt_engine_, "Cannot deserialize TensorRT engine!");
+  CAFFE_ENFORCE(trt_engine_, "Cannot build TensorRT engine!");
 
   // match and bind the input/output
   const int num_bindings = trt_engine_->getNbBindings();
@@ -204,12 +244,12 @@ This is a GPU only operator.
         "log_verbosity",
         "(int default 0) verbosity of the TensorRt engine log.")
     .Arg(
-        "serialized_engine",
+        "backend_buffer",
         "(string default=\"\" blob for serialized TensorRT engine."
         "Note that serialized engine is not compatible across platform and "
         "different TensorRT version.")
     .Arg(
-        "batch_size",
+        "max_batch_size",
         "(int default 0) Batch size set by the TensorRT engine builder."
         "It must be no larger than the max_batch_size of the engine builder so "
         "it is better not to edit this manually.");

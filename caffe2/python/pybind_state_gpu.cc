@@ -82,7 +82,8 @@ void addCUDAGlobalMethods(py::module& m) {
          int max_batch_size,
          int max_workspace_size,
          int verbosity,
-         bool debug_builder) -> py::bytes {
+         bool debug_builder,
+         bool build_serializable_op) -> py::bytes {
 #ifdef CAFFE2_USE_TRT
         caffe2::NetDef pred_net;
         if (!ParseProtoFromLargeString(
@@ -95,8 +96,12 @@ void addCUDAGlobalMethods(py::module& m) {
               it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
         }
         TensorRTTransformer ts(
-            max_batch_size, max_workspace_size, verbosity, debug_builder);
-        ts.Transform(GetCurrentWorkspace(),  &pred_net, tensor_shapes);
+            max_batch_size,
+            max_workspace_size,
+            verbosity,
+            debug_builder,
+            build_serializable_op);
+        ts.Transform(GetCurrentWorkspace(), &pred_net, tensor_shapes);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
         return py::bytes(pred_net_str2);
