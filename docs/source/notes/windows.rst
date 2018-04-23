@@ -78,7 +78,7 @@ object to make it build on Windows.
    )
 
 Second, here is a workground for "unresolved external symbol 
-state caused by ``extern THCState *state;``
+state caused by ``extern THCState *state;``"
 
 Change the source code from C to C++. An example is listed below.
 
