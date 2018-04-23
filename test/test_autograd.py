@@ -8,7 +8,7 @@ import warnings
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
-from operator import mul
+from operator import mul, itemgetter
 from functools import reduce, wraps
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
@@ -2273,9 +2273,9 @@ S = 5
 #   method name,
 #   input size/constructing fn,
 #   args (tuple represents shape of a tensor arg),
-#   test variant name (will be used at test name suffix),  // optional
-#   indices for possible dim arg,                          // optional
-#   output indices that should be gradcheck'ed,            // optional
+#   test variant name (will be used at test name suffix),    // optional
+#   indices for possible dim arg,                            // optional
+#   fn mapping output to part that should be gradcheck'ed,   // optional
 # )
 method_tests = [
     ('add', (S, S, S), ((S, S, S),)),
@@ -2706,18 +2706,31 @@ method_tests = [
      'symmetric_pd', NO_ARGS, [skipIfNoLapack]),
     ('logdet', lambda: make_nonzero_det(random_fullrank_matrix_distinct_singular_value(S), 1, 0), NO_ARGS,
      'distinct_singular_values', NO_ARGS, [skipIfNoLapack]),
-    ('slogdet', lambda: make_nonzero_det(torch.randn(1, 1), 1), NO_ARGS, '1x1_pos_det', NO_ARGS, [skipIfNoLapack], [1]),
+    ('slogdet', lambda: make_nonzero_det(torch.randn(1, 1), 1), NO_ARGS,
+     '1x1_pos_det', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
     ('slogdet', lambda: make_nonzero_det(torch.randn(1, 1), -1), NO_ARGS,
-     '1x1_neg_det', NO_ARGS, [skipIfNoLapack], [1]),
-    ('slogdet', lambda: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS, 'pos_det', NO_ARGS, [skipIfNoLapack], [1]),
-    ('slogdet', lambda: make_nonzero_det(torch.randn(S, S), -1), NO_ARGS, 'neg_det', NO_ARGS, [skipIfNoLapack], [1]),
+     '1x1_neg_det', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
+    ('slogdet', lambda: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS,
+     'pos_det', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
+    ('slogdet', lambda: make_nonzero_det(torch.randn(S, S), -1), NO_ARGS,
+     'neg_det', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
     ('slogdet', lambda: make_nonzero_det(random_symmetric_matrix(S)), NO_ARGS,
-     'symmetric', NO_ARGS, [skipIfNoLapack], [1]),
-    ('slogdet', lambda: random_symmetric_pd_matrix(S), NO_ARGS, 'symmetric_pd', NO_ARGS, [skipIfNoLapack], [1]),
+     'symmetric', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
+    ('slogdet', lambda: random_symmetric_pd_matrix(S), NO_ARGS,
+     'symmetric_pd', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
     ('slogdet', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
-     'distinct_singular_values', NO_ARGS, [skipIfNoLapack], [1]),
+     'distinct_singular_values', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
-    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS, 'large', NO_ARGS, [skipIfNoLapack]),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S)[:(S - 2)], NO_ARGS,
+     'wide', NO_ARGS, [skipIfNoLapack]),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S)[:, :(S - 2)], NO_ARGS,
+     'tall', NO_ARGS, [skipIfNoLapack]),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S)[:(S - 2)], (False,),
+     'wide_all', NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0], usv[1], usv[2][:, :(S - 2)])),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S)[:, :(S - 2)], (False,),
+     'tall_all', NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
+     'large', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
@@ -3034,7 +3047,7 @@ for test in method_tests:
 
     skipTestIf = test[5] if len(test) >= 6 else []
 
-    test_output_indices = test[6] if len(test) >= 7 else None
+    output_process_fn = test[6] if len(test) >= 7 else lambda x: x
 
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
@@ -3045,7 +3058,7 @@ for test in method_tests:
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
-                    test_output_indices=test_output_indices):
+                    output_process_fn=output_process_fn):
             def check(name):
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
                 is_inplace = name[-1] == "_" and not is_magic_method
@@ -3067,10 +3080,7 @@ for test in method_tests:
 
                 def fn(*inputs):
                     output = getattr(inputs[0], name)(*inputs[1:])
-                    if test_output_indices is None:
-                        return output
-                    else:
-                        return tuple(output[i] for i in test_output_indices)
+                    return output_process_fn(output)
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK:
                     run_grad_and_gradgrad_checks(self, name, test_name, fn,
@@ -3080,10 +3090,7 @@ for test in method_tests:
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
                     def fn(*inputs):
                         output = getattr(torch, name)(*inputs)
-                        if test_output_indices is None:
-                            return output
-                        else:
-                            return tuple(output[i] for i in test_output_indices)
+                        return output_process_fn(output)
 
                     f_args_variable = (self_variable,) + args_variable
                     f_args_tensor = (self_tensor,) + args_tensor
