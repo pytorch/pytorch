@@ -1313,8 +1313,8 @@ Examples::
     -0.2239
     [torch.FloatTensor of size 2]
 
-    >>> x = torch.randn(2,5,4,2)
-    >>> torch.diagonal(x, -1, 1, 2)
+    >>> x = torch.randn(2, 5, 4, 2)
+    >>> torch.diagonal(x, offset=-1, dim1=1, dim2=2)
 
     (0 ,.,.) =
      -0.6806 -0.0281 -0.6595 -0.4199

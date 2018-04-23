@@ -2116,6 +2116,18 @@ class TestAutograd(TestCase):
         # we should throw an exception if the output requires grad
         self.assertRaisesRegex(RuntimeError, 'out=', lambda: torch.mul(a, b, out=x))
 
+    def test_diagonal_derivative_requires_grad(self):
+        # test that the backward requires grad
+        # we do this is because diagonal_backward uses inplace
+        # operations and gradgradcheck does not catch whether
+        # they works as expected (it will succeed even if
+        # the gradient has requires_grad == False
+        a = torch.randn(5, 6, requires_grad=True)
+        b = torch.diagonal(a)**2
+        c = b.sum()
+        d, = torch.autograd.grad(c, a, retain_graph=True, create_graph=True)
+        self.assertTrue(d.requires_grad)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
