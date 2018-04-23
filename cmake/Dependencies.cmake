@@ -307,7 +307,7 @@ if(BUILD_PYTHON)
   find_package(PythonLibs 2.7)
   find_package(NumPy REQUIRED)
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND AND NUMPY_FOUND)
-    include_directories(${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
+    include_directories(${PYTHON_INCLUDE_DIR} ${NUMPY_INCLUDE_DIR})
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
   else()
