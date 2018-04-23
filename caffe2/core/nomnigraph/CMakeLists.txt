@@ -13,7 +13,6 @@ set(Caffe2_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS} PARENT_SCOPE)
 
 if (BUILD_TEST)
   foreach(test_src ${NOMNI_TEST_SRCS})
-    message(INFO ${test_src} "WWWW")
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
     target_link_libraries(${test_name} nomnigraph gtest_main)
