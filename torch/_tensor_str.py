@@ -205,12 +205,14 @@ def _str(self):
         if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
             suffix = ', device=\'' + str(self.device) + '\'' + suffix
 
-    if self.dtype != torch.get_default_dtype() and self.dtype != torch.int64:
-        suffix = ', dtype=' + str(self.dtype) + suffix
-
     if self.numel() == 0:
+        if self.dtype != torch.get_default_dtype():
+            suffix = ', dtype=' + str(self.dtype) + suffix
         tensor_str = '[]'
     else:
+        if self.dtype != torch.get_default_dtype() and self.dtype != torch.int64:
+            suffix = ', dtype=' + str(self.dtype) + suffix
+
         fmt, scale, sz = _number_format(self)
         if scale != 1:
             prefix = prefix + SCALE_FORMAT.format(scale) + ' ' * indent
