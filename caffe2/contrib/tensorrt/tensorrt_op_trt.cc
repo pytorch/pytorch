@@ -56,7 +56,7 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
           OperatorBase::GetSingleArgument<int>("max_batch_size", 1)) {
   {
     auto engine_string =
-        OperatorBase::GetSingleArgument<std::string>("serialized_engine", "");
+        OperatorBase::GetSingleArgument<std::string>("backend_buffer", "");
     if (!engine_string.empty()) {
       auto trt_runtime =
           tensorrt::TrtObject(nvinfer1::createInferRuntime(logger_));
@@ -244,12 +244,12 @@ This is a GPU only operator.
         "log_verbosity",
         "(int default 0) verbosity of the TensorRt engine log.")
     .Arg(
-        "serialized_engine",
+        "backend_buffer",
         "(string default=\"\" blob for serialized TensorRT engine."
         "Note that serialized engine is not compatible across platform and "
         "different TensorRT version.")
     .Arg(
-        "batch_size",
+        "max_batch_size",
         "(int default 0) Batch size set by the TensorRT engine builder."
         "It must be no larger than the max_batch_size of the engine builder so "
         "it is better not to edit this manually.");

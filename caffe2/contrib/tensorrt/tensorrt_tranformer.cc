@@ -40,8 +40,8 @@ std::unordered_map<std::string, TensorShape> InferShapes(
   return shape_hints;
 }
 
-void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model) {
-  std::ofstream ff("trt.onnx");
+void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model, const std::string& fname) {
+  std::ofstream ff(fname);
   for (const auto& t : model.graph().initializer()) {
     ff << "tensor: " << t.name() << std::endl;
     ff << "  dims: ";
@@ -49,8 +49,12 @@ void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model) {
       ff << i << " ";
     }
     ff << std::endl;
+    int i = 0;
     for (auto i : t.float_data()) {
       ff << "    " << i << std::endl;
+      if (++i > 10) {
+        break;
+      }
     }
   }
   ff.close();
@@ -275,7 +279,7 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
   auto engine_plan = tensorrt::TrtObject(trt_engine->serialize());
   auto* serialized_engine_arg = op.add_arg();
   serialized_engine_arg->set_s("");
-  serialized_engine_arg->set_name("serialized_engine");
+  serialized_engine_arg->set_name("backend_buffer");
   auto* s = serialized_engine_arg->mutable_s();
   s->assign((char*)engine_plan->data(), engine_plan->size());
 
@@ -395,7 +399,7 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
 
   // Debug stuff
   if (debug_builder_) {
-    DumpModel(onnx_model);
+    DumpModel(onnx_model, "debug.onnx");
   }
 
   // Onnx model is ready. Call onnx-trt to convert to one trt c2 op
