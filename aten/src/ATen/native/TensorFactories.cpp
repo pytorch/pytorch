@@ -326,7 +326,7 @@ Tensor reverse_dim(const Tensor& t, int64_t dim) {
   return t.index_select(dim, index);
 }
 
-Tensor flip(const Tensor& self, IntList dims) {
+Tensor flip_cpu(const Tensor& self, IntList dims) {
   // check if number of axis in dim is valid
   if (dims.size() == 0) {
     std::stringstream ss;
@@ -335,16 +335,23 @@ Tensor flip(const Tensor& self, IntList dims) {
     throw std::runtime_error(ss.str());
   }
 
-  if ((int64_t)dims.size() > self.dim()) {
+  // remove duplicates in dims
+  auto dims_v = std::vector<int64_t>(dims);
+  dims_v.erase(std::unique(dims_v.begin(), dims_v.end()), dims_v.end());
+  dims = IntList(dims_v);
+
+  int64_t shape_len = self.dim(), dims_len = dims.size();
+
+  if (dims_len > shape_len) {
     std::stringstream ss;
     ss << "expected dims to have size <= total tensor dims, "
-       << "but got dims size=" << dims.size() << " and "
-       << "tensor dim=" << self.dim();
+       << "but got dims size=" << dims_len << " and "
+       << "tensor dim=" << shape_len;
     throw std::runtime_error(ss.str());
   }
 
   // check if dims axis within range
-  int64_t min_d = self.dim();
+  int64_t min_d = shape_len;
   int64_t max_d = 0;
   for (auto d : dims) {
     min_d = std::min(min_d, d);
@@ -358,24 +365,25 @@ Tensor flip(const Tensor& self, IntList dims) {
     throw std::runtime_error(ss.str());
   }
 
-  if (max_d >= self.dim()) {
+  if (max_d >= shape_len) {
     std::stringstream ss;
     ss << "expected dims axis < total tensor dims, "
        << "but got max dims=" << max_d << " and "
-       << "tensor dim=" << self.dim();
+       << "tensor dim=" << shape_len;
     throw std::runtime_error(ss.str());
   }
 
-  // remove duplicates in dims
-  auto dims_v = std::vector<int64_t>(dims);
-  dims_v.erase(std::unique(dims_v.begin(), dims_v.end()), dims_v.end());
-  dims = IntList(dims_v);
+
 
   Tensor res = self.clone();
   for (auto d : dims) {
     res.copy_(reverse_dim(res, d));
   }
   return res;
+}
+
+Tensor flip_backward_cpu(const Tensor& grad, IntList dims) {
+  return flip_cpu(grad, dims);
 }
 
 }

@@ -142,14 +142,6 @@ Tensor reverse_dim(const Tensor& t, int64_t dim) {
   return t.index_select(dim, index);
 }
 
-Tensor flip_backward(const Tensor& grad, IntList dims) {
-  Tensor res = grad.clone();
-  for (auto d : dims) {
-    res.copy_(reverse_dim(res, d));
-  }
-  return res;
-}
-
 Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t dim) {
   if (inp.size(dim) == 1) {
     return grad;

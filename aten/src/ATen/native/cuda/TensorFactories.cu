@@ -1,21 +1,4 @@
 #include "ATen/NativeFunctions.h"
-// #include "ATen/ATen.h"
-// #include "ATen/TensorUtils.h"
-// #include "ATen/Error.h"
-//
-// #include "ATen/cuda/AccumulateType.cuh"
-// #include "ATen/cuda/CUDATensorMethods.cuh"
-// #include "ATen/cuda/CUDATypeConversion.cuh"
-//
-// #include <THC/THCDeviceUtils.cuh>
-// #include <THC/THCNumerics.cuh>
-// #include <THC/THCTensorMathReduce.cuh>
-// #include <THC/THCTensorSort.cuh>
-// #include <THC/THCThrustAllocator.cuh>
-// #include <THCUNN/THCHalfAutoNumerics.cuh>
-//
-// #include <thrust/execution_policy.h>
-// #include <thrust/unique.h>
 
 #include <algorithm>
 #include <sstream>
@@ -62,7 +45,6 @@ __device__ int64_t nD_to_oneD(int64_t* nD_index, int64_t shape_len, int64_t* sha
   return dest_oneD_index;
 }
 
-// template <typename T>
 __global__ void flip_cuda_kernel(double* in_t, double* out_t, int64_t N, int64_t* dims, int64_t* nD_index,
   int64_t dims_len, int64_t* shape_size, int64_t* shape, int64_t shape_len) {
 

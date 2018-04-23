@@ -535,13 +535,13 @@
   variants: function
 
 - func: randint_out(Tensor result, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
-  variants: function  
+  variants: function
 
 - func: randint_like(Tensor self, int64_t high) -> Tensor
   variants: function
 
 - func: randint_like(Tensor self, int64_t low, int64_t high) -> Tensor
-  variants: function  
+  variants: function
 
 - func: randint_like(Tensor self, int64_t high, *, Type dtype) -> Tensor
   variants: function
@@ -761,6 +761,14 @@
   variants: method
 
 - func: flip(Tensor self, IntList dims) -> Tensor
+  dispatch:
+    CPU: flip_cpu
+    CUDA: flip_cuda
+
+- func: flip_backward(Tensor grad, IntList dims) -> Tensor
+  dispatch:
+    CPU: flip_backward_cpu
+    CUDA: flip_backward_cuda
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
   variants: function
