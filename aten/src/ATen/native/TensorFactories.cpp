@@ -327,6 +327,7 @@ Tensor reverse_dim(const Tensor& t, int64_t dim) {
 }
 
 Tensor flip(const Tensor& self, IntList dims) {
+  // check if number of axis in dim is valid
   if (dims.size() == 0) {
     std::stringstream ss;
     ss << "expected dims not empty, "
@@ -334,7 +335,7 @@ Tensor flip(const Tensor& self, IntList dims) {
     throw std::runtime_error(ss.str());
   }
 
-  if (dims.size() > self.dim()) {
+  if ((int64_t)dims.size() > self.dim()) {
     std::stringstream ss;
     ss << "expected dims to have size <= total tensor dims, "
        << "but got dims size=" << dims.size() << " and "
@@ -342,6 +343,7 @@ Tensor flip(const Tensor& self, IntList dims) {
     throw std::runtime_error(ss.str());
   }
 
+  // check if dims axis within range
   int64_t min_d = self.dim();
   int64_t max_d = 0;
   for (auto d : dims) {
@@ -364,7 +366,10 @@ Tensor flip(const Tensor& self, IntList dims) {
     throw std::runtime_error(ss.str());
   }
 
-  // TODO: remove duplicates in dims
+  // remove duplicates in dims
+  auto dims_v = std::vector<int64_t>(dims);
+  dims_v.erase(std::unique(dims_v.begin(), dims_v.end()), dims_v.end());
+  dims = IntList(dims_v);
 
   Tensor res = self.clone();
   for (auto d : dims) {

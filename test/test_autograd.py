@@ -1748,13 +1748,14 @@ class TestAutograd(TestCase):
         self.assertEqual(torch.Tensor([0,2,4,6]).view(2, 2), x.grad)
 
         # test cuda backward
-        x_cuda = torch.autograd.Variable(torch.Tensor([0,1,2,3]).view(2, 2).cuda(), requires_grad=True)
-        y_cuda = x_cuda.flip([0])
-        self.assertEqual(torch.Tensor([2,3,0,1]).view(2, 2), y_cuda)
-        z_cuda = y_cuda * y_cuda
-        out_cuda = z_cuda.sum()
-        out_cuda.backward()
-        self.assertEqual(torch.Tensor([0,2,4,6]).view(2, 2), x_cuda.grad)
+        if torch.cuda.is_available():
+            x_cuda = torch.autograd.Variable(torch.Tensor([0,1,2,3]).view(2, 2).cuda(), requires_grad=True)
+            y_cuda = x_cuda.flip([0])
+            self.assertEqual(torch.Tensor([2,3,0,1]).view(2, 2), y_cuda)
+            z_cuda = y_cuda * y_cuda
+            out_cuda = z_cuda.sum()
+            out_cuda.backward()
+            self.assertEqual(torch.Tensor([0,2,4,6]).view(2, 2), x_cuda.grad)
 
     def test_cat(self):
         f_args_variable = (torch.randn(1, S, S, requires_grad=True),
