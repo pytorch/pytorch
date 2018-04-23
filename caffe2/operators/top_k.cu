@@ -68,7 +68,7 @@ void RunRadixSelectionImpl(
     thrust::sort_by_key(
         thrust::cuda::par.on(context->cuda_stream()),
         values + i * k,
-        values + i * k + k,
+        values + i * k + (k <= inner_size ? k : inner_size),
         indices + i * k,
         thrust::greater<T>());
   }
@@ -107,6 +107,9 @@ __global__ void FlattenIndicesCUDAKernel(
     const int k,
     TIndex* dst) {
   CUDA_1D_KERNEL_LOOP(i, size) {
+    if (src[i] < 0) {
+      continue;
+    }
     const TIndex x = i / stride / k;
     const TIndex y = i % stride;
 #if __CUDA_ARCH__ >= 350
@@ -127,6 +130,9 @@ __global__ void SetTopKGradientCUDAKernel(
     const int k,
     T* dst) {
   CUDA_1D_KERNEL_LOOP(i, size) {
+    if (indices[i] < 0) {
+      continue;
+    }
     const TIndex x = i / stride / k;
     const TIndex y = i % stride;
 #if __CUDA_ARCH__ >= 350
@@ -187,10 +193,6 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
   }
   CAFFE_ENFORCE_GE(axis_, 0);
   CAFFE_ENFORCE_LT(axis_, input_dims.size());
-  CAFFE_ENFORCE_LE(
-      k_,
-      input_dims[axis_],
-      "k argument should not be greater than the axis dim.");
 
   const bool need_transpose = axis_ < input_dims.size() - 1;
   std::vector<TIndex> output_dims = input_dims;
@@ -240,6 +242,16 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
     values_data = values_transposed_buffer_.template mutable_data<T>();
     indices_data = indices_transposed_buffer_.template mutable_data<TIndex>();
   }
+
+  // init values as the default value
+  math::Set<T, CUDAContext>(values->size(), T(0), values_data, &context_);
+  math::Set<TIndex, CUDAContext>(
+      indices->size(), TIndex(-1), indices_data, &context_);
+  if (flatten_indices_data != nullptr) {
+    math::Set<TIndex, CUDAContext>(
+        flatten_indices->size(), TIndex(-1), flatten_indices_data, &context_);
+  }
+
   RunTopKOnLastDimCUDAImpl<T>(
       input_data,
       outer_size,
