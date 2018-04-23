@@ -108,6 +108,7 @@ struct InternedStrings {
       switch(sym) {
         FORALL_BUILTIN_SYMBOLS(DEFINE_CASE)
         default:
+          break;
       }
       #undef DEFINE_CASE
     #else
