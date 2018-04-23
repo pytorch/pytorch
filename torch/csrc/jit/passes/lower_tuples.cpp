@@ -70,7 +70,7 @@ static void VisitNode(Node* n, Node* insert_point) {
     if(TupleType* tt = output->type()->cast<TupleType>()) {
       JIT_ASSERTM(white_list.count(n->kind()) > 0, "tuple appears in op that does not forward tuples");
       for(size_t j = 0; j < tt->elements().size(); j++) {
-        n->insertOutput(i + 1 + j)->setType(tt->elements()[i]);
+        n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
       }
       auto new_tup = graph.createTuple(n->outputs().slice(i + 1, tt->elements().size()));
       new_tup->insertBefore(insert_point);

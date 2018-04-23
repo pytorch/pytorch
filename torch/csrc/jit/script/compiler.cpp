@@ -309,6 +309,27 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
   for(size_t i = 0; i < op->num_outputs; ++i)
     n->addOutput();
 
+  // special handling for the tuple that cat takes as its first argument
+  if(name == "cat") {
+    ensureTensors(loc, inputs.slice(1));
+    auto first = inputs.at(0);
+    if(first->type()->kind() != TupleType::Kind) {
+      throw ErrorReport(loc) << "expected a tuple";
+    }
+    if(inputs.size() + attributes.size() > 2) {
+      throw ErrorReport(loc) << "expected at most 2 inputs";
+    }
+    // flatten the tuple into the argument list
+    auto unpacked = graph->insertNode(graph->createTupleUnpack(first));
+    ensureTensors(loc, unpacked->outputs());
+    n->removeInput(0);
+    for(size_t i = 0; i < unpacked->outputs().size(); ++i) {
+      n->insertInput(i, unpacked->outputs().at(i));
+    }
+  } else {
+    ensureTensors(loc, inputs);
+  }
+
   return packOutputs(*graph, n->outputs());
 }
 
@@ -318,6 +339,28 @@ struct NoneValue : SugaredValue {
     return "None";
   }
 };
+
+
+static Value* ensureTensor(const SourceRange& range, Value* v) {
+  // both 'DynamicType' and 'TensorType' are actually Tensors:
+  // 'Dynamic' currently means a dynamically-sized tensor vs e.g. a TupleType
+  // TensorType means a 'sized' tensor which is added by some optimizations
+  if(v->type()->kind() == TypeKind::DynamicType
+     || v->type()->kind() == TypeKind::TensorType) {
+       return v;
+  }
+  throw ErrorReport(range) << "expected a tensor value but found a tuple";
+}
+
+void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values) {
+  for(auto value : values) {
+    ensureTensor(range, value);
+  }
+}
+
+static Value* identity(const SourceRange& range, Value* v) {
+  return v;
+}
 
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
@@ -825,23 +868,29 @@ private:
     }
   }
 
-  std::vector<Value*> getValues(TreeList trees, bool maybe_unpack=false) {
+  std::vector<Value*> getValues(
+      TreeList trees,
+      bool maybe_unpack=false,
+      std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
     std::vector<Value*> values;
     for (const auto& tree : trees) {
       if(maybe_unpack && tree->kind() == TK_STARRED) {
         auto starred = Starred(tree);
         auto entries = emitSugaredExpr(starred.expr(), 1)->asTuple(starred.range(), method);
         for(auto entry : entries) {
-          values.push_back(ensureTensor(starred.range(), entry->asValue(starred.range(), method)));
+          values.push_back(post_process(starred.range(), entry->asValue(starred.range(), method)));
         }
       } else {
-        values.push_back(emitExpr(Expr(tree)));
+        values.push_back(emitExpr(Expr(tree), post_process));
       }
     }
     return values;
   }
-  std::vector<Value*> getValues(List<Expr> trees, bool maybe_unpack=false) {
-    return getValues(trees.tree()->trees(), maybe_unpack);
+  std::vector<Value*> getValues(
+      List<Expr> trees,
+      bool maybe_unpack=false,
+      std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
+    return getValues(trees.tree()->trees(), maybe_unpack, post_process);
   }
 
 
@@ -853,6 +902,7 @@ private:
     } else if (ident.name() == "print") {
       if (!attributes.empty())
         throw ErrorReport(ident) << "print doesn't accept any keyword arguments";
+      ensureTensors(ident.range(), inputs);
       emitNode(prim::Print, ident.range(), inputs, 0);
       return std::make_shared<NoneValue>();
     }
@@ -869,19 +919,8 @@ private:
     return sv->call(callee.range(), method, inputs, attributes, n_binders);
   }
 
-  Value* ensureTensor(const SourceRange& range, Value* v) {
-    // both 'DynamicType' and 'TensorType' are actually Tensors:
-    // 'Dynamic' currently means a dynamically-sized tensor vs e.g. a TupleType
-    // TensorType means a 'sized' tensor which is added by some optimizations
-    if(v->type()->kind() == TypeKind::DynamicType
-       || v->type()->kind() == TypeKind::TensorType) {
-         return v;
-    }
-    throw ErrorReport(range) << "expected a tensor value but found a tuple";
-  }
-
-  Value* emitExpr(Expr tree) {
-    return ensureTensor(tree.range(), emitSugaredExpr(tree, 1)->asValue(tree.range(), method));
+  Value* emitExpr(Expr tree, std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
+    return post_process(tree.range(), emitSugaredExpr(tree, 1)->asValue(tree.range(), method));
   }
 
   // any expression that can produce a SugaredValue is handled here
@@ -897,7 +936,7 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        auto inputs = getValues(apply.inputs(), true);
+        auto inputs = getValues(apply.inputs(), true, identity);
         // the apply is directly an identifier 'foo'
         if(apply.callee().kind() == TK_VAR) {
           return emitApplyIdent(Var(apply.callee()).name(), inputs, apply.attributes(), n_binders);
@@ -965,6 +1004,11 @@ private:
       } break;
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
+      } break;
+      case TK_LIST_LITERAL: {
+        auto ll = ListLiteral(tree);
+        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
+        return graph->insertNode(graph->createTuple(values))->output();
       } break;
       default:
         throw ErrorReport(tree) << "NYI: " << tree;

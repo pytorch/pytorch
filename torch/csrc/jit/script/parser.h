@@ -29,6 +29,20 @@ struct Parser {
         List<Expr>(makeList(range, std::move(inputs))),
         List<Attribute>(makeList(range, std::move(attributes))));
   }
+  // exp | expr, | expr, expr, ...
+  TreeRef parseExpOrExpList(int end) {
+    auto prefix = parseExp();
+    if(L.cur().kind == ',') {
+      std::vector<Expr> exprs = { prefix };
+      while(L.cur().kind != end) {
+        L.expect(',');
+        exprs.push_back(parseExp());
+      }
+      auto list = List<Expr>::create(prefix.range(), exprs);
+      prefix = ListLiteral::create(list.range(), list);
+    }
+    return prefix;
+  }
   // things like a 1.0 or a(4) that are not unary/binary expressions
   // and have higher precedence than all of them
   TreeRef parseBaseExp() {
@@ -46,8 +60,12 @@ struct Parser {
       } break;
       case '(': {
         L.next();
-        prefix = parseExp();
+        prefix = parseExpOrExpList(')');
         L.expect(')');
+      } break;
+      case '[': {
+        auto list = parseList('[', ',', ']', &Parser::parseExp);
+        prefix = ListLiteral::create(list.range(), List<Expr>(list));
       } break;
       case TK_FLOAT:
       case TK_INT:
@@ -170,16 +188,7 @@ struct Parser {
     return Const::create(t.range, t.text());
   }
   Expr parseAttributeValue() {
-    int kind = L.cur().kind;
-    switch (kind) {
-      case '[': {
-        auto list = parseList('[', ',', ']', &Parser::parseExp);
-        return ListLiteral::create(list.range(), List<Expr>(list));
-      }
-      default: {
-        return parseExp();
-      }
-    }
+    return parseExp();
   }
   void parseOperatorArguments(TreeList& inputs, TreeList& attributes) {
     L.expect('(');
@@ -246,7 +255,7 @@ struct Parser {
   // first[,other,lhs] = rhs
   Assign parseAssign(List<Expr> list) {
     auto red = parseOptionalReduction();
-    auto rhs = parseExp();
+    auto rhs = parseExpOrExpList(TK_NEWLINE);
     L.expect(TK_NEWLINE);
     return Assign::create(list.range(), list, AssignKind(red), Expr(rhs));
   }

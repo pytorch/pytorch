@@ -1434,9 +1434,9 @@ class TestJit(TestCase):
         def test_fuser_multiple_blocks(this, that, theother, meme):
             i = 0
             while i < 20:
-                this = cat(this, meme, dim=0)
-                that = cat(that, meme, dim=0)
-                theother = cat(theother, meme, dim=0)
+                this = cat([this, meme], dim=0)
+                that = cat([that, meme], dim=0)
+                theother = cat([theother, meme], dim=0)
                 i = i + 1
             return this, that, theother
         ''')
@@ -1579,6 +1579,53 @@ class TestScript(TestCase):
         y = func(x)
         y2 = torch.sum(x, dim=0, keepdim=True)
         self.assertEqual(y, y2)
+
+    def test_literal(self):
+        def func(a, b):
+            c = [a, b]
+            d, e = c
+            return d + e
+
+        def func2(a, b):
+            c = a, b
+            d, e = c
+            return d + e
+
+        def func3(a, b):
+            c = a, (a, b)
+            d, e = c
+            f, g = e
+            return d + f + g
+
+        def func4(a, b):
+            c = 0, (0, 0)
+            x = True
+            while x:
+                x = False
+                c = a, (a, b)
+            d, e = c
+            f, g = e
+            return d + f + g
+
+        a = torch.rand(1, requires_grad=True)
+        b = torch.rand(1, requires_grad=True)
+        self.checkScript(func, (a, b), optimize=True)
+        self.checkScript(func2, (a, b), optimize=True)
+        self.checkScript(func3, (a, b), optimize=True)
+        self.checkScript(func4, (a, b), optimize=True)
+
+    def test_cat(self):
+        @torch.jit.script
+        def func(x):
+            return torch.cat((x, x), dim=0)
+
+        x = torch.rand(10, dtype=torch.float, requires_grad=True)
+        self.assertEqual(func(x), torch.cat((x, x), dim=0))
+
+        with self.assertRaisesRegex(RuntimeError, "at most 2 inputs"):
+            @torch.jit.script
+            def func(x):
+                return torch.cat((x, x), x, dim=0)
 
     def test_func_call(self):
         script = '''
