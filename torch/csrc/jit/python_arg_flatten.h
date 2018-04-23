@@ -108,3 +108,24 @@ PyObject* unflatten(at::ArrayRef<autograd::Variable> outputs,
                     const IODescriptor& structure);
 
 }}} // namespace torch::jit::python
+
+#if (_MSC_VER <= 1900)
+  namespace std {
+    template <>
+    struct hash<::torch::jit::python::IODescriptor::VariableMetadata>
+    {
+      ::std::size_t operator()(const ::torch::jit::python::IODescriptor::VariableMetadata& k) const
+      {
+        return ::torch::jit::python::IODescriptor::VariableMetadata::hash(k);
+      }
+    };
+    template <>
+    struct hash<::torch::jit::python::IODescriptor>
+    {
+      ::std::size_t operator()(const ::torch::jit::python::IODescriptor& k) const
+      {
+        return ::torch::jit::python::IODescriptor::hash(k);
+      }
+    };
+  }
+#endif

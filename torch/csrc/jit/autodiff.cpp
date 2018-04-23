@@ -32,45 +32,46 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
     auto inputs = fmap<SymbolicVariable>(node->inputs());
     auto outputs = fmap<SymbolicVariable>(node->outputs());
-    switch(node->kind()) {
-      case aten::add:
+	{
+	IR_IFC(node, aten::add)
         // o = a - alpha*other
         if(inputs.size() == 1)
           return { grads.at(0) };
           // o = a + alpha*b
         return {grads.at(0), grads.at(0) * at::Scalar(node->t(attr::alpha)) };
-      case aten::sub:
+	IR_ELSEIFC(aten::sub)
         // o = a - alpha*other
         if(inputs.size() == 1)
           return {grads.at(0)};
         // o = a - alpha*b
         return {grads.at(0), -grads.at(0) * at::Scalar(node->t(attr::alpha))};
-      case aten::mul:
+	IR_ELSEIFC(aten::mul)
         // o = a * other
         if(inputs.size() == 1)
           return {grads.at(0) * at::Scalar(node->t(attr::other))};
         // o = a * b
         return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
-      case prim::Constant:
+	IR_ELSEIFC(prim::Constant)
         return {};
-      case prim::ReplaceIfUndef:
+	IR_ELSEIFC(prim::ReplaceIfUndef)
         return {grads.at(0), grads.at(0)};
-      case aten::sigmoid:
+    IR_ELSEIFC(aten::sigmoid)
         return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};
-      case aten::tanh:
+    IR_ELSEIFC(aten::tanh)
         return {grads.at(0) * (1 - outputs.at(0) * outputs.at(0))};
-      case aten::chunk:
-      case aten::split:
+    IR_ELSEIFC(aten::chunk)
         return {SymbolicVariable::cat(grads, node->i(attr::dim))};
-      case aten::t:
+    IR_ELSEIFC(aten::split)
+        return {SymbolicVariable::cat(grads, node->i(attr::dim))};
+    IR_ELSEIFC(aten::t)
         return {grads.at(0).t()};
-      case aten::neg:
+    IR_ELSEIFC(aten::neg)
         return {-grads.at(0)};
-      case aten::view:
+    IR_ELSEIFC(aten::view)
         return {grads.at(0).view(inputs.at(0).sizes())};
-      case aten::unsqueeze:
+    IR_ELSEIFC(aten::unsqueeze)
         return {grads.at(0).squeeze(node->i(attr::dim))};
-      case aten::mm: {
+    IR_ELSEIFC(aten::mm)
         SymbolicVariable dmat1, dmat2;
         if (auto type = inputs.at(0).value()->type()->cast<TensorType>()) {
           auto sizes = type->sizes(), strides = type->strides();
@@ -93,8 +94,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
           dmat2 = grads.at(0).mm(inputs.at(1).t());
         }
         return {dmat1, dmat2};
-      }
-      case aten::expand: {
+    IR_ELSEIFC(aten::expand)
         const auto& input_sizes = inputs.at(0).sizes();
         if (input_sizes.size() == 0)
           return {grads.at(0).sum()};
@@ -110,8 +110,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
           }
         }
         return {grad};
-      }
-      case aten::squeeze: {
+    IR_ELSEIFC(aten::squeeze)
         const auto& sizes = inputs.at(0).sizes();
         if (node->hasAttribute(attr::dim)) {
           int dim = node->i(attr::dim);
@@ -127,8 +126,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
             returned_grad = returned_grad.unsqueeze(*it);
           return {returned_grad};
         }
-      }
-      case aten::cat: {
+    IR_ELSEIFC(aten::cat)
         int dim = node->i(attr::dim);
         const auto& first_sizes = inputs.at(0).sizes();
         const auto has_first_sizes = [&first_sizes](SymbolicVariable var) {
@@ -148,10 +146,12 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
           }
           return returned_grads;
         }
-      }
-    }
+	IR_ELSE()
+	IR_END()
+	}
     throw std::runtime_error(std::string("don't support differentiation of `") +
                             node->kind().toDisplayString() + "`");
+
   };
   const auto has_tensor_type = [](Value *v) { return v->isTensor(); };
   if (!isDifferentiable(node)) {
