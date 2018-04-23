@@ -1696,6 +1696,23 @@ Example::
            7.0977)
 """)
 
+add_docstr(torch.get_default_dtype,
+           r"""
+get_default_dtype() -> :class:`torch.dtype`
+
+Get the current default :class:`torch.dtype`.
+
+Example::
+
+    >>> torch.get_default_dtype()  # initial default is float32
+    torch.float32
+    >>> torch.set_default_dtype(torch.double)
+    >>> torch.get_default_dtype()  # default is now changed to float64
+    torch.float64
+
+
+""")
+
 add_docstr(torch.get_num_threads,
            r"""
 get_num_threads() -> int

@@ -6,8 +6,9 @@ Tensors
 ----------------------------------
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
-.. autofunction:: set_default_tensor_type
 .. autofunction:: set_default_dtype
+.. autofunction:: get_default_dtype
+.. autofunction:: set_default_tensor_type
 .. autofunction:: numel
 .. autofunction:: set_printoptions
 .. autofunction:: set_flush_denormal
