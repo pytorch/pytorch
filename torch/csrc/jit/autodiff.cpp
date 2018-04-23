@@ -57,7 +57,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         return {grads.at(0), grads.at(0)};
     IR_ELSEIFC(aten::sigmoid)
         return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};
-    IR_ELSEIFC(aten::sigmoid)
+    IR_ELSEIFC(aten::tanh)
         return {grads.at(0) * (1 - outputs.at(0) * outputs.at(0))};
     IR_ELSEIFC(aten::chunk)
         return {SymbolicVariable::cat(grads, node->i(attr::dim))};
