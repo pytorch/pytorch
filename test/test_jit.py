@@ -2541,7 +2541,7 @@ class TestScript(TestCase):
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
-        with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Dynamic, Dynamic\)"):
+        with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Tensor, Tensor\)"):
             @torch.jit.script
             def mixtypes():
                 a = torch.chunk(1, dim=0, chunks=2)
@@ -2773,6 +2773,19 @@ class TestScript(TestCase):
         self.assertEqual(result, reference)
         self.assertExpected(torch.onnx._export_to_pretty_string(
             mte, (torch.ones(2, 3),), None, verbose=False))
+
+    def test_trace_with_size(self):
+        @torch.jit.trace(torch.zeros(1, 1))
+        def foo(x):
+            return x + 1
+
+        def bar(x):
+            y = foo(x)
+            if True:
+                y = 7
+            return y + 1
+
+        self.assertEqual(8, bar(torch.ones(1, 1)))
 
 
 # Smoke tests for export methods
