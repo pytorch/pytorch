@@ -1,9 +1,6 @@
 if(USE_MKL AND MKL_USE_IDEEP)
   message(STATUS "Including IDEEP operators")
 
-  # ---[ Enable AVX2
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2")
-
   # ---[ CPU files.
   file(GLOB_RECURSE tmp *.cc)
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
