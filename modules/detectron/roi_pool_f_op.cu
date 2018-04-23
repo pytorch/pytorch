@@ -46,10 +46,10 @@ __global__ void RoIPoolFForward(const int nthreads, const T* bottom_data,
 
     const T* offset_bottom_rois = bottom_rois + n * 5;
     int roi_batch_ind = offset_bottom_rois[0];
-    int roi_start_w = round(offset_bottom_rois[1] * spatial_scale);
-    int roi_start_h = round(offset_bottom_rois[2] * spatial_scale);
-    int roi_end_w = round(offset_bottom_rois[3] * spatial_scale);
-    int roi_end_h = round(offset_bottom_rois[4] * spatial_scale);
+    int roi_start_w = roundf(offset_bottom_rois[1] * spatial_scale);
+    int roi_start_h = roundf(offset_bottom_rois[2] * spatial_scale);
+    int roi_end_w = roundf(offset_bottom_rois[3] * spatial_scale);
+    int roi_end_h = roundf(offset_bottom_rois[4] * spatial_scale);
 
     // Force malformed ROIs to be 1x1
     int roi_width = max(roi_end_w - roi_start_w + 1, 1);

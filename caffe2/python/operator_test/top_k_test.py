@@ -5,7 +5,6 @@ from __future__ import unicode_literals
 
 import hypothesis.strategies as st
 import numpy as np
-import random
 
 from caffe2.python import core
 from hypothesis import given
@@ -32,10 +31,13 @@ class TestTopK(hu.HypothesisTestCase):
 
         values_ref = np.ndarray(
             shape=(prev_dims, k, next_dims), dtype=np.float32)
+        values_ref.fill(0)
         indices_ref = np.ndarray(
             shape=(prev_dims, k, next_dims), dtype=np.int64)
+        indices_ref.fill(-1)
         flatten_indices_ref = np.ndarray(
             shape=(prev_dims, k, next_dims), dtype=np.int64)
+        flatten_indices_ref.fill(-1)
         for i in range(prev_dims):
             for j in range(next_dims):
                 kv = []
@@ -50,7 +52,7 @@ class TestTopK(hu.HypothesisTestCase):
                     indices_ref[i, cnt, j] = x
                     flatten_indices_ref[i, cnt, j] = y
                     cnt += 1
-                    if cnt >= k:
+                    if cnt >= k or cnt >= n:
                         break
 
         values_ref = values_ref.reshape(out_dims)
@@ -62,10 +64,18 @@ class TestTopK(hu.HypothesisTestCase):
         else:
             return (values_ref, indices_ref)
 
-    @given(X=hu.tensor(), flatten_indices=st.booleans(), **hu.gcs)
-    def test_top_k(self, X, flatten_indices, gc, dc):
+    @given(
+        X=hu.tensor(),
+        flatten_indices=st.booleans(),
+        seed=st.integers(0, 10),
+        **hu.gcs
+    )
+    def test_top_k(self, X, flatten_indices, seed, gc, dc):
         X = X.astype(dtype=np.float32)
-        k = random.randint(1, X.shape[-1])
+        np.random.seed(seed)
+        # `k` can be larger than the total size
+        k = np.random.randint(1, X.shape[-1] + 4)
+
         output_list = ["Values", "Indices"]
         if flatten_indices:
             output_list.append("FlattenIndices")
@@ -115,8 +125,6 @@ class TestTopK(hu.HypothesisTestCase):
            k=st.integers(1, 1024), flatten_indices=st.booleans(), **hu.gcs)
     def test_top_k_3(self, bs, n, k, flatten_indices, gc, dc):
         X = np.random.rand(bs, n).astype(dtype=np.float32)
-        k = min(k, n)
-
         output_list = ["Values", "Indices"]
         if flatten_indices:
             output_list.append("FlattenIndices")
@@ -190,8 +198,7 @@ class TestTopK(hu.HypothesisTestCase):
         dims = X.shape
         if axis >= len(dims):
             axis %= len(dims)
-        if k > dims[axis]:
-            k = (k - 1) % dims[axis] + 1
+
         output_list = ["Values", "Indices"]
         if flatten_indices:
             output_list.append("FlattenIndices")
@@ -210,13 +217,7 @@ class TestTopK(hu.HypothesisTestCase):
         dims = X.shape
         if axis >= len(dims):
             axis %= len(dims)
-        if k > dims[axis]:
-            k = (k - 1) % dims[axis] + 1
 
-        # this try to make sure adding stepsize (0.05)
-        # will not change TopK selections at all
-        # since dims max_value = 5 as defined in
-        # caffe2/caffe2/python/hypothesis_test_util.py
         input_axis = len(dims) - 1 if axis == -1 else axis
         prev_dims = 1
         next_dims = 1
@@ -228,12 +229,14 @@ class TestTopK(hu.HypothesisTestCase):
         X_flat = X.reshape((prev_dims, dims[input_axis], next_dims))
         for i in range(prev_dims):
             for j in range(next_dims):
-                X_flat[i, :, j] = np.arange(
-                    dims[axis], dtype=np.float32) / np.float32(dims[axis])
+                # this try to make sure adding stepsize (0.05)
+                # will not change TopK selections at all
+                X_flat[i, :, j] = np.arange(dims[axis], dtype=np.float32) / 5
                 np.random.shuffle(X_flat[i, :, j])
         X = X_flat.reshape(dims)
 
         op = core.CreateOperator(
             "TopK", ["X"], ["Values", "Indices"], k=k, axis=axis,
             device_option=gc)
-        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=0.05)
