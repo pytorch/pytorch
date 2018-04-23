@@ -1507,8 +1507,6 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         target: Tensor of the same shape as input
         weight (Tensor, optional): a manual rescaling weight
                 if provided it's repeated to match input tensor shape
-        pos_weight (Tensor, optional): a weight of positive examples.
-                Must be a vector with length equal to the number of classes.
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 :attr:`size_average` is set to ``False``, the losses are instead summed
@@ -1517,6 +1515,8 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 observations for each minibatch depending on :attr:`size_average`. When :attr:`reduce`
                 is ``False``, returns a loss per input/target element instead and ignores
                 :attr:`size_average`. Default: ``True``
+        pos_weight (Tensor, optional): a weight of positive examples.
+                Must be a vector with length equal to the number of classes.
 
     Examples::
 

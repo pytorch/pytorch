@@ -476,8 +476,6 @@ class BCEWithLogitsLoss(_Loss):
         weight (Tensor, optional): a manual rescaling weight given to the loss
             of each batch element. If given, has to be a Tensor of size
             "nbatch".
-        pos_weight (Tensor, optional): a weight of positive examples.
-                Must be a vector with length equal to the number of classes.
         size_average (bool, optional): By default, the losses are averaged
             over observations for each minibatch. However, if the field
             size_average is set to ``False``, the losses are instead summed for
@@ -486,6 +484,8 @@ class BCEWithLogitsLoss(_Loss):
             observations for each minibatch depending on size_average. When reduce
             is False, returns a loss per input/target element instead and ignores
             size_average. Default: True
+        pos_weight (Tensor, optional): a weight of positive examples.
+                Must be a vector with length equal to the number of classes.
 
      Shape:
          - Input: :math:`(N, *)` where `*` means, any number of additional
