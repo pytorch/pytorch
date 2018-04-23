@@ -133,17 +133,17 @@ def set_default_tensor_type(t):
     :attr:`t`. This type will also be used as default floating point type for
     type inference in :func:`torch.tensor`.
 
-    The default tensor type is initially ``torch.FloatTensor``
+    The default floating point tensor type is initially ``torch.FloatTensor``.
 
     Args:
         t (type or string): the floating point tensor type or its name
 
     Example::
 
-        >>> torch.tensor([1.2, 3]).dtype  # default is float32
+        >>> torch.tensor([1.2, 3]).dtype    # initial default for floating point is torch.float32
         torch.float32
         >>> torch.set_default_tensor_type(torch.DoubleTensor)
-        >>> torch.tensor([1.2, 3]).dtype  # floating point tensor
+        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
 
     """
@@ -157,16 +157,19 @@ def set_default_dtype(d):
     used as default floating point type for type inference in
     :func:`torch.tensor`.
 
+    The default floating point dtype is initially ``torch.float32``.
+
     Args:
         d (:class:`torch.dtype`): the floating point dtype to make the default
 
     Example::
 
-        >>> torch.tensor([1.2, 3]).dtype  # default is float32
+        >>> torch.tensor([1.2, 3]).dtype           # initial default for floating point is torch.float32
         torch.float32
-        >>> torch.set_default_dtype(torch.double)
-        >>> torch.tensor([1.2, 3]).dtype
+        >>> torch.set_default_dtype(torch.float64)
+        >>> torch.tensor([1.2, 3]).dtype           # a new floating point tensor
         torch.float64
+
     """
     _C._set_default_dtype(d)
 
