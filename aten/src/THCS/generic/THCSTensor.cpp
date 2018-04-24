@@ -58,11 +58,11 @@ THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self) {
   return THCTensor_(newNarrow)(state, self->values, 0, 0, self->nnz);
 }
 
-THCudaIntTensor *THCSTensor_(newCSR)(THCState *state, const THCSTensor *self) {
+THCIndexTensor *THCSTensor_(newCSR)(THCState *state, const THCSTensor *self) {
   if (self->csr == NULL) {
     return self->csr;
   }
-  return THCudaIntTensor_newNarrow(state, self->csr, 0, 0, self->size[0] + 1); 
+  return THCIndexTensor_(newNarrow)(state, self->csr, 0, 0, self->size[0] + 1); 
 }
 /******************************************************************************
  * creation methods
@@ -126,14 +126,14 @@ THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor 
   return THCSTensor_(_move)(state, self, THCIndexTensor_(newClone)(state, indices), THCTensor_(newClone)(state, values));
 }
 
-THCSTensor* THCSTensor_(_move_csr)(THCState *state, THCSTensor *self, THCudaIntTensor *csr) {
+THCSTensor* THCSTensor_(_move_csr)(THCState *state, THCSTensor *self, THCIndexTensor *csr) {
   if (csr != NULL) { 
-    THArgCheck(self->size[0] + 1 == THCudaIntTensor_size(state, csr, 0), 1, 
+    THArgCheck(self->size[0] + 1 == THCIndexTensor_(size)(state, csr, 0), 1, 
         "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1,
-        THCudaIntTensor_size(state, csr, 0));
+        THCIndexTensor_(size)(state, csr, 0));
   }
   if (self->csr != NULL) {
-    THCudaIntTensor_free(state, self->csr);
+    THCIndexTensor_(free)(state, self->csr);
   }
   self->csr = csr;
   return self;
@@ -419,7 +419,7 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
     THCIndexTensor_(free)(state, self->indices);
     THCTensor_(free)(state, self->values);
     if(self->csr != NULL) {
-      THCudaIntTensor_free(state, self->csr);
+      THCIndexTensor_(free)(state, self->csr);
     }
     THFree(self);
   }

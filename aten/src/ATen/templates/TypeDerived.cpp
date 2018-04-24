@@ -13,7 +13,6 @@
 #include "ATen/${SparseTensor}.h"
 #include "ATen/${DenseTensor}.h"
 #include "ATen/${DenseBackend}LongTensor.h"
-#include "ATen/${DenseBackend}IntTensor.h"
 #include "ATen/Allocator.h"
 #include "ATen/Utils.h"
 #include "ATen/Half.h"

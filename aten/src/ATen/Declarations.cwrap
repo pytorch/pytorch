@@ -4166,13 +4166,13 @@
   backends:
     - SparseCPU
     - SparseCUDA
-  return: THDenseIntegerTensor*
+  return: THDenseIndexTensor*
   cname: newCSR
   arguments:
      - THTensor* self
   aten_custom_call: |
     if (self_->tensor->csr == NULL) {
       // Empty tensor
-      return self_->type().toScalarType(kInt).tensor({0}).to_dense();
+      return self_->type().toScalarType(kLong).tensor({0}).to_dense();
     }
 ]]

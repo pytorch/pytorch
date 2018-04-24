@@ -19,15 +19,18 @@
 #define I_INFO(tensor) getTensorInfo<THCIndexTensor, uint64_t>(state, tensor)
 #define V_INFO(tensor) getTensorInfo<THCTensor, uint64_t>(state, tensor)
 
-THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, int64_t nrow, int64_t nnz) {
+THCIndexTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, int64_t nrow, int64_t nnz) {
   THArgCheck(THCIndexTensor_(nDimension)(state, rowIndices) == 1, 2,
         "rowIndices must be a 1-d tensor");
-  THCudaIntTensor *csr = THCudaIntTensor_newWithSize1d(state, nrow + 1);
+  THCIndexTensor *csr = THCIndexTensor_(newWithSize1d)(state, nrow + 1);
+  THCudaIntTensor *csrInt = THCudaIntTensor_newWithSize1d(state, nrow + 1);
   THCudaIntTensor *rowIndicesInt = THCudaIntTensor_newWithSize1d(state, rowIndices->size[0]);
   THCudaIntTensor_copyCudaLong(state, rowIndicesInt, rowIndices);
   THCudaSparse_Xcoo2csr(
-    state, THCudaIntTensor_data(state, rowIndicesInt), nnz, nrow, THCudaIntTensor_data(state, csr));
+    state, THCudaIntTensor_data(state, rowIndicesInt), nnz, nrow, THCudaIntTensor_data(state, csrInt));
+  THCIndexTensor_(copyCudaInt)(state, csr, csrInt);
   THCudaIntTensor_free(state, rowIndicesInt);
+  THCudaIntTensor_free(state, csrInt);
   return csr;
 }
 
@@ -188,7 +191,7 @@ THCSTensor* THCSTensor_(newWithCSR)(THCState *state, THCSTensor *self) {
   if (c->csr != NULL) {
     return self;
   }
-  THCudaIntTensor_free(state, c->csr);
+  THCIndexTensor_(free)(state, c->csr);
   THCIndexTensor *rowIndices = THCIndexTensor_(newSelect)(state, c->indices, 0, 0);
   c->csr = THCSTensor_(toCSR)(state, rowIndices, c->size[0], c->nnz);
   THCIndexTensor_(free)(state, rowIndices);

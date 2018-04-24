@@ -256,7 +256,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         else:
             env['THTensor'] = 'THCS{}Tensor'.format(scalar_name)
         env['THIndexTensor'] = 'THCudaLongTensor'
-        env['THIntegerTensor'] = 'THCudaIntTensor'
         env['state'] = ['context->thc_state']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
@@ -273,7 +272,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['THStorage'] = "TH{}Storage".format(scalar_name)
         env['THTensor'] = 'TH{}{}Tensor'.format(th_density_tag, scalar_name)
         env['THIndexTensor'] = 'THLongTensor'
-        env['THIntegerTensor'] = 'THIntTensor'
         env['state'] = []
         env['isCUDA'] = 'false'
         env['storage_device'] = 'throw std::runtime_error("CPU storage has no device");'

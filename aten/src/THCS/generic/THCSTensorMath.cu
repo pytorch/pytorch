@@ -58,7 +58,6 @@ void THCTensor_(spaddcdiv)(THCState *state, THCTensor *r_, THCTensor *t, real va
 void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real alpha, THCSTensor *sparse_, THCTensor *dense) {
 #if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE)
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 4, sparse_, r_, t, dense));
-  THCudaIntTensor *csr;
   THCIndexTensor *indices;
   THCTensor *values, *r__, *dense_;
 
@@ -90,9 +89,13 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
 
   THCIndexTensor *rowIndices = THCIndexTensor_(newSelect)(state, indices, 0, 0);
   THCIndexTensor *colIndices = THCIndexTensor_(newSelect)(state, indices, 0, 1);
-  csr = THCSTensor_(newCSR)(state, sparse);
   THCudaIntTensor *colIndicesInt = THCudaIntTensor_newWithSize1d(state, colIndices->size[0]);
   THCudaIntTensor_copyCudaLong(state, colIndicesInt, colIndices);
+
+  THCIndexTensor *csr = THCSTensor_(newCSR)(state, sparse);
+  THCudaIntTensor *csrInt = THCudaIntTensor_newWithSize1d(state, csr->size[0]);
+  THCudaIntTensor_copyCudaLong(state, csrInt, csr);
+
 
   char transpose_dense;
 
@@ -144,7 +147,7 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
     nnz,
     alpha,
     THCTensor_(data)(state, values),
-    THCudaIntTensor_data(state, csr),
+    THCudaIntTensor_data(state, csrInt),
     THCudaIntTensor_data(state, colIndicesInt),
     THCTensor_(data)(state, dense_),
     (transpose_dense == 'n' ? dense_->stride[1] : dense_->stride[0]),
@@ -156,7 +159,8 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
   THCTensor_(free)(state, dense_);
   THCTensor_(freeCopyTo)(state, r__, r_);
   THCudaIntTensor_free(state, colIndicesInt);
-  THCudaIntTensor_free(state, csr);
+  THCudaIntTensor_free(state, csrInt);
+  THCIndexTensor_(free)(state, csr);
   THCIndexTensor_(free)(state, indices);
   THCIndexTensor_(free)(state, rowIndices);
   THCIndexTensor_(free)(state, colIndices);

@@ -57,11 +57,11 @@ THTensor *THSTensor_(newValues)(const THSTensor *self) {
   return THTensor_(newNarrow)(self->values, 0, 0, self->nnz);
 }
 
-THIntTensor *THSTensor_(newCSR)(const THSTensor *self) {
+THLongTensor *THSTensor_(newCSR)(const THSTensor *self) {
   if (self->csr == NULL) {
     return self->csr;
   }
-  return THIntTensor_newNarrow(self->csr, 0, 0, self->size[0] + 1);
+  return THLongTensor_newNarrow(self->csr, 0, 0, self->size[0] + 1);
 }
 
 /******************************************************************************
@@ -128,13 +128,13 @@ THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *va
     self, THLongTensor_newClone(indices), THTensor_(newClone)(values));
 }
 
-THSTensor* THSTensor_(_move_csr)(THSTensor *self, THIntTensor *csr) {
+THSTensor* THSTensor_(_move_csr)(THSTensor *self, THLongTensor *csr) {
   if (self->csr != NULL) {
-    THArgCheck(self->size[0] + 1 == THIntTensor_size(csr, 0), 1, 
-        "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1, THIntTensor_size(csr, 0));
+    THArgCheck(self->size[0] + 1 == THLongTensor_size(csr, 0), 1, 
+        "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1, THLongTensor_size(csr, 0));
   }
   if (self->csr != NULL) {
-    THIntTensor_free(self->csr);
+    THLongTensor_free(self->csr);
   }
   self->csr = csr;
 
@@ -305,10 +305,13 @@ THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
  ******************************************************************************/
 
 /*** Helper methods ***/
-THIntTensor *THSTensor_(toCSR)(int64_t const *indices, int64_t nrow, int64_t nnz) {
+THLongTensor *THSTensor_(toCSR)(THLongTensor *rowIndices, int64_t nrow, int64_t nnz) {
+  THArgCheck(THLongTensor_nDimension(rowIndices) == 1, 1, 
+        "rowIndices must be a 1-d tensor");
   int64_t h, i, hp0, hp1;
-  THIntTensor *csr = THIntTensor_newWithSize1d(nrow + 1);
-  THIntTensor_zero(csr);
+  auto indices = THLongTensor_data(rowIndices); 
+  THLongTensor *csr = THLongTensor_newWithSize1d(nrow + 1);
+  THLongTensor_zero(csr);
 
   // Convert the sparse matrix to CSR format
 #pragma omp parallel for private(i, h, hp0, hp1) schedule(static) if (nnz > 10000)
@@ -558,7 +561,8 @@ THSTensor* THSTensor_(newWithCSR)(THSTensor *self) {
   if (c->csr != NULL) {
     return self;
   }
-  c->csr = THSTensor_(toCSR)(THLongTensor_data(c->indices), c->size[0], c->nnz);
+  THLongTensor *rowIndices = THLongTensor_newSelect(c->indices, 0, 0);
+  c->csr = THSTensor_(toCSR)(rowIndices, c->size[0], c->nnz);
   return c;
 }
 
@@ -617,7 +621,7 @@ void THSTensor_(free)(THSTensor *self)
     THLongTensor_free(self->indices);
     THTensor_(free)(self->values);
     if(self->csr != NULL) {
-      THIntTensor_free(self->csr);
+      THLongTensor_free(self->csr);
     }
     THFree(self);
   }

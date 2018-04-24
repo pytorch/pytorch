@@ -18,7 +18,7 @@ typedef struct THSTensor
     // Most math operations can only be performed on ordered sparse tensors
     int coalesced;
     // csr representation
-    THIntTensor *csr;
+    THLongTensor *csr;
 
     int refcount;
 
@@ -33,7 +33,7 @@ TH_API ptrdiff_t THSTensor_(nnz)(const THSTensor *self);
 TH_API THLongStorage *THSTensor_(newSizeOf)(THSTensor *self);
 TH_API THLongTensor *THSTensor_(newIndices)(const THSTensor *self);
 TH_API THTensor *THSTensor_(newValues)(const THSTensor *self);
-TH_API THIntTensor *THSTensor_(newCSR)(const THSTensor *self);
+TH_API THLongTensor *THSTensor_(newCSR)(const THSTensor *self);
 
 /**** creation methods ****/
 TH_API THSTensor *THSTensor_(new)(void);
@@ -67,7 +67,7 @@ TH_API int THSTensor_(isCoalesced)(const THSTensor *self);
 TH_API int THSTensor_(hasCSR)(const THSTensor *self);
 TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor *src);
 TH_API THSTensor *THSTensor_(newCoalesce)(THSTensor *self);
-TH_API THIntTensor *THSTensor_(toCSR)(int64_t const *indices, int64_t dim, int64_t nnz);
+TH_API THLongTensor *THSTensor_(toCSR)(int64_t const *indices, int64_t dim, int64_t nnz);
 TH_API THSTensor *THSTensor_(newWithCSR)(THSTensor *self);
 TH_API void THSTensor_(uncoalesce)(THSTensor *self);
 TH_API void THSTensor_(invalidateCSR)(THSTensor *self);
@@ -89,6 +89,6 @@ TH_API void THSTensor_(select)(THSTensor *self, THSTensor *src, int dimension_, 
 TH_API THSTensor* THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, int64_t *size);
 THSTensor* THSTensor_(_move)(THSTensor *self, THLongTensor *indices, THTensor *values);
 THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *values);
-THSTensor* THSTensor_(_move_csr)(THSTensor *self, THIntTensor *csr);
+THSTensor* THSTensor_(_move_csr)(THSTensor *self, THLongTensor *csr);
 
 #endif
