@@ -139,11 +139,6 @@ else()
   endforeach(flag_var)
 endif()
 
-# ---[ Enable AVX2 if we are using Intel MKLDNN
-if(USE_MKL AND MKL_USE_IDEEP)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2")
-endif()
-
 if(ANDROID)
   if(CMAKE_COMPILER_IS_GNUCXX)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -s")

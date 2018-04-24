@@ -635,7 +635,7 @@ def Benchmark(model_gen, arg):
     results = workspace.BenchmarkNet(
         model.net.Proto().name, arg.warmup_iterations, arg.iterations,
         arg.layer_wise_benchmark)
-    print('FPS: {}'.format(ags.batch_size*1000/results[0]))
+    print('FPS: {}'.format(arg.batch_size*1000/results[0]))
 
 
 def GetArgumentParser():
