@@ -66,9 +66,10 @@ class ProfileOperatorObserver : public ProfileCounter,
       ProfileObserver* netObserver,
       int net_position,
       int rnn_order)
-      : ProfileOperatorObserver(subject, netObserver),
-        net_position_(net_position),
-        rnn_order_(rnn_order) {}
+      : ProfileOperatorObserver(subject, netObserver) {
+    net_position_ = net_position;
+    rnn_order_ = rnn_order;
+  }
 
   std::unique_ptr<ObserverBase<OperatorBase>> rnnCopy(
       OperatorBase* subject,
