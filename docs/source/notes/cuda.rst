@@ -50,8 +50,8 @@ Below you can find a small example showcasing this::
         # even within a context, you can specify the device
         # (or give a GPU index to the .cuda call)
         d = torch.randn(2, device=cuda2)
-        e = torch.randn(2).to(device=cuda2)
-        f = torch.randn(2).cuda(device=cuda2)
+        e = torch.randn(2).to(cuda2)
+        f = torch.randn(2).cuda(cuda2)
         # d.device, e.device, and f.device are all device(type='cuda', index=2)
 
 Asynchronous execution
@@ -136,7 +136,7 @@ The first step is to determine whether the GPU should be used or not. A common
 pattern is to use Python's ``argparse`` module to read in user arguments, and
 have a flag that can be used to disable CUDA, in combination with
 :meth:`~torch.cuda.is_available`. In the following, ``args.device`` results in a
-:class:`torch.device` object that can be used to cast tensors to CPU or CUDA.
+:class:`torch.device` object that can be used to move tensors to CPU or CUDA.
 
 ::
 
@@ -168,7 +168,7 @@ is an example when using a dataloader:
 
     cuda0 = torch.device('cuda:0')  # CUDA GPU 0
     for i, x in enumerate(train_loader):
-        x = x.to(device=cuda0)
+        x = x.to(cuda0)
 
 When working with multiple GPUs on a system, you can use the
 ``CUDA_VISIBLE_DEVICES`` environment flag to manage which GPUs are available to
