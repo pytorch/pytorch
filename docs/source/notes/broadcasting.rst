@@ -19,17 +19,17 @@ Two tensors are "broadcastable" if the following rules hold:
 
 For Example::
 
-    >>> x=torch.FloatTensor(5,7,3)
-    >>> y=torch.FloatTensor(5,7,3)
+    >>> x=torch.empty(5,7,3)
+    >>> y=torch.empty(5,7,3)
     # same shapes are always broadcastable (i.e. the above rules always hold)
 
-    >>> x=torch.FloatTensor()
-    >>> y=torch.FloatTensor(2,2)
+    >>> x=torch.empty(( ,0))
+    >>> y=torch.empty((2,2))
     # x and y are not broadcastable, because x does not have at least 1 dimension
 
     # can line up trailing dimensions
-    >>> x=torch.FloatTensor(5,3,4,1)
-    >>> y=torch.FloatTensor(  3,1,1)
+    >>> x=torch.empty(5,3,4,1)
+    >>> y=torch.empty(  3,1,1)
     # x and y are broadcastable.
     # 1st trailing dimension: both have size 1
     # 2nd trailing dimension: y has size 1
@@ -37,8 +37,8 @@ For Example::
     # 4th trailing dimension: y dimension doesn't exist
 
     # but:
-    >>> x=torch.FloatTensor(5,2,4,1)
-    >>> y=torch.FloatTensor(  3,1,1)
+    >>> x=torch.empty(5,2,4,1)
+    >>> y=torch.empty(  3,1,1)
     # x and y are not broadcastable, because in the 3rd trailing dimension 2 != 3
 
 If two tensors :attr:`x`, :attr:`y` are "broadcastable", the resulting tensor size
@@ -52,8 +52,8 @@ is calculated as follows:
 For Example::
 
     # can line up trailing dimensions to make reading easier
-    >>> x=torch.FloatTensor(5,1,4,1)
-    >>> y=torch.FloatTensor(  3,1,1)
+    >>> x=torch.empty(5,1,4,1)
+    >>> y=torch.empty(  3,1,1)
     >>> (x+y).size()
     torch.Size([5, 3, 4, 1])
 
