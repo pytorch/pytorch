@@ -65,6 +65,13 @@ inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
 } // namespace detail
 
 
+// This is meant to be used as a thread local place, where we can store extra
+// info that gets lost when we call into ATen from Python bindings. One example
+// for when this happens is when we get an IntList argument with e.g. sizes for
+// view. When tracing, those might be tensors, which let us encode extra data
+// dependencies, but once they get to the ATen call where we actually have the
+// tracing logic, they get converted into a raw IntList, and we loose all
+// information. To prevent this, we temporarily stash it in here.
 struct ArgumentStash {
   struct IntListTrace : std::vector<Value*> {
     IntListTrace(int size)

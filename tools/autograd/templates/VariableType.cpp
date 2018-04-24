@@ -51,16 +51,16 @@ static jit::Value* createConstant(jit::Node* n, T value) {
 
 template<typename T>
 static void genericInsertInput(jit::Node* n, size_t idx, T value) {
-  n->insertInput(idx, createConstant(n, t));
+  n->insertInput(idx, createConstant(n, value));
 }
 
-void failPosAttr() {
+void failPositionalAttr() {
   throw std::runtime_error("unsupported type in setposattr. File a bug report!");
 }
 
 static void setposattr(jit::Node* n, size_t idx, const char *name, int64_t v)             { genericInsertInput(n, idx, v); }
 static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Scalar& v)   { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensor s)        { failPosAttr(); }
+static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensor s)        { failPositionalAttr(); }
 static void setposattr(jit::Node* n, size_t idx, const char *name, const at::IntList& v)  {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasIntList(name)) {
@@ -88,7 +88,7 @@ static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Int
 static void setposattr(jit::Node* n, size_t idx, const char *name, bool v)                { genericInsertInput(n, idx, v); }
 static void setposattr(jit::Node* n, size_t idx, const char *name, double v)              { genericInsertInput(n, idx, v); }
 template<std::size_t N>
-static void setposattr(jit::Node* n, size_t idx, const char *name, std::array<bool, N> v) { failPosAttr(); }
+static void setposattr(jit::Node* n, size_t idx, const char *name, std::array<bool, N> v) { failPositionalAttr(); }
 
 VariableType::VariableType(Context* context, Type* baseType)
   : Type(context, /*is_variable_or_undefined=*/true)
