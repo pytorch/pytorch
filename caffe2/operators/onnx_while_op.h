@@ -18,7 +18,8 @@ class ONNXWhileOp final : public Operator<Context> {
             OperatorBase::GetSingleArgument<int64_t>("has_trip_count", 0)),
         has_cond_(OperatorBase::GetSingleArgument<int64_t>("has_cond", 0)),
         save_scopes_(OperatorBase::GetSingleArgument<int64_t>("save_scopes", 0)),
-        disable_scopes_(OperatorBase::GetSingleArgument<int64_t>("disable_scopes", 0)) {
+        disable_scopes_(OperatorBase::GetSingleArgument<int64_t>("disable_scopes", 0)),
+        num_loop_carried_deps_(OperatorBase::GetSingleArgument<int64_t>("num_loop_carried_deps", -1)) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("body"),
         "body net must be specified in ONNXWhile operator");
@@ -50,17 +51,14 @@ class ONNXWhileOp final : public Operator<Context> {
     // First input is the maximumt trip count. Second input is the condition
     // variable (for the first iteration). The rest of the inputs are
     // loop-carried dependencies.
-    int num_loop_carried_deps = InputSize() - num_inputs_before_lcds;
+    int64_t num_loop_carried_deps;
+    if (num_loop_carried_deps_ != -1) {
+      num_loop_carried_deps = num_loop_carried_deps_;
+    } else {
+      num_loop_carried_deps = InputSize() - num_inputs_before_lcds;
+    }
     int64_t max_trip_count = *Input(0).template data<int64_t>();
     const bool first_iter_condition = *Input(1).template data<bool>();
-
-    // Body graph has 2+N inputs: iteration number, condition value, and N
-    // loop-carried dependencies
-    CAFFE_ENFORCE_EQ(
-        num_loop_carried_deps + 2,
-        scope_->net()->external_input().size(),
-        "Body graph must have 2+N inputs, where N is the number of "
-        "loop carried dependencies.");
 
     // Body graph has 1+N+K outputs: recalculated condition variable, N
     // loop-carried dependencies, and K scan_outputs
@@ -294,6 +292,7 @@ class ONNXWhileOp final : public Operator<Context> {
   bool has_cond_;
   bool save_scopes_;
   bool disable_scopes_;
+  int64_t num_loop_carried_deps_;
 
   std::shared_ptr<LocalScope> scope_;
 };
