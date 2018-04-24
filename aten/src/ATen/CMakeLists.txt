@@ -323,6 +323,10 @@ if(MKLDNN_FOUND)
   target_link_libraries(ATen ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
 
+# Directory where cpuinfo will download and build all dependencies
+set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
+  CACHE PATH "Confu-style dependencies binary directory")
+
 # ---[ Configure cpuinfo
 if (NOT TARGET cpuinfo)
   if (NOT DEFINED CPUINFO_SOURCE_DIR)
@@ -335,11 +339,9 @@ if (NOT TARGET cpuinfo)
   set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
   set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
   if(MSVC)
-    if (CAFFE2_USE_MSVC_STATIC_RUNTIME)
-      set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
-    else()
-      set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
-    endif()
+    # ATen is built with default MSVC runtime linking, which is /MD (DLL)
+    # so no need to check *_USE_MSVC_STATIC_RUNTIME or some equivalent.
+    set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
   endif()
   add_subdirectory(
     "${CPUINFO_SOURCE_DIR}"
