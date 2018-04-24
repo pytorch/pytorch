@@ -675,7 +675,7 @@ def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
 
 
 def repeat(g, self, repeats):
-    return g.op("Tile", self, repeats_i=repeats)
+    return g.op("Tile", self, repeats)
 
 
 def instance_norm(g, input, **kwargs):
