@@ -3,14 +3,21 @@
 """muji.py does multi-gpu training for caffe2 with no need to change the c++
 side code. Everything is defined on the computation graph level.
 
-Currently, here are the assumptions: we only support the following use cases:
+We support the following use cases:
   - 2 gpus, where peer access is enabled between them.
   - 4 gpus, where peer access are enabled between all of them.
+  - 4 gpus, where peer access are enabled in two groups,
+    between {1, 2} and {3, 4}
   - 8 gpus, where peer access are enabled in two groups,
     between {1, 2, 3, 4} and {5, 6, 7, 8}.
+If above cases are not satisified, a fallback function which does not rely on
+peer access will be called.
 """
 
+import numpy as np
+
 from caffe2.proto import caffe2_pb2
+from caffe2.python import workspace
 
 
 def OnGPU(gpu_id):
@@ -39,11 +46,14 @@ def Allreduce(net, blobs, reduced_affix="_reduced", gpu_indices=None):
             "gpu_indices length and blobs length mismatch: %d vs %d" %
             (len(gpu_indices), len(blobs))
         )
-    if len(blobs) == 2:
+    pattern = workspace.GetCudaPeerAccessPattern()
+    if len(blobs) == 2 and pattern.shape[0] >= 2 and np.all(pattern[:2, :2]):
         return Allreduce2(net, blobs, reduced_affix, gpu_indices)
-    elif len(blobs) == 4:
+    elif len(blobs) == 4 and pattern.shape[0] >= 4 and np.all(pattern[:4, :4]):
         return Allreduce4(net, blobs, reduced_affix, gpu_indices)
-    elif len(blobs) == 8:
+    elif len(blobs) == 4 and pattern.shape[0] >= 4 and np.all(pattern[:2, :2]) and np.all(pattern[2:4, 2:4]):
+        return Allreduce4Group2(net, blobs, reduced_affix, gpu_indices)
+    elif len(blobs) == 8 and pattern.shape[0] >= 8 and np.all(pattern[:8, :8]):
         return Allreduce8(net, blobs, reduced_affix, gpu_indices)
     else:
         return AllreduceFallback(net, blobs, reduced_affix, gpu_indices)
@@ -89,6 +99,51 @@ def Allreduce4(net, blobs, reduced_affix, gpu_indices):
     )
     # a_reduced <- a_reduced + c_reduced
     a_reduced = a_reduced.Add(c_reduced, a_reduced, device_option=OnGPU(gpu_a))
+    # broadcast a_reduced to c_reduced
+    c_reduced = a_reduced.Copy([], c_reduced, device_option=OnGPU(gpu_c))
+    # broadcast to b and d
+    b_reduced = a_reduced.Copy(
+        [],
+        str(b) + reduced_affix,
+        device_option=OnGPU(gpu_b)
+    )
+    d_reduced = c_reduced.Copy(
+        [],
+        str(d) + reduced_affix,
+        device_option=OnGPU(gpu_d)
+    )
+    return a_reduced, b_reduced, c_reduced, d_reduced
+
+
+def Allreduce4Group2(net, blobs, reduced_affix, gpu_indices):
+    """Allreduce for 4 gpus where peer access are enabled in {0,1} and {2,3}
+
+  Algorithm: 2 level reduction.
+      0r <- 0 + 1, 2r <- 2 + 3
+      0r <- 0r + 2r
+      2r <- 0r,
+      1r <- 0r, 3r <- 2r
+  """
+    a, b, c, d = blobs
+    gpu_a, gpu_b, gpu_c, gpu_d = gpu_indices
+    # a_reduced <- a+b, c_reduced <- c + d
+    a_reduced = net.Add(
+        [a, b],
+        str(a) + reduced_affix,
+        device_option=OnGPU(gpu_a)
+    )
+    c_reduced = net.Add(
+        [c, d],
+        str(c) + reduced_affix,
+        device_option=OnGPU(gpu_c)
+    )
+    c_reduced_copy = c_reduced.Copy(
+        [],
+        str(c_reduced) + '_copy',
+        device_option=OnGPU(gpu_a)
+    )
+    # a_reduced <- a_reduced + c_reduced
+    a_reduced = a_reduced.Add(c_reduced_copy, a_reduced, device_option=OnGPU(gpu_a))
     # broadcast a_reduced to c_reduced
     c_reduced = a_reduced.Copy([], c_reduced, device_option=OnGPU(gpu_c))
     # broadcast to b and d
