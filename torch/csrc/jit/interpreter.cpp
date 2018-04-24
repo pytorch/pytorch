@@ -400,26 +400,31 @@ struct AutogradHandle : public ContainerTensor {
 // behave differently depending on whether a future handle needs to be
 // created.
 struct HandleBuilder {
-  HandleBuilder(bool requires_handle) {
+  HandleBuilder(bool requires_handle, bool values_are_variables)
+    : values_are_variables(values_are_variables) {
     if(requires_handle) {
       handle = new AutogradHandle();
       handle->forward_inputs = std::make_shared<DummyFunction>();
     }
   }
   autograd::Variable addInput(at::Tensor && input, const VariableFlags & flags_) {
-    if(handle && flags_.requires_grad) {
-      auto variable = autograd::make_variable(std::move(input), /*requires_grad=*/false);
+    if (handle && flags_.requires_grad) {
+      auto variable = values_are_variables ?
+        static_cast<autograd::Variable&&>(input).detach() :
+        autograd::make_variable(std::move(input), /*requires_grad=*/false);
       autograd::create_gradient_edge(variable, handle->forward_inputs);
       return variable;
     } else {
-      return autograd::make_variable(std::move(input), /*requires_grad=*/false);
+      return values_are_variables ?
+        input :
+        autograd::make_variable(std::move(input), /*requires_grad=*/false);
     }
   }
   at::Tensor addOutput(const autograd::Variable & output) {
-    if(handle) {
+    if (handle) {
       handle->forward_outputs.push_back(output.gradient_edge());
     }
-    return output.data();
+    return values_are_variables ? output : output.data();
   }
   void writeTo(Stack & outputs) {
     // outputs takes ownership of handle
@@ -430,6 +435,7 @@ struct HandleBuilder {
   }
 private:
   AutogradHandle* handle = nullptr;
+  bool values_are_variables;
 };
 
 bool hasHandleOutput(Node * n) {
@@ -460,7 +466,7 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
     size_t i = 0;
     size_t next_scalar = 0;
     size_t next_tensor = 0;
-    HandleBuilder builder(has_handle);
+    HandleBuilder builder(has_handle, values_are_variables);
     // Note: The first branch here should be considered deprecated and will
     // probably be removed in the future.
     //
@@ -482,7 +488,7 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
       }
       drop(stack, num_inputs);
       py::object py_outputs(func(*py_inputs));
-      auto num_outputs = op->outputs().size();
+      auto num_outputs = op->outputs().size() - static_cast<size_t>(has_handle);
       auto addOutput = [&](py::handle entry) {
         if (!THPVariable_Check(entry.ptr())) {
           throw std::runtime_error(
@@ -574,12 +580,12 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
 }
 #endif
 
-Operation createCppOperation(CppOp* op) {
+Operation createCppOperation(CppOp* op, bool values_are_variables) {
   std::shared_ptr<autograd::Function> func = op->fn;
   bool has_handle = hasHandleOutput(op);
   auto num_inputs = op->inputs().size();
   return [=](Stack & stack) {
-    HandleBuilder builder(has_handle);
+    HandleBuilder builder(has_handle, values_are_variables);
     autograd::variable_list v_inputs;
     for(size_t i = 0; i < num_inputs; i++) {
       v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
@@ -594,14 +600,14 @@ Operation createCppOperation(CppOp* op) {
   };
 }
 
-Operation createEvalOperation(CppOp * op) {
+Operation createEvalOperation(CppOp * op, bool values_are_variables) {
   bool has_handle_output = hasHandleOutput(op);
   auto num_inputs = op->inputs().size();
   return [=](Stack & stack) {
     at::Tensor handle_t = std::move(stack.back());
     AutogradHandle * handle_in = dynamic_cast<AutogradHandle*>(handle_t.get());
     JIT_ASSERT(handle_in);
-    HandleBuilder builder(has_handle_output);
+    HandleBuilder builder(has_handle_output, values_are_variables);
     auto& engine = torch::autograd::Engine::getDefaultEngine();
     autograd::variable_list v_inputs;
     for(size_t i = 0; i < num_inputs - 1; i++) {
@@ -636,9 +642,9 @@ Operation getOperation(jit::Node* node, bool values_are_variables) {
     return createPythonOperation(value, values_are_variables);
   IR_ELSEIFM(CppOp)
     if(dynamic_cast<autograd::Eval*>(value->fn.get())) {
-      return createEvalOperation(value);
+      return createEvalOperation(value, values_are_variables);
     } else {
-      return createCppOperation(value);
+      return createCppOperation(value, values_are_variables);
     }
   IR_ELSEIF(FusionGroup)
     auto fusion_fn = sharedFusionCompiler().getOrCompile(value);

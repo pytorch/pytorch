@@ -346,6 +346,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
 /// equivalent to `variable.set_gradient_edge(function,
 /// function->bump_inputs())`. If you don't want the `Function`'s `num_inputs`
 /// to be incremented, use `set_gradient_edge` directly.
+/// XXX: The variable should require grad
 inline void create_gradient_edge(
     Variable& variable,
     std::shared_ptr<Function> function) {
