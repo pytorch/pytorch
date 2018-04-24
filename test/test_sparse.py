@@ -425,7 +425,6 @@ class TestSparse(TestCase):
         torch.mm(D, x) # this computes csr representation internally 
         self.assertEqual(D._csr(), torch.IntTensor([0, 1, 3]))
 
-
     @cpu_only
     def test_mm(self):
         def test_shape(di, dj, dk):
