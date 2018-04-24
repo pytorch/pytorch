@@ -1,6 +1,6 @@
 #include "TH/THMath.h"
-#include "ATen/Half.h"
 #ifdef __CUDA_ARCH__
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <nvfunctional>
 #endif
 
@@ -52,33 +52,33 @@ struct BaseSampler {
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-template<typename scalar_t>
-deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<scalar_t>& standard_uniform, BaseSampler<scalar_t>& standard_normal) {
-  scalar_t scale = 1.0;
+template<typename scalar_t, typename accscalar_t>
+deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t>& standard_uniform, BaseSampler<accscalar_t>& standard_normal) {
+  accscalar_t scale = 1.0f;
 
   // Boost alpha for higher acceptance probability.
-  if (alpha < 1.0) {
-    scale *= std::pow(1 - standard_uniform.sample(), static_cast<scalar_t>(1.0) / alpha);
-    alpha += 1.0;
+  if (alpha < static_cast<accscalar_t>(1.0f)) {
+    scale *= std::pow(1 - static_cast<accscalar_t>(standard_uniform.sample()), 1.0f / alpha);
+    alpha += 1.0f;
   }
 
   // This implements the acceptance-rejection method of Marsaglia and Tsang (2000)
   // doi:10.1145/358407.358414
-  const scalar_t d = alpha - 1.0 / 3.0;
-  const scalar_t c = 1.0 / std::sqrt(9.0 * d);
+  const accscalar_t d = alpha - 1.0f / 3.0f;
+  const accscalar_t c = 1.0f / std::sqrt(9.0f * d);
   for (;;) {
-    scalar_t x, y;
+    accscalar_t x, y;
     do {
       x = standard_normal.sample();
-      y = 1.0 + c * x;
+      y = 1.0f + c * x;
     } while (y <= 0);
-    const scalar_t v = y * y * y;
-    const scalar_t u = 1 - standard_uniform.sample();
-    const scalar_t xx = x * x;
-    if (u < 1.0 - 0.0331 * xx * xx)
-      return scale * d * v;
-    if (std::log(u) < 0.5 * xx + d * (1.0 - v + std::log(v)))
-      return scale * d * v;
+    const accscalar_t v = y * y * y;
+    const accscalar_t u = 1 - standard_uniform.sample();
+    const accscalar_t xx = x * x;
+    if (u < 1.0f - 0.0331f * xx * xx)
+      return static_cast<scalar_t>(scale * d * v);
+    if (std::log(u) < 0.5f * xx + d * (1.0f - v + std::log(v)))
+      return static_cast<scalar_t>(scale * d * v);
   }
 }
 
@@ -99,14 +99,13 @@ deviceforcuda static inline scalar_t polevl(const scalar_t x,  const scalar_t A[
  * Cephes Math Library Release 2.8:  June, 2000
  * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
  */
-template <typename scalar_t>
+template<typename scalar_t, typename accscalar_t>
 deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
-  using acc_scalar_t = typename std::conditional<std::is_same<scalar_t, at::Half>::value, float, scalar_t>::type;
-  constexpr acc_scalar_t PSI_10 = 2.25175258906672110764;
+  constexpr accscalar_t PSI_10 = 2.25175258906672110764;
   if (x == 0) {
     return INFINITY;
   }
-  acc_scalar_t additional_summand = 0;
+  accscalar_t additional_summand = 0;
   int x_is_integer = x == std::floor(x);
   if (x < 0) {
     if (x_is_integer) {
@@ -114,12 +113,12 @@ deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
     }
     // it is more standard to write this as recursion, but
     // nvcc does not like that
-    additional_summand = - M_PI / std::tan(M_PI * x);
+    additional_summand = - static_cast<accscalar_t>(M_PI) / std::tan(static_cast<accscalar_t>(M_PI) * x);
     x = 1 - x;
   }
 
   // Push x to be >= 10
-  acc_scalar_t result = 0;
+  accscalar_t result = 0;
   while (x < 10) {
     result -= 1 / x;
     x += 1;
@@ -129,7 +128,7 @@ deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
   }
 
   // Compute asymptotic digamma
-  static const acc_scalar_t A[] = {
+  static const accscalar_t A[] = {
      8.33333333333333333333E-2,
     -2.10927960927960927961E-2,
      7.57575757575757575758E-3,
@@ -139,26 +138,28 @@ deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
      8.33333333333333333333E-2,
   };
 
-  acc_scalar_t y = 0;
-  if (x < 1.0e17) {
-    acc_scalar_t z = 1.0 / (x * x);
-    y = z * polevl<acc_scalar_t>(z, A, 6);
+  accscalar_t y = 0;
+  if (x < 1.0e17f) {
+    accscalar_t z = 1.0 / (x * x);
+    y = z * polevl<accscalar_t>(z, A, 6);
   }
-  return static_cast<scalar_t>(result + std::log(x) - (0.5 / x) - y + additional_summand);
+  return static_cast<scalar_t>(result + std::log(x) - (0.5f / x) - y + additional_summand);
 }
 
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
 // for random number x drawn from a standard Gamma distribution Gamma(alpha).
-template <typename scalar_t>
-deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha, scalar_t x) {
+template <typename scalar_t, typename accscalar_t>
+deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
   // Use a Taylor series expansion for small x.
+  accscalar_t x = static_cast<accscalar_t>(x_);
+  accscalar_t alpha = static_cast<accscalar_t>(alpha_);
   if (x < 0.8f) {
-    scalar_t numer = 1;
-    scalar_t denom = alpha;
+    accscalar_t numer = 1;
+    accscalar_t denom = alpha;
     auto series1 = numer / denom;
     auto series2 = numer / (denom * denom);
     for (int i = 1; i <= 5; ++i) {
-      numer *= -x / i;
+      numer *= -x / static_cast<accscalar_t>(i);
       denom += 1;
       series1 += numer / denom;
       series2 += numer / (denom * denom);
@@ -166,10 +167,10 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha, scalar_t x) {
     const auto pow_x_alpha = std::pow(x, alpha);
     const auto gamma_pdf = std::pow(x, alpha - 1) * std::exp(-x);
     const auto gamma_cdf = pow_x_alpha * series1;
-    const auto gamma_cdf_alpha = (std::log(x) - digamma_one(alpha)) * gamma_cdf
+    const auto gamma_cdf_alpha = (std::log(x) - digamma_one<accscalar_t,accscalar_t>(alpha)) * gamma_cdf
         - pow_x_alpha * series2;
     const auto result = -gamma_cdf_alpha / gamma_pdf;
-    return isnan(result) ? 0 : result;
+    return isnan(result) ? static_cast<scalar_t>( 0.f ) : static_cast<scalar_t>(result);
   }
 
   // Use a Rice saddle point expansion for large alpha.
@@ -179,23 +180,23 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha, scalar_t x) {
       const auto numer_2 = 1440 * (alpha * alpha) + 6 * x * (53 - 120 * x)
           - 65 * x * x / alpha + alpha * (107 + 3600 * x);
       const auto denom = 1244160 * (alpha * alpha) * (alpha * alpha);
-      return numer_1 * numer_2 / denom;
+      return static_cast<scalar_t>(numer_1 * numer_2 / denom);
     }
     const auto denom = std::sqrt(8 * alpha);
     const auto term2 = denom / (alpha - x);
-    const auto term3 = std::pow(x - alpha - alpha * std::log(x / alpha), static_cast<scalar_t>(-1.5));
+    const auto term3 = std::pow(x - alpha - alpha * std::log(x / alpha), static_cast<accscalar_t>(-1.5));
     const auto term23 = (x < alpha) ? term2 - term3 : term2 + term3;
     const auto term1 = std::log(x / alpha) * term23
                      - std::sqrt(2 / alpha) * (alpha + x) / ((alpha - x) * (alpha - x));
     const auto stirling = 1 + 1 / (12 * alpha) * (1 + 1 / (24 * alpha));
     const auto numer = x * term1;
-    return -stirling * numer / denom;
+    return static_cast<scalar_t>(-stirling * numer / denom);
   }
 
   // Use a bivariate rational approximation to the reparameterized gradient.
   const auto u = std::log(x / alpha);
   const auto v = std::log(alpha);
-  static const scalar_t coef_uv[3][8] = {
+  static const accscalar_t coef_uv[3][8] = {
     {0.16009398, -0.094634809, 0.025146376, -0.0030648343,
      1, 0.32668115, 0.10406089, 0.0014179084},
     {0.53487893, 0.1298071, 0.065735949, -0.0015649758,
@@ -203,13 +204,13 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha, scalar_t x) {
     {0.040121004, -0.0065914022, -0.0026286047, -0.0013441777,
      0.017050642, -0.0021309326, 0.00085092367, -1.5247877e-07},
   };
-  scalar_t coef_v[8];
+  accscalar_t coef_v[8];
   for (int i = 0; i < 8; ++ i) {
     coef_v[i] = coef_uv[0][i] + u * (coef_uv[1][i] + u * coef_uv[2][i]);
   }
   const auto p = coef_v[0] + v * (coef_v[1] + v * (coef_v[2] + v * coef_v[3]));
   const auto q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
-  return std::exp(p / q);
+  return static_cast<scalar_t>(std::exp(p / q));
 }
 
 } // namespace
