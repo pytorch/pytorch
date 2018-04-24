@@ -361,6 +361,7 @@ def sparse_(tensor, sparsity, std=0.01):
 
     rows, cols = tensor.shape
     num_zeros = int(math.ceil(rows * sparsity))
+
     with torch.no_grad():
         tensor.normal_(0, std)
         for col_idx in range(cols):
