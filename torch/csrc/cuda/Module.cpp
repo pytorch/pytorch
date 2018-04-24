@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include <stdbool.h>
 #include <unordered_map>

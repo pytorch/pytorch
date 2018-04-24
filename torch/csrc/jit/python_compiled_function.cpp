@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include "python_compiled_function.h"
 
