@@ -7,7 +7,7 @@ index 554a379d7..4ff8b0c55 100644
    // on various compute capabilities.
    void* ptr;
 -  THCudaCheck(cudaMallocManaged(&ptr, size, cudaMemAttachGlobal));
-+  THCudaCheck(cudaSuccess);
++  throw std::runtime_error("HIP does not support MallocManaged.");
    return ptr;
  }
  

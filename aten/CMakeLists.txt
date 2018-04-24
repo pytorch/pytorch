@@ -134,13 +134,13 @@ IF(MSVC)
   LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
 ENDIF(MSVC)
 
-IF (NOT MSVC AND NOT WITH_ROCM)
+IF (NOT MSVC)
   IF (CMAKE_VERSION VERSION_LESS "3.1")
     SET(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
   ELSE ()
     SET(CMAKE_C_STANDARD 11)
   ENDIF ()
-ENDIF(NOT MSVC AND NOT WITH_ROCM)
+ENDIF(NOT MSVC)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
@@ -341,7 +341,7 @@ IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
   SET(CMAKE_CXX_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_CXX_FLAGS}")
   add_compile_options(-DUSE_SSE4_1 -DUSE_SSE4_2)
 ENDIF()
-IF(C_SSE3_FOUND AND NOT WITH_ROCM)
+IF(C_SSE3_FOUND)
   MESSAGE(STATUS "SSE3 Found")
   SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} ${CMAKE_C_FLAGS}")
   SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} ${CMAKE_CXX_FLAGS}")
@@ -380,9 +380,6 @@ int main()
   return 0;
 }
 " HAS_C11_ATOMICS)
-
-# For ROCm stack, the hcc/hipcc compiler cannot use C11 atomics. Prefer GCC.
-SET(HAS_C11_ATOMICS OFF)
 
 IF(NOT HAS_C11_ATOMICS)
   CHECK_C_SOURCE_RUNS("
@@ -557,6 +554,7 @@ ENDIF(MSVC)
 
 if(USE_ROCM)
   SET(AT_CUDA_ENABLED 1)
+  message("ROCm is enabled.")
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
   add_subdirectory(src/THCS)

@@ -1,3 +1,6 @@
+/*To successfully compile with hcc, static_casts must be added to the arguments of the generated kernel invocations.
+This is due to hipLaunchKernelGGL. https://github.com/ROCm-Developer-Tools/HIP/blob/master/include/hip/hcc_detail/functional_grid_launch.hp*/
+
 #include "hip/hip_runtime.h"
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "generic/THCTensorRandom.cu"
