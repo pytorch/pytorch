@@ -100,8 +100,8 @@ namespace at {
     /// @name Simple Operations
     /// @{
 
-    iterator begin() const { return Data; }
-    iterator end() const { return Data + Length; }
+    const_iterator begin() const { return Data; }
+    const_iterator end() const { return Data + Length; }
 
     reverse_iterator rbegin() const { return reverse_iterator(end()); }
     reverse_iterator rend() const { return reverse_iterator(begin()); }
