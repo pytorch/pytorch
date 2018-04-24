@@ -90,7 +90,6 @@ INSTALL(FILES
 INSTALL(FILES
   vector/AVX.h
   vector/AVX2.h
-  ../ATen/native/cpu/avx_mathfun.h
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/vector")
 
 INSTALL(FILES

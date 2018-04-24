@@ -437,6 +437,7 @@ SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdi
 
 add_definitions(-DTH_INDEX_BASE=0)
 set(TH_LINK_STYLE STATIC)
+add_subdirectory(src/avx_mathfun)
 add_subdirectory(src/TH)
 include_directories(
   # dense
