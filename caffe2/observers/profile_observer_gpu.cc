@@ -115,7 +115,7 @@ void ProfileOperatorObserver::Stop() {
 
 std::unique_ptr<ObserverBase<OperatorBase>> ProfileOperatorObserver::rnnCopy(
     OperatorBase* subject,
-    int rnn_order) const override {
+    int rnn_order) const {
   return std::unique_ptr<ObserverBase<OperatorBase>>(
       new ProfileOperatorObserver(
           subject, netObserver_, net_position_, rnn_order));
