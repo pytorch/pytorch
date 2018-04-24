@@ -168,6 +168,7 @@ TYPE_FORMAL_GENERIC = {
     'THIntegerTensor*': 'Tensor &',
     'THDenseTensor*': 'Tensor &',
     'THDenseIndexTensor*': 'Tensor &',
+    'THDenseIntegerTensor*': 'Tensor &',
     'THStorage*': 'Storage &',
     'THGenerator*': 'Generator *',
     'THSize*': 'IntList',
@@ -185,6 +186,7 @@ DYNAMIC_TYPE = {
     'THIntegerTensor*': 'IntegerTensor',
     'THDenseTensor*': 'Tensor',
     'THDenseIndexTensor*': 'IndexTensor',
+    'THDenseIntegerTensor*': 'IntegerTensor',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator*',
     'THSize*': 'IntList',
@@ -202,6 +204,7 @@ TYPE_RETURN = {
     'THSTensor*': 'Tensor',
     'THDenseTensor*': 'Tensor',
     'THDenseIndexTensor*': 'Tensor',
+    'THDenseIntegerTensor*': 'Tensor',
     'real': 'Tensor',
     'accreal': 'Tensor',
     'long': 'int64_t',
@@ -229,6 +232,9 @@ CHECKED_CAST = {
     'THDenseIndexTensor*':
         CodeTemplate(
             'checked_cast_tensor<${DenseBackend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'THDenseIntegerTensor*':
+        CodeTemplate(
+            'checked_cast_tensor<${DenseBackend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THStorage*': CodeTemplate('checked_cast_storage<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
     'THGenerator*':
         CodeTemplate(
@@ -250,6 +256,7 @@ CHECKED_USE = {
     'THIntegerTensor*': '{}_->tensor',
     'THDenseTensor*': '{}_->tensor',
     'THDenseIndexTensor*': '{}_->tensor',
+    'THDenseIntegerTensor*': '{}_->tensor',
     'THStorage*': '{}_->storage',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
@@ -265,6 +272,7 @@ ALLOC_WRAP = {
     'THSTensor*': 'new Sparse${Tensor}(context${,arguments})',
     'THDenseTensor*': 'new ${DenseTensor}(context${,arguments})',
     'THDenseIndexTensor*': 'new ${DenseBackend}LongTensor(context${,arguments})',
+    'THDenseIntegerTensor*': 'new ${DenseBackend}IntTensor(context${,arguments})',
 }
 
 # Replacements for constants when calling into TH

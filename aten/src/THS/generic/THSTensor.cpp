@@ -57,11 +57,11 @@ THTensor *THSTensor_(newValues)(const THSTensor *self) {
   return THTensor_(newNarrow)(self->values, 0, 0, self->nnz);
 }
 
-THLongTensor *THSTensor_(newCSR)(const THSTensor *self) {
+THIntTensor *THSTensor_(newCSR)(const THSTensor *self) {
   if (self->csr == NULL) {
     return self->csr;
   }
-  return THLongTensor_newNarrow(self->csr, 0, 0, self->size[0] + 1);
+  return THIntTensor_newNarrow(self->csr, 0, 0, self->size[0] + 1);
 }
 
 /******************************************************************************
@@ -128,13 +128,13 @@ THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *va
     self, THLongTensor_newClone(indices), THTensor_(newClone)(values));
 }
 
-THSTensor* THSTensor_(_move_csr)(THSTensor *self, THLongTensor *csr) {
+THSTensor* THSTensor_(_move_csr)(THSTensor *self, THIntTensor *csr) {
   if (self->csr != NULL) {
-    THArgCheck(self->size[0] + 1 == THLongTensor_size(csr, 0), 1, 
-        "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1, THLongTensor_size(csr, 0));
+    THArgCheck(self->size[0] + 1 == THIntTensor_size(csr, 0), 1, 
+        "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1, THIntTensor_size(csr, 0));
   }
   if (self->csr != NULL) {
-    THLongTensor_free(self->csr);
+    THIntTensor_free(self->csr);
   }
   self->csr = csr;
 
@@ -305,16 +305,16 @@ THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
  ******************************************************************************/
 
 /*** Helper methods ***/
-THLongTensor *THSTensor_(toCSR)(int64_t const *indices, int64_t dim, int64_t nnz) {
+THIntTensor *THSTensor_(toCSR)(int64_t const *indices, int64_t nrow, int64_t nnz) {
   int64_t h, i, hp0, hp1;
-  THLongTensor *csr = THLongTensor_newWithSize1d(dim + 1);
-  THLongTensor_zero(csr);
+  THIntTensor *csr = THIntTensor_newWithSize1d(nrow + 1);
+  THIntTensor_zero(csr);
 
   // Convert the sparse matrix to CSR format
 #pragma omp parallel for private(i, h, hp0, hp1) schedule(static) if (nnz > 10000)
   for (i=0; i<nnz; i++) {
     hp0 = indices[i];
-    hp1 = (i+1 == nnz) ?  dim : indices[i+1];
+    hp1 = (i+1 == nnz) ?  nrow : indices[i+1];
     if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
       THTensor_fastSet1d(csr, h+1, i+1);
     }
@@ -617,7 +617,7 @@ void THSTensor_(free)(THSTensor *self)
     THLongTensor_free(self->indices);
     THTensor_(free)(self->values);
     if(self->csr != NULL) {
-      THLongTensor_free(self->csr);
+      THIntTensor_free(self->csr);
     }
     THFree(self);
   }

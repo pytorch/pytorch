@@ -310,7 +310,8 @@ void THSTensor_(spaddmm)(THTensor *r_,
   int64_t h, i;
   int64_t dim_i, dim_j, dim_k; // ixj * jxk = ixk
   int64_t nnz;
-  THLongTensor *csr, *indices;
+  THIntTensor *csr;
+  THLongTensor *indices;
   THTensor *values;
 
   THArgCheck(sparse_->nDimensionI == 2, 2,
@@ -370,7 +371,7 @@ void THSTensor_(spaddmm)(THTensor *r_,
     }
   }
 
-  THLongTensor_free(csr);
+  THIntTensor_free(csr);
   THLongTensor_free(indices);
   THTensor_(free)(values);
   THSTensor_(free)(sparse); // this frees csr anyway if refcount of the sparse hits zero
@@ -383,7 +384,8 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   int64_t h, i, p;
   int64_t dim_i, dim_j, dim_k; // ixj * jxk = ixk
   int64_t nnz, r_nnz, t_nnz;
-  THLongTensor *csr, *indices, *newi, *narrowi;
+  THIntTensor *csr;
+  THLongTensor *indices, *newi, *narrowi;
   THTensor *values, *newv, *narrowv;
 
   THArgCheck(sparse_->nDimensionI == 2, 2,
@@ -467,7 +469,7 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   r_-> values = newv;
   r_->    nnz = p;
 
-  THLongTensor_free(csr);
+  THIntTensor_free(csr);
   THLongTensor_free(indices);
   THTensor_(free)(values);
   THSTensor_(free)(sparse);

@@ -19,12 +19,14 @@
 #define I_INFO(tensor) getTensorInfo<THCIndexTensor, uint64_t>(state, tensor)
 #define V_INFO(tensor) getTensorInfo<THCTensor, uint64_t>(state, tensor)
 
-THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, int64_t dim, int64_t nnz) {
-  THCudaIntTensor *csr = THCudaIntTensor_newWithSize1d(state, dim + 1);
+THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, int64_t nrow, int64_t nnz) {
+  THArgCheck(THCIndexTensor_(nDimension)(state, rowIndices) == 1, 2,
+        "rowIndices must be a 1-d tensor");
+  THCudaIntTensor *csr = THCudaIntTensor_newWithSize1d(state, nrow + 1);
   THCudaIntTensor *rowIndicesInt = THCudaIntTensor_newWithSize1d(state, rowIndices->size[0]);
   THCudaIntTensor_copyCudaLong(state, rowIndicesInt, rowIndices);
   THCudaSparse_Xcoo2csr(
-    state, THCudaIntTensor_data(state, rowIndicesInt), nnz, dim, THCudaIntTensor_data(state, csr));
+    state, THCudaIntTensor_data(state, rowIndicesInt), nnz, nrow, THCudaIntTensor_data(state, csr));
   THCudaIntTensor_free(state, rowIndicesInt);
   return csr;
 }
