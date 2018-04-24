@@ -216,12 +216,12 @@ struct TupleType : public Type {
     return elements_;
   }
   virtual bool operator==(const Type& rhs) const override {
-    return compare(rhs, [&](const Type& a, const Type& b) {
+    return compare(rhs, [](const Type& a, const Type& b) {
       return a == b;
     });
   }
   virtual bool isSubtypeOf(const Type& rhs) const override {
-    return compare(rhs, [&](const Type& a, const Type&b) {
+    return compare(rhs, [](const Type& a, const Type&b) {
       return a.isSubtypeOf(b);
     });
   }

@@ -292,6 +292,19 @@ void PropagateShapeOnNode(Node * node) {
         PropagateShapeOnNodeByRunningIt(node, types);
       }
     } break;
+    case aten::index_select: {
+      if(check_overload(/*num_inputs=*/2, /*num_outputs=*/1,
+                        {{AKind::i, attr::dim}})) {
+        auto ten = types.at(0);
+        auto index = types.at(1);
+        int64_t dim = node->i(attr::dim);
+        SHAPE_ASSERT(index->sizes().size() == 1);
+        SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < ten->sizes().size());
+        std::vector<int64_t> sizes = ten->sizes();
+        sizes[dim] = index->sizes()[0];
+        node->output()->setType(ten->withSizes(sizes));
+      }
+    } break;
     case prim::ReplaceIfUndef: {
       // If types[0] has a type, then it is not defined, and the type will
       // get set to types[0] because that will be the value propagated.

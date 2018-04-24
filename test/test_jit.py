@@ -2779,6 +2779,7 @@ class TestScript(TestCase):
         def foo(x):
             return x + 1
 
+        @torch.jit.script
         def bar(x):
             y = foo(x)
             if True:
@@ -2786,6 +2787,17 @@ class TestScript(TestCase):
             return y + 1
 
         self.assertEqual(8, bar(torch.ones(1, 1)))
+
+    def test_index_select_shape_prop(self):
+
+        @torch.jit.script
+        def foo(x, y):
+            return torch.index_select(x, y, dim=1)
+
+        a = torch.zeros(2, 2)
+        b = torch.zeros(4, dtype=torch.long)
+        foo.graph.propagate_shapes((a, b), False)
+        self.assertExpected(str(foo.graph))
 
 
 # Smoke tests for export methods
