@@ -392,6 +392,9 @@ THCTensor_(median)(THCState *state,
   THCTensor *newValues = THCTensor_(newNarrow)(state, sorted, dimension, k, 1);
   THCudaLongTensor *newIndices = THCudaLongTensor_newNarrow(state, sorted_indices, dimension, k, 1);
 
+  THCTensor_(free)(state, sorted);
+  THCudaLongTensor_free(state, sorted_indices);
+
   if (!keepdim) {
     THCTensor_(squeeze1d)(state, newValues, newValues, dimension);
     THCudaLongTensor_squeeze1d(state, newIndices, newIndices, dimension);
