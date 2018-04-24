@@ -396,6 +396,8 @@ tests = [
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
     ('eye', small_2d, lambda t: [3, 4],),
+    ('flip', small_3d, lambda t: [0], 'd0', types, True),
+    ('flip', small_3d, lambda t: [0, 1, 2], 'd012', types, True),
     ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),

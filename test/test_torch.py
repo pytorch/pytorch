@@ -1373,63 +1373,20 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
-        def check_sum_dim(tensors, dim):
-            for tensor in tensors:
-                expected = tensor.numpy().sum(dim)
-                actual = tensor.sum(dim)
-                self.assertEqual(expected.shape, actual.shape)
-                if actual.dtype == torch.float:
-                    self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
-                else:
-                    self.assertTrue(np.allclose(expected, actual.numpy()))
+        def check_sum_dim(tensor, dim):
+            expected = tensor.numpy().sum(dim)
+            actual = tensor.sum(dim)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertTrue(np.allclose(expected, actual.numpy()))
 
-        float_types = [torch.double,
-                       torch.float]
-        int_types = [torch.int64,
-                     torch.int32,
-                     torch.int16]
-
-        def make_contiguous(shape, dtype):
-            if dtype in float_types:
-                return torch.randn(*shape, dtype=dtype)
-            result = torch.zeros(*shape, dtype=dtype)
-            result.apply_(lambda x: random.randint(-100, 100))
-            return result
-
-        def make_non_contiguous(shape, dtype):
-            contig = make_contiguous(shape, dtype)
-            non_contig = torch.empty(shape + (2,), dtype=dtype)[..., 0]
-            non_contig.copy_(contig)
-            self.assertFalse(non_contig.is_contiguous())
-            return non_contig
-
-        def make_tensors(*shape):
-            tensors = []
-            for dtype in float_types + int_types:
-                tensors.append(make_contiguous(shape, dtype))
-                tensors.append(make_non_contiguous(shape, dtype))
-            return tensors
-
-        check_sum_dim(make_tensors(5, 400000), 1)
-        check_sum_dim(make_tensors(3, 5, 7), 0)
-        check_sum_dim(make_tensors(3, 5, 7), 1)
-        check_sum_dim(make_tensors(3, 5, 7), 2)
-        check_sum_dim(make_tensors(100000), -1)
-        check_sum_dim(make_tensors(50, 50, 50), 0)
-        check_sum_dim(make_tensors(50, 50, 50), 1)
-        check_sum_dim(make_tensors(50, 50, 50), 2)
-
-        def make_contiguous_slice(size, dtype):
-            contig = make_contiguous((1, size), dtype)
-            non_contig = contig[:1, 1:size - 1]
-            self.assertTrue(non_contig.is_contiguous())
-            return contig
-
-        for dtype in float_types + int_types:
-            check_sum_dim(make_contiguous_slice(5, dtype), 0)
-            check_sum_dim(make_contiguous_slice(50, dtype), 0)
-            check_sum_dim(make_contiguous_slice(500, dtype), 0)
-            check_sum_dim(make_contiguous_slice(100000, dtype), 0)
+        check_sum_dim(torch.randn(3, 5, 7), 0)
+        check_sum_dim(torch.randn(3, 5, 7), 1)
+        check_sum_dim(torch.randn(3, 5, 7), 2)
+        check_sum_dim(torch.randn(100000), -1)
+        check_sum_dim(torch.randn(5, 400000), 1)
+        check_sum_dim(torch.randn(50, 50, 50), 0)
+        check_sum_dim(torch.randn(50, 50, 50), 1)
+        check_sum_dim(torch.randn(50, 50, 50), 2)
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
@@ -5482,13 +5439,6 @@ class TestTorch(TestCase):
             self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split, 0)
             start = start + target_size[dim]
 
-        # Invalid chunk sizes
-        error_regex = 'chunk expects.*greater than 0'
-        with self.assertRaisesRegex(RuntimeError, error_regex):
-            tensor.chunk(0)
-        with self.assertRaisesRegex(RuntimeError, error_regex):
-            tensor.chunk(-2)
-
     def test_tolist(self):
         list0D = []
         tensor0D = torch.Tensor(list0D)
@@ -5521,26 +5471,23 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_flip(self, use_cuda=False):
-        if use_cuda and torch.cuda.is_available():
-            x = torch.Tensor([1,2,3,4,5,6,7,8]).view(2, 2, 2).cuda()
+        if use_cuda:
+            cuda = torch.device("cuda")
+            x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=cuda).view(2, 2, 2)
             # stress testing
-            y = torch.arange(0, 100000000).view(10000, 10000).cuda()
+            y = torch.arange(0, 100000000, device=cuda).view(10000, 10000)
             y.flip([0])
         else:
-            x = torch.Tensor([1,2,3,4,5,6,7,8]).view(2, 2, 2)
+            x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2)
 
         x_flip_0 = x.flip([0])
-        self.assertEqual(torch.Tensor([5,6,7,8,1,2,3,4]).view(2, 2, 2), x_flip_0)
+        self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2), x_flip_0)
 
-        x_flip_01 = x.flip([0,1])
-        self.assertEqual(torch.Tensor([7,8,5,6,3,4,1,2]).view(2, 2, 2), x_flip_01)
+        x_flip_01 = x.flip([0, 1])
+        self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), x_flip_01)
 
-        x_flip_012 = x.flip([0,1,2])
-        self.assertEqual(torch.Tensor([8,7,6,5,4,3,2,1]).view(2, 2, 2), x_flip_012)
-
-        # test duplicated dims
-        x_flip_001 = x.flip([0,0,1])
-        self.assertEqual(x_flip_01, x_flip_001)
+        x_flip_012 = x.flip([0, 1, 2])
+        self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), x_flip_012)
 
     def test_flip(self):
         self._test_flip(self, use_cuda=False)

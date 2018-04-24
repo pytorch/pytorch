@@ -811,29 +811,6 @@ class TestAutograd(TestCase):
         y._backward_hooks['test'] = error
         b.backward(torch.ones(5, 5))
 
-    def test_requires_grad_(self):
-        x = torch.randn(5, 5)
-        y = torch.randn(5, 5, requires_grad=True)
-        self.assertIs(x, x.requires_grad_())
-        self.assertTrue(x.requires_grad)
-        self.assertIs(y, y.requires_grad_())
-        self.assertTrue(y.requires_grad)
-        self.assertIs(x, x.requires_grad_(True))
-        self.assertTrue(x.requires_grad)
-        self.assertIs(y, y.requires_grad_(True))
-        self.assertTrue(y.requires_grad)
-        z = x * y
-        self.assertRaises(RuntimeError, lambda: z.requires_grad_(False))
-        self.assertIs(z, z.requires_grad_())
-        self.assertTrue(z.requires_grad)
-        self.assertIs(z, z.requires_grad_(True))
-        self.assertTrue(z.requires_grad)
-
-        self.assertIs(x, x.requires_grad_(False))
-        self.assertFalse(x.requires_grad)
-        self.assertIs(y, y.requires_grad_(False))
-        self.assertFalse(y.requires_grad)
-
     def test_requires_grad_inplace(self):
         a = torch.randn(5, 5)
         b = torch.randn(5, 5, requires_grad=True)
@@ -1289,12 +1266,6 @@ class TestAutograd(TestCase):
         Identity.apply(v).backward()
         self.assertEqual(device[0], 1)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    def test_inputbuffer_add_multigpu(self):
-        input = torch.randn(1).cuda(0).requires_grad_()
-        output = input.cuda(1) + input.cuda(1)
-        output.backward()
-
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
         y = x + 2
@@ -1737,25 +1708,6 @@ class TestAutograd(TestCase):
         out = Reenter.apply(x)
         out.sum().backward()
         self.assertEqual(x.grad.data, y_data)
-
-    def test_flip(self):
-        x = torch.autograd.Variable(torch.Tensor([0,1,2,3]).view(2, 2), requires_grad=True)
-        y = x.flip([0])
-        self.assertEqual(torch.Tensor([2,3,0,1]).view(2, 2), y)
-        z = y * y
-        out = z.sum()
-        out.backward()
-        self.assertEqual(torch.Tensor([0,2,4,6]).view(2, 2), x.grad)
-
-        # test cuda backward
-        if torch.cuda.is_available():
-            x_cuda = torch.autograd.Variable(torch.Tensor([0,1,2,3]).view(2, 2).cuda(), requires_grad=True)
-            y_cuda = x_cuda.flip([0])
-            self.assertEqual(torch.Tensor([2,3,0,1]).view(2, 2), y_cuda)
-            z_cuda = y_cuda * y_cuda
-            out_cuda = z_cuda.sum()
-            out_cuda.backward()
-            self.assertEqual(torch.Tensor([0,2,4,6]).view(2, 2), x_cuda.grad)
 
     def test_cat(self):
         f_args_variable = (torch.randn(1, S, S, requires_grad=True),
@@ -2367,6 +2319,8 @@ method_tests = [
     ('reshape', (S,), (S,), '1d'),
     ('reshape', (), (dont_convert(()),), 'scalar_to_scalar'),
     ('reshape', (), (1,), 'scalar_to_1d'),
+    ('flip', torch.rand(S, S, S).requires_grad_(), ([0],), 'd0'),
+    ('flip', torch.rand(S, S, S).requires_grad_(), ([0,1,2],), 'd012'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
     ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
     ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
