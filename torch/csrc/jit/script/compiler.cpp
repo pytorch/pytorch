@@ -21,19 +21,15 @@ using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
-static std::string diagnosticType(TypePtr ptr) {
-  if(TupleType* tt = ptr->cast<TupleType>()) {
-    std::stringstream ss;
-    ss << "(";
-    for(size_t i = 0; i < tt->elements().size(); ++i) {
-      if(i > 0)
-        ss << ", ";
-      ss << diagnosticType(tt->elements()[i]);
-    }
-    ss << ")";
-    return ss.str();
+// what type will this have in the interpreter, ignoring extra static information
+// in particular Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
+static TypePtr interpreterType(const TypePtr& type) {
+  if(TupleType* t = type->cast<TupleType>()) {
+    return std::make_shared<TupleType>(fmap(t->elements(), interpreterType));
+  } else if(type->kind() == TypeKind::TensorType) {
+    return DynamicType::get();
   } else {
-    return ptr->name();
+    return type;
   }
 }
 
@@ -152,9 +148,9 @@ struct Environment {
         throw ErrorReport(loc) << "cannot re-assign '" << name << "' because it has type " << value->kind()
         << ". Only reassignments to first-class values are allowed";
       }
-      if(*as_simple_value->type() != *simple_parent->type()) {
-        throw ErrorReport(loc) << "variable '" << name << "' previously has type " << diagnosticType(simple_parent->type())
-        << " but is now being assigned to a value of type " << diagnosticType(as_simple_value->type());
+      if(!as_simple_value->type()->isSubtypeOf(*interpreterType(simple_parent->type()))) {
+        throw ErrorReport(loc) << "variable '" << name << "' previously has type " << simple_parent->type()->name()
+        << " but is now being assigned to a value of type " << as_simple_value->type()->name();
       }
     }
     if (as_simple_value &&
@@ -342,14 +338,10 @@ struct NoneValue : SugaredValue {
 
 
 static Value* ensureTensor(const SourceRange& range, Value* v) {
-  // both 'DynamicType' and 'TensorType' are actually Tensors:
-  // 'Dynamic' currently means a dynamically-sized tensor vs e.g. a TupleType
-  // TensorType means a 'sized' tensor which is added by some optimizations
-  if(v->type()->kind() == TypeKind::DynamicType
-     || v->type()->kind() == TypeKind::TensorType) {
-       return v;
+  if(!v->type()->isSubtypeOf(*DynamicType::get())) {
+    throw ErrorReport(range) << "expected a tensor value but found a tuple";
   }
-  throw ErrorReport(range) << "expected a tensor value but found a tuple";
+  return v;
 }
 
 void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values) {
