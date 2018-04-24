@@ -13,8 +13,8 @@ of the selected device, and the results will be always placed in on the same
 device as the tensor.
 
 Cross-GPU operations are not allowed by default, with the exception of
-:meth:`~torch.Tensor.copy_` and other methods like copy like
-:meth:`~torch.Tensor.to` and :meth:`~torch.Tensor.cuda`.
+:meth:`~torch.Tensor.copy_` and other methods with copy-like functionality
+such as :meth:`~torch.Tensor.to` and :meth:`~torch.Tensor.cuda`.
 Unless you enable peer-to-peer memory access, any attempts to launch ops on
 tensors spread across different devices will raise an error.
 
@@ -35,24 +35,24 @@ Below you can find a small example showcasing this::
 
         # transfers a tensor from CPU to GPU 1
         b = torch.tensor([1., 2.]).cuda()
-        # a.device.index == b.device.index == 1
+        # a.device and b.device are device(type='cuda', index=1)
 
         # You can also use ``Tensor.to`` to transfer a tensor:
         b2 = torch.tensor([1., 2.]).to(device=cuda)
-        b.device.index == b2.device.index == 1
+        # b.device and b2.device are device(type='cuda', index=1)
 
         c = a + b
-        # c.device.index == 1
+        # c.device is device(type='cuda', index=1)
 
         z = x + y
-        # z.device.index == 0
+        # z.device is device(type='cuda', index=0)
 
         # even within a context, you can specify the device
         # (or give a GPU index to the .cuda call)
         d = torch.randn(2, device=cuda2)
         e = torch.randn(2).to(device=cuda2)
-        f = torch.randn(2).cuda(2)
-        # d.device.index == e.device.index == f.device.index == 2
+        f = torch.randn(2).cuda(device=cuda2)
+        # d.device, e.device, and f.device are all device(type='cuda', index=2)
 
 Asynchronous execution
 ----------------------
@@ -93,7 +93,7 @@ used.  For example, the following code is incorrect::
 
     cuda = torch.device('cuda')
     s = torch.cuda.stream()  # Create a new stream.
-    A = torch.empty((100, 100), dtype=cuda).normal_(0.0, 1.0)
+    A = torch.empty((100, 100), device=cuda).normal_(0.0, 1.0)
     with torch.cuda.stream(s):
         # sum() may start execution before normal_() finishes!
         B = torch.sum(A)
