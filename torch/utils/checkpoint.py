@@ -24,7 +24,7 @@ class CheckpointFunction(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, run_function, *args):
-        check_backward_validity(*args)
+        check_backward_validity(args)
         ctx.run_function = run_function
         ctx.save_for_backward(*args)
         with torch.no_grad():
