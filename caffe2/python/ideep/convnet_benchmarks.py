@@ -635,7 +635,7 @@ def Benchmark(model_gen, arg):
     results = workspace.BenchmarkNet(
         model.net.Proto().name, arg.warmup_iterations, arg.iterations,
         arg.layer_wise_benchmark)
-    print('result: {}'.format(results))
+    print('FPS: {}'.format(ags.batch_size*1000/results[0]))
 
 
 def GetArgumentParser():
@@ -697,7 +697,7 @@ def GetArgumentParser():
         help="If True, dump the model prototxts to disk."
     )
     parser.add_argument("--net_type", type=str, default="simple")
-    parser.add_argument("--num_workers", type=int, default=1)
+    parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--use-nvtx", default=False, action='store_true')
     parser.add_argument("--htrace_span_log_path", type=str)
     return parser
