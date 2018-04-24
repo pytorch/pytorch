@@ -127,6 +127,11 @@ class Caffe2Backend {
 
   Caffe2Ops ConvertNode(const std::string& node_str, int opset_version);
 
+  void BuildTensorFillingOp(
+      caffe2::OperatorDef* c2_op,
+      const TensorProto& onnx_tensor,
+      const std::string& name = "");
+
  private:
   using SpecialOpConverter = Caffe2Ops (Caffe2Backend::*)(OnnxNode*, int);
 
@@ -148,11 +153,6 @@ class Caffe2Backend {
       int opset_version);
 
   std::unordered_set<std::string> AllNamesInGraph(const GraphProto& graph);
-
-  void BuildTensorFillingOp(
-      caffe2::OperatorDef* c2_op,
-      const TensorProto& onnx_tensor,
-      const std::string& name = "");
 
   Caffe2Ops CommonOnnxNodeToCaffe2Ops(OnnxNode* onnx_node, int opset_version);
 
