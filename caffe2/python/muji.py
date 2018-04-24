@@ -137,12 +137,13 @@ def Allreduce4Group2(net, blobs, reduced_affix, gpu_indices):
         str(c) + reduced_affix,
         device_option=OnGPU(gpu_c)
     )
+    # copy from c_reduce(gpu_c) to c_reduce_copy(gpu_a)
     c_reduced_copy = c_reduced.Copy(
         [],
         str(c_reduced) + '_copy',
         device_option=OnGPU(gpu_a)
     )
-    # a_reduced <- a_reduced + c_reduced
+    # a_reduced <- a_reduced + c_reduced_copy
     a_reduced = a_reduced.Add(c_reduced_copy, a_reduced, device_option=OnGPU(gpu_a))
     # broadcast a_reduced to c_reduced
     c_reduced = a_reduced.Copy([], c_reduced, device_option=OnGPU(gpu_c))
