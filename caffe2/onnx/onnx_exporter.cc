@@ -466,45 +466,42 @@ ConvertedResult OnnxExporter::CreateConvPoolNodes(
     CAFFE_ENFORCE(
         node.op_type().size() >= 4 &&
         (node.op_type().rfind("Pool") == node.op_type().size() - 4));
-    CAFFE_ENFORCE(!global);
     const auto& input_size = shapes.at(node.input(0));
     const auto& output_size = shapes.at(node.output(0));
     CAFFE_ENFORCE_EQ(output_size.dims().size(), 4);
-    if (legacy_pad_attr.i() ==
-        static_cast<int64_t>(caffe2::LegacyPadding::VALID)) {
-      CAFFE_ENFORCE(!attrs.count("pads"));
-      attrs.emplace("auto_pad", MakeAttribute("auto_pad", "VALID"));
-    } else if (
-        legacy_pad_attr.i() ==
-        static_cast<int64_t>(caffe2::LegacyPadding::SAME)) {
-      CAFFE_ENFORCE(!attrs.count("pads"));
-      // default behavior in Caffe2 is SAME_UPPER
-      // https://github.com/caffe2/caffe2/blob/master/caffe2/operators/conv_pool_op_base.h#L39
-      attrs.emplace("auto_pad", MakeAttribute("auto_pad", "SAME_UPPER"));
-    } else if (
-        legacy_pad_attr.i() ==
-        static_cast<int64_t>(caffe2::LegacyPadding::CAFFE_LEGACY_POOLING)) {
-      // The problem here is that, Pool op in Caffe may add an additional pixel,
-      // if the last part is smaller than stride. So we use the explicit padding
-      // to replace legacy_pad. pad[end] = output_size[start + 2] *
-      // stride[start] - pad[start] - 1 + kernel[start] - input[start + 2] end =
-      // start + len(pad) / 2
-      LOG(WARNING) << "Converting legacy padding to explicit padding.";
-      auto* pads_attr = attrs.at("pads").mutable_ints();
-      auto& strides_attr = attrs.at("strides").ints();
-      auto& kernel_shape_attr = attrs.at("kernel_shape").ints();
-      for (int i = 0; i < 2; ++i) {
-        int64_t tmp_pad = output_size.dims(i + 2) * strides_attr.Get(i) -
-            pads_attr->Get(i) - 1 + kernel_shape_attr.Get(i) -
-            input_size.dims(i + 2);
-        pads_attr->Set(i + 2, tmp_pad);
+    if (!global &&  // global pool does not care about legacy pad
+        legacy_pad_attr.i() != static_cast<int64_t>(caffe2::LegacyPadding::NOTSET)) {
+      if (legacy_pad_attr.i() ==
+          static_cast<int64_t>(caffe2::LegacyPadding::VALID)) {
+        CAFFE_ENFORCE(!attrs.count("pads"));
+        attrs.emplace("auto_pad", MakeAttribute("auto_pad", "VALID"));
+      } else if (legacy_pad_attr.i() ==
+          static_cast<int64_t>(caffe2::LegacyPadding::SAME)) {
+        CAFFE_ENFORCE(!attrs.count("pads"));
+        // default behavior in Caffe2 is SAME_UPPER
+        // https://github.com/caffe2/caffe2/blob/master/caffe2/operators/conv_pool_op_base.h#L39
+        attrs.emplace("auto_pad", MakeAttribute("auto_pad", "SAME_UPPER"));
+      } else if (legacy_pad_attr.i() ==
+          static_cast<int64_t>(caffe2::LegacyPadding::CAFFE_LEGACY_POOLING)) {
+        // The problem here is that, Pool op in Caffe may add an additional pixel,
+        // if the last part is smaller than stride. So we use the explicit padding
+        // to replace legacy_pad. pad[end] = output_size[start + 2] *
+        // stride[start] - pad[start] - 1 + kernel[start] - input[start + 2] end =
+        // start + len(pad) / 2
+        LOG(WARNING) << "Converting legacy padding to explicit padding.";
+        auto* pads_attr = attrs.at("pads").mutable_ints();
+        auto& strides_attr = attrs.at("strides").ints();
+        auto& kernel_shape_attr = attrs.at("kernel_shape").ints();
+        for (int i = 0; i < 2; ++i) {
+          int64_t tmp_pad = output_size.dims(i + 2) * strides_attr.Get(i) -
+              pads_attr->Get(i) - 1 + kernel_shape_attr.Get(i) -
+              input_size.dims(i + 2);
+          pads_attr->Set(i + 2, tmp_pad);
+        }
+      } else {
+        LOG(ERROR) << "Don't know how to handle the legacy_pad:" << legacy_pad_attr.i();
+        CAFFE_THROW("Failed to handle legacy padding in pool operator!");
       }
-    } else if (
-        legacy_pad_attr.i() !=
-        static_cast<int64_t>(caffe2::LegacyPadding::NOTSET)) {
-      CAFFE_THROW(caffe2::MakeString(
-          "Don't know how to handle the legacy_pad, while processing operator: ",
-          def.type()));
     }
   }
 
