@@ -298,6 +298,26 @@ each element with the value returned by :attr:`callable`.
     sections that require high performance.
 """)
 
+add_docstr_all('as_param', r"""
+as_param() -> Tensor
+
+Returns this tensor with :attr:`requires_grad` set to ``True`` and with no
+:attr:`grad_fn`. The result is an independent variable (parameter), suitable
+for use in a differentiable computation. Calling :meth:`backward` on a variable
+dependent on the result will store the derivative in the result's :attr:`grad`
+attribute.
+
+Example::
+
+    >>> x = torch.empty(1).uniform_(0, 1).as_param()
+    >>> x.requires_grad
+    True
+    >>> (x * 2).backward()
+    >>> x.grad
+     2
+    [torch.FloatTensor of size (1,)]
+""")
+
 add_docstr_all('asin', r"""
 asin() -> Tensor
 

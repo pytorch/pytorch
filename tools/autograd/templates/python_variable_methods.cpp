@@ -47,6 +47,14 @@ static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_as_param(PyObject* self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return THPVariable_Wrap(self_.as_param());
+  END_HANDLE_TH_ERRORS
+}
+
 static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
@@ -652,6 +660,7 @@ PyMethodDef variable_methods[] = {
   {"__nonzero__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
+  {"as_param", (PyCFunction)THPVariable_as_param, METH_NOARGS, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},

@@ -247,6 +247,11 @@ struct Variable : public at::Tensor {
   /// this. If this `Variable` is a view, throws an `std::runtime_error()`.
   void detach_();
 
+  /// Returns this `Variable` as an independent variable (parameter). The result
+  /// shares the same data, has `requires_grad` set to `True`, and has no
+  /// `grad_fn`.
+  Variable as_param() const;
+
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

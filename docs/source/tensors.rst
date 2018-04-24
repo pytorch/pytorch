@@ -160,6 +160,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: apply_
    .. automethod:: argmax
    .. automethod:: argmin
+   .. automethod:: as_param
    .. automethod:: asin
    .. automethod:: asin_
    .. automethod:: atan
