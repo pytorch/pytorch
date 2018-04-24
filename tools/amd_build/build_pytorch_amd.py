@@ -2,6 +2,7 @@
 import shutil
 import subprocess
 import os
+from shutil import copytree, ignore_patterns
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
@@ -34,6 +35,27 @@ for root, _directories, files in os.walk(os.path.join(amd_build_dir, "hip_files"
 patch_folder = os.path.join(amd_build_dir, "patches")
 for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
     subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=out_dir)
+
+# Make various replacements inside AMD_BUILD/torch directory
+ignore_files =  ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp", "csrc/cuda/cuda_check.h", "csrc/jit/fusion_compiler.h", "csrc/jit/fusion_compiler.cpp"]
+for root, _directories, files in os.walk(os.path.join(amd_build_dir, "torch")):
+    for filename in files:
+        if filename.endswith(".cpp") or filename.endswith(".h"):
+            source = os.path.join(root, filename)
+            # Disabled files
+            if reduce(lambda result, exclude: source.endswith(exclude) or result, ignore_files, False):
+                continue
+
+            # Update contents.
+            with open(source, "r+") as f:
+                contents = f.read()
+                contents = contents.replace("WITH_CUDA", "WITH_ROCM")
+                contents = contents.replace("CUDA_VERSION", "0")
+                f.seek(0)
+                f.write(contents)
+                f.truncate()
+                f.flush()
+                os.fsync(f)
 
 # Execute the Hipify Script.
 subprocess.Popen(

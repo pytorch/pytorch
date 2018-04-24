@@ -7,7 +7,7 @@ index 319652fdf..181ab7634 100644
  
  void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor *sparse_, THCTensor *dense) {
 +#if defined(__HIP_PLATFORM_HCC__)
-+  #define THRUST_EXEC(fn, ...) // whitespace
++  #define THRUST_EXEC(fn, ...) throw std::runtime_error("Thrust method, thrust::cuda::par, disabled!") // whitespace
 +#else
  #if CUDA_VERSION >= 7000
    THCThrustAllocator thrustAlloc(state);

@@ -25,7 +25,7 @@ __host__ __device__ __forceinline__ T THCRoundUp(T a, T b) {
  * For CC 3.5+, perform a load using __ldg
  */
 template <typename T>
-__device__ __forceinline__ inline T doLdg(const T* p) {
+__device__ __forceinline__ T doLdg(const T* p) {
 #if __CUDA_ARCH__ >= 350
   return __ldg(p);
 #else
@@ -33,7 +33,7 @@ __device__ __forceinline__ inline T doLdg(const T* p) {
 #endif
 }
 
-__device__ __forceinline__ inline unsigned int ACTIVE_MASK()
+__device__ __forceinline__ unsigned int ACTIVE_MASK()
 {
 #if CUDA_VERSION >= 9000
     return __activemask();
@@ -43,7 +43,7 @@ __device__ __forceinline__ inline unsigned int ACTIVE_MASK()
 #endif
 }
 
-__device__ __forceinline__ inline int WARP_BALLOT(int predicate, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ int WARP_BALLOT(int predicate, unsigned int mask = 0xffffffff)
 {
 #if CUDA_VERSION >= 9000
     return __ballot_sync(mask, predicate);
@@ -53,12 +53,12 @@ __device__ __forceinline__ inline int WARP_BALLOT(int predicate, unsigned int ma
 }
 
 //To handle ambiguity, add a type double version.
-__device__ __forceinline__ inline double WARP_SHFL_XOR(double value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff) {
+__device__ __forceinline__ double WARP_SHFL_XOR(double value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff) {
   //(HIP doesn't support double)
   return (double) __shfl_xor((float) value, laneMask, width);
 }
 template <typename T>
-__device__ __forceinline__ inline T WARP_SHFL_XOR(T value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ T WARP_SHFL_XOR(T value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff)
 {
 #if CUDA_VERSION >= 9000
     return __shfl_xor_sync(mask, value, laneMask, width);
@@ -68,7 +68,7 @@ __device__ __forceinline__ inline T WARP_SHFL_XOR(T value, int laneMask, int wid
 }
 
 template <typename T>
-__device__ __forceinline__ inline T WARP_SHFL(T value, int srcLane, int width = warpSize, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ T WARP_SHFL(T value, int srcLane, int width = warpSize, unsigned int mask = 0xffffffff)
 {
 #if CUDA_VERSION >= 9000
     return __shfl_sync(mask, value, srcLane, width);
@@ -78,7 +78,7 @@ __device__ __forceinline__ inline T WARP_SHFL(T value, int srcLane, int width = 
 }
 
 template <typename T>
-__device__ __forceinline__ inline T WARP_SHFL_UP(T value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ T WARP_SHFL_UP(T value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
 {
 #if CUDA_VERSION >= 9000
     return __shfl_up_sync(mask, value, delta, width);
@@ -88,13 +88,13 @@ __device__ __forceinline__ inline T WARP_SHFL_UP(T value, unsigned int delta, in
 }
 
 //To handle ambiguity, add a type double version.
-__device__ __forceinline__ inline double WARP_SHFL_DOWN(double value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ double WARP_SHFL_DOWN(double value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
 {
   //(HIP doesn't support double)
   return (double) __shfl_down((float) value, delta, width);
 }
 template <typename T>
-__device__ __forceinline__ inline T WARP_SHFL_DOWN(T value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
 {
 #if CUDA_VERSION >= 9000
     return __shfl_down_sync(mask, value, delta, width);

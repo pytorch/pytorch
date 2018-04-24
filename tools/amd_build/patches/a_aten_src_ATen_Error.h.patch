@@ -7,11 +7,11 @@ index b68779144..faea76bff 100644
  #include <stdarg.h>
  
 -#if !defined(_WIN32)
-+#if !defined(__HIP_PLATFORM_HCC__)
++#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__) 
  #include <cxxabi.h>
  #include <execinfo.h>
 -#endif // !defined(_WIN32)
-+#endif // !defined(__HIP_PLATFORM_HCC__)
++#endif // !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
  
  #if defined(_MSC_VER) && _MSC_VER <= 1900
  #define __func__ __FUNCTION__
@@ -20,7 +20,7 @@ index b68779144..faea76bff 100644
  // https://stackoverflow.com/questions/26398064/counterpart-to-glibcs-backtrace-and-backtrace-symbols-on-windows
  // https://msdn.microsoft.com/en-us/library/windows/desktop/bb204633%28v=vs.85%29.aspx.
 -#if !defined(_WIN32)
-+#if !defined(__HIP_PLATFORM_HCC__)
++#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
  struct FrameInformation {
    /// If available, the demangled name of the function at this frame, else
    /// whatever (possibly mangled) name we got from `backtrace()`.
@@ -29,7 +29,7 @@ index b68779144..faea76bff 100644
    return stream.str();
  }
 -#endif // !defined(_WIN32)
-+#endif // !defined(__HIP_PLATFORM_HCC__)
++#endif // !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
  
  /// A tiny implementation of static `all_of`.
  template <bool...>
@@ -38,11 +38,11 @@ index b68779144..faea76bff 100644
          "format arguments must be literal types!");
      what_ += " (" + source_location.toString() + ")\n";
 -#if !defined(_WIN32)
-+#if !defined(__HIP_PLATFORM_HCC__)
++#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
      // Skip this constructor's frame.
      what_ += detail::get_backtrace(/*frames_to_skip=*/1);
 -#endif // !defined(_WIN32)
-+#endif // !defined(__HIP_PLATFORM_HCC__)
++#endif // !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
    }
  
    /// Returns the complete error message, including the source location.

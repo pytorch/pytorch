@@ -1,3 +1,5 @@
+/*This file contains various adjustments required to interoperate with the Bitfield and Lanes for the AMD Architecture.*/
+
 #ifndef THC_ASM_UTILS_INC
 #define THC_ASM_UTILS_INC
 

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0)
 IF(WITH_ROCM)
-  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindHIP.cmake)
+  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/LoadHIP.cmake)
 ENDIF()
 
 set(CMAKE_MODULE_PATH
@@ -103,13 +103,13 @@ IF(MSVC)
   ENDIF()
 ENDIF(MSVC)
 
-IF (NOT MSVC AND NOT WITH_ROCM)
+IF (NOT MSVC)
   IF (CMAKE_VERSION VERSION_LESS "3.1")
     SET(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
   ELSE ()
     SET(CMAKE_C_STANDARD 11)
   ENDIF ()
-ENDIF(NOT MSVC AND NOT WITH_ROCM)
+ENDIF(NOT MSVC)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
@@ -301,11 +301,11 @@ ENDIF(C_SSE2_FOUND)
 IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
   SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} -DUSE_SSE4_1 ${C_SSE4_2_FLAGS} -DUSE_SSE4_2 ${CMAKE_C_FLAGS}")
 ENDIF()
-IF(C_SSE3_FOUND AND NOT WITH_ROCM)
+IF(C_SSE3_FOUND)
   MESSAGE(STATUS "SSE3 Found")
   SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_C_FLAGS}")
   SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_CXX_FLAGS}")
-ENDIF(C_SSE3_FOUND AND NOT WITH_ROCM)
+ENDIF(C_SSE3_FOUND)
 
 # we don't set -mavx and -mavx2 flags globally, but only for specific files
 # however, we want to enable the AVX codepaths, so we still need to
@@ -340,9 +340,6 @@ int main()
   return 0;
 }
 " HAS_C11_ATOMICS)
-
-# For ROCm stack, the hcc/hipcc compiler cannot use C11 atomics. Prefer GCC.
-SET(HAS_C11_ATOMICS OFF)
 
 IF(NOT HAS_C11_ATOMICS)
   CHECK_C_SOURCE_RUNS("
@@ -464,6 +461,7 @@ add_subdirectory(src/THS)
 
 if (WITH_ROCM)
   SET(AT_CUDA_ENABLED 1)
+  message("ROCm is enabled.")
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
   add_subdirectory(src/THCS)
@@ -524,9 +522,7 @@ if(NOT NO_CUDA AND NOT WITH_ROCM)
   include_directories(${CUDA_INCLUDE_DIRS})
 endif()
 
-IF(NOT WITH_ROCM)
 add_subdirectory(src/ATen/test)
-ENDIF(NOT WITH_ROCM)
 
 if(ATEN_NO_CONTRIB)
   message("disable contrib because ATEN_NO_CONTRIB is set")

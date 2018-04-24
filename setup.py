@@ -131,7 +131,7 @@ if check_env_flag('WITH_ROCM'):
     WITH_ROCM = True
     WITH_CUDA = False
 
-    # If using ROCM stack disable distributed for now
+    # Distributed disabled for now since RCCL development isn't complete. https://github.com/ROCmSoftwarePlatform/rccl
     WITH_DISTRIBUTED = False
 else:
     WITH_ROCM = False
@@ -772,10 +772,6 @@ if WITH_ROCM:
     hcc_include_path = '/opt/rocm/hcc/include'
     hipblas_include_path = '/opt/rocm/hipblas/include'
     hipsparse_include_path = '/opt/rocm/hcsparse/include'
-    print(rocm_include_path)
-    print(hcc_include_path)
-    print(hipblas_include_path)
-    print(hipsparse_include_path)
     hip_lib_path = '/opt/rocm/hip/lib'
     hcc_lib_path = '/opt/rocm/hcc/lib'
     include_dirs.append(rocm_include_path)
