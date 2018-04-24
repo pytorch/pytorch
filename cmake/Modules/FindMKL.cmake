@@ -17,9 +17,6 @@
 # ---[ Options
 include(CMakeDependentOption)
 
-option(MKL_USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
-option(MKL_USE_MKLML "Use MKLML interface in MKL BLAS" ON)
-
 if(MKL_USE_IDEEP)
   set(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   set(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
