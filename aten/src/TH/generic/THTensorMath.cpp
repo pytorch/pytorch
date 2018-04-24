@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorMath.c"
+#define TH_GENERIC_FILE "generic/THTensorMath.cpp"
 #else
 
 #ifndef NAN

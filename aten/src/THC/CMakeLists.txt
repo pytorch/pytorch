@@ -114,16 +114,16 @@ INSTALL(FILES
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC")
 
 INSTALL(FILES
-          generic/THCStorage.c
+          generic/THCStorage.cpp
           generic/THCStorage.cu
           generic/THCStorage.h
-          generic/THCTensor.c
+          generic/THCTensor.cpp
           generic/THCTensor.cu
           generic/THCTensor.h
-          generic/THCStorageCopy.c
+          generic/THCStorageCopy.cpp
           generic/THCStorageCopy.cu
           generic/THCStorageCopy.h
-          generic/THCTensorCopy.c
+          generic/THCTensorCopy.cpp
           generic/THCTensorCopy.cu
           generic/THCTensorCopy.h
           generic/THCTensorMasked.h

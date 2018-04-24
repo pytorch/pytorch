@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorage.c"
+#define THC_GENERIC_FILE "generic/THCStorage.cpp"
 #else
 
 real* THCStorage_(data)(THCState *state, const THCStorage *self)

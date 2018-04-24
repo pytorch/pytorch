@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THStorage.c"
+#define TH_GENERIC_FILE "generic/THStorage.cpp"
 #else
 
 real* THStorage_(data)(const THStorage *self)

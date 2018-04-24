@@ -26,13 +26,6 @@ HAS_CUDA = torch.cuda.is_available()
 
 from common import TestCase, run_tests, download_file
 
-try:
-    import cffi
-    from torch.utils.ffi import compile_extension
-    HAS_CFFI = True
-except ImportError:
-    HAS_CFFI = False
-
 
 class SimplePlugin(Plugin):
 
@@ -355,60 +348,6 @@ class TestFFI(TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
-
-    @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
-    def test_cpu(self):
-        compile_extension(
-            name='test_extensions.cpulib',
-            header=test_dir + '/ffi/src/cpu/lib.h',
-            sources=[
-                test_dir + '/ffi/src/cpu/lib1.c',
-                test_dir + '/ffi/src/cpu/lib2.c',
-            ],
-            verbose=False,
-        )
-        from test_extensions import cpulib
-        tensor = torch.ones(2, 2).float()
-
-        cpulib.good_func(tensor, 2, 1.5)
-        self.assertEqual(tensor, torch.ones(2, 2) * 2 + 1.5)
-
-        new_tensor = cpulib.new_tensor(4)
-        self.assertEqual(new_tensor, torch.ones(4, 4) * 4)
-
-        f = cpulib.int_to_float(5)
-        self.assertIs(type(f), float)
-
-        self.assertRaises(TypeError,
-                          lambda: cpulib.good_func(tensor.double(), 2, 1.5))
-        self.assertRaises(torch.FatalError,
-                          lambda: cpulib.bad_func(tensor, 2, 1.5))
-
-    @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
-    def test_gpu(self):
-        compile_extension(
-            name='gpulib',
-            header=test_dir + '/ffi/src/cuda/cudalib.h',
-            sources=[
-                test_dir + '/ffi/src/cuda/cudalib.c',
-            ],
-            with_cuda=True,
-            verbose=False,
-        )
-        import gpulib
-        tensor = torch.ones(2, 2).float()
-
-        gpulib.good_func(tensor, 2, 1.5)
-        self.assertEqual(tensor, torch.ones(2, 2) * 2 + 1.5)
-
-        ctensor = tensor.cuda().fill_(1)
-        gpulib.cuda_func(ctensor, 2, 1.5)
-        self.assertEqual(ctensor, torch.ones(2, 2) * 2 + 1.5)
-
-        self.assertRaises(TypeError,
-                          lambda: gpulib.cuda_func(tensor, 2, 1.5))
-        self.assertRaises(TypeError,
-                          lambda: gpulib.cuda_func(ctensor.storage(), 2, 1.5))
 
 
 class TestLuaReader(TestCase):

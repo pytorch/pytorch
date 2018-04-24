@@ -1,5 +1,5 @@
 #include "THCTensorCopy.h"
 #include "THCCachingHostAllocator.h"
 
-#include "generic/THCTensorCopy.c"
+#include "generic/THCTensorCopy.cpp"
 #include "THCGenerateAllTypes.h"

@@ -3,5 +3,5 @@
 #include "THCTensorCopy.h"
 #include "THAtomic.h"
 
-#include "generic/THCTensor.c"
+#include "generic/THCTensor.cpp"
 #include "THCGenerateAllTypes.h"

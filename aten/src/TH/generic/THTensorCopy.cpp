@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorCopy.c"
+#define TH_GENERIC_FILE "generic/THTensorCopy.cpp"
 #else
 
 #ifndef _WIN32

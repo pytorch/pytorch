@@ -1,16 +1,16 @@
 #include "THAtomic.h"
 #include "THStorage.h"
 
-#include "generic/THStorage.c"
+#include "generic/THStorage.cpp"
 #include "THGenerateAllTypes.h"
 
-#include "generic/THStorage.c"
+#include "generic/THStorage.cpp"
 #include "THGenerateHalfType.h"
 
-#include "generic/THStorageCopy.c"
+#include "generic/THStorageCopy.cpp"
 #include "THGenerateAllTypes.h"
 
-#include "generic/THStorageCopy.c"
+#include "generic/THStorageCopy.cpp"
 #include "THGenerateHalfType.h"
 
 

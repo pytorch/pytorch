@@ -4,5 +4,5 @@
 
 #include "THCHalf.h"
 
-#include "generic/THCStorage.c"
+#include "generic/THCStorage.cpp"
 #include "THCGenerateAllTypes.h"

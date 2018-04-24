@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensor.c"
+#define THC_GENERIC_FILE "generic/THCTensor.cpp"
 #else
 
 /**** access methods ****/

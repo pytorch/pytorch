@@ -4,9 +4,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 struct THGenerator;
 
 void THDoubleVector_cadd_AVX2(double *z, const double *x, const double *y, const double c, const ptrdiff_t n);
@@ -17,7 +14,4 @@ void THFloatVector_normal_fill_AVX2(float *data,
                                     const float mean,
                                     const float stddev);
 void THFloatVector_sigmoid_AVX2(float *y, const float *x, const ptrdiff_t n);
-#ifdef __cplusplus
-}
-#endif
 #endif
