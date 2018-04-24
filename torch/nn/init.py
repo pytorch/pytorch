@@ -361,16 +361,13 @@ def sparse_(tensor, sparsity, std=0.01):
 
     rows, cols = tensor.shape
     num_zeros = int(math.ceil(rows * sparsity))
-
     with torch.no_grad():
         tensor.normal_(0, std)
         for col_idx in range(cols):
-            row_indices = list(range(rows))
-            random.shuffle(row_indices)
+            row_indices = torch.randperm(rows)
             zero_indices = row_indices[:num_zeros]
-            for row_idx in zero_indices:
-                tensor[row_idx, col_idx] = 0
-
+            t = tensor[:, col_idx]
+            t[zero_indices] = 0
     return tensor
 
 
