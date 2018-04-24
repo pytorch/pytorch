@@ -367,8 +367,7 @@ def sparse_(tensor, sparsity, std=0.01):
         for col_idx in range(cols):
             row_indices = torch.randperm(rows)
             zero_indices = row_indices[:num_zeros]
-            t = tensor[:, col_idx]
-            t[zero_indices] = 0
+            tensor[zero_indices, col_idx] = 0
     return tensor
 
 
