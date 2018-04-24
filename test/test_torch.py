@@ -6575,12 +6575,6 @@ class TestTorch(TestCase):
         with self.assertRaises(RuntimeError):
             torch.bincount(torch.tensor([1., 0.3]))
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_bincount_cuda(self):
-        # bincount currently does not support CUDA.
-        self.assertRaises(
-            RuntimeError, lambda: torch.cuda.LongTensor([0, 1]).bincount())
-
 
 # Functions to test negative dimension wrapping
 METHOD = 1

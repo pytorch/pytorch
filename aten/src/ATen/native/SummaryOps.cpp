@@ -15,18 +15,17 @@ Tensor _bincount_cpu_template(
     const Tensor& weights,
     int64_t minlength) {
   if (minlength < 0) {
-    throw std::domain_error("minlength should be >= 0");
+    AT_ERROR("minlength should be >= 0");
   }
   if (self.dim() != 1 || self.numel() == 0 ||
       !isIntegralType(self.type().scalarType()) ||
       *self.min().data<integral_t>() < 0) {
-    throw std::domain_error(
-        "bincount only supports 1-d non-negative integral inputs.");
+    AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
 
   bool has_weights = weights.defined();
   if (has_weights && weights.numel() != self.numel()) {
-    throw std::runtime_error("input and weights should have the same length");
+    AT_ERROR("input and weights should have the same length");
   }
 
   Tensor output;

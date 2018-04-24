@@ -1578,6 +1578,52 @@ class TestCuda(TestCase):
     def test_random_neg_values(self):
         TestTorch._test_random_neg_values(self, use_cuda=True)
 
+    def test_bincount_cuda(self):
+        cuda = torch.device('cuda')
+        # negative input throws
+        with self.assertRaises(RuntimeError):
+            torch.bincount(torch.tensor([1, -1], device=cuda))
+        # n-d input, with n > 1 throws
+        with self.assertRaises(RuntimeError):
+            torch.bincount(torch.tensor([[1, 2], [3, 4]], device=cuda))
+        # minlength < 0 throws
+        with self.assertRaises(RuntimeError):
+            torch.bincount(torch.tensor([1, 3], device=cuda),
+                           torch.tensor([.2, .2], device=cuda),
+                           minlength=-1)
+        # floating input type throws
+        with self.assertRaises(RuntimeError):
+            torch.bincount(torch.tensor([1., 0.3], device=cuda))
+
+        # test tensor method without weights
+        long_counts = torch.tensor([0, 3, 2, 1, 3], device=cuda).bincount()
+        self.assertEqual(
+            torch.tensor([1, 1, 1, 2], dtype=torch.int64, device=cuda),
+            long_counts)
+        # test minlength functionality
+        int_counts = torch.bincount(
+            torch.tensor([1, 1, 1, 1], device=cuda), minlength=5)
+        self.assertEqual(
+            torch.tensor([0, 4, 0, 0, 0], dtype=torch.int64, device=cuda),
+            int_counts)
+        # test weights
+        byte_counts = torch.bincount(
+            torch.tensor([0, 1, 1, 1, 4], dtype=torch.uint8, device=cuda),
+            torch.tensor([.1, .2, .3, .4, .5], device=cuda))
+        self.assertEqual(
+            torch.tensor([0.1, 0.9, 0, 0, 0.5], device=cuda), byte_counts)
+        # test large number of bins - global memory use
+        big_exp = torch.zeros(100000000).cuda()
+        big_exp[-1] = 50.0
+        big_w = torch.tensor([.5] * 100, device=cuda)
+        big_out = torch.tensor([99999999] * 100, device=cuda).bincount(big_w)
+        self.assertEqual(big_exp, big_out)
+        # test large input size
+        big_exp = torch.zeros(2).cuda()
+        big_exp[1] = 1000000
+        big_out = torch.ones(1000000, dtype=torch.int8).cuda().bincount()
+        self.assertEqual(big_exp, big_out)
+
 
 def load_ignore_file():
     from os.path import join, dirname

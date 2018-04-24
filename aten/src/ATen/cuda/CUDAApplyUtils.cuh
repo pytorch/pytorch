@@ -2,6 +2,7 @@
 
 #include "detail/IndexUtils.cuh"
 #include "ATen/TensorUtils.h"
+#include "THC/THCAtomics.cuh"
 
 //
 // This file contains pointwise operation functions and kernels that
@@ -952,6 +953,200 @@ bool CUDA_tensor_apply4(at::Tensor a,
     d = oldD;
   }
 
+  return true;
+}
+
+/*
+  Memory types used for the 3 histogram implementations.
+  See `CUDA_tensor_histogram` below.
+ */
+enum class CUDAHistogramMemoryType { MULTI_BLOCK, SHARED, GLOBAL };
+
+/*
+  Kernel for computing the histogram of the input.
+ */
+template <
+    typename scalar1,
+    typename scalar2,
+    typename IndexType,
+    CUDAHistogramMemoryType MemoryType = CUDAHistogramMemoryType::MULTI_BLOCK,
+    typename Op>
+__global__ void kernelHistogram1D(
+    detail::TensorInfo<scalar1, IndexType> a, /* output */
+    detail::TensorInfo<scalar2, IndexType> b, /* input */
+    int binsize,
+    IndexType totalElements,
+    Op getWeightOp) {
+  extern __shared__ unsigned char my_smem[];
+  scalar1* smem = nullptr;
+  if (MemoryType == CUDAHistogramMemoryType::SHARED) {
+    smem = reinterpret_cast<scalar1*>(my_smem);
+    for (size_t i = 0; i < a.sizes[1]; i++) {
+      smem[i] = 0;
+    }
+    __syncthreads();
+  }
+
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalElements;
+       linearIndex += gridDim.x * blockDim.x) {
+    // Convert `linearIndex` into an offset of `b`
+    const IndexType bOffset =
+        detail::IndexToOffset<scalar2, IndexType, 1>::get(linearIndex, b);
+
+    if (MemoryType == CUDAHistogramMemoryType::SHARED) {
+      // use shared memory to accummulate
+      // Use value at `b` as an offset of `a`
+      const IndexType aOffset = b.data[bOffset] / binsize;
+
+      atomicAdd(&smem[aOffset], getWeightOp(linearIndex));
+    } else if (MemoryType == CUDAHistogramMemoryType::MULTI_BLOCK) {
+      // Use value at `b` as an offset of `a`
+      auto bVal = b.data[bOffset];
+      const IndexType aIdx = a.sizes[1] * blockIdx.x + bVal / binsize;
+      const IndexType aOffset =
+          detail::IndexToOffset<scalar1, IndexType, 2>::get(aIdx, a);
+
+      atomicAdd(&a.data[aOffset], getWeightOp(linearIndex));
+    } else { // MemoryType == CUDAHistogramMemoryType::GLOBAL
+      // Use value at `b` as an offset of `a`
+      const IndexType aIdx = b.data[bOffset] / binsize;
+      const IndexType aOffset =
+          detail::IndexToOffset<scalar1, IndexType, 2>::get(aIdx, a);
+
+      atomicAdd(&a.data[aOffset], getWeightOp(linearIndex));
+    }
+  }
+  if (MemoryType == CUDAHistogramMemoryType::SHARED) {
+    __syncthreads();
+    // move the bin values into global device memory d_counts
+    if (threadIdx.x == 0) {
+      const IndexType aIdx = a.sizes[1] * blockIdx.x;
+      const IndexType aRowOffset =
+          detail::IndexToOffset<scalar1, IndexType, 2>::get(aIdx, a);
+      for (size_t i = 0; i < a.sizes[1]; i++) {
+        a.data[aRowOffset + i] = smem[i];
+      }
+    }
+  }
+}
+
+#define MAX_NUMBER_BINS_WITH_SHARED_MEM 5000
+
+/*
+  Calculate the frequesncy of the input values.
+
+  `a` contains the final output or the histogram. Input `b` is assumed to
+  be 1-D non-negative int array. `c` optionally contains the weight vector.
+  See `help torch.bincount` for details on the math.
+
+  3 implementations based of input size and memory usage:
+    MULTI_BLOCK: `partial_output` temp tensor with (#blocks X #bins) shape.
+        Each block atomically adds to it's own **global** hist copy:
+        `partial_output[i, :]`. Once all blocks are done, the partial output is
+        sum-reduced to give the final output with (#bins) shape.
+    SHARED: `partial_output` temp tensor with (#blocks X #bins) shape.
+        Each block atomically adds to it's own **shared** hist copy: `smem[:]`.
+        Copies it's local histogram to `partial_output[i, :]` followed by
+        sum-reduction to yield the final output.
+    GLOBAL: if #bins > MAX_NUMBER_BINS_WITH_SHARED_MEM. In this case, only a
+        single **global** copy of the output histogram is maintained and all
+        blocks/threads atomically update bin counts. Hence, this can be slow.
+        CPU version may perform better.
+ */
+template <typename scalar1, typename scalar2>
+bool CUDA_tensor_histogram(
+    at::Tensor a, /* output */
+    at::Tensor b, /* input */
+    at::Tensor c, /* weights(optional) */
+    int64_t nbins,
+    int binsize,
+    TensorArgType aType = TensorArgType::ReadWrite,
+    TensorArgType bType = TensorArgType::ReadOnly,
+    TensorArgType cType = TensorArgType::ReadOnly) {
+  checkBackend("CUDA_tensor_histogram", {a, b}, Backend::CUDA);
+  constexpr int has_weights = !std::is_integral<scalar1>::value;
+  if (has_weights) {
+    checkBackend("CUDA_tensor_histogram", {c}, Backend::CUDA);
+  }
+  int64_t totalElements = b.numel();
+
+  const dim3 block = getApplyBlock();
+  dim3 grid;
+  if (!getApplyGrid(totalElements, grid)) {
+    return false;
+  }
+#if CUDA_VERSION < 9000
+  grid.x = std::min(
+      (unsigned int)at::globalContext()
+              .getCurrentDeviceProperties()
+              ->multiProcessorCount *
+          AT_APPLY_BLOCKS_PER_SM,
+      grid.x);
+#endif
+
+  Tensor partial_output;
+  if (nbins < MAX_NUMBER_BINS_WITH_SHARED_MEM) {
+    partial_output = a.type().zeros({grid.x, nbins});
+  } else {
+    partial_output = a.type().zeros({1, nbins});
+  }
+  // kernel call to compute partial histogram
+  using IndexType = uint64_t;
+  auto pInfo = detail::getTensorInfo<scalar1, IndexType>(partial_output);
+  auto bInfo = detail::getTensorInfo<scalar2, IndexType>(b);
+  auto maxSharedMem =
+      at::globalContext().getCurrentDeviceProperties()->sharedMemPerBlock;
+  auto sharedMem = nbins * sizeof(scalar1) + 8; // 8 guard bytes
+
+#define GET_WEIGHTS_DUMMY_OP [] __device__(IndexType) { return 1L; }
+#define GET_WEIGHTS_OP                                                    \
+  [cInfo] __device__(IndexType cIndex) {                                  \
+    const IndexType cOffset =                                             \
+        detail::IndexToOffset<scalar1, IndexType, 1>::get(cIndex, cInfo); \
+    return cInfo.data[cOffset];                                           \
+  }
+#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP)                               \
+  kernelHistogram1D<scalar1, scalar2, IndexType, MEMORY_TYPE>              \
+      <<<grid,                                                             \
+         block,                                                            \
+         (MEMORY_TYPE == CUDAHistogramMemoryType::SHARED) ? sharedMem : 0, \
+         at::globalContext().getCurrentCUDAStream()>>>(                    \
+          pInfo, bInfo, binsize, totalElements, WEIGHTS_OP);               \
+  AT_ASSERT(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
+
+  if (has_weights) {
+    auto cInfo = detail::getTensorInfo<scalar1, IndexType>(c);
+    if (nbins >= MAX_NUMBER_BINS_WITH_SHARED_MEM) {
+      std::cerr << "WARNING: Potentially slow. "
+                   "CUDA_tensor_histogram with nbins = "
+                << nbins << " uses global memory with atomics." << std::endl;
+      HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, GET_WEIGHTS_OP);
+    } else if (sharedMem < maxSharedMem) {
+      HANDLE_CASE(CUDAHistogramMemoryType::SHARED, GET_WEIGHTS_OP);
+    } else {
+      HANDLE_CASE(CUDAHistogramMemoryType::MULTI_BLOCK, GET_WEIGHTS_OP);
+    }
+  } else {
+    if (nbins >= MAX_NUMBER_BINS_WITH_SHARED_MEM) {
+      std::cerr << "WARNING: Potentially slow. "
+                   "CUDA_tensor_histogram with nbins = "
+                << nbins << " uses global memory with atomics." << std::endl;
+      HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, GET_WEIGHTS_DUMMY_OP);
+    } else if (sharedMem < maxSharedMem) {
+      HANDLE_CASE(CUDAHistogramMemoryType::SHARED, GET_WEIGHTS_DUMMY_OP);
+    } else {
+      HANDLE_CASE(CUDAHistogramMemoryType::MULTI_BLOCK, GET_WEIGHTS_DUMMY_OP);
+    }
+  }
+
+#undef HANDLE_CASE
+#undef GET_WEIGHTS_OP
+#undef GET_WEIGHTS_DUMMY_OP
+
+  // sum reduce partial counts
+  partial_output = partial_output._sum(0);
+  a.copy_(partial_output);
   return true;
 }
 
