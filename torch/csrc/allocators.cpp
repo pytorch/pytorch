@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include "allocators.h"
 #include "torch/csrc/utils/auto_gil.h"

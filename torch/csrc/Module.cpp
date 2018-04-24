@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <sys/types.h>
 
 #ifndef _MSC_VER

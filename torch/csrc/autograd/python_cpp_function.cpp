@@ -1,6 +1,6 @@
 #include "torch/csrc/autograd/python_cpp_function.h"
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <memory>
 #include <stdio.h>
 #include <typeindex>

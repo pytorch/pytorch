@@ -20,7 +20,7 @@
 //   }
 
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <string>
 #include <sstream>
 #include <vector>

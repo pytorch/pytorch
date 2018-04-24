@@ -1,5 +1,5 @@
 #ifndef NO_PYTHON
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #endif
 #include "torch/csrc/jit/tracer.h"
 

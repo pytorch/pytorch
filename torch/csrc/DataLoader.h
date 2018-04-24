@@ -1,5 +1,5 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 extern PyMethodDef DataLoaderMethods[];

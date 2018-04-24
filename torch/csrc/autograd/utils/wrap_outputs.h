@@ -3,7 +3,7 @@
 // Wrap tensor operation outputs as PyObject*
 
 #include <ATen/ATen.h>
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <tuple>
 
 #include "torch/csrc/Dtype.h"

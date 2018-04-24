@@ -2,7 +2,7 @@
 
 // RAII structs to acquire and release Python's global interpreter lock (GIL)
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 // Acquires the GIL on construction
 struct AutoGIL {

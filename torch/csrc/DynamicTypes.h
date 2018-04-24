@@ -2,7 +2,7 @@
 
 // Provides conversions between Python tensor objects and at::Tensor.
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <memory>
 #include <unordered_map>
 #include <ATen/ATen.h>

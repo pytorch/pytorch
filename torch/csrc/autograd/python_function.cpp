@@ -1,6 +1,6 @@
 #include "torch/csrc/autograd/python_function.h"
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <structmember.h>
 #include <unordered_map>
 #include <unordered_set>
