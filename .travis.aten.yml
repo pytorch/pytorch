@@ -13,6 +13,7 @@ install:
     - travis_retry pip install pyyaml typing
 
 script:
+    - cd aten
     - mkdir build install
     - cd build
     - cmake .. -DNO_CUDA=1 -DCMAKE_INSTALL_PREFIX=../install
