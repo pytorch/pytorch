@@ -43,10 +43,6 @@
 #   WITH_GLOO_IBVERBS
 #     toggle features related to distributed support
 #
-#   PYTORCH_BINARY_BUILD
-#     toggle static linking against libstdc++, used when we're building
-#     binaries for distribution
-#
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER
 #     specify the version of PyTorch, rather than the hard-coded version
@@ -779,19 +775,6 @@ if DEBUG:
     else:
         extra_compile_args += ['-O0', '-g']
         extra_link_args += ['-O0', '-g']
-
-if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
-    print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
-    # get path of libstdc++ and link manually.
-    # for reasons unknown, -static-libstdc++ doesn't fully link some symbols
-    CXXNAME = os.getenv('CXX', 'g++')
-    STDCPP_LIB = subprocess.check_output([CXXNAME, '-print-file-name=libstdc++.a'])
-    STDCPP_LIB = STDCPP_LIB[:-1]
-    if type(STDCPP_LIB) != str:  # python 3
-        STDCPP_LIB = STDCPP_LIB.decode(sys.stdout.encoding)
-    main_link_args += [STDCPP_LIB]
-    version_script = os.path.abspath("tools/pytorch.version")
-    extra_link_args += ['-Wl,--version-script=' + version_script]
 
 
 def make_relative_rpath(path):
