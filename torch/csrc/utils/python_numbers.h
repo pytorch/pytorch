@@ -57,6 +57,18 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
   return (int64_t)value;
 }
 
+inline bool THPUtils_checkIndex(PyObject *obj) {
+  if (THPUtils_checkLong(obj)) {
+    return true;
+  }
+  auto index = THPObjectPtr(PyNumber_Index(obj));
+  if (!index) {
+    PyErr_Clear();
+    return false;
+  }
+  return true;
+}
+
 inline int64_t THPUtils_unpackIndex(PyObject* obj) {
   if (!THPUtils_checkLong(obj)) {
     auto index = THPObjectPtr(PyNumber_Index(obj));
