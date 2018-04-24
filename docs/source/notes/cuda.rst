@@ -12,35 +12,47 @@ However, once a tensor is allocated, you can do operations on it irrespective
 of the selected device, and the results will be always placed in on the same
 device as the tensor.
 
-Cross-GPU operations are not allowed by default, with the only exception of
-:meth:`~torch.Tensor.copy_`. Unless you enable peer-to-peer memory access, any
-attempts to launch ops on tensors spread across different devices will raise an
-error.
+Cross-GPU operations are not allowed by default, with the exception of
+:meth:`~torch.Tensor.copy_` and other methods with copy-like functionality
+such as :meth:`~torch.Tensor.to` and :meth:`~torch.Tensor.cuda`.
+Unless you enable peer-to-peer memory access, any attempts to launch ops on
+tensors spread across different devices will raise an error.
 
 Below you can find a small example showcasing this::
 
-    x = torch.cuda.FloatTensor(1)
-    # x.get_device() == 0
-    y = torch.FloatTensor(1).cuda()
-    # y.get_device() == 0
+    cuda = torch.device('cuda')     # Default CUDA device
+    cuda0 = torch.device('cuda:0')
+    cuda2 = torch.device('cuda:2')  # GPU 2 (these are 0-indexed)
+
+    x = torch.tensor([1., 2.], device=cuda0)
+    # x.device is device(type='cuda', index=0)
+    y = torch.tensor([1., 2.]).cuda()
+    # y.device is device(type='cuda', index=0)
 
     with torch.cuda.device(1):
         # allocates a tensor on GPU 1
-        a = torch.cuda.FloatTensor(1)
+        a = torch.tensor([1., 2.], device=cuda)
 
         # transfers a tensor from CPU to GPU 1
-        b = torch.FloatTensor(1).cuda()
-        # a.get_device() == b.get_device() == 1
+        b = torch.tensor([1., 2.]).cuda()
+        # a.device and b.device are device(type='cuda', index=1)
+
+        # You can also use ``Tensor.to`` to transfer a tensor:
+        b2 = torch.tensor([1., 2.]).to(device=cuda)
+        # b.device and b2.device are device(type='cuda', index=1)
 
         c = a + b
-        # c.get_device() == 1
+        # c.device is device(type='cuda', index=1)
 
         z = x + y
-        # z.get_device() == 0
+        # z.device is device(type='cuda', index=0)
 
-        # even within a context, you can give a GPU id to the .cuda call
-        d = torch.randn(2).cuda(2)
-        # d.get_device() == 2
+        # even within a context, you can specify the device
+        # (or give a GPU index to the .cuda call)
+        d = torch.randn(2, device=cuda2)
+        e = torch.randn(2).to(cuda2)
+        f = torch.randn(2).cuda(cuda2)
+        # d.device, e.device, and f.device are all device(type='cuda', index=2)
 
 Asynchronous execution
 ----------------------
@@ -79,8 +91,9 @@ relative order, unless explicit synchronization functions (such as
 :meth:`~torch.cuda.synchronize` or :meth:`~torch.cuda.Stream.wait_stream`) are
 used.  For example, the following code is incorrect::
 
+    cuda = torch.device('cuda')
     s = torch.cuda.stream()  # Create a new stream.
-    A = torch.cuda.FloatTensor(100, 100).normal_(0.0, 1.0)
+    A = torch.empty((100, 100), device=cuda).normal_(0.0, 1.0)
     with torch.cuda.stream(s):
         # sum() may start execution before normal_() finishes!
         B = torch.sum(A)
@@ -122,8 +135,10 @@ the initial hidden state of a recurrent neural network.
 The first step is to determine whether the GPU should be used or not. A common
 pattern is to use Python's ``argparse`` module to read in user arguments, and
 have a flag that can be used to disable CUDA, in combination with
-:meth:`~torch.cuda.is_available`. In the following, ``args.cuda`` results in a
-flag that can be used to cast tensors and modules to CUDA if desired::
+:meth:`~torch.cuda.is_available`. In the following, ``args.device`` results in a
+:class:`torch.device` object that can be used to move tensors to CPU or CUDA.
+
+::
 
     import argparse
     import torch
@@ -132,29 +147,35 @@ flag that can be used to cast tensors and modules to CUDA if desired::
     parser.add_argument('--disable-cuda', action='store_true',
                         help='Disable CUDA')
     args = parser.parse_args()
-    args.cuda = not args.disable_cuda and torch.cuda.is_available()
+    args.device = None
+    if not args.disable_cuda and torch.cuda.is_available():
+        args.device = torch.device('cuda')
+    else:
+        args.device = torch.device('cpu')
 
-If modules or tensors need to be sent to the GPU, ``args.cuda`` can be used as
-follows::
+Now that we have ``args.device``, we can use it to create a Tensor on the
+desired device.
 
-    x = torch.Tensor(8, 42)
-    net = Network()
-    if args.cuda:
-      x = x.cuda()
-      net.cuda()
+::
 
-When creating tensors, an alternative to the if statement is to have a default
-datatype defined, and cast all tensors using that. An example when using a
-dataloader would be as follows::
+    x = torch.empty((8, 42), device=args.device)
+    net = Network().to(device=args.device)
 
-    dtype = torch.cuda.FloatTensor
+This can be used in a number of cases to produce device agnostic code. Below
+is an example when using a dataloader:
+
+::
+
+    cuda0 = torch.device('cuda:0')  # CUDA GPU 0
     for i, x in enumerate(train_loader):
-        x = Variable(x.type(dtype))
+        x = x.to(cuda0)
 
 When working with multiple GPUs on a system, you can use the
 ``CUDA_VISIBLE_DEVICES`` environment flag to manage which GPUs are available to
 PyTorch. As mentioned above, to manually control which GPU a tensor is created
-on, the best practice is to use a :any:`torch.cuda.device` context manager::
+on, the best practice is to use a :any:`torch.cuda.device` context manager.
+
+::
 
     print("Outside device is 0")  # On device 0 (default in most scenarios)
     with torch.cuda.device(1):
@@ -162,29 +183,52 @@ on, the best practice is to use a :any:`torch.cuda.device` context manager::
     print("Outside device is still 0")  # On device 0
 
 If you have a tensor and would like to create a new tensor of the same type on
-the same device, then you can use the :meth:`~torch.Tensor.new` method, which
-acts the same as a normal tensor constructor. Whilst the previously mentioned
-methods depend on the current GPU context, :meth:`~torch.Tensor.new` preserves
-the device of the original tensor.
+the same device, then you can use a ``torch.Tensor.new_*`` method
+(see :class:`torch.Tensor`).
+Whilst the previously mentioned ``torch.*`` factory functions
+(:ref:`tensor-creation-ops`) depend on the current GPU context and
+the attributes arguments you pass in, ``torch.Tensor.new_*`` methods preserve
+the device and other attributes of the tensor.
 
 This is the recommended practice when creating modules in which new
-tensors/variables need to be created internally during the forward pass::
+tensors need to be created internally during the forward pass.
 
-    x_cpu = torch.FloatTensor(1)
-    x_gpu = torch.cuda.FloatTensor(1)
-    x_cpu_long = torch.LongTensor(1)
+::
 
-    y_cpu = x_cpu.new(8, 10, 10).fill_(0.3)
-    y_gpu = x_gpu.new(x_gpu.size()).fill_(-5)
-    y_cpu_long = x_cpu_long.new([[1, 2, 3]])
+    cuda = torch.device('cuda')
+    x_cpu = torch.empty(2)
+    x_gpu = torch.empty(2, device=cuda)
+    x_cpu_long = torch.empty(2, dtype=torch.int64)
+
+    y_cpu = x_cpu.new_full([3, 2], fill_value=0.3)
+    print(y_cpu)
+
+        tensor([[ 0.3000,  0.3000],
+                [ 0.3000,  0.3000],
+                [ 0.3000,  0.3000]])
+
+    y_gpu = x_gpu.new_full([3, 2], fill_value=-5)
+    print(y_gpu)
+
+        tensor([[-5.0000, -5.0000],
+                [-5.0000, -5.0000],
+                [-5.0000, -5.0000]], device='cuda:0')
+
+    y_cpu_long = x_cpu_long.new_tensor([[1, 2, 3]])
+    print(y_cpu_long)
+
+        tensor([[ 1,  2,  3]])
+
 
 If you want to create a tensor of the same type and size of another tensor, and
 fill it with either ones or zeros, :meth:`~torch.ones_like` or
 :meth:`~torch.zeros_like` are provided as convenient helper functions (which
-also preserve device)::
+also preserve :class:`torch.device` and :class:`torch.dtype` of a Tensor).
 
-    x_cpu = torch.FloatTensor(1)
-    x_gpu = torch.cuda.FloatTensor(1)
+::
+
+    x_cpu = torch.empty(2, 3)
+    x_gpu = torch.empty(2, 3)
 
     y_cpu = torch.ones_like(x_cpu)
     y_gpu = torch.zeros_like(x_gpu)
@@ -204,7 +248,7 @@ memory. CPU tensors and storages expose a :meth:`~torch.Tensor.pin_memory`
 method, that returns a copy of the object, with data put in a pinned region.
 
 Also, once you pin a tensor or storage, you can use asynchronous GPU copies.
-Just pass an additional ``async=True`` argument to a :meth:`~torch.Tensor.cuda`
+Just pass an additional ``non_blocking=True`` argument to a :meth:`~torch.Tensor.cuda`
 call. This can be used to overlap data transfers with computation.
 
 You can make the :class:`~torch.utils.data.DataLoader` return batches placed in
