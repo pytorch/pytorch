@@ -408,6 +408,24 @@ class TestSparse(TestCase):
         r = torch.mm(D.t_(), x)
         self.assertEqual(r, res)
 
+    def test_csr(self):
+        i = self.IndexTensor([
+            [0, 1, 1],
+            [2, 1, 0], 
+        ])
+        v = self.ValueTensor([1, 1, 1])
+        x = self.ValueTensor([
+            [1],
+            [1],
+            [1],
+        ])
+        D = self.SparseTensor(i, v, torch.Size([2, 3]))
+        self.assertEqual(D._csr(), torch.IntTensor([]))
+        D = D.coalesce()
+        torch.mm(D, x) # this computes csr representation internally 
+        self.assertEqual(D._csr(), torch.IntTensor([0, 1, 3]))
+
+
     @cpu_only
     def test_mm(self):
         def test_shape(di, dj, dk):
