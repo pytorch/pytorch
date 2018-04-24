@@ -1690,6 +1690,41 @@ class TestTorch(TestCase):
                 self.assertEqual(a.device, b.to(a).device)
                 self.assertEqual(b.device, a.to(b).device)
 
+    def test_to_with_requires_grad(self):
+        # only requires_grad
+        a = torch.tensor(5.)
+        self.assertEqual(a, a.to(requires_grad=True))
+        self.assertNotEqual(a.requires_grad, a.to(requires_grad=True))
+        self.assertIs(a, a.to(requires_grad=False))
+        b = torch.tensor(5., requires_grad=True) * 5
+        self.assertFalse(b.to(requires_grad=False).requires_grad)
+        self.assertIsNot(b, b.to(requires_grad=False))
+        self.assertIs(b, b.to(requires_grad=True))
+
+        # requires grad with dtype
+        a = torch.tensor(5.)
+        other_dtype = torch.float32 if torch.get_default_dtype() != torch.float32 else torch.float64
+        for dtype in [torch.get_default_dtype(), other_dtype]:
+            self.assertNotEqual(a.requires_grad, a.to(dtype, requires_grad=True))
+            self.assertEqual(a.requires_grad, a.to(dtype, requires_grad=False).requires_grad)
+            b = torch.tensor(5., requires_grad=True) * 5
+            self.assertFalse(b.to(dtype, requires_grad=False).requires_grad)
+            self.assertTrue(b.requires_grad)
+            self.assertEqual(b.requires_grad, b.to(dtype, requires_grad=True).requires_grad)
+
+        # requires_grad with device
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            self.assertNotEqual(a.requires_grad, a.to(device, requires_grad=True))
+            self.assertNotEqual(a.requires_grad, a.to(device, other_dtype, requires_grad=True))
+            self.assertEqual(a.requires_grad, a.to(device, requires_grad=False).requires_grad)
+            self.assertEqual(a.requires_grad, a.to(device, other_dtype, requires_grad=False).requires_grad)
+            b = torch.tensor(5., requires_grad=True) * 5
+            self.assertFalse(b.to(device, requires_grad=False).requires_grad)
+            self.assertFalse(b.to(device, other_dtype, requires_grad=False).requires_grad)
+            self.assertTrue(b.requires_grad)
+            self.assertEqual(b.requires_grad, b.to(device, requires_grad=True).requires_grad)
+            self.assertEqual(b.requires_grad, b.to(device, other_dtype, requires_grad=True).requires_grad)
+
     @staticmethod
     def _test_empty_full(self, dtypes, layout, device):
         shape = torch.Size([2, 3])
