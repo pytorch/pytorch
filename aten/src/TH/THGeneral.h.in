@@ -18,6 +18,7 @@
 #include <inttypes.h>
 
 #include <atomic>
+#include <new>
 
 #cmakedefine USE_BLAS
 #cmakedefine USE_LAPACK

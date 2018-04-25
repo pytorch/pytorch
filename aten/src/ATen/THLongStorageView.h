@@ -56,7 +56,7 @@ public:
     bool noelem_to_empty = false;
     switch (kind) {
       case THLongStorageViewKind::SIZE:
-        zero_dim_to_one = true
+        zero_dim_to_one = true;
         break;
       case THLongStorageViewKind::STRIDE_EMPTY_TENSOR:
         zero_dim_to_null = true;
