@@ -279,7 +279,7 @@ ALLOC_WRAP = {
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('__storage_size.get\\(\\)',
-      'THLongStorageView(static_cast<int64_t>(storage.size()), THLongStorageViewKind::SIZE)'),
+     'THLongStorageView(static_cast<int64_t>(storage.size()), THLongStorageViewKind::SIZE)'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 
@@ -1244,19 +1244,19 @@ def create_derived(backend_type_env, declarations):
 
                     noelem_to_empty = 'is_noelem_tensor_size(size)' if 'size' in seen_names else 'false'
                     if arg['type'] in DIRECT_CONSTRUCTION_CHECKED_CAST:
-                      body.append(CHECKED_CAST[arg['type']].substitute(
-                          env, arg_name=arg['name'], arg_pos=count,
-                          null_okay=null_okay, default_init=default_init,
-                          size=arg.get('size'),
-                          noelem_to_empty=noelem_to_empty))
+                        body.append(CHECKED_CAST[arg['type']].substitute(
+                            env, arg_name=arg['name'], arg_pos=count,
+                            null_okay=null_okay, default_init=default_init,
+                            size=arg.get('size'),
+                            noelem_to_empty=noelem_to_empty))
                     else:
-                      check_cast = CHECKED_CAST[arg['type']].substitute(
-                          env, arg_name=arg['name'], arg_pos=count,
-                          null_okay=null_okay, default_init=default_init,
-                          size=arg.get('size'),
-                          noelem_to_empty=noelem_to_empty)
-                      body.append("auto {}_ = {};".format(
-                          arg['name'], check_cast))
+                        check_cast = CHECKED_CAST[arg['type']].substitute(
+                            env, arg_name=arg['name'], arg_pos=count,
+                            null_okay=null_okay, default_init=default_init,
+                            size=arg.get('size'),
+                            noelem_to_empty=noelem_to_empty)
+                        body.append("auto {}_ = {};".format(
+                            arg['name'], check_cast))
                 if drop_argument(arg, option) or replace_with_null(arg):
                     body.append(
                         "(void) {}_; //silence unused warning".format(arg['name']))
