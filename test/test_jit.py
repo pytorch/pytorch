@@ -2833,6 +2833,45 @@ class TestScript(TestCase):
         foo.graph.propagate_shapes((a, b), False)
         self.assertExpected(str(foo.graph))
 
+    def test_onnx_export_speculate(self):
+
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self, m):
+                super(Foo, self).__init__()
+                self.m = m
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x += x
+                if True:
+                    if True:
+                        y = self.m(x)
+                    else:
+                        y = self.m(x)
+                else:
+                    y = self.m(x)
+                return y
+
+        linear = torch.jit.trace(torch.zeros(1, 10, dtype=torch.float))(nn.Linear(10, 20).float())
+
+        @torch.jit.script
+        def transpose(x):
+            return x.t()
+
+        f1 = Foo(transpose)
+        f2 = Foo(linear)
+
+        onnx_ish = torch.onnx._export_to_pretty_string(
+            f1,
+            (torch.ones(1, 10, dtype=torch.float), ),
+            None, verbose=False)
+        self.assertExpected(onnx_ish, subname='f1')
+        onnx_ish = torch.onnx._export_to_pretty_string(
+            f2,
+            (torch.ones(1, 10, dtype=torch.float), ),
+            None, verbose=False)
+        self.assertExpected(onnx_ish, subname='f2')
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
