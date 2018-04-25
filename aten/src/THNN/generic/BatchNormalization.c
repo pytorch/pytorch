@@ -1,3 +1,6 @@
+#ifndef THNN_OMP_OVERHEAD_THRESHOLD
+#define THNN_OMP_OVERHEAD_THRESHOLD 5000
+#endif
 #ifndef TH_GENERIC_FILE
 #define TH_GENERIC_FILE "generic/BatchNormalization.c"
 #else
@@ -27,18 +30,46 @@ void THNN_(BatchNormalization_updateOutput)(
     real mean, invstd;
 
     if (train) {
-      // compute mean per input
       accreal sum = 0;
-      TH_TENSOR_APPLY(real, in, sum += *in_data;);
-
+      int serial_path = 0;
+#ifdef _OPENMP
+      int inOMP = omp_in_parallel();
+      if (inOMP) {
+        serial_path = 1;
+      } else {
+      // compute mean per input
+        TH_TENSOR_APPLY_REDUCTION_OMP(real, in, +:sum,
+          sum += *in_data;, THNN_OMP_OVERHEAD_THRESHOLD);
+      }
+#else
+      serial_path = 1;
+#endif
+      if (serial_path) {
+        TH_TENSOR_APPLY(real, in, sum += *in_data;);
+      }
       mean = (real) sum / n;
       THTensor_(set1d)(save_mean, f, (real) mean);
 
-      // compute variance per input
       sum = 0;
-      TH_TENSOR_APPLY(real, in,
-        sum += (*in_data - mean) * (*in_data - mean););
-
+      serial_path = 0;
+#ifdef _OPENMP
+      inOMP = omp_in_parallel();
+      if (inOMP) {
+        serial_path = 1;
+      } else {
+      // compute variance per input
+        TH_TENSOR_APPLY_REDUCTION_OMP(real, in, +:sum,
+          sum += (*in_data - mean) * (*in_data - mean);,
+          THNN_OMP_OVERHEAD_THRESHOLD
+        );
+      }
+#else
+      serial_path = 1;
+#endif
+      if (serial_path) {
+        TH_TENSOR_APPLY(real, in,
+          sum += (*in_data - mean) * (*in_data - mean););
+      }
       if (sum == 0 && eps == 0.0) {
         invstd = 0;
       } else {
@@ -64,10 +95,8 @@ void THNN_(BatchNormalization_updateOutput)(
     // compute output
     real w = weight ? THTensor_(get1d)(weight, f) : 1;
     real b = bias ? THTensor_(get1d)(bias, f) : 0;
-
     TH_TENSOR_APPLY2(real, in, real, out,
       *out_data = (real) (((*in_data - mean) * invstd) * w + b););
-
     THTensor_(free)(out);
     THTensor_(free)(in);
   }
@@ -105,13 +134,25 @@ void THNN_(BatchNormalization_backward)(
 
     // sum over all gradOutput in feature plane
     accreal sum = 0;
-    TH_TENSOR_APPLY(real, gradOut, sum += *gradOut_data;);
-
+    int serial_path = 0;
+#ifdef _OPENMP
+    int inOMP = omp_in_parallel();
+    if (inOMP) {
+      serial_path = 1;
+    } else {
+      TH_TENSOR_APPLY_REDUCTION_OMP(real, gradOut, +:sum,
+        sum += *gradOut_data;, THNN_OMP_OVERHEAD_THRESHOLD
+      );
+    }
+#else
+    serial_path = 1;
+#endif
+    if (serial_path) {
+      TH_TENSOR_APPLY(real, gradOut, sum += *gradOut_data;);
+    }
     // dot product of the Q(X) and gradOuput
     accreal dotp = 0;
-    TH_TENSOR_APPLY2(real, in, real, gradOut,
-      dotp += (*in_data - mean) * (*gradOut_data););
-
+    TH_TENSOR_APPLY2(real, in, real, gradOut, dotp += (*in_data - mean) * (*gradOut_data););
     if (gradInput) {
       THTensor *gradIn = THTensor_(newSelect)(gradInput, 1, f);
 
@@ -125,17 +166,15 @@ void THNN_(BatchNormalization_backward)(
         real k = (real) dotp * invstd * invstd / n;
         TH_TENSOR_APPLY2(real, gradIn, real, in,
           *gradIn_data = (*in_data - mean) * k;);
-
         accreal gradMean = sum / n;
         TH_TENSOR_APPLY2(real, gradIn, real, gradOut,
           *gradIn_data = (*gradOut_data - gradMean - *gradIn_data) * invstd * w;);
-
       } else {
         // when in evaluation mode
         // Q(X) = X - running_mean  ; i.e. input centered to zero mean
         // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
         // dL/dX = w / running_std
-        TH_TENSOR_APPLY2(real, gradIn, real, gradOut,
+        TH_TENSOR_APPLY2( real, gradIn, real, gradOut,
           *gradIn_data = *gradOut_data * invstd * w;);
       }
 
@@ -157,4 +196,5 @@ void THNN_(BatchNormalization_backward)(
   }
 }
 
+#undef THNN_OMP_OVERHEAD_THRESHOLD
 #endif

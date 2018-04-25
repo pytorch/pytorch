@@ -1,3 +1,6 @@
+#ifndef THNN_OMP_OVERHEAD_THRESHOLD
+#define THNN_OMP_OVERHEAD_THRESHOLD 5000
+#endif
 #ifndef TH_GENERIC_FILE
 #define TH_GENERIC_FILE "generic/HardTanh.c"
 #else
@@ -30,14 +33,39 @@ void THNN_(HardTanh_updateOutput)(
     }
     else
     {
-      TH_TENSOR_APPLY2(real, output, real, input,
-        if (*input_data < min_val)
-          *output_data = min_val;
-        else if (*input_data <= max_val)
-          *output_data = *input_data;
-        else
-          *output_data = max_val;
-      );
+      int serial_path = 0;
+#ifdef _OPENMP
+      int inOMP = omp_in_parallel();
+      if (inOMP) {
+        serial_path = 1;
+      } else {
+        int64_t output_size = THTensor_(nElement)(output);
+        int output_contig = THTensor_(isContiguous)(output);
+        int input_contig = THTensor_(isContiguous)(input);
+        TH_TENSOR_APPLY2_OMP(output_size, output_contig, input_contig,
+          real, output, real, input,
+          if (*input_data < min_val)
+            *output_data = min_val;
+          else if (*input_data <= max_val)
+            *output_data = *input_data;
+          else
+            *output_data = max_val;,
+          THNN_OMP_OVERHEAD_THRESHOLD
+        );
+      }
+#else
+      serial_path = 1;
+#endif
+      if (serial_path) {
+        TH_TENSOR_APPLY2(real, output, real, input,
+          if (*input_data < min_val)
+            *output_data = min_val;
+          else if (*input_data <= max_val)
+            *output_data = *input_data;
+          else
+            *output_data = max_val;
+        );
+      }
     }
   }
   else
@@ -95,18 +123,64 @@ void THNN_(HardTanh_updateGradInput)(
   {
     if (inplace)
     {
-      TH_TENSOR_APPLY2(real, gradOutput, real, input,
-        if (*input_data <= min_val || *input_data >= max_val)
-          *gradOutput_data = 0;
-      );
+      int serial_path = 0;
+#ifdef _OPENMP
+      int inOMP = omp_in_parallel();
+      if (inOMP) {
+        serial_path = 1;
+      } else {
+        int64_t gradOutput_size = THTensor_(nElement)(gradOutput);
+        int gradOutput_contig = THTensor_(isContiguous)(gradOutput);
+        int input_contig = THTensor_(isContiguous)(input);
+        TH_TENSOR_APPLY2_OMP(gradOutput_size, gradOutput_contig, input_contig,
+          real, gradOutput, real, input,
+          if (*input_data <= min_val || *input_data >= max_val)
+            *gradOutput_data = 0;,
+          THNN_OMP_OVERHEAD_THRESHOLD
+        );
+      }
+#else
+      serial_path = 1;
+#endif
+      if (serial_path) {
+        TH_TENSOR_APPLY2(real, gradOutput, real, input,
+          if (*input_data <= min_val || *input_data >= max_val)
+            *gradOutput_data = 0;
+        );
+      }
     }
-    else
-      TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
-        if (*input_data <= min_val || *input_data >= max_val)
-          *gradInput_data = 0;
-        else
-          *gradInput_data = *gradOutput_data;
-      );
+    else {
+      int serial_path = 0;
+#ifdef _OPENMP
+      int inOMP = omp_in_parallel();
+      if (inOMP) {
+        serial_path = 1;
+      } else {
+        int64_t gradInput_size = THTensor_(nElement)(gradInput);
+        int gradInput_contig = THTensor_(isContiguous)(gradInput);
+        int gradOutput_contig = THTensor_(isContiguous)(gradOutput);
+        int input_contig = THTensor_(isContiguous)(input);
+        TH_TENSOR_APPLY3_OMP(gradInput_size, gradInput_contig, gradOutput_contig, input_contig,
+          real, gradInput, real, gradOutput, real, input,
+          if (*input_data <= min_val || *input_data >= max_val)
+            *gradInput_data = 0;
+          else
+            *gradInput_data = *gradOutput_data;,
+          THNN_OMP_OVERHEAD_THRESHOLD
+        );
+      }
+#else
+      serial_path = 1;
+#endif
+      if (serial_path) {
+        TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
+          if (*input_data <= min_val || *input_data >= max_val)
+            *gradInput_data = 0;
+          else
+            *gradInput_data = *gradOutput_data;
+        );
+      }
+    }
   }
   else
   {
@@ -135,4 +209,5 @@ void THNN_(HardTanh_updateGradInput)(
   }
 }
 
+#undef THNN_OMP_OVERHEAD_THRESHOLD
 #endif
