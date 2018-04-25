@@ -32,11 +32,11 @@ class SpectralNorm(object):
         return weight, u
 
     def remove(self, module):
-        weight, _ = self.compute_weight(module)
+        weight = module._parameters[self.name + '_org']
         del module._parameters[self.name]
         del module._buffers[self.name + '_u']
         del module._parameters[self.name + '_org']
-        module.register_parameter(self.name, module._parameters[self.name])
+        module.register_parameter(self.name, weight)
 
     def __call__(self, module, inputs):
         weight, u = self.compute_weight(module)
@@ -64,13 +64,9 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12):
          \mathbf{W} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})}
          \text{where, } \sigma(\mathbf{W}) := \max_{\mathbf{h} \ne 0} \dfrac{\|\mathbf{A} \mathbf{h}\|_2}{\|\mathbf{h}\|_2}
 
-    Spectral normalization is a reparameterization that decouples the magnitude
-    of a weight tensor from its direction. This replaces the parameter specified
-    by `name` (e.g. "weight") with two parameters: one specifying the magnitude
-    (e.g. "weight_g") and one specifying the direction (e.g. "weight_v").
-    Spectral normalization is implemented via a hook that recomputes the weight
-    tensor from the magnitude and direction before every :meth:`~Module.forward`
-    call.
+    Spectral normalization stabilize the training of discriminators(critics)
+    in GANs.  This is implemented via a hook that rescale weight matrix
+    by spectral norm sigma, where we reshape the weight to 2D if necessary.
 
     See https://arxiv.org/abs/1802.05957
 
@@ -88,10 +84,8 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12):
 
         >>> m = spectral_norm(nn.Linear(20, 40))
         Linear (20 -> 40)
-        >>> m.weight_g.size()
-        torch.Size([40])
-        >>> m.weight_v.size()
-        torch.Size([40, 20])
+        >>> m.weight_u.size()
+        torch.Size([20])
 
     """
     SpectralNorm.apply(module=module,

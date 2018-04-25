@@ -1289,16 +1289,31 @@ class TestNN(NNTestCase):
     def test_spectral_norm(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
-        _weight = m._parameters['weight']
         m = torch.nn.utils.spectral_norm(m)
-        output = m(input)
 
-        self.assertEqual(m.weight_u.size(), (m.weight.size(0)))
+        self.assertEqual(m.weight_u.size(), torch.Size([m.weight.size(0)]))
         self.assertTrue(hasattr(m, 'weight_org'))
 
-        m = torch.utils.remove_spectral_norm(m)
+        m = torch.nn.utils.remove_spectral_norm(m)
         self.assertFalse(hasattr(m, 'weight_org'))
         self.assertFalse(hasattr(m, 'weight_u'))
+
+    def test_spectral_norm_forward(self):
+        input = torch.randn(3, 5)
+        m = nn.Linear(5, 7)
+        m = torch.nn.utils.spectral_norm(m)
+        # naive forward
+        _weight, _bias, _u = m.weight_org, m.bias, m.weight_u
+        _weight_mat = _weight.view(_weight.size(0), -1)
+        _v = torch.mv(_weight_mat.t(), _u)
+        _v = _v / (_v.norm() + 1e-12)
+        _u = torch.mv(_weight_mat, _v)
+        _u = _u / (_u.norm() + 1e-12)
+        _weight.data /= torch.dot(_u, torch.matmul(_weight_mat, _v))
+        out_hat = torch.nn.functional.linear(input, _weight, _bias)
+        expect_out = m(input)
+        self.assertAlmostEqual(expect_out, out_hat)
+
 
     def test_spectral_norm_pickle(self):
         m = torch.nn.utils.spectral_norm(nn.Linear(5, 7))
