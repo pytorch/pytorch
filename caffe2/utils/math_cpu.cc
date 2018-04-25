@@ -1099,8 +1099,7 @@ void ReduceMeanImpl(
       const int* axes,                                               \
       const T* X,                                                    \
       T* Y,                                                          \
-      CPUContext* context,                                           \
-      Tensor<CPUContext>* /* scratch_ptr */) {                       \
+      CPUContext* context) {                                         \
     ReduceMinImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
   }
 CAFFE2_SPECIALIZED_REDUCE_MIN(float)
@@ -1115,8 +1114,7 @@ CAFFE2_SPECIALIZED_REDUCE_MIN(float)
       const int* axes,                                               \
       const T* X,                                                    \
       T* Y,                                                          \
-      CPUContext* context,                                           \
-      Tensor<CPUContext>* /* scratch_ptr */) {                       \
+      CPUContext* context) {                                         \
     ReduceMaxImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
   }
 CAFFE2_SPECIALIZED_REDUCE_MAX(float)
@@ -1131,8 +1129,7 @@ CAFFE2_SPECIALIZED_REDUCE_MAX(float)
       const int* axes,                                               \
       const T* X,                                                    \
       T* Y,                                                          \
-      CPUContext* context,                                           \
-      Tensor<CPUContext>* /* scratch_ptr */) {                       \
+      CPUContext* context) {                                         \
     ReduceSumImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
   }
 CAFFE2_SPECIALIZED_REDUCE_SUM(float)
@@ -1147,8 +1144,7 @@ CAFFE2_SPECIALIZED_REDUCE_SUM(float)
       const int* axes,                                                \
       const T* X,                                                     \
       T* Y,                                                           \
-      CPUContext* context,                                            \
-      Tensor<CPUContext>* /* scratch_ptr */) {                        \
+      CPUContext* context) {                                          \
     ReduceMeanImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
   }
 CAFFE2_SPECIALIZED_REDUCE_MEAN(float)
@@ -1250,8 +1246,7 @@ void MomentsImpl(
       const T* X,                                                    \
       T* mean,                                                       \
       T* variance,                                                   \
-      CPUContext* context,                                           \
-      Tensor<CPUContext>* /* scratch_ptr */) {                       \
+      CPUContext* context) {                                         \
     MomentsImpl<T>(                                                  \
         num_dims, dims, num_axes, axes, X, mean, variance, context); \
   }
