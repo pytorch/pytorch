@@ -407,8 +407,7 @@ class ReduceTensorTest : public testing::Test {
         axes.data(),
         X_.data<float>(),
         Y_.mutable_data<float>(),
-        cpu_context_.get(),
-        nullptr);
+        cpu_context_.get());
     ASSERT_EQ(Y_data.size(), Y_.size());
     for (int i = 0; i < Y_.size(); ++i) {
       EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
@@ -428,10 +427,9 @@ TEST_F(ReduceTensorTest, ReduceMinTest) {
                               const int* axes,
                               const float* X,
                               float* Y,
-                              CPUContext* context,
-                              TensorCPU* scratch_ptr) {
+                              CPUContext* context) {
     return math::ReduceMin<float, CPUContext>(
-        num_dims, dims, num_axes, axes, X, Y, context, scratch_ptr);
+        num_dims, dims, num_axes, axes, X, Y, context);
   };
   // Test for 1D tensor.
   RunRedcueTensorTest(
@@ -489,10 +487,9 @@ TEST_F(ReduceTensorTest, ReduceMaxTest) {
                               const int* axes,
                               const float* X,
                               float* Y,
-                              CPUContext* context,
-                              TensorCPU* scratch_ptr) {
+                              CPUContext* context) {
     return math::ReduceMax<float, CPUContext>(
-        num_dims, dims, num_axes, axes, X, Y, context, scratch_ptr);
+        num_dims, dims, num_axes, axes, X, Y, context);
   };
   // Test for 1D tensor.
   RunRedcueTensorTest(

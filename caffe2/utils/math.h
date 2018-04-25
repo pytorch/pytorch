@@ -160,8 +160,7 @@ void ReduceMin(
     const int* axes,
     const T* X,
     T* Y,
-    Context* context,
-    Tensor<Context>* scratch_ptr = nullptr);
+    Context* context);
 
 template <typename T, class Context>
 void ReduceMax(
@@ -171,8 +170,7 @@ void ReduceMax(
     const int* axes,
     const T* X,
     T* Y,
-    Context* context,
-    Tensor<Context>* scratch_ptr = nullptr);
+    Context* context);
 
 template <typename T, class Context>
 void ReduceSum(
@@ -182,8 +180,7 @@ void ReduceSum(
     const int* axes,
     const T* X,
     T* Y,
-    Context* context,
-    Tensor<Context>* scratch_ptr = nullptr);
+    Context* context);
 
 template <typename T, class Context>
 void ReduceMean(
@@ -193,10 +190,9 @@ void ReduceMean(
     const int* axes,
     const T* X,
     T* Y,
-    Context* context,
-    Tensor<Context>* scratch_ptr = nullptr);
+    Context* context);
 
-// Broadcasts X with X_dims to Y with Y_dims and multiply the data by scale.
+// Broadcasts X with X_dims to Y with Y_dims.
 template <typename T, class Context>
 void Broadcast(
     const int X_ndim,
@@ -207,6 +203,7 @@ void Broadcast(
     T* Y,
     Context* context);
 
+// COmputes mean and variance over axes.
 template <typename T, class Context>
 void Moments(
     const int num_dims,
@@ -216,8 +213,7 @@ void Moments(
     const T* X,
     T* mean,
     T* variance,
-    Context* context,
-    Tensor<Context>* scratch_ptr = nullptr);
+    Context* context);
 
 // Adds batch sub-tensors elementwise to output. Stripe is the stripe length
 // and N is the number of elements to add (size of Y).
