@@ -1,5 +1,5 @@
 ## @package convnet_benchmarks
-# Module caffe2.python.convnet_benchmarks
+# Module caffe2.python.ideep.convnet_benchmarks
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -70,7 +70,7 @@ from caffe2.python.model_helper import ModelHelper
 from caffe2.python.models import resnet
 import numpy as np
 
-def MLP(order, cudnn_ws, ideep):
+def MLP(order, cudnn_ws, device):
     model = ModelHelper(name="benchmark")
     d = 256
     depth = 20
@@ -92,20 +92,21 @@ def MLP(order, cudnn_ws, ideep):
              weight_init=('XavierFill', {}),
              bias_init=('XavierFill', {}))
     xent = model.LabelCrossEntropy(["last", "label"], "xent")
-    model.AveragedLoss(xent, "loss")
+    if device != 'MKL':
+        model.AveragedLoss(xent, "loss")
     return model, d
 
 
-def ResNet50(order, cudnn_ws, ideep):
+def ResNet50(order, cudnn_ws, device):
     my_arg_scope = {'order': order, 'use_cudnn': True,
                     'cudnn_exhaustive_search': True,
                     'ws_nbytes_limit': str(cudnn_ws)}
-    model = ModelHelper(name="alexnet", arg_scope=my_arg_scope)
+    model = ModelHelper(name="resnet50", arg_scope=my_arg_scope)
     resnet.create_resnet50(model, "data", 3, 1000, is_test=True,
                            final_avg_kernel=14)
     return model, 448
 
-def AlexNet(order, cudnn_ws, ideep):
+def AlexNet(order, cudnn_ws, device):
     my_arg_scope = {'order': order, 'use_cudnn': True,
                     'cudnn_exhaustive_search': True,
                     'ws_nbytes_limit': str(cudnn_ws)}
@@ -188,11 +189,12 @@ def AlexNet(order, cudnn_ws, ideep):
     )
     pred = brew.softmax(model, fc8, "pred")
     xent = model.LabelCrossEntropy([pred, "label"], "xent")
-    loss = model.AveragedLoss(xent, "loss")
+    if device != 'MKL':
+        loss = model.AveragedLoss(xent, "loss")
     return model, 224
 
 
-def OverFeat(order, cudnn_ws, ideep):
+def OverFeat(order, cudnn_ws, device):
     my_arg_scope = {'order': order, 'use_cudnn': True,
                     'cudnn_exhaustive_search': True,
                     'ws_nbytes_limit': str(cudnn_ws)}
@@ -266,11 +268,12 @@ def OverFeat(order, cudnn_ws, ideep):
     )
     pred = brew.softmax(model, fc8, "pred")
     xent = model.LabelCrossEntropy([pred, "label"], "xent")
-    loss = model.AveragedLoss(xent, "loss")
+    if device != 'MKL':
+        loss = model.AveragedLoss(xent, "loss")
     return model, 231
 
 
-def VGGA(order, cudnn_ws, ideep):
+def VGGA(order, cudnn_ws, device):
     my_arg_scope = {'order': order, 'use_cudnn': True,
                     'cudnn_exhaustive_search': True,
                     'ws_nbytes_limit': str(cudnn_ws)}
@@ -391,7 +394,8 @@ def VGGA(order, cudnn_ws, ideep):
     )
     pred = brew.softmax(model, fcxi, "pred")
     xent = model.LabelCrossEntropy([pred, "label"], "xent")
-    loss = model.AveragedLoss(xent, "loss")
+    if device != 'MKL':
+        loss = model.AveragedLoss(xent, "loss")
     return model, 231
 
 
@@ -399,7 +403,7 @@ def _InceptionModule(
     model, input_blob, input_depth, output_name, conv1_depth, conv3_depths,
     conv5_depths, pool_depth
 ):
-    # path 1: 1x1 conv
+# path 1: 1x1 conv
     conv1 = brew.conv(
         model, input_blob, output_name + ":conv1", input_depth, conv1_depth, 1,
         ('XavierFill', {}), ('ConstantFill', {})
@@ -459,7 +463,7 @@ def _InceptionModule(
     return output
 
 
-def Inception(order, cudnn_ws, ideep):
+def Inception(order, cudnn_ws, device):
     my_arg_scope = {'order': order, 'use_cudnn': True,
                     'cudnn_exhaustive_search': True,
                     'ws_nbytes_limit': str(cudnn_ws)}
@@ -536,7 +540,8 @@ def Inception(order, cudnn_ws, ideep):
     # backward pass.
     pred = brew.softmax(model, fc, "pred")
     xent = model.LabelCrossEntropy([pred, "label"], "xent")
-    loss = model.AveragedLoss(xent, "loss")
+    if device != 'MKL':
+        loss = model.AveragedLoss(xent, "loss")
     return model, 224
 
 
@@ -552,7 +557,7 @@ def AddParameterUpdate(model):
 
 
 def Benchmark(model_gen, arg):
-    model, input_size = model_gen(arg.order, arg.cudnn_ws, arg.ideep)
+    model, input_size = model_gen(arg.order, arg.cudnn_ws, arg.device)
     model.Proto().type = arg.net_type
     model.Proto().num_workers = arg.num_workers
 
@@ -572,8 +577,8 @@ def Benchmark(model_gen, arg):
         mean=0.0,
         std=1.0
     )
-    #IDEEP doesn't support int, so have to use numpy
-    if arg.ideep:
+    #IDEEP/MKL doesn't support int, so have to use numpy
+    if arg.device == 'MKL' or  arg.device == 'IDEEP':
         label = np.random.randint(
                 low=0, high=1000, size=(arg.batch_size,)).astype(np.int32)
         workspace.FeedBlob("label", label)
@@ -588,6 +593,8 @@ def Benchmark(model_gen, arg):
 
     if arg.forward_only:
         print('{}: running forward only.'.format(arg.model))
+    elif arg.device == 'MKL':
+        raise Exception('forward-backward not supported yet in MKL')
     else:
         print('{}: running forward-backward.'.format(arg.model))
         model.AddGradientOperators(["loss"])
@@ -599,13 +606,16 @@ def Benchmark(model_gen, arg):
                 'exit suddenly.'
             )
 
-    if not arg.cpu:
-        if arg.ideep:
-            model.param_init_net.RunAllOnIDEEP()
-            model.net.RunAllOnIDEEP()
-        else:
-            model.param_init_net.RunAllOnGPU()
-            model.net.RunAllOnGPU()
+    if arg.device == 'IDEEP':
+        model.param_init_net.RunAllOnIDEEP()
+        model.net.RunAllOnIDEEP()
+    elif arg.device == 'MKL':
+        model.param_init_net.RunAllOnMKL()
+        model.net.RunAllOnMKL()
+    elif arg.device == 'CUDA':
+        model.param_init_net.RunAllOnGPU()
+        model.net.RunAllOnGPU()
+    print('Running on device: {}'.format(arg.device))
 
     if arg.engine:
         for op in model.net.Proto().op:
@@ -622,9 +632,10 @@ def Benchmark(model_gen, arg):
 
     workspace.RunNetOnce(model.param_init_net)
     workspace.CreateNet(model.net)
-    workspace.BenchmarkNet(
+    results = workspace.BenchmarkNet(
         model.net.Proto().name, arg.warmup_iterations, arg.iterations,
         arg.layer_wise_benchmark)
+    print('FPS: {}'.format(arg.batch_size*1000/results[0]))
 
 
 def GetArgumentParser():
@@ -641,6 +652,12 @@ def GetArgumentParser():
         type=str,
         default="NCHW",
         help="The order to evaluate."
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="CPU",
+        help="device to evaluate on."
     )
     parser.add_argument(
         "--cudnn_ws",
@@ -668,16 +685,6 @@ def GetArgumentParser():
         "--layer_wise_benchmark",
         action='store_true',
         help="If True, run the layer-wise benchmark as well."
-    )
-    parser.add_argument(
-        "--cpu",
-        action='store_true',
-        help="If True, run testing on CPU instead of GPU."
-    )
-    parser.add_argument(
-        "--ideep",
-        action='store_true',
-        help="If True, run testing on CPU-IDEEP instead of GPU."
     )
     parser.add_argument(
         "--engine",

@@ -1318,7 +1318,10 @@ void addGlobalMethods(py::module& m) {
         if (PyArray_Check(arg.ptr())) { // numpy array
           PyArrayObject* array = reinterpret_cast<PyArrayObject*>(arg.ptr());
           auto feeder = CreateFeeder(option.device_type());
-          CAFFE_ENFORCE(feeder, "Unknown device type encountered in FeedBlob.");
+          CAFFE_ENFORCE(
+              feeder,
+              "Unknown device type encountered in FeedBlob: ",
+              option.device_type());
           feeder->Feed(option, array, blob);
           return true;
         }
