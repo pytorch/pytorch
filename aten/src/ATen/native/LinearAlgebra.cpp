@@ -179,8 +179,8 @@ Tensor dot(const Tensor& self, const Tensor& tensor) {
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
   result.resize_({});
-  // Note: this allows mismatched types between lhs and rhs, but we should allow that in general?
-  return result.fill_(self.dot(tensor));
+  // dispatching through type ensures we don't allow mismatched types.
+  return self.type().fill_(result, self.dot(tensor));
 }
 
 /*
