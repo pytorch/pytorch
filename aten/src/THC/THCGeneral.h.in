@@ -69,9 +69,6 @@ typedef struct _THCCudaResourcesPerDevice {
   cusparseHandle_t* sparseHandles;
   /* Size of scratch space per each stream on this device available */
   size_t scratchSpacePerStream;
-  /* Device-resident scratch space per stream, used for global memory
-     reduction kernels. Lazily initialized. */
-  void** devScratchSpacePerStream;
 } THCCudaResourcesPerDevice;
 
 
@@ -160,7 +157,6 @@ THC_API void THCMagma_init(THCState *state);
 
 /* State manipulators and accessors */
 THC_API int THCState_getNumDevices(THCState* state);
-THC_API void THCState_reserveStreams(THCState* state, int numStreams, int nonBlocking);
 THC_API int THCState_getNumStreams(THCState* state);
 
 /* Stream API */
@@ -190,8 +186,6 @@ THC_API int THCState_getCurrentSparseHandleIndex(THCState *state);
 THC_API void THCState_setCurrentSparseHandleIndex(THCState *state, int handle);
 
 /* For the current device and stream, returns the allocated scratch space */
-THC_API void* THCState_getCurrentDeviceScratchSpace(THCState* state);
-THC_API void* THCState_getDeviceScratchSpace(THCState* state, int device, int stream);
 THC_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);
 THC_API size_t THCState_getDeviceScratchSpaceSize(THCState* state, int device);
 
