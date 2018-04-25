@@ -1286,6 +1286,25 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    def test_spectral_norm(self):
+        input = torch.randn(3, 5)
+        m = nn.Linear(5, 7)
+        _weight = m._parameters['weight']
+        m = torch.nn.utils.spectral_norm(m)
+        output = m(input)
+
+        self.assertEqual(m.weight_u.size(), (m.weight.size(0)))
+        self.assertTrue(hasattr(m, 'weight_org'))
+
+        m = torch.utils.remove_spectral_norm(m)
+        self.assertFalse(hasattr(m, 'weight_org'))
+        self.assertFalse(hasattr(m, 'weight_u'))
+
+    def test_spectral_norm_pickle(self):
+        m = torch.nn.utils.spectral_norm(nn.Linear(5, 7))
+        m = pickle.loads(pickle.dumps(m))
+        self.assertIsInstance(m, nn.Linear)
+        
     def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
