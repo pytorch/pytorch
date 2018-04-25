@@ -87,7 +87,7 @@ def checkpoint(function, *args):
         args: tuple containing inputs to the :attr:`function`
 
     Returns:
-        Output of running :attr`function` on *:attr:`args`
+        Output of running :attr:`function` on *:attr:`args`
     """
     return CheckpointFunction.apply(function, *args)
 
