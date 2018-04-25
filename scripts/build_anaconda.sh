@@ -283,12 +283,13 @@ fi
 # Flags required for CUDA for Caffe2
 if [[ -n $CUDA_VERSION ]]; then
   CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=ON")
+  CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=ON")
 
   # NCCL and GLOO don't work with static CUDA right now. Cmake changes are
   # needed
-  CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=OFF")
-  CAFFE2_CMAKE_ARGS+=("-DUSE_GLOO=OFF")
-  CAFFE2_CMAKE_ARGS+=("-DCAFFE2_STATIC_LINK_CUDA=ON")
+  #CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=OFF")
+  #CAFFE2_CMAKE_ARGS+=("-DUSE_GLOO=OFF")
+  #CAFFE2_CMAKE_ARGS+=("-DCAFFE2_STATIC_LINK_CUDA=ON")
 else
   # Flags required for CPU for Caffe2
   CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=OFF")
