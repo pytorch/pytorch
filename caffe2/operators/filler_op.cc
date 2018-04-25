@@ -65,7 +65,7 @@ will also be appended)
 
 NOTE: Currently, it supports data type of float, int32, int64, and bool.
 )DOC")
-    .Arg("value", "The value for the elements of the output tensor.")
+    .Arg("value", "The value for the elements of the output tensor. Default is 0.0f.")
     .Arg(
         "dtype",
         "The data type for the elements of the output tensor."
