@@ -237,7 +237,7 @@ ELSE()
 ENDIF()
 ADD_DEPENDENCIES(ATen aten_files_are_generated)
 
-set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb/tbb_remote")
+set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/../third_party/tbb")
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
 set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
@@ -323,14 +323,33 @@ if(MKLDNN_FOUND)
   target_link_libraries(ATen ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
 
+# Directory where cpuinfo will download and build all dependencies
+set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
+  CACHE PATH "Confu-style dependencies binary directory")
+
 # ---[ Configure cpuinfo
-IF(NOT TARGET cpuinfo)
-  SET(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
-  SET(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
-  SET(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
-  SET(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  ADD_SUBDIRECTORY("cpu/cpuinfo")
-ENDIF()
+if (NOT TARGET cpuinfo)
+  if (NOT DEFINED CPUINFO_SOURCE_DIR)
+    set(CPUINFO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
+  endif()
+
+  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+  if(MSVC)
+    # ATen is built with default MSVC runtime linking, which is /MD (DLL)
+    # so no need to check *_USE_MSVC_STATIC_RUNTIME or some equivalent.
+    set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
+  endif()
+  add_subdirectory(
+    "${CPUINFO_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
+  # We build static version of cpuinfo but link
+  # them into a shared library for Caffe2, so they need PIC.
+  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+endif()
 TARGET_LINK_LIBRARIES(ATen cpuinfo)
 
 IF(CUDA_FOUND)

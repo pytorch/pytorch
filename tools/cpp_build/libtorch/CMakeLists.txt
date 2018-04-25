@@ -195,7 +195,7 @@ target_link_libraries(test_jit torch)
 
 target_include_directories(test_jit PUBLIC
   "${TORCH_SRC_DIR}/../"
-  "${TORCH_SRC_DIR}/../aten/src/ATen/utils/catch/single_include"
+  "${TORCH_SRC_DIR}/../third_party/catch/single_include"
   "${COMMON_INCLUDES}")
 
 install(TARGETS test_jit
