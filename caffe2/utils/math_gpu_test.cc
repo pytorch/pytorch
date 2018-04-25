@@ -331,10 +331,8 @@ class ReduceTensorGPUTest : public testing::Test {
     cuda_context_ = make_unique<CUDAContext>(option_);
     Blob* blob_x = ws_.CreateBlob("X");
     Blob* blob_y = ws_.CreateBlob("Y");
-    Blob* blob_scratch = ws_.CreateBlob("scratch");
     X_ = blob_x->GetMutable<Tensor<CUDAContext>>();
     Y_ = blob_y->GetMutable<Tensor<CUDAContext>>();
-    scratch_ptr_ = blob_scratch->GetMutable<Tensor<CUDAContext>>();
   }
 
   void SetUpData(
@@ -378,8 +376,7 @@ class ReduceTensorGPUTest : public testing::Test {
         axes.data(),
         X_->data<float>(),
         Y_->mutable_data<float>(),
-        cuda_context_.get(),
-        scratch_ptr_);
+        cuda_context_.get());
     VerifyResult(Y_data);
   }
 
@@ -388,7 +385,6 @@ class ReduceTensorGPUTest : public testing::Test {
   std::unique_ptr<CUDAContext> cuda_context_;
   Tensor<CUDAContext>* X_ = nullptr;
   Tensor<CUDAContext>* Y_ = nullptr;
-  Tensor<CUDAContext>* scratch_ptr_ = nullptr;
 };
 
 TEST_F(ReduceTensorGPUTest, ReduceMinGPUTest) {
@@ -401,10 +397,9 @@ TEST_F(ReduceTensorGPUTest, ReduceMinGPUTest) {
                               const int* axes,
                               const float* X,
                               float* Y,
-                              CUDAContext* context,
-                              Tensor<CUDAContext>* scratch_ptr) {
+                              CUDAContext* context) {
     return math::ReduceMin<float, CUDAContext>(
-        num_dims, dims, num_axes, axes, X, Y, context, scratch_ptr);
+        num_dims, dims, num_axes, axes, X, Y, context);
   };
   // Test for 1D tensor.
   RunRedcueTensorTest(
@@ -465,10 +460,9 @@ TEST_F(ReduceTensorGPUTest, ReduceMaxGPUTest) {
                               const int* axes,
                               const float* X,
                               float* Y,
-                              CUDAContext* context,
-                              Tensor<CUDAContext>* scratch_ptr) {
+                              CUDAContext* context) {
     return math::ReduceMax<float, CUDAContext>(
-        num_dims, dims, num_axes, axes, X, Y, context, scratch_ptr);
+        num_dims, dims, num_axes, axes, X, Y, context);
   };
   // Test for 1D tensor.
   RunRedcueTensorTest(
@@ -711,11 +705,9 @@ class MomentsGPUTest : public testing::Test {
     Blob* blob_x = ws_.CreateBlob("X");
     Blob* blob_mean = ws_.CreateBlob("mean");
     Blob* blob_variance = ws_.CreateBlob("variance");
-    Blob* blob_scratch = ws_.CreateBlob("scratch");
     X_ = blob_x->GetMutable<Tensor<CUDAContext>>();
     mean_ = blob_mean->GetMutable<Tensor<CUDAContext>>();
     variance_ = blob_variance->GetMutable<Tensor<CUDAContext>>();
-    scratch_ptr_ = blob_scratch->GetMutable<Tensor<CUDAContext>>();
   }
 
   void SetUpData(
@@ -771,8 +763,7 @@ class MomentsGPUTest : public testing::Test {
         X_->data<float>(),
         mean_->mutable_data<float>(),
         variance_->mutable_data<float>(),
-        cuda_context_.get(),
-        scratch_ptr_);
+        cuda_context_.get());
     VerifyResult(mean_data, variance_data);
   }
 
@@ -782,7 +773,6 @@ class MomentsGPUTest : public testing::Test {
   Tensor<CUDAContext>* X_ = nullptr;
   Tensor<CUDAContext>* mean_ = nullptr;
   Tensor<CUDAContext>* variance_ = nullptr;
-  Tensor<CUDAContext>* scratch_ptr_ = nullptr;
 };
 
 TEST_F(MomentsGPUTest, MomentsGPUFloatTest) {
