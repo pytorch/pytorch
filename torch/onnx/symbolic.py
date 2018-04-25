@@ -674,6 +674,10 @@ def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
+def repeat(g, self, repeats):
+    return g.op("Tile", self, repeats_i=repeats)
+
+
 def instance_norm(g, input, **kwargs):
     input_type = input.type().scalarType()
     weight = kwargs.get("weight", None)
