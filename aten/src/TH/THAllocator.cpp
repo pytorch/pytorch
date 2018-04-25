@@ -1,15 +1,7 @@
 #include "THAllocator.h"
-#include "THAtomic.h"
 
-/* needed for ATOMIC_INT_LOCK_FREE */
-/* cannot go in THAtomic.h because of interactions with OpenMP giving
-   sorry not implemented errors */
-#if defined(USE_C11_ATOMICS)
-#include <stdatomic.h>
+#include <atomic>
 #if ATOMIC_INT_LOCK_FREE == 2
-#define TH_ATOMIC_IPC_REFCOUNT 1
-#endif
-#elif defined(USE_MSC_ATOMICS) || defined(USE_GCC_ATOMICS)
 #define TH_ATOMIC_IPC_REFCOUNT 1
 #endif
 
@@ -544,7 +536,7 @@ static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
   if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
     map_info->refcount = 1;
   else
-    THAtomicIncrementRef(&map_info->refcount);
+    map_info->refcount++;
 
   return (void*)data;
 }
@@ -559,7 +551,7 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
 
 #ifdef _WIN32
   THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
-  if (THAtomicDecrementRef(&info->refcount)) {
+  if (--info->refcount == 0) {
     SetEvent(ctx->event); 
   }
   if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0)
@@ -567,7 +559,7 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
 #else /* _WIN32 */
 
   THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
-  if (THAtomicDecrementRef(&info->refcount)) {
+  if (--info->refcount == 0) {
 #ifdef HAVE_SHM_UNLINK
     if (shm_unlink(ctx->filename) == -1)
       THError("could not unlink the shared memory file %s", ctx->filename);
@@ -585,13 +577,13 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
 void THRefcountedMapAllocator_incref(THMapAllocatorContext *ctx, void *data)
 {
   THMapInfo *map_info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
-  THAtomicIncrementRef(&map_info->refcount);
+  ++map_info->refcount;
 }
 
 int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
 {
   THMapInfo *map_info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
-  return THAtomicDecrementRef(&map_info->refcount);
+  return --map_info->refcount == 0;
 }
 
 #else

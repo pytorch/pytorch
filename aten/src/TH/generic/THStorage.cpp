@@ -104,7 +104,7 @@ void THStorage_(clearFlag)(THStorage *storage, const char flag)
 void THStorage_(retain)(THStorage *storage)
 {
   if(storage && (storage->flag & TH_STORAGE_REFCOUNTED))
-    THAtomicIncrementRef(&storage->refcount);
+    ++storage->refcount;
 }
 
 void THStorage_(free)(THStorage *storage)
@@ -112,9 +112,9 @@ void THStorage_(free)(THStorage *storage)
   if(!storage)
     return;
 
-  if((storage->flag & TH_STORAGE_REFCOUNTED) && (THAtomicGet(&storage->refcount) > 0))
+  if((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0))
   {
-    if(THAtomicDecrementRef(&storage->refcount))
+    if(--storage->refcount == 0)
     {
       if(storage->flag & TH_STORAGE_FREEMEM) {
         storage->allocator->free(storage->allocatorContext, storage->data);

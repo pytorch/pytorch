@@ -17,7 +17,7 @@ typedef struct THSTensor
     // the indices tensor, and the indices are in sorted order.
     // Most math operations can only be performed on ordered sparse tensors
     int coalesced;
-    int refcount;
+    std::atomic<int> refcount;
 
 } THSTensor;
 

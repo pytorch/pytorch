@@ -25,7 +25,7 @@ typedef struct THStorage
 {
     real *data;
     ptrdiff_t size;
-    int refcount;
+    std::atomic<int> refcount;
     char flag;
     THAllocator *allocator;
     void *allocatorContext;

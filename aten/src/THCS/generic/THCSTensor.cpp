@@ -381,7 +381,7 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
 {
   if(!self)
     return;
-  if(THAtomicDecrementRef(&self->refcount))
+  if(--self->refcount == 0)
   {
     THFree(self->size);
     THCIndexTensor_(free)(state, self->indices);
@@ -392,7 +392,7 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
 
 void THCSTensor_(retain)(THCState *state, THCSTensor *self)
 {
-  THAtomicIncrementRef(&self->refcount);
+  self->refcount++;
 }
 
 int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...)

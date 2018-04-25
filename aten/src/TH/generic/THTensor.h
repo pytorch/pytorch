@@ -16,7 +16,7 @@ typedef struct THTensor
     // of a tensor
     THStorage *storage;
     ptrdiff_t storageOffset;
-    int refcount;
+    std::atomic<int> refcount;
 
     char flag;
 

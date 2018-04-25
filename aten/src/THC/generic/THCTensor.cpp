@@ -695,7 +695,7 @@ ptrdiff_t THCTensor_(nElement)(THCState *state, const THCTensor *self)
 void THCTensor_(retain)(THCState *state, THCTensor *self)
 {
   if(self->flag & TH_TENSOR_REFCOUNTED)
-    THAtomicIncrementRef(&self->refcount);
+    self->refcount++;
 }
 
 void THCTensor_(free)(THCState *state, THCTensor *self)
@@ -705,7 +705,7 @@ void THCTensor_(free)(THCState *state, THCTensor *self)
 
   if(self->flag & TH_TENSOR_REFCOUNTED)
   {
-    if(THAtomicDecrementRef(&self->refcount))
+    if(--self->refcount == 0)
     {
       THFree(self->size);
       THFree(self->stride);

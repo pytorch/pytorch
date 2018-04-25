@@ -697,7 +697,7 @@ ptrdiff_t THTensor_(nElement)(const THTensor *self)
 void THTensor_(retain)(THTensor *self)
 {
   if(self->flag & TH_TENSOR_REFCOUNTED)
-    THAtomicIncrementRef(&self->refcount);
+    ++self->refcount;
 }
 
 void THTensor_(free)(THTensor *self)
@@ -707,7 +707,7 @@ void THTensor_(free)(THTensor *self)
 
   if(self->flag & TH_TENSOR_REFCOUNTED)
   {
-    if(THAtomicDecrementRef(&self->refcount))
+    if(--self->refcount == 0)
     {
       THFree(self->size);
       THFree(self->stride);

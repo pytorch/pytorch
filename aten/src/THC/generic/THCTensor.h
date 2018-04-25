@@ -12,7 +12,7 @@ typedef struct THCTensor
 
     THCStorage *storage;
     ptrdiff_t storageOffset;
-    int refcount;
+    std::atomic<int> refcount;
 
     char flag;
 

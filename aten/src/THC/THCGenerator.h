@@ -8,7 +8,7 @@ typedef struct THCGeneratorState {
   struct mtgp32_kernel_params *kernel_params;
   int initf;
   uint64_t initial_seed;
-  int64_t philox_seed_offset;
+  std::atomic<int64_t> philox_seed_offset;
 } THCGeneratorState;
 
 struct THCGenerator {

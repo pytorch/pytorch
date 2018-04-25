@@ -10,7 +10,7 @@ typedef struct THCStorage
 {
     real *data;
     ptrdiff_t size;
-    int refcount;
+    std::atomic<int> refcount;
     char flag;
     THCDeviceAllocator *allocator;
     void *allocatorContext;

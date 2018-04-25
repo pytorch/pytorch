@@ -17,6 +17,8 @@
 #include <stddef.h>
 #include <inttypes.h>
 
+#include <atomic>
+
 #cmakedefine USE_BLAS
 #cmakedefine USE_LAPACK
 #cmakedefine BLAS_F2C

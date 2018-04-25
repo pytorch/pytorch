@@ -1,7 +1,7 @@
 #include <cmath>
 #include <float.h>
 
-#include "THAtomic.h"
+#include <atomic>
 #include "THTensor.h"
 #include "THVector.h"
 #include "generic/simd/simd.h"

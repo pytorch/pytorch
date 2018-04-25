@@ -547,7 +547,7 @@ void THSTensor_(free)(THSTensor *self)
 {
   if(!self)
     return;
-  if(THAtomicDecrementRef(&self->refcount))
+  if(--self->refcount == 0)
   {
     THFree(self->size);
     THLongTensor_free(self->indices);
@@ -558,7 +558,7 @@ void THSTensor_(free)(THSTensor *self)
 
 void THSTensor_(retain)(THSTensor *self)
 {
-  THAtomicIncrementRef(&self->refcount);
+  self->refcount++;
 }
 
 #endif

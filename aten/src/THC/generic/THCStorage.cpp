@@ -169,7 +169,7 @@ void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char fla
 void THCStorage_(retain)(THCState *state, THCStorage *self)
 {
   if(self && (self->flag & TH_STORAGE_REFCOUNTED))
-    THAtomicIncrementRef(&self->refcount);
+    self->refcount++;
 }
 
 void THCStorage_(free)(THCState *state, THCStorage *self)
@@ -177,7 +177,7 @@ void THCStorage_(free)(THCState *state, THCStorage *self)
   if(!(self->flag & TH_STORAGE_REFCOUNTED))
     return;
 
-  if (THAtomicDecrementRef(&self->refcount))
+  if (--self->refcount == 0)
   {
     if(self->flag & TH_STORAGE_FREEMEM) {
       THCudaCheck(

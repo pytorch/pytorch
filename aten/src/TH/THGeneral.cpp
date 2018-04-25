@@ -1,5 +1,4 @@
 #include "THGeneral.h"
-#include "THAtomic.h"
 
 #ifdef _OPENMP
 #include <omp.h>
