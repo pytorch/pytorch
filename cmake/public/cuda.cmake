@@ -13,12 +13,17 @@ if(NOT CUDA_FOUND)
 endif()
 
 # Find cudnn.
+if(CAFFE2_STATIC_LINK_CUDA)
+  SET(CUDNN_LIBNAME "libcudnn_static.a")
+else()
+  SET(CUDNN_LIBNAME "cudnn")
+endif()
 include(FindPackageHandleStandardArgs)
 set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
 find_path(CUDNN_INCLUDE_DIR cudnn.h
     HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES cuda/include include)
-find_library(CUDNN_LIBRARY cudnn
+find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
     HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64)
 find_package_handle_standard_args(
@@ -89,6 +94,10 @@ find_library(CUDA_NVRTC_LIB nvrtc
     PATH_SUFFIXES lib lib64 lib/x64)
 
 # Create new style imported libraries.
+# Several of these libraries have a hardcoded path if CAFFE2_STATIC_LINK_CUDA
+# is set. This path is where sane CUDA installations have their static
+# libraries installed. This flag should only be used for binary builds, so
+# end-users should never have this flag set.
 
 # cuda
 add_library(caffe2::cuda UNKNOWN IMPORTED)
@@ -102,14 +111,21 @@ set_property(
 # cudart. CUDA_LIBRARIES is actually a list, so we will make an interface
 # library.
 add_library(caffe2::cudart INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-    ${CUDA_LIBRARIES})
+if(CAFFE2_STATIC_LINK_CUDA)
+    set_property(
+        TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
+else()
+    set_property(
+        TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDA_LIBRARIES})
+endif()
 set_property(
     TARGET caffe2::cudart PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
 # cudnn
+# static linking is handled by USE_STATIC_CUDNN environment variable
 add_library(caffe2::cudnn UNKNOWN IMPORTED)
 set_property(
     TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
@@ -120,9 +136,15 @@ set_property(
 
 # curand
 add_library(caffe2::curand UNKNOWN IMPORTED)
-set_property(
-    TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
-    ${CUDA_curand_LIBRARY})
+if(CAFFE2_STATIC_LINK_CUDA)
+    set_property(
+        TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a")
+else()
+    set_property(
+        TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
+        ${CUDA_curand_LIBRARY})
+endif()
 set_property(
     TARGET caffe2::curand PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
@@ -141,9 +163,15 @@ endif()
 # cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
 # interface library similar to cudart.
 add_library(caffe2::cublas INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-    ${CUDA_CUBLAS_LIBRARIES})
+if(CAFFE2_STATIC_LINK_CUDA)
+    set_property(
+        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
+else()
+    set_property(
+        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDA_CUBLAS_LIBRARIES})
+endif()
 set_property(
     TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
