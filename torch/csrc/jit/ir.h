@@ -975,7 +975,6 @@ public:
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
-      bool is_legacy,
       std::vector<VariableFlags>&& var_flags,
       pyobj_list&& scalar_args,
       bool tracing_autograd_python_function = true);
@@ -1283,7 +1282,6 @@ struct PythonOp : public Node {
   PythonOp* init(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
-      bool is_legacy,
       std::vector<VariableFlags>&& var_flags,
       pyobj_list&& scalar_args,
       bool tracing_autograd_python_function = true) {
@@ -1291,13 +1289,17 @@ struct PythonOp : public Node {
     this->scalar_args = std::move(scalar_args);
     this->cconv = cconv;
     this->var_flags = std::move(var_flags);
-    this->is_legacy = is_legacy;
     this->tracing_autograd_python_function = tracing_autograd_python_function;
     return this;
   }
   virtual Node * allocNewInstance(Graph * g) override {
     return new PythonOp(g);
   }
+  // recover the autograd.Function instance, if this PythonOp's function
+  // was originally SomeFunction.apply
+  // used in ONNX for discovering symbolics
+  at::optional<THPObjectPtr> autogradFunction() const;
+
   //TODO: make this non-autograd specific
   //remove is_legacy, avoid THPObjectPtr to avoid big PyTorch dependency
 
@@ -1309,7 +1311,6 @@ struct PythonOp : public Node {
   // 's' -- python scalar argument
   // 't' -- tensor argument
   std::string cconv;
-  bool is_legacy;
   bool tracing_autograd_python_function;
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
@@ -1321,7 +1322,6 @@ struct PythonOp : public Node {
 inline Node* Graph::createPythonOp(
     THPObjectPtr&& pyobj,
     const std::string& cconv,
-    bool is_legacy,
     std::vector<VariableFlags>&& var_flags,
     pyobj_list&& scalar_args,
     bool tracing_autograd_python_function) {
@@ -1329,7 +1329,6 @@ inline Node* Graph::createPythonOp(
   return op->init(
       std::move(pyobj),
       cconv,
-      is_legacy,
       std::move(var_flags),
       std::move(scalar_args),
       tracing_autograd_python_function);

@@ -20,7 +20,8 @@ TracingState::TracingState(size_t num_stages)
       num_stages(num_stages),
       eval_count(0),
       var_flags(num_stages),
-      output_edges(num_stages) {}
+      output_edges(num_stages),
+      creates_handles(true) {}
 
 TracingState::~TracingState() = default;
 

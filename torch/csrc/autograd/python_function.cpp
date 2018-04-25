@@ -610,7 +610,7 @@ static void _trace_post_record(
   // NB: this path is executed only for forward of Python functions, so there's no need to check
   // tracing_state->in_eval_subgraph (it's always false, because they are never part of backward
   // subgraphs AND we don't even materialize the forward function).
-  if (!passes_state_transparently) {
+  if (trace_info.state->creates_handles && !passes_state_transparently) {
     // TODO: sgross and ezyang don't know if this is right
     tracer::nontraceableBackwardSubgraph(input_vars, output_vars);
     Function::set_up_context_edge(trace_info.n, input_vars, output_vars);

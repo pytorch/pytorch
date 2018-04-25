@@ -154,7 +154,12 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
 
     // Test if there is a symbolic function; bail if there is not
     auto pyobj = py::handle(op->pyobj.get());
-    if (!py::hasattr(pyobj, "symbolic")) {
+    auto func = op->autogradFunction();
+    if(func) {
+      pyobj = func->get();
+    }
+
+    if(!py::hasattr(pyobj, "symbolic")) {
       cloneNode(op);
       return;
     }
