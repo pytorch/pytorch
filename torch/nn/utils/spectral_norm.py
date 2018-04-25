@@ -61,8 +61,9 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12):
     r"""Applies spectral normalization to a parameter in the given module.
 
     .. math::
-         \mathbf{W} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})}
-         \text{where, } \sigma(\mathbf{W}) := \max_{\mathbf{h} \ne 0} \dfrac{\|\mathbf{A} \mathbf{h}\|_2}{\|\mathbf{h}\|_2}
+         \mathbf{W} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})} \
+         \text{where,} \sigma(\mathbf{W}) = \max_{\mathbf{h} \ne 0}
+            \dfrac{\|\mathbf{A} \mathbf{h}\|_2}{\|\mathbf{h}\|_2}
 
     Spectral normalization stabilize the training of discriminators(critics)
     in GANs.  This is implemented via a hook that rescale weight matrix
