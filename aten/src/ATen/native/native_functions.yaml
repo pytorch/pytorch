@@ -283,6 +283,7 @@
 - func: dot(Tensor self, Tensor tensor) -> Tensor
 
 - func: dot_out(Tensor result, Tensor self, Tensor tensor) -> Tensor
+  variants: function
 
 - func: einsum(std::string equation, TensorList tensors) -> Tensor
   variants: function
