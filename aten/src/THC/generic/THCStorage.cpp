@@ -61,7 +61,7 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
 
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
-  new (&self->refcount) std::atomic<int>(1);
+  new (&storage->refcount) std::atomic<int>(1);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;

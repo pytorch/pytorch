@@ -53,8 +53,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
       }
     }
 
-    if (invalid_target >= 0) {
-        THError("Target %d out of bounds", invalid_target);
+    if (invalid_target.load() >= 0) {
+        THError("Target %d out of bounds", invalid_target.load());
     }
 
     return;

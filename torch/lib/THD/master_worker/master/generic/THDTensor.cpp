@@ -827,7 +827,7 @@ ptrdiff_t THDTensor_(nElement)(const THDTensor *self) {
 
 void THDTensor_(retain)(THDTensor *tensor) {
   if (tensor->flag & TH_TENSOR_REFCOUNTED)
-    THAtomicIncrementRef(&tensor->refcount);
+    tensor->refcount++;
 }
 
 void THDTensor_(free)(THDTensor *tensor) {
@@ -835,7 +835,7 @@ void THDTensor_(free)(THDTensor *tensor) {
     return;
 
   // TODO: check refcounted flag?
-  if (THAtomicDecrementRef(&tensor->refcount)) {
+  if (--tensor->refcount == 0) {
     delete[] tensor->size;
     delete[] tensor->stride;
     masterCommandChannel->sendMessage(
