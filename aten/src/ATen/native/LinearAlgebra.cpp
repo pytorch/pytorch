@@ -172,13 +172,15 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
 }
 
 Tensor dot(const Tensor& self, const Tensor& tensor) {
-  if (self.dim() != 1) {
-   AT_ERROR("Expected argument self to have 1 dimension, but has %d", self.dim());
-  }
-  if (tensor.dim() != 1) {
-   AT_ERROR("Expected argument tensor to have 1 dimension, but has %d", tensor.dim());
-  }
+  check_1d(self, "self", "dot");
+  check_1d(tensor, "tensor", "dot");
   return self._dot(tensor);
+}
+
+Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
+  result.resize_({});
+  // Note: this allows mismatched types between lhs and rhs, but we should allow that in general?
+  return result.fill_(self.dot(tensor));
 }
 
 /*
@@ -201,17 +203,22 @@ The behavior depends on the dimensionality of the Tensors as follows:
   and tensor2 is a (k x m x p) Tensor, the returned tensor will be an (j x k x n x p) Tensor.
 */
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
+  auto result = tensor1.type().tensor({0});
+  return at::matmul_out(result, tensor1, tensor2);
+}
+
+Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-    return tensor1.dot(tensor2);
+    return at::dot_out(result, tensor1, tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    return tensor1.mv(tensor2);
+    return at::mv_out(result, tensor1, tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
+    return at::mm_out(result, tensor1.unsqueeze(0), tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-    return tensor1.mm(tensor2);
+    return at::mm_out(result, tensor1, tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.
@@ -227,7 +234,8 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
 
     // fold the batch into the first dimension
     Tensor t1 = tensor1.contiguous().view({-1, size1[size1.size() - 1]});
-    return at::_unsafe_view(t1.mm(t2), output_size);
+    Tensor output = at::_unsafe_view(at::mm_out(result, t1, t2),  output_size);
+    return result.set_(output);
   } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
     // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
     // we track m1 vs m2 separately even though they must match for nicer error messages
@@ -260,7 +268,7 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
     Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).contiguous().view(tensor1_bmm_view);
     Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).contiguous().view(tensor2_bmm_view);
 
-    Tensor output = tensor1_expanded.bmm(tensor2_expanded);
+    at::bmm_out(result, tensor1_expanded, tensor2_expanded);
 
     // reshape batches back into result
     std::vector<int64_t> output_shape(expand_batch_portion);
@@ -270,7 +278,8 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
     if (dim_tensor2 > 1) {
       output_shape.push_back(p);
     }
-    return at::_unsafe_view(output, output_shape);
+    Tensor output = at::_unsafe_view(result, output_shape);
+    return result.set_(output);
   }
 
  AT_ERROR("both arguments to matmul need to be at least 1D, but they are %dD and %dD",
