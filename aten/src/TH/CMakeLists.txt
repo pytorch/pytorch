@@ -44,7 +44,6 @@ set(ATen_TH_SRCS
 # Remember that PARENT_SCOPE variables are not in the current scope
 set(ATen_TH_SRCS ${ATen_TH_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} ${ATen_TH_SRCS} PARENT_SCOPE)
-message(INFO ${ATen_CPU_SRCS})
 ######################################################
 
 
