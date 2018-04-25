@@ -1797,9 +1797,8 @@ class TestDistributions(TestCase):
                     self.assertEqual(indep_dist.has_rsample, base_dist.has_rsample)
                     if indep_dist.has_rsample:
                         self.assertEqual(indep_dist.sample().shape, base_dist.sample().shape)
-                    if indep_dist.has_enumerate_support:
-                        self.assertEqual(indep_dist.enumerate_support().shape, base_dist.enumerate_support().shape)
                     try:
+                        self.assertEqual(indep_dist.enumerate_support().shape, base_dist.enumerate_support().shape)
                         self.assertEqual(indep_dist.mean.shape, base_dist.mean.shape)
                     except NotImplementedError:
                         pass
