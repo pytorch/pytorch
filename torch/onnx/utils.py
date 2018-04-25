@@ -182,7 +182,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     graph, params, torch_out = _model_to_graph(model, args, f, verbose,
                                                training, input_names,
                                                output_names, aten)
-
     # TODO: Don't allocate a in-memory string for the protobuf
     from torch.onnx.symbolic import _onnx_opset_version
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

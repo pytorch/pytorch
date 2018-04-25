@@ -2613,22 +2613,26 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
             M()
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_trace_of_script(self):
         @torch.jit.script
         def foo(a, c):
-            b = 0
-            if a == 0:
-                b = 1
+            b = 0.0
+            if a == 0.0:
+                b = 1.0
             return b + c
 
-        a = torch.ones(1, dtype=torch.long)
+        a = torch.ones(1, dtype=torch.float)
 
-        @torch.jit.trace(torch.zeros(1, dtype=torch.long))
+        @torch.jit.trace(torch.zeros(1, dtype=torch.float))
         def use(b):
-            return foo(b - 1, a) + 1
+            return foo(b - 1.0, a) + 1.0
 
-        self.assertEqual(3, use(torch.ones(1, dtype=torch.long)))
-        self.assertEqual(2, use(torch.zeros(1, dtype=torch.long)))
+        # test we propagated shapes through the function
+        self.assertTrue("Dynamic" not in str(use.graph))
+
+        self.assertEqual(3, use(torch.ones(1, dtype=torch.float)))
+        self.assertEqual(2, use(torch.zeros(1, dtype=torch.float)))
 
     def test_if_define(self):
         @torch.jit.script
