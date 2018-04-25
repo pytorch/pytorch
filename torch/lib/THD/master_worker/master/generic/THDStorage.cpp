@@ -8,7 +8,6 @@ using namespace master;
 
 static THDStorage* THDStorage_(_alloc)() {
   THDStorage* new_storage = new THDStorage();
-  // ezyang: What the fuck is this?!
   std::memset(reinterpret_cast<void*>(new_storage), 0, sizeof(new_storage));
   new (&new_storage->refcount) std::atomic<int>(1);
   new_storage->storage_id = THDState::s_nextId++;
