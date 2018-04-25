@@ -80,12 +80,11 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   // check duplicates in dims
   auto dims_v = std::vector<int64_t>(dims);
   dims_v.erase(std::unique(dims_v.begin(), dims_v.end()), dims_v.end());
-  dims = IntList(dims_v);
-  if (dims.size() < dims_len) {
+  if (dims_v.size() < dims_len) {
     std::stringstream ss;
     ss << "dims has duplicates, "
        << "input dims size=" << dims_len << ", "
-       << "but unique dims size= " << dims.size();
+       << "but unique dims size= " << dims_v.size();
     throw std::runtime_error(ss.str());
   }
 

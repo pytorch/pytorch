@@ -2349,7 +2349,7 @@ method_tests = [
     ('reshape', (), (dont_convert(()),), 'scalar_to_scalar'),
     ('reshape', (), (1,), 'scalar_to_1d'),
     ('flip', torch.rand(S, S, S).requires_grad_(), ([0],), 'd0'),
-    ('flip', torch.rand(S, S, S).requires_grad_(), ([0,1,2],), 'd012'),
+    ('flip', torch.rand(S, S, S).requires_grad_(), ([0, 1, 2],), 'd012'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
     ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
     ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
