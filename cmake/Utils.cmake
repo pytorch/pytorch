@@ -231,23 +231,16 @@ endfunction()
 # This isn't called anywhere, but it's very useful when debugging cmake
 # NOTE: This doesn't work for INTERFACE_LIBRARY or INTERFACE_LINK_LIBRARY targets
 
-# Get all properties that cmake supports
-function(populate_cmake_property_list)
-  if (!${CMAKE+PROPERTY_LIST})
-    execute_process(COMMAND cmake --help-property-list OUTPUT_VARIABLE CMAKE_PROPERTY_LIST)
-
-    # Convert command output into a CMake list
-    STRING(REGEX REPLACE ";" "\\\\;" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
-    STRING(REGEX REPLACE "\n" ";" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
-  endif()
-endfunction()
-
 function(print_target_properties tgt)
   if(NOT TARGET ${tgt})
     message("There is no target named '${tgt}'")
     return()
   endif()
-  populate_cmake_property_list()
+
+  # Get a list of all cmake properties TODO cache this lazily somehow
+  execute_process(COMMAND cmake --help-property-list OUTPUT_VARIABLE CMAKE_PROPERTY_LIST)
+  STRING(REGEX REPLACE ";" "\\\\;" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
+  STRING(REGEX REPLACE "\n" ";" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
 
   foreach (prop ${CMAKE_PROPERTY_LIST})
     string(REPLACE "<CONFIG>" "${CMAKE_BUILD_TYPE}" prop ${prop})
