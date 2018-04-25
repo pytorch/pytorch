@@ -34,7 +34,7 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
   THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
   storage->data = static_cast<real*>(allocator->malloc(allocatorContext, sizeof(real)*size));
   storage->size = size;
-  storage->refcount = 1;
+  new (&storage->refcount) std::atomic<int>(1);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
@@ -122,6 +122,7 @@ void THStorage_(free)(THStorage *storage)
       if(storage->flag & TH_STORAGE_VIEW) {
         THStorage_(free)(storage->view);
       }
+      storage->refcount.~atomic<int>();
       THFree(storage);
     }
   }

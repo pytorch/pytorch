@@ -65,7 +65,7 @@ THTensor *THSTensor_(newValues)(const THSTensor *self) {
 /*** Helper methods ***/
 static void THSTensor_(rawInit)(THSTensor *self)
 {
-  self->refcount = 1;
+  new (&self->refcount) std::atomic<int>(1);
   self->size = NULL;
   self->indices = THLongTensor_new();
   self->values = THTensor_(new)();
@@ -552,6 +552,7 @@ void THSTensor_(free)(THSTensor *self)
     THFree(self->size);
     THLongTensor_free(self->indices);
     THTensor_(free)(self->values);
+    self->refcount.~atomic<int>();
     THFree(self);
   }
 }

@@ -713,6 +713,7 @@ void THTensor_(free)(THTensor *self)
       THFree(self->stride);
       if(self->storage)
         THStorage_(free)(self->storage);
+      self->refcount.~atomic<int>();
       THFree(self);
     }
   }
@@ -730,7 +731,7 @@ void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
 
 static void THTensor_(rawInit)(THTensor *self)
 {
-  self->refcount = 1;
+  new (&self->refcount) std::atomic<int>(1);
   self->storage = THStorage_(new)();
   self->storageOffset = 0;
   self->size = NULL;

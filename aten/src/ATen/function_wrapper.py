@@ -233,8 +233,12 @@ CHECKED_CAST = {
     'THGenerator*':
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &context->defaultGenerator(backend()))'),
-    'THSize*': CodeTemplate('THLongStorageView::makeFromSize(${arg_name})'),
-    'THStride*': CodeTemplate('THLongStorageView::makeFromStride(${arg_name}, ${noelem_to_empty})'),
+    'THSize*': CodeTemplate('THLongStorageView(${arg_name}, THLongStorageViewKind::SIZE)'),
+    'THStride*':
+        CodeTemplate(
+            'THLongStorageView(${arg_name}, '
+            '${noelem_to_empty} ? '
+            'THLongStorageViewKind::STRIDE_EMPTY_TENSOR : THLongStorageViewKind::STRIDE_SCALAR)'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, '

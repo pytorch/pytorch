@@ -711,6 +711,7 @@ void THCTensor_(free)(THCState *state, THCTensor *self)
       THFree(self->stride);
       if(self->storage)
         THCStorage_(free)(state, self->storage);
+      self->refcount.~atomic<int>();
       THFree(self);
     }
   }
@@ -728,7 +729,7 @@ void THCTensor_(freeCopyTo)(THCState *state, THCTensor *self, THCTensor *dst)
 
 static void THCTensor_(rawInit)(THCState *state, THCTensor *self)
 {
-  self->refcount = 1;
+  new (&self->refcount) std::atomic<int>(1);
   self->storage = THCStorage_(new)(state);
   self->storageOffset = 0;
   self->size = NULL;
