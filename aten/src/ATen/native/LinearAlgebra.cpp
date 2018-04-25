@@ -202,23 +202,21 @@ The behavior depends on the dimensionality of the Tensors as follows:
   must be broadcastable).  For example, if tensor1 is a (j x 1 x n x m) Tensor
   and tensor2 is a (k x m x p) Tensor, the returned tensor will be an (j x k x n x p) Tensor.
 */
-Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  auto result = tensor1.type().tensor({0});
-  return at::matmul_out(result, tensor1, tensor2);
-}
-
-Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
+Tensor matmul(at::optional<Tensor> out_opt, const Tensor& tensor1, const Tensor& tensor2) {
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
+  auto has_out = out_opt.has_value();
+  Tensor out = out_opt.value_or(Tensor());
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-    return at::dot_out(result, tensor1, tensor2);
+    return has_out ? at::native::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    return at::mv_out(result, tensor1, tensor2);
+    return has_out ? at::native::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return at::mm_out(result, tensor1.unsqueeze(0), tensor2).squeeze_(0);
+    return has_out ? at::native::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
+                   : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-    return at::mm_out(result, tensor1, tensor2);
+    return has_out ? at::native::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.
@@ -234,8 +232,9 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
 
     // fold the batch into the first dimension
     Tensor t1 = tensor1.contiguous().view({-1, size1[size1.size() - 1]});
-    Tensor output = at::_unsafe_view(at::mm_out(result, t1, t2),  output_size);
-    return result.set_(output);
+    Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
+                            : at::_unsafe_view(t1.mm(t2), output_size);
+    return has_out ? out.set_(output) : output;
   } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
     // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
     // we track m1 vs m2 separately even though they must match for nicer error messages
@@ -268,8 +267,6 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
     Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).contiguous().view(tensor1_bmm_view);
     Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).contiguous().view(tensor2_bmm_view);
 
-    at::bmm_out(result, tensor1_expanded, tensor2_expanded);
-
     // reshape batches back into result
     std::vector<int64_t> output_shape(expand_batch_portion);
     if (dim_tensor1 > 1) {
@@ -278,13 +275,25 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
     if (dim_tensor2 > 1) {
       output_shape.push_back(p);
     }
-    Tensor output = at::_unsafe_view(result, output_shape);
-    return result.set_(output);
+
+    Tensor output = has_out ? at::_unsafe_view(at::bmm_out(out, tensor1_expanded, tensor2_expanded), output_shape)
+                            : at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
+
+    return has_out ? out.set_(output) : output;
   }
 
  AT_ERROR("both arguments to matmul need to be at least 1D, but they are %dD and %dD",
                 dim_tensor1, dim_tensor2);
 
+}
+
+Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
+  return at::native::matmul(at::nullopt, tensor1, tensor2);
+}
+
+Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
+  at::native::matmul(at::optional<Tensor>(result), tensor1, tensor2);
+  return result;
 }
 
 }
