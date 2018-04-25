@@ -13,6 +13,7 @@
 #include <functional>
 
 #include "TH/THRandom.h"
+#include "TH/THGenerator.h"
 #include "TH/THMath.h"
 
 namespace {
@@ -122,7 +123,7 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "_standard_gamma_grad", [&] {
     CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, self, output,
       [](scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {
-        ret_val = standard_gamma_grad_one<scalar_t, scalar_t>(self_val, output_val);
+        ret_val = standard_gamma_grad_one<scalar_t, double>(self_val, output_val);
       }
     );
   });
@@ -137,6 +138,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
   Tensor ret = at::zeros(lambda.type(), lambda.sizes());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
     THGenerator* generator = get_generator(gen);
+    std::lock_guard<std::mutex> lock(generator->mutex);
     CPU_tensor_apply2<scalar_t, scalar_t>(ret, lambda,
       [generator](scalar_t& ret_val, const scalar_t& lambda){
         ret_val = static_cast<scalar_t>(sample_poisson(static_cast<double>(lambda), generator));
@@ -150,15 +152,16 @@ Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
   Tensor ret = alpha.type().zeros(alpha.sizes());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "gamma", [&] {
     THGenerator* generator = get_generator(gen);
+    std::lock_guard<std::mutex> lock(generator->mutex);
     CPU_tensor_apply2<scalar_t, scalar_t>(ret, alpha,
       [generator](scalar_t& ret_val, const scalar_t& alpha){
-        BaseSampler<scalar_t> standard_uniform([generator] () {
+        BaseSampler<double> standard_uniform([generator] () {
           return THRandom_standard_uniform(generator);
         });
-        BaseSampler<scalar_t> standard_normal([generator] () {
+        BaseSampler<double> standard_normal([generator] () {
           return THRandom_normal(generator, 0.0, 1.0);
         });
-        auto sample = sample_gamma<scalar_t, scalar_t>(alpha, standard_uniform, standard_normal);
+        auto sample = sample_gamma<scalar_t, double>(alpha, standard_uniform, standard_normal);
         ret_val = std::max(std::numeric_limits<scalar_t>::min(), (scalar_t) sample);
       }
     );

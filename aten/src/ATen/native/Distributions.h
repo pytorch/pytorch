@@ -18,7 +18,7 @@ namespace {
 #endif
 
 // workaround: cuda 8 cannot do static_cast with half
-#if (defined(__CUDACC_VER_MAJOR__) && (__CUDACC_MAJOR_VER < 9))
+#ifdef __CUDACC__
 template<typename R, typename T>
 deviceforcuda R cast_wrapper(T v) { return scalar_cast<R>(v); }
 #else
