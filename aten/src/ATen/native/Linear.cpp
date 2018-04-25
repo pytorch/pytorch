@@ -218,7 +218,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   // we start with the leftmost operator and reduce indices that
   // appear only there
   Tensor result = permuted_ops[0];
-  for (int64_t idx = 0; idx < number_of_letters; idx++) {
+  for (size_t idx = 0; idx < number_of_letters; idx++) {
     if ((last_occurrence[idx] == 0)
 	&& (sorted_position[idx]>=num_output_dims)) {
       result = result.sum(sorted_position[idx], true);
@@ -228,7 +228,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   // now we process each tensor using sumproduct_pair
   for (int64_t i = 1; i < (int64_t) permuted_ops.size(); i++) {
     std::vector<int64_t> sum_dims;
-    for (int64_t idx = 0; idx < number_of_letters; idx++) {
+    for (size_t idx = 0; idx < number_of_letters; idx++) {
       if ((last_occurrence[idx] == i)
 	  && (sorted_position[idx]>=num_output_dims)) {
 	sum_dims.push_back(sorted_position[idx]);
