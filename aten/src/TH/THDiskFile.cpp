@@ -526,7 +526,7 @@ static ssize_t THDiskFile_readString(THFile *self, const char *format, char **st
       if(total-pos == 0) /* we need more space! */
       {
         total += TBRS_BSZ;
-        p = THRealloc(p, total);
+        p = static_cast<char*>(THRealloc(p, total));
       }
       pos += fread(p+pos, 1, total-pos, dfself->handle);
       if (pos < total) /* eof? */
@@ -558,7 +558,7 @@ static ssize_t THDiskFile_readString(THFile *self, const char *format, char **st
       if(total-pos <= 1) /* we can only write '\0' in there! */
       {
         total += TBRS_BSZ;
-        p = THRealloc(p, total);
+        p = static_cast<char*>(THRealloc(p, total));
       }
       if (fgets(p+pos, (int) (total-pos), dfself->handle) == NULL) /* eof? */
       {

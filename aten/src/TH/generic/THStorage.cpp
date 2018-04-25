@@ -31,7 +31,7 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                         THAllocator *allocator,
                                         void *allocatorContext)
 {
-  THStorage *storage = THAlloc(sizeof(THStorage));
+  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
   storage->data = allocator->malloc(allocatorContext, sizeof(real)*size);
   storage->size = size;
   storage->refcount = 1;
@@ -136,7 +136,7 @@ THStorage* THStorage_(newWithData)(real *data, ptrdiff_t size)
 THStorage* THStorage_(newWithDataAndAllocator)(real* data, ptrdiff_t size,
                                                THAllocator* allocator,
                                                void* allocatorContext) {
-  THStorage *storage = THAlloc(sizeof(THStorage));
+  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
   storage->data = data;
   storage->size = size;
   storage->refcount = 1;
