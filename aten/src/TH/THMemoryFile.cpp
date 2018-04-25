@@ -526,7 +526,7 @@ static ssize_t THMemoryFile_writeLong(THFile *self, int64_t *data, ssize_t n)
 
 static int8_t* THMemoryFile_cloneString(const int8_t *str, ssize_t size)
 {
-  int8_t *cstr = THAlloc(size);
+  int8_t *cstr = static_cast<int8_t*>(THAlloc(size));
   memcpy(cstr, str, size);
   return cstr;
 }
@@ -664,7 +664,7 @@ THFile *THMemoryFile_newWithStorage(THCharStorage *storage, const char *mode)
     storage->data[0] = '\0';
   }
 
-  mfself = THAlloc(sizeof(THMemoryFile));
+  mfself = static_cast<THMemoryFile*>(THAlloc(sizeof(THMemoryFile)));
 
   mfself->storage = storage;
   mfself->size = (storage ? storage->size-1 : 0);

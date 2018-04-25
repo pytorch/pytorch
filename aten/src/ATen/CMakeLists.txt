@@ -48,10 +48,6 @@ IF(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
   SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
 ENDIF()
 
-# Suppress warnings about C-isms which are not valid in C++; TH is going away so
-# it is not worth fixing all of these
-set_property(SOURCE ${ATen_TH_SRCS} APPEND_STRING PROPERTY COMPILE_FLAGS " -fpermissive ")
-
 FILE(GLOB cpu_kernel_cpp_in RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cpu/*.cpp")
 
 LIST(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
