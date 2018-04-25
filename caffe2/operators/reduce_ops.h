@@ -65,8 +65,6 @@ class ReduceOpBase : public Operator<Context> {
 
   std::vector<int> axes_;
   const int keep_dims_;
-
-  Tensor<Context> buffer_;
 };
 
 template <typename T, class Context>
@@ -90,8 +88,7 @@ class ReduceMinOp final : public ReduceOpBase<T, Context> {
         axes.data(),
         X_data,
         Y_data,
-        &context_,
-        &this->buffer_);
+        &context_);
     return true;
   }
 };
@@ -117,8 +114,7 @@ class ReduceMaxOp final : public ReduceOpBase<T, Context> {
         axes.data(),
         X_data,
         Y_data,
-        &context_,
-        &this->buffer_);
+        &context_);
     return true;
   }
 };
@@ -144,8 +140,7 @@ class ReduceSumOp final : public ReduceOpBase<T, Context> {
         axes.data(),
         X_data,
         Y_data,
-        &context_,
-        &this->buffer_);
+        &context_);
     return true;
   }
 };
@@ -171,8 +166,7 @@ class ReduceMeanOp final : public ReduceOpBase<T, Context> {
         axes.data(),
         X_data,
         Y_data,
-        &context_,
-        &this->buffer_);
+        &context_);
     return true;
   }
 };
