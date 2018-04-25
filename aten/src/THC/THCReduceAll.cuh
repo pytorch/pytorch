@@ -191,13 +191,8 @@ void callReduceAll(THCState* state,
   dim3 block;
 
   if (isTwoPassReductionSize(totalElements)) {
-    bool freeScratchSpace = false;
-    void* scratchSpace = THCState_getCurrentDeviceScratchSpace(state);
-    if (!scratchSpace) {
-      THCudaCheck(THCudaMalloc(state, &scratchSpace,
-          THCState_getCurrentDeviceScratchSpaceSize(state)));
-      freeScratchSpace = true;
-    }
+    void* scratchSpace;
+    THCudaCheck(THCudaMalloc(state, &scratchSpace, THCState_getCurrentDeviceScratchSpaceSize(state)));
 
     getPass1ReduceBlockGrid<InT, AccT>(state, totalElements, grid, block);
     size_t smemSize = block.x * sizeof(AccT);
@@ -216,9 +211,7 @@ void callReduceAll(THCState* state,
         numPass1Blocks, init, reduceAccOp,
         (AccT*) scratchSpace, devOut);
 
-    if (freeScratchSpace) {
-      THCudaCheck(THCudaFree(state, scratchSpace));
-    }
+    THCudaCheck(THCudaFree(state, scratchSpace));
   } else {
     getSinglePassReduceBlockGrid<InT, AccT>(totalElements, grid, block);
     size_t smemSize = block.x * sizeof(AccT);
@@ -261,12 +254,9 @@ bool THC_reduceAll(THCState* state,
   if (!outOnDevice) {
     // Use the stream-specific scratch space for the reduction kernel
     // to write out its value
-    devOut = (AccT*) THCState_getCurrentDeviceScratchSpace(state);
-    if (!devOut) {
-      THCudaCheck(THCudaMalloc(state, (void**)&devOut,
-          THCState_getCurrentDeviceScratchSpaceSize(state)));
-      freeDevOut = true;
-    }
+    THCudaCheck(THCudaMalloc(state, (void**)&devOut,
+        THCState_getCurrentDeviceScratchSpaceSize(state)));
+    freeDevOut = true;
   }
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -332,10 +322,10 @@ bool THC_reduceAll(THCState* state,
   // the host (synchronous!)
   if (!outOnDevice) {
     cudaStream_t stream = THCState_getCurrentStream(state);
-    THCudaCheck(cudaMemcpyAsync(out, 
-                                devOut, 
-                                sizeof(AccT), 
-                                cudaMemcpyDeviceToHost, 
+    THCudaCheck(cudaMemcpyAsync(out,
+                                devOut,
+                                sizeof(AccT),
+                                cudaMemcpyDeviceToHost,
                                 stream));
     THCudaCheck(cudaStreamSynchronize(stream));
   }
