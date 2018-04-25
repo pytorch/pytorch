@@ -295,9 +295,9 @@ else
   CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=OFF")
   CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=OFF")
   if [[ -z $BUILD_INTEGRATED ]]; then
-    CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
-    add_package 'mkl'
-    add_package 'mkl-include'
+    #CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
+    #add_package 'mkl'
+    #add_package 'mkl-include'
   fi
 fi
 
