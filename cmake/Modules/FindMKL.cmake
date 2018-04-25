@@ -2,8 +2,8 @@
 #
 # Options:
 #
-#   MKL_USE_IDEEP                     : use IDEEP interface
-#   MKL_USE_MKLML                     : use MKLML interface
+#   USE_IDEEP                         : use IDEEP interface
+#   USE_MKLML                         : use MKLML interface
 #   MKLML_USE_SINGLE_DYNAMIC_LIBRARY  : use single dynamic library interface
 #   MKLML_USE_STATIC_LIBS             : use static libraries
 #   MKLML_MULTI_THREADED              : use multi-threading
@@ -17,7 +17,7 @@
 # ---[ Options
 include(CMakeDependentOption)
 
-if(MKL_USE_IDEEP)
+if(USE_IDEEP)
   set(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   set(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
   set(__ideep_looked_for IDEEP_ROOT)
@@ -90,7 +90,7 @@ if(MKL_USE_IDEEP)
   endif()
 endif()
 
-if(MKL_USE_MKLML)
+if(USE_MKLML)
 
   # ---[ Options
   option(MKLML_USE_SINGLE_DYNAMIC_LIBRARY "Use single dynamic library interface" ON)
@@ -200,10 +200,16 @@ endif()
 if(IDEEP_FOUND OR MKLML_FOUND)
   set(USE_MKL ON)
   set(MKL_FOUND True)
-  list(APPEND MKL_INCLUDE_DIR ${IDEEP_INCLUDE_DIR} ${MKLML_INCLUDE_DIR})
-  list(APPEND MKL_LIBRARIES ${IDEEP_LIBRARIES} ${MKLML_LIBRARIES})
+  if (IDEEP_FOUND)
+    list(APPEND MKL_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
+    list(APPEND MKL_LIBRARIES ${IDEEP_LIBRARIES})
+  endif()
+  if (MKLML_FOUND)
+    list(APPEND MKL_INCLUDE_DIR ${MKLML_INCLUDE_DIR})
+    list(APPEND MKL_LIBRARIES ${MKLML_LIBRARIES})
+  endif()
 else()
   set(USE_MKL OFF)
-  set(MKL_USE_IDEEP OFF)
-  set(MKL_USE_MKLML OFF)
+  set(USE_IDEEP OFF)
+  set(USE_MKLML OFF)
 endif()
