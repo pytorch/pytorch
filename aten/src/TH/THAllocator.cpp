@@ -79,7 +79,7 @@ THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags
 #ifdef _WIN32
     char *suffixname = "_event";
     size_t namelen = strlen(filename)+1+strlen(suffixname);
-    ctx->eventname = THAlloc(namelen);
+    ctx->eventname = static_cast<char*>(THAlloc(namelen));
     strcpy(ctx->eventname, ctx->filename);
     strcat(ctx->eventname, suffixname);
 #endif
