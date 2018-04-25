@@ -453,7 +453,7 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
   // Exceptions must not be thrown across OpenMP parallel sections, so we
   // record the position of the invalid index and throw the exception after the
   // loop.
-  std::atomic<int64_t> invalidIdxPos = -1;
+  std::atomic<int64_t> invalidIdxPos(-1);
 
   ptrdiff_t i;
   #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD) private(i)
@@ -467,7 +467,8 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
         dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
       }
     } else {
-      invalidIdxPos.compare_exchange_strong(-1, i);
+      int64_t tmp = -1;
+      invalidIdxPos.compare_exchange_strong(tmp, i);
     }
   }
 

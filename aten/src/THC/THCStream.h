@@ -8,7 +8,7 @@ struct THCStream
 {
     cudaStream_t stream;
     int device;
-    int refcount;
+    std::atomic<int> refcount;
 };
 
 

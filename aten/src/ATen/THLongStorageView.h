@@ -46,13 +46,12 @@ public:
   */
 
   THLongStorageView(ArrayRef<int64_t> ref, THLongStorageViewKind kind)
-    : zero_dim_to_null(zero_dim_to_null)
+  : zero_dim_to_null(false)
   {
     // zero_dim_to_one converts an empty ArrayRef into [1]
     // zero_dim_to_null converts an empty ArrayRef into a null THLongStorage
     // noelem_to_empty makes an ArrayRef of [0] into an empty THLongStorage
     bool zero_dim_to_one = false;
-    bool zero_dim_to_null = false;
     bool noelem_to_empty = false;
     switch (kind) {
       case THLongStorageViewKind::SIZE:
