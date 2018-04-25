@@ -206,6 +206,42 @@ class TestCaffe2Basic(TestCase):
             np.testing.assert_almost_equal(output[0], vals)
             np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
 
+    def test_tensor_filling_ops_c_backend(self):
+        for dtype in [
+                onnx.TensorProto.FLOAT,
+                onnx.TensorProto.DOUBLE,
+                onnx.TensorProto.BOOL,
+                onnx.TensorProto.INT8,
+                onnx.TensorProto.INT16,
+                onnx.TensorProto.INT32,
+                onnx.TensorProto.INT64,
+                onnx.TensorProto.UINT8,
+                onnx.TensorProto.UINT16,
+                onnx.TensorProto.UINT32,
+        ]:
+            shape = (1, 2, 3)
+            vals = np.random.randn(*shape)
+            if dtype != onnx.TensorProto.BOOL:
+                vals *= 5
+            vals = vals.astype(
+                mapping.TENSOR_TYPE_TO_NP_TYPE[dtype])
+            tensor = make_tensor(
+                name='test-tensor-{}'.format(dtype),
+                data_type=dtype,
+                dims=[1, 2, 3],
+                vals=vals.flatten().tolist(),
+            )
+            b = C.Caffe2Backend()
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(b._build_tensor_filling_op(tensor.SerializeToString(), ''))
+            self.assertEqual(len(op.input), 0)
+            self.assertEqual(op.output, [tensor.name])
+            ws, output = c2_native_run_op(op, inputs=[])
+            self.assertEqual(len(output), 1)
+            np.testing.assert_almost_equal(output[0], vals)
+            np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
+
+
     def test_slice(self):
         X = np.random.randn(1, 2, 3).astype(np.float32)
         starts = np.array([0, 1, 0], dtype=np.int32)

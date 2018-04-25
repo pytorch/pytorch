@@ -60,8 +60,23 @@ is marked as omitted by setting its 'has_{name}' argument to False.
           cond = ...;
         }
     )DOC")
-    .Arg("loop_net", "Net executed on each iteration")
-    .Input(0, "condition", "Scalar boolean condition")
+    .Arg("body", "Net executed on each iteration")
+    .Arg("has_trip_count", "Whether to use the trip count input")
+    .Arg("has_cond", "Whether to use the condition input")
+    .Arg("save_scopes", "Whether to save the scopes across iterations, as in "
+                        "for backprop")
+    .Arg("disable_scopes", "Do not create new scopes. Use this only if you're "
+                           "certain there will be no name collision, for "
+                           "example if you're converting from a fully-SSA IR")
+    .NumInputs(2, INT_MAX)
+    .Input(0, "max_trip_count", "Number of iterations to go out to. Used if "
+                                "the flag has_trip_count is True.")
+    .Input(1, "first_iter_condition", "Dynamic condition value for the first "
+                                      "iteration. For all subsequent iterations,"
+                                      " the condition from the body graph is "
+                                      "used. This input is used if the flag "
+                                      "has_cond is true.")
+    .NumOutputs(0, INT_MAX)
     .AllowInplace([](int in, int out) -> bool { return true; });
 
 } // namespace caffe2

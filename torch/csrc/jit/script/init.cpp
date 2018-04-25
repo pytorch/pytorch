@@ -26,7 +26,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_binders) override {
     ensureTensors(loc, inputs);
-    
+
     if (attributes.size() > 0)
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
     Graph& g = *m.graph();
@@ -43,7 +43,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     py::object func = self;
     std::string cconv(inputs.size(), 't');
     Node* new_node = g.insertNode(g.createPythonOp(
-      THPObjectPtr(func.release().ptr()), cconv, false, {}, {}, false));
+      THPObjectPtr(func.release().ptr()), cconv, {}, {}, false));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for(auto i : inputs)
       new_node->addInput(i);
@@ -383,6 +383,9 @@ void initJitScriptBindings(PyObject* module) {
       auto inputs = createVariableTensorList(args);
       auto outputs = m.run(std::move(inputs));
       return unpackVariableTensorList(std::move(outputs));
+    })
+    .def_property_readonly("graph", [](Method& m) {
+      return m.graph();
     })
     .def("propagate_shapes", &Method::propagate_shapes)
     .def("params", &Method::params);

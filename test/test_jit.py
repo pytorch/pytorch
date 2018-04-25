@@ -1446,6 +1446,41 @@ class TestJit(TestCase):
 
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
+    def test_dropout_script(self):
+
+        eg = torch.zeros(1, 2, 3, requires_grad=True)
+
+        @torch.jit.trace(eg)
+        def foo(x):
+            x = torch.neg(x)
+            return F.dropout(x)
+
+        class MyDrop(nn.Module):
+            def forward(self, x):
+                return foo(x)
+
+        f = io.BytesIO()
+        torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
+
+    def test_python_function(self):
+        class MyFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        @torch.jit.trace(torch.zeros(2))
+        def fn(x):
+            return MyFn.apply(x + 2) + 3
+
+        x = torch.tensor([1., 2., 3.])
+        y = torch.randn(2, 2, requires_grad=True)
+        fn(x)
+        fn(y)
+
 
 class TestScript(TestCase):
 
@@ -2540,7 +2575,7 @@ class TestScript(TestCase):
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
-        with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Dynamic, Dynamic\)"):
+        with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Tensor, Tensor\)"):
             @torch.jit.script
             def mixtypes():
                 a = torch.chunk(1, dim=0, chunks=2)
@@ -2772,6 +2807,31 @@ class TestScript(TestCase):
         self.assertEqual(result, reference)
         self.assertExpected(torch.onnx._export_to_pretty_string(
             mte, (torch.ones(2, 3),), None, verbose=False))
+
+    def test_trace_with_size(self):
+        @torch.jit.trace(torch.zeros(1, 1))
+        def foo(x):
+            return x + 1
+
+        @torch.jit.script
+        def bar(x):
+            y = foo(x)
+            if True:
+                y = 7
+            return y + 1
+
+        self.assertEqual(8, bar(torch.ones(1, 1)))
+
+    def test_index_select_shape_prop(self):
+
+        @torch.jit.script
+        def foo(x, y):
+            return torch.index_select(x, y, dim=1)
+
+        a = torch.zeros(2, 2)
+        b = torch.zeros(4, dtype=torch.long)
+        foo.graph.propagate_shapes((a, b), False)
+        self.assertExpected(str(foo.graph))
 
 
 # Smoke tests for export methods

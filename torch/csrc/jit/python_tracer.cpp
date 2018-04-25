@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
@@ -54,7 +54,7 @@ void initPythonTracerBindings(PyObject* module_) {
     });
 
   m.def("_tracer_enter", [](variable_list trace_inputs, std::size_t num_backwards) {
-    return tracer::enter(std::move(trace_inputs), num_backwards + 1);
+    return tracer::enter(std::move(trace_inputs), num_backwards + 1, true);
   });
   m.def("_tracer_exit", [](variable_list var_outputs) {
     tracer::exit(var_outputs);

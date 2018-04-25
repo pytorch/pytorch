@@ -774,7 +774,20 @@ void addObjectMethods(py::module& m) {
               normal_vals.emplace_back(py::bytes(out));
             }
             return vals;
-          });
+          })
+      .def(
+        "_build_tensor_filling_op",
+        [](caffe2::onnx::Caffe2Backend& instance,
+           const py::bytes& tensor_proto_str,
+           const std::string& name="") -> py::bytes {
+            caffe2::OperatorDef op;
+            onnx_c2::TensorProto tp;
+            ParseProtoFromLargeString(tensor_proto_str, &tp);
+            instance.BuildTensorFillingOp(&op, tp, name);
+            std::string out;
+            op.SerializeToString(&out);
+            return py::bytes(out);
+        });
 
   py::class_<Predictor>(m, "Predictor")
       .def(
@@ -1305,7 +1318,10 @@ void addGlobalMethods(py::module& m) {
         if (PyArray_Check(arg.ptr())) { // numpy array
           PyArrayObject* array = reinterpret_cast<PyArrayObject*>(arg.ptr());
           auto feeder = CreateFeeder(option.device_type());
-          CAFFE_ENFORCE(feeder, "Unknown device type encountered in FeedBlob.");
+          CAFFE_ENFORCE(
+              feeder,
+              "Unknown device type encountered in FeedBlob: ",
+              option.device_type());
           feeder->Feed(option, array, blob);
           return true;
         }

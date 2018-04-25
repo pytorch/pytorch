@@ -17,10 +17,14 @@ class ONNXWhileOp final : public Operator<Context> {
         has_trip_count_(
             OperatorBase::GetSingleArgument<int64_t>("has_trip_count", 0)),
         has_cond_(OperatorBase::GetSingleArgument<int64_t>("has_cond", 0)),
-        save_scopes_(OperatorBase::GetSingleArgument<int64_t>("save_scopes", 0)) {
+        save_scopes_(OperatorBase::GetSingleArgument<int64_t>("save_scopes", 0)),
+        disable_scopes_(OperatorBase::GetSingleArgument<int64_t>("disable_scopes", 0)) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("body"),
         "body net must be specified in ONNXWhile operator");
+    if (disable_scopes_) {
+      CAFFE_ENFORCE(!save_scopes_, "Cannot save scopes when disable_scopes=True");
+    }
     body_net_def_ = this->template GetSingleArgument<NetDef>("body", NetDef());
     if (!body_net_def_.has_name()) {
       body_net_def_.set_name("loop_net");
@@ -39,7 +43,7 @@ class ONNXWhileOp final : public Operator<Context> {
     // Clear workspaces from the previous invocations of the loop
     // and setup a local scope for the first iteration
     ws_stack_.clear();
-    auto loop_ws = ws_stack_.pushForwardWorkspace(parent_ws_);
+    auto loop_ws = !disable_scopes_ ? ws_stack_.pushForwardWorkspace(parent_ws_).get() : parent_ws_;
     scope_ = std::make_shared<LocalScope>(loop_ws, body_net_def_);
 
     constexpr int64_t num_inputs_before_lcds = 2;
@@ -112,7 +116,7 @@ class ONNXWhileOp final : public Operator<Context> {
     // they're the same across iterations.
     std::vector<std::vector<TIndex>> scan_outputs_sizes;
 
-    std::shared_ptr<Workspace> cur_ws = nullptr;
+    Workspace *cur_ws = nullptr;
     bool cur_output_condition = false;
 
     while (true) {
@@ -125,7 +129,7 @@ class ONNXWhileOp final : public Operator<Context> {
         cur_ws = scope_->workspace();
         cur_output_condition = scope_->output_condition();
         if (save_scopes_) {
-          loop_ws = ws_stack_.pushForwardWorkspace(parent_ws_);
+          loop_ws = ws_stack_.pushForwardWorkspace(parent_ws_).get();
           scope_ = std::make_shared<LocalScope>(loop_ws, body_net_def_);
         }
 
@@ -198,7 +202,7 @@ class ONNXWhileOp final : public Operator<Context> {
   class LocalScope {
    public:
     LocalScope(
-        const std::shared_ptr<Workspace>& loop_ws,
+        Workspace *loop_ws,
         const NetDef& body_net_def) : loop_ws_(loop_ws) {
       CAFFE_ENFORCE(loop_ws_,
           "Failed to initialize local loop workspace");
@@ -237,7 +241,7 @@ class ONNXWhileOp final : public Operator<Context> {
       return body_net_;
     }
 
-    std::shared_ptr<Workspace> workspace() const {
+    Workspace* workspace() const {
       return loop_ws_;
     }
 
@@ -272,7 +276,7 @@ class ONNXWhileOp final : public Operator<Context> {
     }
 
    private:
-    std::shared_ptr<Workspace> loop_ws_;
+    Workspace *loop_ws_;
 
     NetBase* body_net_; // owned by a workspace
     Tensor<Context>* iteration_var_;
@@ -289,6 +293,7 @@ class ONNXWhileOp final : public Operator<Context> {
   bool has_trip_count_;
   bool has_cond_;
   bool save_scopes_;
+  bool disable_scopes_;
 
   std::shared_ptr<LocalScope> scope_;
 };
