@@ -88,7 +88,7 @@ struct THPFunction {
 
     // The C++ wrapper for this Python function.
     // See a comment in THPFunction_asFunction for details about this field.
-    torch::autograd::PyFunction cdata;
+    torch::autograd::PyFunction* cdata;
 };
 
 bool THPFunction_initModule(PyObject *module);

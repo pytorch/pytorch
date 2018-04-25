@@ -226,12 +226,12 @@ auto PyFunction::get_shared_ptr() -> std::shared_ptr<Function> {
 // Traverse and clear are required for supporting Python's GC cycle handling.
 static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 {
-  for (const auto& hook : self->cdata.pre_hooks()) {
+  for (const auto& hook : self->cdata->pre_hooks()) {
     if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
     }
   }
-  for (const auto& hook : self->cdata.post_hooks()) {
+  for (const auto& hook : self->cdata->post_hooks()) {
     if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
     }
@@ -244,7 +244,7 @@ static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 
 static int THPFunction_clear(THPFunction *self)
 {
-  self->cdata.set_num_inputs(0);
+  self->cdata->set_num_inputs(0);
 
   Py_CLEAR(self->needs_input_grad);
 
@@ -262,8 +262,8 @@ static int THPFunction_clear(THPFunction *self)
   // exiting this scope. This is important, because deleting Python objects can
   // trigger deletion of other objects, and they can reference this function,
   // seeing it in a half-deleted state.
-  auto pre_hooks = std::move(self->cdata.pre_hooks());
-  auto post_hooks = std::move(self->cdata.post_hooks());
+  auto pre_hooks = std::move(self->cdata->pre_hooks());
+  auto post_hooks = std::move(self->cdata->post_hooks());
 
   return 0;
 }
@@ -272,7 +272,7 @@ static void THPFunction_dealloc(THPFunction* self)
 {
   PyObject_GC_UnTrack(self);
   THPFunction_clear(self);
-  self->cdata.~PyFunction();
+  delete self->cdata;
   self->output_info.~vector();
   self->input_info.~vector();
   self->saved_variables.~vector();
@@ -287,12 +287,12 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   // Python zero-initializes the object memory, so there's no need to initialize
   // most fields
   THPFunction* self = (THPFunction*)obj;
-  new (&self->cdata) PyFunction(obj);
+  self->cdata = new PyFunction(obj);
   new (&self->output_info) std::vector<VariableInfo>();
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
-  self->cdata.set_num_inputs(0);
+  self->cdata->set_num_inputs(0);
   return obj;
 }
 
@@ -445,7 +445,6 @@ static void _save_variables(THPFunction* self)
   Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
   self->saved_variables.clear();
   self->saved_variables.reserve(num_saved);
-  auto cdata_ptr = &self->cdata;
   for (int i = 0; i < num_saved; i++) {
     PyObject *obj = PyTuple_GET_ITEM(self->to_save, i);
     if (obj == Py_None) {
@@ -453,7 +452,7 @@ static void _save_variables(THPFunction* self)
       continue;
     } else if (THPVariable_Check(obj)) {
       auto variable = (THPVariable*)obj;
-      bool is_output = variable->cdata.grad_fn().get() == cdata_ptr;
+      bool is_output = variable->cdata.grad_fn().get() == self->cdata;
       self->saved_variables.emplace_back(variable->cdata, is_output);
     } else {
       throw TypeError(
@@ -627,7 +626,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   THPObjectPtr outputs(PyTuple_New(num_outputs));
   if (!outputs) throw python_error();
 
-  grad_fn->cdata.set_num_inputs(num_outputs);
+  grad_fn->cdata->set_num_inputs(num_outputs);
 
   // Record type, device, and size information about inputs
   if (is_executable) {
@@ -676,7 +675,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   auto& unpacked_input = info_pair.first;
   auto& input_info = info_pair.second;
   bool is_executable = input_info.is_executable;
-  self->cdata.set_next_edges(std::move(input_info.next_edges));
+  self->cdata->set_next_edges(std::move(input_info.next_edges));
   self->needs_input_grad = input_info.needs_input_grad.release();
 
   // We don't support tracing in the legacy code path
@@ -722,7 +721,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
   // Initialize backward function (and ctx)
   bool is_executable = input_info.is_executable;
-  ctx->cdata.set_next_edges(std::move(input_info.next_edges));
+  ctx->cdata->set_next_edges(std::move(input_info.next_edges));
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
@@ -791,7 +790,7 @@ static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_g
 static void _trim_grad_input(THPFunction *self, THPObjectPtr& grad_input)
 {
   int num_grads = PyTuple_GET_SIZE(grad_input.get());
-  const int num_outputs = self->cdata.num_outputs();
+  const int num_outputs = self->cdata->num_outputs();
   if (num_grads > num_outputs) {
     // Check that all extra grads are none
     bool all_none = true;
@@ -819,9 +818,9 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
       THPUtils_invalidArguments(args, nullptr, "_do_backward", 1, "(tuple, bool)");
       return nullptr;
     }
-    THPUtils_assert(PyTuple_GET_SIZE(raw_grad_output) == self->cdata.num_inputs(),
+    THPUtils_assert(PyTuple_GET_SIZE(raw_grad_output) == self->cdata->num_inputs(),
                     "%s got an invalid number of gradients (expected %d got %d)",
-                    THPUtils_typename(self), self->cdata.num_inputs(),
+                    THPUtils_typename(self), self->cdata->num_inputs(),
                     PyTuple_GET_SIZE(raw_grad_output));
 
     // Some of the output might have been unused, so we have to allocate
@@ -842,7 +841,7 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     // if and only if the additional ones are all None
     _trim_grad_input(self, grad_input);
     int num_grads = PyTuple_GET_SIZE(grad_input.get());
-    int num_outputs = self->cdata.num_outputs();
+    int num_outputs = self->cdata->num_outputs();
     THPUtils_assert(num_grads == num_outputs, "%s returned an invalid number of "
         "gradient tensors (expected %d, but got %d)", THPUtils_typename(self),
         num_outputs, num_grads);
@@ -869,13 +868,13 @@ PyObject* THPFunction__register_hook_dict(THPFunction *self, PyObject *_var)
   THPVariable *var = (THPVariable*)_var;
   std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(
       var->backward_hooks, var->cdata.output_nr()));
-  self->cdata.add_pre_hook(std::move(hook));
+  self->cdata->add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }
 
 PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
 {
-  return torch::autograd::registerFunctionHook(self->cdata, hook);
+  return torch::autograd::registerFunctionHook(*self->cdata, hook);
 }
 
 static PyObject *unpack_saved_variables(
@@ -929,14 +928,14 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
 
 PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
-  const auto num_outputs = self->cdata.num_outputs();
+  const auto num_outputs = self->cdata->num_outputs();
   THPObjectPtr result(PyTuple_New(num_outputs));
   if (!result)
     return nullptr;
   for (uint32_t i = 0; i < num_outputs; i++) {
     THPObjectPtr fn_tuple(PyTuple_New(2));
     if (!fn_tuple) return nullptr;
-    const auto& edge = self->cdata.next_edge(i);
+    const auto& edge = self->cdata->next_edge(i);
     PyObject* fn = functionToPyObject(edge.function);
     if (!fn) return nullptr;
     PyTuple_SET_ITEM(fn_tuple.get(), 0, fn);
@@ -1087,5 +1086,5 @@ std::shared_ptr<PyFunction> THPFunction_asFunction(THPFunction* self)
   }
 
   Py_INCREF((PyObject*)self);
-  return std::shared_ptr<PyFunction>(&self->cdata, Decref());
+  return std::shared_ptr<PyFunction>(self->cdata, Decref());
 }
