@@ -5,6 +5,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import onnx.backend
+
 import argparse
 import caffe2.python.workspace as c2_workspace
 import glob
@@ -217,8 +219,9 @@ model_mapping = {
     'inception_v2': 'inception_v2',
     'resnet50': 'resnet50',
     'squeezenet': 'squeezenet_old',
-    'vgg16': 'vgg16',
+    #'vgg16': 'vgg16',
     'vgg19': 'vgg19',
+    'zfnet': 'zfnet',
 }
 
 
