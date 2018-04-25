@@ -284,14 +284,20 @@ fi
 if [[ -n $CUDA_VERSION ]]; then
   CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=ON")
   CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=ON")
+
+  # NCCL and GLOO don't work with static CUDA right now. Cmake changes are
+  # needed
+  #CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=OFF")
+  #CAFFE2_CMAKE_ARGS+=("-DUSE_GLOO=OFF")
+  #CAFFE2_CMAKE_ARGS+=("-DCAFFE2_STATIC_LINK_CUDA=ON")
 else
   # Flags required for CPU for Caffe2
   CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=OFF")
   CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=OFF")
   if [[ -z $BUILD_INTEGRATED ]]; then
-    CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
-    add_package 'mkl'
-    add_package 'mkl-include'
+    #CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
+    #add_package 'mkl'
+    #add_package 'mkl-include'
   fi
 fi
 
@@ -320,9 +326,10 @@ if [[ -z $SKIP_CONDA_TESTS && -n $UPLOAD_TO_CONDA ]]; then
   CONDA_BUILD_ARGS+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
 
   # If building a redistributable, then package the CUDA libraries with it
-  if [[ -n $CUDA_VERSION ]]; then
-    export PACKAGE_CUDA_LIBS=1
-  fi
+  # TODO this doesn't work on Ubuntu right now
+  #if [[ -n $CUDA_VERSION ]]; then
+  #  export PACKAGE_CUDA_LIBS=1
+  #fi
 
   # Show what the final meta.yaml looks like
   echo "Finalized meta.yaml is"
