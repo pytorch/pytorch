@@ -32,6 +32,9 @@ export TH_BINARY_BUILD=1
 export PYTORCH_BUILD_VERSION=$PKG_VERSION
 export PYTORCH_BUILD_NUMBER=$PKG_BUILDNUM
 export NCCL_ROOT_DIR=/usr/local/cuda
+export USE_STATIC_CUDNN=1
+export USE_STATIC_NCCL=1
+export ATEN_STATIC_CUDA=1
 
 
 ###########################################################
