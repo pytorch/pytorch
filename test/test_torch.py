@@ -778,12 +778,12 @@ class TestTorch(TestCase):
 
     def test_all_any_with_dim(self):
         def test(x):
-            r1 = x.prod(dim=0, keepdim=False)
+            r1 = x.prod(dim=0, keepdim=False).byte()
             r2 = x.all(dim=0, keepdim=False)
             self.assertEqual(r1.shape, r2.shape)
             self.assertTrue((r1 == r2).all())
 
-            r3 = x.sum(dim=1, keepdim=True).clamp(0, 1)
+            r3 = x.sum(dim=1, keepdim=True).clamp(0, 1).byte()
             r4 = x.any(dim=1, keepdim=True)
             self.assertEqual(r3.shape, r4.shape)
             self.assertTrue((r3 == r4).all())
