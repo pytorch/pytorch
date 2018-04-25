@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/cpu/cpuinfo/include/cpuinfo.h"
+#include <cpuinfo.h>
 #include <type_traits>
 #include <iostream>
 
