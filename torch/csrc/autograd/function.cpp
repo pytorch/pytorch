@@ -125,28 +125,23 @@ void Function::set_up_context_edge(
  * depth, the Function* to be deleted are accumulated in a per-thread
  * delete queue and handled by one of the deleters.
  */
-using function_queue = std::deque<Function*>;
-thread_local function_queue kDeleteFunctionQueue;
+thread_local std::deque<Function*> kDeleteFunctionQueue;
 
-const ssize_t kDeleteFunctionMaxRecursionDepth = 50000;
-thread_local ssize_t kDeleteFunctionRecursionDepth = 0;
+constexpr size_t kDeleteFunctionMaxRecursionDepth = 10000;
+thread_local size_t kDeleteFunctionRecursionDepth = 0;
 
 struct RecursionDepthCounter {
  public:
   explicit RecursionDepthCounter() {
     ++kDeleteFunctionRecursionDepth;
-    value_ = kDeleteFunctionRecursionDepth;
   }
   ~RecursionDepthCounter() {
     --kDeleteFunctionRecursionDepth;
   }
 
-  ssize_t value() {
-    return value_;
+  size_t value() {
+    return kDeleteFunctionRecursionDepth;
   }
-
- private:
-  ssize_t value_;
 };
 
 void deleteFunction(Function* function) {
@@ -158,14 +153,18 @@ void deleteFunction(Function* function) {
   }
 
   delete function;
+
+  if (kDeleteFunctionQueue.size() == 0) {
+    return;
+  }
+  if (recursion_depth.value() != kDeleteFunctionMaxRecursionDepth) {
+    AT_ERROR("Only one deleter per thread should be able to process "
+             "the delete queue. Please open an issue.");
+  }
   while (kDeleteFunctionQueue.size() > 0) {
-    if (recursion_depth.value() != kDeleteFunctionMaxRecursionDepth) {
-      AT_ERROR("Only one deleter per thread should be able to process "
-               "the delete queue. Please open an issue.");
-    }
-    auto function = kDeleteFunctionQueue.front();
+    auto queued_function = kDeleteFunctionQueue.front();
     kDeleteFunctionQueue.pop_front();
-    delete function;
+    delete queued_function;
   }
 }
 
