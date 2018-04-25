@@ -441,12 +441,7 @@ bool hasHandleOutput(Node * n) {
 
 #ifndef NO_PYTHON
 Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
-  py::function func;
-  if (op->tracing_autograd_python_function) {
-    func = py::function(py::handle(op->pyobj.get()).attr("apply"));
-  } else {
-    func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
-  }
+  py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
   bool tracing_autograd_python_function = op->tracing_autograd_python_function;
   bool has_handle = hasHandleOutput(op);
   size_t num_inputs = 0;
