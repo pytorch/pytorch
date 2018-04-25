@@ -210,8 +210,10 @@ enum Functions: std::uint16_t {
   tensorLogspace,
   tensorRand,
   tensorRandn,
-  tensorLogicalall,
-  tensorLogicalany,
+  tensorLogicalAndAll,
+  tensorLogicalAnd,
+  tensorLogicalAnyAll,
+  tensorLogicalAny,
 
   // th_random
   tensorRandom,
