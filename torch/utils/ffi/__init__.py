@@ -172,6 +172,8 @@ def create_extension(name, headers, sources, verbose=True, with_cuda=False,
 
     ffi = cffi.FFI()
     sources = [os.path.join(base_path, src) for src in sources]
+    # NB: TH headers are C99 now
+    kwargs['extra_compile_args'] = ['-std=c99'] + kwargs.get('extra_compile_args', [])
     ffi.set_source(cffi_wrapper_name, wrapper_source + all_headers_source,
                    sources=sources,
                    include_dirs=include_dirs,
