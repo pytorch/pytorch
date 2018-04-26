@@ -130,7 +130,9 @@ As a developer, here is what you need to know:
    will also ensure that the symbol is exported from the DLL; otherwise it
    won't be visible.)
 
-2. By default, C++ features should ONLY be used in cpp files, and not in
-   header files.  If you need to use a C++ type in a header file, you should
-   define this in a separate, C++ only header, and declare it opaquely
-   in the C headers. Search for `mutex` for an example of this principle being applied.
+2. C++ features should ONLY be used in `.cpp` and `.hpp` files, and not in
+   `.h` files.  If you need to use a C++ type in a header file, you should
+   define this in a separate, C++ only header `.hpp`, and declare it opaquely
+   in the `.h`. Search for `mutex` for an example of this principle being applied.
+   (This convention is OPPOSITE from the prevailing convention in PyTorch and
+   ATen, where C++ headers are defined in `.h` files.)
