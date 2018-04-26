@@ -92,7 +92,7 @@ class TestTorch(TestCase):
             for i, j in zip(v1, v2):
                 res2 += i * j
             self.assertEqual(res1, res2)
-            out = torch.randn(())
+            out = torch.randn(()).type(tname)
             torch.dot(v1, v2, out=out)
             self.assertEqual(res1, out)
 
@@ -105,7 +105,7 @@ class TestTorch(TestCase):
             for i, j in zip(v1, v2):
                 res2 += i * j
             self.assertEqual(res1, res2)
-            out = torch.randn(())
+            out = torch.randn(()).type(tname)
             torch.dot(v1, v2, out=out)
             self.assertEqual(res1, out)
 
