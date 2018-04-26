@@ -12,7 +12,7 @@
 #  BLAS_LIBRARIES - list of libraries to link against to use BLAS
 #  BLAS_INCLUDE_DIR - include directory
 
-# Do nothing is BLAS was found before
+# Do nothing if BLAS was found before
 IF(NOT BLAS_FOUND)
 
 SET(BLAS_LIBRARIES)
