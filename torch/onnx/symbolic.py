@@ -406,6 +406,20 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     return r, None
 
 
+def max_pool3d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+    if ceil_mode:
+        return _unimplemented("max_pool3d", "ceil_mode")
+    if set(_triple(dilation)) != {1}:
+        return _unimplemented("max_pool3d", "dilation")
+    if not stride:
+        stride = kernel_size
+    r = g.op("MaxPool", input,
+             kernel_shape_i=_triple(kernel_size),
+             pads_i=_triple(padding) * 2,
+             strides_i=_triple(stride))
+    return r, None
+
+
 def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
     if ceil_mode:
         return _unimplemented("avg_pool2d", "ceil_mode")
@@ -539,7 +553,9 @@ def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
 
-def elu(g, input, alpha, inplace=False):
+def elu(g, input, alpha, scale):
+    if scale and scale != 1.:
+        return _unimplemented("scale", "does not support scale in Elu")
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
 
