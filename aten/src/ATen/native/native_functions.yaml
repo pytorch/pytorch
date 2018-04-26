@@ -281,6 +281,9 @@
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
 
+- func: dot_out(Tensor result, Tensor self, Tensor tensor) -> Tensor
+  variants: function
+
 - func: einsum(std::string equation, TensorList tensors) -> Tensor
   variants: function
 
@@ -467,6 +470,9 @@
   variants: function
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
+
+- func: matmul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
 
 - func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
