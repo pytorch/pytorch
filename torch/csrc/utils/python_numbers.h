@@ -58,6 +58,9 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
 }
 
 inline bool THPUtils_checkIndex(PyObject *obj) {
+  if (PyBool_Check(obj)) {
+    return false;
+  }
   if (THPUtils_checkLong(obj)) {
     return true;
   }
