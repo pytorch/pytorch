@@ -4,6 +4,8 @@
 #include <structmember.h>
 
 #include <stdbool.h>
+#include <TH/THTensor.hpp>
+#include <THC/THCTensor.hpp>
 #include "THCP.h"
 
 #include "override_macros.h"

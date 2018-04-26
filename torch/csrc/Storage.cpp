@@ -10,6 +10,7 @@
 
 #include <stdbool.h>
 #include <TH/TH.h>
+#include <TH/THStorage.hpp>
 #include <libshm.h>
 #include "THP.h"
 #include "allocators.h"

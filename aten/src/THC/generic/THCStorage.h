@@ -41,7 +41,7 @@ THC_API void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const 
 THC_API void THCStorage_(retain)(THCState *state, THCStorage *storage);
 
 /* used by StorageSharing */
-THC_API bool THStorage_(retainIfLive)(THStorage *storage);
+THC_API bool THCStorage_(retainIfLive)(THCStorage *storage);
 
 THC_API void THCStorage_(free)(THCState *state, THCStorage *storage);
 THC_API void THCStorage_(resize)(THCState *state, THCStorage *storage, ptrdiff_t size);

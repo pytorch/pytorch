@@ -164,6 +164,6 @@ INSTALL(FILES
           generic/THCTensorMode.cu
           generic/THCTensorTopK.h
           generic/THCTensorTopK.cu
-          generic/generic/THCStorage.hpp
-          generic/generic/THCTensor.hpp
+          generic/THCStorage.hpp
+          generic/THCTensor.hpp
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")
