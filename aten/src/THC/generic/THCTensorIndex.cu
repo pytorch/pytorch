@@ -92,18 +92,6 @@ bool THCTensor_(indexShouldBeMajor)(TensorInfo<real, unsigned int> &info,
   return false;
 }
 
-void THCTensor_(indexCopy_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, THCTensor *src)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
-
-  THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
-  THCudaLongTensor_copyLong(state, indices_, indices);
-
-  THCTensor_(indexCopy)(state, dst, dim, indices_, src);
-
-  THCudaLongTensor_free(state, indices_);
-}
-
 void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, THCTensor *src)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
@@ -293,18 +281,6 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
   }
 }
 
-void THCTensor_(indexAdd_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, THCTensor *src)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
-
-  THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
-  THCudaLongTensor_copyLong(state, indices_, indices);
-
-  THCTensor_(indexAdd)(state, dst, dim, indices_, src);
-
-  THCudaLongTensor_free(state, indices_);
-}
-
 void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, THCTensor *src)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
@@ -426,18 +402,6 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
 #undef LARGE_INDEX
 }
 
-void THCTensor_(indexFill_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, real val)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, dst));
-
-  THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
-  THCudaLongTensor_copyLong(state, indices_, indices);
-
-  THCTensor_(indexFill)(state, dst, dim, indices_, val);
-
-  THCudaLongTensor_free(state, indices_);
-}
-
 void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, real val)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, dst));
@@ -542,20 +506,6 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
 #undef SMALL_INDEX
 #undef LARGE_INDEX
-}
-
-
-void THCTensor_(indexSelect_long)(THCState *state, THCTensor *dst, THCTensor *src, int dim, THLongTensor *indices)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
-  THArgCheck(indices->nDimension <= 1, 3, "Index is supposed to be an empty tensor or a vector");
-
-  THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
-  THCudaLongTensor_copyLong(state, indices_, indices);
-
-  THCTensor_(indexSelect)(state, dst, src, dim, indices_);
-
-  THCudaLongTensor_free(state, indices_);
 }
 
 void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, int dim, THCudaLongTensor *indices)
