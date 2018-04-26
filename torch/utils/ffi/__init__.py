@@ -32,8 +32,8 @@ def _generate_typedefs():
                 th_struct = 'struct ' + th_name
 
                 typedefs += ['typedef {} {};'.format(th_struct, th_name)]
-                module = torch if lib == 'TH' else torch.cuda
-                python_class = getattr(module, python_name)
+                python_module = 'torch.cuda' if lib == 'THCuda' else 'torch'
+                python_class = python_module + '.' + python_name
                 _cffi_to_torch[th_struct] = python_class
                 _torch_to_cffi[python_class] = th_struct
     return '\n'.join(typedefs) + '\n'
@@ -191,7 +191,7 @@ def create_extension(name, headers, sources, verbose=True, with_cuda=False,
 def _wrap_function(function, ffi):
     @wraps(function)
     def safe_call(*args, **kwargs):
-        args = tuple(ffi.cast(_torch_to_cffi.get(type(arg), 'void') + '*', arg._cdata)
+        args = tuple(ffi.cast(_torch_to_cffi.get(arg.type(), 'void') + '*', arg._cdata)
                      if isinstance(arg, torch.Tensor) or torch.is_storage(arg)
                      else arg
                      for arg in args)
@@ -203,6 +203,8 @@ def _wrap_function(function, ffi):
                 cdata = int(ffi.cast('uintptr_t', result))
                 cname = typeof.item.cname
                 if cname in _cffi_to_torch:
-                    return _cffi_to_torch[cname](cdata=cdata)
+                    # TODO: Maybe there is a less janky way to eval
+                    # off of this
+                    return eval(_cffi_to_torch[cname])(cdata=cdata)
         return result
     return safe_call
