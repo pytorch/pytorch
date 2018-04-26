@@ -92,6 +92,9 @@ class TestTorch(TestCase):
             for i, j in zip(v1, v2):
                 res2 += i * j
             self.assertEqual(res1, res2)
+            out = torch.randn(()).type(tname)
+            torch.dot(v1, v2, out=out)
+            self.assertEqual(res1, out)
 
         # Test 0-strided
         for tname, _prec in types.items():
@@ -102,6 +105,9 @@ class TestTorch(TestCase):
             for i, j in zip(v1, v2):
                 res2 += i * j
             self.assertEqual(res1, res2)
+            out = torch.randn(()).type(tname)
+            torch.dot(v1, v2, out=out)
+            self.assertEqual(res1, out)
 
     def test_ger(self):
         types = {
@@ -2604,6 +2610,10 @@ class TestTorch(TestCase):
                             # test torch.matmul function as well
                             torch_result = maybe_squeeze_result(l, r, torch.matmul(l, r))
                             self.assertEqual(truth, torch_result)
+                            # test torch.matmul with out
+                            out = torch.zeros_like(torch_result)
+                            torch.matmul(l, r, out=out)
+                            self.assertEqual(truth, maybe_squeeze_result(l, r, out))
 
                 # compare to bmm
                 bmm_result = (torch.bmm(lhs_expanded.contiguous().view(-1, *lhs_mat_dims),
