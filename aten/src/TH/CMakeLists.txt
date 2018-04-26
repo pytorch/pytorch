@@ -120,6 +120,7 @@ INSTALL(FILES
   generic/THTensorRandom.h
   generic/THVectorDispatch.cpp
   generic/THVector.h
+  # See Note [TH abstraction violation]
   generic/THStorage.hpp
   generic/THTensor.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")
