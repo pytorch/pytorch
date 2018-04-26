@@ -55,6 +55,9 @@ TH_API void THStorage_(clearFlag)(THStorage *storage, const char flag);
 TH_API void THStorage_(retain)(THStorage *storage);
 TH_API void THStorage_(swap)(THStorage *storage1, THStorage *storage2);
 
+/* used by StorageSharing */
+TH_API bool THStorage_(retainIfLive)(THStorage *storage);
+
 /* might differ with other API (like CUDA) */
 TH_API void THStorage_(free)(THStorage *storage);
 TH_API void THStorage_(resize)(THStorage *storage, ptrdiff_t size);

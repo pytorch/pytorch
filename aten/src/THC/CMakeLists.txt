@@ -111,6 +111,11 @@ INSTALL(FILES
           THCThrustAllocator.cuh
           THCTensorMode.cuh
           THCTensorTopK.cuh
+          THCCachingAllocator.hpp
+          THCGenerator.hpp
+          THCTensor.hpp
+          THCStream.hpp
+          THCStorage.hpp
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC")
 
 INSTALL(FILES
@@ -159,4 +164,6 @@ INSTALL(FILES
           generic/THCTensorMode.cu
           generic/THCTensorTopK.h
           generic/THCTensorTopK.cu
+          generic/generic/THCStorage.hpp
+          generic/generic/THCTensor.hpp
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")

@@ -107,6 +107,19 @@ void THStorage_(retain)(THStorage *storage)
     ++storage->refcount;
 }
 
+bool THStorage_(retainIfLive)(THStorage *storage)
+{
+  // TODO: Check if TH_STORAGE_REFCOUNTED?
+  int refcount = storage->refcount.load();
+  while (refcount > 0) {
+    if (storage->refcount.compare_exchange_strong(refcount, refcount + 1)) {
+      return true;
+    }
+    refcount = storage->refcount.load();
+  }
+  return false;
+}
+
 void THStorage_(free)(THStorage *storage)
 {
   if(!storage)

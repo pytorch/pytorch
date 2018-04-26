@@ -86,6 +86,9 @@ INSTALL(FILES
   THTensorMacros.h
   THVector.h
   THHalf.h
+  THTensor.hpp
+  THStorage.hpp
+  THGenerator.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
 INSTALL(FILES
@@ -117,4 +120,6 @@ INSTALL(FILES
   generic/THTensorRandom.h
   generic/THVectorDispatch.cpp
   generic/THVector.h
+  generic/THStorage.hpp
+  generic/THTensor.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")
