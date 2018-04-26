@@ -290,6 +290,11 @@ class KLDivLoss(_Loss):
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
 
+    .. note:: The default averaging means that the loss is actually **not** the
+          KL Divergence because the terms are already probability weighted.
+          A future release of PyTorch may move the default loss closer to the
+          mathematical definition.
+
     Args:
         size_average (bool, optional: By default, the losses are averaged
             for each minibatch over observations **as well as** over
