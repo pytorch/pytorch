@@ -1,3 +1,5 @@
+#pragma once
+
 #include "THCTensor.h"
 #include "THTensor.hpp"
 #include "THCStorage.hpp"
