@@ -18,7 +18,7 @@
 
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>
-#include <THC/THCGenerator.h>
+#include <THC/THCGenerator.hpp>
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
 

@@ -1,6 +1,6 @@
 #include "THGeneral.h"
 #include "THRandom.h"
-#include "THGenerator.h"
+#include "THGenerator.hpp"
 
 #ifndef _WIN32
 #include <fcntl.h>

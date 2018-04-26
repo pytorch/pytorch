@@ -1,4 +1,4 @@
-#include "THCCachingAllocator.h"
+#include "THCCachingAllocator.hpp"
 
 #include <cuda_runtime_api.h>
 #include <algorithm>

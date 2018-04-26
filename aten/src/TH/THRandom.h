@@ -6,7 +6,7 @@
 #define _MERSENNE_STATE_N 624
 #define _MERSENNE_STATE_M 397
 
-/* Struct definition is moved to THGenerator.h, because THRandom.h
+/* Struct definition is moved to THGenerator.hpp, because THRandom.h
 needs to be C-compatible in order to be included in C FFI extensions. */
 typedef struct THGenerator THGenerator;
 typedef struct THGeneratorState THGeneratorState;

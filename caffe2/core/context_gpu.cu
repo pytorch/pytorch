@@ -4,7 +4,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "THCCachingAllocator.h"
+#include "THCCachingAllocator.hpp"
 #include "cub/util_allocator.cuh"
 
 #include "caffe2/core/asan.h"
