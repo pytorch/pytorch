@@ -111,6 +111,9 @@ fi
 if [[ -n $CONDA_INSTALL_LOCALLY ]]; then
   install_locally=1
 fi
+if [[ -n $BUILD_INTEGRATED ]]; then
+  pytorch_too=1
+fi
 
 # Parameters passed in by command line. These override those set by environment
 # variables
@@ -118,7 +121,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --name)
       shift
-      PACKAGE_NAME=$1
+      package_name=$1
       ;;
     --suffix)
       shift
@@ -145,7 +148,10 @@ while [[ $# -gt 0 ]]; do
       BUILD_FULL=1
       ;;
     --integrated)
-      BUILD_INTEGRATED=1
+      pytorch_too=1
+      ;;
+    --pytorch-too)
+      pytorch_too=1
       ;;
     --conda)
       shift
@@ -186,7 +192,7 @@ fi
 
 ###########################################################
 # Set the build version
-if [[ -n $BUILD_INTEGRATED ]]; then
+if [[ -n $pytorch_too ]]; then
   export PYTORCH_BUILD_VERSION="$(date +"%Y.%m.%d")"
 else
   export PYTORCH_BUILD_VERSION="0.8.dev.$(date +"%Y.%m.%d")"
@@ -217,15 +223,16 @@ fi
 ###########################################################
 # Pick the correct conda-build folder
 ###########################################################
+# And copy the meta.yaml to the correct build folder
 PYTORCH_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 CONDA_BUILD_DIR="${PYTORCH_ROOT}/conda"
-if [[ -n $BUILD_INTEGRATED ]]; then
-  # This cp is so only one meta.yaml is used
-  \cp -r "$CONDA_BUILD_DIR/caffe2/normal/meta.yaml" "$CONDA_BUILD_DIR/integrated/meta.yaml"
+if [[ -n $pytorch_too ]]; then
+  \cp -r "$CONDA_BUILD_DIR/caffe2/meta.yaml" "$CONDA_BUILD_DIR/integrated/meta.yaml"
   CONDA_BUILD_DIR="${CONDA_BUILD_DIR}/integrated"
 elif [[ -n $BUILD_FULL ]]; then
   CONDA_BUILD_DIR="${CONDA_BUILD_DIR}/caffe2/full"
 else
+  \cp -r "$CONDA_BUILD_DIR/caffe2/meta.yaml" "$CONDA_BUILD_DIR/caffe2/normal/meta.yaml"
   CONDA_BUILD_DIR="${CONDA_BUILD_DIR}/caffe2/normal"
 fi
 META_YAML="${CONDA_BUILD_DIR}/meta.yaml"
@@ -236,10 +243,10 @@ portable_sed "s#path:.*#path: $PYTORCH_ROOT#" $META_YAML
 # Build the package name and build string depending on gcc and CUDA
 ###########################################################
 BUILD_STRING='py{{py}}'
-if [[ -z $PACKAGE_NAME ]]; then
-  PACKAGE_NAME='caffe2'
-  if [[ -n $BUILD_INTEGRATED ]]; then
-    PACKAGE_NAME="pytorch-${PACKAGE_NAME}"
+if [[ -z $package_name ]]; then
+  package_name='caffe2'
+  if [[ -n $pytorch_too ]]; then
+    package_name="pytorch-${package_name}"
   fi
 fi
 if [[ -n $CUDA_VERSION ]]; then
@@ -252,14 +259,14 @@ if [[ -n $CUDA_VERSION ]]; then
 else
   BUILD_STRING="${BUILD_STRING}_cpu"
 fi
-if [[ "$(uname)" != 'Darwin' && -z $BUILD_INTEGRATED && $GCC_USE_C11 -eq 0 ]]; then
+if [[ "$(uname)" != 'Darwin' && -z $pytorch_too && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
   BUILD_STRING="${BUILD_STRING}_gcc${GCC_VERSION:0:3}"
 fi
 if [[ -n $BUILD_FULL ]]; then
   BUILD_STRING="${BUILD_STRING}_full"
 fi
-portable_sed "s/name: caffe2.*\$/name: ${PACKAGE_NAME}/" $META_YAML
+portable_sed "s/name: caffe2.*\$/name: ${package_name}/" $META_YAML
 portable_sed "s/string:.*\$/string: ${BUILD_STRING}/" $META_YAML
 
 
@@ -270,7 +277,7 @@ if [[ -n $skip_tests ]]; then
   remove_lines_with 'test:'
   remove_lines_with 'imports:'
   remove_lines_with 'caffe2.python.core'
-elif [[ -n $BUILD_INTEGRATED ]]; then
+elif [[ -n $pytorch_too ]]; then
   if [[ -n $CUDA_VERSION ]]; then
     append_to_section 'test' 'requires:'
     append_to_section 'test' "  - $CUDA_FEATURE_NAME"
@@ -292,7 +299,7 @@ add_package 'gflags'
 add_package 'opencv'
 
 # Add packages required for pytorch
-if [[ -n $BUILD_INTEGRATED ]]; then
+if [[ -n $pytorch_too ]]; then
   remove_lines_with 'numpy'
   add_package 'cffi'
   add_package 'mkl' '>=2018'
@@ -301,13 +308,14 @@ if [[ -n $BUILD_INTEGRATED ]]; then
   add_package 'typing'
   append_to_section 'build' '- pyyaml'
   append_to_section 'build' '- setuptools'
-  CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
+  #CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
   if [[ -n $CUDA_VERSION ]]; then
     append_to_section 'features' features:
     append_to_section 'features' "  - $CUDA_FEATURE_NAME" 
     append_to_section 'features' '  - nccl2'
     add_package $CUDA_FEATURE_NAME
     CONDA_CHANNEL+=('-c pytorch')
+    export BUILD_WITH_CUDA=1
   fi
 else
   add_package 'leveldb'
@@ -327,7 +335,7 @@ else
   # Flags required for CPU for Caffe2
   CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=OFF")
   CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=OFF")
-  #if [[ -z $BUILD_INTEGRATED ]]; then
+  #if [[ -z $pytorch_too ]]; then
   #  #CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
   #  #add_package 'mkl'
   #  #add_package 'mkl-include'
@@ -377,5 +385,5 @@ CONDA_CAFFE2_CMAKE_ARGS=${CAFFE2_CMAKE_ARGS[@]} conda build $CONDA_BUILD_DIR ${C
 
 # Install Caffe2 from the built package into the local conda environment
 if [[ -n $install_locally ]]; then
-  conda install -y ${CONDA_CHANNEL[@]} $PACKAGE_NAME --use-local
+  conda install -y ${CONDA_CHANNEL[@]} $package_name --use-local
 fi
