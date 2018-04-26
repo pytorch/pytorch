@@ -261,7 +261,7 @@ void encodeBlock(onnx::GraphProto * p_g, Block *b,
       body->set_name("body");
       body->set_type(onnx::aGRAPH);
       auto g = body->mutable_g();
-      encodeBlock(g, node->blocks()[0], initializers, ctx, raw_data_export_map);
+      encodeBlock(g, node->blocks()[0], {}, ctx, raw_data_export_map);
     }
     if (node->kind() == torch::jit::onnx::If) {
       JIT_ASSERT(node->blocks().size() == 2);
@@ -270,17 +270,18 @@ void encodeBlock(onnx::GraphProto * p_g, Block *b,
       true_branch->set_name("then_branch");
       true_branch->set_type(onnx::aGRAPH);
       auto true_g = true_branch->mutable_g();
-      encodeBlock(true_g, node->blocks()[0], initializers, ctx, raw_data_export_map);
+      encodeBlock(true_g, node->blocks()[0], {}, ctx, raw_data_export_map);
 
       auto false_branch = p_n->add_attribute();
       false_branch->set_name("else_branch");
       false_branch->set_type(onnx::aGRAPH);
       auto false_g = false_branch->mutable_g();
-      encodeBlock(false_g, node->blocks()[1], initializers, ctx, raw_data_export_map);
+      encodeBlock(false_g, node->blocks()[1], {}, ctx, raw_data_export_map);
     }
   }
   auto num_initializers = initializers.size();
-  int inputs_count = b->inputs().size() - num_initializers;
+  JIT_ASSERT(b->inputs().size() >= num_initializers);
+  size_t inputs_count = b->inputs().size() - num_initializers;
   for (auto & tensor : initializers) {
     // TODO: stop using positions to determine which initializers
     // match to which inputs

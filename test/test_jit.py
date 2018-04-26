@@ -2613,22 +2613,26 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
             M()
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_trace_of_script(self):
         @torch.jit.script
         def foo(a, c):
-            b = 0
-            if a == 0:
-                b = 1
+            b = 0.0
+            if a == 0.0:
+                b = 1.0
             return b + c
 
-        a = torch.ones(1, dtype=torch.long)
+        a = torch.ones(1, dtype=torch.float)
 
-        @torch.jit.trace(torch.zeros(1, dtype=torch.long))
+        @torch.jit.trace(torch.zeros(1, dtype=torch.float))
         def use(b):
-            return foo(b - 1, a) + 1
+            return foo(b - 1.0, a) + 1.0
 
-        self.assertEqual(3, use(torch.ones(1, dtype=torch.long)))
-        self.assertEqual(2, use(torch.zeros(1, dtype=torch.long)))
+        # test we propagated shapes through the function
+        self.assertTrue("Dynamic" not in str(use.graph))
+
+        self.assertEqual(3, use(torch.ones(1, dtype=torch.float)))
+        self.assertEqual(2, use(torch.zeros(1, dtype=torch.float)))
 
     def test_if_define(self):
         @torch.jit.script
@@ -2832,6 +2836,45 @@ class TestScript(TestCase):
         b = torch.zeros(4, dtype=torch.long)
         foo.graph.propagate_shapes((a, b), False)
         self.assertExpected(str(foo.graph))
+
+    def test_onnx_export_speculate(self):
+
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self, m):
+                super(Foo, self).__init__()
+                self.m = m
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x += x
+                if True:
+                    if True:
+                        y = self.m(x)
+                    else:
+                        y = self.m(x)
+                else:
+                    y = self.m(x)
+                return y
+
+        linear = torch.jit.trace(torch.zeros(1, 10, dtype=torch.float))(nn.Linear(10, 20).float())
+
+        @torch.jit.script
+        def transpose(x):
+            return x.t()
+
+        f1 = Foo(transpose)
+        f2 = Foo(linear)
+
+        onnx_ish = torch.onnx._export_to_pretty_string(
+            f1,
+            (torch.ones(1, 10, dtype=torch.float), ),
+            None, verbose=False)
+        self.assertExpected(onnx_ish, subname='f1')
+        onnx_ish = torch.onnx._export_to_pretty_string(
+            f2,
+            (torch.ones(1, 10, dtype=torch.float), ),
+            None, verbose=False)
+        self.assertExpected(onnx_ish, subname='f2')
 
 
 # Smoke tests for export methods
