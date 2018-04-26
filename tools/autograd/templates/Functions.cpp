@@ -720,6 +720,13 @@ Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal)
   return grad_input;
 }
 
+Tensor diagonal_backward(const Tensor & grad, IntList input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros(grad.type(), input_sizes);
+  auto diag = grad_input.diagonal(offset, dim1, dim2);
+  diag.copy_(grad);
+  return grad_input;
+}
+
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, bool size_average, bool reduce) {
   auto grad_input = 2 * grad;
   if (size_average && reduce) {

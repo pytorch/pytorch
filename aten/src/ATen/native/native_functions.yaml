@@ -277,8 +277,7 @@
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
   variants: function
 
-- func: diagonal(Tensor self, int64_t offset=0) -> Tensor
-  variants: function
+- func: diagonal(Tensor self, int64_t offset=0, int64_t dim1=0, int64_t dim2=1) -> Tensor
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
 
