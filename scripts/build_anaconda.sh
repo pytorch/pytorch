@@ -19,7 +19,7 @@
 # - The conda version and gcc version given in BUILD_ENVIRONMENT are ignored.
 #   These versions are determined by calling the binaries with --version
 #
-# The special flags SKIP_CONDA_TESTS, CAFFE2_ANACONDA_ORG_ACCESS_TOKEN, and
+# The special values CAFFE2_ANACONDA_ORG_ACCESS_TOKEN, and
 # ANACONDA_USERNAME can only be passed in as environment variables.
 #
 # This script works by
@@ -100,11 +100,38 @@ fi
 if [[ $BUILD_ENVIRONMENT == *full* ]]; then
   BUILD_FULL=1
 fi
+
+# Support legacy way of passing in these parameters
+if [[ -n $SKIP_CONDA_TESTS ]]; then
+  skip_tests=1
+fi
+if [[ -n $UPLOAD_TO_CONDA ]]; then
+  upload_to_conda=1
+fi
+if [[ -n $CONDA_INSTALL_LOCALLY ]]; then
+  install_locally=1
+fi
+
+# Parameters passed in by command line. These override those set by environment
+# variables
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name)
       shift
       PACKAGE_NAME=$1
+      ;;
+    --suffix)
+      shift
+      package_name_suffix=$1
+      ;;
+    --skip-tests)
+      skip_tests=1
+      ;;
+    --upload)
+      upload_to_conda=1
+      ;;
+    --install-locally)
+      install_locally=1
       ;;
     --cuda)
       shift
@@ -149,6 +176,12 @@ if [[ -n $CUDA_VERSION ]]; then
     echo "CuDNN that it finds first, and will break if there is no CuDNN found."
   fi
   echo "Detected CUDA_VERSION $CUDA_VERSION"
+fi
+
+# Only allow uploading to Anaconda if the tests were run
+if [[ -n $skip_tests && -n $upload_to_conda ]]; then
+  echo "Uploading to Anaconda only allowed if tests are run. Upload turned off"
+  upload_to_conda=''
 fi
 
 ###########################################################
@@ -233,7 +266,7 @@ portable_sed "s/string:.*\$/string: ${BUILD_STRING}/" $META_YAML
 ###########################################################
 # Handle tests
 ###########################################################
-if [[ -n $SKIP_CONDA_TESTS ]]; then
+if [[ -n $skip_tests ]]; then
   remove_lines_with 'test:'
   remove_lines_with 'imports:'
   remove_lines_with 'caffe2.python.core'
@@ -294,11 +327,11 @@ else
   # Flags required for CPU for Caffe2
   CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=OFF")
   CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=OFF")
-  if [[ -z $BUILD_INTEGRATED ]]; then
-    #CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
-    #add_package 'mkl'
-    #add_package 'mkl-include'
-  fi
+  #if [[ -z $BUILD_INTEGRATED ]]; then
+  #  #CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
+  #  #add_package 'mkl'
+  #  #add_package 'mkl-include'
+  #fi
 fi
 
 # Change flags based on target gcc ABI
@@ -321,7 +354,7 @@ fi
 # Set flags needed for uploading to Anaconda. This is only allowed if testing
 # is enabled
 ###########################################################
-if [[ -z $SKIP_CONDA_TESTS && -n $UPLOAD_TO_CONDA ]]; then
+if [[ $upload_to_conda ]]; then
   CONDA_BUILD_ARGS+=(" --user ${ANACONDA_USERNAME}")
   CONDA_BUILD_ARGS+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
 
@@ -343,6 +376,6 @@ cat $META_YAML
 CONDA_CAFFE2_CMAKE_ARGS=${CAFFE2_CMAKE_ARGS[@]} conda build $CONDA_BUILD_DIR ${CONDA_CHANNEL[@]} ${CONDA_BUILD_ARGS[@]} "$@"
 
 # Install Caffe2 from the built package into the local conda environment
-if [ -n "$CONDA_INSTALL_LOCALLY" ]; then
+if [[ -n $install_locally ]]; then
   conda install -y ${CONDA_CHANNEL[@]} $PACKAGE_NAME --use-local
 fi
