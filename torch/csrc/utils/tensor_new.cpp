@@ -222,10 +222,10 @@ static Tensor legacy_new_from_sequence(const Type & type, int device, PyObject* 
 static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
-    "new(IntList size, *, Device? device=None)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor indices, Tensor values, *, Device? device=None)",
     "new(Tensor indices, Tensor values, IntList size, *, Device? device=None)",
+    "new(IntList size, *, Device? device=None)",
   });
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -233,6 +233,15 @@ static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObje
     AutoGPU auto_gpu(r.deviceInt64(0));
     return type.tensor();
   } else if (r.idx == 1) {
+    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
+    return type.unsafeTensorFromTH(cdata, true);
+  } else if (r.idx == 2) {
+    AutoGPU auto_gpu(r.deviceInt64(2));
+    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
+  } else if (r.idx == 3) {
+    AutoGPU auto_gpu(r.deviceInt64(3));
+    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
+  } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
@@ -240,15 +249,6 @@ static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObje
       return legacy_new_from_sequence(type, r.deviceInt64(1), r.pyobject(0));
     }
     return new_with_sizes(type, r.deviceInt64(1), r.intlist(0));
-  } else if (r.idx == 2) {
-    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    return type.unsafeTensorFromTH(cdata, true);
-  } else if (r.idx == 3) {
-    AutoGPU auto_gpu(r.deviceInt64(2));
-    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
-  } else if (r.idx == 4) {
-    AutoGPU auto_gpu(r.deviceInt64(3));
-    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
@@ -256,10 +256,10 @@ static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObje
 Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
-    "new(IntList size, *, Device? device=None)",
     "new(Storage storage)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor other)",
+    "new(IntList size, *, Device? device=None)",
     "new(PyObject* data, *, Device? device=None)",
   });
 
@@ -273,6 +273,13 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
     AutoGPU auto_gpu(r.deviceInt64(0));
     return type.tensor();
   } else if (r.idx == 1) {
+    return new_with_storage(type, *r.storage(0));
+  } else if (r.idx == 2) {
+    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
+    return type.unsafeTensorFromTH(cdata, true);
+  } else if (r.idx == 3) {
+    return new_with_tensor(type, r.tensor(0));
+  } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
@@ -280,13 +287,6 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
       return legacy_new_from_sequence(type, r.deviceInt64(1), r.pyobject(0));
     }
     return new_with_sizes(type, r.deviceInt64(1), r.intlist(0));
-  } else if (r.idx == 2) {
-    return new_with_storage(type, *r.storage(0));
-  } else if (r.idx == 3) {
-    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    return type.unsafeTensorFromTH(cdata, true);
-  } else if (r.idx == 4) {
-    return new_with_tensor(type, r.tensor(0));
   } else if (r.idx == 5) {
     return legacy_new_from_sequence(type, r.deviceInt64(1), r.pyobject(0));
   }
@@ -296,10 +296,10 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
 static Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
-    "new(IntList size, *, Device? device=None)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor indices, Tensor values, *, Device? device=None)",
     "new(Tensor indices, Tensor values, IntList size, *, Device? device=None)",
+    "new(IntList size, *, Device? device=None)",
   });
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -307,6 +307,19 @@ static Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObjec
     AutoGPU auto_gpu(r.deviceInt64(0));
     return type.tensor();
   } else if (r.idx == 1) {
+    auto cdata = reinterpret_cast<void*>(r.deviceInt64(0));
+    return type.unsafeTensorFromTH(cdata, true);
+  } else if (r.idx == 2) {
+    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
+    // have a device (we should infer it).
+    AutoGPU auto_gpu(r.deviceInt64(2));
+    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
+  } else if (r.idx == 3) {
+    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
+    // have a device (we should infer it).
+    AutoGPU auto_gpu(r.deviceInt64(3));
+    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
+  } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
@@ -314,19 +327,6 @@ static Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObjec
       return legacy_new_from_sequence(type, r.deviceInt64(1), r.pyobject(0));
     }
     return new_with_sizes(type, r.deviceInt64(1), r.intlist(0));
-  } else if (r.idx == 2) {
-    auto cdata = reinterpret_cast<void*>(r.deviceInt64(0));
-    return type.unsafeTensorFromTH(cdata, true);
-  } else if (r.idx == 3) {
-    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
-    // have a device (we should infer it).
-    AutoGPU auto_gpu(r.deviceInt64(2));
-    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
-  } else if (r.idx == 4) {
-    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
-    // have a device (we should infer it).
-    AutoGPU auto_gpu(r.deviceInt64(3));
-    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
@@ -334,10 +334,10 @@ static Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObjec
 Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
-    "new(IntList size, *, Device? device=None)",
     "new(Storage storage)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor other)",  // this doesn't have a dtype/device because it creates an alias.
+    "new(IntList size, *, Device? device=None)",
     "new(PyObject* data, *, Device? device=None)",
   });
 
@@ -351,6 +351,13 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
     AutoGPU auto_gpu(r.deviceInt64(0));
     return type.tensor();
   } else if (r.idx == 1) {
+    return new_with_storage(type, *r.storage(0));
+  } else if (r.idx == 2) {
+    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
+    return type.unsafeTensorFromTH(cdata, true);
+  } else if (r.idx == 3) {
+    return new_with_tensor(type, r.tensor(0));
+  } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
@@ -358,13 +365,6 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
       return legacy_new_from_sequence(type, r.deviceInt64(1), r.pyobject(0));
     }
     return new_with_sizes(type, r.deviceInt64(1), r.intlist(0));
-  } else if (r.idx == 2) {
-    return new_with_storage(type, *r.storage(0));
-  } else if (r.idx == 3) {
-    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    return type.unsafeTensorFromTH(cdata, true);
-  } else if (r.idx == 4) {
-    return new_with_tensor(type, r.tensor(0));
   } else if (r.idx == 5) {
     return legacy_new_from_sequence(type, r.deviceInt64(1), r.pyobject(0));
   }
