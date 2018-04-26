@@ -1085,7 +1085,7 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
             * :func:`embedding_bag` with `mode=sum` is equivalent to :func:`nn.functional.embedding` followed by
               ``torch.sum(dim=1)``
             * with `mode=mean` is equivalent to :func:`nn.functional.embedding` followed by ``torch.mean(dim=1)``
-            * with `mode=max` is equivalent to :func:`nn.functional.embedding` followed by ``orch.max(dim=1)``
+            * with `mode=max` is equivalent to :func:`nn.functional.embedding` followed by ``torch.max(dim=1)``
 
         However, :func:`embedding_bag` is much more time and memory efficient than using a chain of these
         operations.
