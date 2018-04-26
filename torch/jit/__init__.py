@@ -477,7 +477,7 @@ def trace(*args, **kwargs):
     return wrapper
 
 
-def createResolutionCallback(frame_id=2):
+def createResolutionCallback(frames_up=0):
     """
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
@@ -496,8 +496,10 @@ def createResolutionCallback(frame_id=2):
 
     This is used to enable access in-scope Python variables inside
     TorchScript fragments.
+
+    frames_up is
     """
-    frame = inspect.stack()[frame_id][0]
+    frame = inspect.stack()[1 + frames_up][0]
 
     def env(key):
         if key in frame.f_locals:
@@ -511,30 +513,30 @@ def createResolutionCallback(frame_id=2):
 
 
 class CompilationUnit(object):
-    def __init__(self, lang=None, optimize=True):
+    def __init__(self, lang=None, optimize=True, _frames_up=0):
         self.module = torch._C.ScriptModule()
         self.module._set_optimized(optimize)
         if lang is not None:
-            self.define(lang, frame_id=3)
+            self.define(lang, _frames_up=_frames_up + 1)
         self.optimize = optimize
 
-    def define(self, lang, rcb=None, frame_id=2):
+    def define(self, lang, rcb=None, _frames_up=0):
         if not rcb:
-            rcb = createResolutionCallback(frame_id)
+            rcb = createResolutionCallback(_frames_up + 1)
         self.module._define(lang, rcb, False)
 
     def __getattr__(self, attr):
         return self.module._get_method(attr)
 
 
-def _script_graph(fn, frame_id=2):
-    rcb = createResolutionCallback(frame_id)
+def _script_graph(fn, _frames_up=0):
+    rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn)
     return _jit_script_compile(ast, rcb)
 
 
-def script(fn):
-    graph = _script_graph(fn, frame_id=3)
+def script(fn, _frames_up=0):
+    graph = _script_graph(fn, _frames_up=_frames_up + 1)
     return torch._C.GraphExecutor(graph, True)
 
 
@@ -542,7 +544,7 @@ ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast')
 
 
 def script_method(fn):
-    return ScriptMethodStub(createResolutionCallback(), get_jit_ast(fn))
+    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn))
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -762,7 +764,7 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
         return self.__getattr__('forward')(*args, **kwargs)
 
     def define(self, lang):
-        rcb = createResolutionCallback()
+        rcb = createResolutionCallback(frames_up=1)
         self._define(lang, rcb, True)
 
 

@@ -1554,9 +1554,9 @@ class TestScript(TestCase):
             os.close(r)
             os.close(w)
 
-    def checkScript(self, script, inputs, optimize, outputs=None, name='func', capture_output=False):
+    def checkScript(self, script, inputs, optimize, outputs=None, name='func', capture_output=False, frames_up=1):
         if isinstance(script, str):
-            cu = torch.jit.CompilationUnit(script, optimize)
+            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
             ge = getattr(cu, name)
         else:
             if capture_output:
@@ -1566,9 +1566,9 @@ class TestScript(TestCase):
                 outputs = script(*inputs)
             # Check the string frontend first
             source = textwrap.dedent(inspect.getsource(script))
-            self.checkScript(source, inputs, optimize, outputs, script.__name__, capture_output)
+            self.checkScript(source, inputs, optimize, outputs, script.__name__, capture_output, frames_up=2)
             # Continue checking the Python frontend
-            ge = torch.jit.script(script)
+            ge = torch.jit.script(script, _frames_up=1)
 
         if capture_output:
             with self.capture_stdout() as captured:
