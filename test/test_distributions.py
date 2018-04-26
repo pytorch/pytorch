@@ -113,6 +113,12 @@ EXAMPLES = [
     Example(Binomial, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': 10},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10])},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10, 8])},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+         'total_count': torch.tensor([[10., 8.], [5., 3.]])},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+         'total_count': torch.tensor(0.)},
     ]),
     Example(Multinomial, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
@@ -795,6 +801,15 @@ class TestDistributions(TestCase):
             logits = probs_to_logits(probs, is_binary=True)
             self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_binomial_log_prob_vectorized_count(self):
+        probs = torch.tensor([0.2, 0.7, 0.9])
+        for total_count, sample in [(torch.tensor([10]), torch.tensor([7., 3., 9.])),
+                                    (torch.tensor([1, 2, 10]), torch.tensor([0., 1., 9.]))]:
+            log_prob = Binomial(total_count, probs).log_prob(sample)
+            expected = scipy.stats.binom(total_count.cpu().numpy(), probs.cpu().numpy()).logpmf(sample)
+            self.assertAlmostEqual(log_prob, expected, places=4)
+
     def test_binomial_extreme_vals(self):
         total_count = 100
         bin0 = Binomial(total_count, 0)
@@ -805,6 +820,28 @@ class TestDistributions(TestCase):
         self.assertEqual(bin1.sample(), total_count)
         self.assertAlmostEqual(bin1.log_prob(torch.tensor([float(total_count)]))[0], 0, places=3)
         self.assertEqual(float(bin1.log_prob(torch.tensor([float(total_count - 1)])).exp()), 0, allow_inf=True)
+        zero_counts = torch.zeros(torch.Size((2, 2)))
+        bin2 = Binomial(zero_counts, 1)
+        self.assertEqual(bin2.sample(), zero_counts)
+        self.assertEqual(bin2.log_prob(zero_counts), zero_counts)
+
+    def test_binomial_vectorized_count(self):
+        set_rng_seed(0)
+        total_count = torch.tensor([[4, 7], [3, 8]])
+        bin0 = Binomial(total_count, torch.tensor(1.))
+        self.assertEqual(bin0.sample(), total_count)
+        bin1 = Binomial(total_count, torch.tensor(0.5))
+        samples = bin1.sample(torch.Size((100000,)))
+        self.assertTrue((samples <= total_count.type_as(samples)).all())
+        self.assertEqual(samples.mean(dim=0), bin1.mean, prec=0.02)
+        self.assertEqual(samples.var(dim=0), bin1.variance, prec=0.02)
+
+    def test_binomial_enumerate_support(self):
+        set_rng_seed(0)
+        bin0 = Binomial(0, torch.tensor(1.))
+        self.assertEqual(bin0.enumerate_support(), torch.tensor([0.]))
+        bin1 = Binomial(torch.tensor(5), torch.tensor(0.5))
+        self.assertEqual(bin1.enumerate_support(), torch.arange(6))
 
     def test_multinomial_1d(self):
         total_count = 10
@@ -1793,9 +1830,8 @@ class TestDistributions(TestCase):
                     self.assertEqual(indep_dist.has_rsample, base_dist.has_rsample)
                     if indep_dist.has_rsample:
                         self.assertEqual(indep_dist.sample().shape, base_dist.sample().shape)
-                    if indep_dist.has_enumerate_support:
-                        self.assertEqual(indep_dist.enumerate_support().shape, base_dist.enumerate_support().shape)
                     try:
+                        self.assertEqual(indep_dist.enumerate_support().shape, base_dist.enumerate_support().shape)
                         self.assertEqual(indep_dist.mean.shape, base_dist.mean.shape)
                     except NotImplementedError:
                         pass
@@ -2301,6 +2337,15 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
 
+    def test_binomial_shape_vectorized_n(self):
+        dist = Binomial(torch.tensor([[10, 3, 1], [4, 8, 4]]), torch.tensor([0.6, 0.3, 0.1]))
+        self.assertEqual(dist._batch_shape, torch.Size((2, 3)))
+        self.assertEqual(dist._event_shape, torch.Size(()))
+        self.assertEqual(dist.sample().size(), torch.Size((2, 3)))
+        self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 2, 3)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+        self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_1)
+
     def test_multinomial_shape(self):
         dist = Multinomial(10, torch.tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
@@ -2562,6 +2607,8 @@ class TestKL(TestCase):
         # e.g. bernoulli[1] varies row-wise; that way we test all param pairs.
         bernoulli = pairwise(Bernoulli, [0.1, 0.2, 0.6, 0.9])
         binomial30 = pairwise(Binomial30, [0.1, 0.2, 0.6, 0.9])
+        binomial_vectorized_count = (Binomial(torch.tensor([3, 4]), torch.tensor([0.4, 0.6])),
+                                     Binomial(torch.tensor([3, 4]), torch.tensor([0.5, 0.8])))
         beta = pairwise(Beta, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         categorical = pairwise(Categorical, [[0.4, 0.3, 0.3],
                                              [0.2, 0.7, 0.1],
@@ -2607,6 +2654,7 @@ class TestKL(TestCase):
             (beta, gamma),
             (beta, normal),
             (binomial30, binomial30),
+            (binomial_vectorized_count, binomial_vectorized_count),
             (categorical, categorical),
             (chi2, chi2),
             (chi2, exponential),
@@ -2654,6 +2702,8 @@ class TestKL(TestCase):
             (Beta(1, 2), Uniform(0.25, 0.75)),
             (Beta(1, 2), Pareto(1, 2)),
             (Binomial(31, 0.7), Binomial(30, 0.3)),
+            (Binomial(torch.tensor([3, 4]), torch.tensor([0.4, 0.6])),
+             Binomial(torch.tensor([2, 3]), torch.tensor([0.5, 0.8]))),
             (Chi2(1), Beta(2, 3)),
             (Chi2(1), Pareto(2, 3)),
             (Chi2(1), Uniform(-2, 3)),
