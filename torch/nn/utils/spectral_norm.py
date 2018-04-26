@@ -1,4 +1,6 @@
-r"""Spectral Normalization from https://arxiv.org/abs/1802.05957"""
+"""
+Spectral Normalization from https://arxiv.org/abs/1802.05957
+"""
 import torch
 from torch.nn.parameter import Parameter
 
@@ -10,8 +12,6 @@ def l2normalize(v, eps=1e-12):
 
 
 class SpectralNorm(object):
-
-    """Spectral Normalization for weights."""
 
     def __init__(self, name='weight', n_power_iterations=1, eps=1e-12):
         self.name = name
@@ -61,13 +61,16 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12):
     r"""Applies spectral normalization to a parameter in the given module.
 
     .. math::
-         \mathbf{W} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})} \
-         \text{where,} \sigma(\mathbf{W}) = \max_{\mathbf{h} \ne 0}
-            \dfrac{\|\mathbf{A} \mathbf{h}\|_2}{\|\mathbf{h}\|_2}
+         \mathbf{W} &= \dfrac{\mathbf{W}}{\sigma(\mathbf{W})} \\
+         \sigma(\mathbf{W}) &= \max_{\mathbf{h}: \mathbf{h} \ne 0} \dfrac{\|\mathbf{W} \mathbf{h}\|_2}{\|\mathbf{h}\|_2}
 
     Spectral normalization stabilize the training of discriminators(critics)
-    in GANs.  This is implemented via a hook that rescale weight matrix
-    by spectral norm sigma, where we reshape the weight to 2D if necessary.
+    in GANs by rescaling the weight tensor by spectral norm "sigma" of the
+    weight matrix calculated by power iteration method. If the dimension of the
+    weight tensor is greater than 2, reahaped to 2D in power iteration method
+    to get spectral norm. This is implemented via a hook that calculates
+    spectral norm and rescales weight before every :meth:`~Module.forward`
+    call.
 
     See https://arxiv.org/abs/1802.05957
 
@@ -89,10 +92,7 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12):
         torch.Size([20])
 
     """
-    SpectralNorm.apply(module=module,
-                       name=name,
-                       n_power_iterations=n_power_iterations,
-                       eps=eps)
+    SpectralNorm.apply(module, name, n_power_iterations, eps)
     return module
 
 
@@ -113,5 +113,5 @@ def remove_spectral_norm(module, name='weight'):
             del module._forward_pre_hooks[k]
             return module
 
-    raise ValueError("spectral_norm of '{}' not found in {}"
-                     .format(name, module))
+    raise ValueError("spectral_norm of '{}' not found in {}".format(
+        name, module))
