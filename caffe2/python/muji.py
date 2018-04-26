@@ -230,12 +230,15 @@ def AllreduceFallback(net, blobs, reduced_affix, gpu_indices):
       ir <- 0r for i in gpu_indices[1:]
   """
     reduced = [None] * len(gpu_indices)
-    # copy first
-    reduced[0] = net.Copy(
-        blobs[0],
-        blobs[0] + reduced_affix,
-        device_option=OnGPU(gpu_indices[0])
-    )
+    if reduced_affix != '':
+        # copy first
+        reduced[0] = net.Copy(
+            blobs[0],
+            blobs[0] + reduced_affix,
+            device_option=OnGPU(gpu_indices[0])
+        )
+    else:
+        reduced[0] = blobs[0]
     # do temp copy and add
     temp_name = reduced[0] + '_temp_copy'
     for i in range(1, len(gpu_indices)):
@@ -244,8 +247,8 @@ def AllreduceFallback(net, blobs, reduced_affix, gpu_indices):
             temp_name,
             device_option=OnGPU(gpu_indices[0])
         )
-        reduced[0] = reduced[0].Add(
-            temp,
+        reduced[0] = net.Add(
+            [temp, reduced[0]],
             reduced[0],
             device_option=OnGPU(gpu_indices[0])
         )
