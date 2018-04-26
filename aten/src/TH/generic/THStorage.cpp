@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THStorage.cpp"
 #else
 
+#include <new>
+
 real* THStorage_(data)(const THStorage *self)
 {
   return self->data;

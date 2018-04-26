@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THTensor.cpp"
 #else
 
+#include <new>
+
 /**** access methods ****/
 THStorage *THTensor_(storage)(const THTensor *self)
 {

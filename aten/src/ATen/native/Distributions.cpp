@@ -13,7 +13,7 @@
 #include <functional>
 
 #include "TH/THRandom.h"
-#include "TH/THGenerator.h"
+#include "TH/THGenerator.hpp"
 #include "TH/THMath.h"
 
 namespace {
