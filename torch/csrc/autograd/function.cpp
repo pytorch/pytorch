@@ -124,46 +124,68 @@ void Function::set_up_context_edge(
  * nested deleters it is in. When this number exceeds the maximum allowed
  * depth, the Function* to be deleted are accumulated in a per-thread
  * delete queue and handled by one of the deleters.
+ *
+ * Note that these custom deleters are NOT necessary for deleting PyFunction.
+ * This is because a THPFunction Python object owns a PyFunction that is in a
+ * computation graph. When Python objects get recursively destroyed, they
+ * are also queued into a delete list. This happens very early for them
+ * (at 50 deleters): https://github.com/python/cpython/blob/f320be77ffb73e3b9e7fc98c37b8df3975d84b40/Include/object.h#L1024-L1063
+ * so we don't need to worry about them.
  */
-thread_local std::deque<Function*> kDeleteFunctionQueue;
 
-constexpr size_t kDeleteFunctionMaxRecursionDepth = 10000;
-thread_local size_t kDeleteFunctionRecursionDepth = 0;
+thread_local std::deque<Function*> deleteFunctionQueue;
+thread_local size_t deleteFunctionRecursionDepth = 0;
+
+/*
+ * If this number is set too high, a deep computation graph can still
+ * stack overflow. The procedure for setting this number was to
+ * 1) find the smallest value that would not guard against stack overflows
+ *    on various machines
+ * 2) Take the minimum of all such values and subtract some leeway because
+ *    the memory of these stack frames will probably grow as time passes.
+ * Testing on 3 machines, the magic numbers were:
+ * - Mac OSX (Macbook Pro 15) : ~60000
+ * - A beefy Ubuntu 16.04 box : ~15000
+ * - Windows AWS instance (g3.4xlarge): ~8300
+ */
+constexpr size_t kDeleteFunctionMaxRecursionDepth = 6000;
 
 struct RecursionDepthCounter {
  public:
   explicit RecursionDepthCounter() {
-    ++kDeleteFunctionRecursionDepth;
+    ++deleteFunctionRecursionDepth;
   }
   ~RecursionDepthCounter() {
-    --kDeleteFunctionRecursionDepth;
+    --deleteFunctionRecursionDepth;
   }
 
   size_t value() {
-    return kDeleteFunctionRecursionDepth;
+    return deleteFunctionRecursionDepth;
   }
 };
 
 void deleteFunction(Function* function) {
   RecursionDepthCounter recursion_depth;
 
+  std::cout << recursion_depth.value() << std::endl;
+
   if (recursion_depth.value() > kDeleteFunctionMaxRecursionDepth) {
-    kDeleteFunctionQueue.push_back(function);
+    deleteFunctionQueue.push_back(function);
     return;
   }
 
   delete function;
 
-  if (kDeleteFunctionQueue.size() == 0) {
+  if (deleteFunctionQueue.size() == 0) {
     return;
   }
   if (recursion_depth.value() != kDeleteFunctionMaxRecursionDepth) {
     AT_ERROR("Only one deleter per thread should be able to process "
              "the delete queue. Please open an issue.");
   }
-  while (kDeleteFunctionQueue.size() > 0) {
-    auto queued_function = kDeleteFunctionQueue.front();
-    kDeleteFunctionQueue.pop_front();
+  while (deleteFunctionQueue.size() > 0) {
+    auto queued_function = deleteFunctionQueue.front();
+    deleteFunctionQueue.pop_front();
     delete queued_function;
   }
 }

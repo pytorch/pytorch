@@ -635,7 +635,7 @@ class TestAutograd(TestCase):
                 return grad_output, grad_output
 
         def scope():
-            depth = 300000
+            depth = 150000
             x = torch.randn(9, requires_grad=True)
             y = x.clone()
 
