@@ -35,9 +35,9 @@ if [[ -n $BUILD_WITH_CUDA ]]; then #TODO
   export TORCH_CUDA_ARCH_LIST="3.5;5.2+PTX;6.0;6.1;7.0"
   export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
   export NCCL_ROOT_DIR=/usr/local/cuda
-  export USE_STATIC_CUDNN=1
-  export USE_STATIC_NCCL=1
-  export ATEN_STATIC_CUDA=1
+  #export USE_STATIC_CUDNN=1
+  #export USE_STATIC_NCCL=1
+  #export ATEN_STATIC_CUDA=1
 else
   export NO_CUDA=1
 fi
