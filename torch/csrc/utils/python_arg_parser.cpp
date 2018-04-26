@@ -403,7 +403,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     } else if (param.check(obj)) {
       dst[i++] = obj;
     } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-               THPUtils_checkLong(obj)) {
+               THPUtils_checkIndex(obj)) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;

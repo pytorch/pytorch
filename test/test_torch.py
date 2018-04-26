@@ -5848,6 +5848,31 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError,
                           lambda: torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1., requires_grad=True)).all())
 
+    def test_parsing_intlist(self):
+        #  parse with integer variables
+        self.assertEqual(torch.Size([3, 4]), torch.ones((torch.tensor(3), torch.tensor(4))).shape)
+        self.assertEqual(torch.Size([3, 4]), torch.ones(torch.tensor(3), torch.tensor(4)).shape)
+        # parse with numpy integers
+        if TEST_NUMPY:
+            self.assertEqual(torch.Size([3, 4]), torch.ones((np.array(3), np.int64(4))).shape)
+            self.assertEqual(torch.Size([3, 4]), torch.ones(np.array(3), np.int64(4)).shape)
+            self.assertEqual(torch.Size([3, 4]), torch.ones((np.int64(3), np.array(4))).shape)
+            self.assertEqual(torch.Size([3, 4]), torch.ones(np.int64(3), np.array(4)).shape)
+
+        # fail parse with float variables
+        self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3.), torch.tensor(4))))
+        # fail parse with numpy floats
+        if TEST_NUMPY:
+            self.assertRaises(TypeError, lambda: torch.ones((np.float(3.), torch.tensor(4))))
+            self.assertRaises(TypeError, lambda: torch.ones((np.array(3.), torch.tensor(4))))
+
+        # fail parse with > 1 element variables
+        self.assertRaises(TypeError, lambda: torch.ones(torch.tensor(3, 3)))
+        self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3, 3))))
+        if TEST_NUMPY:
+            self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
+            self.assertRaises(TypeError, lambda: torch.ones((np.array(3, 3))))
+
     def _test_serialization(self, filecontext_lambda, test_use_filename=True):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]
