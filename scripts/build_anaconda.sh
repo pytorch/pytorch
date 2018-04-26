@@ -315,6 +315,7 @@ if [[ -n $pytorch_too ]]; then
     append_to_section 'features' '  - nccl2'
     add_package $CUDA_FEATURE_NAME
     CONDA_CHANNEL+=('-c pytorch')
+    export BUILD_WITH_CUDA=1
   fi
 else
   add_package 'leveldb'
