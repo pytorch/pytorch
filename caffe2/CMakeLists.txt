@@ -141,16 +141,25 @@ if(USE_CUDA)
   # it. We will then manually add the cudart library as interface libs.
   set(__tmp ${CUDA_LIBRARIES})
   set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
-  CUDA_ADD_LIBRARY(caffe2_gpu ${Caffe2_GPU_SRCS})
+  if(CAFFE2_STATIC_LINK_CUDA)
+    CUDA_ADD_LIBRARY(caffe2_gpu STATIC ${Caffe2_GPU_SRCS})
+  else()
+    CUDA_ADD_LIBRARY(caffe2_gpu ${Caffe2_GPU_SRCS})
+  endif()
   set(CUDA_LIBRARIES ${__tmp})
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
 
   target_include_directories(
       caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
   target_link_libraries(
-      caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-  target_link_libraries(
       caffe2_gpu PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
+
+  # These public dependencies must go after the previous dependencies, as the
+  # order of the libraries in the linker call matters here when statically
+  # linking; libculibos and cublas must be last.
+  target_link_libraries(
+      caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <string>
 
 const int LAYOUT_NAME_LEN = 64;

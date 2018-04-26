@@ -277,10 +277,15 @@
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
   variants: function
 
-- func: diagonal(Tensor self, int64_t offset=0) -> Tensor
-  variants: function
+- func: diagonal(Tensor self, int64_t offset=0, int64_t dim1=0, int64_t dim2=1) -> Tensor
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
+
+- func: dot_out(Tensor result, Tensor self, Tensor tensor) -> Tensor
+  variants: function
+
+- func: einsum(std::string equation, TensorList tensors) -> Tensor
+  variants: function
 
 - func: embedding(Tensor weight, IndexTensor indices, int64_t padding_idx=-1, bool scale_grad_by_freq=false, bool sparse=false) -> Tensor
   variants: function
@@ -465,6 +470,9 @@
   variants: function
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
+
+- func: matmul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
 
 - func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
@@ -819,6 +827,11 @@
   dispatch:
     CPU: _standard_gamma_grad_cpu
     CUDA: _standard_gamma_grad_cuda
+
+- func: _standard_gamma(Tensor self, Generator* generator=nullptr) -> Tensor
+  dispatch:
+    CPU: _s_gamma_cpu
+    CUDA: _s_gamma_cuda
 
 - func: poisson(Tensor self, Generator* generator=nullptr) -> Tensor
   variants: function

@@ -12,7 +12,6 @@ from .modules import utils
 from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
-from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 from . import grad
 
@@ -233,11 +232,9 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
 
     Example::
         >>> # pool of square window of size=3, stride=2
-        >>> input = torch.Tensor([[[1,2,3,4,5,6,7]]])
+        >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
         >>> F.avg_pool1d(input, kernel_size=3, stride=2)
-        (0 ,.,.) =
-          2  4  6
-        [torch.FloatTensor of size (1,1,3)]
+        tensor([[[ 2.,  4.,  6.]]])
     """
     if input.dim() != 3:
         raise ValueError('expected 3D input (got {} dimensions)'
@@ -447,23 +444,25 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
 
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     r"""Applies a 2D power-average pooling over an input signal composed of
-    several input planes.
+    several input planes. If the sum of all inputs to the power of `p` is
+    zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
     kw, kh = utils._pair(kernel_size)
     out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
-    return out.mul(kw * kh).pow(1. / norm_type)
+    return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1. / norm_type)
 
 
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     r"""Applies a 1D power-average pooling over an input signal composed of
-    several input planes.
+    several input planes. If the sum of all inputs to the power of `p` is
+    zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
     out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
-    return out.mul(kernel_size).pow(1. / norm_type)
+    return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1. / norm_type)
 
 
 def adaptive_max_pool1d(input, output_size, return_indices=False):
@@ -612,7 +611,7 @@ In-place version of :func:`~threshold`.
 
 
 def relu(input, inplace=False):
-    r"""relu(input, threshold, value, inplace=False) -> Tensor
+    r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
@@ -644,7 +643,7 @@ def glu(input, dim=-1):
     See `Language Modeling with Gated Convolutional Networks <https://arxiv.org/abs/1612.08083>`_.
 
     Args:
-        input (Variable): input variable
+        input (Tensor): input tensor
         dim (int): dimension on which to split the input
     """
     if input.dim() == 0:
@@ -829,7 +828,7 @@ def softmin(input, dim=None, _stacklevel=3):
     See :class:`~torch.nn.Softmin` for more details.
 
     Arguments:
-        input (Variable): input
+        input (Tensor): input
         dim (int): A dimension along which softmin will be computed (so every slice
             along dim will sum to 1).
     """
@@ -851,7 +850,7 @@ def softmax(input, dim=None, _stacklevel=3):
     See :class:`~torch.nn.Softmax` for more details.
 
     Arguments:
-        input (Variable): input
+        input (Tensor): input
         dim (int): A dimension along which softmax will be computed.
 
     .. note::
@@ -914,16 +913,16 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
     assert len(shape) == 2
     y_soft = _gumbel_softmax_sample(logits, tau=tau, eps=eps)
     if hard:
-        _, k = y_soft.data.max(-1)
+        _, k = y_soft.max(-1)
         # this bit is based on
         # https://discuss.pytorch.org/t/stop-gradients-for-st-gumbel-softmax/530/5
-        y_hard = logits.data.new(*shape).zero_().scatter_(-1, k.view(-1, 1), 1.0)
+        y_hard = logits.new_zeros(*shape).scatter_(-1, k.view(-1, 1), 1.0)
         # this cool bit of code achieves two things:
         # - makes the output value exactly one-hot (since we add then
         #   subtract y_soft value)
         # - makes the gradient equal to y_soft gradient (since we strip
         #   all other gradients)
-        y = Variable(y_hard - y_soft.data) + y_soft
+        y = y_hard - y_soft.detach() + y_soft
     else:
         y = y_soft
     return y
@@ -939,7 +938,7 @@ def log_softmax(input, dim=None, _stacklevel=3):
     See :class:`~torch.nn.LogSoftmax` for more details.
 
     Arguments:
-        input (Variable): input
+        input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
     """
     if dim is None:
@@ -1001,7 +1000,7 @@ def linear(input, weight, bias=None):
 
 
 def bilinear(input1, input2, weight, bias=None):
-    return torch._C._VariableFunctions.bilinear(input1, input2, weight, bias)
+    return torch.bilinear(input1, input2, weight, bias)
 
 
 def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
@@ -1031,7 +1030,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
         - Output: `(N, W, embedding_dim)`
 
     Notes:
-        It is advised to only use `sparse=True` if `embedding_matrix` is a leaf Variable,
+        It is advised to only use `sparse=True` if `embedding_matrix` is a leaf Tensor,
         since some autograd functions may not propagate sparse gradients correctly.
         Additionally, keep in mind that only a limited number of optimizers support
         sparse gradients: currently it's :class:`optim.SGD` (`CUDA` and `CPU`), and :class:`optim.Adagrad` (`CPU`)
@@ -1039,38 +1038,30 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
     Examples::
 
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
+        >>> input = torch.tensor([[1,2,4,5],[4,3,2,9]])
         >>> # an embedding matrix containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
         >>> F.embedding(input, embedding_matrix)
+        tensor([[[ 0.8490,  0.9625,  0.6753],
+                 [ 0.9666,  0.7761,  0.6108],
+                 [ 0.6246,  0.9751,  0.3618],
+                 [ 0.4161,  0.2419,  0.7383]],
 
-        (0 ,.,.) =
-         -1.0822  1.2522  0.2434
-          0.8393 -0.6062 -0.3348
-          0.6597  0.0350  0.0837
-          0.5521  0.9447  0.0498
-
-        (1 ,.,.) =
-          0.6597  0.0350  0.0837
-         -0.1527  0.0877  0.4260
-          0.8393 -0.6062 -0.3348
-         -0.8738 -0.9054  0.4281
-        [torch.FloatTensor of size (2,4,3)]
+                [[ 0.6246,  0.9751,  0.3618],
+                 [ 0.0237,  0.7794,  0.0528],
+                 [ 0.9666,  0.7761,  0.6108],
+                 [ 0.3385,  0.8612,  0.1867]]])
 
         >>> # example with padding_idx
         >>> weights = torch.rand(10, 3)
         >>> weights[0, :].zero_()
         >>> embedding_matrix = weights
-        >>> input = torch.LongTensor([[0,2,0,5]])
+        >>> input = torch.tensor([[0,2,0,5]])
         >>> F.embedding(input, embedding_matrix, padding_idx=0)
-
-        (0 ,.,.) =
-          0.0000  0.0000  0.0000
-          0.3452  0.4937 -0.9361
-          0.0000  0.0000  0.0000
-          0.0706 -2.1962 -0.6276
-        [torch.FloatTensor of size (1,4,3)]
-
+        tensor([[[ 0.0000,  0.0000,  0.0000],
+                 [ 0.5609,  0.5384,  0.8720],
+                 [ 0.0000,  0.0000,  0.0000],
+                 [ 0.6262,  0.2438,  0.7471]]])
     """
     input = input.contiguous()
     if padding_idx is not None:
@@ -1093,10 +1084,11 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
         intermediate embeddings.
 
         For bags of constant length,
-            * embedding_bag with `mode=sum` is equivalent to nn.functional.embedding followed by `torch.sum(dim=1)`
-            * with `mode=mean` is equivalent to nn.functional.embedding followed by `torch.mean(dim=1)`
+            * :func:`embedding_bag` with `mode=sum` is equivalent to :func:`nn.functional.embedding` followed by
+              ``torch.sum(dim=1)``
+            * with `mode=mean` is equivalent to :func:`nn.functional.embedding` followed by ``torch.mean(dim=1)``
 
-        However, embedding_bag is much more time and memory efficient than using a chain of these
+        However, :func:`embedding_bag` is much more time and memory efficient than using a chain of these
         operations.
 
         Args:
@@ -1133,14 +1125,11 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
             >>> # an Embedding module containing 10 tensors of size 3
             >>> embedding_matrix = torch.rand(10, 3)
             >>> # a batch of 2 samples of 4 indices each
-            >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
-            >>> offsets = torch.LongTensor([0,4])
-            >>> embedding_bag(embedding_matrix, input, offsets)
-
-            -1.1840 -0.2547 -0.5860
-            -0.7126  0.0002 -0.3411
-            [torch.FloatTensor of size (2,3)]
-
+            >>> input = torch.tensor([1,2,4,5,4,3,2,9])
+            >>> offsets = torch.tensor([0,4])
+            >>> F.embedding_bag(embedding_matrix, input, offsets)
+            tensor([[ 0.3397,  0.3552,  0.5545],
+                    [ 0.5893,  0.4386,  0.5882]])
         """
     if indices.dim() == 2:
         if offsets is not None:
@@ -1149,8 +1138,9 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
                              " fixed length sequences. However, found "
                              "offsets of type {}".format(type(offsets)))
         else:
-            offsets = Variable(torch.arange(0, indices.numel(), indices.size(1),
-                                            out=indices.data.new().long()))
+            offsets = torch.arange(0, indices.numel(), indices.size(1),
+                                   dtype=torch.long, device=indices.device)
+
             indices = indices.view(-1)
     elif indices.dim() == 1:
         if offsets is None:
@@ -1327,15 +1317,13 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
     Example::
 
         >>> # input is of size N x C = 3 x 5
-        >>> input = torch.randn(3, 5)
+        >>> input = torch.randn(3, 5, requires_grad=True)
         >>> # each element in target has to have 0 <= value < C
-        >>> target = torch.LongTensor([1, 0, 4])
+        >>> target = torch.tensor([1, 0, 4])
         >>> output = F.nll_loss(F.log_softmax(input), target)
         >>> output.backward()
     """
     dim = input.dim()
-    if torch.is_tensor(weight):
-        weight = weight
     if dim < 2:
         raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
 
@@ -1407,8 +1395,8 @@ The `Kullback-Leibler divergence`_ Loss.
 See :class:`~torch.nn.KLDivLoss` for details.
 
 Args:
-    input: Variable of arbitrary shape
-    target: Variable of the same shape as input
+    input: Tensor of arbitrary shape
+    target: Tensor of the same shape as input
     size_average: if ``True`` the output is divided by the number of elements
         in input tensor. Default: ``True``
     reduce (bool, optional): By default, the losses are averaged
@@ -1426,10 +1414,10 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
+        input (Tensor) : :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
             in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
             in the case of K-dimensional loss.
-        target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
+        target (Tensor) : :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
             K-dimensional loss.
         weight (Tensor, optional): a manual rescaling weight given to each
@@ -1449,7 +1437,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
     Examples::
 
         >>> input = torch.randn(3, 5, requires_grad=True)
-        >>> target = torch.LongTensor(3).random_(5)
+        >>> target = torch.randint(5, (3,), dtype=torch.int64)
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
@@ -1463,9 +1451,9 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
     See :class:`~torch.nn.BCELoss` for details.
 
     Args:
-        input: Variable of arbitrary shape
-        target: Variable of the same shape as input
-        weight (Variable, optional): a manual rescaling weight
+        input: Tensor of arbitrary shape
+        target: Tensor of the same shape as input
+        weight (Tensor, optional): a manual rescaling weight
                 if provided it's repeated to match input tensor shape
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
@@ -1478,8 +1466,8 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
 
     Examples::
 
-        >>> input = torch.randn(3, requires_grad=True)
-        >>> target = torch.LongTensor(3).random_(2)
+        >>> input = torch.randn((3, 2), requires_grad=True)
+        >>> target = torch.rand((3, 2), requires_grad=False)
         >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
         >>> loss.backward()
     """
@@ -1493,8 +1481,6 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
     if weight is not None:
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
-        if torch.is_tensor(weight):
-            weight = weight
 
     return torch._C._nn.binary_cross_entropy(input, target, weight, size_average, reduce)
 
@@ -1506,9 +1492,9 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
     Args:
-        input: Variable of arbitrary shape
-        target: Variable of the same shape as input
-        weight (Variable, optional): a manual rescaling weight
+        input: Tensor of arbitrary shape
+        target: Tensor of the same shape as input
+        weight (Tensor, optional): a manual rescaling weight
                 if provided it's repeated to match input tensor shape
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
@@ -1522,7 +1508,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
     Examples::
 
          >>> input = torch.randn(3, requires_grad=True)
-         >>> target = torch.FloatTensor(3).random_(2)
+         >>> target = torch.empty(3).random_(2)
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
          >>> loss.backward()
     """
@@ -1593,7 +1579,7 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=True, red
     if input1.dim() == 0 or input2.dim() == 0 or target.dim() == 0:
         raise RuntimeError(("margin_ranking_loss does not support scalars, got sizes: "
                             "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())))
-    return torch._C._VariableFunctions.margin_ranking_loss(input1, input2, target, margin, size_average, reduce)
+    return torch.margin_ranking_loss(input1, input2, target, margin, size_average, reduce)
 
 
 def hinge_embedding_loss(input, target, margin=1.0, size_average=True, reduce=True):
@@ -1631,7 +1617,7 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True, r
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """
-    return torch._C._VariableFunctions.cosine_embedding_loss(input1, input2, target, margin, size_average, reduce)
+    return torch.cosine_embedding_loss(input1, input2, target, margin, size_average, reduce)
 
 
 def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True, reduce=True):
@@ -1654,13 +1640,13 @@ def pixel_shuffle(input, upscale_factor):
     See :class:`~torch.nn.PixelShuffle` for details.
 
     Args:
-        input (Variable): Input
+        input (Tensor): Input
         upscale_factor (int): factor to increase spatial resolution by
 
     Examples::
 
         >>> ps = nn.PixelShuffle(3)
-        >>> input = torch.Tensor(1, 9, 4, 4)
+        >>> input = torch.empty(1, 9, 4, 4)
         >>> output = ps(input)
         >>> print(output.size())
         torch.Size([1, 1, 12, 12])
@@ -1799,13 +1785,14 @@ def upsample_nearest(input, size=None, scale_factor=None):
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
     .. warning::
-        This function is deprecated in favor of :meth:`torch.nn.functional.upsample`.
+        This function is deprecated in favor of :func:`torch.nn.functional.upsample`.
+        This is equivalent with ``nn.functional.upsample(..., mode='nearest')``.
 
     Currently spatial and volumetric upsampling are supported (i.e. expected
     inputs are 4 or 5 dimensional).
 
     Args:
-        input (Variable): input
+        input (Tensor): input
         size (int or Tuple[int, int] or Tuple[int, int, int]): output spatia
             size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
@@ -1819,7 +1806,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     r"""Upsamples the input, using bilinear upsampling.
 
     .. warning::
-        This function is deprecated in favor of :meth:`torch.nn.functional.upsample`.
+        This function is deprecated in favor of :func:`torch.nn.functional.upsample`.
         This is equivalent with
         ``nn.functional.upsample(..., mode='bilinear', align_corners=True)``.
 
@@ -1827,7 +1814,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     volumetric (5 dimensional) inputs.
 
     Args:
-        input (Variable): input
+        input (Tensor): input
         size (int or Tuple[int, int]): output spatial size.
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
@@ -1866,13 +1853,13 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     .. Note:: This function is used in building Spatial Transformer Networks
 
     Args:
-        input (Variable): input batch (N x C x IH x IW) or (N x C x ID x IH x IW)
-        grid (Variable): flow-field of size (N x OH x OW x 2) or (N x OD x OH x OW x 3)
+        input (Tensor): input batch (N x C x IH x IW) or (N x C x ID x IH x IW)
+        grid (Tensor): flow-field of size (N x OH x OW x 2) or (N x OD x OH x OW x 3)
         padding_mode (str): padding mode for outside grid values
             'zeros' | 'border'. Default: 'zeros'
 
     Returns:
-        output (Variable): output Tensor
+        output (Tensor): output Tensor
 
     """
     return vision.grid_sampler(input, grid, padding_mode)
@@ -1884,12 +1871,12 @@ def affine_grid(theta, size):
     implement Spatial Transformer Networks.
 
     Args:
-        theta (Variable): input batch of affine matrices (:math:`N \times 2 \times 3`)
+        theta (Tensor): input batch of affine matrices (:math:`N \times 2 \times 3`)
         size (torch.Size): the target output image size (:math:`N \times C \times H \times W`)
                            Example: torch.Size((32, 3, 24, 24))
 
     Returns:
-        output (Variable): output Tensor of size (:math:`N \times H \times W \times 2`)
+        output (Tensor): output Tensor of size (:math:`N \times H \times W \times 2`)
     """
     return vision.affine_grid_generator(theta, size)
 
@@ -1915,14 +1902,14 @@ def pad(input, pad, mode='constant', value=0):
     padding modes works.
 
     Args:
-        input (Variable): `Nd` tensor
+        input (Tensor): `Nd` tensor
         pad (tuple): m-elem tuple, where :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
         mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
         value: fill value for 'constant' padding. Default: 0
 
     Examples::
 
-        >>> t4d = torch.Tensor(3, 3, 4, 2)
+        >>> t4d = torch.empty(3, 3, 4, 2)
         >>> p1d = (1, 1) # pad last dim by 1 on each side
         >>> out = F.pad(t4d, p1d, "constant", 0)  # effectively zero padding
         >>> print(out.data.size())
@@ -1931,7 +1918,7 @@ def pad(input, pad, mode='constant', value=0):
         >>> out = F.pad(t4d, p2d, "constant", 0)
         >>> print(out.data.size())
         torch.Size([3, 3, 8, 4])
-        >>> t4d = torch.Tensor(3, 3, 4, 2)
+        >>> t4d = torch.empty(3, 3, 4, 2)
         >>> p3d = (0, 1, 2, 1, 3, 3) # pad by (0, 1), (2, 1), and (3, 3)
         >>> out = F.pad(t4d, p3d, "constant", 0)
         >>> print(out.data.size())
@@ -1972,7 +1959,7 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
-    return torch._C._VariableFunctions.pairwise_distance(x1, x2, p, eps, keepdim)
+    return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
 def cosine_similarity(x1, x2, dim=1, eps=1e-8):
@@ -1982,8 +1969,8 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
         \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
 
     Args:
-        x1 (Variable): First input.
-        x2 (Variable): Second input (of size matching x1).
+        x1 (Tensor): First input.
+        x2 (Tensor): Second input (of size matching x1).
         dim (int, optional): Dimension of vectors. Default: 1
         eps (float, optional): Small value to avoid division by zero.
             Default: 1e-8
@@ -2010,8 +1997,8 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
     r"""
     See :class:`~torch.nn.TripletMarginLoss` for details
     """
-    return torch._C._VariableFunctions.triplet_margin_loss(anchor, positive, negative, margin, p, eps, swap,
-                                                           size_average, reduce)
+    return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps,
+                                     swap, size_average, reduce)
 
 
 def normalize(input, p=2, dim=1, eps=1e-12):

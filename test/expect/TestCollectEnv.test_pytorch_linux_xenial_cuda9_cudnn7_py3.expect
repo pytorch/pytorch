@@ -1,0 +1,25 @@
+PyTorch version: 0.5.0a0
+Is debug build: No
+CUDA used to build PyTorch: 9.0.X
+
+OS: Ubuntu 16.04.X LTS
+GCC version: (Ubuntu 5.4.0-6ubuntu1~16.04.9) 5.4.0 20160609
+CMake version: version 3.9.X
+
+Python version: 3.6
+Is CUDA available: Yes
+CUDA runtime version: 9.0.X
+GPU models and configuration: 
+GPU 0: Tesla M60
+GPU 1: Tesla M60
+
+Nvidia driver version: 384.X
+cuDNN version: Probably one of the following:
+/usr/lib/x86_64-linux-gnu/libcudnn.so.7.1.2
+/usr/lib/x86_64-linux-gnu/libcudnn_static_v7.a
+
+Versions of relevant libraries:
+[pip] numpy (1.14.X)
+[pip] torch (0.5.0a0)
+[conda] magma-cuda90              2.3.0                         1    soumith
+[conda] torch                     0.5.0a0           <pip>

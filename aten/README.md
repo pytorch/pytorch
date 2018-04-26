@@ -60,7 +60,7 @@ Here is a simple example; again, the syntax follows Torch semantics.
 using namespace at; // assumed in the following
 
 Tensor d = CPU(kFloat).ones({3, 4});
-Tensor r = CPU(kFloat).zeros({3,4})
+Tensor r = CPU(kFloat).zeros({3,4});
 for(auto i = 0; i < 100000; i++) {
   r = r.add(d);
   // equivalently
@@ -75,7 +75,7 @@ Want this running on the GPU?
 using namespace at; // assumed in the following
 
 Tensor d = CUDA(kFloat).ones({3, 4});
-Tensor r = CUDA(kFloat).zeros({3,4})
+Tensor r = CUDA(kFloat).zeros({3,4});
 for(auto i = 0; i < 100000; i++) {
   r = r.add(d);
   // equivalently
@@ -208,7 +208,7 @@ to the CPU, this would result in 2 copies. To avoid these synchronizations, Scal
 optionally backed by a zero-dim Tensor, and are only copied to the CPU when requested.
 
 ```c++
-auto a = CUDA(kFloat).rand({3,4})
+auto a = CUDA(kFloat).rand({3,4});
 Scalar on_gpu = Scalar(a[1][1]); //backed by zero-dim Tensor
 assert(on_gpu.isBackedByTensor());
 

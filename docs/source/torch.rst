@@ -6,8 +6,9 @@ Tensors
 ----------------------------------
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
-.. autofunction:: set_default_tensor_type
 .. autofunction:: set_default_dtype
+.. autofunction:: get_default_dtype
+.. autofunction:: set_default_tensor_type
 .. autofunction:: numel
 .. autofunction:: set_printoptions
 .. autofunction:: set_flush_denormal
@@ -16,6 +17,21 @@ Tensors
 
 Creation Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+    Random sampling creation ops are listed under :ref:`random-sampling` and
+    include:
+    :func:`torch.rand`
+    :func:`torch.rand_like`
+    :func:`torch.randn`
+    :func:`torch.randn_like`
+    :func:`torch.randint`
+    :func:`torch.randint_like`
+    :func:`torch.randperm`
+    You may also use :func:`torch.empty` with the :ref:`inplace-random-sampling`
+    methods to create :class:`torch.Tensor` s with values sampled from a broader
+    range of distributions.
+
 .. autofunction:: tensor
 .. autofunction:: from_numpy
 .. autofunction:: zeros
@@ -51,6 +67,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: unsqueeze
 .. autofunction:: where
 
+.. _random-sampling:
 
 Random sampling
 ----------------------------------
@@ -63,10 +80,14 @@ Random sampling
 .. autofunction:: multinomial
 .. autofunction:: normal
 .. autofunction:: rand
+.. autofunction:: rand_like
 .. autofunction:: randint
+.. autofunction:: randint_like
 .. autofunction:: randn
 .. autofunction:: randn_like
 .. autofunction:: randperm
+
+.. _inplace-random-sampling:
 
 In-place random sampling
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -93,6 +114,37 @@ Parallelism
 ----------------------------------
 .. autofunction:: get_num_threads
 .. autofunction:: set_num_threads
+
+Locally disabling gradient computation
+--------------------------------------
+The context managers :func:`torch.no_grad`, :func:`torch.enable_grad`, and
+:func:`torch.set_grad_enabled` are helpful for locally disabling and enabling
+gradient computation. See :ref:`locally-disable-grad` for more details on
+their usage.
+
+Examples::
+
+  >>> x = torch.zeros(1, requires_grad=True)
+  >>> with torch.no_grad():
+  ...     y = x * 2
+  >>> y.requires_grad
+  False
+
+  >>> is_train = False
+  >>> with torch.set_grad_enabled(is_train):
+  ...     y = x * 2
+  >>> y.requires_grad
+  False
+
+  >>> torch.set_grad_enabled(True)  # this can also be used as a function
+  >>> y = x * 2
+  >>> y.requires_grad
+  True
+
+  >>> torch.set_grad_enabled(False)
+  >>> y = x * 2
+  >>> y.requires_grad
+  False
 
 
 Math operations
@@ -196,6 +248,7 @@ Other Operations
 .. autofunction:: diag
 .. autofunction:: diagflat
 .. autofunction:: diagonal
+.. autofunction:: einsum
 .. autofunction:: histc
 .. autofunction:: renorm
 .. autofunction:: trace

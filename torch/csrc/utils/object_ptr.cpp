@@ -1,6 +1,6 @@
 #include "torch/csrc/utils/object_ptr.h"
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 template<>
 void THPPointer<PyObject>::free() {

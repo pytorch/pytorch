@@ -42,6 +42,7 @@ static_assert(
 #cmakedefine CAFFE2_USE_GOOGLE_GLOG
 #cmakedefine CAFFE2_USE_LITE_PROTO
 #cmakedefine CAFFE2_USE_MKL
+#cmakedefine CAFFE2_USE_IDEEP
 #cmakedefine CAFFE2_USE_NVTX
 #cmakedefine CAFFE2_USE_TRT
 #cmakedefine CAFFE2_DISABLE_NUMA

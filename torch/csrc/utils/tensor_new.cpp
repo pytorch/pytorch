@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include "tensor_new.h"
 
 #include <ATen/ATen.h>

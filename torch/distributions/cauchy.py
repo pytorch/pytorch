@@ -15,7 +15,7 @@ class Cauchy(Distribution):
 
     Example::
 
-        >>> m = Cauchy(torch.Tensor([0.0]), torch.Tensor([1.0]))
+        >>> m = Cauchy(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Cauchy distribution with loc=0 and scale=1
          2.3214
         [torch.FloatTensor of size 1]
@@ -38,11 +38,11 @@ class Cauchy(Distribution):
 
     @property
     def mean(self):
-        return self.loc.new([float('nan')]).expand(self._extended_shape())
+        return self.loc.new_tensor(float('nan')).expand(self._extended_shape())
 
     @property
     def variance(self):
-        return self.loc.new([float('inf')]).expand(self._extended_shape())
+        return self.loc.new_tensor(float('inf')).expand(self._extended_shape())
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)

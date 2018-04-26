@@ -133,7 +133,7 @@ class TestCompositeReader(TestCase):
         for i in range(num_srcs):
             written_data = sorted(
                 ws.fetch_blob(str(dst_ds.content()[names[i]].label())))
-            npt.assert_array_equal(data[i], written_data)
+            npt.assert_array_equal(data[i], written_data, "i: {}".format(i))
 
     @unittest.skipIf(os.environ.get('JENKINS_URL'), 'Flaky test on Jenkins')
     def test_composite_reader_builder(self):
@@ -169,7 +169,8 @@ class TestCompositeReader(TestCase):
         for name, offset in zip(names, offsets):
             written_data = sorted(
                 ws.fetch_blob(str(dst_ds.content()[name].label())))
-            npt.assert_array_equal(range(offset, offset + size), written_data)
+            npt.assert_array_equal(range(offset, offset + size), written_data,
+                                   "name: {}".format(name))
 
 
 class TestReaderWithLimit(TestCase):

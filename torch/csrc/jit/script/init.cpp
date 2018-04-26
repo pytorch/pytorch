@@ -25,6 +25,8 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_binders) override {
+    ensureTensors(loc, inputs);
+
     if (attributes.size() > 0)
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
     Graph& g = *m.graph();
@@ -41,7 +43,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     py::object func = self;
     std::string cconv(inputs.size(), 't');
     Node* new_node = g.insertNode(g.createPythonOp(
-      THPObjectPtr(func.release().ptr()), cconv, false, {}, {}, false));
+      THPObjectPtr(func.release().ptr()), cconv, {}, {}, false));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for(auto i : inputs)
       new_node->addInput(i);
@@ -120,7 +122,7 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     // while ...
     //   f = f + 1
     if(py::isinstance<py::int_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kInt).scalarTensor(py::cast<int32_t>(self)));
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(py::cast<int64_t>(self)));
     } else if(py::isinstance<py::float_>(self)) {
       return createConstant(loc, m, at::CPU(at::kFloat).scalarTensor(py::cast<float>(self)));
     } else if(py::isinstance<py::bool_>(self)) {
@@ -381,7 +383,12 @@ void initJitScriptBindings(PyObject* module) {
       auto inputs = createVariableTensorList(args);
       auto outputs = m.run(std::move(inputs));
       return unpackVariableTensorList(std::move(outputs));
-    });
+    })
+    .def_property_readonly("graph", [](Method& m) {
+      return m.graph();
+    })
+    .def("propagate_shapes", &Method::propagate_shapes)
+    .def("params", &Method::params);
 
   m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
     return compileFunction(def, pythonResolver(rcb));

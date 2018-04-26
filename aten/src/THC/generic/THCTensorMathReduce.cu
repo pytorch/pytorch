@@ -182,6 +182,10 @@ THCTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, real value, i
                   ScalarConvert<float, accreal>::to(0.0), dimension, keepdim);
     THCTensor_(pow)(state, self, self, ScalarConvert<float, real>::to(0.5));
 
+  } else if (THCNumerics<real>::eq(value, ScalarConvert<float, real>::to(INFINITY))) {
+    THC_reduceDim(state, self, src,
+                  TensorNormOp<real, 1>(value), ReduceMaxTo<real, accreal>(), ReduceMax<accreal>(),
+                  ScalarConvert<float, accreal>::to(0.0), dimension, keepdim);
   } else {
     THC_reduceDim(state, self, src,
                   TensorNormOp<real, -1>(value), ReduceAdd<real, accreal>(), ReduceAdd<accreal, accreal>(),
@@ -220,6 +224,13 @@ THCTensor_(normall)(THCState *state, THCTensor *self, real value)
                   ScalarConvert<float, accreal>::to(0.0f),
                   &result, 0);
     result = THCNumerics<accreal>::sqrt(result);
+  } else if (THCNumerics<real>::eq(value, ScalarConvert<float, real>::to(INFINITY))) {
+    THC_reduceAll(state, self,
+                  TensorNormOp<real, 1>(value),
+                  ReduceMaxTo<real, accreal>(),
+                  ReduceMax<accreal>(),
+                  ScalarConvert<float, accreal>::to(0.0f),
+                  &result, 0);
   } else {
     THC_reduceAll(state, self,
                   TensorNormOp<real, -1>(value),
@@ -391,6 +402,9 @@ THCTensor_(median)(THCState *state,
 
   THCTensor *newValues = THCTensor_(newNarrow)(state, sorted, dimension, k, 1);
   THCudaLongTensor *newIndices = THCudaLongTensor_newNarrow(state, sorted_indices, dimension, k, 1);
+
+  THCTensor_(free)(state, sorted);
+  THCudaLongTensor_free(state, sorted_indices);
 
   if (!keepdim) {
     THCTensor_(squeeze1d)(state, newValues, newValues, dimension);

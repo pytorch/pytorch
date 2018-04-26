@@ -77,37 +77,34 @@ void addCUDAGlobalMethods(py::module& m) {
       });
   m.def(
       "transform_trt",
-      [](const py::bytes& init_net_str,
-         const py::bytes& pred_net_str,
+      [](const py::bytes& pred_net_str,
          const std::unordered_map<std::string, std::vector<int>>& shapes,
          int max_batch_size,
          int max_workspace_size,
          int verbosity,
-         bool debug_builder) -> std::vector<py::bytes> {
+         bool debug_builder,
+         bool build_serializable_op) -> py::bytes {
 #ifdef CAFFE2_USE_TRT
-        caffe2::NetDef init_net;
-        if(!ParseProtoFromLargeString(
-            init_net_str.cast<std::string>(), &init_net)) {
-          LOG(ERROR) << "broken init_net protobuf";
-        }
         caffe2::NetDef pred_net;
-        if(!ParseProtoFromLargeString(
-            pred_net_str.cast<std::string>(), &pred_net)) {
+        if (!ParseProtoFromLargeString(
+                pred_net_str.cast<std::string>(), &pred_net)) {
           LOG(ERROR) << "broken pred_net protobuf";
         }
         std::unordered_map<std::string, TensorShape> tensor_shapes;
-        for (const auto& it: shapes) {
+        for (const auto& it : shapes) {
           tensor_shapes.emplace(
               it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
         }
         TensorRTTransformer ts(
-            max_batch_size, max_workspace_size, verbosity, debug_builder);
-        ts.Transform(&init_net, &pred_net, tensor_shapes);
-        std::string init_net_str2;
+            max_batch_size,
+            max_workspace_size,
+            verbosity,
+            debug_builder,
+            build_serializable_op);
+        ts.Transform(GetCurrentWorkspace(), &pred_net, tensor_shapes);
         std::string pred_net_str2;
-        init_net.SerializeToString(&init_net_str2);
         pred_net.SerializeToString(&pred_net_str2);
-        return {py::bytes(init_net_str2), py::bytes(pred_net_str2)};
+        return py::bytes(pred_net_str2);
 #else
         CAFFE_THROW("Please build Caffe2 with USE_TENSORRT=1");
 #endif // CAFFE2_USE_TRT

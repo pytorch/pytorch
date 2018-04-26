@@ -406,6 +406,20 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     return r, None
 
 
+def max_pool3d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+    if ceil_mode:
+        return _unimplemented("max_pool3d", "ceil_mode")
+    if set(_triple(dilation)) != {1}:
+        return _unimplemented("max_pool3d", "dilation")
+    if not stride:
+        stride = kernel_size
+    r = g.op("MaxPool", input,
+             kernel_shape_i=_triple(kernel_size),
+             pads_i=_triple(padding) * 2,
+             strides_i=_triple(stride))
+    return r, None
+
+
 def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
     if ceil_mode:
         return _unimplemented("avg_pool2d", "ceil_mode")
@@ -510,12 +524,19 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
 
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
+    input_sizes = input.type().sizes()
+    if len(input_sizes) == 2:
+        # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
+        input = g.op("Unsqueeze", input, axes_i=[2])
+
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                is_test_i=not training,
                epsilon_f=eps,
                momentum_f=1 - momentum,
                outputs=1 if not training else 5)
     if not training:
+        if len(input_sizes) == 2:
+            out = g.op("Squeeze", out, axes_i=[2])
         return out
     else:
         res, new_running_mean, new_running_var, saved_mean, saved_var = out
@@ -523,6 +544,8 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         new_running_var.setType(running_var.type())
         saved_mean.setUniqueName("batch_norm_dead_output-" + saved_mean.uniqueName())
         saved_var.setUniqueName("batch_norm_dead_output-" + saved_var.uniqueName())
+        if len(input_sizes) == 2:
+            res = g.op("Squeeze", res, axes_i=[2])
         return res
 
 
@@ -530,7 +553,9 @@ def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
 
-def elu(g, input, alpha, inplace=False):
+def elu(g, input, alpha, scale):
+    if scale and scale != 1.:
+        return _unimplemented("scale", "does not support scale in Elu")
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
 
@@ -631,14 +656,14 @@ def _unique(g, input, sorted, return_inverse):
 # TODO: remove these once we support Type's in the JIT IR and we can once again
 # use the unified toType operator
 cast_pytorch_to_onnx = {
-    'uint8_t': 2,
-    'int8_t': 3,
-    'double': 11,
-    'float': 1,
-    'Half': 10,
-    'int': 6,
-    'int64_t': 7,
-    'int16_t': 5,
+    'uint8_t': torch.onnx.TensorProtoDataType.UINT8,
+    'int8_t': torch.onnx.TensorProtoDataType.INT8,
+    'double': torch.onnx.TensorProtoDataType.DOUBLE,
+    'float': torch.onnx.TensorProtoDataType.FLOAT,
+    'Half': torch.onnx.TensorProtoDataType.FLOAT16,
+    'int': torch.onnx.TensorProtoDataType.INT32,
+    'int64_t': torch.onnx.TensorProtoDataType.INT64,
+    'int16_t': torch.onnx.TensorProtoDataType.INT16,
 }
 
 
@@ -672,6 +697,14 @@ def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
         _unimplemented("TopK", "Ascending TopK is not supported")
 
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
+
+
+def repeat(g, self, repeats):
+    sizes = self.type().sizes()
+    diff_dims = len(repeats) - len(sizes)
+    if diff_dims > 0:
+        self = view(g, self, [1] * diff_dims + sizes)
+    return g.op("Tile", self, g.op("Constant", value_t=torch.LongTensor(repeats)))
 
 
 def instance_norm(g, input, **kwargs):

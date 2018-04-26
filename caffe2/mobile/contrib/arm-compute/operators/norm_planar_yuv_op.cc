@@ -23,8 +23,8 @@ template <typename T> bool GLNormalizePlanarYUVOp<T>::RunOnDevice() {
   auto *meanblob = OperatorBase::Inputs()[1];
   auto *sdblob = OperatorBase::Inputs()[2];
 
+  X_ = GLContext::getGLTensor<T>(Xblob, X_.release());
   if (first_run_) {
-    X_ = GLContext::getGLTensor<T>(Xblob);
     mean_ = GLContext::getGLTensor<T>(meanblob);
     sd_ = GLContext::getGLTensor<T>(sdblob);
   }

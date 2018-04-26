@@ -9,6 +9,7 @@
 #include "ATen/optional.h"
 
 #include <climits>
+#include <set>
 
 namespace torch {
 namespace jit {
@@ -20,19 +21,15 @@ using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
-static std::string diagnosticType(TypePtr ptr) {
-  if(TupleType* tt = ptr->cast<TupleType>()) {
-    std::stringstream ss;
-    ss << "(";
-    for(size_t i = 0; i < tt->elements().size(); ++i) {
-      if(i > 0)
-        ss << ", ";
-      ss << diagnosticType(tt->elements()[i]);
-    }
-    ss << ")";
-    return ss.str();
+// what type will this have in the interpreter, ignoring extra static information
+// in particular Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
+static TypePtr interpreterType(const TypePtr& type) {
+  if(TupleType* t = type->cast<TupleType>()) {
+    return std::make_shared<TupleType>(fmap(t->elements(), interpreterType));
+  } else if(type->kind() == TypeKind::TensorType) {
+    return DynamicType::get();
   } else {
-    return "Tensor";
+    return type;
   }
 }
 
@@ -82,9 +79,13 @@ struct Environment {
   }
 
   SugaredValuePtr findInParentFrame(const std::string& name) {
-    for (auto runner = next; runner; runner = runner->next) {
-      if (runner->value_table.count(name)) {
-        return runner->value_table.at(name);
+    return next ? next->findInAnyFrame(name) : nullptr;
+  }
+
+  SugaredValuePtr findInAnyFrame(const std::string& name) {
+    for (auto runner = this; runner; runner = runner->next.get()) {
+      if(auto r = runner->findInThisFrame(name)) {
+        return r;
       }
     }
     return nullptr;
@@ -147,9 +148,9 @@ struct Environment {
         throw ErrorReport(loc) << "cannot re-assign '" << name << "' because it has type " << value->kind()
         << ". Only reassignments to first-class values are allowed";
       }
-      if(*as_simple_value->type() != *simple_parent->type()) {
-        throw ErrorReport(loc) << "variable '" << name << "' previously has type " << diagnosticType(simple_parent->type())
-        << " but is now being assigned to a value of type " << diagnosticType(as_simple_value->type());
+      if(!as_simple_value->type()->isSubtypeOf(*interpreterType(simple_parent->type()))) {
+        throw ErrorReport(loc) << "variable '" << name << "' previously has type " << simple_parent->type()->name()
+        << " but is now being assigned to a value of type " << as_simple_value->type()->name();
       }
     }
     if (as_simple_value &&
@@ -304,6 +305,27 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
   for(size_t i = 0; i < op->num_outputs; ++i)
     n->addOutput();
 
+  // special handling for the tuple that cat takes as its first argument
+  if(name == "cat") {
+    ensureTensors(loc, inputs.slice(1));
+    auto first = inputs.at(0);
+    if(first->type()->kind() != TupleType::Kind) {
+      throw ErrorReport(loc) << "expected a tuple";
+    }
+    if(inputs.size() + attributes.size() > 2) {
+      throw ErrorReport(loc) << "expected at most 2 inputs";
+    }
+    // flatten the tuple into the argument list
+    auto unpacked = graph->insertNode(graph->createTupleUnpack(first));
+    ensureTensors(loc, unpacked->outputs());
+    n->removeInput(0);
+    for(size_t i = 0; i < unpacked->outputs().size(); ++i) {
+      n->insertInput(i, unpacked->outputs().at(i));
+    }
+  } else {
+    ensureTensors(loc, inputs);
+  }
+
   return packOutputs(*graph, n->outputs());
 }
 
@@ -313,6 +335,24 @@ struct NoneValue : SugaredValue {
     return "None";
   }
 };
+
+
+static Value* ensureTensor(const SourceRange& range, Value* v) {
+  if(!v->type()->isSubtypeOf(*DynamicType::get())) {
+    throw ErrorReport(range) << "expected a tensor value but found a tuple";
+  }
+  return v;
+}
+
+void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values) {
+  for(auto value : values) {
+    ensureTensor(range, value);
+  }
+}
+
+static Value* identity(const SourceRange& range, Value* v) {
+  return v;
+}
 
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
@@ -440,17 +480,10 @@ private:
 
   std::shared_ptr<Environment> emitSingleIfBranch(
       Block* b,
-      const List<Stmt> branch,
-      std::unordered_set<std::string>* mutated_parent_values) {
+      const List<Stmt> branch) {
     pushFrame(b);
     WithInsertPoint guard(b);
     emitStatements(branch);
-
-    for (const auto & n : environment_stack->definedVariables()) {
-      if (environment_stack->findInParentFrame(n)) {
-        mutated_parent_values->insert(n);
-      }
-    }
     return popFrame();
   }
 
@@ -494,18 +527,49 @@ private:
     auto* false_block = n->addBlock();
 
     // Emit both blocks once to get the union of all mutated values
-    std::unordered_set<std::string> mutated_parent_values;
-    auto save_true = emitSingleIfBranch(
-        true_block, stmt.trueBranch(), &mutated_parent_values);
-    auto save_false = emitSingleIfBranch(
-        false_block, stmt.falseBranch(), &mutated_parent_values);
+    auto save_true = emitSingleIfBranch(true_block, stmt.trueBranch());
+    auto save_false = emitSingleIfBranch(false_block, stmt.falseBranch());
 
-    std::vector<std::string> sorted_mutations(
-        mutated_parent_values.begin(), mutated_parent_values.end());
-    std::sort(sorted_mutations.begin(), sorted_mutations.end());
+    // In python, every variable assigned in an if statement escapes
+    // the scope of the if statement (all variables are scoped to the function).
+    // Script is a subset of python: we consider variables to be in scope
+    // as long as there is a definition of the variable along all paths
+    // through the if statemnent
+    // ----
+    // if ...:
+    //   a =
+    // else:
+    //   ...
+    // ... = a  # error, a is not defined along all paths
+    // ----
+    // if ...:
+    //   a =
+    // else:
+    //   a =
+    // ... = a # OK, a is defined along all paths
+    // ----
+    // a = ...
+    // if ...:
+    //   a =
+    // ... = a # OK, a is defined along all paths
+
+
+    //ordered set, because we want deterministic graph output
+    std::set<std::string> mutated_variables;
+
+    for(auto & v : save_true->definedVariables()) {
+      if(save_false->findInAnyFrame(v)) {
+        mutated_variables.insert(v);
+      }
+    }
+    for(auto & v : save_false->definedVariables()) {
+      if(save_true->findInAnyFrame(v)) {
+        mutated_variables.insert(v);
+      }
+    }
 
     // Register outputs in each block
-    for (const auto& x : sorted_mutations) {
+    for (const auto& x : mutated_variables) {
       auto tv = save_true->getVar(x, stmt.range());
       true_block->registerOutput(tv);
       auto fv = save_false->getVar(x, stmt.range());
@@ -796,23 +860,29 @@ private:
     }
   }
 
-  std::vector<Value*> getValues(TreeList trees, bool maybe_unpack=false) {
+  std::vector<Value*> getValues(
+      TreeList trees,
+      bool maybe_unpack=false,
+      std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
     std::vector<Value*> values;
     for (const auto& tree : trees) {
       if(maybe_unpack && tree->kind() == TK_STARRED) {
         auto starred = Starred(tree);
         auto entries = emitSugaredExpr(starred.expr(), 1)->asTuple(starred.range(), method);
         for(auto entry : entries) {
-          values.push_back(ensureTensor(starred.range(), entry->asValue(starred.range(), method)));
+          values.push_back(post_process(starred.range(), entry->asValue(starred.range(), method)));
         }
       } else {
-        values.push_back(emitExpr(Expr(tree)));
+        values.push_back(emitExpr(Expr(tree), post_process));
       }
     }
     return values;
   }
-  std::vector<Value*> getValues(List<Expr> trees, bool maybe_unpack=false) {
-    return getValues(trees.tree()->trees(), maybe_unpack);
+  std::vector<Value*> getValues(
+      List<Expr> trees,
+      bool maybe_unpack=false,
+      std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
+    return getValues(trees.tree()->trees(), maybe_unpack, post_process);
   }
 
 
@@ -824,6 +894,7 @@ private:
     } else if (ident.name() == "print") {
       if (!attributes.empty())
         throw ErrorReport(ident) << "print doesn't accept any keyword arguments";
+      ensureTensors(ident.range(), inputs);
       emitNode(prim::Print, ident.range(), inputs, 0);
       return std::make_shared<NoneValue>();
     }
@@ -840,19 +911,8 @@ private:
     return sv->call(callee.range(), method, inputs, attributes, n_binders);
   }
 
-  Value* ensureTensor(const SourceRange& range, Value* v) {
-    // both 'DynamicType' and 'TensorType' are actually Tensors:
-    // 'Dynamic' currently means a dynamically-sized tensor vs e.g. a TupleType
-    // TensorType means a 'sized' tensor which is added by some optimizations
-    if(v->type()->kind() == TypeKind::DynamicType
-       || v->type()->kind() == TypeKind::TensorType) {
-         return v;
-    }
-    throw ErrorReport(range) << "expected a tensor value but found a tuple";
-  }
-
-  Value* emitExpr(Expr tree) {
-    return ensureTensor(tree.range(), emitSugaredExpr(tree, 1)->asValue(tree.range(), method));
+  Value* emitExpr(Expr tree, std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
+    return post_process(tree.range(), emitSugaredExpr(tree, 1)->asValue(tree.range(), method));
   }
 
   // any expression that can produce a SugaredValue is handled here
@@ -868,7 +928,7 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        auto inputs = getValues(apply.inputs(), true);
+        auto inputs = getValues(apply.inputs(), true, identity);
         // the apply is directly an identifier 'foo'
         if(apply.callee().kind() == TK_VAR) {
           return emitApplyIdent(Var(apply.callee()).name(), inputs, apply.attributes(), n_binders);
@@ -936,6 +996,11 @@ private:
       } break;
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
+      } break;
+      case TK_LIST_LITERAL: {
+        auto ll = ListLiteral(tree);
+        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
+        return graph->insertNode(graph->createTuple(values))->output();
       } break;
       default:
         throw ErrorReport(tree) << "NYI: " << tree;

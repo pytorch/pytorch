@@ -36,7 +36,7 @@ def build_pipeline(node_id):
 
         epoch_reader = ReaderWithLimit(full_reader, num_iter=3)
         pipe(epoch_reader, processor=inc_total)
-        Job.current().add_stop_signal(epoch_reader.data_finished())
+        Job.current().add_stop_condition(epoch_reader.data_finished())
     return [total]
 
 
@@ -161,9 +161,9 @@ class TestCheckpoint(TestCase):
                     num_epochs = job_runner.train(session)
                 self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
 
-                # There are 12 global blobs after finishing up the job runner.
+                # There are 17 global blobs after finishing up the job runner.
                 # (only blobs on init_group are checkpointed)
-                self.assertEquals(len(ws.blobs), 12)
+                self.assertEquals(len(ws.blobs), 17)
 
             ws = workspace.C.Workspace()
             session = LocalSession(ws)

@@ -33,7 +33,11 @@ Tensor cat(TensorList tensors, int64_t dim) {
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   if (self.dim() == 0) {
-    throw std::runtime_error("chunk expects at least a 1-dimensional tensor");
+    AT_ERROR("chunk expects at least a 1-dimensional tensor");
+  }
+  if (chunks <= 0) {
+    AT_ERROR("chunk expects `chunks` to be greater than 0, got: %lld",
+             (long long)chunks);
   }
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
   // ensure this is dispatched through Tensor/Type, rather than the native function directly.
@@ -44,11 +48,42 @@ Tensor diagflat(const Tensor& self, int64_t offset) {
   return self.contiguous().view(-1).diag(offset);
 }
 
-Tensor diagonal(const Tensor& self, int64_t offset) {
-  if (self.dim() != 2) {
-    throw std::runtime_error("diagonal expects a 2-dimensional tensor");
+Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_) {
+  int64_t nDims = self.dim();
+  int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
+  int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
+  AT_ASSERT(dim1 != dim2, "diagonal dimensions cannot be identical %zd, %zd", dim1_, dim2_);
+  int64_t diag_size;
+  int64_t storage_offset = self.storage_offset();
+  // compute storage offset and size for the diagonal
+  // for positive values of offset (above the main diagonal)
+  // "leftmost columns" (along dim2) are dropped
+  // for negative values of offset (below the main diagonal)
+  // "topmost rows" (along dim1) are dropped.
+  // Note that we invert +/- in the second to absorb the negative
+  // sign in the offset.
+  if (offset >= 0) {
+    diag_size = std::min(self.size(dim1), self.size(dim2)-offset);
+    storage_offset += offset * self.stride(dim2);
+  } else {
+    diag_size = std::min(self.size(dim1)+offset, self.size(dim2));
+    storage_offset -= offset * self.stride(dim1);
   }
-  return self.diag(offset);
+  AT_ASSERT(diag_size > 0, "invalid diagonal offset %zd", offset); // the diagonal offset was too large in magnitude
+
+  // construct new size and stride: we drop dim1 and dim2 (maximum first for not changing the index of the minumum)
+  // the new ("joint") dimension is appended to the end of the shape / stride to match numpy semantics
+  auto sizes = std::vector<int64_t>(self.sizes());
+  auto strides = std::vector<int64_t>(self.strides());
+  sizes.erase(sizes.begin() + std::max(dim1, dim2));
+  strides.erase(strides.begin() + std::max(dim1, dim2));
+  sizes.erase(sizes.begin() + std::min(dim1, dim2));
+  strides.erase(strides.begin() + std::min(dim1, dim2));
+  sizes.push_back(diag_size);
+  strides.push_back(self.stride(dim1)+self.stride(dim2));
+
+  // return view with new parameters
+  return self.as_strided(sizes, strides, storage_offset);
 }
 
 Tensor expand(const Tensor& self, IntList size) {
@@ -490,7 +525,7 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
 // _unsafe_view() differs from view() in that the returned tensor isn't treated
 // as a view for the purposes of automatic differentiation. (It's not listed in
 // VIEW_FUNCTIONS in gen_autograd.py).  It's only safe to use if the `self` tensor
-// is temporary. For example, the viewed tensor here is discarded immediately
+// is temporary. For example, the viewed tensor here (a + b) is discarded immediately
 // after viewing:
 //
 //  res = at::_unsafe_view(a + b, size);

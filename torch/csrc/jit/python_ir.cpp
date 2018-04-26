@@ -1,9 +1,13 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/utils/pybind.h"
+#include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/argument_spec.h"
+
 
 #include <iostream>
 #include <sstream>
@@ -21,6 +25,31 @@ void initPythonIRBindings(PyObject * module_) {
       ss << g;
       return ss.str();
     })
+    .def("propagate_shapes", [](Graph& g, std::vector<at::Tensor> inputs, bool with_grad) {
+      PropagateInputShapes(g, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+    })
+    .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
+                      int64_t onnx_opset_version, bool defer_weight_export=false) {
+      std::string graph;
+      RawDataExportMap export_map;
+      std::tie(graph, export_map) = ExportGraph(
+        g, initializers, onnx_opset_version, defer_weight_export);
+      std::unordered_map<std::string, py::bytes> python_serialized_export_map;
+      for (auto& kv : export_map) {
+        auto t = kv.second;
+        size_t copy_bytes = t.type().elementSizeInBytes() * t.numel();
+        // TODO: this is an unecessary copy. In theory we can directly return
+        // the map from identifier to Tensor, but we need some API in Python
+        // to get raw `bytes` containing the raw tensor data.
+        python_serialized_export_map[kv.first] = py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
+      }
+      return std::make_tuple(py::bytes(graph), python_serialized_export_map);
+    })
+    .def("prettyPrintExport", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
+                      int64_t onnx_opset_version, bool defer_weight_export=false) {
+      return PrettyPrintExportedGraph(
+        g, initializers, onnx_opset_version, defer_weight_export);
+    })
     .def("wrapPyFuncWithSymbolic", [](Graph &g, py::function func, std::vector<Value*> inputs, size_t n_outputs, py::function symbolic) {
       // This function should be used for situations where we have a Python function
       // that should have different behavior when exporting for JIT interpreter
@@ -34,7 +63,7 @@ void initPythonIRBindings(PyObject * module_) {
       std::string cconv(inputs.size(), 't');
       func.attr("symbolic") = symbolic;
       Node* new_node = g.insertNode(g.createPythonOp(
-        THPObjectPtr(func.release().ptr()), cconv, false, {}, {}, false));
+        THPObjectPtr(func.release().ptr()), cconv, {}, {}, false));
       for (auto i : inputs)
         new_node->addInput(i);
       std::vector<Value*> outputs;
@@ -81,6 +110,7 @@ void initPythonIRBindings(PyObject * module_) {
     .GS(appendNode)
     .GS(prependNode)
     .GS(lint)
+    .GS(insertNode)
     ;
     #undef GS
 
@@ -115,6 +145,8 @@ void initPythonIRBindings(PyObject * module_) {
     ;
 
   #undef VS
+
+  py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block");
 
   #define NS(name) \
     def(#name,&Node :: name)
@@ -155,6 +187,10 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(eraseOutput)
     .NS(addOutput)
     .NS(scopeName)
+    .def("blocks", [](Node& n) {
+      return py::make_iterator(n.blocks().begin(), n.blocks().end());
+    })
+    .NS(addBlock)
 
 #define AS(name) def(#name,&Attributes<Node> :: name)
     // methods from Attributes

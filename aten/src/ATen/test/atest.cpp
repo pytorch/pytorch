@@ -24,7 +24,8 @@ void trace() {
 
 TEST_CASE( "atest", "[]" ) {
 
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::Backend::CUDA);
 
   auto foo = rand(CPU(kFloat), {12,6});
   REQUIRE(foo.data<float>() == foo.toFloatData());

@@ -27,7 +27,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"optional<ScalarType>", ParameterType::SCALARTYPE},
   {"Layout", ParameterType::LAYOUT},
   {"Device", ParameterType::DEVICE},
-  {"String", ParameterType::STRING},
+  {"std::string", ParameterType::STRING},
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)

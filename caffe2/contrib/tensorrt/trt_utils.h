@@ -1,8 +1,9 @@
 #pragma once
 
-#include "caffe2/core/logging.h"
-#include <NvInfer.h>
 #include <iostream>
+#include <NvInfer.h>
+
+#include "caffe2/core/logging.h"
 
 namespace caffe2 { namespace tensorrt {
 
@@ -43,6 +44,12 @@ inline std::shared_ptr<T> TrtObject(T* obj) {
   return std::shared_ptr<T>(obj, TrtDeleter());
 }
 
+std::shared_ptr<nvinfer1::ICudaEngine> BuildTrtEngine(
+    const std::string& onnx_model_str,
+    TrtLogger* logger,
+    size_t max_batch_size,
+    size_t max_workspace_size,
+    bool debug_builder);
 }
 }
 

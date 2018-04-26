@@ -71,8 +71,11 @@ at::optional<size_t> fusibleExpandTo(at::IntList from, at::IntList to) {
   return to.size() - from.size();
 }
 
-void fuseBroadcast(std::shared_ptr<Graph>& graph) {
-  for(auto n : graph->nodes()) {
+void fuseBroadcast(Block *b) {
+  for(auto n : b->nodes()) {
+    for (auto *child_block : n->blocks()) {
+      fuseBroadcast(child_block);
+    }
 
     // Can't fuse into nodes that don't support broadcasting
     if (!isBroadcasting(n)) continue;
@@ -122,9 +125,11 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
-  for(auto n : graph->nodes()) {
-
+void fuseConsecutiveTransposes(Block *b) {
+  for(auto n : b->nodes()) {
+    for (auto *child_block : n->blocks()) {
+      fuseConsecutiveTransposes(child_block);
+    }
     if (n->kind() == onnx::Transpose && n->input()->node()->kind() == onnx::Transpose) {
       auto origInput = n->input();
       n->is_(attr::perm, composeTransposes(origInput->node()->is(attr::perm), n->is(attr::perm)));
@@ -137,9 +142,12 @@ void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void eliminateNopTranspose(std::shared_ptr<Graph>& graph) {
-  for(auto it = graph->nodes().begin(), end = graph->nodes().end(); it != end; ++it) {
+void eliminateNopTranspose(Block *b) {
+  for(auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     auto n = *it;
+    for (auto *child_block : n->blocks()) {
+      eliminateNopTranspose(child_block);
+    }
     if (n->kind() == onnx::Transpose) {
       if (isNopTranspose(n->is(attr::perm))) {
         n->replaceAllUsesWith(n->input()->node());
@@ -150,11 +158,13 @@ void eliminateNopTranspose(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
+void fuseTransposeIntoGemm(Block *b) {
   static const std::vector<int64_t> simpleTransPerm({1,0});
 
-  for(auto n : graph->nodes()) {
-
+  for(auto n : b->nodes()) {
+    for (auto *child_block : n->blocks()) {
+      fuseTransposeIntoGemm(child_block);
+    }
     if (n->kind() == onnx::Gemm) {
       for (size_t i : {0,1}) {
         auto inp = n->inputs()[i];
@@ -187,9 +197,13 @@ void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
 //   the removeNopPacking pass removes the packing operations
 //   entirely by pairing them with their inverse PadPacked. If the
 //   input graph does not pair the operations, export will fail.
-void pushPackingPastRnn(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+
+void pushPackingPastRnn(Block *b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
     auto* n = *it;
+    for (auto *child_block : n->blocks()) {
+      pushPackingPastRnn(child_block);
+    }
 
     if (n->kind() != prim::PackPadded) {
       continue;
@@ -203,6 +217,9 @@ void pushPackingPastRnn(std::shared_ptr<Graph>& graph) {
       continue;
     }
 
+    if(rnn->owningBlock() != n->owningBlock())
+      continue;
+
     // remove PackPadded from in front of the RNN
     n->outputs()[0]->replaceAllUsesWith(n->inputs()[0]);
 
@@ -211,7 +228,7 @@ void pushPackingPastRnn(std::shared_ptr<Graph>& graph) {
     n->outputs()[1]->replaceFirstUseWith(n->inputs()[1]);
 
     // and insert new PackPadded after the RNN
-    Node * newPackPadded = graph->create(prim::PackPadded, 2);
+    Node * newPackPadded = b->owningGraph()->create(prim::PackPadded, 2);
     newPackPadded->insertAfter(rnn);
 
     // make things consume from the new PackPadded
@@ -226,9 +243,12 @@ void pushPackingPastRnn(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void removeNopPacking(std::shared_ptr<Graph>& graph) {
+void removeNopPacking(Block* graph) {
   for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
     auto* n = *it;
+    for (auto *child_block : n->blocks()) {
+      removeNopPacking(child_block);
+    }
 
     if (n->kind() != prim::PadPacked) {
       continue;
@@ -251,7 +271,7 @@ void removeNopPacking(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void fixDefaultRNNState(std::shared_ptr<Graph>& graph, Node * n, int input_index) {
+void fixDefaultRNNState(Graph* graph, Node * n, int input_index) {
   auto initial_state = n->inputs()[input_index];
 
   // The RNN code in pytorch accepts an optional hidden state. When it
@@ -319,9 +339,12 @@ void fixDefaultRNNState(std::shared_ptr<Graph>& graph, Node * n, int input_index
   }
 }
 
-void fixDefaultRnnHiddenState(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+void fixDefaultRnnHiddenState(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
     auto* n = *it;
+    for (auto *child_block : n->blocks()) {
+      fixDefaultRnnHiddenState(child_block);
+    }
 
     if (!isRNN(n)) {
       continue;
@@ -331,13 +354,16 @@ void fixDefaultRnnHiddenState(std::shared_ptr<Graph>& graph) {
     if (n->inputs().size() < 6) {
       continue;
     }
-    fixDefaultRNNState(graph, n, 5);
+    fixDefaultRNNState(b->owningGraph(), n, 5);
   }
 }
 
-void fixDefaultLstmCellState(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+void fixDefaultLstmCellState(Block *b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
     auto* n = *it;
+    for (auto *child_block : n->blocks()) {
+      fixDefaultLstmCellState(child_block);
+    }
 
     if (n->kind() != onnx::LSTM) {
       continue;
@@ -347,7 +373,37 @@ void fixDefaultLstmCellState(std::shared_ptr<Graph>& graph) {
     if (n->inputs().size() < 7) {
       continue;
     }
-    fixDefaultRNNState(graph, n, 6);
+    fixDefaultRNNState(b->owningGraph(), n, 6);
+  }
+}
+
+static bool isSafeToSpeculate(Node* n) {
+  return n->kind() == onnx::Transpose;
+}
+
+static void speculateOps(Block* block) {
+  for(auto it = block->nodes().begin(), end = block->nodes().end();
+      it != end;) {
+    Node * n = *it;
+    ++it; //note: increment first so that it is safe to move the node if needed
+
+    for(auto b : n->blocks()) {
+      speculateOps(b);
+    }
+    if(!isSafeToSpeculate(n))
+      continue;
+    // XXX - only works for nodes with a single input
+    // move node n outside of the control flow it is nested in
+    auto node_input = n->input()->node();
+    if(node_input->owningBlock() == n->owningBlock())
+      continue;
+    // find the control flow node in the same block as node_input that contains
+    // Node n
+    auto control_flow_node = n->owningBlock()->owningNode();
+    while(control_flow_node->owningBlock() != node_input->owningBlock())
+      control_flow_node = control_flow_node->owningBlock()->owningNode();
+    // put the node right before this flow node
+    n->moveBefore(control_flow_node);
   }
 }
 
@@ -372,14 +428,15 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   // TODO: decide on fixpoint strategy
   // TODO: make it easier not to do O(k) iterations over the graph, where
   // k is the number of distinct peephole optimizations
-  pushPackingPastRnn(graph);
-  removeNopPacking(graph);
-  fixDefaultRnnHiddenState(graph);
-  fixDefaultLstmCellState(graph);
-  fuseBroadcast(graph);
-  fuseConsecutiveTransposes(graph);
-  eliminateNopTranspose(graph);
-  fuseTransposeIntoGemm(graph);
+  pushPackingPastRnn(graph->block());
+  removeNopPacking(graph->block());
+  fixDefaultRnnHiddenState(graph->block());
+  fixDefaultLstmCellState(graph->block());
+  fuseBroadcast(graph->block());
+  fuseConsecutiveTransposes(graph->block());
+  eliminateNopTranspose(graph->block());
+  fuseTransposeIntoGemm(graph->block());
+  speculateOps(graph->block());
 }
 
 }}
