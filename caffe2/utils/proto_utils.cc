@@ -55,6 +55,8 @@ std::string DeviceTypeName(const int32_t& d) {
       return "MKLDNN";
     case IDEEP:
       return "IDEEP";
+    case HIP:
+      return "HIP";
     default:
       CAFFE_THROW(
           "Unknown device: ",
