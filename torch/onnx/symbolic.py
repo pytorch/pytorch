@@ -699,6 +699,14 @@ def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
+def repeat(g, self, repeats):
+    sizes = self.type().sizes()
+    diff_dims = len(repeats) - len(sizes)
+    if diff_dims > 0:
+        self = view(g, self, [1] * diff_dims + sizes)
+    return g.op("Tile", self, g.op("Constant", value_t=torch.LongTensor(repeats)))
+
+
 def instance_norm(g, input, **kwargs):
     input_type = input.type().scalarType()
     weight = kwargs.get("weight", None)
