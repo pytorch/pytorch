@@ -188,7 +188,7 @@ static Tensor internal_new_from_data(const Type & type, int device, PyObject* da
 #ifdef WITH_NUMPY
   if (PyArray_Check(data)) {
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
-    const auto& type_to_use = type_inference ? tensor.type() : type;
+    const auto& type_to_use = type_inference ? type.toScalarType(tensor.type().scalarType()) : type;
     return copy_numpy ? new_with_tensor_copy(type_to_use, tensor, device) :
                         new_with_type_conversion(type_to_use, tensor, device);
   }
