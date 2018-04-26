@@ -1,6 +1,8 @@
 #include "ATen/native/cpu/ReduceOpsKernel.h"
 
 #include <numeric>
+#include <iterator>
+#include <algorithm>
 
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
@@ -126,9 +128,10 @@ struct Reduction {
 
     if (cols_rounded != cols) {
       scalar_t buf[WIDTH];
-      for (int64_t j = 0; j != cols - cols_rounded; j++) {
-        buf[j] = ident;
-      }
+
+      // Initializes the entire (tiny) array to avoid uninitialized warnings
+      std::fill(std::begin(buf), std::end(buf), ident);
+
       for (int64_t row = 0; row != rows; row++) {
         for (int64_t j = 0; j != cols - cols_rounded; j++) {
           auto val = data[row * stride + j + cols_rounded];
