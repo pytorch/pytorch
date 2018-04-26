@@ -216,9 +216,29 @@ private:
     auto input_values = fmap(input_vars, [&](const Variable& v) {
       return tracer::getValueTrace(state, v);
     });
+
+    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
     input_vars.clear(); // don't hold inputs during execution
     auto outputs = runFallback(std::move(inputs));
-    auto output_values = script::inlineCallTo(*state->graph, *this->graph, input_values);
+
+    auto all_dynamic = [](const at::ArrayRef<Value*> xs) {
+      for(Value* x : xs) {
+        if(x->type()->kind() != TypeKind::DynamicType)
+          return false;
+      }
+      return true;
+    };
+    // Traces always have types propagated through them, so we make sure to
+    // also propagate types through the graph we are inserting here.
+    // However, this->graph itself may already have been generated with
+    // tracing and so we only do the type propgation if no concrete types have
+    // been set.
+    auto local_graph = this->graph;
+    if(all_dynamic(local_graph->inputs()) && all_dynamic(local_graph->outputs())) {
+      local_graph = this->graph->copy();
+      PropagateInputShapes(*local_graph, spec);
+    }
+    auto output_values = script::inlineCallTo(*state->graph, *local_graph, input_values);
 
     for(size_t i = 0; i < outputs.size(); ++i) {
       tracer::setValueTrace(state, outputs[i], output_values[i]);
