@@ -1,8 +1,11 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 
+#include <cstdlib>
+#include <limits>
 #include <stdexcept>
-#include <unordered_map>
 #include <sstream>
+#include <unordered_map>
+#include <utility>
 
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/python_strings.h"
@@ -133,7 +136,7 @@ bool FunctionParameter::check(PyObject* obj) {
 std::string FunctionParameter::type_name() const {
   switch (type_) {
     case ParameterType::TENSOR: return "Tensor";
-    case ParameterType::SCALAR: return "float";
+    case ParameterType::SCALAR: return "Number";
     case ParameterType::INT64: return "int";
     case ParameterType::DOUBLE: return "float";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";
@@ -149,6 +152,15 @@ std::string FunctionParameter::type_name() const {
     default: throw std::runtime_error("unknown parameter type");
   }
 }
+
+static inline std::pair<bool, int64_t> parse_as_integer(const std::string& s) {
+  if (s.empty()) return std::make_pair(false, std::numeric_limits<int64_t>::lowest());
+  char *str_end;
+  long ans = strtol(s.c_str(), &str_end, 0);
+  // *str_end == 0 if the entire string was parsed as an integer.
+  return std::make_pair(*str_end == 0, ans);
+}
+
 
 void FunctionParameter::set_default_str(const std::string& str) {
   if (str == "None") {
@@ -170,7 +182,13 @@ void FunctionParameter::set_default_str(const std::string& str) {
       // but allows None.
       default_scalar = Scalar(NAN);
     } else {
-      default_scalar = Scalar(atof(str.c_str()));
+      // we sometimes rely on integer-vs-float values, e.g. with arange.
+      auto is_integer = parse_as_integer(str);
+      if (std::get<0>(is_integer)) {
+        default_scalar = Scalar(std::get<1>(is_integer));
+      } else {
+        default_scalar = Scalar(atof(str.c_str()));
+      }
     }
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {

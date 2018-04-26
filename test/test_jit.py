@@ -1890,8 +1890,8 @@ class TestScript(TestCase):
             w = -q
             return w * w
 
-        x = torch.arange(4, requires_grad=True)
-        y = torch.arange(0, 8, 2, requires_grad=True)
+        x = torch.arange(4., requires_grad=True)
+        y = torch.arange(0., 8, 2, requires_grad=True)
         self.checkScript(func, [x, y], optimize=True, capture_output=True)
 
     def test_multiple_assignment(self):
@@ -2041,7 +2041,7 @@ class TestScript(TestCase):
             c = F.prelu(x, slope)
             return a, b, c
 
-        x = torch.arange(-3, 4)
+        x = torch.arange(-3., 4)
         slope = torch.tensor([0.5])
         self.checkScript(fn, [x, slope], optimize=True)
 
