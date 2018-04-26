@@ -123,6 +123,16 @@ struct ReduceMaxTo {
   }
 };
 
+#ifdef CUDA_HALF_TENSOR
+template <>
+struct ReduceMaxTo<half, float> {
+  inline __device__ float operator()(float a, half b) const {
+    float b_f = __half2float(b);
+    return (THCNumerics<float>::gt(a, b_f) ? a : b_f);
+  }
+};
+#endif // CUDA_HALF_TENSOR
+
 struct LogicalAll {
   inline __device__ unsigned char operator()(unsigned char x,
                                              unsigned char y) const {
