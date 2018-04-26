@@ -180,7 +180,7 @@ static Tensor internal_new_from_data(const Type & type, int device, PyObject* da
 
   if (THPVariable_Check(data)) {
       auto var = reinterpret_cast<THPVariable*>(data)->cdata;
-      const auto& type_to_use = type_inference ? var.type() : type;
+      const auto& type_to_use = type_inference ? type.toScalarType(var.type().scalarType()) : type;
       return copy_variables ? new_with_tensor_copy(type_to_use, var, device) :
                               new_with_type_conversion(type_to_use, var, device);
   }
