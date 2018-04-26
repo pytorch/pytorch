@@ -285,7 +285,7 @@ class KLDivLoss(_Loss):
 
     By default, the losses are averaged for each minibatch over observations
     **as well as** over dimensions. However, if the field
-    `size_average` is set to ``False``, the losses are instead summed.
+    :attr:`size_average` is set to ``False``, the losses are instead summed.
 
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
@@ -294,6 +294,19 @@ class KLDivLoss(_Loss):
           KL Divergence because the terms are already probability weighted.
           A future release of PyTorch may move the default loss closer to the
           mathematical definition.
+
+          To get the real KL Divergence, use ``size_average=False``, and
+          then divide the output by the batch size.
+
+          Example::
+
+            >>> loss = nn.KLDivLoss(size_average=False)
+            >>> batch_size = 5
+            >>> probs1 = F.softmax(torch.randn(batch_size, 10), 1)
+            >>> probs2 = F.softmax(torch.randn(batch_size, 10), 1)
+            >>> loss(probs1.log(), probs2) / batch_size
+            tensor(0.7142)
+
 
     Args:
         size_average (bool, optional: By default, the losses are averaged
