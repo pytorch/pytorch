@@ -1656,7 +1656,7 @@ class TestScript(TestCase):
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "at most 2 inputs"):
+        with self.assertRaisesRegex(RuntimeError, "expected 1 input"):
             @torch.jit.script
             def func(x):
                 return torch.cat((x, x), x, dim=0)
@@ -2309,6 +2309,20 @@ class TestScript(TestCase):
                 return v
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
+
+    def test_constant_as_attr(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['dim']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.dim = 1
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return torch.cat([v, v, v], dim=self.dim)
+        v = torch.zeros(1, 1)
+        self.assertEqual(torch.cat([v, v, v], dim=1), M().forward(v))
 
     class StarTestSumStarred(torch.nn.Module):
         def __init__(self):
