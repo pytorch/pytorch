@@ -1026,9 +1026,11 @@ Examples::
 
 add_docstr(torch.diagonal,
            r"""
-diagonal(input, offset=0) -> Tensor
+diagonal(input, offset=0, dim1=0, dim2=1) -> Tensor
 
-Returns a 1-D tensor with the diagonal elements of :attr:`input`.
+Returns a partial view of :attr:`input` with the its diagonal elements
+with respect to :attr:`dim1` and :attr:`dim2` appended as a dimension
+at the end of the shape.
 
 The argument :attr:`offset` controls which diagonal to consider:
 
@@ -1037,9 +1039,15 @@ The argument :attr:`offset` controls which diagonal to consider:
 - If :attr:`offset` < 0, it is below the main diagonal.
 
 Args:
-    input (Tensor): the input tensor. Must be 2-dimensional.
+    input (Tensor): the input tensor. Must be at least 2-dimensional.
     offset (int, optional): which diagonal to consider. Default: 0
         (main diagonal).
+    dim1 (int, optional): first dimension with respect to which to
+        take diagonal. Default: 0.
+    dim2 (int, optional): second dimension with respect to which to
+        take diagonal. Default: 1.
+
+.. note::  To take a batch diagonal, pass in dim1=-2, dim2=-1.
 
 Examples::
 
@@ -1058,6 +1066,17 @@ Examples::
     tensor([ 1.1431,  0.0360])
 
 
+    >>> x = torch.randn(2, 5, 4, 2)
+    >>> torch.diagonal(x, offset=-1, dim1=1, dim2=2)
+
+    (0 ,.,.) =
+     -0.6806 -0.0281 -0.6595 -0.4199
+      0.8741 -0.1793 -0.6997  0.6265
+
+    (1 ,.,.) =
+      0.6182  1.3069  1.6503  1.7627
+     -0.2122 -0.2250  0.0990 -2.6433
+    [torch.FloatTensor of size (2,2,4)]
 """)
 
 add_docstr(torch.dist,

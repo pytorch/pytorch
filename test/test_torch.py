@@ -2014,6 +2014,25 @@ class TestTorch(TestCase):
     def test_diagonal(self):
         self._test_diagonal(self, dtype=torch.float32, device='cpu')
 
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_diagonal_multidim(self):
+        x = torch.randn(10, 11, 12, 13)
+        xn = x.numpy()
+        for args in [(2, 2, 3),
+                     (2,),
+                     (-2, 1, 2),
+                     (0, -2, -1)]:
+            result = torch.diagonal(x, *args)
+            expected = xn.diagonal(*args)
+            self.assertEqual(expected.shape, result.shape)
+            self.assertTrue(np.allclose(expected, result.numpy()))
+        # test non-continguous
+        xp = x.permute(1, 2, 3, 0)
+        result = torch.diagonal(xp, 0, -2, -1)
+        expected = xp.numpy().diagonal(0, -2, -1)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertTrue(np.allclose(expected, result.numpy()))
+
     @staticmethod
     def _test_diagflat(self, dtype, device):
         # Basic sanity test
