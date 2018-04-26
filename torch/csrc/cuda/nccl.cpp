@@ -8,6 +8,7 @@
 #include <sstream>
 #include <ATen/ATen.h>
 #include <THC/THC.h>
+#include <THC/THCStream.hpp> // forgive me for I have sinned
 
 namespace torch { namespace cuda { namespace nccl {
 

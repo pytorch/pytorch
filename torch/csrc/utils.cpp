@@ -96,7 +96,7 @@ bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStora
     if (!THPUtils_checkLong(arg)) {
       return false;
     }
-    THLongStorage_set(storage, i, THPUtils_unpackLong(arg));
+    THLongStorage_set(result, i, THPUtils_unpackLong(arg));
   }
   return true;
 }

@@ -8,13 +8,13 @@ template <class io>
 void THPStorage_(writeFileRaw)(THStorage *self, io fd)
 {
   real *data;
-  int64_t size = self->size;
+  int64_t size = THStorage_(size)(LIBRARY_STATE self);
 #ifndef THC_GENERIC_FILE
-  data = self->data;
+  data = THStorage_(data)(LIBRARY_STATE self);
 #else
   std::unique_ptr<char[]> cpu_data(new char[size * sizeof(real)]);
   data = (real*)cpu_data.get();
-  THCudaCheck(cudaMemcpy(data, self->data, size * sizeof(real), cudaMemcpyDeviceToHost));
+  THCudaCheck(cudaMemcpy(data, THStorage_(data)(LIBRARY_STATE self), size * sizeof(real), cudaMemcpyDeviceToHost));
 #endif
   ssize_t result = doWrite(fd, &size, sizeof(int64_t));
   if (result != sizeof(int64_t))
@@ -76,14 +76,14 @@ THStorage * THPStorage_(readFileRaw)(io file, THStorage *_storage)
   if (_storage == nullptr) {
     storage = THStorage_(newWithSize)(LIBRARY_STATE size);
   } else {
-    THPUtils_assert(_storage->size == size,
+    THPUtils_assert(THStorage_(size)(LIBRARY_STATE _storage) == size,
         "storage has wrong size: expected %ld got %ld",
-        size, _storage->size);
+        size, THStorage_(size)(LIBRARY_STATE _storage));
     storage = _storage;
   }
 
 #ifndef THC_GENERIC_FILE
-  data = storage->data;
+  data = THStorage_(data)(LIBRARY_STATE storage);
 #else
   std::unique_ptr<char[]> cpu_data(new char[size * sizeof(real)]);
   data = (real*)cpu_data.get();
@@ -92,7 +92,7 @@ THStorage * THPStorage_(readFileRaw)(io file, THStorage *_storage)
   // fast track for bytes and little endian
   if (sizeof(real) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
     char *bytes = (char *) data;
-    int64_t remaining = sizeof(real) * storage->size;
+    int64_t remaining = sizeof(real) * THStorage_(size)(LIBRARY_STATE storage);
     while (remaining > 0) {
       // we write and read in 1GB blocks to avoid bugs on some OSes
       ssize_t result = doRead(file, bytes, THMin(remaining, 1073741824));
@@ -134,7 +134,7 @@ THStorage * THPStorage_(readFileRaw)(io file, THStorage *_storage)
   }
 
 #ifdef THC_GENERIC_FILE
-  THCudaCheck(cudaMemcpy(storage->data, data, size * sizeof(real), cudaMemcpyHostToDevice));
+  THCudaCheck(cudaMemcpy(THStorage_(data)(LIBRARY_STATE storage), data, size * sizeof(real), cudaMemcpyHostToDevice));
 #endif
   return storage.release();
 }
