@@ -172,17 +172,17 @@ void THCStorage_(retain)(THCState *state, THCStorage *self)
     self->refcount++;
 }
 
-bool THCStorage_(retainIfLive)(THCState *state, THCStorage *storage)
+int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage)
 {
   // TODO: Check if THC_STORAGE_REFCOUNTED?
   int refcount = storage->refcount.load();
   while (refcount > 0) {
     if (storage->refcount.compare_exchange_strong(refcount, refcount + 1)) {
-      return true;
+      return 1;
     }
     refcount = storage->refcount.load();
   }
-  return false;
+  return 0;
 }
 
 void THCStorage_(free)(THCState *state, THCStorage *self)
