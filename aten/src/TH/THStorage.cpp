@@ -1,4 +1,4 @@
-#include "THStorage.h"
+#include "THStorage.hpp"
 
 #include "generic/THStorage.cpp"
 #include "THGenerateAllTypes.h"

@@ -4,13 +4,7 @@
 #include <cuda_runtime_api.h>
 #include "THCGeneral.h"
 
-struct THCStream
-{
-    cudaStream_t stream;
-    int device;
-    std::atomic<int> refcount;
-};
-
+struct THCStream;
 
 THC_API THCStream* THCStream_new(int flags);
 THC_API THCStream* THCStream_defaultStream(int device);

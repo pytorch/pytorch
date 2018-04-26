@@ -1,6 +1,7 @@
 #ifndef THC_GENERATOR_INC
 #define THC_GENERATOR_INC
 
+#include <atomic>
 #include <mutex>
 
 typedef struct THCGeneratorState {

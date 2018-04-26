@@ -1,5 +1,7 @@
 #include "THSTensor.h"
 
+#include <new>
+
 #include "generic/THSTensor.cpp"
 #include "THSGenerateAllTypes.h"
 

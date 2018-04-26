@@ -2,7 +2,7 @@
 #include <float.h>
 
 #include <atomic>
-#include "THTensor.h"
+#include "THTensor.hpp"
 #include "THVector.h"
 #include "generic/simd/simd.h"
 

@@ -21,16 +21,8 @@
 #define TH_STORAGE_FREEMEM    4
 #define TH_STORAGE_VIEW       8
 
-typedef struct THStorage
-{
-    real *data;
-    ptrdiff_t size;
-    std::atomic<int> refcount;
-    char flag;
-    THAllocator *allocator;
-    void *allocatorContext;
-    struct THStorage *view;
-} THStorage;
+// Struct definition is moved to THStorage.hpp (so this file stays C compatible)
+typedef struct THStorage THStorage;
 
 TH_API real* THStorage_(data)(const THStorage*);
 TH_API ptrdiff_t THStorage_(size)(const THStorage*);
