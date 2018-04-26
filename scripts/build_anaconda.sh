@@ -330,11 +330,11 @@ if [[ -z $SKIP_CONDA_TESTS && -n $UPLOAD_TO_CONDA ]]; then
   #if [[ -n $CUDA_VERSION ]]; then
   #  export PACKAGE_CUDA_LIBS=1
   #fi
-
-  # Show what the final meta.yaml looks like
-  echo "Finalized meta.yaml is"
-  cat $META_YAML
 fi
+
+# Show what the final meta.yaml looks like
+echo "Finalized meta.yaml is"
+cat $META_YAML
 
 
 ###########################################################
