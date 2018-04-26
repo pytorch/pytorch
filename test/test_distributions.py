@@ -967,7 +967,7 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_gpu_sample(self):
-        set_rng_seed(0)
+        set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
             self._check_sampler_discrete(Poisson(torch.Tensor([rate]).cuda()),
                                          scipy.stats.poisson(rate),
@@ -1515,6 +1515,28 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gamma_gpu_shape(self):
+        alpha = torch.tensor(torch.exp(torch.randn(2, 3).cuda()), requires_grad=True)
+        beta = torch.tensor(torch.exp(torch.randn(2, 3).cuda()), requires_grad=True)
+        alpha_1d = torch.tensor(torch.exp(torch.randn(1).cuda()), requires_grad=True)
+        beta_1d = torch.tensor(torch.exp(torch.randn(1).cuda()), requires_grad=True)
+        self.assertEqual(Gamma(alpha, beta).sample().size(), (2, 3))
+        self.assertEqual(Gamma(alpha, beta).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(Gamma(alpha_1d, beta_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Gamma(alpha_1d, beta_1d).sample().size(), (1,))
+        self.assertEqual(Gamma(0.5, 0.5).sample().size(), ())
+        self.assertEqual(Gamma(0.5, 0.5).sample((1,)).size(), (1,))
+
+        def ref_log_prob(idx, x, log_prob):
+            a = alpha.data.view(-1)[idx]
+            b = beta.data.view(-1)[idx]
+            expected = scipy.stats.gamma.logpdf(x, a, scale=1 / b)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -1522,6 +1544,17 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(Gamma(alpha, beta),
                                         scipy.stats.gamma(alpha, scale=1.0 / beta),
                                         'Gamma(concentration={}, rate={})'.format(alpha, beta))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_gamma_gpu_sample(self):
+        set_rng_seed(0)
+        for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
+            a, b = torch.Tensor([alpha]).cuda(), torch.Tensor([beta]).cuda()
+            self._check_sampler_sampler(Gamma(a, b),
+                                        scipy.stats.gamma(alpha, scale=1.0 / beta),
+                                        'Gamma(alpha={}, beta={})'.format(alpha, beta),
+                                        failure_rate=1e-4)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto(self):
