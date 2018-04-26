@@ -63,10 +63,11 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
       return "CUDNN_DATA_INT32";
     case CUDNN_DATA_INT8x4:
       return "CUDNN_DATA_INT8x4";
+    default:
+      std::ostringstream oss;
+      oss << "(unknown data-type " << static_cast<int>(dtype) << ")";
+      return oss.str();
   }
-  std::ostringstream oss;
-  oss << "(unknown data-type " << static_cast<int>(dtype) << ")";
-  return oss.str();
 }
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
