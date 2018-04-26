@@ -142,6 +142,7 @@ void initPythonIRBindings(PyObject * module_) {
       return node;
     })
     .VS(copyMetadata)
+    .VS(isTensor)
     ;
 
   #undef VS
@@ -284,7 +285,7 @@ void initPythonIRBindings(PyObject * module_) {
     ;
 
   #define TS(name) \
-    def(#name,&Node :: name)
+    def(#name,&Type :: name)
   py::class_<Type,std::shared_ptr<Type>>(m,"Type")
     .def("__repr__",[](Type & t) {
       std::stringstream ss;

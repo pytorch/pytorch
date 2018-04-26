@@ -51,6 +51,8 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor,
     p->add_dims(d);
   }
   onnx::DataType onnx_type;
+  // Most integral types and float16 need to be serialized as int32
+  at::ScalarType cast_type = tensor.type().scalarType();
   switch(tensor.type().scalarType()) {
     case at::kDouble:
       onnx_type = onnx::kDOUBLE;
@@ -60,13 +62,16 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor,
       break;
     case at::kHalf:
       onnx_type = onnx::kFLOAT16;
+      cast_type = at::kInt;
       break;
     case at::kByte:
     case at::kChar:
       onnx_type = onnx::kINT8;
+      cast_type = at::kInt;
       break;
     case at::kShort:
       onnx_type = onnx::kINT16;
+      cast_type = at::kInt;
       break;
     case at::kInt:
       onnx_type = onnx::kINT32;
@@ -80,7 +85,7 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor,
   }
   p->set_data_type(onnx_type);
   // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
-  auto t = tensor.contiguous().toBackend(at::kCPU);
+  auto t = tensor.contiguous().toBackend(at::kCPU).toType(cast_type);
   // Add a buffer to the raw_data_export_map for the caller to dump into an
   // external data store. If external_ref is not specified, we instead dump
   // the contiguous data into the protobuf itself
@@ -158,40 +163,41 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name, Export
 
 void encodeTypeProtoTensorType(onnx::TypeProtoTensor* tensor_type, Value* n) {
   onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-  TensorType* node_type = n->type()->expect<TensorType>();
-  const std::vector<std::int64_t>& sizes = node_type->sizes();
-  for (std::int64_t s : sizes) {
-    shape->add_dim(s);
+  if (TensorType* node_type = n->type()->cast<TensorType>()) {
+    const std::vector<std::int64_t>& sizes = node_type->sizes();
+    for (std::int64_t s : sizes) {
+      shape->add_dim(s);
+    }
+    onnx::DataType onnx_type;
+    switch(node_type->scalarType()) {
+      case at::kDouble:
+        onnx_type = onnx::kDOUBLE;
+        break;
+      case at::kFloat:
+        onnx_type = onnx::kFLOAT;
+        break;
+      case at::kHalf:
+        onnx_type = onnx::kFLOAT16;
+        break;
+      case at::kByte:
+      case at::kChar:
+        onnx_type = onnx::kINT8;
+        break;
+      case at::kShort:
+        onnx_type = onnx::kINT16;
+        break;
+      case at::kInt:
+        onnx_type = onnx::kINT32;
+        break;
+      case at::kLong:
+        onnx_type = onnx::kINT64;
+        break;
+      default:
+        torch::barf("unexpected tensor scalar type");
+        break;
+    }
+    tensor_type->set_data_type(onnx_type);
   }
-  onnx::DataType onnx_type;
-  switch(node_type->scalarType()) {
-    case at::kDouble:
-      onnx_type = onnx::kDOUBLE;
-      break;
-    case at::kFloat:
-      onnx_type = onnx::kFLOAT;
-      break;
-    case at::kHalf:
-      onnx_type = onnx::kFLOAT16;
-      break;
-    case at::kByte:
-    case at::kChar:
-      onnx_type = onnx::kINT8;
-      break;
-    case at::kShort:
-      onnx_type = onnx::kINT16;
-      break;
-    case at::kInt:
-      onnx_type = onnx::kINT32;
-      break;
-    case at::kLong:
-      onnx_type = onnx::kINT64;
-      break;
-    default:
-      torch::barf("unexpected tensor scalar type");
-      break;
-  }
-  tensor_type->set_data_type(onnx_type);
 }
 
 void encodeValueInfo(onnx::ValueInfoProto* v, Value* n) {
