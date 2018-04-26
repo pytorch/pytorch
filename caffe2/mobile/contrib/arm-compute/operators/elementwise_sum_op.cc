@@ -24,10 +24,8 @@ bool GLSumOp<T>::RunOnDevice() {
   auto *Ablob = OperatorBase::Inputs()[0];
   auto *Bblob = OperatorBase::Inputs()[1];
 
-  if (first_run_) {
-    A_ = GLContext::getGLTensor<T>(Ablob);
-    B_ = GLContext::getGLTensor<T>(Bblob);
-  }
+  A_ = GLContext::getGLTensor<T>(Ablob, A_.release());
+  B_ = GLContext::getGLTensor<T>(Bblob, B_.release());
 
   GLTensor<T> *Y =
       OperatorBase::Outputs()[0]->template GetMutable<GLTensor<T>>();
@@ -35,14 +33,20 @@ bool GLSumOp<T>::RunOnDevice() {
     first_run_ = false;
     Y->ResizeLike(*A_);
     add_layer_.configure(A_->get_underlying(), B_->get_underlying(), Y->get_underlying(), arm_compute::ConvertPolicy::SATURATE);
+  } else if (second_run_) {
+    A_->lazy_allocate(Ablob, second_run_, true);
+    B_->lazy_allocate(Bblob, second_run_, true);
+    second_run_ = false;
+    Y->allocate();
+    add_layer_.run();
   } else {
     A_->lazy_allocate(Ablob, second_run_, true);
     B_->lazy_allocate(Bblob, second_run_, true);
-    if (second_run_) {
+    bool need_allocation = Y->ResizeLike(*A_);
+    add_layer_.configure(A_->get_underlying(), B_->get_underlying(), Y->get_underlying(), arm_compute::ConvertPolicy::SATURATE);
+    if (need_allocation) {
       Y->allocate();
-      second_run_ = false;
     }
-    add_layer_.run();
   }
 
   return true;

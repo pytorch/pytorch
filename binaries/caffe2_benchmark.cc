@@ -5,12 +5,15 @@
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+#include "observers/net_observer_reporter_print.h"
 #include "observers/observer_config.h"
+#include "observers/perf_observer.h"
 
 CAFFE2_DEFINE_string(
     backend,
@@ -113,6 +116,13 @@ static void writeTextOutput(
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
+  caffe2::ClearGlobalNetObservers();
+  caffe2::AddGlobalNetObserverCreator([](caffe2::NetBase* subject) {
+    return caffe2::make_unique<caffe2::PerfNetObserver>(subject);
+  });
+  caffe2::ObserverConfig::setReporter(
+      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
+
   caffe2::ShowLogInfoToStderr();
   unique_ptr<caffe2::Workspace> workspace(new caffe2::Workspace());
 
@@ -135,32 +145,48 @@ int main(int argc, char** argv) {
         CAFFE_ENFORCE(caffe2::ReadProtoFromFile(input_files[i], &blob_proto));
         workspace->CreateBlob(input_names[i])->Deserialize(blob_proto);
       }
-    } else if (caffe2::FLAGS_input_dims.size()) {
+    } else if (
+        caffe2::FLAGS_input_dims.size() || caffe2::FLAGS_input_type.size()) {
+      CAFFE_ENFORCE_GE(
+          caffe2::FLAGS_input_dims.size(),
+          0,
+          "Input dims must be specified when input tensors are used.");
+      CAFFE_ENFORCE_GE(
+          caffe2::FLAGS_input_type.size(),
+          0,
+          "Input type must be specified when input tensors are used.");
+
       vector<string> input_dims_list =
           caffe2::split(';', caffe2::FLAGS_input_dims);
       CAFFE_ENFORCE_EQ(
           input_names.size(),
           input_dims_list.size(),
           "Input name and dims should have the same number of items.");
-      for (int i = 0; i < input_names.size(); ++i) {
+      vector<string> input_type_list =
+          caffe2::split(';', caffe2::FLAGS_input_type);
+      CAFFE_ENFORCE_EQ(
+          input_names.size(),
+          input_type_list.size(),
+          "Input name and type should have the same number of items.");
+      for (size_t i = 0; i < input_names.size(); ++i) {
         vector<string> input_dims_str = caffe2::split(',', input_dims_list[i]);
         vector<int> input_dims;
         for (const string& s : input_dims_str) {
           input_dims.push_back(caffe2::stoi(s));
         }
-        if (!workspace->HasBlob(input_names[i])) {
-          workspace->CreateBlob(input_names[i]);
+        caffe2::Blob* blob = workspace->GetBlob(input_names[i]);
+        if (blob == nullptr) {
+          blob = workspace->CreateBlob(input_names[i]);
         }
-        caffe2::TensorCPU* tensor =
-            workspace->GetBlob(input_names[i])->GetMutable<caffe2::TensorCPU>();
+        caffe2::TensorCPU* tensor = blob->GetMutable<caffe2::TensorCPU>();
+        CHECK_NOTNULL(tensor);
         tensor->Resize(input_dims);
-        if (caffe2::FLAGS_input_type == "float") {
+        if (input_type_list[i] == "uint8_t") {
+          tensor->mutable_data<uint8_t>();
+        } else if (input_type_list[i] == "float") {
           tensor->mutable_data<float>();
         } else {
-          CAFFE_ENFORCE(
-              caffe2::FLAGS_input_type == "uint8_t",
-              "Only supported input types are: float, uint8_t");
-          tensor->mutable_data<uint8_t>();
+          CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
         }
       }
     } else {
@@ -173,6 +199,9 @@ int main(int argc, char** argv) {
   // Run main network.
   caffe2::NetDef net_def;
   CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_net, &net_def));
+  if (!net_def.has_name()) {
+    net_def.set_name("benchmark");
+  }
   if (caffe2::FLAGS_backend != "builtin") {
     std::string engine = caffe2::FLAGS_backend == "nnpack"
         ? "NNPACK"

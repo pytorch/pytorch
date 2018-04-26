@@ -6,14 +6,16 @@ TEST(OPENGLOperatorTest, CopyFromGL) {
 
   for (auto dims: std::vector<std::vector<int>>{
       {1},
+      {3},
       {1, 2},
+      {2, 3},
       {1, 2, 3},
       {1, 2, 3, 4},
       {4, 3, 2, 1},
       {4, 9, 8, 13},
     }) {
     Workspace ws;
-    PopulateCPUBlob(&ws, true, std::string("cpu_X"), dims);
+    PopulateCPUBlob(&ws, true, std::string("cpu_X"), dims, 1, 0.2, 0.1);
 
     NetDef gpu_net;
     gpu_net.set_type("opengl");

@@ -1,4 +1,5 @@
 #include "nomnigraph/Representations/NeuralNet.h"
+#include "nomnigraph/Graph/Algorithms.h"
 
 namespace nom {
 namespace repr {
@@ -7,26 +8,15 @@ NeuralNetOperator::~NeuralNetOperator() {}
 
 const std::string NeuralNetOperator::getName() const {
   switch (getKind()) {
-  case NNKind::Conv:
-    return "Conv";
-  case NNKind::Relu:
-    return "Relu";
-  case NNKind::Send:
-    return "Send";
-  case NNKind::Receive:
-    return "Receive";
-  case NNKind::While:
-    return "While";
-  case NNKind::NNPhi:
-    return "Phi";
-  case NNKind::ConvRelu:
-    return "ConvRelu";
-  case NNKind::DynamicInput:
-    return "DynamicInput";
-  case NNKind::GenericOperator:
-    return dyn_cast<GenericOperator>(this)->getName();
-  default:
-    return "Unknown";
+#include "nomnigraph/Generated/OpNames.h"
+    case NNKind::While:
+      return "While";
+    case NNKind::NNPhi:
+      return "Phi";
+    case NNKind::GenericOperator:
+      return dyn_cast<GenericOperator>(this)->getName();
+    default:
+      return "Unknown";
   }
 }
 
@@ -54,6 +44,10 @@ NNGraph::NodeRef getProducer(NNGraph::NodeRef n) {
   assert(inEdges.size() > 0 && "Tensor does not have a producer.");
   assert(inEdges.size() == 1 && "Malformed NNGraph, NeuralNetData has multiple producers.");
   return inEdges.front()->tail();
+}
+
+bool hasConsumer(NNGraph::NodeRef n) {
+  return n->getOutEdges().size() != 0;
 }
 
 std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n) {
@@ -87,15 +81,21 @@ std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n) {
   return out;
 }
 
-size_t coalesceInsertedDataDependenciesHelper(repr::NNModule* m) {
-  // Get all nodes tracked by CF graph
+// Get all nodes tracked by CF graph
+std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
+    repr::NNCFGraph& cf) {
   std::unordered_set<repr::NNGraph::NodeRef> cfTrackedNodes;
-  for (const auto &bbNode : m->controlFlow.getMutableNodes()) {
+  for (const auto& bbNode : cf.getMutableNodes()) {
     auto bb = repr::nn::get<repr::BasicBlockType<repr::NNGraph>>(bbNode);
     for (const auto node : bb->getInstructions()) {
       cfTrackedNodes.insert(node);
     }
   }
+  return cfTrackedNodes;
+}
+
+size_t coalesceInsertedDataDependenciesHelper(repr::NNModule* m) {
+  auto cfTrackedNodes = getTrackedNodes(m->controlFlow);
 
   for (auto &bbNode : m->controlFlow.getMutableNodes()) {
     auto bb = repr::nn::get<repr::BasicBlockType<repr::NNGraph>>(bbNode);
@@ -126,6 +126,27 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
     oldSize = newSize;
     newSize = coalesceInsertedDataDependenciesHelper(m);
   } while (newSize != oldSize);
+
+  // Now we track new nodes that have no relationship to the old CFGraph
+  auto cfTrackedNodes = getTrackedNodes(m->controlFlow);
+  std::unordered_set<repr::NNGraph::NodeRef> dfNodes;
+  for (auto node : m->dataFlow.getMutableNodes()) {
+    if (repr::nn::is<NeuralNetOperator>(node) && !cfTrackedNodes.count(node)) {
+      dfNodes.insert(node);
+    }
+  }
+
+  auto bbNode = m->controlFlow.createNode(
+      util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
+  auto sccs = algorithm::tarjans(&m->dataFlow);
+  for (auto iter = sccs.rbegin(); iter != sccs.rend(); ++iter) {
+    for (auto node : iter->getNodes()) {
+      if (dfNodes.count(node)) {
+        auto currentBasicBlock = bbNode->mutableData()->get();
+        currentBasicBlock->pushInstructionNode(node);
+      }
+    }
+  }
 }
 
 } // namespace nn

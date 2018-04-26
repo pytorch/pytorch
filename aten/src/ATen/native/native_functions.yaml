@@ -86,6 +86,19 @@
 - func: arange_out(Tensor result, Scalar end) -> Tensor
   variants: function
 
+# `argmin` and `argmax` are exposed in C++ but not in Python, where we only
+# expose `_argmin` and `_argmax` (which call the first versions). In Python, we
+# then define our own `argmax` and `argmin` that handle passing `dim=None`,
+# which gets the argmax/argmin of the flattened array.
+
+- func: argmax(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+- func: argmax(Tensor self) -> Tensor
+- func: _argmax(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
+- func: argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+- func: argmin(Tensor self) -> Tensor
+- func: _argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
 
@@ -164,7 +177,7 @@
     CPU: _cos_out_cpu
     CUDA: _cos_out_cuda
 
-- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
@@ -237,6 +250,28 @@
       name: grad_grid
   variants: function
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: cumsum(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: cumsum(Tensor self, int64_t dim) -> Tensor
+
+- func: cumsum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: cumsum_out(Tensor result, Tensor self, int64_t dim) -> Tensor
+  variants: function
+
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: cumprod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: cumprod(Tensor self, int64_t dim) -> Tensor
+
+- func: cumprod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: cumprod_out(Tensor result, Tensor self, int64_t dim) -> Tensor
+  variants: function
+
 - func: det(Tensor self) -> Tensor
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
@@ -246,6 +281,9 @@
   variants: function
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
+
+- func: einsum(std::string equation, TensorList tensors) -> Tensor
+  variants: function
 
 - func: embedding(Tensor weight, IndexTensor indices, int64_t padding_idx=-1, bool scale_grad_by_freq=false, bool sparse=false) -> Tensor
   variants: function
@@ -297,6 +335,8 @@
 
 - func: empty_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: exp(Tensor self) -> Tensor
 
@@ -344,8 +384,10 @@
 
 - func: full_like(Tensor self, Scalar fill_value, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
-- func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+- func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
@@ -364,7 +406,7 @@
 
 - func: rfft(Tensor self, int64_t signal_ndim, bool normalized=false, bool onesided=true) -> Tensor
 
-- func: irfft(Tensor self, int64_t signal_ndim, IntList signal_sizes={}, bool normalized=false, bool onesided=true) -> Tensor
+- func: irfft(Tensor self, int64_t signal_ndim, bool normalized=false, bool onesided=true, IntList signal_sizes={}) -> Tensor
 
 - func: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes) -> Tensor
   dispatch:
@@ -422,13 +464,17 @@
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
 
-- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
+- func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
+
+- func: min_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
 
@@ -453,6 +499,8 @@
 
 - func: ones_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
@@ -473,6 +521,37 @@
 
 - func: rand_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
+
+
+- func: randint(Type dtype, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randint(Type dtype, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randint_out(Tensor result, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randint_out(Tensor result, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function  
+
+- func: randint_like(Tensor self, int64_t high) -> Tensor
+  variants: function
+
+- func: randint_like(Tensor self, int64_t low, int64_t high) -> Tensor
+  variants: function  
+
+- func: randint_like(Tensor self, int64_t high, *, Type dtype) -> Tensor
+  variants: function
+  python_default_init:
+    dtype: self.type()
+
+- func: randint_like(Tensor self, int64_t low, int64_t high, *, Type dtype) -> Tensor
+  variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
   variants: function
@@ -485,6 +564,8 @@
 
 - func: randn_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
   variants: function
@@ -597,14 +678,34 @@
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: sum(Tensor self, *, ScalarType dtype) -> Tensor
+
 - func: sum(Tensor self) -> Tensor
+
+- func: _sum(Tensor self) -> Tensor
   dispatch:
     CPU: _sum_cpu
     CUDA: _sum_cuda
 
+- func: sum(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+
 - func: sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
+- func: sum(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: _sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function
+
 - func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: sum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: _sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
   dispatch:
     CPU: _sum_out_cpu
@@ -620,14 +721,34 @@
     CPU: _sqrt_out_cpu
     CUDA: _sqrt_out_cuda
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: prod(Tensor self, *, ScalarType dtype) -> Tensor
+
 - func: prod(Tensor self) -> Tensor
+
+- func: _prod(Tensor self) -> Tensor
   dispatch:
     CPU: _prod_cpu
     CUDA: _prod_cuda
 
+- func: prod(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+
 - func: prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
+- func: prod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: _prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function
+
 - func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: prod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: _prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
   dispatch:
     CPU: _prod_out_cpu
@@ -638,6 +759,9 @@
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
+
+- func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
+  variants: function
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
@@ -691,6 +815,8 @@
 
 - func: zeros_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   dispatch:

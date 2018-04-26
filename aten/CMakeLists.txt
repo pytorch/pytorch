@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0)
 set(CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix
   /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
   ${CMAKE_MODULE_PATH})
@@ -9,6 +9,9 @@ SET(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 project(ATen)
 
 cmake_policy(SET CMP0012 NEW)
+
+# Polyfill for upstream FindCUDA
+include(CMakeInitializeConfigs)
 
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
@@ -26,8 +29,11 @@ if("${isSystemDir}" STREQUAL "-1")
 endif()
 
 IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wextra -Wno-missing-field-initializers -Wno-type-limits -Wno-unused-parameter -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
   set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
+  if ($ENV{WERROR})
+    set(CMAKE_CXX_FLAGS "-Werror ${CMAKE_CXX_FLAGS}")
+  endif()
 ENDIF(NOT MSVC)
 
 INCLUDE(CheckCXXSourceCompiles)
@@ -73,7 +79,13 @@ endif()
 
 # Detect CUDA architecture and get best NVCC flags
 # finding cuda must be first because other things depend on the result
-IF(NOT CUDA_FOUND)
+#
+# NB: We MUST NOT run this find_package if NO_CUDA is set, because upstream
+# FindCUDA has a bug where it will still attempt to make use of NOTFOUND
+# compiler variables to run various probe tests.  We could try to fix
+# this, but since FindCUDA upstream is subsumed by first-class support
+# for CUDA language, it seemed not worth fixing.
+IF(NOT CUDA_FOUND AND NOT NO_CUDA)
   FIND_PACKAGE(CUDA 5.5)
 ENDIF()
 
@@ -123,7 +135,7 @@ ENDIF()
 
 IF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
   MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.CudaHalfTensor")
-  LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__")
+  LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__")
   SET(CMAKE_C_FLAGS "-DCUDA_HAS_FP16=1 ${CMAKE_C_FLAGS}")
 ELSE(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
   MESSAGE(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
@@ -386,6 +398,7 @@ ENDMACRO(Install_Required_Library libname)
 
 FIND_PACKAGE(BLAS)
 SET(AT_MKL_ENABLED 0)
+SET(AT_MKL_MT 0)
 IF(BLAS_FOUND)
   SET(USE_BLAS 1)
   IF(BLAS_INFO STREQUAL "mkl")
@@ -397,6 +410,10 @@ IF(BLAS_FOUND)
         `pip install mkl-devel` if using pip. If build fails with header files \
         available in the system, please make sure that CMake will search the \
         directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
+    ENDIF()
+    IF(MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
+      ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
+      SET(AT_MKL_MT 1)
     ENDIF()
     INCLUDE_DIRECTORIES(${BLAS_INCLUDE_DIR})  # include MKL headers
     SET(AT_MKL_ENABLED 1)
@@ -451,7 +468,9 @@ else()
   add_subdirectory(src/THCS)
 endif()
 
-find_package(CuDNN)
+IF (NOT NO_CUDA)
+  find_package(CuDNN)
+ENDIF()
 IF(NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
   MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
   set(AT_CUDNN_ENABLED 0)
@@ -489,7 +508,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN)
 add_subdirectory(src/ATen)
 include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src
-${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/utils/catch/single_include
+${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include
 ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 if(NOT NO_CUDA)
   include_directories(${CUDA_INCLUDE_DIRS})

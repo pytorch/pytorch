@@ -1,6 +1,5 @@
 #include "Functions.h"
 #include <ATen/WrapDimUtils.h>
-#include <iostream>
 
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
@@ -9,6 +8,7 @@
 #endif
 #include <math.h>
 #include <algorithm>
+#include <numeric>
 
 // ${generated_comment}
 
@@ -859,20 +859,26 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto m = self.size(0);
   auto n = self.size(1);
   auto k = sigma.size(0);
+  auto gsigma = grads[1];
 
-  Tensor u, v;
+  auto u = raw_u;
+  auto v = raw_v;
+  auto gu = grads[0];
+  auto gv = grads[2];
+
   if (!some) {
-    // ignore the free subspace
+    // We ignore the free subspace here because possible base vectors cancel
+    // each other, e.g., both -v and +v are valid base for a dimension.
+    // Don't assume behavior of any particular implementation of svd.
     u = raw_u.narrow(1, 0, k);
     v = raw_v.narrow(1, 0, k);
-  } else {
-    u = raw_u;
-    v = raw_v;
+    if (gu.defined()) {
+      gu = gu.narrow(1, 0, k);
+    }
+    if (gv.defined()) {
+      gv = gv.narrow(1, 0, k);
+    }
   }
-
-  auto gu = grads[0];
-  auto gsigma = grads[1];
-  auto gv = grads[2];
   auto vt = v.t();
 
   Tensor sigma_term;
@@ -1003,6 +1009,109 @@ std::tuple<Tensor, Tensor> trtrs_backward(
   return std::tuple<Tensor, Tensor>{grad_b, grad_a};
 }
 
+// Generally speaking, fft's backward is ifft.
+Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
+                    bool complex_input, bool complex_output,
+                    bool inverse, IntList checked_signal_sizes,
+                    bool normalized, bool onesided,
+                    IntList output_sizes) {
+  Tensor gI;
+  if (!complex_input && complex_output) {
+    // Forward is R2C
+    // Do inverse C2C and project onto real plane because grad can be
+    // asymmetrical so C2R can't be used.
+    if (onesided) {
+      // Forward is R2C (onesided)
+      // Think of onesided R2C rfft as
+      //     1. view as complex numbers (fill complex dim with zeros)
+      //     2. C2C fft
+      //     3. discard half of results
+      // So backward is
+      //     1. fill the other half with zeros (with `zero_grad_shape` below)
+      //        (C2C ifft only take twosided inputs so we need to fill here)
+      //     2. inverse C2C ifft
+      //     3. discard the complex dim
+      int64_t zero_length = checked_signal_sizes[signal_ndim - 1] - grad.size(signal_ndim);
+      auto complex_full_grad = grad;
+      if (zero_length > 0) {
+        std::vector<int64_t> zero_grad_shape(signal_ndim + 2);
+        zero_grad_shape[0] = self.size(0);
+        for (int64_t i = 1; i < signal_ndim; i++) {
+          zero_grad_shape[i] = checked_signal_sizes[i - 1];
+        }
+        zero_grad_shape[signal_ndim] = zero_length;
+        zero_grad_shape[signal_ndim + 1] = 2;
+        complex_full_grad =  at::cat({ grad, at::zeros(grad.type(), zero_grad_shape) }, signal_ndim);
+      }
+      gI = _fft_with_size(complex_full_grad, signal_ndim,
+                          /* complex_input */ true, /* complex_output */ true,
+                          !inverse, checked_signal_sizes, normalized,
+                          /* onesided */ false, complex_full_grad.sizes()).select(-1, 0);
+    } else {
+      gI = _fft_with_size(grad, signal_ndim, /* complex_input */ true,
+                          /* complex_output */ true, !inverse,
+                          checked_signal_sizes, normalized,
+                          /* onesided */ false, grad.sizes()).select(-1, 0);
+    }
+  } else if (complex_input && !complex_output && onesided) {
+    // Forward is C2R (onesided)
+    // Think of onesided C2R irfft as
+    //    1. fill the other half by conjugate symmetry
+    //    2. inverse C2C ifft
+    //    3. discard the complex dimension
+    // So backward is
+    //    1. R2C rfft (essentially add dummy complex dimension, and dft)
+    //    2. accumulate gradient by conjugate symmetry
+    //       since rfft results follow conjugate symmetry, we only need to
+    //       double some entries from onesided rfft results, i.e., the ones with
+    //       their reflected indices also landing out of the onesided range. So
+    //       consider the index of last dim:
+    //           i.   idx = 0.
+    //                Reflected to (N - 0) % N = 0. Not doubled.
+    //           ii   0 < idx < floor(N/2) (last).
+    //                N > N - idx > ceil(N/2)
+    //                Reflected to ()
+    //           iii. idx = floor(N/2) = N/2 (last) when N even.
+    //                Reflected to (N - N/2) % N = N/2. Not doubled.
+    //           iv.  idx = floor(N/2) = (N-1)/2 (last) when N odd.
+    //                Reflected to (N - (N-1)/2) % N = (N+1)/2. Doubled.
+    //       Therefore, needs to double
+    //           idx = 1, 2, ..., N/2 - 1     when N even
+    //           idx = 1, 2, ..., (N-1)/2     when N odd
+    //       that is
+    //           idx = 1, 2, ..., N - (floor(N/2) + 1)
+    //               = 1, 2, ..., N - onesided_length
+    gI = _fft_with_size(grad, signal_ndim, /* complex_input */ false,
+                        /* complex_output */ true, /* inverse */ false,
+                        checked_signal_sizes, normalized, /* onesided */ true,
+                        self.sizes());
+    int64_t double_length = checked_signal_sizes[signal_ndim - 1] - self.size(signal_ndim);
+    if (double_length > 0) {  // also covers case when signal size is zero
+      gI.narrow(signal_ndim, 1, double_length).mul_(2);
+    }
+  } else {
+    gI = _fft_with_size(grad, signal_ndim, complex_output, complex_input,
+                        !inverse, checked_signal_sizes, normalized, onesided,
+                        self.sizes());
+  }
+  if (normalized) {
+    // If normalized, backward is exactly calling fft with inversed argument as
+    // the forward because both are unitary.
+    return gI;
+  } else {
+    // If not normalized, in backward, we need to upscale or downscale gI basing
+    // on whether the forward is an inverse fft.
+    auto signal_numel = std::accumulate(checked_signal_sizes.begin(),
+                    checked_signal_sizes.end(), 1, std::multiplies<int64_t>());
+    if (!inverse) {
+      return gI.mul_(static_cast<double>(signal_numel));
+    } else {
+      return gI.div_(static_cast<double>(signal_numel));
+    }
+  }
+}
+
+// Helper for batchnorm_double_backward
 Tensor sum_exclude_dim1(const Tensor& to_sum, bool keepdim=true) {
   auto r = to_sum.sum(0, keepdim);
   int64_t start_point_exclusive = keepdim ? 1 : 0;
@@ -1012,6 +1121,7 @@ Tensor sum_exclude_dim1(const Tensor& to_sum, bool keepdim=true) {
   return r;
 }
 
+// Helper for batchnorm_double_backward
 // similar to expand_as below, but doesn't do the expand_as; operates as if
 // reductions were done with keepdim=True
 Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
@@ -1162,6 +1272,19 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 
+}
+
+std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
+						       IntList expand1, IntList expand2, IntList expand3,
+						       IntList sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
+  Tensor grad_i1, grad_i2, grad_i3;
+  if (grad_mask[0])
+    grad_i1 = at::_trilinear(grad_out, i2, i3, sumdim, expand2, expand3, expand1);
+  if (grad_mask[1])
+    grad_i2 = at::_trilinear(i1, grad_out, i3, expand1, sumdim, expand3, expand2);
+  if (grad_mask[2])
+    grad_i3 = at::_trilinear(i1, i2, grad_out, expand1, expand2, sumdim, expand3);
+  return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
 }
 
 } // anonymous namespace

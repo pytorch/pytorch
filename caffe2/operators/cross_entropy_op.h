@@ -67,17 +67,37 @@ class MakeTwoClassGradientOp final : public Operator<Context> {
 template <typename T, class Context>
 class SigmoidCrossEntropyWithLogitsOp final : public Operator<Context> {
  public:
-  USE_SIMPLE_CTOR_DTOR(SigmoidCrossEntropyWithLogitsOp);
   USE_OPERATOR_CONTEXT_FUNCTIONS;
+  SigmoidCrossEntropyWithLogitsOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        log_D_trick_(OperatorBase::template GetSingleArgument<bool>(
+            "log_D_trick",
+            false)) {}
+
   bool RunOnDevice() override;
+
+ protected:
+  bool log_D_trick_;
 };
 
 template <typename T, class Context>
 class SigmoidCrossEntropyWithLogitsGradientOp final : public Operator<Context> {
  public:
-  USE_SIMPLE_CTOR_DTOR(SigmoidCrossEntropyWithLogitsGradientOp);
   USE_OPERATOR_CONTEXT_FUNCTIONS;
+  SigmoidCrossEntropyWithLogitsGradientOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        log_D_trick_(OperatorBase::template GetSingleArgument<bool>(
+            "log_D_trick",
+            false)) {}
+
   bool RunOnDevice() override;
+
+ protected:
+  bool log_D_trick_;
 };
 
 template <typename T, class Context>

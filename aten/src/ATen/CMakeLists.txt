@@ -9,8 +9,10 @@ ENDIF()
 
 IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
   SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
+  SET(VCOMP_LIB "vcomp")
 ELSE()
-  SET(MSVC_OPT_FLAG "")
+  SET(MSVC_OPT_FLAG " ")
+  SET(VCOMP_LIB "vcompd")
 ENDIF()
 
 ########################
@@ -126,10 +128,6 @@ endfunction()
 IF ($ENV{TH_BINARY_BUILD})
   MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
   SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
-  IF (UNIX AND NOT APPLE)
-    # hiding statically linked library symbols, this flag is not available for the linker under macOS
-    SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
-  ENDIF(UNIX AND NOT APPLE)
 ENDIF()
 
 # Can be compiled standalone
@@ -239,7 +237,7 @@ ELSE()
 ENDIF()
 ADD_DEPENDENCIES(ATen aten_files_are_generated)
 
-set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb/tbb_remote")
+set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/../third_party/tbb")
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
 set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
@@ -249,8 +247,6 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb)
 set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
 target_include_directories(tbb_static PUBLIC ${TBB_ROOT_DIR}/include)
 target_link_libraries(ATen tbb_static)
-
-SET_TARGET_PROPERTIES(ATen PROPERTIES VERSION 1 SOVERSION 1)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
     SET_PROPERTY(TARGET ATen PROPERTY CXX_STANDARD 11)
@@ -303,6 +299,12 @@ ENDIF(UNIX)
 
 IF(NOT MSVC)
   TARGET_LINK_LIBRARIES(ATen m)
+ELSE(NOT MSVC)
+  IF(AT_MKL_MT)
+    set_target_properties(ATen PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(ATen PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(ATen PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
+  ENDIF(AT_MKL_MT)
 ENDIF(NOT MSVC)
 
 # Is __thread supported?
@@ -321,23 +323,85 @@ if(MKLDNN_FOUND)
   target_link_libraries(ATen ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
 
+# Directory where cpuinfo will download and build all dependencies
+set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
+  CACHE PATH "Confu-style dependencies binary directory")
+
 # ---[ Configure cpuinfo
-IF(NOT TARGET cpuinfo)
-  SET(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
-  SET(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
-  SET(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
-  SET(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  ADD_SUBDIRECTORY("cpu/cpuinfo")
-ENDIF()
+if (NOT TARGET cpuinfo)
+  if (NOT DEFINED CPUINFO_SOURCE_DIR)
+    set(CPUINFO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
+  endif()
+
+  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+  if(MSVC)
+    # ATen is built with default MSVC runtime linking, which is /MD (DLL)
+    # so no need to check *_USE_MSVC_STATIC_RUNTIME or some equivalent.
+    set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
+  endif()
+  add_subdirectory(
+    "${CPUINFO_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
+  # We build static version of cpuinfo but link
+  # them into a shared library for Caffe2, so they need PIC.
+  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+endif()
 TARGET_LINK_LIBRARIES(ATen cpuinfo)
 
 IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(ATen
-    ${CUDA_LIBRARIES}
-    ${CUDA_cusparse_LIBRARY}
-    ${CUDA_curand_LIBRARY})
-  CUDA_ADD_CUBLAS_TO_TARGET(ATen)
-  CUDA_ADD_CUFFT_TO_TARGET(ATen)
+  IF ($ENV{ATEN_STATIC_CUDA})
+    # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
+    # we first have to build a fake lib that links with no device callbacks,
+    # and then we link against this object file.
+    # This was recommended by the CuFFT team at NVIDIA
+
+    # build fake CuFFT lib in build dir
+    EXECUTE_PROCESS(COMMAND touch ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc)
+    if(${CUDA_VERSION_MAJOR} EQUAL "8")
+      SET(CUFFT_FAKELINK_OPTIONS
+	--generate-code arch=compute_35,code=sm_35
+	--generate-code arch=compute_50,code=sm_50
+	--generate-code arch=compute_60,code=sm_60)
+    elseif(${CUDA_VERSION_MAJOR} EQUAL "9")
+      SET(CUFFT_FAKELINK_OPTIONS
+	--generate-code arch=compute_35,code=sm_35
+	--generate-code arch=compute_50,code=sm_50
+	--generate-code arch=compute_60,code=sm_60
+	--generate-code arch=compute_70,code=sm_70)
+    else()
+      MESSAGE(FATAL_ERROR "Unhandled major cuda version ${CUDA_VERSION_MAJOR}")
+    endif()
+    ADD_CUSTOM_COMMAND(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a
+      COMMAND "${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc" -o ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a -Xcompiler -fPIC
+      ${CUFFT_FAKELINK_OPTIONS}
+      --device-link ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc -lcufft_static -lculibos
+      )
+    ADD_CUSTOM_TARGET(FAKELINKED_CUFFT_TARGET DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a)
+    add_library(FAKELINKED_CUFFT STATIC IMPORTED GLOBAL)
+    add_dependencies(FAKELINKED_CUFFT FAKELINKED_CUFFT_TARGET)
+    set_target_properties(FAKELINKED_CUFFT PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a)
+
+    TARGET_LINK_LIBRARIES(ATen
+      ${CUDA_LIBRARIES}
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
+      FAKELINKED_CUFFT
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a
+      )
+  ELSE()
+    TARGET_LINK_LIBRARIES(ATen
+      ${CUDA_LIBRARIES}
+      ${CUDA_cusparse_LIBRARY}
+      ${CUDA_curand_LIBRARY})
+    CUDA_ADD_CUBLAS_TO_TARGET(ATen)
+    CUDA_ADD_CUFFT_TO_TARGET(ATen)
+  ENDIF()
 
   if(CUDNN_FOUND)
     target_link_libraries(ATen ${CUDNN_LIBRARIES})
@@ -346,21 +410,12 @@ IF(CUDA_FOUND)
   IF(USE_MAGMA)
     TARGET_LINK_LIBRARIES(ATen ${MAGMA_LIBRARIES})
     IF ($ENV{TH_BINARY_BUILD})
-      # because magma is linked statically and it wants a BLAS,
-      # we need to link the BLAS lib against THC. Usually TH will
-      # load a BLAS library and it's all fine, but in the binary builds,
-      # TH uses static linkage to MKL, so it doesn't have all symbols that
-      # magma needs. So in this case, explicitly find a BLAS and link against it
-      # just like in TH
-      SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../TH/cmake ${CMAKE_MODULE_PATH})
-      FIND_PACKAGE(BLAS)
-      IF(BLAS_FOUND)
-        TARGET_LINK_LIBRARIES(ATen "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-      ELSE(BLAS_FOUND)
-        MESSAGE(FATAL_ERROR "Binary build needs blas to be found here")
-      ENDIF(BLAS_FOUND)
+      TARGET_LINK_LIBRARIES(ATen "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     ENDIF($ENV{TH_BINARY_BUILD})
   ENDIF(USE_MAGMA)
+  IF ($ENV{ATEN_STATIC_CUDA})
+    TARGET_LINK_LIBRARIES(ATen "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
+  ENDIF($ENV{ATEN_STATIC_CUDA})
 ENDIF()
 
 INSTALL(TARGETS ATen

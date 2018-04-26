@@ -1,5 +1,5 @@
 #ifndef NO_PYTHON
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #endif
 #include "ir.h"
 
@@ -23,17 +23,12 @@ namespace py = pybind11;
 
 namespace torch { namespace jit {
 
-std::string getPythonName(const PyObject* obj, bool is_legacy) {
+std::string getPythonName(const PyObject* obj_) {
   AutoGIL gil;
-  if (is_legacy) {
-    return std::string(obj->ob_type->tp_name);
-  } else {
-    // NB: hypothetically __name__ could mutate the Python
-    // object in a externally visible way. Please don't!
-    auto wobj = const_cast<PyObject*>(obj);
-    THPObjectPtr name{PyObject_GetAttrString(wobj, "__name__")};
-    return THPUtils_unpackString(name.get());
-  }
+  PyObject* obj = const_cast<PyObject*>(obj_);
+  auto v = py::getattr(obj, "__name__", py::str("<python_value>"));
+  // if this was a autograd.Function recover the name of the class
+  return py::str(v);
 }
 
 std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
@@ -75,15 +70,40 @@ std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
   }
 }
 
+at::optional<THPObjectPtr> PythonOp::autogradFunction() const {
+  AutoGIL gil;
+  py::handle obj = const_cast<PyObject*>(pyobj.get());
+
+  auto r = py::getattr(obj, "__self__", py::none());
+  if(r.is_none())
+    return at::nullopt;
+
+  auto apply = py::getattr(r, "apply", py::none());
+  if(apply.is_none())
+    return at::nullopt;
+
+  auto c = PyObject_RichCompareBool(apply.ptr(), obj.ptr(), Py_NE);
+  if(PyErr_Occurred())
+    throw py::error_already_set();
+  if(c)
+    return at::nullopt;
+
+  return THPObjectPtr(r.release().ptr());
+}
+
 std::string PythonOp::name() const {
-  return getPythonName(pyobj.get(),is_legacy);
+  AutoGIL gil;
+  if(auto autograd = autogradFunction()) {
+    return getPythonName(autograd->get());
+  } else {
+    return getPythonName(pyobj.get());
+  }
 }
 
 void PythonOp::cloneFrom(Node * other_) {
   Node::cloneFrom(other_);
   auto other = other_->cast<PythonOp>();
   this->cconv = other->cconv;
-  this->is_legacy = other->is_legacy;
   Py_INCREF(other->pyobj.get());
   this->pyobj = THPObjectPtr(other->pyobj.get());
   this->var_flags = other->var_flags;

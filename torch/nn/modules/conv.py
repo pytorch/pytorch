@@ -502,13 +502,27 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
+    .. note::
+        The :attr:`padding` argument effectively adds ``kernel_size - 1 - padding``
+        amount of zero padding to both sizes of the input. This is set so that
+        when a :class:`~torch.nn.Conv1d` and a :class:`~torch.nn.ConvTranspose1d`
+        are initialized with same parameters, they are inverses of each other in
+        regard to the input and output shapes. However, when :attr`stride` ``>1``,
+        :class:`~torch.nn.Conv1d` maps multiple input shapes to the same output
+        shape. :attr:`output_padding` is provided to resolve this ambiguity by
+        effectively increasing the calculated output shape on one side. Note
+        that :attr:`output_padding` is only used to find output shape, but does
+        not actually add zero-padding to output.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
-        output_padding (int or tuple, optional): Zero-padding added to one side of the output. Default: 0
+        padding (int or tuple, optional): ``kernel_size - 1 - padding`` zero-padding
+            will be added to both sides of the input. Default: 0
+        output_padding (int or tuple, optional): Additional size added to one side
+            of the output shape. Default: 0
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
@@ -591,13 +605,27 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
+    .. note::
+        The :attr:`padding` argument effectively adds ``kernel_size - 1 - padding``
+        amount of zero padding to both sizes of the input. This is set so that
+        when a :class:`~torch.nn.Conv2d` and a :class:`~torch.nn.ConvTranspose2d`
+        are initialized with same parameters, they are inverses of each other in
+        regard to the input and output shapes. However, when :attr`stride` ``>1``,
+        :class:`~torch.nn.Conv2d` maps multiple input shapes to the same output
+        shape. :attr:`output_padding` is provided to resolve this ambiguity by
+        effectively increasing the calculated output shape on one side. Note
+        that :attr:`output_padding` is only used to find output shape, but does
+        not actually add zero-padding to output.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
-        output_padding (int or tuple, optional): Zero-padding added to one side of the output. Default: 0
+        padding (int or tuple, optional): ``kernel_size - 1 - padding`` zero-padding
+            will be added to both sides of each dimension in the input. Default: 0
+        output_padding (int or tuple, optional): Additional size added to one side
+            of each dimension in the output shape. Default: 0
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
@@ -711,13 +739,27 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
+    .. note::
+        The :attr:`padding` argument effectively adds ``kernel_size - 1 - padding``
+        amount of zero padding to both sizes of the input. This is set so that
+        when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
+        are initialized with same parameters, they are inverses of each other in
+        regard to the input and output shapes. However, when :attr`stride` ``>1``,
+        :class:`~torch.nn.Conv3d` maps multiple input shapes to the same output
+        shape. :attr:`output_padding` is provided to resolve this ambiguity by
+        effectively increasing the calculated output shape on one side. Note
+        that :attr:`output_padding` is only used to find output shape, but does
+        not actually add zero-padding to output.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
-        output_padding (int or tuple, optional): Zero-padding added to one side of the output. Default: 0
+        padding (int or tuple, optional): ``kernel_size - 1 - padding`` zero-padding
+            will be added to both sides of each dimension in the input. Default: 0
+        output_padding (int or tuple, optional): Additional size added to one side
+            of each dimension in the output shape. Default: 0
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1

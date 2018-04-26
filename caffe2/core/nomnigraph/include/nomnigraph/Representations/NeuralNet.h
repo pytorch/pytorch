@@ -27,6 +27,10 @@
 namespace nom {
 namespace repr {
 
+// Expose supported attribute types to this namespace.
+using std::vector;
+using std::string;
+
 class NeuralNetData;
 
 /// \brief Annotations allow for generic manipulation of
@@ -73,63 +77,69 @@ private:
 class NeuralNetOperator : public Instruction {
 public:
   /// Discriminator for LLVM-style RTTI (isa<>)
-  enum class NNKind {
-    Undefined,
-    Conv,
-    Relu,
-    ConvRelu,
-    DynamicInput,
-    Send,
-    Receive,
-    While,
-    NNPhi,
-    GenericOperator
-  };
+ enum class NNKind {
+   Undefined,
+   GenericOperator,
+   NNPhi,
+   While,
+#include "nomnigraph/Generated/OpEnum.h"
+ };
 
-  /// An optional tensor-type specifier.
-  enum class NNLayout { Undefined, NCHW, NHWC };
+ /// An optional tensor-type specifier.
+ enum class NNLayout { Undefined, NCHW, NHWC };
 
-  NeuralNetOperator(NNKind K, Opcode I, NNLayout L)
-      : Instruction(I), Kind(K), Layout(L) {}
-  NeuralNetOperator(NNKind K, Opcode I)
-      : Instruction(I), Kind(K), Layout(NNLayout::Undefined) {}
-  NeuralNetOperator(NNKind K, NNLayout L) : Instruction(), Kind(K), Layout(L) {}
-  NeuralNetOperator(NNKind K)
-      : Instruction(), Kind(K), Layout(NNLayout::Undefined) {}
-  NeuralNetOperator()
-      : Instruction(), Kind(NNKind::Undefined), Layout(NNLayout::Undefined) {}
+ NeuralNetOperator(NNKind K, Opcode I, NNLayout L)
+     : Instruction(I), Kind(K), Layout(L) {}
+ NeuralNetOperator(NNKind K, Opcode I)
+     : Instruction(I), Kind(K), Layout(NNLayout::Undefined) {}
+ NeuralNetOperator(NNKind K, NNLayout L) : Instruction(), Kind(K), Layout(L) {}
+ NeuralNetOperator(NNKind K)
+     : Instruction(), Kind(K), Layout(NNLayout::Undefined) {}
+ NeuralNetOperator()
+     : Instruction(), Kind(NNKind::Undefined), Layout(NNLayout::Undefined) {}
 
-  NNKind getKind() const { return Kind; }
+ NNKind getKind() const {
+   return Kind;
+ }
 
-  void setLayout(NNLayout L) { Layout = L; }
+ void setLayout(NNLayout L) {
+   Layout = L;
+ }
 
-  NNLayout getLayout() const { return Layout; }
+ NNLayout getLayout() const {
+   return Layout;
+ }
 
-  void setAnnotation(std::unique_ptr<Annotation> extraAnnotation) {
-    ExtraAnnotation = std::move(extraAnnotation);
-  }
+ void setAnnotation(std::unique_ptr<Annotation> extraAnnotation) {
+   ExtraAnnotation = std::move(extraAnnotation);
+ }
 
-  const Annotation *getAnnotation() const { return ExtraAnnotation.get(); }
-  Annotation *getMutableAnnotation() { return ExtraAnnotation.get(); }
+ const Annotation* getAnnotation() const {
+   return ExtraAnnotation.get();
+ }
+ Annotation* getMutableAnnotation() {
+   return ExtraAnnotation.get();
+ }
 
-  const std::string getName() const;
+ const std::string getName() const;
 
-  /// \brief Validate the inputs and outputs to this operator.
-  ///
-  /// \p inputs A vector of references to NeuralNetData types that
-  /// represent the data being fed into the operator.
-  /// \p outputs A vector of references to NeuralNetData types that
-  /// represent the data being outputted by the operator.
-  /// \return true if the inputs and outputs are compatible with the operator.
-  bool checkInputsAndOutputs(std::vector<const NeuralNetData *> inputs,
-                             std::vector<const NeuralNetData *> outputs) {
-    return true;
-  }
+ /// \brief Validate the inputs and outputs to this operator.
+ ///
+ /// \p inputs A vector of references to NeuralNetData types that
+ /// represent the data being fed into the operator.
+ /// \p outputs A vector of references to NeuralNetData types that
+ /// represent the data being outputted by the operator.
+ /// \return true if the inputs and outputs are compatible with the operator.
+ bool checkInputsAndOutputs(
+     std::vector<const NeuralNetData*> inputs,
+     std::vector<const NeuralNetData*> outputs) {
+   return true;
+ }
 
-  virtual ~NeuralNetOperator() = 0;
+ virtual ~NeuralNetOperator() = 0;
 
-  NeuralNetOperator(const NeuralNetOperator &) = delete;
-  NeuralNetOperator &operator=(NeuralNetOperator &) = delete;
+ NeuralNetOperator(const NeuralNetOperator&) = delete;
+ NeuralNetOperator& operator=(NeuralNetOperator&) = delete;
 
 private:
   const NNKind Kind;
@@ -161,119 +171,40 @@ private:
 
 class Tensor : public NeuralNetData {
 public:
-  Tensor(std::string name) : NeuralNetData(NNDataKind::Tensor), name_(name) {}
+  enum class DataType { Generic, Float, Half, Int8 };
+  enum class Layout { Generic, NCHW, NHWC };
+
+  Tensor(std::string name) : NeuralNetData(NNDataKind::Tensor), name_(name), type_(DataType::Generic) {}
   static bool classof(const NeuralNetData *D) {
     return D->getKind() == NNDataKind::Tensor;
   }
 
   NeuralNetData *clone() { return new Tensor(name_); }
 
+  void setType(DataType type) { type_ = type; }
+
+  DataType getType() const { return type_; }
+
   const std::string getName() const { return name_; }
   ~Tensor() {}
 
 private:
   std::string name_;
-};
-
-class DynamicInput : public NeuralNetOperator {
-public:
-  DynamicInput() : NeuralNetOperator(NNKind::DynamicInput) {}
-  ~DynamicInput() {}
+  DataType type_;
 };
 
 #define NOMNIGRAPH_DEFINE_NN_RTTI(op)                                          \
   static bool classof(const NeuralNetOperator *N) {                            \
     return N->getKind() == NNKind::op;                                         \
+  }                                                                            \
+  static bool classof(const Value *N) {                                        \
+    if (isa<NeuralNetOperator>(N)) {                                           \
+      return dyn_cast<NeuralNetOperator>(N)->getKind() == NNKind::op;          \
+    }                                                                          \
+    return false;                                                              \
   }
 
-class Conv : public NeuralNetOperator {
-public:
-  Conv(std::vector<int> kernelShape, std::vector<int> dilations = {1, 1},
-       int group = 1, std::vector<int> pads = {0, 0},
-       std::vector<int> strides = {1, 1})
-      : NeuralNetOperator(NNKind::Conv), KernelShape(kernelShape),
-        Dilations(dilations), Group(group), Pads(pads), Strides(strides) {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Conv);
-
-  ~Conv() {}
-
-  void setDilations(std::vector<int> &&dilations) {
-    Dilations = std::move(dilations);
-  }
-
-  void setGroup(int &&group) { Group = std::move(group); }
-
-  void setPads(std::vector<int> &&pads) { Pads = std::move(pads); }
-
-  void setStrides(std::vector<int> &&strides) { Strides = std::move(strides); }
-
-  std::vector<int> getDilations() { return Dilations; }
-
-  int getGroup() { return Group; }
-
-  std::vector<int> getPads() { return Pads; }
-
-  std::vector<int> getStrides() { return Strides; }
-
-  std::vector<int> getKernelShape() { return KernelShape; }
-
-  bool checkInputsAndOutputs(std::vector<const NeuralNetData *> inputs,
-                             std::vector<const NeuralNetData *> outputs) {
-    assert(KernelShape.size() == Dilations.size());
-    assert(KernelShape.size() == Pads.size());
-    assert(KernelShape.size() == Strides.size());
-    return true;
-  }
-
-protected:
-  std::vector<int> KernelShape;
-  std::vector<int> Dilations;
-  int Group;
-  std::vector<int> Pads;
-  std::vector<int> Strides;
-};
-
-class ConvRelu : public NeuralNetOperator {
-public:
-  ConvRelu(std::vector<int> kernelShape, std::vector<int> dilations = {1, 1},
-           int group = 1, std::vector<int> pads = {0, 0},
-           std::vector<int> strides = {1, 1})
-      : NeuralNetOperator(NNKind::ConvRelu),
-        ConvPtr(util::make_unique<Conv>(kernelShape, dilations, group, pads,
-                                        strides)) {}
-
-  ConvRelu(Conv *conv)
-      : NeuralNetOperator(NNKind::ConvRelu), ConvPtr(std::move(conv)) {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(ConvRelu);
-
-  ~ConvRelu() {}
-
-private:
-  std::unique_ptr<Conv> ConvPtr = nullptr;
-};
-
-class Relu : public NeuralNetOperator {
-public:
-  Relu() : NeuralNetOperator(NNKind::Relu) {}
-  NOMNIGRAPH_DEFINE_NN_RTTI(Relu);
-  ~Relu() {}
-};
-
-class Send : public NeuralNetOperator {
-public:
-  Send() : NeuralNetOperator(NNKind::Send) {}
-  NOMNIGRAPH_DEFINE_NN_RTTI(Send);
-  ~Send() {}
-};
-
-class Receive : public NeuralNetOperator {
-public:
-  Receive() : NeuralNetOperator(NNKind::Receive) {}
-  NOMNIGRAPH_DEFINE_NN_RTTI(Receive);
-  ~Receive() {}
-};
+#include "nomnigraph/Generated/OpClasses.h"
 
 class While : public NeuralNetOperator {
 public:
@@ -296,6 +227,7 @@ public:
       : NeuralNetOperator(NNKind::GenericOperator), name_(name) {}
   NOMNIGRAPH_DEFINE_NN_RTTI(GenericOperator);
   std::string getName() const { return name_; }
+  void setName(std::string name) { name_ = name; }
   ~GenericOperator() {}
 
 private:
@@ -303,6 +235,7 @@ private:
 };
 
 using NNGraph = nom::Graph<std::unique_ptr<nom::repr::Value>, int>;
+using NNSubgraph = nom::Subgraph<std::unique_ptr<nom::repr::Value>, int>;
 using NNCFGraph = nom::repr::ControlFlowGraph<NNGraph>;
 
 struct NNModule {
@@ -321,16 +254,10 @@ namespace nn {
 template< bool B, class T = void >
 using enable_if_t = typename std::enable_if<B,T>::type;
 
-template <typename T>
-constexpr bool inheritedFromNeuralNetOperator() {
-  return std::is_base_of<NeuralNetOperator, T>::value &&
-    !std::is_same<NeuralNetOperator, T>::value;
-}
-
-template <typename T>
-constexpr bool inheritedFromNeuralNetData() {
-  return std::is_base_of<NeuralNetData, T>::value &&
-    !std::is_same<NeuralNetData, T>::value;
+template <typename T, typename U>
+constexpr bool inheritedFrom() {
+  return std::is_base_of<U, T>::value &&
+    !std::is_same<U, T>::value;
 }
 
 // This is just a way to fix issues when the isa<> implementation
@@ -340,16 +267,22 @@ template <typename T, typename N, typename = void> struct is_impl {
 };
 
 template <typename T, typename N>
-struct is_impl<T, N, enable_if_t<inheritedFromNeuralNetOperator<T>()>> {
+struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>()>> {
   inline static bool impl(N n) {
+    if (!isa<NeuralNetOperator>(n->data().get())) {
+      return false;
+    }
     auto nno = dyn_cast<NeuralNetOperator>(n->data().get());
     return isa<T>(nno);
   }
 };
 
 template <typename T, typename N>
-struct is_impl<T, N, enable_if_t<inheritedFromNeuralNetData<T>()>> {
+struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>()>> {
   inline static bool impl(N n) {
+    if (!isa<NeuralNetData>(n->data().get())) {
+      return false;
+    }
     auto nno = dyn_cast<NeuralNetData>(n->data().get());
     return isa<T>(nno);
   }
@@ -366,16 +299,24 @@ template <typename T, typename N, typename = void> struct get_impl {
 };
 
 template <typename T, typename N>
-struct get_impl<T, N, enable_if_t<inheritedFromNeuralNetOperator<T>()>> {
+struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>()>> {
   inline static T *impl(N n) {
+    if (!is<T>(n)) {
+      assert(0 && "Cannot get type from node");
+      return nullptr;
+    }
     auto nno = dyn_cast<NeuralNetOperator>(n->data().get());
     return dyn_cast<T>(nno);
   }
 };
 
 template <typename T, typename N>
-struct get_impl<T, N, enable_if_t<inheritedFromNeuralNetData<T>()>> {
+struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>()>> {
   inline static T *impl(N n) {
+    if (!is<T>(n)) {
+      assert(0 && "Cannot get type from node");
+      return nullptr;
+    }
     auto nno = dyn_cast<NeuralNetData>(n->data().get());
     return dyn_cast<T>(nno);
   }
@@ -398,9 +339,51 @@ std::vector<std::pair<T *, typename G::NodeRef>> dataIterator(G &g) {
   return out;
 }
 
+template <typename T, typename... Args>
+void insertOp(NNGraph& g, NNGraph::NodeRef a, NNGraph::NodeRef b, Args... args) {
+  if (is<NeuralNetData>(a) && is<NeuralNetOperator>(b)) {
+    auto newNode = g.createNode(util::make_unique<T>(args...));
+    auto data = get<NeuralNetData>(a);
+    auto newData = g.createNode(util::make_unique<Tensor>(data->getName() + "_"));
+    g.createEdge(a, newNode);
+    g.createEdge(newNode, newData);
+    g.createEdge(newData, b);
+    return;
+  }
+  if (is<NeuralNetOperator>(a) && is<NeuralNetData>(b)) {
+    auto newNode = g.createNode(util::make_unique<T>(args...));
+    auto data = get<NeuralNetData>(b);
+    auto newData = g.createNode(util::make_unique<Tensor>(data->getName() + "_"));
+    g.createEdge(a, newData);
+    g.createEdge(newData, newNode);
+    g.createEdge(newNode, b);
+    return;
+  }
+
+  assert(0 && "insertOp takes (DFG, Tensor, Op) or (DFG, Op, Tensor)");
+}
+
+template <typename NewT, typename OldT>
+NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
+  assert(is<OldT>(node) && "Cannot get type from node.");
+
+  auto* nnOp = get<NeuralNetOperator>(node);
+  NeuralNetOperator* nnOpPtr = dyn_cast<NeuralNetOperator>(node->mutableData()->release());
+
+  auto newNode = g.createNode(util::make_unique<NewT>(*dyn_cast<OldT>(nnOpPtr)));
+
+  g.replaceNode(node, newNode);
+  g.deleteNode(node);
+
+  return newNode;
+}
+
+
 /// NeuralNetData specific helpers.
 bool hasProducer(NNGraph::NodeRef n);
+bool hasProducer(NNGraph::NodeRef n);
 NNGraph::NodeRef getProducer(NNGraph::NodeRef n);
+bool hasConsumer(NNGraph::NodeRef n);
 std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n);
 
 bool hasInputs(NNGraph::NodeRef n);

@@ -16,6 +16,9 @@ $BUILD_ROOT/src/ATen/test/undefined_tensor_test
 if [[ -x $BUILD_ROOT/src/ATen/test/cudnn_test ]]; then
   $BUILD_ROOT/src/ATen/test/cudnn_test
 fi
+if [[ -x $BUILD_ROOT/src/ATen/test/cuda_rng_test ]]; then
+  $BUILD_ROOT/src/ATen/test/cuda_rng_test
+fi
 if [ "$VALGRIND" == "ON" ]
 then
   valgrind --suppressions=`dirname $0`/valgrind.sup --error-exitcode=1 $BUILD_ROOT/src/ATen/test/basic "[cpu]"

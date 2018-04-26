@@ -11,6 +11,8 @@ Automatic differentiation package - torch.autograd
 
 .. autofunction:: grad
 
+.. _locally-disable-grad:
+
 Locally disabling gradient computation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -49,7 +51,7 @@ Variable (deprecated)
     has changed:
 
     - ``Variable(tensor)`` and ``Variable(tensor, requires_grad)`` still work as expected,
-      buut they return Tensors instead of Variables.
+      but they return Tensors instead of Variables.
     - ``var.data`` is the same thing as ``tensor.data``.
     - Methods such as ``var.backward(), var.detach(), var.register_hook()`` now work on tensors
       with the same method names.

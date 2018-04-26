@@ -1,7 +1,7 @@
 import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
-from torch.nn import Module, ParameterList, Parameter
+from torch.nn import Module, ModuleList, ParameterList, Parameter
 from torch.jit.frontend import get_jit_ast
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
@@ -15,7 +15,9 @@ import os
 import functools
 import inspect
 import copy
-
+import numbers
+import collections
+import re
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -58,8 +60,8 @@ def compile(arg=None, nderivs=1, optimize=True, enabled=True):
         A JIT compiled function/module may be compiled multiple times, as
         different inputs can result in different traces.  Currently, the
         JIT compiler conservatively assumes the trace may change if the
-        `size` or `requires_grad` of `Variable` inputs change, or if
-        any of the non-Variable inputs change.  For example, if you JIT
+        `size` or `requires_grad` of `Tensor` inputs change, or if
+        any of the non-Tensor inputs change.  For example, if you JIT
         compile an RNN which takes the number of hidden units as a parameter,
         we will compile a trace for every RNN length you use at runtime.
 
@@ -128,7 +130,7 @@ def compile(arg=None, nderivs=1, optimize=True, enabled=True):
 
     Example: Compile as function decorator.  The same modes of use for the class
     decorator are also supported for functions; however, the decorated
-    function must declare *all* Variable inputs in its arguments.
+    function must declare *all* Tensor inputs in its arguments.
 
         >>> @jit.compile
         >>> def f(x):
@@ -224,7 +226,7 @@ def get_trace_graph(f, args=tuple(), kwargs=None, nderivs=0):
     Arguments:
         f (torch.nn.Module or function): the function or module
             to be traced.
-        args (tuple or Variable): the positional arguments to pass to the
+        args (tuple or Tensor): the positional arguments to pass to the
             function/module to be traced.  A non-tuple is assumed to
             be a single positional argument to be passed to the model.
         kwargs (dict): the keyword arguments to pass to the function/module
@@ -294,15 +296,16 @@ def _clone_inputs(args):
     def clone_input(a):
         if a is None:
             return None
-        elif isinstance(a, Variable):
+        elif isinstance(a, torch.Tensor):
+            # TODO: figure out one liner to .clone() and set requires_grad
             v = Variable(a.data.clone(), requires_grad=a.requires_grad)
             if a.grad is not None:
                 v.grad = clone_input(v.grad)
             return v
         else:
             return a.clone()
-    return function._nested_map(lambda o: isinstance(o, Variable) or torch.is_tensor(o),
-                                clone_input, condition_msg="Variables")(args)
+    return function._nested_map(lambda x: isinstance(x, torch.Tensor),
+                                clone_input, condition_msg="tensors")(args)
 
 
 # This is purely for developer debugging.  We are not going to advertise it.
@@ -358,7 +361,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
         model (compiled torch.nn.Module or function): the module/function to be
             verified.  The module/function definition MUST have been decorated with
             `@torch.jit.compile`.
-        args (tuple or Variable): the positional arguments to pass to the
+        args (tuple or Tensor): the positional arguments to pass to the
             compiled function/module to be verified.  A non-tuple is assumed to
             be a single positional argument to be passed to the model.
         loss_fn (function, optional): the loss function to be applied to
@@ -454,9 +457,9 @@ def trace(*args, **kwargs):
     Keyword arguments:
         optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
 
-        >>> @jit.trace(torch.autograd.Variable(torch.rand(1)))
-        >>> def f(x):
-        >>>     return x * 2
+        >>> @jit.trace(torch.rand(1))
+        ... def f(x):
+        ...     return x * 2
     """
     def wrapper(func):
         executor_options = {'optimize': True}
@@ -524,10 +527,14 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def script(fn):
-    rcb = createResolutionCallback()
+def _script_graph(fn, frame_id=2):
+    rcb = createResolutionCallback(frame_id)
     ast = get_jit_ast(fn)
-    graph = _jit_script_compile(ast, rcb)
+    return _jit_script_compile(ast, rcb)
+
+
+def script(fn):
+    graph = _script_graph(fn, frame_id=3)
     return torch._C.GraphExecutor(graph, True)
 
 
@@ -550,6 +557,7 @@ def script_method(fn):
 #  del view[name]
 #  view.items()
 #  view.keys()
+#  len(view)
 
 class OrderedDictWrapper(object):
     def __init__(self, module):
@@ -605,7 +613,6 @@ class OrderedModuleDict(OrderedDictWrapper):
     def __setitem__(self, k, v):
         if k in self._python_modules:
             raise RuntimeError("cannot re-assign modules in a ScriptModule")
-
         if isinstance(v, ScriptModule):
             self.module._register_module(k, v)
 
@@ -656,6 +663,25 @@ class OrderedBufferDict(OrderedDictWrapper):
             raise KeyError(k)
         return self.module._get_parameter(k)
 
+# base types that can be constants
+# in addition, tuples and lists of these base types are also considered constants
+# If you edit this list, then you also need to edit the handlers in
+# ConstantValue in jit/script/init.cpp
+_constant_types = (bool, float, int, types.FunctionType)
+
+
+def _get_valid_constant(v):
+    if isinstance(v, _constant_types):
+        return v
+    elif isinstance(v, tuple) or isinstance(v, list):
+        return tuple(_get_valid_constant(x) for x in v)
+    constants = ", ".join(typ.__name__ for typ in _constant_types)
+    raise TypeError(
+        "'{}' object is not a valid constant.\n".format(type(v).__name__) +
+        "Valid constants are:\n" +
+        "  1. a nn.ModuleList\n" +
+        "  2. a value of type {{{}}}\n".format(constants) +
+        "  3. a list or tuple of (2)\n")
 
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method
@@ -665,6 +691,7 @@ class OrderedBufferDict(OrderedDictWrapper):
 # has run. This has to occur after the user-defined __init__ so that
 # submodules and parameters are initialized _before_ the script compiler
 # resolve references to `self.param` or `self.module`.
+
 
 class ScriptMeta(type(torch._C.ScriptModule)):
     # this has to inherit from pybind11's metaclass otherwise we get
@@ -680,6 +707,8 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         # after the user's __init__ register all the script methods
         # with the module
         original_init = getattr(cls, '__init__', lambda self: None)
+        super_constants = getattr(super(cls), '_constants_set', set())
+        cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
 
         def init_then_register(self, *args, **kwargs):
             # ensure even if the user forgets to call super that
@@ -688,8 +717,9 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            for m in methods:
-                self._create_method(m.ast, m.resolution_callback)
+            asts = [m.ast for m in methods]
+            rcbs = [m.resolution_callback for m in methods]
+            self._create_methods(asts, rcbs)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
@@ -697,6 +727,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 
 class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def __init__(self, optimize=True):
+        # must be before Module.init since the field is used in __getattr__
         Module.__init__(self)
         self._set_optimized(optimize)
         self._parameters = OrderedParameterDict(self)
@@ -707,6 +738,20 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
         if self._has_method(attr):
             return self._get_method(attr)
         return Module.__getattr__(self, attr)
+
+    def __setattr__(self, attr, value):
+        if attr not in self._constants_set:
+            return super(ScriptModule, self).__setattr__(attr, value)
+        if hasattr(self, attr):
+            raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
+        if isinstance(value, ModuleList):
+            # special case for list of modules. Modules need to be registered with their
+            # parent module. To do this, we create a ConstModuleList, which is itself a module, that
+            # contains each of these modules as submodules. The ConstModuleList then
+            # is set as an attribute of the parent module.
+            super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
+        else:
+            super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
 
     def __dir__(self):
         return sorted(Module.__dir__(self) + self._method_names())
@@ -730,9 +775,9 @@ def _get_methods(cls):
 _compiled_methods_whitelist = {
     'forward', 'register_buffer', 'register_parameter', 'add_module',
     '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
-    'state_dict', 'load_state_dict', 'parameters', 'named_parameters',
-    '_all_buffers', 'children', 'named_children', 'modules', 'named_modules',
-    'zero_grad', 'share_memory', '_get_name'
+    'state_dict', 'load_state_dict', '_load_from_state_dict', 'parameters',
+    'named_parameters', '_all_buffers', 'children', 'named_children', 'modules',
+    'named_modules', 'zero_grad', 'share_memory', '_get_name'
 }
 
 
@@ -801,6 +846,33 @@ class TopLevelTracedModule(TracedModule):
     def forward(self, *args, **kwargs):
         return self._get_method('forward')(*args, **kwargs)
 
+
+class _ConstModuleList(ScriptModule):
+    def __init__(self, modules):
+        super(_ConstModuleList, self).__init__()
+        for i, module in enumerate(modules):
+            self.add_module(str(i), module)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            return _ConstModuleList(list(self._modules.values())[idx])
+        else:
+            if not (-len(self) <= idx < len(self)):
+                raise IndexError('index {} is out of range'.format(idx))
+            if idx < 0:
+                idx += len(self)
+            return self._modules[str(idx)]
+
+    def __len__(self):
+        return len(self._modules)
+
+    def __iter__(self):
+        return iter(self._modules.values())
+
+    def __dir__(self):
+        keys = super(_ConstModuleList, self).__dir__()
+        keys = [key for key in keys if not key.isdigit()]
+        return keys
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

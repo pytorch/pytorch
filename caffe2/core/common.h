@@ -2,6 +2,7 @@
 #define CAFFE2_CORE_COMMON_H_
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -146,6 +147,11 @@ private:                                                                       \
 #define CAFFE2_API CAFFE2_IMPORT
 #endif
 
+
+#if defined(_MSC_VER)
+#define NOMINMAX
+#endif
+
 // make_unique is a C++14 feature. If we don't have 14, we will emulate
 // its behavior. This is copied from folly/Memory.h
 #if __cplusplus >= 201402L ||                                              \
@@ -217,6 +223,12 @@ using std::to_string;
 using std::stoi;
 using std::stod;
 #endif // defined(__ANDROID__) || defined(CAFFE2_FORCE_STD_STRING_FALLBACK_TEST)
+
+#if defined(__ANDROID__) && !defined(__NDK_MAJOR__)
+using ::round;
+#else
+using std::round;
+#endif // defined(__ANDROID__) && !defined(__NDK_MAJOR__)
 
 // dynamic cast reroute: if RTTI is disabled, go to reinterpret_cast
 template <typename Dst, typename Src>

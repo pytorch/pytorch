@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/python_compiled_function.h"
+#include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
@@ -13,6 +14,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
 #include "torch/csrc/jit/passes/onnx/peephole.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
@@ -32,11 +34,6 @@ bool loadPythonClasses() {
   //PyObject *jit_dict = PyModule_GetDict(jit_module);
 
   return true;
-}
-
-template<void (*F)(std::shared_ptr<Graph>& graph)>
-void graph_pass(const std::shared_ptr<tracer::TracingState>& state) {
-  return F(state->graph);
 }
 
 // we cannot use the default py:cast<autograd::Variable> because it currently
@@ -62,13 +59,21 @@ void initJITBindings(PyObject *module) {
 
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
-   .def("_jit_pass_onnx_peephole", graph_pass<PeepholeOptimizeONNX>)
-   .def("_jit_pass_fuse", graph_pass<FuseGraph>)
-   .def("_jit_pass_dce", graph_pass<EliminateDeadCode>)
-   .def("_jit_pass_cse", graph_pass<EliminateCommonSubexpression>)
-   .def("_jit_pass_peephole", graph_pass<PeepholeOptimize>)
-   .def("_jit_pass_canonicalize", graph_pass<Canonicalize>)
-   .def("_jit_pass_lint", graph_pass<LintGraph>)
+   .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+   .def("_jit_pass_fuse", FuseGraph)
+   .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g){
+     return EliminateDeadCode(g); // overload resolution
+   })
+   .def("_jit_pass_cse", EliminateCommonSubexpression)
+   .def("_jit_pass_peephole", PeepholeOptimize)
+   .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
+     return Canonicalize(g);
+   })
+   .def("_jit_pass_lint", LintGraph)
+   .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
+     auto tensor_inputs = createVariableTensorList(inputs);
+     PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
+   })
    .def("_jit_run_cpp_tests", runJITCPPTests)
    .def("_jit_flatten", [](py::handle& obj) {
      auto res =  python::flatten(obj);
@@ -76,7 +81,8 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_unflatten", [](autograd::variable_list vars, python::IODescriptor& desc) {
      return py::reinterpret_steal<py::object>(python::unflatten(vars, desc));
-   });
+   })
+   .def("_jit_pass_onnx_block", BlockToONNX);
 
   py::class_<GraphExecutor>(m, "GraphExecutor")
       .def(
@@ -96,6 +102,9 @@ void initJITBindings(PyObject *module) {
           }),
           py::arg("graph"),
           py::arg("optimize") = true)
+      .def_property_readonly("graph", [](GraphExecutor& ge) {
+        return ge.graph();
+      })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         auto inputs = createVariableTensorList(args);
         auto outputs = ge.run(std::move(inputs));

@@ -7,11 +7,11 @@
 #include "caffe2/core/workspace.h"
 #include <unordered_set>
 
-CAFFE2_DEFINE_int(warmup, 10, "The number of iterations to warm up.");
+CAFFE2_DEFINE_int(warmup, 3, "The number of iterations to warm up.");
 CAFFE2_DEFINE_int(iter, 100, "The number of iterations to run.");
 CAFFE2_DEFINE_bool(
     run_individual,
-    false,
+    true,
     "Whether to benchmark individual operators.");
 
 
@@ -25,15 +25,16 @@ namespace caffe2 {
     NetDef predict_net_def, predict_net_def_gpu;
     CAFFE_ENFORCE(ReadProtoFromFile(predict_net_pb, &predict_net_def));
     PopulateCPUBlob(ws.get(), true, input_name, input_dims);
-
+    LOG(ERROR) << "[C2DEBUG] rewriting OpenGL net";
     tryConvertToOpenGL(predict_net_def, &predict_net_def_gpu, false, cpu_ops);
     // change the name of last op
     auto index = predict_net_def_gpu.op().size() - 1;
+    LOG(ERROR) << "[C2DEBUG] index:" << index;
     auto last_blob = predict_net_def_gpu.op()[index].output()[0];
     auto op = predict_net_def_gpu.mutable_op(index);
     auto output = op->mutable_output(0);
     *output = last_blob + "_gpu";
-
+    LOG(ERROR) << "[C2DEBUG] last blob: " << last_blob;
     for (auto i = 0; i < predict_net_def_gpu.external_output_size(); ++i) {
       auto out = predict_net_def_gpu.mutable_external_output(i);
       if (*out == last_blob) {
@@ -42,9 +43,9 @@ namespace caffe2 {
     }
 
     compareNetResult4D(*ws, predict_net_def, predict_net_def_gpu, last_blob, last_blob + "_gpu");
-
-  NetBase* net = ws->CreateNet(predict_net_def);
-  LOG(INFO) << "[C2DEBUG] Benchmarking OpenGL Net";
+  LOG(ERROR) << "[C2DEBUG] after compareNetResult4D";
+  NetBase* net = ws->CreateNet(predict_net_def_gpu);
+  LOG(ERROR) << "[C2DEBUG] Benchmarking OpenGL Net";
   net->TEST_Benchmark(caffe2::FLAGS_warmup, caffe2::FLAGS_iter, caffe2::FLAGS_run_individual);
   // Test CPU
   for (auto i = 0; i < predict_net_def.op().size(); ++i) {

@@ -148,6 +148,14 @@ class OpSchema {
   OpSchema& TensorInferenceFunction(TensorInferenceFunctionType function);
 
   /**
+   * A wrapper that makes an infer tensor function to return unknown
+   * shape for all outputs if any one of the inputs has unknown shape
+   */
+
+  static TensorInferenceFunctionType NeedsAllInputShapes(
+      TensorInferenceFunctionType f);
+
+  /**
    * @brief Sets the corresponding onnx schema name
    */
   OpSchema& InheritOnnxSchema(const std::string& onnx_schema_name);
@@ -498,23 +506,17 @@ OpSchema::Cost PointwiseCostInference(
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                            \
-  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) =      \
+#define OPERATOR_SCHEMA(name)                                     \
+  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
+  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
-#define OPERATOR_SCHEMA_STR(name)                                  \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(schema_registration) = \
-      &OpSchemaRegistry::NewSchema(name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                            \
-  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) =      \
+#define OPERATOR_SCHEMA(name)                                     \
+  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
+  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
-#define OPERATOR_SCHEMA_STR(name)                                  \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(schema_registration) = \
-      1 ? nullptr : &OpSchemaRegistry::NewSchema(name, __FILE__, __LINE__)
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 

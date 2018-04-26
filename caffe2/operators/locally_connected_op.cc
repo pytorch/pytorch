@@ -1,7 +1,8 @@
+#include "caffe2/operators/locally_connected_op.h"
+
 #include <functional>
 #include <vector>
 
-#include "caffe2/operators/locally_connected_op.h"
 #include "caffe2/operators/locally_connected_op_impl.h"
 
 namespace caffe2 {

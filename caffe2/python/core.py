@@ -1933,7 +1933,8 @@ class Net(object):
         for blob in record.field_blobs():
             assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
         for blob in record.field_blobs():
-            self.AddExternalOutput(blob)
+            if blob not in self.external_outputs:
+                self.AddExternalOutput(blob)
         self._output_record = record
 
     def recover_output_record_by_prefix(self, prefix):
@@ -1990,10 +1991,17 @@ class Net(object):
         if use_cudnn:
             for op in self._net.op:
                 op.engine = "CUDNN"
+
     def RunAllOnMKL(self):
         """A convenient function to run everything using MKLDNN."""
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.MKLDNN
+        self._net.device_option.CopyFrom(device_option)
+
+    def RunAllOnIDEEP(self):
+        """A convenient function to run everything using IDEEP."""
+        device_option = caffe2_pb2.DeviceOption()
+        device_option.device_type = caffe2_pb2.IDEEP
         self._net.device_option.CopyFrom(device_option)
 
     def _CreateAndAddToSelf(self, op_type, inputs, outputs=None, **kwargs):
@@ -2186,8 +2194,8 @@ def update_placeholder_op_output(op, blob_to_device):
     '''
     outputs = []
     for output in op.output:
-        blob_dev = blob_to_device[output]
-        if blob_dev.device_type != caffe2_pb2.CPU:
+        if (output in blob_to_device and
+                blob_to_device[output].device_type != caffe2_pb2.CPU):
             output += '_cpu'
         outputs.append(output)
     del op.output[:]

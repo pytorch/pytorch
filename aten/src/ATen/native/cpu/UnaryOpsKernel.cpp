@@ -7,7 +7,7 @@
 #include "ATen/cpu/vec256/vec256.h"
 #include "ATen/native/cpu/CapabilityDispatch.h"
 
-namespace at { namespace native {
+namespace at { namespace native { namespace {
 
 using namespace vec256;
 
@@ -21,9 +21,11 @@ static void unary_kernel(scalar_t* arr_out, const scalar_t* arr_in, int64_t size
     value.store(arr_out + k);
   }
   auto leftover = size - k;
-  Vec a;
-  a.load_partial(arr_in + k, leftover);
-  func(a).store_partial(arr_out + k, leftover);
+  if (leftover > 0) {
+    Vec a;
+    a.load_partial(arr_in + k, leftover);
+    func(a).store_partial(arr_out + k, leftover);
+  }
 }
 
 template <class scalar_t, class F>
@@ -127,6 +129,8 @@ static void trunc_kernel(Tensor& result, const Tensor& self) {
     });
   });
 }
+
+}  // anonymous namespace
 
 REGISTER_DISPATCH(absImpl, &abs_kernel);
 REGISTER_DISPATCH(ceilImpl, &ceil_kernel);

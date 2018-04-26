@@ -16,10 +16,8 @@ extern "C" {
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
 
-#ifndef __CUDACC__
 #include "Eigen/Core"
 #include "Eigen/Dense"
-#endif
 
 namespace caffe2 {
 
@@ -30,7 +28,6 @@ class Tensor;
 // engine specified.
 class DefaultEngine {};
 
-#ifndef __CUDACC__
 // Common Eigen types that we will often use
 template <typename T>
 using EigenMatrixMap =
@@ -54,7 +51,6 @@ using ConstEigenVectorMap =
 template <typename T>
 using ConstEigenVectorArrayMap =
     Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1> >;
-#endif
 
 namespace math {
 
@@ -131,6 +127,16 @@ CAFFE2_DECLARE_BINARY_OP(Div);
 
 #undef CAFFE2_DECLARE_BINARY_OP
 
+namespace internal {
+
+// Increase the index digits by one based on dims.
+void IncreaseIndexInDims(const int n, const int* dims, int* index);
+
+// Get index value from dims and index digits.
+int GetIndexFromDims(const int n, const int* dims, const int* index);
+
+} // namespace internal
+
 template <typename T, class Context>
 void ReduceMin(
     const int N,
@@ -144,6 +150,69 @@ void ReduceMax(
     const T* x,
     T* y,
     Tensor<Context>* scratch_ptr,
+    Context* context);
+
+template <typename T, class Context>
+void ReduceMin(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+void ReduceMax(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+void ReduceSum(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+void ReduceMean(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
+// Broadcasts X with X_dims to Y with Y_dims.
+template <typename T, class Context>
+void Broadcast(
+    const int X_ndim,
+    const int* X_dims,
+    const int Y_ndim,
+    const int* Y_dims,
+    const T* X,
+    T* Y,
+    Context* context);
+
+// COmputes mean and variance over axes.
+template <typename T, class Context>
+void Moments(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* mean,
+    T* variance,
     Context* context);
 
 // Adds batch sub-tensors elementwise to output. Stripe is the stripe length
@@ -182,15 +251,12 @@ void Maximum(
     T* y,
     Context* context);
 
-// Transpose tensor X with x_dims by axes and write the result to tensor Y with
-// y_dims.
+// Transpose tensor X with dims by axes and write the result to tensor Y.
 template <typename T, class Context>
 void Transpose(
-    const int num_axes,
-    const int* x_dims,
-    const int* y_dims,
+    const int ndim,
+    const int* dims,
     const int* axes,
-    const int data_size,
     const T* X,
     T* Y,
     Context* context);

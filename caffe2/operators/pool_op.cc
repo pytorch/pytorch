@@ -9,7 +9,7 @@ using std::min;
 
 namespace {
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
 
 bool isNeon4x4p0s0Eligible(
     int inputH,
@@ -303,7 +303,7 @@ void runNeonMaxPool2x2p0s0NCHW(
     }
   }
 }
-#endif // __ARM_NEON__
+#endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
 
 } // namespace
 
@@ -354,7 +354,7 @@ class AveragePool {
       int dilationW,
       const float* input,
       float* output) {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
     if (isNeon4x4p0s0Eligible(
             inputH,
             inputW,
@@ -446,7 +446,7 @@ class MaxPool {
       int dilationW,
       const float* input,
       float* output) {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
     if (isNeon2x2p0s0Eligible(
             inputH,
             inputW,

@@ -9,7 +9,6 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/observers/operator_attaching_net_observer.h"
-#include "caffe2/operators/rnn/rnn_capable_operator_observer.h"
 
 namespace caffe2 {
 
@@ -29,13 +28,13 @@ class TimeCounter {
 };
 
 class TimeOperatorObserver final : public TimeCounter,
-                                   public RNNCapableOperatorObserver {
+                                   public ObserverBase<OperatorBase> {
  public:
   explicit TimeOperatorObserver(OperatorBase* subject) = delete;
   explicit TimeOperatorObserver(
       OperatorBase* subject,
       TimeObserver* /* unused */)
-      : RNNCapableOperatorObserver(subject) {}
+      : ObserverBase<OperatorBase>(subject) {}
   std::unique_ptr<ObserverBase<OperatorBase>> rnnCopy(
       OperatorBase* subject,
       int rnn_order) const override;

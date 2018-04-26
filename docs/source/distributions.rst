@@ -131,6 +131,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`Independent`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.independent
+.. autoclass:: Independent
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Laplace`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

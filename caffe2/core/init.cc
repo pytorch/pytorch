@@ -31,7 +31,7 @@ bool GlobalInit(int* pargc, char*** pargv) {
   success &= ParseCaffeCommandLineFlags(pargc, pargv);
   success &= InitCaffeLogging(pargc, *pargv);
   // Print out the current build version. Using cerr as LOG(INFO) might be off
-  if (VLOG_IS_ON(1) || FLAGS_caffe2_version) {
+  if (FLAGS_caffe2_version) {
     std::cerr << "Caffe2 build configuration: " << std::endl;
     for (const auto& it : GetBuildOptions()) {
       std::cerr << "  " << std::setw(25) << std::left << it.first << " : "
@@ -49,4 +49,16 @@ bool GlobalInit(int* pargc, char*** pargv) {
   // TODO: if we fail GlobalInit(), should we continue?
   return success;
 }
+
+#if CAFFE2_MOBILE
+bool GlobalInit() {
+  // On mobile devices, run global init here, since we cannot pass the
+  // command line options to caffe2, no arguments are passed.
+  int mobile_argc = 1;
+  char caffe2_name[] = "caffe2";
+  char* mobile_name = &caffe2_name[0];
+  char** mobile_argv = &mobile_name;
+  return ::caffe2::GlobalInit(&mobile_argc, &mobile_argv);
+}
+#endif
 }  // namespace caffe2

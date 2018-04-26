@@ -49,20 +49,37 @@ std::string DeviceTypeName(const int32_t& d) {
       return "CUDA";
     case OPENGL:
       return "OPENGL";
+    case OPENCL:
+      return "OPENCL";
     case MKLDNN:
       return "MKLDNN";
+    case IDEEP:
+      return "IDEEP";
     default:
       CAFFE_THROW(
           "Unknown device: ",
           d,
           ". If you have recently updated the caffe2.proto file to add a new "
-          "device type, did you forget to update the TensorDeviceTypeName() "
+          "device type, did you forget to update the DeviceTypeName() "
           "function to reflect such recent changes?");
       // The below code won't run but is needed to suppress some compiler
       // warnings.
       return "";
   }
-};
+}
+
+int DeviceId(const DeviceOption& option) {
+  switch (option.device_type()) {
+    case CPU:
+      return option.numa_node_id();
+    case CUDA:
+      return option.cuda_gpu_id();
+    case MKLDNN:
+      return option.numa_node_id();
+    default:
+      CAFFE_THROW("Unknown device id for device type: ", option.device_type());
+  }
+}
 
 bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
   return (

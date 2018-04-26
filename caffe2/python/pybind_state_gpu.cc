@@ -14,6 +14,10 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
 
+#ifdef CAFFE2_USE_TRT
+#include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
+#endif // CAFFE2_USE_TRT
+
 namespace caffe2 {
 namespace python {
 
@@ -50,6 +54,61 @@ void addCUDAGlobalMethods(py::module& m) {
     obj["totalGlobalMem"] = py::cast(prop.totalGlobalMem);
     return obj;
   });
+  m.def(
+      "onnx_to_trt_op",
+      [](const py::bytes& onnx_model_str,
+         const std::unordered_map<std::string, std::vector<int>>&
+             output_size_hints,
+         int max_batch_size,
+         int max_workspace_size,
+         int verbosity,
+         bool debug_builder) -> py::bytes {
+#ifdef CAFFE2_USE_TRT
+        TensorRTTransformer t(
+            max_batch_size, max_workspace_size, verbosity, debug_builder);
+        auto op_def =
+            t.BuildTrtOp(onnx_model_str.cast<std::string>(), output_size_hints);
+        std::string out;
+        op_def.SerializeToString(&out);
+        return py::bytes(out);
+#else
+        CAFFE_THROW("Please build Caffe2 with USE_TENSORRT=1");
+#endif // CAFFE2_USE_TRT
+      });
+  m.def(
+      "transform_trt",
+      [](const py::bytes& pred_net_str,
+         const std::unordered_map<std::string, std::vector<int>>& shapes,
+         int max_batch_size,
+         int max_workspace_size,
+         int verbosity,
+         bool debug_builder,
+         bool build_serializable_op) -> py::bytes {
+#ifdef CAFFE2_USE_TRT
+        caffe2::NetDef pred_net;
+        if (!ParseProtoFromLargeString(
+                pred_net_str.cast<std::string>(), &pred_net)) {
+          LOG(ERROR) << "broken pred_net protobuf";
+        }
+        std::unordered_map<std::string, TensorShape> tensor_shapes;
+        for (const auto& it : shapes) {
+          tensor_shapes.emplace(
+              it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
+        }
+        TensorRTTransformer ts(
+            max_batch_size,
+            max_workspace_size,
+            verbosity,
+            debug_builder,
+            build_serializable_op);
+        ts.Transform(GetCurrentWorkspace(), &pred_net, tensor_shapes);
+        std::string pred_net_str2;
+        pred_net.SerializeToString(&pred_net_str2);
+        return py::bytes(pred_net_str2);
+#else
+        CAFFE_THROW("Please build Caffe2 with USE_TENSORRT=1");
+#endif // CAFFE2_USE_TRT
+      });
 };
 
 void addCUDAObjectMethods(py::module& m) {

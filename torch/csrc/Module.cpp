@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <sys/types.h>
 
 #ifndef _MSC_VER
@@ -18,6 +18,7 @@
 
 #include "THP.h"
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Device.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DataLoader.h"
 #include "torch/csrc/Generator.h"
@@ -33,6 +34,7 @@
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
 #include "torch/csrc/jit/python_ir.h"
+#include "torch/csrc/onnx/init.h"
 
 #ifdef WITH_CUDNN
 #include "cudnn.h"
@@ -123,6 +125,14 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 {
   HANDLE_TH_ERRORS
   torch::tensor::py_set_default_tensor_type(type);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THPModule_setDefaultDtype(PyObject *_unused, PyObject *dtype)
+{
+  HANDLE_TH_ERRORS
+  torch::tensor::py_set_default_dtype(dtype);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -330,10 +340,18 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   auto& type = torch::tensor::get_default_tensor_type();
-  bool is_cuda = type.backend() == at::kCUDA;
-  auto dtype = (PyObject*)torch::getDtype(type.scalarType(), is_cuda);
+  auto dtype = (PyObject*)torch::getDtype(type.scalarType());
   Py_INCREF(dtype);
   return dtype;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPModule_isDefaultTypeCuda(PyObject *_unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (torch::tensor::get_default_tensor_type().is_cuda()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -345,6 +363,7 @@ static PyMethodDef TorchMethods[] = {
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  NULL},
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
+  {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
@@ -362,6 +381,7 @@ static PyMethodDef TorchMethods[] = {
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  NULL},
+  {"_is_default_type_cuda", (PyCFunction)THPModule_isDefaultTypeCuda, METH_NOARGS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 
@@ -463,11 +483,13 @@ static PyObject* initModule() {
   THPSize_init(module);
   THPDtype_init(module);
   THPLayout_init(module);
+  THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
   torch::autograd::initAutogradClosureBindings(module);
   torch::jit::initJITBindings(module);
+  torch::onnx::initONNXBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
 #ifdef WITH_CUDA

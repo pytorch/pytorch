@@ -16,6 +16,7 @@
 #pragma once
 
 #include <ATen/Error.h>
+#include <ATen/SmallVector.h>
 
 #include <array>
 #include <iterator>
@@ -68,6 +69,14 @@ namespace at {
     ArrayRef(const T *begin, const T *end)
       : Data(begin), Length(end - begin) {}
 
+    /// Construct an ArrayRef from a SmallVector. This is templated in order to
+    /// avoid instantiating SmallVectorTemplateCommon<T> whenever we
+    /// copy-construct an ArrayRef.
+    template<typename U>
+    /*implicit*/ ArrayRef(const SmallVectorTemplateCommon<T, U> &Vec)
+      : Data(Vec.data()), Length(Vec.size()) {
+    }
+
     /// Construct an ArrayRef from a std::vector.
     template<typename A>
     /*implicit*/ ArrayRef(const std::vector<T, A> &Vec)
@@ -91,8 +100,8 @@ namespace at {
     /// @name Simple Operations
     /// @{
 
-    iterator begin() const { return Data; }
-    iterator end() const { return Data + Length; }
+    const_iterator begin() const { return Data; }
+    const_iterator end() const { return Data + Length; }
 
     reverse_iterator rbegin() const { return reverse_iterator(end()); }
     reverse_iterator rend() const { return reverse_iterator(begin()); }

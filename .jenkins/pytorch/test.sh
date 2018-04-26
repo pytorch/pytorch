@@ -23,10 +23,19 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1
     export PYTORCH_TEST_WITH_ASAN=1
     # TODO: Figure out how to avoid hard-coding these paths
+    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
     export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
 fi
 
 time python test/run_test.py --verbose
+
+# Test ATen
+if [[ "$BUILD_ENVIRONMENT" != *asan* ]]; then
+  echo "Testing ATen"
+  TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
+  ln -s "$TORCH_LIB_PATH"/libATen.so aten/build/src/ATen/libATen.so
+  aten/tools/run_tests.sh aten/build
+fi
 
 rm -rf ninja
 
@@ -40,13 +49,10 @@ popd
 
 if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
    echo "Testing libtorch with NO_PYTHON"
-   LIBTORCH_INSTALL_PREFIX=`pwd`/../libtorch
-   pushd tools/cpp_build
-
+   CPP_BUILD="$PWD/../cpp-build"
    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-     "$LIBTORCH_INSTALL_PREFIX"/bin/test_jit
+     "$CPP_BUILD"/libtorch/bin/test_jit
    else
-     "$LIBTORCH_INSTALL_PREFIX"/bin/test_jit "[cpu]"
+     "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
    fi
-   popd
 fi

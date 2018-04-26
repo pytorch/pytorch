@@ -79,4 +79,43 @@ Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& o
   });
   return ret;
 }
+
+Tensor max_values(const Tensor& self, int64_t dim, bool keepdim) {
+  return std::get<0>(self.max(dim, keepdim));
+}
+
+Tensor min_values(const Tensor& self, int64_t dim, bool keepdim) {
+  return std::get<0>(self.min(dim, keepdim));
+}
+
+// argmax and argmin
+
+Tensor argmax(const Tensor& self, int64_t dim, bool keepdim) {
+  return std::get<1>(self.max(dim, keepdim));
+}
+
+Tensor argmax(const Tensor& self) {
+  return std::get<1>(self.reshape({-1}).max(/*dim=*/0));
+}
+
+Tensor argmin(const Tensor& self, int64_t dim, bool keepdim) {
+  return std::get<1>(self.min(dim, keepdim));
+}
+
+Tensor argmin(const Tensor& self) {
+  return std::get<1>(self.reshape({-1}).min(/*dim=*/0));
+}
+
+// `argmin` and `argmax` are exposed in C++ but not in Python, where we only
+// expose `_argmin` and `_argmax` (which call the first versions). In Python,
+// we then define our own `argmax` and `argmin` that handle passing `dim=None`,
+// which gets the argmax/argmin of the flattened array.
+
+Tensor _argmax(const Tensor& self, int64_t dim, bool keepdim) {
+  return at::argmax(self, dim, keepdim);
+}
+
+Tensor _argmin(const Tensor& self, int64_t dim, bool keepdim) {
+  return at::argmin(self, dim, keepdim);
+}
 }} // namespace at::native

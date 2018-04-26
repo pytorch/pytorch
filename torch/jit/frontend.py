@@ -178,16 +178,16 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Expr(ctx, stmt):
-        return ExprStmt(build_expr(ctx, stmt.value))
+        return ExprStmt([build_expr(ctx, stmt.value)])
 
     @staticmethod
-    def get_assign_ident(ctx, expr):
+    def get_assign_lhs_expr(ctx, expr):
         var = build_expr(ctx, expr)
-        if not isinstance(var, Var):
+        if not isinstance(var, Var) and not isinstance(var, Starred):
             raise NotSupportedError(var.range(),
                                     "the only expressions allowed on the left hand side of "
-                                    "assignments are variable names")
-        return var.name
+                                    "assignments are variable names and starred expressions")
+        return var
 
     @staticmethod
     def build_Assign(ctx, stmt):
@@ -198,7 +198,7 @@ class StmtBuilder(Builder):
                                     "Performing multiple assignments in a single line isn't supported")
         py_lhs = stmt.targets[0]
         py_lhs_exprs = py_lhs.elts if isinstance(py_lhs, ast.Tuple) else [py_lhs]
-        return Assign([StmtBuilder.get_assign_ident(ctx, e) for e in py_lhs_exprs], '=', rhs)
+        return Assign([StmtBuilder.get_assign_lhs_expr(ctx, e) for e in py_lhs_exprs], '=', rhs)
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -208,7 +208,7 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_AugAssign(ctx, stmt):
-        lhs = [StmtBuilder.get_assign_ident(ctx, stmt.target)]
+        lhs = [StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)]
         rhs = build_expr(ctx, stmt.value)
         op = type(stmt.op)
         if op in StmtBuilder.augassign_map:
@@ -232,7 +232,7 @@ class StmtBuilder(Builder):
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
         return For(
-            r, [StmtBuilder.get_assign_ident(ctx, stmt.target)],
+            r, [StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], [build_stmt(ctx, s) for s in stmt.body])
 
     @staticmethod
@@ -248,7 +248,7 @@ class StmtBuilder(Builder):
         if stmt.dest:
             raise NotSupportedError(r, "print statements with non-default destinations aren't supported")
         args = [build_expr(ctx, val) for val in stmt.values]
-        return ExprStmt(Apply(Var(Ident(r, "print")), args, []))
+        return ExprStmt([Apply(Var(Ident(r, "print")), args, [])])
 
 
 class ExprBuilder(Builder):
@@ -297,6 +297,9 @@ class ExprBuilder(Builder):
     def build_Call(ctx, expr):
         func = build_expr(ctx, expr.func)
         args = [build_expr(ctx, py_arg) for py_arg in expr.args]
+        if hasattr(expr, 'starargs') and expr.starargs:
+            stararg_expr = build_expr(ctx, expr.starargs)
+            args += [Starred(stararg_expr.range(), stararg_expr)]
         kwargs = []
         for kw in expr.keywords:
             kw_expr = build_expr(ctx, kw.value)
@@ -310,7 +313,20 @@ class ExprBuilder(Builder):
         if expr.id.startswith(_reserved_prefix):
             raise NotSupportedError(r, "names of variables used in JIT-ed functions "
                                        "can't start with " + _reserved_prefix)
+        if expr.id == "True":
+            return TrueLiteral(r)
+        elif expr.id == "False":
+            return FalseLiteral(r)
         return Var(Ident(r, expr.id))
+
+    @staticmethod
+    def build_NameConstant(ctx, expr):
+        text = "True" if expr.value else "False"
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(text))
+        if expr.value:
+            return TrueLiteral(r)
+        else:
+            return FalseLiteral(r)
 
     @staticmethod
     def build_BinOp(ctx, expr):
@@ -397,10 +413,20 @@ class ExprBuilder(Builder):
                            [build_expr(ctx, e) for e in expr.elts])
 
     @staticmethod
+    def build_Tuple(ctx, expr):
+        return ListLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
+                           [build_expr(ctx, e) for e in expr.elts])
+
+    @staticmethod
     def build_Num(ctx, expr):
         value = str(expr.n)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value))
         return Const(r, value)
+
+    @staticmethod
+    def build_Starred(ctx, expr):
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        return Starred(r, build_expr(ctx, expr.value))
 
 build_expr = ExprBuilder()
 build_stmt = StmtBuilder()

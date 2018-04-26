@@ -7,16 +7,10 @@ if (NOT USE_NNPACK)
   return()
 endif()
 
-# try any external nnpack first
-find_package(NNPACK)
-
-if (NNPACK_FOUND)
-  message(INFO "Found external NNPACK installation.")
-  return()
-endif()
-
 ##############################################################################
-# Custom build rules to build nnpack, if external dependency is not found 
+# NNPACK is built together with Caffe2
+# By default, it builds code from third-party/NNPACK submodule.
+# Define NNPACK_SOURCE_DIR to build with a different version.
 ##############################################################################
 
 ##############################################################################
@@ -67,6 +61,7 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
   if(NOT TARGET nnpack)
     set(NNPACK_BUILD_TESTS OFF CACHE BOOL "")
     set(NNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    set(NNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
     set(NNPACK_LIBRARY_TYPE "static" CACHE STRING "")
     set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
     set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")

@@ -40,7 +40,7 @@ Containers
 .. autoclass:: ParameterList
     :members:
 
-Convolution Layers
+Convolution layers
 ----------------------------------
 
 :hidden:`Conv1d`
@@ -81,7 +81,7 @@ Convolution Layers
     :members:
 
 
-Pooling Layers
+Pooling layers
 ----------------------------------
 
 :hidden:`MaxPool1d`
@@ -193,13 +193,25 @@ Pooling Layers
     :members:
 
 
-Padding Layers
+Padding layers
 --------------
+
+:hidden:`ReflectionPad1d`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReflectionPad1d
+    :members:
 
 :hidden:`ReflectionPad2d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ReflectionPad2d
+    :members:
+
+:hidden:`ReplicationPad1d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReplicationPad1d
     :members:
 
 :hidden:`ReplicationPad2d`
@@ -220,15 +232,27 @@ Padding Layers
 .. autoclass:: ZeroPad2d
     :members:
 
+:hidden:`ConstantPad1d`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ConstantPad1d
+    :members:
+
 :hidden:`ConstantPad2d`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ConstantPad2d
     :members:
 
+:hidden:`ConstantPad3d`
+~~~~~~~~~~~~~~~~~~~~~~~
 
-Non-linear Activations (weighed sum+nonlinearity)
--------------------------------------------------
+.. autoclass:: ConstantPad3d
+    :members:
+
+
+Non-linear activations (weighted sum, nonlinearity)
+---------------------------------------------------
 
 :hidden:`ELU`
 ~~~~~~~~~~~~~
@@ -332,7 +356,7 @@ Non-linear Activations (weighed sum+nonlinearity)
 .. autoclass:: Threshold
     :members:
 
-Non-linear Activations (Other)
+Non-linear activations (other)
 ------------------------------
 
 :hidden:`Softmin`
@@ -676,10 +700,15 @@ DataParallel layers (multi-GPU, distributed)
 Utilities
 ---------
 
-:hidden:`clip_grad_norm`
-~~~~~~~~~~~~~~~~~~~~~~~~
+:hidden:`clip_grad_norm_`
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: torch.nn.utils.clip_grad_norm
+.. autofunction:: torch.nn.utils.clip_grad_norm_
+
+:hidden:`clip_grad_value_`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.clip_grad_value_
 
 :hidden:`weight_norm`
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1164,6 +1193,14 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: affine_grid
+
+DataParallel functions (multi-GPU, distributed)
+-----------------------------------------------
+
+:hidden:`data_parallel`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.parallel.data_parallel
 
 
 torch.nn.init

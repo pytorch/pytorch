@@ -26,9 +26,12 @@ bool GLConcatOp<T>::RunOnDevice() {
   of input must be between 2 and 4.");
 
   auto *X0blob = OperatorBase::Inputs()[0];
-  auto X0 = GLContext::getGLTensor<T>(X0blob);
   if (first_run_) {
+    auto X0 = GLContext::getGLTensor<T>(X0blob);
     inputs_.push_back(std::move(X0));
+  } else {
+    auto X0 = GLContext::getGLTensor<T>(X0blob, inputs_[0].release());
+    inputs_[0] = std::move(X0);
   }
 
   int N = inputs_[0]->dim32(0);
@@ -49,6 +52,17 @@ bool GLConcatOp<T>::RunOnDevice() {
       channelCount_ += X->dim32(1);
       inputs_.push_back(std::move(X));
     }
+  } else {
+    channelCount_ = channels;
+    for (int i = 1; i < Inputs().size(); ++i) {
+      auto *Xblob = OperatorBase::Inputs()[i];
+      auto X = GLContext::getGLTensor<T>(Xblob, inputs_[i].release());
+      CAFFE_ENFORCE_EQ(N, X->dim32(0), X->dim32(0));
+      CAFFE_ENFORCE_EQ(height, X->dim32(2), X->dim32(2));
+      CAFFE_ENFORCE_EQ(width, X->dim32(3), X->dim32(3));
+      channelCount_ += X->dim32(1);
+      inputs_[i] = std::move(X);
+    }
   }
 
   for (int i = 1; i < Inputs().size(); ++i) {
@@ -61,20 +75,34 @@ bool GLConcatOp<T>::RunOnDevice() {
   if (first_run_) {
     first_run_ = false;
     Y->Resize(output_dims);
-
     std::vector<arm_compute::IGCTensor*> inputsGC;
     for (int i = 0; i < inputs_.size(); ++i) {
       inputsGC.push_back(inputs_[i]->get_underlying());
     }
     concat_layer_.configure(inputsGC, Y->get_underlying());
+  } else if (second_run_) {
+    for (int i = 0; i < inputs_.size(); ++i) {
+      auto* X = inputs_[i].get();
+      auto* Xblob = inputsBlob[i];
+      X->lazy_allocate(Xblob, second_run_, true);
+    }
+    second_run_ = false;
+    Y->Resize(output_dims);
+    Y->allocate();
+    concat_layer_.run();
   } else {
     for (int i = 0; i < inputs_.size(); ++i) {
       auto* X = inputs_[i].get();
       auto* Xblob = inputsBlob[i];
       X->lazy_allocate(Xblob, second_run_, true);
     }
-    if (second_run_) {
-      second_run_ = false;
+    bool need_allocation = Y->Resize(output_dims);
+    std::vector<arm_compute::IGCTensor*> inputsGC;
+    for (int i = 0; i < inputs_.size(); ++i) {
+      inputsGC.push_back(inputs_[i]->get_underlying());
+    }
+    concat_layer_.configure(inputsGC, Y->get_underlying());
+    if (need_allocation) {
       Y->allocate();
     }
     concat_layer_.run();

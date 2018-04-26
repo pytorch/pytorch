@@ -2,6 +2,7 @@
 
 #include "caffe2/onnx/backend_rep.h"
 #include "caffe2/onnx/device.h"
+#include "caffe2/onnx/helper.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "onnx/onnx_pb.h"
 
@@ -104,6 +105,19 @@ struct OnnxNode {
 
 class Caffe2Backend {
  public:
+  // Since we still have this Python-C++ hybrid flow, we will need to take the
+  // DummyName generator from Python as a pointer. In this case, Python env owns
+  // the DummyName object and we don't need to keep track of its life time in
+  // C++. Therefore in this case, we use a null dtor to prevent C++ shared_ptr
+  // from releasing the object
+  Caffe2Backend(DummyName* dummy = nullptr) {
+    if (dummy) {
+      dummy_ = std::shared_ptr<DummyName>(dummy, [](DummyName *){});
+    } else {
+      dummy_ = std::make_shared<DummyName>();
+    }
+  }
+
   Caffe2BackendRep* Prepare(
       const std::string& onnx_model_str,
       const std::string& device,
@@ -112,6 +126,11 @@ class Caffe2Backend {
   bool SupportOp(const std::string tyep) const;
 
   Caffe2Ops ConvertNode(const std::string& node_str, int opset_version);
+
+  void BuildTensorFillingOp(
+      caffe2::OperatorDef* c2_op,
+      const TensorProto& onnx_tensor,
+      const std::string& name = "");
 
  private:
   using SpecialOpConverter = Caffe2Ops (Caffe2Backend::*)(OnnxNode*, int);
@@ -125,6 +144,8 @@ class Caffe2Backend {
       bool include_initializers,
       const std::vector<Caffe2Ops>& extras);
 
+  void CheckOpSchemaArguments(const caffe2::OpSchema& schema, const caffe2::OperatorDef& op);
+
   Caffe2Ops OnnxNodeToCaffe2Ops(
       const ModelProto& init_model,
       const ModelProto& pred_model,
@@ -133,12 +154,9 @@ class Caffe2Backend {
 
   std::unordered_set<std::string> AllNamesInGraph(const GraphProto& graph);
 
-  void BuildTensorFillingOp(
-      caffe2::OperatorDef* c2_op,
-      const TensorProto& onnx_tensor,
-      const std::string& name = "");
-
   Caffe2Ops CommonOnnxNodeToCaffe2Ops(OnnxNode* onnx_node, int opset_version);
+
+  Caffe2Ops CreateCast(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateConstant(OnnxNode* onnx_node, int opset_version);
 
@@ -158,6 +176,8 @@ class Caffe2Backend {
 
   Caffe2Ops CreateSlice(OnnxNode* onnx_node, int opset_version);
 
+  Caffe2Ops CreateSplit(OnnxNode* onnx_node, int opset_version);
+
   Caffe2Ops CreateReciprocal(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateBatchNormalization(OnnxNode* onnx_node, int opset_version);
@@ -175,6 +195,9 @@ class Caffe2Backend {
       get_per_op_renamed_attrs() const;
   const std::unordered_map<std::string, Caffe2Backend::SpecialOpConverter>&
   get_special_operators() const;
+
+  // Dummy name generator
+  std::shared_ptr<DummyName> dummy_;
 };
 
 } // namespace onnx

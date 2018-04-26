@@ -56,18 +56,25 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   shape.input_image_dims = GetDims(X);
   const std::vector<int> X_dims(X.dims().cbegin() + 1, X.dims().cend());
-  SetDeviceTensor(X_dims, &X_dims_device_);
   shape.kernel_size = shape.C / group_ * kernel_dims_size;
-
-  SetColumnBufferShape(
+  lc_op_util::SetColumnBufferShape(
       shape.N,
-      shape.C,
       shape.kernel_size,
       shape.output_image_size,
+      order_,
       &shape.column_dims,
-      &shape.column_transposed_dims);
-  SetYTranposedBufferShape(
-      shape.N, shape.M, shape.output_image_size, &shape.Y_transposed_dims);
+      &shape.column_transposed_dims,
+      &shape.column_axes);
+  lc_op_util::SetYBufferShape(
+      shape.N,
+      shape.M,
+      shape.output_image_size,
+      order_,
+      &shape.Y_dims,
+      &shape.Y_transposed_dims,
+      &shape.Y_axes);
+  SetDeviceTensor(X_dims, &X_dims_device_);
+  SetDeviceTensor(shape.column_dims, &column_dims_device_);
 
   const T* X_data = X.template data<T>();
   const T* filter_data = filter.template data<T>();
@@ -127,15 +134,22 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
 
   shape.kernel_size = kernel_h() * kernel_w() * shape.C;
-  SetColumnBufferShape(
+  lc_op_util::SetColumnBufferShape(
       shape.N,
-      shape.C,
       shape.kernel_size,
       shape.output_image_size,
+      order_,
       &shape.column_dims,
-      &shape.column_transposed_dims);
-  SetYTranposedBufferShape(
-      shape.N, shape.M, shape.output_image_size, &shape.Y_transposed_dims);
+      &shape.column_transposed_dims,
+      &shape.column_axes);
+  lc_op_util::SetYBufferShape(
+      shape.N,
+      shape.M,
+      shape.output_image_size,
+      order_,
+      &shape.Y_dims,
+      &shape.Y_transposed_dims,
+      &shape.Y_axes);
 
   const T* X_data = X.template data<T>();
   const T* filter_data = filter.template data<T>();
@@ -225,10 +239,8 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
   }
   math::Transpose(
       shape.column_dims.size(),
-      column_dims_device_.template data<int>(),
-      column_transposed_dims_device_.template data<int>(),
-      column_axes_device_.template data<int>(),
-      column_buffer->size(),
+      shape.column_dims.data(),
+      shape.column_axes.data(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
@@ -261,10 +273,8 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
   }
   math::Transpose(
       shape.Y_transposed_dims.size(),
-      Y_transposed_dims_device_.template data<int>(),
-      Y_dims_device_.template data<int>(),
-      Y_transposed_axes_device_.template data<int>(),
-      Y_transposed_buffer->size(),
+      shape.Y_transposed_dims.data(),
+      shape.Y_axes.data(),
       Y_transposed_buffer_data,
       Y_data,
       &context_);
@@ -308,10 +318,8 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
   }
   math::Transpose(
       shape.column_dims.size(),
-      column_dims_device_.template data<int>(),
-      column_transposed_dims_device_.template data<int>(),
-      column_axes_device_.template data<int>(),
-      column_buffer->size(),
+      shape.column_dims.data(),
+      shape.column_axes.data(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
@@ -330,10 +338,8 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       &context_);
   math::Transpose(
       shape.Y_transposed_dims.size(),
-      Y_transposed_dims_device_.template data<int>(),
-      Y_dims_device_.template data<int>(),
-      Y_transposed_axes_device_.template data<int>(),
-      Y_transposed_buffer->size(),
+      shape.Y_transposed_dims.data(),
+      shape.Y_axes.data(),
       Y_transposed_buffer_data,
       Y_data,
       &context_);
@@ -351,51 +357,6 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         Y_data,
         &context_);
   }
-}
-
-template <typename T, class Context>
-void LocallyConnectedOp<T, Context>::SetColumnBufferShape(
-    const int N,
-    const int C,
-    const int kernel_size,
-    const int output_image_size,
-    std::vector<int>* column_dims,
-    std::vector<int>* column_transposed_dims) {
-  std::vector<int> column_axes;
-  lc_op_util::SetColumnBufferShapeImpl(
-      N,
-      kernel_size,
-      output_image_size,
-      order_,
-      column_dims,
-      column_transposed_dims,
-      &column_axes,
-      nullptr);
-  SetDeviceTensor(*column_dims, &column_dims_device_);
-  SetDeviceTensor(*column_transposed_dims, &column_transposed_dims_device_);
-  SetDeviceTensor(column_axes, &column_axes_device_);
-}
-
-template <typename T, class Context>
-void LocallyConnectedOp<T, Context>::SetYTranposedBufferShape(
-    const int N,
-    const int M,
-    const int output_image_size,
-    std::vector<int>* Y_transposed_dims) {
-  std::vector<int> Y_dims;
-  std::vector<int> Y_transposed_axes;
-  lc_op_util::SetYBufferShapeImpl(
-      N,
-      M,
-      output_image_size,
-      order_,
-      &Y_dims,
-      Y_transposed_dims,
-      nullptr,
-      &Y_transposed_axes);
-  SetDeviceTensor(Y_dims, &Y_dims_device_);
-  SetDeviceTensor(*Y_transposed_dims, &Y_transposed_dims_device_);
-  SetDeviceTensor(Y_transposed_axes, &Y_transposed_axes_device_);
 }
 
 template <typename T, class Context>
@@ -430,18 +391,25 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   }
 
   const std::vector<int> X_dims(X.dims().cbegin() + 1, X.dims().cend());
-  SetDeviceTensor(X_dims, &X_dims_device_);
   shape.kernel_size = shape.C / group_ * kernel_dims_size;
-
-  SetColumnBufferShape(
+  lc_op_util::SetColumnBufferShape(
       shape.N,
-      shape.C,
       shape.kernel_size,
       shape.output_image_size,
+      order_,
       &shape.column_dims,
-      &shape.column_transposed_dims);
-  SetDYTranposedBufferShape(
-      shape.N, shape.M, shape.output_image_size, &shape.Y_transposed_dims);
+      &shape.column_transposed_dims,
+      &shape.column_axes);
+  lc_op_util::SetYBufferShape(
+      shape.N,
+      shape.M,
+      shape.output_image_size,
+      order_,
+      &shape.Y_dims,
+      &shape.Y_transposed_dims,
+      &shape.Y_axes);
+  SetDeviceTensor(X_dims, &X_dims_device_);
+  SetDeviceTensor(shape.column_dims, &column_dims_device_);
 
   dfilter->ResizeLike(filter);
   const T* X_data = X.template data<T>();
@@ -509,15 +477,22 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
 
   shape.kernel_size = kernel_h() * kernel_w() * shape.C;
-  SetColumnBufferShape(
+  lc_op_util::SetColumnBufferShape(
       shape.N,
-      shape.C,
       shape.kernel_size,
       shape.output_image_size,
+      order_,
       &shape.column_dims,
-      &shape.column_transposed_dims);
-  SetDYTranposedBufferShape(
-      shape.N, shape.M, shape.output_image_size, &shape.Y_transposed_dims);
+      &shape.column_transposed_dims,
+      &shape.column_axes);
+  lc_op_util::SetYBufferShape(
+      shape.N,
+      shape.M,
+      shape.output_image_size,
+      order_,
+      &shape.Y_dims,
+      &shape.Y_transposed_dims,
+      &shape.Y_axes);
 
   dfilter->ResizeLike(filter);
   const T* X_data = X.template data<T>();
@@ -617,20 +592,16 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
   }
   math::Transpose(
       shape.column_dims.size(),
-      column_dims_device_.template data<int>(),
-      column_transposed_dims_device_.template data<int>(),
-      column_axes_device_.template data<int>(),
-      column_buffer->size(),
+      shape.column_dims.data(),
+      shape.column_axes.data(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
 
   math::Transpose(
-      shape.Y_transposed_dims.size(),
-      dY_dims_device_.template data<int>(),
-      dY_transposed_dims_device_.template data<int>(),
-      dY_axes_device_.template data<int>(),
-      dY_transposed_buffer->size(),
+      shape.Y_dims.size(),
+      shape.Y_dims.data(),
+      shape.Y_axes.data(),
       dY_data,
       dY_transposed_buffer_data,
       &context_);
@@ -680,11 +651,9 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
         column_transposed_buffer->template mutable_data<T>(),
         &context_);
     math::Transpose(
-        shape.column_dims.size(),
-        column_transposed_dims_device_.template data<int>(),
-        column_dims_device_.template data<int>(),
-        column_transposed_axes_device_.template data<int>(),
-        column_transposed_buffer->size(),
+        shape.column_transposed_dims.size(),
+        shape.column_transposed_dims.data(),
+        shape.column_axes.data(),
         column_transposed_buffer->template data<T>(),
         column_buffer->template mutable_data<T>(),
         &context_);
@@ -772,20 +741,15 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
   }
   math::Transpose(
       shape.column_dims.size(),
-      column_dims_device_.template data<int>(),
-      column_transposed_dims_device_.template data<int>(),
-      column_axes_device_.template data<int>(),
-      column_buffer->size(),
+      shape.column_dims.data(),
+      shape.column_axes.data(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
-
   math::Transpose(
-      shape.Y_transposed_dims.size(),
-      dY_dims_device_.template data<int>(),
-      dY_transposed_dims_device_.template data<int>(),
-      dY_axes_device_.template data<int>(),
-      dY_transposed_buffer->size(),
+      shape.Y_dims.size(),
+      shape.Y_dims.data(),
+      shape.Y_axes.data(),
       dY_data,
       dY_transposed_buffer_data,
       &context_);
@@ -835,11 +799,9 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         column_transposed_buffer->template mutable_data<T>(),
         &context_);
     math::Transpose(
-        shape.column_dims.size(),
-        column_transposed_dims_device_.template data<int>(),
-        column_dims_device_.template data<int>(),
-        column_transposed_axes_device_.template data<int>(),
-        column_transposed_buffer->size(),
+        shape.column_transposed_dims.size(),
+        shape.column_transposed_dims.data(),
+        shape.column_axes.data(),
         column_transposed_buffer->template data<T>(),
         column_buffer->template mutable_data<T>(),
         &context_);
@@ -866,53 +828,6 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       const_column_buffer_data += column_stride;
     }
   }
-}
-
-template <typename T, class Context>
-void LocallyConnectedGradientOp<T, Context>::SetColumnBufferShape(
-    const int N,
-    const int C,
-    const int kernel_size,
-    const int output_image_size,
-    std::vector<int>* column_dims,
-    std::vector<int>* column_transposed_dims) {
-  std::vector<int> column_axes;
-  std::vector<int> column_transposed_axes;
-  lc_op_util::SetColumnBufferShapeImpl(
-      N,
-      kernel_size,
-      output_image_size,
-      order_,
-      column_dims,
-      column_transposed_dims,
-      &column_axes,
-      &column_transposed_axes);
-  SetDeviceTensor(*column_dims, &column_dims_device_);
-  SetDeviceTensor(*column_transposed_dims, &column_transposed_dims_device_);
-  SetDeviceTensor(column_axes, &column_axes_device_);
-  SetDeviceTensor(column_transposed_axes, &column_transposed_axes_device_);
-}
-
-template <typename T, class Context>
-void LocallyConnectedGradientOp<T, Context>::SetDYTranposedBufferShape(
-    const int N,
-    const int M,
-    const int output_image_size,
-    std::vector<int>* dY_transposed_dims) {
-  std::vector<int> dY_dims;
-  std::vector<int> dY_axes;
-  lc_op_util::SetYBufferShapeImpl(
-      N,
-      M,
-      output_image_size,
-      order_,
-      &dY_dims,
-      dY_transposed_dims,
-      &dY_axes,
-      nullptr);
-  SetDeviceTensor(dY_dims, &dY_dims_device_);
-  SetDeviceTensor(*dY_transposed_dims, &dY_transposed_dims_device_);
-  SetDeviceTensor(dY_axes, &dY_axes_device_);
 }
 
 } // namespace caffe2

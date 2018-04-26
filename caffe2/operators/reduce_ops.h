@@ -1,12 +1,14 @@
 #ifndef CAFFE2_OPERATORS_REDUCE_OPS_H_
 #define CAFFE2_OPERATORS_REDUCE_OPS_H_
 
-#include "caffe2/core/common_omp.h"
+#include <algorithm>
+#include <functional>
+#include <vector>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 
@@ -16,70 +18,109 @@ class ReduceOpBase : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   ReduceOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
-    axes_ = OperatorBase::GetRepeatedArgument<int>("axes");
-    keepdims_ = OperatorBase::GetSingleArgument<int>("keepdims", 1);
-  }
+      : Operator<Context>(operator_def, ws),
+        axes_(OperatorBase::GetRepeatedArgument<int>("axes")),
+        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
 
   bool RunOnDevice() override {
-    int ndim = Input(0).ndim();
-
+    const auto& X = Input(0);
+    auto* Y = Output(0);
+    const int ndim = X.ndim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
       std::sort(axes_.begin(), axes_.end());
-      CAFFE_ENFORCE(axes_.front() >= 0, "Axes ids must be non-negative.");
-      CAFFE_ENFORCE(
-          axes_.back() < ndim,
+      CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
+      CAFFE_ENFORCE_LT(
+          axes_.back(),
+          ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-
-    auto& X = Input(0);
-    auto* Y = Output(0);
-
-    vector<TIndex> y_dims = X.dims();
-    TIndex Y_size = X.size();
-    for (TIndex id = axes_.size() - 1; id >= 0; id--) {
-      TIndex reduced_axis = axes_[id];
-      Y_size /= y_dims[reduced_axis];
-      if (keepdims_) {
-        y_dims[reduced_axis] = 1;
+    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    std::vector<int> Y_dims;
+    Y_dims.reserve(ndim);
+    std::size_t cur_axis = 0;
+    for (int i = 0; i < ndim; ++i) {
+      if (cur_axis < axes_.size() && i == axes_[cur_axis]) {
+        if (keep_dims_) {
+          Y_dims.push_back(1);
+        }
+        ++cur_axis;
       } else {
-        y_dims.erase(y_dims.begin() + reduced_axis);
+        Y_dims.push_back(X_dims[i]);
       }
     }
-    Y->Resize(y_dims);
-
+    Y->Resize(Y_dims);
     return this->Compute(
-        X.template data<T>(),
-        X.size(),
-        const_cast<vector<TIndex>&>(X.dims()),
-        Y->template mutable_data<T>(),
-        Y_size,
-        axes_,
-        y_dims,
-        keepdims_);
+        X_dims, axes_, X.template data<T>(), Y->template mutable_data<T>());
   }
 
  protected:
   virtual bool Compute(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
       const T* X_data,
-      const TIndex X_size,
-      vector<TIndex>& dims,
-      T* Y_data,
-      const TIndex Y_size,
-      vector<int>& axes,
-      vector<TIndex>& Y_dims,
-      int keepdims) = 0;
+      T* Y_data) = 0;
 
- private:
   std::vector<int> axes_;
-  int keepdims_;
+  const int keep_dims_;
 };
 
 template <typename T, class Context>
-class ReduceSumOp : public ReduceOpBase<T, Context> {
+class ReduceMinOp final : public ReduceOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  ReduceMinOp(const OperatorDef& operator_def, Workspace* ws)
+      : ReduceOpBase<T, Context>(operator_def, ws) {}
+
+ protected:
+  bool Compute(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data) override {
+    math::ReduceMin<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        X_data,
+        Y_data,
+        &context_);
+    return true;
+  }
+};
+
+template <typename T, class Context>
+class ReduceMaxOp final : public ReduceOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  ReduceMaxOp(const OperatorDef& operator_def, Workspace* ws)
+      : ReduceOpBase<T, Context>(operator_def, ws) {}
+
+ protected:
+  bool Compute(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data) override {
+    math::ReduceMax<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        X_data,
+        Y_data,
+        &context_);
+    return true;
+  }
+};
+
+template <typename T, class Context>
+class ReduceSumOp final : public ReduceOpBase<T, Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -88,18 +129,24 @@ class ReduceSumOp : public ReduceOpBase<T, Context> {
 
  protected:
   bool Compute(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
       const T* X_data,
-      const TIndex X_size,
-      vector<TIndex>& dims,
-      T* Y_data,
-      const TIndex Y_size,
-      vector<int>& axes,
-      vector<TIndex>& Y_dims,
-      int keepdims) override;
+      T* Y_data) override {
+    math::ReduceSum<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        X_data,
+        Y_data,
+        &context_);
+    return true;
+  }
 };
 
 template <typename T, class Context>
-class ReduceMeanOp : public ReduceOpBase<T, Context> {
+class ReduceMeanOp final : public ReduceOpBase<T, Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -108,14 +155,155 @@ class ReduceMeanOp : public ReduceOpBase<T, Context> {
 
  protected:
   bool Compute(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
       const T* X_data,
-      const TIndex X_size,
-      vector<TIndex>& dims,
-      T* Y_data,
-      const TIndex Y_size,
-      vector<int>& axes,
-      vector<TIndex>& Y_dims,
-      int keepdims) override;
+      T* Y_data) override {
+    math::ReduceMean<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        X_data,
+        Y_data,
+        &context_);
+    return true;
+  }
+};
+
+template <typename T, class Context>
+class ReduceGradientOpBase : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  ReduceGradientOpBase(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        axes_(OperatorBase::GetRepeatedArgument<int>("axes")) {}
+
+  bool RunOnDevice() override {
+    const auto& dY = Input(0);
+    const auto& X = Input(1);
+    const auto& Y = Input(2);
+    auto* dX = Output(0);
+    const int ndim = X.ndim();
+    if (axes_.empty()) {
+      axes_.resize(ndim);
+      std::iota(axes_.begin(), axes_.end(), 0);
+    } else {
+      std::sort(axes_.begin(), axes_.end());
+      CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
+      CAFFE_ENFORCE_LT(
+          axes_.back(),
+          ndim,
+          "Axes ids must be smaller than the dimensions of input.");
+    }
+    const std::vector<int> dX_dims(X.dims().cbegin(), X.dims().cend());
+    std::vector<int> dY_dims = dX_dims;
+    for (const int axis : axes_) {
+      dY_dims[axis] = 1;
+    }
+    dX->ResizeLike(X);
+    return Compute(
+        dY_dims,
+        dX_dims,
+        dY.template data<T>(),
+        X.template data<T>(),
+        Y.template data<T>(),
+        dX->template mutable_data<T>());
+  }
+
+ protected:
+  virtual bool Compute(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* X_data,
+      const T* Y_data,
+      T* dX_data) = 0;
+
+  std::vector<int> axes_;
+};
+
+template <typename T, class Context>
+class ReduceMinMaxGradientOp final : public ReduceGradientOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  ReduceMinMaxGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : ReduceGradientOpBase<T, Context>(operator_def, ws) {}
+
+ protected:
+  bool Compute(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* X_data,
+      const T* Y_data,
+      T* dX_data) override;
+};
+
+template <typename T, class Context>
+class ReduceSumGradientOp final : public ReduceGradientOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  ReduceSumGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : ReduceGradientOpBase<T, Context>(operator_def, ws) {}
+
+ protected:
+  bool Compute(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* /* X_data */,
+      const T* /* Y_data */,
+      T* dX_data) override {
+    math::Broadcast(
+        dY_dims.size(),
+        dY_dims.data(),
+        dX_dims.size(),
+        dX_dims.data(),
+        dY_data,
+        dX_data,
+        &context_);
+    return true;
+  }
+};
+
+template <typename T, class Context>
+class ReduceMeanGradientOp final : public ReduceGradientOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  ReduceMeanGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : ReduceGradientOpBase<T, Context>(operator_def, ws) {}
+
+ protected:
+  bool Compute(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* /* X_data */,
+      const T* /* Y_data */,
+      T* dX_data) override {
+    math::Broadcast(
+        dY_dims.size(),
+        dY_dims.data(),
+        dX_dims.size(),
+        dX_dims.data(),
+        dY_data,
+        dX_data,
+        &context_);
+    const int dX_size = std::accumulate(
+        dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+    int scale = 1;
+    for (const int axis : this->axes_) {
+      scale *= dX_dims[axis];
+    }
+    math::Scale<T, Context>(
+        dX_size, 1.0 / static_cast<float>(scale), dX_data, dX_data, &context_);
+    return true;
+  }
 };
 
 } // namespace caffe2

@@ -15,6 +15,11 @@ NCCL_LIB_DIR = None
 NCCL_SYSTEM_LIB = None
 NCCL_INCLUDE_DIR = None
 NCCL_ROOT_DIR = None
+WITH_STATIC_NCCL = os.getenv("USE_STATIC_NCCL")
+LIBNCCL_PREFIX = "libnccl"
+if WITH_STATIC_NCCL is not None:
+    LIBNCCL_PREFIX = "libnccl_static"
+
 if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
     ENV_ROOT = os.getenv('NCCL_ROOT_DIR', None)
     LIB_DIR = os.getenv('NCCL_LIB_DIR', None)
@@ -49,12 +54,12 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
         path = os.path.expanduser(path)
         if path is None or not os.path.exists(path):
             continue
-        if glob.glob(os.path.join(path, 'libnccl*')):
+        if glob.glob(os.path.join(path, LIBNCCL_PREFIX + '*')):
             NCCL_LIB_DIR = path
             # try to find an exact versioned .so/.dylib, rather than libnccl.so
-            preferred_path = glob.glob(os.path.join(path, 'libnccl*[0-9]*'))
+            preferred_path = glob.glob(os.path.join(path, LIBNCCL_PREFIX + '*[0-9]*'))
             if len(preferred_path) == 0:
-                NCCL_SYSTEM_LIB = glob.glob(os.path.join(path, 'libnccl*'))[0]
+                NCCL_SYSTEM_LIB = glob.glob(os.path.join(path, LIBNCCL_PREFIX + '*'))[0]
             else:
                 NCCL_SYSTEM_LIB = os.path.realpath(preferred_path[0])
             break

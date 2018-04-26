@@ -83,58 +83,56 @@ static void _maybe_reinitialize_engine_after_fork() {
 }
 
 // Implementation of torch._C._EngineBase.run_backward
-//
-// When inputs == nullptr, this is a torch.autograd.backward() call
-// When inputs != nullptr, this is a torch.autograd.grad() call
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
   _maybe_reinitialize_engine_after_fork();
-  PyObject *variables = nullptr;
-  PyObject *grad_variables = nullptr;
+  PyObject *tensors = nullptr;
+  PyObject *grad_tensors = nullptr;
   unsigned char keep_graph = 0;
   unsigned char create_graph = 0;
   PyObject *inputs = nullptr;
+  unsigned char allow_unreachable = 0;
   const char *accepted_kwargs[] = {
-      "variables", "grad_variables", "keep_graph", "create_graph", "inputs",
-      nullptr
+      "tensors", "grad_tensors", "keep_graph", "create_graph", "inputs",
+      "allow_unreachable", nullptr
   };
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|O", (char**)accepted_kwargs,
-        &variables, &grad_variables, &keep_graph, &create_graph, &inputs))
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|Ob", (char**)accepted_kwargs,
+        &tensors, &grad_tensors, &keep_graph, &create_graph, &inputs, &allow_unreachable))
     return nullptr;
 
-  THPUtils_assert(PyTuple_Check(variables), "variables argument is expected to "
-      "be a tuple, but got %s", THPUtils_typename(variables));
-  THPUtils_assert(PyTuple_Check(grad_variables), "variables argument is "
-      "expected to be a tuple, but got %s", THPUtils_typename(grad_variables));
+  THPUtils_assert(PyTuple_Check(tensors), "tensors argument is expected to "
+      "be a tuple, but got %s", THPUtils_typename(tensors));
+  THPUtils_assert(PyTuple_Check(grad_tensors), "grad_tensors argument is "
+      "expected to be a tuple, but got %s", THPUtils_typename(grad_tensors));
 
-  Py_ssize_t num_variables = PyTuple_GET_SIZE(variables);
-  Py_ssize_t num_gradients = PyTuple_GET_SIZE(grad_variables);
-  THPUtils_assert(num_variables == num_gradients, "got %ld variables and %ld "
-      "gradients", num_variables, num_gradients);
+  Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors);
+  Py_ssize_t num_gradients = PyTuple_GET_SIZE(grad_tensors);
+  THPUtils_assert(num_tensors == num_gradients, "got %ld tensors and %ld "
+      "gradients", num_tensors, num_gradients);
 
   edge_list roots;
-  roots.reserve(num_variables);
+  roots.reserve(num_tensors);
   variable_list grads;
-  grads.reserve(num_variables);
-  for (int i = 0; i < num_variables; i++) {
-    PyObject *_variable = PyTuple_GET_ITEM(variables, i);
-    THPUtils_assert(THPVariable_Check(_variable), "element %d of variables "
-        "tuple is not a Variable", i);
-    auto& variable = ((THPVariable*)_variable)->cdata;
+  grads.reserve(num_tensors);
+  for (int i = 0; i < num_tensors; i++) {
+    PyObject *_tensor = PyTuple_GET_ITEM(tensors, i);
+    THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
+        "tuple is not a Tensor", i);
+    auto& variable = ((THPVariable*)_tensor)->cdata;
     auto gradient_edge = variable.gradient_edge();
     THPUtils_assert(gradient_edge.function,
-        "element %d of variables does not require grad and does not have a grad_fn", i);
+        "element %d of tensors does not require grad and does not have a grad_fn", i);
     roots.push_back(std::move(gradient_edge));
 
-    PyObject *grad = PyTuple_GET_ITEM(grad_variables, i);
+    PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       grads.push_back(((THPVariable*)grad)->cdata);
     } else {
       THPUtils_assert(grad == Py_None,
-          "element %d of gradients tuple is not a Variable or None", i);
+          "element %d of gradients tuple is not a Tensor or None", i);
       THPUtils_assert(!variable.requires_grad(),
-          "element %d of gradients tuple is None, but the corresponding Variable requires grad");
+          "element %d of gradients tuple is None, but the corresponding Tensor requires grad");
     }
   }
 
@@ -145,7 +143,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     for (int i = 0; i < num_inputs; ++i) {
       PyObject *input = PyTuple_GET_ITEM(inputs, i);
       THPUtils_assert(THPVariable_Check(input),
-          "all inputs have to be Variables, but got %s", THPUtils_typename(input));
+          "all inputs have to be Tensors, but got %s", THPUtils_typename(input));
       THPVariable *input_var = (THPVariable*)input;
       const auto output_nr = input_var->cdata.output_nr();
       auto grad_fn = input_var->cdata.grad_fn();
@@ -153,12 +151,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
           grad_fn = input_var->cdata.try_get_grad_accumulator();
       }
       THPUtils_assert(input_var->cdata.requires_grad(),
-          "One of the differentiated Variables does not require grad");
+          "One of the differentiated Tensors does not require grad");
       if (!grad_fn) {
         output_edges.emplace_back();
       } else {
-        THPUtils_assert(grad_fn,
-            "One of the differentiated Variables appears to not have been used in the graph");
         output_edges.emplace_back(grad_fn, output_nr);
       }
     }
@@ -175,6 +171,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;
     for (int i = 0; i < num_inputs; i++) {
+      THPUtils_assert(allow_unreachable || outputs[i].defined(), "One of the "
+                      "differentiated Tensors appears to not have been used "
+                      "in the graph. Set allow_unused=True if this is the "
+                      "desired behavior.");
       PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
     }
     return py_outputs.release();
@@ -198,6 +198,16 @@ PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPEngine_is_checkpoint_valid(PyObject *self) {
+  HANDLE_TH_ERRORS
+  if(engine.is_checkpoint_valid()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   return type->tp_alloc(type, 0);
@@ -206,6 +216,7 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward", (PyCFunction)THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, nullptr},
+  {(char*)"is_checkpoint_valid", (PyCFunction)THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
   {nullptr}
 };
 

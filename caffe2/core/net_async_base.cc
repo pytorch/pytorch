@@ -1,5 +1,6 @@
 #include "caffe2/core/net_async_polling.h"
 
+#include "caffe2/core/net_async_tracing.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 
@@ -66,6 +67,19 @@ AsyncNetBase::AsyncNetBase(
   }
 
   num_workers_ = net_def->has_num_workers() ? net_def->num_workers() : -1;
+
+  tracer_ = tracing::create(this, net_def->name());
+  if (tracer_) {
+    LOG(INFO) << "Tracing net: " << net_def->name();
+  }
+}
+
+bool AsyncNetBase::RunAsync() {
+  tracing::startIter(tracer_);
+  for (auto& op : GetOperators()) {
+    op->ResetEvent();
+  }
+  return DoRunAsync();
 }
 
 std::shared_ptr<TaskThreadPool> AsyncNetBase::pool_getter(
@@ -178,6 +192,10 @@ const std::vector<int>& AsyncNetBase::parents(int task_id) const {
   return task_node.parents_;
 }
 
+int AsyncNetBase::num_ops(int task_id) const {
+  return chains_[task_id].size();
+}
+
 void AsyncNetBase::asyncWait(
     int task_id,
     int stream_id,
@@ -197,6 +215,13 @@ void AsyncNetBase::run(int task_id, int stream_id) {
   for (auto& op_id : chains_[task_id]) {
     auto& op = operators_[op_id];
     try {
+      TRACE_EVENT(
+          tracing::TRACE_OP,
+          op_id,
+          tracing::TRACE_TASK,
+          task_id,
+          tracing::TRACE_STREAM,
+          stream_id);
       CAFFE_ENFORCE(op->RunAsync(stream_id), "Failed to execute an op");
     } catch (const std::exception& e) {
       CAFFE_THROW(

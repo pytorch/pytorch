@@ -56,8 +56,9 @@ class ObserverConfig {
     return skipIters_;
   }
   static void setReporter(unique_ptr<NetObserverReporter> reporter) {
-    // Can only set the reporter once
-    CAFFE_ENFORCE(reporter_ == nullptr);
+    if (reporter_) {
+      reporter_.reset(nullptr);
+    }
     reporter_ = std::move(reporter);
   }
   static NetObserverReporter* getReporter() {

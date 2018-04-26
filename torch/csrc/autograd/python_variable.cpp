@@ -1,6 +1,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 
 #include "THP.h"
+#include "torch/csrc/Device.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
@@ -13,6 +14,7 @@
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/tensor/python_tensor.h"
@@ -27,6 +29,7 @@
 #include <list>
 #include <memory>
 #include <structmember.h>
+#include <sstream>
 
 using namespace at;
 using namespace torch;
@@ -288,13 +291,7 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
   THPUtils_assertRet(-1, PyBool_Check(obj), "requires_grad must be a bool");
   auto& var = self->cdata;
   if (!var.is_leaf()) {
-    const char *hint = "";
-    if (obj == Py_False) {
-      hint = " If you want to use a computed variable in a subgraph "
-             "that doesn't require differentiation use "
-             "var_no_grad = var.detach().";
-    }
-    THPUtils_setError("you can only change requires_grad flags of leaf variables.%s", hint);
+    THPUtils_setError(autograd::utils::requires_grad_leaf_error(obj == Py_True).c_str());
     return -1;
   }
   var.set_requires_grad(obj == Py_True);
@@ -376,7 +373,7 @@ PyObject *THPVariable_dtype(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getDtype(self_.type().scalarType(), self_.type().is_cuda()));
+  return torch::autograd::utils::wrap(torch::getDtype(self_.type().scalarType()));
   END_HANDLE_TH_ERRORS
 }
 
@@ -384,6 +381,20 @@ static PyObject * THPVariable_layout(THPVariable* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
   return torch::autograd::utils::wrap(torch::getLayout(self_.type().backend()));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_device(THPVariable* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  if (self_.type().is_cuda()) {
+    torch::Device device(torch::DeviceType::CUDA, self_.get_device(), false);
+    return THPDevice_New(device);
+  }
+  else {
+    torch::Device device(torch::DeviceType::CPU, -1, true);
+    return THPDevice_New(device);
+  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -407,6 +418,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, NULL, NULL, NULL},
   {"layout", (getter)THPVariable_layout, NULL, NULL, NULL},
+  {"device", (getter)THPVariable_device, NULL, NULL, NULL},
   {nullptr}
 };
 

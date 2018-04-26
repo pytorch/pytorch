@@ -1,5 +1,3 @@
-#define EIGEN_USE_GPU
-
 #include "caffe2/operators/arg_ops.h"
 
 #include <limits>
@@ -9,7 +7,6 @@
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/arg_ops_eigen.h"
 
 namespace caffe2 {
 
@@ -48,21 +45,13 @@ __global__ void ComputeArgCUDAKernel(
 
 } // namespace
 
-template <typename T>
-class ArgMaxOp<T, CUDAContext> final : public ArgOpBase<T, CUDAContext> {
+template <typename T, typename Context>
+class ArgMaxCudaOp final : public ArgOpBase<T, Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
+  USE_OPERATOR_FUNCTIONS(Context);
 
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ArgMaxOp(const OperatorDef& operator_def, Workspace* ws)
-      : ArgOpBase<T, CUDAContext>(operator_def, ws),
-        cuda_stream_(context_.cuda_stream()),
-        stream_device_(&cuda_stream_, context_.cuda_gpu_id()),
-        gpu_device_(&stream_device_) {}
-#else // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ArgMaxOp(const OperatorDef& operator_def, Workspace* ws)
-      : ArgOpBase<T, CUDAContext>(operator_def, ws) {}
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  ArgMaxCudaOp(const OperatorDef& operator_def, Workspace* ws)
+      : ArgOpBase<T, Context>(operator_def, ws) {}
 
  protected:
   bool Compute(
@@ -71,25 +60,15 @@ class ArgMaxOp<T, CUDAContext> final : public ArgOpBase<T, CUDAContext> {
       const TIndex next_size,
       const TIndex n,
       TIndex* Y) override;
-
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
- private:
-  const cudaStream_t cuda_stream_;
-  const Eigen::CudaStreamDevice stream_device_;
-  const Eigen::GpuDevice gpu_device_;
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 };
 
-template <typename T>
-bool ArgMaxOp<T, CUDAContext>::Compute(
+template <typename T, typename Context>
+bool ArgMaxCudaOp<T, Context>::Compute(
     const T* X,
     const TIndex prev_size,
     const TIndex next_size,
     const TIndex n,
     TIndex* Y) {
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  arg_ops_eigen::ComputeArgMaxEigen(gpu_device_, X, prev_size, next_size, n, Y);
-#else // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   const TIndex outer_size = prev_size * next_size;
   ComputeArgCUDAKernel<<<
       std::min(outer_size, static_cast<TIndex>(CAFFE_MAXIMUM_NUM_BLOCKS)),
@@ -103,25 +82,16 @@ bool ArgMaxOp<T, CUDAContext>::Compute(
       cub::ArgMax(),
       std::numeric_limits<T>::lowest(),
       Y);
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   return true;
 }
 
-template <typename T>
-class ArgMinOp<T, CUDAContext> final : public ArgOpBase<T, CUDAContext> {
+template <typename T, typename Context>
+class ArgMinCudaOp final : public ArgOpBase<T, Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
+  USE_OPERATOR_FUNCTIONS(Context);
 
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ArgMinOp(const OperatorDef& operator_def, Workspace* ws)
-      : ArgOpBase<T, CUDAContext>(operator_def, ws),
-        cuda_stream_(context_.cuda_stream()),
-        stream_device_(&cuda_stream_, context_.cuda_gpu_id()),
-        gpu_device_(&stream_device_) {}
-#else // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ArgMinOp(const OperatorDef& operator_def, Workspace* ws)
-      : ArgOpBase<T, CUDAContext>(operator_def, ws) {}
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+  ArgMinCudaOp(const OperatorDef& operator_def, Workspace* ws)
+      : ArgOpBase<T, Context>(operator_def, ws) {}
 
  protected:
   bool Compute(
@@ -130,25 +100,15 @@ class ArgMinOp<T, CUDAContext> final : public ArgOpBase<T, CUDAContext> {
       const TIndex next_size,
       const TIndex n,
       TIndex* Y) override;
-
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
- private:
-  const cudaStream_t cuda_stream_;
-  const Eigen::CudaStreamDevice stream_device_;
-  const Eigen::GpuDevice gpu_device_;
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 };
 
-template <typename T>
-bool ArgMinOp<T, CUDAContext>::Compute(
+template <typename T, typename Context>
+bool ArgMinCudaOp<T, Context>::Compute(
     const T* X,
     const TIndex prev_size,
     const TIndex next_size,
     const TIndex n,
     TIndex* Y) {
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  arg_ops_eigen::ComputeArgMinEigen(gpu_device_, X, prev_size, next_size, n, Y);
-#else // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   const TIndex outer_size = prev_size * next_size;
   ComputeArgCUDAKernel<<<
       std::min(outer_size, static_cast<TIndex>(CAFFE_MAXIMUM_NUM_BLOCKS)),
@@ -162,11 +122,10 @@ bool ArgMinOp<T, CUDAContext>::Compute(
       cub::ArgMin(),
       std::numeric_limits<T>::max(),
       Y);
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(ArgMax, ArgMaxOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(ArgMin, ArgMinOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(ArgMax, ArgMaxCudaOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(ArgMin, ArgMinCudaOp<float, CUDAContext>);
 
 } // namespace caffe2

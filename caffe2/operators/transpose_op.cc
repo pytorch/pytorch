@@ -17,9 +17,8 @@ REGISTER_MKL_OPERATOR(Transpose, mkl::MKLFallbackOp<TransposeOp<CPUContext>>);
 OPERATOR_SCHEMA(Transpose)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction([](
-        const OperatorDef& def,
-        const vector<TensorShape>& in) {
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
       ArgumentHelper helper(def);
       vector<int> axes = helper.GetRepeatedArgument<int>("axes");
       vector<TensorShape> out(1);

@@ -48,6 +48,22 @@ class StumpFuncOp final : public Operator<Context> {
   // Input: label, output: weight
 };
 
+template <typename TIN, typename TOUT, class Context>
+class StumpFuncIndexOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  StumpFuncIndexOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        threshold_(OperatorBase::GetSingleArgument<TIN>("threshold", 0)) {}
+
+  bool RunOnDevice() override;
+
+ protected:
+  TIN threshold_;
+  // Input: label, output: indices
+};
+
 } // caffe2
 
 #endif // CAFFE2_FB_OPERATORS_UTILITY_OPS_H_

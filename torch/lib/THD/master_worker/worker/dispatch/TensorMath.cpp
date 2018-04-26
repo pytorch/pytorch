@@ -302,7 +302,9 @@ TENSOR_IMPLEMENT_LOGICAL(Ne,ne)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Abs,abs)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Sigmoid,sigmoid)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Log,log)
+TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Log10,log10)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Log1p,log1p)
+TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Log2,log2)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Exp,exp)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Expm1,expm1)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Cos,cos)
@@ -589,7 +591,7 @@ static void tensorHistc(rpc::RPCMessage& raw_message) {
   }
 }
 
-static void tensorLogicalall(rpc::RPCMessage& raw_message) {
+static void tensorLogicalAndAll(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
@@ -597,10 +599,28 @@ static void tensorLogicalall(rpc::RPCMessage& raw_message) {
   sendValueToMaster(response);
 }
 
-static void tensorLogicalany(rpc::RPCMessage& raw_message) {
+static void tensorLogicalAnyAll(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
   int64_t response = tensor.any().toCLong();
   sendValueToMaster(response);
+}
+
+static void tensorLogicalAnd(rpc::RPCMessage& raw_message) {
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
+  finalize(raw_message);
+  at::all_out(tensor, src, dimension, keepdim);
+}
+
+static void tensorLogicalAny(rpc::RPCMessage& raw_message) {
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
+  finalize(raw_message);
+  at::any_out(tensor, src, dimension, keepdim);
 }

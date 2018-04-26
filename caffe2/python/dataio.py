@@ -492,3 +492,91 @@ class ReaderWithTimeLimit(ReaderWithLimitBase):
             return stop_condition_net.ConstantFill(
                 [], 1, shape=[], value=False, dtype=core.DataType.BOOL
             )
+
+
+class CompositeReader(Reader):
+    """
+    Base class for a reader that wrap multiple readers, e.g., reading from
+    multiple sources simultaneously.
+    """
+    def __init__(self, names, readers):
+        """
+        Args:
+            names: list[str] names of readers; used as schema keys
+            readers: list[Reader] Reader instances, must have schema
+        """
+        assert len(names) == len(readers)
+        super(CompositeReader, self).__init__(schema=Struct(*[
+            (name, reader.schema()) for name, reader in zip(names, readers)
+        ]))
+        self._names = names
+        self._readers = readers
+
+    def setup_ex(self, init_net, finish_net):
+        for reader in self._readers:
+            reader.setup_ex(init_net, finish_net)
+
+    def read_ex(self, local_init_net, local_finish_net):
+        """
+        Stops when one of the reader finished
+        """
+        local_should_stop = local_init_net.ConstantFill(
+            [], shape=[], dtype=core.DataType.BOOL, value=False)
+        read_nets = []
+        fields = []
+        for name, reader in zip(self._names, self._readers):
+            sub_read_nets, should_stop, record = reader.read_record_ex(
+                local_init_net, local_finish_net)
+            stop_net = core.Net("{}_stop".format(name))
+            stop_net.Copy(should_stop, local_should_stop)
+            sub_read_nets.append(stop_net)
+            read_nets.extend(sub_read_nets)
+            fields.extend(record.field_blobs())
+        return read_nets, local_should_stop, fields
+
+    def reset(self, net):
+        for reader in self._readers:
+            reader.reset(net)
+
+
+class CompositeReaderBuilder(ReaderBuilder):
+    """
+    A reader builder for CompositeReader
+    """
+    def __init__(self, names, reader_builders):
+        """
+        Args:
+            names: list[str] names of readers; used as schema keys
+            reader_builders: list[ReaderBuilder] ReaderBuilder instances;
+                must have schema
+        """
+        super(CompositeReaderBuilder, self).__init__()
+        self._names = names
+        self._reader_builders = reader_builders
+        self._schema = Struct(*[
+            (name, reader_builder.schema())
+            for name, reader_builder in zip(names, reader_builders)
+        ])
+
+    def schema(self):
+        return self._schema
+
+    def setup(self, **kwargs):
+        for reader_builder in self._reader_builders:
+            reader_builder.setup(**kwargs)
+
+    def new_reader(self, **kwargs):
+        readers = []
+        for reader_builder in self._reader_builders:
+            reader = reader_builder.new_reader(**kwargs)
+            if isinstance(reader, Reader):
+                pass
+            elif hasattr(reader, 'reader'):
+                reader = reader.reader()
+            else:
+                raise ValueError('reader must be an instance of Reader or Pipe')
+            readers.append(reader)
+
+        multi_reader = CompositeReader(self._names, readers)
+        assert multi_reader.schema() == self._schema
+        return multi_reader

@@ -1,6 +1,6 @@
 # Welcome to the PyTorch setup.py.
 #
-# Environment variables you are probably interestd in:
+# Environment variables you are probably interested in:
 #
 #   DEBUG
 #     build with -O0 and -g (debug symbols)
@@ -272,9 +272,9 @@ class build_deps(Command):
         check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, "nanopb", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
-        check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'cpuinfo', 'CMakeLists.txt'))
-        check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'tbb', 'tbb_remote', 'Makefile'))
-        check_file(os.path.join('aten', 'src', 'ATen', 'utils', 'catch', 'CMakeLists.txt'))
+        check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
+        check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
+        check_file(os.path.join(third_party_path, 'catch', 'CMakeLists.txt'))
 
         check_pydep('yaml', 'pyyaml')
         check_pydep('typing', 'typing')
@@ -292,6 +292,15 @@ class build_deps(Command):
                 libs += ['gloo']
             libs += ['THD']
         build_libs(libs)
+
+        # Use copies instead of symbolic files.
+        # Windows has very poor support for them.
+        sym_files = ['tools/shared/cwrap_common.py']
+        orig_files = ['aten/src/ATen/common_with_cwrap.py']
+        for sym_file, orig_file in zip(sym_files, orig_files):
+            if os.path.exists(sym_file):
+                os.remove(sym_file)
+            shutil.copyfile(orig_file, sym_file)
 
         # Copy headers necessary to compile C++ extensions.
         #
@@ -516,14 +525,25 @@ if IS_WINDOWS:
         # against libaries in Python 2.7 under Windows
         extra_compile_args.append('/bigobj')
 else:
-    extra_compile_args = ['-std=c++11', '-Wno-write-strings',
-                          # Python 2.6 requires -fno-strict-aliasing, see
-                          # http://legacy.python.org/dev/peps/pep-3123/
-                          '-fno-strict-aliasing',
-                          # Clang has an unfixed bug leading to spurious missing
-                          # braces warnings, see
-                          # https://bugs.llvm.org/show_bug.cgi?id=21629
-                          '-Wno-missing-braces']
+    extra_compile_args = [
+        '-std=c++11',
+        '-Wall',
+        '-Wextra',
+        '-Wno-unused-parameter',
+        '-Wno-missing-field-initializers',
+        '-Wno-write-strings',
+        '-Wno-zero-length-array',
+        # Python 2.6 requires -fno-strict-aliasing, see
+        # http://legacy.python.org/dev/peps/pep-3123/
+        # We also depend on it in our code (even Python 3).
+        '-fno-strict-aliasing',
+        # Clang has an unfixed bug leading to spurious missing
+        # braces warnings, see
+        # https://bugs.llvm.org/show_bug.cgi?id=21629
+        '-Wno-missing-braces'
+    ]
+    if check_env_flag('WERROR'):
+        extra_compile_args.append('-Werror')
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
@@ -544,7 +564,7 @@ include_dirs += [
 library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
-ATEN_LIB = os.path.join(lib_path, 'libATen.so.1')
+ATEN_LIB = os.path.join(lib_path, 'libATen.so')
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 
@@ -552,7 +572,7 @@ NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if IS_DARWIN:
-    ATEN_LIB = os.path.join(lib_path, 'libATen.1.dylib')
+    ATEN_LIB = os.path.join(lib_path, 'libATen.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
@@ -571,6 +591,7 @@ main_sources = [
     "torch/csrc/Generator.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Dtype.cpp",
+    "torch/csrc/Device.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/Layout.cpp",
     "torch/csrc/Storage.cpp",
@@ -581,6 +602,7 @@ main_sources = [
     "torch/csrc/torch.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
+    "torch/csrc/utils/device.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
@@ -620,6 +642,7 @@ main_sources = [
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
+    "torch/csrc/jit/passes/lower_tuples.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
@@ -663,12 +686,13 @@ main_sources = [
     "torch/csrc/tensor/python_tensor.cpp",
     "torch/csrc/onnx/onnx.pb.cpp",
     "torch/csrc/onnx/onnx.cpp",
+    "torch/csrc/onnx/init.cpp",
 ]
 
 try:
     import numpy as np
-    include_dirs += [np.get_include()]
-    extra_compile_args += ['-DWITH_NUMPY']
+    include_dirs.append(np.get_include())
+    extra_compile_args.append('-DWITH_NUMPY')
     WITH_NUMPY = True
 except ImportError:
     WITH_NUMPY = False
@@ -783,7 +807,7 @@ def make_relative_rpath(path):
 ################################################################################
 
 extensions = []
-packages = find_packages(exclude=('tools', 'tools.*',))
+packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe'))
 C = Extension("torch._C",
               libraries=main_libraries,
               sources=main_sources,
@@ -826,7 +850,7 @@ if WITH_CUDA:
                         )
     extensions.append(THNVRTC)
 
-version = '0.4.0a0'
+version = '0.5.0a0'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
@@ -886,6 +910,7 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/autograd/*.h',
                 'lib/include/torch/csrc/jit/*.h',
                 'lib/include/torch/csrc/utils/*.h',
+                'lib/include/torch/csrc/cuda/*.h',
                 'lib/include/torch/torch.h',
             ]
         })

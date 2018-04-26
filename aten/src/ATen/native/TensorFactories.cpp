@@ -178,6 +178,42 @@ Tensor rand_like(const Tensor& self, const Type& dtype) {
   return at::native::rand(dtype, self.sizes());
 }
 
+Tensor randint(const Type& dtype, int64_t high, IntList size, Generator* generator) {
+  Tensor result = dtype.tensor(size);
+  return result.random_(0, high, generator);
+}
+
+Tensor randint(const Type& dtype, int64_t low, int64_t high, IntList size, Generator* generator) {
+  Tensor result = dtype.tensor(size);
+  return result.random_(low, high, generator);
+}
+
+Tensor& randint_out(Tensor& result, int64_t high, IntList size, Generator* generator) {
+  result.resize_(size);
+  return result.random_(0, high, generator);
+}
+
+Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntList size, Generator* generator) {
+  result.resize_(size);
+  return result.random_(low, high, generator);
+}
+
+Tensor randint_like(const Tensor& self, int64_t high) {
+  return at::native::randint_like(self, high, self.type());
+}
+
+Tensor randint_like(const Tensor& self, int64_t low, int64_t high) {
+  return at::native::randint_like(self, low, high, self.type());
+}
+
+Tensor randint_like(const Tensor& self, int64_t high, const Type& dtype) {
+  return at::native::randint(dtype, high, self.sizes(), nullptr);
+}
+
+Tensor randint_like(const Tensor& self, int64_t low, int64_t high, const Type& dtype) {
+  return at::native::randint(dtype, low, high, self.sizes(), nullptr);
+}
+
 Tensor randn(const Type& dtype, IntList size, Generator* generator) {
   Tensor result = dtype.tensor(size);
   return result.normal_(0, 1, generator);
@@ -231,9 +267,9 @@ Tensor randperm(const Type& dtype, int64_t n, Generator* generator) {
 }
 
 Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
-  if (n <= 0) {
+  if (n < 0) {
     std::ostringstream oss;
-    oss << "n must be strictly positive, got " << n;
+    oss << "n must be non-negative, got " << n;
     throw std::runtime_error(oss.str());
   }
   if (result.type().backend() != at::kCPU) {

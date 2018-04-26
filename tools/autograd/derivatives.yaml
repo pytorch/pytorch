@@ -185,10 +185,10 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
-- name: cumprod(Tensor self, int64_t dim)
+- name: _cumprod(Tensor self, int64_t dim)
   self: cumprod_backward(grad, self, dim)
 
-- name: cumsum(Tensor self, int64_t dim)
+- name: _cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
@@ -348,8 +348,14 @@
 - name: log(Tensor self)
   self: grad.div(self)
 
+- name: log10(Tensor self)
+  self: grad / (self * 2.3025850929940456)
+
 - name: log1p(Tensor self)
   self: grad / (self + 1)
+
+- name: log2(Tensor self)
+  self: grad / (self * 0.6931471805599453)
 
 - name: logdet(Tensor self)
   self: logdet_backward(grad, self, result)
@@ -489,10 +495,10 @@
   self: grad * exponent * self.pow(exponent - 1)
   exponent: grad * self.pow(exponent) * self.log()
 
-- name: prod(Tensor self, int64_t dim, bool keepdim)
+- name: _prod(Tensor self, int64_t dim, bool keepdim)
   self: prod_backward(grad, self, result, dim, keepdim)
 
-- name: prod(Tensor self)
+- name: _prod(Tensor self)
   self: prod_backward(grad, self, result)
 
 - name: pstrf(Tensor self, bool upper, Scalar tol)
@@ -595,10 +601,10 @@
   self: grad
   other: -grad * alpha
 
-- name: sum(Tensor self)
+- name: _sum(Tensor self)
   self: grad.expand(self.sizes())
 
-- name: sum(Tensor self, int64_t dim, bool keepdim)
+- name: _sum(Tensor self, int64_t dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: svd(Tensor self, bool some)
@@ -682,6 +688,8 @@
   self: not_implemented("_standard_gamma_grad")
 
 # NN
+- name: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim)
+  i1, i2, i3: _trilinear_backward(grad, i1, i2, i3, expand1, expand2, expand3, sumdim, unroll_dim, grad_input_mask)
 
 - name: binary_cross_entropy_forward(Tensor self, Tensor target, Tensor weight, bool size_average, bool reduce)
   self: binary_cross_entropy_backward(grad, self, target, weight, size_average, reduce)
@@ -1123,3 +1131,7 @@
 # mkldnn
 - name: mkldnn_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation)
   self, weight, bias: mkldnn_convolution_backward(self, grad, weight, padding, stride, dilation, grad_input_mask)
+
+# fft
+- name: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes)
+  self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalized, onesided, output_sizes)

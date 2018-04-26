@@ -1,5 +1,5 @@
 #include "../Cuda.hpp"
-#include "../../../csrc/utils/auto_gpu.h"
+#include "../../../../csrc/utils/auto_gpu.h"
 #include "DataChannelNccl.hpp"
 #include "DataChannelUtils.hpp"
 

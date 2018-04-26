@@ -291,5 +291,10 @@ class DeviceGuard {
   int previous_;
 };
 
+template <typename T, int N>
+struct SimpleArray {
+  T data[N];
+};
+
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_COMMON_GPU_H_

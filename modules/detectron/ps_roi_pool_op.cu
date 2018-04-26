@@ -114,13 +114,13 @@ __global__ void PSRoIPoolForward(
     const T* offset_bottom_rois = bottom_rois + n * 5;
     int roi_batch_ind = offset_bottom_rois[0];
     T roi_start_w = static_cast<T>(
-      round(offset_bottom_rois[1])) * spatial_scale;
+      roundf(offset_bottom_rois[1])) * spatial_scale;
     T roi_start_h = static_cast<T>(
-      round(offset_bottom_rois[2])) * spatial_scale;
+      roundf(offset_bottom_rois[2])) * spatial_scale;
     T roi_end_w = static_cast<T>(
-      round(offset_bottom_rois[3]) + 1.) * spatial_scale;
+      roundf(offset_bottom_rois[3]) + 1.) * spatial_scale;
     T roi_end_h = static_cast<T>(
-      round(offset_bottom_rois[4]) + 1.) * spatial_scale;
+      roundf(offset_bottom_rois[4]) + 1.) * spatial_scale;
 
     // Force too small ROIs to be 1x1
     T roi_width = max(roi_end_w - roi_start_w, 0.1);  // avoid 0
@@ -190,13 +190,13 @@ __global__ void PSRoIPoolBackward(
     const T* offset_bottom_rois = bottom_rois + n * 5;
     int roi_batch_ind = offset_bottom_rois[0];
     T roi_start_w = static_cast<T>(
-      round(offset_bottom_rois[1])) * spatial_scale;
+      roundf(offset_bottom_rois[1])) * spatial_scale;
     T roi_start_h = static_cast<T>(
-      round(offset_bottom_rois[2])) * spatial_scale;
+      roundf(offset_bottom_rois[2])) * spatial_scale;
     T roi_end_w = static_cast<T>(
-      round(offset_bottom_rois[3]) + 1.) * spatial_scale;
+      roundf(offset_bottom_rois[3]) + 1.) * spatial_scale;
     T roi_end_h = static_cast<T>(
-      round(offset_bottom_rois[4]) + 1.) * spatial_scale;
+      roundf(offset_bottom_rois[4]) + 1.) * spatial_scale;
 
     // Force too small ROIs to be 1x1
     T roi_width = max(roi_end_w - roi_start_w, 0.1); //avoid 0

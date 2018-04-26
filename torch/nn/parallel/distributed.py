@@ -77,7 +77,7 @@ class DistributedDataParallel(Module):
         Parameters are never broadcast between processes. The module performs
         an all-reduce step on gradients and assumes that they will be modified
         by the optimizer in all processes in the same way. Buffers
-        (e.g. BatchNorm stats) are broadcast form the module in process of rank
+        (e.g. BatchNorm stats) are broadcast from the module in process of rank
         0, to all other replicas in the system in every iteration.
 
     .. warning::
@@ -213,7 +213,7 @@ class DistributedDataParallel(Module):
         self._sync_params()
         if len(self.device_ids) == 1:
             return self.module(*inputs[0], **kwargs[0])
-        outputs = self.parallel_apply(self._module_copies, inputs, kwargs)
+        outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
         return self.gather(outputs, self.output_device)
 
     def scatter(self, inputs, kwargs, device_ids):
