@@ -1563,6 +1563,22 @@ class TestTorch(TestCase):
         output = torch.zeros_like(x)
         self.assertEqual(output, expected)
 
+    def test_zeros_out(self):
+        shape = (3, 4)
+        out = torch.zeros(shape)
+        torch.zeros(shape, out=out)
+
+        # change the dtype, layout, device
+        self.assertRaises(RuntimeError, lambda: torch.zeros(shape, dtype=torch.int64, out=out))
+        self.assertRaises(RuntimeError, lambda: torch.zeros(shape, layout=torch.sparse_coo, out=out))
+        if torch.cuda.is_available():
+            self.assertRaises(RuntimeError, lambda: torch.zeros(shape, device='cuda', out=out))
+
+        # leave them the same
+        self.assertEqual(torch.zeros(shape), torch.zeros(shape, dtype=out.dtype, out=out))
+        self.assertEqual(torch.zeros(shape), torch.zeros(shape, layout=torch.strided, out=out))
+        self.assertEqual(torch.zeros(shape), torch.zeros(shape, device='cpu', out=out))
+
     def test_histc(self):
         x = torch.Tensor((2, 4, 2, 2, 5, 4))
         y = torch.histc(x, 5, 1, 5)  # nbins,  min,  max
