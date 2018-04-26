@@ -34,11 +34,17 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
   return self;
 }
 
-static void check_out_type_matches(Tensor result, ScalarType scalarType, const THPLayout& layout,
+static void check_out_type_matches(Tensor result,
+                                   ScalarType scalarType, bool scalarType_is_none,
+                                   const THPLayout& layout, bool layout_is_none,
                                    const Device& device, bool device_is_none) {
-  auto result_device_type = torch::getDeviceType(result.type());
-  auto device_type = device_is_none ? result_device_type : device.type;
-  const auto& type = torch::getType(scalarType, layout, device_type);
+  if (scalarType_is_none && layout_is_none && device_is_none) {  // common case
+    return;
+  }
+  auto scalarType_arg = scalarType_is_none ? result.type().scalarType() : scalarType;
+  auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
+  auto device_type_arg = device_is_none ? torch::getDeviceType(result.type()) : device.type;
+  const auto& type = torch::getType(scalarType_arg, layout_arg, device_type_arg);
   if (result.type() != type) {
     AT_ERROR(
         "type corresponding to %s does not match type of out parameter (%s)",
