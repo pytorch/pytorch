@@ -100,6 +100,7 @@ def gen_jit_dispatch(declarations, out):
         return arg['simple_type'] in {'Tensor', 'TensorList'}
 
     def is_sized_intlist_arg(arg):
+        """Returns True for arguments declared as IntList[k], but False for IntList."""
         return (arg['simple_type'] == 'IntList') and ('size' in arg)
 
     def get_invocation(decl, args):
@@ -221,7 +222,7 @@ def gen_jit_dispatch(declarations, out):
         only_tensors_are_inputs = tuple(is_tensor_arg(arg) for arg in arguments)
 
         sized_intlist_args = [i for i, a in enumerate(arguments) if is_sized_intlist_arg(a)]
-        inds_to_replace_powerset = (set(c)
+        inds_to_replace_powerset = (c
                                     for r in range(len(sized_intlist_args) + 1)
                                     for c in combinations(sized_intlist_args, r))
 
