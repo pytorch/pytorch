@@ -64,10 +64,10 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12):
          \mathbf{W} &= \dfrac{\mathbf{W}}{\sigma(\mathbf{W})} \\
          \sigma(\mathbf{W}) &= \max_{\mathbf{h}: \mathbf{h} \ne 0} \dfrac{\|\mathbf{W} \mathbf{h}\|_2}{\|\mathbf{h}\|_2}
 
-    Spectral normalization stabilize the training of discriminators(critics)
+    Spectral normalization stabilizes the training of discriminators (critics)
     in GANs by rescaling the weight tensor by spectral norm "sigma" of the
     weight matrix calculated by power iteration method. If the dimension of the
-    weight tensor is greater than 2, reahaped to 2D in power iteration method
+    weight tensor is greater than 2, reshaped to 2D in power iteration method
     to get spectral norm. This is implemented via a hook that calculates
     spectral norm and rescales weight before every :meth:`~Module.forward`
     call.
