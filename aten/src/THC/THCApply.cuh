@@ -208,19 +208,15 @@ bool THC_pointwiseApply1(THCState* state,
     return false;
   }
 
-  // If tensor args have overlapping indices and are read/write, then
-  // we must expand the tensor to a contiguous form first, since
-  // otherwise there are conflicting writes. Upon copying back to the
-  // non-contiguous form, there will be conflicting writes, but at
-  // least with copy, one of the updaters will win atomically. This is
-  // a sketchy property of the old system as well (writing into all
-  // indices of a tensor with overlapping indices should probably be
-  // an error, since it is unclear which one should win), but we will
-  // preserve this last-writer-wins (in arbitrary copy order) behavior.
+  /*
+  Expands readable/writable tensors whose indices may be "overlapped."
+  This ensures that each element of the tensor is operated on once and only 
+  once.
+  */
   TensorTypeA* oldA = NULL;
 
   if (aType == ReadWrite &&
-      TensorUtils<TensorTypeA>::overlappingIndices(state, a)) {
+      TensorUtils<TensorTypeA>::maybeOverlappingIndices(state, a)) {
     // Must perform in contiguous space
     oldA = a;
     a = TensorUtils<TensorTypeA>::newContiguous(state, a);
@@ -332,7 +328,6 @@ bool THC_pointwiseApply2(THCState* state,
                          TensorArgType aType = ReadWrite,
                          TensorArgType bType = ReadOnly) {
   ptrdiff_t totalElements = TensorUtils<TensorTypeA>::getNumElements(state, a);
-
   if (totalElements != TensorUtils<TensorTypeB>::getNumElements(state, b)) {
     return false;
   }
@@ -354,26 +349,22 @@ bool THC_pointwiseApply2(THCState* state,
     return false;
   }
 
-  // If tensor args have overlapping indices and are read/write, then
-  // we must expand the tensor to a contiguous form first, since
-  // otherwise there are conflicting writes. Upon copying back to the
-  // non-contiguous form, there will be conflicting writes, but at
-  // least with copy, one of the updaters will win atomically. This is
-  // a sketchy property of the old system as well (writing into all
-  // indices of a tensor with overlapping indices should probably be
-  // an error, since it is unclear which one should win), but we will
-  // preserve this last-writer-wins (in arbitrary copy order) behavior.
+  /*
+  Expands readable/writable tensors whose indices may be "overlapped."
+  This ensures that each element of the tensor is operated on once and only 
+  once.
+  */
   TensorTypeA* oldA = NULL;
   TensorTypeB* oldB = NULL;
 
   if (aType == ReadWrite &&
-      TensorUtils<TensorTypeA>::overlappingIndices(state, a)) {
+      TensorUtils<TensorTypeA>::maybeOverlappingIndices(state, a)) {
     // Must perform in contiguous space
     oldA = a;
     a = TensorUtils<TensorTypeA>::newContiguous(state, a);
   }
   if (bType == ReadWrite &&
-      TensorUtils<TensorTypeB>::overlappingIndices(state, b)) {
+      TensorUtils<TensorTypeB>::maybeOverlappingIndices(state, b)) {
     // Must perform in contiguous space
     oldB = b;
     b = TensorUtils<TensorTypeB>::newContiguous(state, b);
@@ -557,33 +548,29 @@ bool THC_pointwiseApply3(THCState* state,
     return false;
   }
 
-  // If tensor args have overlapping indices and are read/write, then
-  // we must expand the tensor to a contiguous form first, since
-  // otherwise there are conflicting writes. Upon copying back to the
-  // non-contiguous form, there will be conflicting writes, but at
-  // least with copy, one of the updaters will win atomically. This is
-  // a sketchy property of the old system as well (writing into all
-  // indices of a tensor with overlapping indices should probably be
-  // an error, since it is unclear which one should win), but we will
-  // preserve this last-writer-wins (in arbitrary copy order) behavior.
+  /*
+  Expands readable/writable tensors whose indices may be "overlapped."
+  This ensures that each element of the tensor is operated on once and only 
+  once.
+  */
   TensorTypeA* oldA = NULL;
   TensorTypeB* oldB = NULL;
   TensorTypeC* oldC = NULL;
 
   if (aType == ReadWrite &&
-      TensorUtils<TensorTypeA>::overlappingIndices(state, a)) {
+      TensorUtils<TensorTypeA>::maybeOverlappingIndices(state, a)) {
     // Must perform in contiguous space
     oldA = a;
     a = TensorUtils<TensorTypeA>::newContiguous(state, a);
   }
   if (bType == ReadWrite &&
-      TensorUtils<TensorTypeB>::overlappingIndices(state, b)) {
+      TensorUtils<TensorTypeB>::maybeOverlappingIndices(state, b)) {
     // Must perform in contiguous space
     oldB = b;
     b = TensorUtils<TensorTypeB>::newContiguous(state, b);
   }
   if (cType == ReadWrite &&
-      TensorUtils<TensorTypeC>::overlappingIndices(state, c)) {
+      TensorUtils<TensorTypeC>::maybeOverlappingIndices(state, c)) {
     // Must perform in contiguous space
     oldC = c;
     c = TensorUtils<TensorTypeC>::newContiguous(state, c);
