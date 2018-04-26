@@ -86,6 +86,9 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
   } else if (p == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
+  } else if (p == INFINITY) {
+    self_scaled = self.sign() * (self.abs() == norm).toType(self.type());
+    scale_v = grad.clone();
   } else {
     self_scaled = self * self.abs().pow(p - 2);
     scale_v = grad / norm.pow(p - 1);

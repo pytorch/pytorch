@@ -4252,6 +4252,9 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension, int k
   } else if (value == 3) {
     DIM_REDUCE(sum += TH_MATH_NAME(fabs)(t_data[i*t_stride] * t_data[i*t_stride] * t_data[i*t_stride]),
                *r__data = TH_MATH_NAME(pow)(sum, 1.0/3));
+  } else if (value == INFINITY) {
+    DIM_REDUCE(sum = THMax(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
+	       *r__data = sum);
   } else {
     DIM_REDUCE(sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(t_data[i*t_stride]), value),
                *r__data = TH_MATH_NAME(pow)(sum, 1.0/value));
@@ -4278,6 +4281,9 @@ accreal THTensor_(normall)(THTensor *tensor, real value)
   } else if(value == 3) {
     TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += std::abs(z*z*z););
     return TH_MATH_NAME(pow)(sum, 1.0/3);
+  } else if(value == INFINITY) {
+    TH_TENSOR_APPLY(real, tensor, sum = THMax(sum, TH_MATH_NAME(fabs)(*tensor_data)););
+    return sum;
   } else {
     TH_TENSOR_APPLY(real, tensor, sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(*tensor_data), value););
     return TH_MATH_NAME(pow)(sum, 1.0/value);
@@ -4311,11 +4317,15 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, real value, int dimension, 
       TH_TENSOR_APPLY(real, rowS, norm += fabs(*rowS_data););
     } else if (value == 2) {
       TH_TENSOR_APPLY(real, rowS, accreal z = *rowS_data; norm += z*z;);
+    } else if (value == INFINITY) {
+      TH_TENSOR_APPLY(real, rowS, norm = THMax(norm, TH_MATH_NAME(fabs)(*rowS_data)););
     } else {
       TH_TENSOR_APPLY(real, rowS, norm += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(*rowS_data), value););
     }
 
-    norm = pow(norm, 1/value);
+    if (value != INFINITY) {
+      norm = pow(norm, 1/value);
+    }
 
     if (norm > maxnorm)
     {
