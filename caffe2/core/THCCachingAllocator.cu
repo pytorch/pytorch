@@ -1,4 +1,4 @@
-#include "THCCachingAllocator.hpp"
+#include "THCCachingAllocator.h"
 
 #include <deque>
 #include <map>

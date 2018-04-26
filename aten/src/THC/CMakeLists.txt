@@ -82,7 +82,7 @@ INSTALL(FILES
           THCScanUtils.cuh
           THCSortUtils.cuh
           THCAllocator.h
-          THCCachingAllocator.hpp
+          THCCachingAllocator.h
           THCCachingHostAllocator.h
           THCDeviceUtils.cuh
           THCDeviceTensor.cuh
@@ -111,7 +111,7 @@ INSTALL(FILES
           THCThrustAllocator.cuh
           THCTensorMode.cuh
           THCTensorTopK.cuh
-          THCCachingAllocator.hpp
+          THCCachingAllocator.h
           THCGenerator.hpp
           THCTensor.hpp
           THCStream.hpp

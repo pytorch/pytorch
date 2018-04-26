@@ -1,5 +1,8 @@
 #pragma once
 
+// STOP!!! Thinking of including this header directly?  Please
+// read Note [TH abstraction violation]
+
 #include "THTensor.h"
 #include "THStorage.hpp"
 

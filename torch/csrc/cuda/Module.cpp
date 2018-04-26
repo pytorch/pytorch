@@ -7,7 +7,7 @@
 #include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
-#include <THC/THCCachingAllocator.hpp>
+#include <THC/THCCachingAllocator.h>
 #ifdef WITH_NCCL
 #include <nccl.h>
 #endif

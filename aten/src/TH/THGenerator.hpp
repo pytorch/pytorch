@@ -1,5 +1,7 @@
-#ifndef TH_GENERATOR
-#define TH_GENERATOR
+#pragma once
+
+// STOP!!! Thinking of including this header directly?  Please
+// read Note [TH abstraction violation]
 
 #include <mutex>
 
@@ -25,5 +27,3 @@ struct THGenerator {
   std::mutex mutex; /* mutex for using this generator */
   THGeneratorState gen_state;
 };
-
-#endif

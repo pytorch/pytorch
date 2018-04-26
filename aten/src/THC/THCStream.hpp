@@ -1,4 +1,8 @@
 #pragma once
+
+// STOP!!! Thinking of including this header directly?  Please
+// read Note [TH abstraction violation]
+
 #include <atomic>
 #include "THCStream.h"
 
