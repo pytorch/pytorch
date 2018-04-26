@@ -614,12 +614,15 @@ class TestAutograd(TestCase):
     def test_free_deep_graph(self):
         def scope():
             depth = 150000
-            x = torch.randn(9, requires_grad=True)
+            x = torch.randn(1, requires_grad=True)
             y = x.clone()
 
             # build deeply nested computation graph
             for i in range(depth):
                 y = y + y * 0.000001
+
+            # triggers graph deletion
+            del x
 
         # Should not stack overflow
         scope()
@@ -636,12 +639,15 @@ class TestAutograd(TestCase):
 
         def scope():
             depth = 150000
-            x = torch.randn(9, requires_grad=True)
+            x = torch.randn(1, requires_grad=True)
             y = x.clone()
 
             # build deeply nested computation graph
             for i in range(depth):
                 y = MyOp.apply(y, y)
+
+            # triggers graph deletion
+            del x
 
         # Should not stack overflow
         scope()
