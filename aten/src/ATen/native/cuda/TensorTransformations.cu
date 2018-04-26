@@ -13,12 +13,12 @@ namespace native {
 
 // Map the index of an element in tensor from 1D to nD
 __device__ __forceinline__
-void oneD_to_nD(int64_t oneD_index, int64_t* shape_size, int64_t shape_len, int64_t* nD_index) {
-  int64_t res = oneD_index;
-  for (int i = 0; i < shape_len; i++) {
-    int64_t nD_i = oneD_index * shape_len + i;
-    nD_index[nD_i] = res / shape_size[i];
-    res = res % shape_size[i];
+void linear_index_to_indices(int64_t linear_index, int64_t* each_dim_len, int64_t total_dims, int64_t* indices) {
+  int64_t res = linear_index;
+  for (int i = 0; i < total_dims; i++) {
+    int64_t indices_i = linear_index * total_dims + i;
+    indices[indices_i] = res / each_dim_len[i];
+    res = res % each_dim_len[i];
   }
 }
 
@@ -35,70 +35,74 @@ Example: given a 3D tensor
 Here element 3 has nD index = (0,1,0), and this corresponds to oneD index = 2
 */
 __device__ __forceinline__
-int64_t nD_to_oneD(int64_t* nD_index, int64_t shape_len, int64_t* shape_size, int64_t src_oneD_index) {
-  int64_t dest_oneD_index = 0;
-  for (int i = 0; i < shape_len; i++) {
-    int64_t nD_i = src_oneD_index * shape_len + i;
-    dest_oneD_index += nD_index[nD_i] * shape_size[i];
+int64_t indices_to_linear_index(int64_t* indices, int64_t total_dims, int64_t* each_dim_len, int64_t src_linear_index) {
+  int64_t dest_linear_index = 0;
+  for (int i = 0; i < total_dims; i++) {
+    int64_t indices_i = src_linear_index * total_dims + i;
+    dest_linear_index += indices[indices_i] * each_dim_len[i];
   }
-  return dest_oneD_index;
+  return dest_linear_index;
 }
 
-template <typename T>
+template <typename scalar_t>
 __global__
-void flip_cuda_kernel(T* in_t, T* out_t, int64_t N, int64_t* dims, int64_t* nD_index,
-  int64_t dims_len, int64_t* shape_size, int64_t* shape, int64_t shape_len) {
+void flip_cuda_kernel(scalar_t* in_t, scalar_t* out_t, int64_t N, int64_t* dims, int64_t* indices,
+  int64_t flip_dims_size, int64_t* each_dim_len, int64_t* shape, int64_t total_dims) {
 
-  int64_t oneD_index = blockIdx.x * blockDim.x + threadIdx.x;
-  if (oneD_index >= N) {
+  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (linear_index >= N) {
     return;
   }
 
-  oneD_to_nD(oneD_index, shape_size, shape_len, nD_index);
+  linear_index_to_indices(linear_index, each_dim_len, total_dims, indices);
+
   // flip nD index along each desired dimension
-  for (int i = 0 ; i < dims_len; i++) {
-    int64_t d = dims[i];
-    int64_t nD_d = oneD_index * shape_len + d;
-    nD_index[nD_d] = shape[d]-1-nD_index[nD_d];
+  for (int i = 0 ; i < flip_dims_size; i++) {
+    int64_t dim = dims[i];
+    int64_t indices_dim = linear_index * total_dims + dim;
+    indices[indices_dim] = shape[dim] - 1 - indices[indices_dim];
   }
-  int64_t dest_oneD_index = nD_to_oneD(nD_index, shape_len, shape_size, oneD_index);
-  out_t[oneD_index] = in_t[dest_oneD_index];
+  int64_t dest_linear_index = indices_to_linear_index(indices, total_dims, each_dim_len, linear_index);
+  out_t[linear_index] = in_t[dest_linear_index];
 }
 
 Tensor flip_cuda(const Tensor& self, IntList dims) {
 
-  int64_t dims_len = dims.size(), shape_len = self.dim(), N = self.numel();
+  // TODO: allow non-contiguous tensors
+  self.contiguous();
+
+  int64_t flip_dims_size = dims.size(), total_dims = self.dim(), N = self.numel();
 
   // check if number of axis in dim is valid
-  if (dims_len == 0) {
+  if (flip_dims_size == 0) {
     std::stringstream ss;
-    ss << "expected dims not empty, "
-       << "but got dims size=" << dims_len;
+    ss << "expected input tensor dims not empty, "
+       << "but got tensor dims size=" << flip_dims_size;
     throw std::runtime_error(ss.str());
   }
 
   // check duplicates in dims
-  auto dims_v = std::vector<int64_t>(dims);
-  dims_v.erase(std::unique(dims_v.begin(), dims_v.end()), dims_v.end());
-  if (dims_v.size() < dims_len) {
+  auto flip_dims_v = std::vector<int64_t>(dims);
+  flip_dims_v.erase(std::unique(flip_dims_v.begin(), flip_dims_v.end()), flip_dims_v.end());
+  if (flip_dims_v.size() < flip_dims_size) {
     std::stringstream ss;
     ss << "dims has duplicates, "
-       << "input dims size=" << dims_len << ", "
-       << "but unique dims size= " << dims_v.size();
+       << "original flip dims size=" << flip_dims_size << ", "
+       << "but unique flip dims size= " << flip_dims_v.size();
     throw std::runtime_error(ss.str());
   }
 
   // check len of dims
-  if (dims_len > shape_len) {
+  if (flip_dims_size > total_dims) {
     std::stringstream ss;
-    ss << "expected dims to have size <= total tensor dims, "
-       << "but got dims size=" << dims_len << " and "
-       << "tensor dim=" << shape_len;
+    ss << "expected flip dims size <= tensor total dims, "
+       << "but got flip dims size=" << flip_dims_size << " and "
+       << "tensor total dim=" << total_dims;
     throw std::runtime_error(ss.str());
   }
 
   // check if dims axis within range
-  int64_t min_d = shape_len, max_d = 0;
+  int64_t min_d = total_dims, max_d = 0;
   for (auto d : dims) {
     min_d = std::min(min_d, d);
     max_d = std::max(max_d, d);
@@ -106,42 +110,41 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
 
   if (min_d < 0) {
     std::stringstream ss;
-    ss << "expected dims axis >= 0, "
-       << "but got min dims=" << min_d;
+    ss << "expected flip dims axis >= 0, "
+       << "but got min flip dims=" << min_d;
     throw std::runtime_error(ss.str());
   }
 
-  if (max_d >= shape_len) {
+  if (max_d >= total_dims) {
     std::stringstream ss;
-    ss << "expected dims axis < total tensor dims, "
-       << "but got max dims=" << max_d << " and "
-       << "tensor dim=" << shape_len;
+    ss << "expected flip dims axis < tensor total dims, "
+       << "but got max flip dims=" << max_d << " and "
+       << "tensor total dim=" << total_dims;
     throw std::runtime_error(ss.str());
   }
 
-  Tensor dims_t = at::zeros(CPU(kLong), {dims_len});
-  int64_t* dims_t_d = dims_t.data<int64_t>();
-  for (int i = 0; i < dims_len; i++) {
-    dims_t_d[i] = dims[i];
+  Tensor flip_dims_t = at::zeros(CPU(kLong), {flip_dims_size});
+  int64_t* flip_dims_t_d = flip_dims_t.data<int64_t>();
+  for (int i = 0; i < flip_dims_size; i++) {
+    flip_dims_t_d[i] = dims[i];
   }
 
   auto shape = self.sizes();
-  Tensor shape_t = at::zeros(CPU(kLong), {shape_len});
+  Tensor shape_t = at::zeros(CPU(kLong), {total_dims});
   int64_t* shape_t_d = shape_t.data<int64_t>();
-  for (int i = 0; i < shape_len; i++) {
+  for (int64_t i = 0; i < total_dims; i++) {
     shape_t_d[i] = shape[i];
   }
 
-  Tensor shape_size = at::zeros(CPU(kLong), {shape_len});
-  int64_t* shape_size_d = shape_size.data<int64_t>();
+  Tensor each_dim_len = at::zeros(CPU(kLong), {total_dims});
+  int64_t* each_dim_len_d = each_dim_len.data<int64_t>();
   int64_t tmp = N;
-  for (int i = 0; i < shape_len; i++) {
+  for (int64_t i = 0; i < total_dims; i++) {
     tmp = tmp / shape[i];
-    shape_size_d[i] = tmp;
+    each_dim_len_d[i] = tmp;
   }
 
-  Tensor nD_index = at::zeros(CUDA(kLong), {N, shape_len});
-
+  Tensor indices = at::zeros(CUDA(kLong), {N, total_dims});
   Tensor out_t = self.clone();
 
   int64_t block_size = 512;
@@ -151,7 +154,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "flip_cuda", [&] {
     using cuda_scalar_t = cuda::type<scalar_t>;
     flip_cuda_kernel<<<dim_grid, dim_block, 0, globalContext().getCurrentCUDAStream()>>>(
-      self.data<cuda_scalar_t>(), out_t.data<cuda_scalar_t>(), N, dims_t.toType(CUDA(kLong)).data<int64_t>(), nD_index.data<int64_t>(), dims_len, shape_size.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), shape_len);
+      self.data<cuda_scalar_t>(), out_t.data<cuda_scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data<int64_t>(), indices.data<int64_t>(), flip_dims_size, each_dim_len.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
   });
 
   return out_t;
