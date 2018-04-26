@@ -4,6 +4,8 @@
 #include <structmember.h>
 
 #include <stdbool.h>
+// See Note [TH abstraction violation]
+//    - Used to get at allocator from storage
 #include <TH/THTensor.hpp>
 #include <THC/THCTensor.hpp>
 #include "THCP.h"

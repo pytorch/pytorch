@@ -164,6 +164,7 @@ INSTALL(FILES
           generic/THCTensorMode.cu
           generic/THCTensorTopK.h
           generic/THCTensorTopK.cu
+          # See Note [TH abstraction violation]
           generic/THCStorage.hpp
           generic/THCTensor.hpp
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")

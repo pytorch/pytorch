@@ -3,8 +3,6 @@
 
 #include "torch/csrc/python_headers.h"
 #include <THC/THC.h>
-#include <THC/THCStream.hpp>
-
 
 struct THCPStream {
   PyObject_HEAD

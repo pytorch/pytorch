@@ -8,7 +8,10 @@
 #include <sstream>
 #include <ATen/ATen.h>
 #include <THC/THC.h>
-#include <THC/THCStream.hpp> // forgive me for I have sinned
+
+// See Note [TH abstraction violation]
+//  - Used to access 'stream' member
+#include <THC/THCStream.hpp>
 
 namespace torch { namespace cuda { namespace nccl {
 
