@@ -2938,6 +2938,29 @@ class TestScript(TestCase):
             return a
 
         self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), False)
+        
+    def test_intlist_args(self):
+        def foo_0(x):
+            return torch.nn.functional.adaptive_avg_pool1d(x, 1)
+
+        @torch.jit.script
+        def foo_1(x):
+            return torch.nn.functional.adaptive_avg_pool1d(x, 1)
+
+        @torch.jit.script
+        def foo_2(x):
+            return torch.nn.functional.adaptive_avg_pool1d(x, output_size=1)
+
+        @torch.jit.script
+        def foo_3(x):
+            return torch.nn.functional.adaptive_avg_pool1d(x, output_size=[1])
+
+        x = torch.randn(8, 8, 8)
+        r = foo_0(x)
+
+        self.assertEqual(r, foo_1(x))
+        self.assertEqual(r, foo_2(x))
+        self.assertEqual(r, foo_3(x))
 
 
 # Smoke tests for export methods
