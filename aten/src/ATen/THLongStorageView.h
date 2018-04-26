@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TH/TH.h"
+#include "TH/THStorage.hpp"
 
 namespace at {
 

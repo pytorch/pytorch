@@ -2,22 +2,7 @@
 #define THCS_GENERIC_FILE "generic/THCSTensor.h"
 #else
 
-typedef struct THCSTensor
-{  // Stored in COO format, indices + values
-    int64_t *size;
-    ptrdiff_t nnz;
-    int nDimensionI; // dimension of indices
-    int nDimensionV; // dimension of values
-
-    // 2-D tensor of nDim x nnz of indices. May have nnz dim bigger than nnz
-    // as buffer, so we keep track of both
-    THCIndexTensor *indices;
-    THCTensor *values;
-    // Some math operations can only be performed on ordered sparse tensors
-    int coalesced;
-    int refcount;
-
-} THCSTensor;
+typedef struct THCSTensor THCSTensor;
 
 /**** access methods ****/
 TH_API int THCSTensor_(nDimension)(THCState *state, const THCSTensor *self);

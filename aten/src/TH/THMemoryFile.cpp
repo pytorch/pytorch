@@ -1,4 +1,5 @@
 #include "THMemoryFile.h"
+#include "THStorage.hpp"
 #include "THFilePrivate.h"
 #include "THDiskFile.h"
 #include "stdint.h"

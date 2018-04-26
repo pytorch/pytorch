@@ -1,4 +1,4 @@
-#include "THSTensor.h"
+#include "THSTensor.hpp"
 
 #include <new>
 

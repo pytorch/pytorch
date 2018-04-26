@@ -1,4 +1,4 @@
-#include "THCStream.h"
+#include "THCStream.hpp"
 
 #include <mutex>
 #include <cuda_runtime_api.h>

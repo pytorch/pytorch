@@ -114,7 +114,7 @@ THDTensor *THDTensor_(newWithSize)(THLongStorage *size, THLongStorage *stride) {
   THDTensor* tensor = THDTensor_(_alloc)();
   if (size && stride)
     THArgCheck(size->size == stride->size, 4, "inconsistent size");
-  THDTensor_(_resize)(tensor, size->size, size->data, stride ? stride->data : nullptr);
+  THDTensor_(_resize)(tensor, THLongStorage_size(size), THLongStorage_data(size), stride ? THLongStorage_data(stride) : nullptr);
   RPCType constructed_type = type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
@@ -166,8 +166,8 @@ THDTensor *THDTensor_(newWithStorage)(THDStorage *storage, ptrdiff_t storageOffs
     storage,
     storageOffset,
     (size ? size->size : (stride ? stride->size : 0)),
-    (size ? size->data : nullptr),
-    (stride ? stride->data : nullptr)
+    (size ? THLongStorage_data(size) : nullptr),
+    (stride ? THLongStorage_data(stride) : nullptr)
   );
   RPCType constructed_type = type_traits<real>::type;
   masterCommandChannel->sendMessage(
@@ -300,7 +300,7 @@ void THDTensor_(resize)(THDTensor *tensor, THLongStorage *size, THLongStorage *s
     ),
     THDState::s_current_worker
   );
-  THDTensor_(_resize)(tensor, size->size, size->data, stride ? stride->data : nullptr);
+  THDTensor_(_resize)(tensor, size->size, THLongStorage_data(size), stride ? THLongStorage_data(stride) : nullptr);
 }
 
 void THDTensor_(resizeAs)(THDTensor *tensor, THDTensor *src) {
@@ -434,8 +434,8 @@ void THDTensor_(setStorage)(THDTensor *self, THDStorage *storage,
     storage,
     storageOffset,
     (size ? size->size : (stride ? stride->size : 0)),
-    (size ? size->data : nullptr),
-    (stride ? stride->data : nullptr)
+    (size ? THLongStorage_data(size) : nullptr),
+    (stride ? THLongStorage_data(stride) : nullptr)
   );
 }
 
@@ -805,10 +805,10 @@ int THDTensor_(isSetTo)(const THDTensor *self, const THDTensor *src) {
 }
 
 int THDTensor_(isSize)(const THDTensor *self, const THLongStorage *dims) {
-  if (self->nDimension != dims->size)
+  if (self->nDimension != THLongStorage_size(dims))
     return 0;
   for (std::size_t d = 0; d < self->nDimension; d++)
-    if (self->size[d] != dims->data[d])
+    if (self->size[d] != THLongStorage_get(dims, d))
       return 0;
   return 1;
 }

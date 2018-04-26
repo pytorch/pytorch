@@ -1,4 +1,5 @@
 #include "THCStorageCopy.h"
+#include "THCTensor.hpp"
 
 #include "THCTensorCopy.h"
 

@@ -1,4 +1,5 @@
 #include "THCGeneral.h"
+#include "THCStream.hpp"
 #include "TH.h"
 #include "THCAllocator.h"
 #include "THCCachingHostAllocator.h"
