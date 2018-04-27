@@ -1,11 +1,8 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 
-#include <cstdlib>
-#include <limits>
 #include <stdexcept>
 #include <sstream>
 #include <unordered_map>
-#include <utility>
 
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/python_strings.h"
