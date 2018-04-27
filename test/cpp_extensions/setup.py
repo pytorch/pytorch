@@ -22,5 +22,6 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
 
 setup(
     name='torch_test_cpp_extension',
+    packages=['torch_test_cpp_extension'],
     ext_modules=ext_modules,
     cmdclass={'build_ext': torch.utils.cpp_extension.BuildExtension})

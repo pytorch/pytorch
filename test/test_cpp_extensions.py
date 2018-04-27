@@ -4,7 +4,7 @@ import torch
 import torch.utils.cpp_extension
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
-except ModuleNotFoundError:
+except ImportError:
     print("\'test_cpp_extensions.py\' cannot be invoked directly. " +
           "Run \'python run_test.py -i cpp_extensions\' for the \'test_cpp_extensions.py\' tests.")
     raise
