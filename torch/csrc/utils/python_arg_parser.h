@@ -101,6 +101,7 @@ struct PythonArgs {
   inline Device device(int i);
   inline Device deviceWithDefault(int i, const Device& default_device);
   inline int64_t deviceInt64(int i);
+  inline at::optional<Device> deviceOptional(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -330,6 +331,11 @@ inline Device PythonArgs::deviceWithDefault(int i, const Device& default_device)
 inline int64_t PythonArgs::deviceInt64(int i) {
   auto dev = device(i);
   return dev.deviceInt64();
+}
+
+inline at::optional<Device> PythonArgs::deviceOptional(int i) {
+  if (!args[i]) return at::nullopt;
+  return device(i);
 }
 
 inline std::string PythonArgs::string(int i) {
