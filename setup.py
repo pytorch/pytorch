@@ -867,7 +867,7 @@ if not IS_WINDOWS:
     DL = Extension("torch._dl",
                    sources=["torch/csrc/dl.c"],
                    language='c',
-                   extra_link_args=['-shared'] if WITH_ROCM else []
+                   extra_link_args=[]
                    )
     extensions.append(DL)
 

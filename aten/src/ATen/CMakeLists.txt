@@ -268,10 +268,9 @@ set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
 target_include_directories(tbb_static PUBLIC ${TBB_ROOT_DIR}/include)
 target_link_libraries(ATen tbb_static)
 
-# ROCM's HCC compiler fails if CXX_STANDARD==11 (HCC uses C++ AMP)
-if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1" AND NOT WITH_ROCM)
+if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
     SET_PROPERTY(TARGET ATen PROPERTY CXX_STANDARD 11)
-endif(NOT ${CMAKE_VERSION} VERSION_LESS "3.1" AND NOT WITH_ROCM)
+endif(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
 
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})

@@ -26,6 +26,12 @@
   ],
   "disabled_functions": [
     {
+      "path": "aten/src/ATen/native/cuda/Distributions.cu",
+      "functions": [
+        "_s_poisson_cuda"
+      ]
+    },
+    {
       "path": "aten/src/THC/THCGeneral.cpp",
       "functions": [
         "THC_float2half",

@@ -3,16 +3,14 @@ import shutil
 import subprocess
 import os
 from shutil import copytree, ignore_patterns
+from functools import reduce
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
 out_dir = os.path.join(os.path.dirname(proj_dir), "pytorch_amd")
-exclude_dirs = [
-    "aten/src/TH",
-    "aten/src/THNN",
-    "aten/src/THS",
-    "caffe2",
-    "third_party"
+include_dirs = [
+    "aten",
+    "torch"
 ]
 
 # List of operators currently disabled
@@ -26,7 +24,7 @@ for root, _directories, files in os.walk(os.path.join(amd_build_dir, "hip_files"
     for filename in files:
         if filename.endswith(".hip"):
             source = os.path.join(root, filename)
-            destination = os.path.join(out_dir, source[source.find("hip_files/") + 10:])
+            destination = os.path.join(out_dir, source[source.find("hip_files/") + 10:][:-4])
 
             # Extract the .hip file.
             shutil.copy(source, destination)
@@ -37,17 +35,16 @@ for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
     subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=out_dir)
 
 # Make various replacements inside AMD_BUILD/torch directory
-ignore_files =  ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp", "csrc/cuda/cuda_check.h", "csrc/jit/fusion_compiler.h", "csrc/jit/fusion_compiler.cpp"]
-for root, _directories, files in os.walk(os.path.join(amd_build_dir, "torch")):
+ignore_files =  ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp", "csrc/cuda/cuda_check.h", "csrc/jit/fusion_compiler.cpp"]
+for root, _directories, files in os.walk(os.path.join(out_dir, "torch")):
     for filename in files:
         if filename.endswith(".cpp") or filename.endswith(".h"):
             source = os.path.join(root, filename)
             # Disabled files
             if reduce(lambda result, exclude: source.endswith(exclude) or result, ignore_files, False):
                 continue
-
             # Update contents.
-            with open(source, "r+") as f:
+            with open(source, "r+", encoding="utf-8") as f:
                 contents = f.read()
                 contents = contents.replace("WITH_CUDA", "WITH_ROCM")
                 contents = contents.replace("CUDA_VERSION", "0")
@@ -62,5 +59,5 @@ subprocess.Popen(
     ["/opt/rocm/bin/hipify-python.py",
         "--project-directory", proj_dir,
         "--output-directory", out_dir,
-        "--exclude-dirs"] + exclude_dirs +
+        "--include-dirs"] + include_dirs +
     ["--yaml-settings", yaml_file, "--add-static-casts", "True"])
