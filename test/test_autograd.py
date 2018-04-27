@@ -2164,27 +2164,29 @@ class TestAutograd(TestCase):
         if cuda:
             dtypes.append(torch.half)
 
-        def f1():
+        def f1(dt):
+            a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
             a.requires_grad_()
 
-        def f2():
+        def f2(dt):
+            a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
             a.requires_grad = True
 
+        def f3(dt):
+            torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu', requires_grad=True)
+
         for dt in dtypes:
-            def f3():
-                torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu', requires_grad=True)
             a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
             a.requires_grad = False  # should always work
             a.requires_grad_(False)
 
             for f in [f1, f2, f3]:
-                a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
                 if dt.is_floating_point:
-                    f()
+                    f(dt)
                 else:
                     with self.assertRaisesRegex(RuntimeError, 'floating point',
                                                 msg="dt: {} device: {}".format(a.dtype, a.device)):
-                        f()
+                        f(dt)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_set_requires_grad_only_for_floats_cuda(self):
