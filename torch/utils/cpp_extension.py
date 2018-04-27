@@ -475,6 +475,7 @@ def load(name,
 
     if baton.try_acquire():
         try:
+            check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
             with_cuda = any(map(_is_cuda_file, sources))
             extra_ldflags = _prepare_ldflags(
                 extra_ldflags or [],
