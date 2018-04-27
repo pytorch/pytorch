@@ -21,13 +21,37 @@ from __future__ import unicode_literals
 import caffe2.python._import_c_extension as C
 
 
-def addNNPACK(net):
+def addNNPACK(net, low_memory=False):
     net.Proto().ParseFromString(
-        C.transform_addNNPACK(net.Proto().SerializeToString())
+        C.transform_addNNPACK(net.Proto().SerializeToString(), low_memory)
+    )
+
+
+def fuseConvRelu(net):
+    net.Proto().ParseFromString(
+        C.transform_fuseConvRelu(net.Proto().SerializeToString())
     )
 
 
 def fuseNNPACKConvRelu(net):
     net.Proto().ParseFromString(
         C.transform_fuseNNPACKConvRelu(net.Proto().SerializeToString())
+    )
+
+
+def fuseAveragePoolRelu(net):
+    net.Proto().ParseFromString(
+        C.transform_fuseAveragePoolRelu(net.Proto().SerializeToString())
+    )
+
+
+def fuseMaxPoolRelu(net):
+    net.Proto().ParseFromString(
+        C.transform_fuseMaxPoolRelu(net.Proto().SerializeToString())
+    )
+
+
+def fuseSumRelu(net):
+    net.Proto().ParseFromString(
+        C.transform_fuseSumRelu(net.Proto().SerializeToString())
     )
