@@ -126,7 +126,8 @@ C++ compiler doesn't mangle its name and a C client can link against it.
 As a developer, here is what you need to know:
 
 1. If you add a function to the public API of Torch, you *must* mark it with
-   `THC_API`.  This will ensure it is built with C-linkage (and on Windows, it
+   `TH_API` or `THC_API` (depending if you are in CPU or CUDA land).
+   This will ensure it is built with C-linkage (and on Windows, it
    will also ensure that the symbol is exported from the DLL; otherwise it
    won't be visible.)
 

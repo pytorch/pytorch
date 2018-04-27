@@ -32,6 +32,9 @@ def _generate_typedefs():
                 th_struct = 'struct ' + th_name
 
                 typedefs += ['typedef {} {};'.format(th_struct, th_name)]
+                # We have to assemble a string here, because we're going to
+                # do this lookup based on tensor.type(), which returns a
+                # string (not a type object, as this code was before)
                 python_module = 'torch.cuda' if lib == 'THCuda' else 'torch'
                 python_class = python_module + '.' + python_name
                 _cffi_to_torch[th_struct] = python_class
