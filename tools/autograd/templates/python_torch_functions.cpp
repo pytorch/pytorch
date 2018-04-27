@@ -82,7 +82,7 @@ inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const Type 
 
 static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
   for (Scalar& s : l) {
-    if (!s.isIntegral() && !(s.isBackedByTensor() && at::isIntegralType(s.toTensor().type().scalarType()))) {
+    if (!(s.isIntegral() || (s.isBackedByTensor() && at::isIntegralType(s.toTensor().type().scalarType())))) {
       return false;
     }
   }
@@ -104,6 +104,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
     if (r.isNone(1)) {
       auto device = r.device(4);
       auto end = r.scalar(0);
+      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
       auto scalarType = r.isNone(2) && allIntegral({end}) ? at::ScalarType::Long : r.scalartype(2);
       auto& type = torch::getType(scalarType, r.layout(3), device.type);
       return wrap(set_requires_grad(dispatch_arange(end, type,  device.deviceInt64()), r.toBool(5)));
@@ -118,6 +119,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
       auto start = r.scalar(0);
       auto end = r.scalar(1);
       auto step = r.scalar(2);
+      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
       auto scalarType = r.isNone(4) && allIntegral({start, end, step}) ? at::ScalarType::Long : r.scalartype(4);
       auto& type = torch::getType(scalarType, r.layout(5), device.type);
       return wrap(set_requires_grad(dispatch_arange(start, end, step, type, device.deviceInt64()), r.toBool(7)));
