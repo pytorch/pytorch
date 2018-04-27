@@ -360,6 +360,7 @@ class TestFFI(TestCase):
         shutil.rmtree(self.tmpdir)
 
     @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
+    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
     def test_cpu(self):
         create_extension(
             name='test_extensions.cpulib',
@@ -388,6 +389,7 @@ class TestFFI(TestCase):
                           lambda: cpulib.bad_func(tensor, 2, 1.5))
 
     @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
+    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
     def test_gpu(self):
         create_extension(
             name='gpulib',
