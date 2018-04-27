@@ -7,7 +7,7 @@ index 692a08079..f96fee941 100644
    uint32_t block_threads = block.x * block.y;
    smem_size = block.x == 1 ? 0 : block_threads * sizeof(AccumT);
 +#if defined(__HIP_PLATFORM_HCC__)
-+  int max_active_blocks = 8;
++  int max_active_blocks = 16;
 +#else
    int max_active_blocks;
    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks,
