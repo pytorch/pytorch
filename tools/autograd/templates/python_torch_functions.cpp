@@ -20,6 +20,7 @@
 #include "torch/csrc/utils/tensor_layouts.h"
 
 #include "python_torch_functions_dispatch.h"
+#include <functional>
 
 using at::Tensor;
 using at::Scalar;
@@ -79,8 +80,8 @@ inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const Type 
   return at::arange(dtype, start, end, step);
 }
 
-static inline bool allIntegral(std::initializer_list<Scalar> l) {
-  for (auto s : l) {
+static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
+  for (Scalar& s : l) {
     if (!s.isIntegral() && !(s.isBackedByTensor() && at::isIntegralType(s.toTensor().type().scalarType()))) {
       return false;
     }
