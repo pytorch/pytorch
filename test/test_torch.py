@@ -1745,6 +1745,10 @@ class TestTorch(TestCase):
         # NOTE: 'cpu' is the canonical representation of 'cpu:0', but 'cuda:X' is the canonical
         # representation of cuda devices.
         assertEqual('cpu', lambda: torch.ones((2, 3), dtype=torch.float32, device='cpu:0'))
+        assertEqual('cpu', lambda: torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='cpu:0'))
+        if TEST_NUMPY:
+            assertEqual('cpu', lambda: torch.tensor(np.random.randn(2, 3), device='cpu'))
+
         if torch.cuda.is_available():
             assertEqual('cuda:0', lambda: torch.tensor(5).cuda(0))
             assertEqual('cuda:0', lambda: torch.tensor(5).cuda('cuda:0'))
@@ -1754,12 +1758,18 @@ class TestTorch(TestCase):
             assertEqual('cuda:0', lambda: torch.tensor(5, dtype=torch.int64, device='cuda:0'))
             assertEqual('cuda:' + str(torch.cuda.current_device()),
                         lambda: torch.tensor(5, dtype=torch.int64, device='cuda'))
+            assertEqual('cuda:0', lambda: torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='cuda:0'))
+            if TEST_NUMPY:
+                assertEqual('cuda:0', lambda: torch.tensor(np.random.randn(2, 3), device='cuda:0'))
 
             if torch.cuda.device_count() > 1:
                 assertEqual('cuda:1', lambda: torch.tensor(5).cuda(1))
                 assertEqual('cuda:1', lambda: torch.tensor(5).cuda('cuda:1'))
                 assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.int64, device=1))
                 assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.int64, device='cuda:1'))
+                assertEqual('cuda:1', lambda: torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='cuda:1'))
+                if TEST_NUMPY:
+                    assertEqual('cuda:1', lambda: torch.tensor(np.random.randn(2, 3), device='cuda:1'))
 
     def test_to(self):
         a = torch.tensor(5)
