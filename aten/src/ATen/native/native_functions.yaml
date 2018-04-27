@@ -44,6 +44,9 @@
 - func: abs(Tensor self) -> Tensor
 
 - func: abs_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _abs__cpu
+    CUDA: _abs__cuda
 
 - func: abs_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -118,6 +121,9 @@
 - func: ceil(Tensor self) -> Tensor
 
 - func: ceil_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _ceil__cpu
+    CUDA: _ceil__cuda
 
 - func: ceil_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -170,6 +176,9 @@
 - func: cos(Tensor self) -> Tensor
 
 - func: cos_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _cos__cpu
+    CUDA: _cos__cuda
 
 - func: cos_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -343,6 +352,9 @@
 - func: exp(Tensor self) -> Tensor
 
 - func: exp_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _exp__cpu
+    CUDA: _exp__cuda
 
 - func: exp_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -368,6 +380,9 @@
 - func: floor(Tensor self) -> Tensor
 
 - func: floor_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _floor__cpu
+    CUDA: _floor__cuda
 
 - func: floor_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -451,6 +466,9 @@
 - func: log(Tensor self) -> Tensor
 
 - func: log_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _log__cpu
+    CUDA: _log__cuda
 
 - func: log_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -604,6 +622,9 @@
 - func: round(Tensor self) -> Tensor
 
 - func: round_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _round__cpu
+    CUDA: _round__cuda
 
 - func: round_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -632,6 +653,9 @@
 - func: sin(Tensor self) -> Tensor
 
 - func: sin_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _sin__cpu
+    CUDA: _sin__cuda
 
 - func: sin_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -719,6 +743,9 @@
 - func: sqrt(Tensor self) -> Tensor
 
 - func: sqrt_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _sqrt__cpu
+    CUDA: _sqrt__cuda
 
 - func: sqrt_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -774,6 +801,9 @@
 - func: trunc(Tensor self) -> Tensor
 
 - func: trunc_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _trunc__cpu
+    CUDA: _trunc__cuda
 
 - func: trunc_out(Tensor result, Tensor self) -> Tensor
   variants: function
