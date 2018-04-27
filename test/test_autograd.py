@@ -611,6 +611,78 @@ class TestAutograd(TestCase):
 
         TestFn.apply(b).sum().backward()
 
+    def test_free_deep_graph(self):
+        def scope():
+            depth = 150000
+            x = torch.randn(1, requires_grad=True)
+            y = x.clone()
+
+            # build a "chain" computation graph
+            for i in range(depth):
+                y = y + y * 0.000001
+
+            # triggers graph deletion
+            del x
+
+        # Should not stack overflow
+        scope()
+
+    def test_free_deep_graph_complicated(self):
+        def scope():
+            depth = 100000
+            randchoice = torch.randint(2, [depth, 2])
+            x = torch.randn(1, requires_grad=True)
+            y = x.clone()
+
+            # Hold the two previous values
+            prev_values = [None, None]
+
+            # Build a "chain with skip connections" graph
+            for i in range(depth):
+                prev_tensors = [tensor for tensor in prev_values[:-1]
+                                if tensor is not None]
+                prev_values.append(y)
+                prev_values.pop(0)
+
+                # Definitely pick one tensor to add
+                y += y * 0.000001
+
+                # Possibly add other tensors
+                nprev = len(prev_tensors)
+                if nprev == 2:
+                    y += randchoice[depth].mul(torch.cat(prev_tensors)).sum()
+
+            # triggers graph deletion
+            del x
+
+        # Should not stack overflow
+        scope()
+
+    def test_free_deep_graph_pyfunction(self):
+        class MyOp(Function):
+            @staticmethod
+            def forward(ctx, tensor1, tensor2):
+                return tensor1 + tensor2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output
+
+        def scope():
+            depth = 150000
+            x = torch.randn(1, requires_grad=True)
+            y = x.clone()
+
+            # build deeply nested computation graph
+            for i in range(depth):
+                y = MyOp.apply(y, y)
+
+            # triggers graph deletion
+            del x
+
+        # Should not stack overflow
+        scope()
+
     def test_no_grad(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4)
