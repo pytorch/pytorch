@@ -2157,6 +2157,42 @@ class TestAutograd(TestCase):
         d, = torch.autograd.grad(c, a, retain_graph=True, create_graph=True)
         self.assertTrue(d.requires_grad)
 
+    @staticmethod
+    def _test_set_requires_grad_only_for_floats(self, cuda):
+        dtypes = [torch.int64, torch.int32, torch.int16, torch.int8,
+                  torch.float, torch.double]
+        if cuda:
+            dtypes.append(torch.half)
+
+        def f1():
+            a.requires_grad_()
+
+        def f2():
+            a.requires_grad = True
+
+        for dt in dtypes:
+            def f3():
+                torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu', requires_grad=True)
+            a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
+            a.requires_grad = False  # should always work
+            a.requires_grad_(False)
+
+            for f in [f1, f2, f3]:
+                a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
+                if dt.is_floating_point:
+                    f()
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'floating point',
+                                                msg="dt: {} device: {}".format(a.dtype, a.device)):
+                        f()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_set_requires_grad_only_for_floats_cuda(self):
+        self._test_set_requires_grad_only_for_floats(self, True)
+
+    def test_set_requires_grad_only_for_floats(self):
+        self._test_set_requires_grad_only_for_floats(self, False)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
