@@ -1,5 +1,10 @@
 #include "Descriptors.h"
+
 #include <ATen/ATen.h>
+
+#include <ostream>
+#include <sstream>
+#include <string>
 
 namespace at { namespace native {
 
@@ -69,6 +74,10 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
     case CUDNN_DATA_UINT8x4:
       return "CUDNN_DATA_UINT8x4";
 #endif
+    default:
+      std::ostringstream oss;
+      oss << "(unknown data-type " << static_cast<int>(dtype) << ")";
+      return oss.str();
   }
 }
 
