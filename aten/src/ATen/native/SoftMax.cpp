@@ -2,7 +2,7 @@
 #include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
-
+#include "ATen/AccumulateType.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -52,7 +52,8 @@ void host_softmax(Tensor output, const Tensor & input_, const int64_t dim_){
     for (d = 0; d < LOG_SOFTMAX_CAST_TYPE dim_size; d++)
       max_input = std::max(max_input, input_data[d * dim_stride]);
 
-    scalar_t tmpsum = 0;//TODO was accreal here
+    using accscalar_t =  acc_type<scalar_t, false>; 
+    accscalar_t tmpsum = 0;
     for (d = 0; d < LOG_SOFTMAX_CAST_TYPE dim_size; d++){
       scalar_t z = std::exp(input_data[d * dim_stride] - max_input);
       tmpsum += z;
@@ -107,7 +108,8 @@ void host_softmax_backward(Tensor gI, const Tensor &grad_, const Tensor &output_
     scalar_t *output_data     = output_data_base     + outer_idx * outer_stride + inner_idx;
     scalar_t *gradOutput_data = gradOutput_data_base + outer_idx * outer_stride + inner_idx;
 
-    scalar_t sum = 0;//TODO was accreal here
+    using accscalar_t =  acc_type<scalar_t, false>; 
+    accscalar_t sum = 0;//TODO was accreal here
     for (d = 0; d < LOG_SOFTMAX_CAST_TYPE dim_size; d++)
       if (LogSoftMax) 
           sum += gradOutput_data[d * dim_stride];

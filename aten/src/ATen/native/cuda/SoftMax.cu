@@ -8,7 +8,7 @@
 #include <THC/THCThrustAllocator.cuh>
 #include <THCUNN/THCHalfAutoNumerics.cuh>
 
-#include "ATen/cuda/AccumulateType.cuh"
+#include "ATen/AccumulateType.h"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
@@ -496,7 +496,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_){
     dim3 block = SoftMax_getBlockSize(ILP, dim_size);
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
     using cuda_scalar_t = cuda::type<scalar_t>;
-    using accscalar_t = cuda::acc_type<cuda_scalar_t>;
+    using accscalar_t = acc_type<cuda_scalar_t, true>;
     cunn_SoftMaxForward<ILP, cuda_scalar_t, accscalar_t, Epilogue>
       <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
         output.data<cuda_scalar_t>(), input.data<cuda_scalar_t>(), dim_size
@@ -510,7 +510,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_){
     dim3 grid, block;
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
     using cuda_scalar_t = cuda::type<scalar_t>;
-    using accscalar_t = cuda::acc_type<cuda_scalar_t>;
+    using accscalar_t = acc_type<cuda_scalar_t, true>;
     SpatialSoftMax_getLaunchSizes<accscalar_t>(
         &cunn_SpatialSoftMaxForward<cuda_scalar_t, accscalar_t, Epilogue>,
         outer_size, dim_size, inner_size,
@@ -549,7 +549,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     dim3 block = SoftMax_getBlockSize(ILP, dim_size);
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "host_softmax_backward", [&] {
     using cuda_scalar_t = cuda::type<scalar_t>;
-    using accscalar_t = cuda::acc_type<cuda_scalar_t>;
+    using accscalar_t = acc_type<cuda_scalar_t, true>;
     cunn_SoftMaxBackward<ILP, cuda_scalar_t, accscalar_t, Epilogue>
       <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
         gI.data<cuda_scalar_t>(), output.data<cuda_scalar_t>(), grad.data<cuda_scalar_t>(), dim_size
@@ -560,7 +560,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     dim3 grid, block;
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "host_softmax_backward", [&] {
     using cuda_scalar_t = cuda::type<scalar_t>;
-    using accscalar_t = cuda::acc_type<cuda_scalar_t>;
+    using accscalar_t = acc_type<cuda_scalar_t, true>;
     SpatialSoftMax_getLaunchSizes<accscalar_t>(
         &cunn_SpatialSoftMaxBackward<cuda_scalar_t, accscalar_t, Epilogue>,
         outer_size, dim_size, inner_size,
