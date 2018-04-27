@@ -252,7 +252,7 @@ if(BUILD_CAFFE2)
         caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
         ${CMAKE_BINARY_DIR}/caffe2/python)
     target_link_libraries(
-        caffe2_pybind11_state caffe2_library)
+        caffe2_pybind11_state caffe2_library nomnigraph)
     install(TARGETS caffe2_pybind11_state DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
 
     if(USE_CUDA)
@@ -267,7 +267,7 @@ if(BUILD_CAFFE2)
           caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
           ${CMAKE_BINARY_DIR}/caffe2/python)
       target_link_libraries(
-          caffe2_pybind11_state_gpu caffe2_library caffe2_gpu_library)
+          caffe2_pybind11_state_gpu caffe2_library nomnigraph caffe2_gpu_library)
       install(TARGETS caffe2_pybind11_state_gpu DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
     endif()
 

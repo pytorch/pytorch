@@ -120,6 +120,10 @@ convertToOperatorDef(caffe2::OperatorDef op) {
     nnOp = util::make_unique<repr::Sum>();
   }
 
+  if (op.type() == "SpatialBN") {
+    nnOp = util::make_unique<repr::BatchNormalization>();
+  }
+
   if (!nnOp) {
     nnOp = util::make_unique<repr::GenericOperator>(op.type());
   }

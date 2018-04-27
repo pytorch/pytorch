@@ -475,6 +475,62 @@ class Receive : public NeuralNetOperator {
   string Source;
 };
 
+class BatchNormalization : public NeuralNetOperator {
+ public:
+  BatchNormalization(
+      float epsilon = 1e-5f,
+      float momentum = 0.9f,
+      bool spatial = true,
+      bool isTest = false)
+      : NeuralNetOperator(NNKind::BatchNormalization),
+        Epsilon(epsilon),
+        Momentum(momentum),
+        Spatial(spatial),
+        IsTest(isTest) {}
+
+  ~BatchNormalization() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(BatchNormalization);
+
+  float getEpsilon() const {
+    return Epsilon;
+  }
+
+  float getMomentum() const {
+    return Momentum;
+  }
+
+  bool getSpatial() const {
+    return Spatial;
+  }
+
+  bool getIsTest() const {
+    return IsTest;
+  }
+
+  void setEpsilon(float epsilon) {
+    Epsilon = epsilon;
+  }
+
+  void setMomentum(float momentum) {
+    Momentum = momentum;
+  }
+
+  void setSpatial(bool spatial) {
+    Spatial = spatial;
+  }
+
+  void setIsTest(bool isTest) {
+    IsTest = isTest;
+  }
+
+ private:
+  float Epsilon;
+  float Momentum;
+  bool Spatial;
+  bool IsTest;
+};
+
 class FC : public NeuralNetOperator {
  public:
   FC() : NeuralNetOperator(NNKind::FC) {}
