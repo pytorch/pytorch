@@ -3937,7 +3937,7 @@ class TestTorch(TestCase):
                     return_size = fft_size
                 result = x.new(batch, int((length - frame_length) / float(hop)) + 1, return_size, 2)
                 for w in range(return_size):  # freq
-                    radians = torch.arange(frame_length) * w * 2 * math.pi / fft_size
+                    radians = torch.arange(float(frame_length)) * w * 2 * math.pi / fft_size
                     radians = radians.type_as(x)
                     re_kernel = radians.cos().mul_(window)
                     im_kernel = -radians.sin().mul_(window)
