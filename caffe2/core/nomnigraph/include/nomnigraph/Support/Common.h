@@ -14,25 +14,33 @@
 #include <functional>
 #include <list>
 
-template <typename T> class StorageType {
-public:
-  StorageType(T &&data) : Data(std::move(data)) {}
-  StorageType(const T &data) = delete;
+template <typename T>
+class StorageType {
+ public:
+  StorageType(T&& data) : Data(std::move(data)) {}
+  StorageType(const T& data) = delete;
   StorageType() {}
 
-  const T &data() const { return Data; }
-  T *mutableData() { return &Data; }
-  void resetData(T &&data) { Data = std::move(data); }
+  const T& data() const {
+    return Data;
+  }
+  T* mutableData() {
+    return &Data;
+  }
+  void resetData(T&& data) {
+    Data = std::move(data);
+  }
 
-private:
+ private:
   T Data;
 };
 
 /// \brief This class enables a listener pattern.
 /// It is to be used with a "curious recursive pattern"
 /// i.e. Derived : public Notifier<Derived> {}
-template <typename T> class Notifier {
-public:
+template <typename T>
+class Notifier {
+ public:
   using Callback = std::function<void(T*)>;
   Notifier() {}
 
@@ -79,7 +87,7 @@ public:
     }
   }
 
-private:
+ private:
   std::list<Callback> DtorCallbacks;
   std::list<Callback> NotifCallbacks;
 };

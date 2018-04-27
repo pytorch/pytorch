@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 #include <set>
 
-#include "nomnigraph/Graph/Graph.h"
-#include "nomnigraph/Graph/Algorithms.h"
 #include "nomnigraph/Converters/Dot.h"
+#include "nomnigraph/Graph/Algorithms.h"
+#include "nomnigraph/Graph/Graph.h"
 
 /** Our test graph looks like this:
  *           +-------+
@@ -80,30 +80,23 @@ nom::Graph<std::string> createGraph() {
 
 TEST(BinaryMatch, NoMatch) {
   auto graph = createGraph();
-  auto matches = nom::algorithm::binaryMatch(&graph,
-  [](decltype(graph)::NodeRef n) {
-    return false;
-  });
+  auto matches = nom::algorithm::binaryMatch(
+      &graph, [](decltype(graph)::NodeRef n) { return false; });
   EXPECT_EQ(matches.size(), 0);
 }
 
 TEST(BinaryMatch, AllMatch) {
   auto graph = createGraph();
-  auto matches = nom::algorithm::binaryMatch(&graph,
-  [](decltype(graph)::NodeRef n) {
-    return true;
-  });
+  auto matches = nom::algorithm::binaryMatch(
+      &graph, [](decltype(graph)::NodeRef n) { return true; });
   EXPECT_EQ(matches.size(), 1);
-  EXPECT_EQ(matches.front().Nodes.size(),
-            graph.getMutableNodes().size());
+  EXPECT_EQ(matches.front().Nodes.size(), graph.getMutableNodes().size());
 }
 
 TEST(BinaryMatch, EmptyGraph) {
   nom::Graph<std::string> graph;
-  auto matches = nom::algorithm::binaryMatch(&graph,
-  [](decltype(graph)::NodeRef n) {
-    return true;
-  });
+  auto matches = nom::algorithm::binaryMatch(
+      &graph, [](decltype(graph)::NodeRef n) { return true; });
   EXPECT_EQ(matches.size(), 0);
 }
 
@@ -125,16 +118,14 @@ TEST(BinaryMatch, EmptyGraph) {
 //           +-------+
 TEST(BinaryMatch, Basic) {
   auto graph = createGraph();
-  auto matches = nom::algorithm::binaryMatch(&graph,
-  [](decltype(graph)::NodeRef n) {
-    if (n->data() == "2" ||
-        n->data() == "3" ||
-        n->data() == "4" ||
-        n->data() == "6") {
-      return true;
-    }
-    return false;
-  });
+  auto matches =
+      nom::algorithm::binaryMatch(&graph, [](decltype(graph)::NodeRef n) {
+        if (n->data() == "2" || n->data() == "3" || n->data() == "4" ||
+            n->data() == "6") {
+          return true;
+        }
+        return false;
+      });
 
   EXPECT_EQ(matches.size(), 1);
   auto match = matches.front();
@@ -172,15 +163,13 @@ TEST(BinaryMatch, Basic) {
 // should match as { 4, 2 }, { 6 } not { 4, 2, 6 }
 TEST(BinaryMatch, RemovedMiddleNode) {
   auto graph = createGraph();
-  auto matches = nom::algorithm::binaryMatch(&graph,
-  [](decltype(graph)::NodeRef n) {
-    if (n->data() == "2" ||
-        n->data() == "4" ||
-        n->data() == "6") {
-      return true;
-    }
-    return false;
-  });
+  auto matches =
+      nom::algorithm::binaryMatch(&graph, [](decltype(graph)::NodeRef n) {
+        if (n->data() == "2" || n->data() == "4" || n->data() == "6") {
+          return true;
+        }
+        return false;
+      });
 
   EXPECT_EQ(matches.size(), 2);
   auto match1 = matches.front();

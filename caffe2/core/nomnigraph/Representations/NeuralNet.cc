@@ -24,11 +24,11 @@ NeuralNetData::~NeuralNetData() {}
 
 const std::string NeuralNetData::getName() const {
   switch (getKind()) {
-  case NNDataKind::Tensor: {
-    return dyn_cast<Tensor>(this)->getName();
-  }
-  default:
-    return "";
+    case NNDataKind::Tensor: {
+      return dyn_cast<Tensor>(this)->getName();
+    }
+    default:
+      return "";
   }
 }
 
@@ -39,10 +39,14 @@ bool hasProducer(NNGraph::NodeRef n) {
 }
 
 NNGraph::NodeRef getProducer(NNGraph::NodeRef n) {
-  assert(is<NeuralNetData>(n) && "getProducer only works with NeuralNetData types.");
+  assert(
+      is<NeuralNetData>(n) &&
+      "getProducer only works with NeuralNetData types.");
   auto inEdges = n->getInEdges();
   assert(inEdges.size() > 0 && "Tensor does not have a producer.");
-  assert(inEdges.size() == 1 && "Malformed NNGraph, NeuralNetData has multiple producers.");
+  assert(
+      inEdges.size() == 1 &&
+      "Malformed NNGraph, NeuralNetData has multiple producers.");
   return inEdges.front()->tail();
 }
 
@@ -51,7 +55,9 @@ bool hasConsumer(NNGraph::NodeRef n) {
 }
 
 std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n) {
-  assert(is<NeuralNetData>(n) && "getProducer only works with NeuralNetData types.");
+  assert(
+      is<NeuralNetData>(n) &&
+      "getProducer only works with NeuralNetData types.");
   std::vector<NNGraph::NodeRef> out;
   for (auto outEdge : n->getOutEdges()) {
     out.emplace_back(outEdge->head());
@@ -64,7 +70,9 @@ bool hasInputs(NNGraph::NodeRef n) {
 }
 
 std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n) {
-  assert(is<NeuralNetOperator>(n) && "getInputs only works with NeuralNetOperator types.");
+  assert(
+      is<NeuralNetOperator>(n) &&
+      "getInputs only works with NeuralNetOperator types.");
   std::vector<NNGraph::NodeRef> out;
   for (auto inEdge : n->getInEdges()) {
     out.emplace_back(inEdge->tail());
@@ -73,7 +81,9 @@ std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n) {
 }
 
 std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n) {
-  assert(is<NeuralNetOperator>(n) && "getOutputs only works with NeuralNetOperator types.");
+  assert(
+      is<NeuralNetOperator>(n) &&
+      "getOutputs only works with NeuralNetOperator types.");
   std::vector<NNGraph::NodeRef> out;
   for (auto outEdge : n->getOutEdges()) {
     out.emplace_back(outEdge->head());
@@ -97,14 +107,16 @@ std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
 size_t coalesceInsertedDataDependenciesHelper(repr::NNModule* m) {
   auto cfTrackedNodes = getTrackedNodes(m->controlFlow);
 
-  for (auto &bbNode : m->controlFlow.getMutableNodes()) {
+  for (auto& bbNode : m->controlFlow.getMutableNodes()) {
     auto bb = repr::nn::get<repr::BasicBlockType<repr::NNGraph>>(bbNode);
     // We mutate the instructions of the bb, so we copy here.
     // TODO make this an iterator and simply promote it on insertion.
     auto instrsCopy = bb->getInstructions();
     for (const auto instr : instrsCopy) {
       for (const auto input : repr::nn::getInputs(instr)) {
-        if (!repr::nn::hasProducer(input)) { continue; }
+        if (!repr::nn::hasProducer(input)) {
+          continue;
+        }
         auto producer = repr::nn::getProducer(input);
         if (!cfTrackedNodes.count(producer)) {
           bb->insertInstructionBefore(producer, instr);

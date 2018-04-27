@@ -6,20 +6,20 @@
 #include "nomnigraph/Converters/Dot.h"
 
 #include "nomnigraph/Transformations/ConnectNet.h"
-#include "nomnigraph/Transformations/OperatorFusion.h"
 #include "nomnigraph/Transformations/Match.h"
+#include "nomnigraph/Transformations/OperatorFusion.h"
 
 #include "nomnigraph/Support/Casting.h"
 
+#include <stdio.h>
 #include <fstream>
 #include <iomanip>
-#include <stdio.h>
 
-#define ADD_ARG(_op, _name, _type, _val)                                       \
-  {                                                                            \
-    caffe2::Argument *arg = _op->add_arg();                                    \
-    arg->set_name(_name);                                                      \
-    arg->set_##_type(_val);                                                    \
+#define ADD_ARG(_op, _name, _type, _val)    \
+  {                                         \
+    caffe2::Argument* arg = _op->add_arg(); \
+    arg->set_name(_name);                   \
+    arg->set_##_type(_val);                 \
   }
 
 class TestClass {

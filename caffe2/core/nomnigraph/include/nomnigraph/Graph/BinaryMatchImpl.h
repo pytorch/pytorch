@@ -4,7 +4,7 @@
 
 /// \brief A binary graph matching algorithm based on Kahn's algorithm.
 template <typename T, typename U, typename F>
-std::vector<Subgraph<T, U>> binaryMatch(Graph<T, U> *g, F condition) {
+std::vector<Subgraph<T, U>> binaryMatch(Graph<T, U>* g, F condition) {
   using G = Graph<T, U>;
 
   auto swappableCondition = [&](typename G::NodeRef m, bool match) {
@@ -15,7 +15,7 @@ std::vector<Subgraph<T, U>> binaryMatch(Graph<T, U> *g, F condition) {
   std::unordered_set<typename G::EdgeRef> edgeSet(edges.begin(), edges.end());
 
   // Topologically sorted matching subgraphs.
-  std::vector<Subgraph<T,U>> sortedNodes;
+  std::vector<Subgraph<T, U>> sortedNodes;
 
   // Find the initial frontier.
   std::vector<typename G::NodeRef> frontier;
@@ -90,7 +90,9 @@ std::vector<Subgraph<T, U>> binaryMatch(Graph<T, U> *g, F condition) {
   }
 
   if (edgeSet.size()) {
-    assert(0 && "Invalid graph for Kahn's algorithm, cycle detected.  Please use Tarjans.");
+    assert(
+        0 &&
+        "Invalid graph for Kahn's algorithm, cycle detected.  Please use Tarjans.");
   }
 
   return sortedNodes;
