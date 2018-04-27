@@ -143,12 +143,17 @@ thread_local size_t deleteFunctionRecursionDepth = 0;
  *    on various machines
  * 2) Take the minimum of all such values and subtract some leeway because
  *    the memory of these stack frames will probably grow as time passes.
- * Testing on 3 machines, the magic numbers were:
+ * Testing on a few machines machines, the magic numbers were:
  * - Mac OSX (Macbook Pro 15) : ~60000
  * - A beefy Ubuntu 16.04 box : ~15000
- * - Windows AWS instance (g3.4xlarge): ~8300
+ * - Windows AWS instance (g3.4xlarge): variable. My two attempts at different
+ *   times have gotten the following numbers: ~8300, 3669
  */
-constexpr size_t kDeleteFunctionMaxRecursionDepth = 6000;
+#ifdef _WIN32
+constexpr size_t kDeleteFunctionMaxRecursionDepth = 3000;
+#else
+constexpr size_t kDeleteFunctionMaxRecursionDepth = 10000;
+#endif
 
 struct RecursionDepthCounter {
  public:
@@ -164,10 +169,14 @@ struct RecursionDepthCounter {
   }
 };
 
+/*
+ * Note that the custom deleter deletes in BFS style. Without using
+ * the custom deleter, the computation graph is deleted in a DFS style.
+ * The BFS deletion is valid (and safe) because if a shared_ptr<Function>
+ * 's reference count hits 0, nothing else will access it.
+ */
 void deleteFunction(Function* function) {
   RecursionDepthCounter recursion_depth;
-
-  std::cout << recursion_depth.value() << std::endl;
 
   if (recursion_depth.value() > kDeleteFunctionMaxRecursionDepth) {
     deleteFunctionQueue.push_back(function);
