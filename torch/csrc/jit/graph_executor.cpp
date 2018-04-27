@@ -1,5 +1,3 @@
-#include <Python.h>
-
 #include "torch/csrc/jit/graph_executor.h"
 
 #include "torch/csrc/autograd/grad_mode.h"
