@@ -256,7 +256,7 @@ if [[ -n $CUDA_VERSION ]]; then
   # the package name in meta.yaml based off of these values, we let Caffe2
   # take the CUDA and cuDNN versions that it finds in the build environment,
   # and manually set the package name ourself.
-  package_name="${package_name}_cuda${CUDA_VERSION}_cudnn${CUDNN_VERSION}_nccl2"
+  package_name="${package_name}_cuda${CUDA_VERSION}_cudnn${CUDNN_VERSION}"
   build_string="${build_string}_cuda${CUDA_VERSION}_cudnn${CUDNN_VERSION}_nccl2"
 else
   build_string="${build_string}_cpu"
