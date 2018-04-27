@@ -2334,7 +2334,10 @@ class TestTorch(TestCase):
         self.assertIs(torch.int64, torch.arange(torch.tensor(1), 3).dtype)
         self.assertIs(torch.int64, torch.arange(torch.tensor(1), torch.tensor(3, dtype=torch.int16)).dtype)
         self.assertIs(torch.int64, torch.arange(1, 3, 1).dtype)
-        self.assertIs(torch.int64, torch.arange(torch.tensor(1), torch.tensor(3), torch.tensor(1, dtype=torch.int16)).dtype)
+        self.assertIs(torch.int64,
+                      torch.arange(torch.tensor(1),
+                                   torch.tensor(3),
+                                   torch.tensor(1, dtype=torch.int16)).dtype)
         torch.set_default_dtype(saved_dtype)
 
     @staticmethod
