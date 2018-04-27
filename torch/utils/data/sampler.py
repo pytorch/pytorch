@@ -120,7 +120,7 @@ class BatchSampler(object):
     def __init__(self, sampler, batch_size, drop_last):
         if not isinstance(sampler, Sampler):
             raise ValueError("sampler should be an instance of "
-                             "torch.utils.data.sampler.Sampler, but got sampler={}"
+                             "torch.utils.data.Sampler, but got sampler={}"
                              .format(sampler))
         if not isinstance(batch_size, _int_classes) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
