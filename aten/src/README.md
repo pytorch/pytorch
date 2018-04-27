@@ -137,3 +137,8 @@ As a developer, here is what you need to know:
    in the `.h`. Search for `mutex` for an example of this principle being applied.
    (This convention is OPPOSITE from the prevailing convention in PyTorch and
    ATen, where C++ headers are defined in `.h` files.)
+
+Arguably, the "C-compatible" headers should live in a separate directory,
+distinct from the C++ code.  We think this might be a good thing to do
+eventually, and would make the code structure more clear, but we have not
+done it at the moment.
