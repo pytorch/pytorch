@@ -302,9 +302,9 @@ class KLDivLoss(_Loss):
 
             >>> loss = nn.KLDivLoss(size_average=False)
             >>> batch_size = 5
-            >>> probs1 = F.softmax(torch.randn(batch_size, 10), 1)
+            >>> log_probs1 = F.log_softmax(torch.randn(batch_size, 10), 1)
             >>> probs2 = F.softmax(torch.randn(batch_size, 10), 1)
-            >>> loss(probs1.log(), probs2) / batch_size
+            >>> loss(log_probs1, probs2) / batch_size
             tensor(0.7142)
 
 
