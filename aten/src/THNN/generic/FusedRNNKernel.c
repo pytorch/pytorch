@@ -105,7 +105,7 @@ void THNN_(GRUFused_updateOutput)(
 
     *hy_ = F2H(ng + ig * (H2F(hx_)-ng));
 
-    //SAVE FOR BACKWARDS
+    //save for backwards
     storage_data[offset_s+0*hsz] = F2H(rg);
     storage_data[offset_s+1*hsz] = F2H(ig);
     storage_data[offset_s+2*hsz] = F2H(ng);
@@ -260,7 +260,7 @@ void THNN_(LSTMFused_updateOutput)(
     *hy_ = F2H(f_hy);
     *cy_ = F2H(f_cy);
 
-    //SAVE FOR BACKWARDS
+    //save for backwards
     *iig = F2H(ig);
     *ifg = F2H(fg);
     *icg = F2H(cg);
