@@ -1237,7 +1237,7 @@ class TestNN(NNTestCase):
             self.assertEqual(scale.std(), 0)
             return scale[0]
 
-        grads = torch.arange(1, 101).view(10, 10), torch.ones(10).div(1000)
+        grads = torch.arange(1., 101).view(10, 10), torch.ones(10).div(1000)
         for norm_type in [0.5, 1.5, 2, 4, 'inf']:
             for p, g in zip(l.parameters(), grads):
                 p._grad = Variable(g.clone().view_as(p.data))
@@ -1267,7 +1267,7 @@ class TestNN(NNTestCase):
         l = nn.Linear(10, 10)
         clip_value = 2.5
 
-        grad_w, grad_b = torch.arange(-50, 50).view(10, 10).div_(5), torch.ones(10).mul_(2)
+        grad_w, grad_b = torch.arange(-50., 50).view(10, 10).div_(5), torch.ones(10).mul_(2)
         for grad_list in [[grad_w, grad_b], [grad_w, None]]:
             for p, g in zip(l.parameters(), grad_list):
                 p._grad = g.clone().view_as(p.data) if g is not None else g
@@ -1290,7 +1290,7 @@ class TestNN(NNTestCase):
         fc1 = nn.Linear(10, 20)
         model = nn.Sequential(conv1, fc1)
 
-        vec = Variable(torch.arange(0, 980))
+        vec = Variable(torch.arange(0., 980))
         vector_to_parameters(vec, model.parameters())
 
         sample = next(model.parameters())[0, 0, 0]
@@ -3191,10 +3191,10 @@ class TestNN(NNTestCase):
         max_length = lengths[0]
         batch_sizes = [sum(map(bool, filter(lambda x: x >= i, lengths))) for i in range(1, max_length + 1)]
         offset = 0
-        padded = torch.cat([pad(i * 100 + torch.arange(1, 5 * l + 1).view(l, 1, 5), max_length)
+        padded = torch.cat([pad(i * 100 + torch.arange(1., 5 * l + 1).view(l, 1, 5), max_length)
                             for i, l in enumerate(lengths, 1)], 1)
         padded = torch.tensor(padded, requires_grad=True)
-        expected_data = [[torch.arange(1, 6) + (i + 1) * 100 + 5 * n for i in range(batch_size)]
+        expected_data = [[torch.arange(1., 6) + (i + 1) * 100 + 5 * n for i in range(batch_size)]
                          for n, batch_size in enumerate(batch_sizes)]
         expected_data = list(itertools.chain.from_iterable(expected_data))
         expected_data = torch.stack(expected_data, dim=0)
@@ -4320,7 +4320,7 @@ class TestNN(NNTestCase):
         # test known input on CPU
         for padding_mode in ['zeros', 'border']:
 
-            input = Variable(torch.arange(1, 11).view(1, 1, 2, 5))
+            input = Variable(torch.arange(1., 11).view(1, 1, 2, 5))
             grid = Variable(torch.Tensor(
                 [[-0.9, -1.4, 0, 0.2, 1],
                  [-1, -0.333, 0, 0.5, 1],
@@ -4430,7 +4430,7 @@ class TestNN(NNTestCase):
 
     def test_affine_grid(self):
         # test known input on CPU
-        input = Variable(torch.arange(1, 7).view(1, 2, 3))
+        input = Variable(torch.arange(1., 7).view(1, 2, 3))
         output = F.affine_grid(input, torch.Size([1, 1, 2, 2]))
         groundtruth = torch.Tensor(
             [[[0, -3], [2, 5]], [[4, 7], [6, 15]]]).view(1, 2, 2, 2)

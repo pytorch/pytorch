@@ -998,7 +998,7 @@ class TestTorch(TestCase):
             long_m1 = torch.LongTensor(10, 10).random_(-10, 10)
             long_res1 = long_m1.clone()
             long_res2 = long_m1.clone()
-            long_qs = torch.arange(-5, 5).long()
+            long_qs = torch.arange(-5, 5)
             long_qs[5] = 5  # Can't handle the divisor=0 case
             for col_idx, long_q in enumerate(long_qs):
                 # Reference
@@ -2313,6 +2313,39 @@ class TestTorch(TestCase):
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
 
+    def test_arange_inference(self):
+        saved_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.float32)
+        # end only
+        self.assertIs(torch.float32, torch.arange(1.).dtype)
+        self.assertIs(torch.float32, torch.arange(torch.tensor(1.)).dtype)
+        self.assertIs(torch.float32, torch.arange(torch.tensor(1., dtype=torch.float64)).dtype)
+
+        self.assertIs(torch.int64, torch.arange(1).dtype)
+        self.assertIs(torch.int64, torch.arange(torch.tensor(1)).dtype)
+        self.assertIs(torch.int64, torch.arange(torch.tensor(1, dtype=torch.int16)).dtype)
+
+        # start, end, [step]
+        self.assertIs(torch.float32, torch.arange(1., 3).dtype)
+        self.assertIs(torch.float32, torch.arange(torch.tensor(1., dtype=torch.float64), 3).dtype)
+        self.assertIs(torch.float32, torch.arange(1, 3.).dtype)
+        self.assertIs(torch.float32, torch.arange(torch.tensor(1, dtype=torch.int16), torch.tensor(3.)).dtype)
+        self.assertIs(torch.float32, torch.arange(1, 3, 1.).dtype)
+        self.assertIs(torch.float32,
+                      torch.arange(torch.tensor(1),
+                                   torch.tensor(3, dtype=torch.int16),
+                                   torch.tensor(1., dtype=torch.float64)).dtype)
+
+        self.assertIs(torch.int64, torch.arange(1, 3).dtype)
+        self.assertIs(torch.int64, torch.arange(torch.tensor(1), 3).dtype)
+        self.assertIs(torch.int64, torch.arange(torch.tensor(1), torch.tensor(3, dtype=torch.int16)).dtype)
+        self.assertIs(torch.int64, torch.arange(1, 3, 1).dtype)
+        self.assertIs(torch.int64,
+                      torch.arange(torch.tensor(1),
+                                   torch.tensor(3),
+                                   torch.tensor(1, dtype=torch.int16)).dtype)
+        torch.set_default_dtype(saved_dtype)
+
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
         # select full dimensionality
@@ -2883,7 +2916,7 @@ class TestTorch(TestCase):
             self.assertEqual(x, x0, 0)
 
     def test_mode(self):
-        x = torch.arange(1, SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
+        x = torch.arange(1., SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
         x[:2] = 1
         x[:, :2] = 1
         x0 = x.clone()
@@ -3119,7 +3152,7 @@ class TestTorch(TestCase):
 
     def test_slice(self):
         empty = torch.Tensor()
-        x = torch.arange(0, 16).view(4, 4)
+        x = torch.arange(0., 16).view(4, 4)
         self.assertEqual(x.slice(), x)
         self.assertEqual(x.slice(0, 0, 4), x)
         # start and stop are clamped to the size of dim
@@ -3914,7 +3947,7 @@ class TestTorch(TestCase):
                     return_size = fft_size
                 result = x.new(batch, int((length - frame_length) / float(hop)) + 1, return_size, 2)
                 for w in range(return_size):  # freq
-                    radians = torch.arange(frame_length) * w * 2 * math.pi / fft_size
+                    radians = torch.arange(float(frame_length)) * w * 2 * math.pi / fft_size
                     radians = radians.type_as(x)
                     re_kernel = radians.cos().mul_(window)
                     im_kernel = -radians.sin().mul_(window)
@@ -4576,7 +4609,7 @@ class TestTorch(TestCase):
         # strided is [[1 3 5 7],
         #             [9 11 13 15]]
 
-        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        reference = conv_fn(torch.arange(0., 24).view(3, 8))
         strided = conv_fn(torch.Tensor())
         strided.set_(reference.storage(), 1, size=torch.Size([2, 4]),
                      stride=[8, 2])
@@ -4614,7 +4647,7 @@ class TestTorch(TestCase):
         # strided is [[10, 11],
         #             [17, 18]]
 
-        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        reference = conv_fn(torch.arange(0., 24).view(3, 8))
         strided = conv_fn(torch.Tensor())
         strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
                      stride=[7, 1])
@@ -4622,7 +4655,7 @@ class TestTorch(TestCase):
         strided[ri([0]), ri([1])] = -1
         self.assertEqual(strided[ri([0]), ri([1])], torch.Tensor([-1]))
 
-        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        reference = conv_fn(torch.arange(0., 24).view(3, 8))
         strided = conv_fn(torch.Tensor())
         strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
                      stride=[7, 1])
@@ -4632,7 +4665,7 @@ class TestTorch(TestCase):
         self.assertEqual(strided[ri([0, 1]), ri([1, 0])], torch.Tensor([-1,
                          2]))
 
-        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        reference = conv_fn(torch.arange(0., 24).view(3, 8))
         strided = conv_fn(torch.Tensor())
         strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
                      stride=[7, 1])
@@ -4727,7 +4760,7 @@ class TestTorch(TestCase):
             #            5  6  7  8  9
             #           10 11 12 13 14
             #           15 16 17 18 19
-            reference = conv_fn(torch.arange(0, 20).view(4, 5))
+            reference = conv_fn(torch.arange(0., 20).view(4, 5))
 
             indices_to_test = [
                 # grab the second, fourth columns
@@ -4753,7 +4786,7 @@ class TestTorch(TestCase):
                               indexer,
                               get_set_tensor(reference, indexer))
 
-            reference = conv_fn(torch.arange(0, 160).view(4, 8, 5))
+            reference = conv_fn(torch.arange(0., 160).view(4, 8, 5))
 
             indices_to_test = [
                 [slice(None), slice(None), [0, 3, 4]],
@@ -4804,7 +4837,7 @@ class TestTorch(TestCase):
                               indexer,
                               get_set_tensor(reference, indexer))
 
-            reference = conv_fn(torch.arange(0, 1296).view(3, 9, 8, 6))
+            reference = conv_fn(torch.arange(0., 1296).view(3, 9, 8, 6))
 
             indices_to_test = [
                 [slice(None), slice(None), slice(None), [0, 3, 4]],
