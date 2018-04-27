@@ -8,23 +8,30 @@
 // it. Some mobile platforms do not like stl_logging, so we add an
 // overload in that case as well.
 
-#if !defined(__CUDACC__) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
+#ifdef __CUDACC__
+#include <cuda.h>
+#endif
+
+#if (!defined(__CUDACC__) || CUDA_VERSION > 9000 ) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
 #include <glog/stl_logging.h>
-#else // !defined(__CUDACC__) && !!defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
+#else // (!defined(__CUDACC__) || CUDA_VERSION > 9000 ) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
 
 // here, we need to register a fake overload for vector/string - here,
 // we just ignore the entries in the logs.
 
-#define INSTANTIATE_FOR_CONTAINER(container)                                \
-  template <class... Types>                                                 \
-  std::ostream& operator<<(std::ostream& out, const container<Types...>&) { \
-    return out;                                                             \
-  }
+namespace std
+{
+  #define INSTANTIATE_FOR_CONTAINER(container)                      \
+    template <class... Types>                                       \
+    ostream& operator<<(ostream& out, const container<Types...>&) { \
+      return out;                                                   \
+    }
 
-INSTANTIATE_FOR_CONTAINER(std::vector)
-INSTANTIATE_FOR_CONTAINER(std::map)
-INSTANTIATE_FOR_CONTAINER(std::set)
-#undef INSTANTIATE_FOR_CONTAINER
+  INSTANTIATE_FOR_CONTAINER(vector)
+  INSTANTIATE_FOR_CONTAINER(map)
+  INSTANTIATE_FOR_CONTAINER(set)
+  #undef INSTANTIATE_FOR_CONTAINER
+}
 
 #endif
 
