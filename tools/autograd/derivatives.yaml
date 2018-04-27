@@ -164,7 +164,7 @@
   self: zeros_like(grad)
 
 - name: clamp(Tensor self, Scalar min, Scalar max)
-  self: grad * (self > min).type_as(grad) * (self < max).type_as(grad)
+  self: grad * ((self >= min) * (self <= max)).type_as(grad)
 
 - name: clamp_min(Tensor self, Scalar min)
   self: grad * (self > min).type_as(grad)
