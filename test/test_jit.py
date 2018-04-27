@@ -2322,7 +2322,7 @@ class TestScript(TestCase):
             def forward(self, v):
                 return torch.cat([v, v, v], dim=self.dim)
         v = torch.zeros(1, 1)
-        self.assertEqual(torch.cat([v, v, v], dim=1), M().forward(v))
+        self.assertEqual(torch.cat([v, v, v], dim=1), M()(v))
 
     class StarTestSumStarred(torch.nn.Module):
         def __init__(self):
@@ -2849,7 +2849,7 @@ class TestScript(TestCase):
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         foo.graph.propagate_shapes((a, b), False)
-        self.assertExpected(str(foo.graph))
+        self.assertExpected(str(torch._C._jit_pass_canonicalize(foo.graph)))
 
     def test_onnx_export_speculate(self):
 
@@ -2893,6 +2893,14 @@ class TestScript(TestCase):
     def test_shape_analysis_loop(self):
         def foo(a, b, x):
             c = a
+            # on the first iteration of the loop it appears that
+            # c should have a expand to the size of b
+            # but on the second+ iterations, there is no broadcast and the
+            # sizes are different.
+            # previously this would cause the compiler to (1) enter an infinite
+            # loop trying to compute the shape, and (2) insert invalid
+            # broadcasts.
+            # this test ensure we don't regress on these issues
             for _ in range(2):
                 a = c + b
                 c = x

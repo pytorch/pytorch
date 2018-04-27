@@ -198,7 +198,12 @@ struct Environment {
   // no assignment, only references.
   void deleteExtraInputs(const SourceRange& loc) {
     // note: skip i == 0, it is the loop trip count for inputs
-    // and the loop condition for outputs
+    // and the loop condition for outputs.
+    // captured_inputs is indexed by i - 1 since it only contains loop
+    // carried dependencies
+    //          inputs: loop_counter, lcd0, lcd1, ...
+    //         outputs: loop_condition, lcd0, lcd1, ...
+    // captured_inputs: lcd0, lcd1, ...
     JIT_ASSERT(b->inputs().size() == b->outputs().size());
     JIT_ASSERT(b->inputs().size() == captured_inputs.size() + 1);
     for(size_t i = b->inputs().size() - 1; i > 0; i--) {
@@ -231,10 +236,10 @@ std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values)
   return std::make_shared<SimpleValue>(g.insertNode(g.createTuple(values))->output());
 }
 
-at::Tensor getConstantValue(const SourceRange& loc, Value* v, int64_t max_dim) {
+at::Tensor getConstantValue(const SourceRange& loc, Value* v) {
   if(v->node()->kind() == prim::Constant) {
     auto t = v->node()->t(attr::value);
-    if(t.ndimension() > max_dim) {
+    if(t.ndimension() > 0) {
       throw ErrorReport(loc) << "attributes must be scalars or lists of scalars";
     }
     return t;
@@ -244,13 +249,13 @@ at::Tensor getConstantValue(const SourceRange& loc, Value* v, int64_t max_dim) {
 
 at::Tensor getAttributeValue(const NamedValue& nv) {
   auto v = nv.value;
-   if(v->node()->kind() == prim::TupleConstruct) {
+  if(v->node()->kind() == prim::TupleConstruct) {
     auto ts = fmap(v->node()->inputs(), [&](Value* input) {
-      return getConstantValue(nv.loc, input, 0);
+      return getConstantValue(nv.loc, input);
     });
     return at::stack(ts);
   }
-  return getConstantValue(nv.loc, v, 1);
+  return getConstantValue(nv.loc, v);
 }
 
 std::shared_ptr<SugaredValue> emitBuiltinCall(
@@ -313,6 +318,7 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
         throw ErrorReport(loc) << "expected 1 input";
       }
     } else {
+      // findTensorOp already verified we don't have additional attributes
       JIT_ASSERT(attributes.size() == 0);
       if(inputs.size() != 2) {
           throw ErrorReport(loc) << "expected 2 inputs";
@@ -662,6 +668,8 @@ private:
       for(size_t i = 0; i < body_frame->captured_inputs.size(); ++i) {
         auto x = body_frame->captured_inputs[i];
         n->addInput(outer_frame->getVar(x, range));
+        // body_block->inputs(): loop_counter, lcd0, lcd1, ...
+        // captured_inputs: lcd0, lcd1, ...
         auto typ = body_block->inputs()[i + 1]->type();
         outer_frame->setVar(range, x, n->addOutput()->setType(typ));
       }
