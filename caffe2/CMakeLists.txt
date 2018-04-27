@@ -222,20 +222,23 @@ list(APPEND Caffe2_MAIN_LIBS caffe2_library)
 
 # ---[ CUDA library.
 if(USE_CUDA)
+  set(__tmp_CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS})
+
   # A hack to deal with cuda library dependencies and modern CMake: the
   # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
   # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
   # hack adds the PRIVATE keywords to CUDA_LIBRARIES so we can deal with
   # it. We will then manually add the cudart library as interface libs.
-  set(__tmp ${CUDA_LIBRARIES})
-  set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
+  set(__tmp_CUDA_LINK_LIBRARIES_KEYWORD ${CUDA_LINK_LIBRARIES_KEYWORD})
+  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  list(APPEND CUDA_NVCC_FLAGS "-DCAFFE2_BUILD_GPU_LIB")
   if(CAFFE2_STATIC_LINK_CUDA)
     torch_cuda_based_add_library(caffe2_gpu STATIC ${Caffe2_GPU_SRCS})
   else()
     torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
   endif()
-  set(CUDA_LIBRARIES ${__tmp})
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
+  target_compile_options(caffe2_gpu PRIVATE "-DCAFFE2_BUILD_GPU_LIB")
 
   target_include_directories(
       caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
@@ -256,6 +259,9 @@ if(USE_CUDA)
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
+
+  set(CUDA_LINK_LIBRARIES_KEYWORD ${__tmp_CUDA_LINK_LIBRARIES_KEYWORD})
+  set(CUDA_NVCC_FLAGS ${__tmp_CUDA_NVCC_FLAGS})
 endif()
 
 # ---[ Caffe2 HIP sources.

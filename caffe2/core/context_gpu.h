@@ -137,8 +137,8 @@ class ThreadLocalCUDAObjects {
 class CUDAContext final {
  public:
   // The default cuda context constructor.
-  explicit CUDAContext(const int gpu_id = -1);
-  explicit CUDAContext(const DeviceOption& option);
+  CAFFE2_GPU_API explicit CUDAContext(const int gpu_id = -1);
+  CAFFE2_GPU_API explicit CUDAContext(const DeviceOption& option);
 
   ~CUDAContext() {
     if (curand_generator_) {
@@ -164,13 +164,7 @@ class CUDAContext final {
     ev->Record(CUDA, this, err_msg);
   }
 
-  void FinishDeviceComputation() {
-    cudaStreamSynchronize(cuda_objects_.GetStream(gpu_id_, stream_id_));
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-      CAFFE_THROW("Encountered CUDA error: ", cudaGetErrorString(error));
-    }
-  }
+  CAFFE2_GPU_API void FinishDeviceComputation();
 
   inline int cuda_gpu_id() const {
     return gpu_id_;
@@ -184,18 +178,12 @@ class CUDAContext final {
     return cuda_stream(gpu_id_, stream_id_);
   }
 
-  static cudaStream_t cuda_stream(int gpu_id, int stream_id) {
-    return cuda_objects_.GetStream(gpu_id, stream_id);
-  }
+  CAFFE2_GPU_API static cudaStream_t cuda_stream(int gpu_id, int stream_id);
 
-  cublasHandle_t cublas_handle() {
-    return cuda_objects_.GetHandle(gpu_id_, stream_id_);
-  }
+  CAFFE2_GPU_API cublasHandle_t cublas_handle();
 
 #ifdef CAFFE2_USE_CUDNN
-  cudnnHandle_t cudnn_handle() {
-    return cuda_objects_.GetCudnnHandle(gpu_id_, stream_id_);
-  }
+  CAFFE2_GPU_API cudnnHandle_t cudnn_handle();
 #endif // CAFFE2_USE_CUDNN
 
   curandGenerator_t& curand_generator() {
@@ -211,17 +199,17 @@ class CUDAContext final {
     return curand_generator_;
   }
 
-  static std::pair<void*, MemoryDeleter> New(size_t nbytes);
+  CAFFE2_GPU_API static std::pair<void*, MemoryDeleter> New(size_t nbytes);
 
   // Get a mutex to lock out cudaMalloc / cudaFree calls when
   // NCCL kernels are being launched. Should remove threat of
   // deadlocks
-  static std::mutex& mutex();
+  CAFFE2_GPU_API static std::mutex& mutex();
 
   // Functions to query memory stats. Only available if flag
   // --caffe2_gpu_memory_tracking is enabled.
-  static std::vector<long> TotalMemoryByGpu();
-  static std::vector<long> MaxMemoryByGpu();
+  CAFFE2_GPU_API static std::vector<long> TotalMemoryByGpu();
+  CAFFE2_GPU_API static std::vector<long> MaxMemoryByGpu();
 
   template <class SrcContext, class DstContext>
   inline void CopyBytes(size_t nbytes, const void* src, void* dst) {
@@ -230,7 +218,7 @@ class CUDAContext final {
         src,
         nbytes,
         cudaMemcpyDefault,
-        cuda_objects_.GetStream(gpu_id_, stream_id_)));
+		get_cuda_objects_().GetStream(gpu_id_, stream_id_)));
   }
 
   template <typename T, class SrcContext, class DstContext>
@@ -262,7 +250,7 @@ class CUDAContext final {
   }
 
  protected:
-  static void Delete(void* data);
+  CAFFE2_GPU_API static void Delete(void* data);
   void set_stream_id(int stream_id) {
     stream_id_ = stream_id;
   }
@@ -272,6 +260,8 @@ class CUDAContext final {
   int random_seed_;
   curandGenerator_t curand_generator_{nullptr};
   static thread_local ThreadLocalCUDAObjects cuda_objects_;
+
+  CAFFE2_GPU_API static ThreadLocalCUDAObjects& get_cuda_objects_();
 };
 
 // For the CPU context, we also allow a (probably expensive) function
