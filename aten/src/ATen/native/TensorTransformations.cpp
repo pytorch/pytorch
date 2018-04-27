@@ -29,7 +29,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
   // check duplicates in dims
   auto flip_dims_v = std::vector<int64_t>(dims);
   flip_dims_v.erase(std::unique(flip_dims_v.begin(), flip_dims_v.end()), flip_dims_v.end());
-  if (flip_dims_v.size() < flip_dims_size) {
+  if ((int64_t)flip_dims_v.size() < flip_dims_size) {
     std::stringstream ss;
     ss << "dims has duplicates, "
        << "original flip dims size=" << flip_dims_size << ", "

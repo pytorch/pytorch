@@ -15,7 +15,7 @@ namespace native {
 __device__ __forceinline__
 void linear_index_to_indices(int64_t linear_index, int64_t* each_dim_len, int64_t total_dims, int64_t* indices) {
   int64_t res = linear_index;
-  for (int i = 0; i < total_dims; i++) {
+  for (int64_t i = 0; i < total_dims; i++) {
     int64_t indices_i = linear_index * total_dims + i;
     indices[indices_i] = res / each_dim_len[i];
     res = res % each_dim_len[i];
@@ -37,7 +37,7 @@ Here element 3 has nD index = (0,1,0), and this corresponds to oneD index = 2
 __device__ __forceinline__
 int64_t indices_to_linear_index(int64_t* indices, int64_t total_dims, int64_t* each_dim_len, int64_t src_linear_index) {
   int64_t dest_linear_index = 0;
-  for (int i = 0; i < total_dims; i++) {
+  for (int64_t i = 0; i < total_dims; i++) {
     int64_t indices_i = src_linear_index * total_dims + i;
     dest_linear_index += indices[indices_i] * each_dim_len[i];
   }
@@ -57,7 +57,7 @@ void flip_cuda_kernel(scalar_t* in_t, scalar_t* out_t, int64_t N, int64_t* dims,
   linear_index_to_indices(linear_index, each_dim_len, total_dims, indices);
 
   // flip nD index along each desired dimension
-  for (int i = 0 ; i < flip_dims_size; i++) {
+  for (int64_t i = 0 ; i < flip_dims_size; i++) {
     int64_t dim = dims[i];
     int64_t indices_dim = linear_index * total_dims + dim;
     indices[indices_dim] = shape[dim] - 1 - indices[indices_dim];
@@ -84,7 +84,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   // check duplicates in dims
   auto flip_dims_v = std::vector<int64_t>(dims);
   flip_dims_v.erase(std::unique(flip_dims_v.begin(), flip_dims_v.end()), flip_dims_v.end());
-  if (flip_dims_v.size() < flip_dims_size) {
+  if ((int64_t)flip_dims_v.size() < flip_dims_size) {
     std::stringstream ss;
     ss << "dims has duplicates, "
        << "original flip dims size=" << flip_dims_size << ", "
@@ -125,7 +125,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
 
   Tensor flip_dims_t = at::zeros(CPU(kLong), {flip_dims_size});
   int64_t* flip_dims_t_d = flip_dims_t.data<int64_t>();
-  for (int i = 0; i < flip_dims_size; i++) {
+  for (int64_t i = 0; i < flip_dims_size; i++) {
     flip_dims_t_d[i] = dims[i];
   }
 
