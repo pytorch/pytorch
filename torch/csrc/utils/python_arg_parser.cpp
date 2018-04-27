@@ -153,12 +153,12 @@ std::string FunctionParameter::type_name() const {
   }
 }
 
-static inline std::pair<bool, int64_t> parse_as_integer(const std::string& s) {
-  if (s.empty()) return std::make_pair(false, std::numeric_limits<int64_t>::lowest());
+static inline at::optional<int64_t> parse_as_integer(const std::string& s) {
+  if (s.empty()) return at::nullopt;
   char *str_end;
   long ans = strtol(s.c_str(), &str_end, 0);
   // *str_end == 0 if the entire string was parsed as an integer.
-  return std::make_pair(*str_end == 0, ans);
+  return (*str_end == 0) ? at::optional<int64_t>(ans) : at::nullopt;
 }
 
 
@@ -183,12 +183,8 @@ void FunctionParameter::set_default_str(const std::string& str) {
       default_scalar = Scalar(NAN);
     } else {
       // we sometimes rely on integer-vs-float values, e.g. with arange.
-      auto is_integer = parse_as_integer(str);
-      if (std::get<0>(is_integer)) {
-        default_scalar = Scalar(std::get<1>(is_integer));
-      } else {
-        default_scalar = Scalar(atof(str.c_str()));
-      }
+      auto as_integer = parse_as_integer(str);
+      default_scalar = Scalar(as_integer.value_or(atof(str.c_str())));
     }
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {
