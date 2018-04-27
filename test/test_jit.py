@@ -2890,6 +2890,17 @@ class TestScript(TestCase):
             None, verbose=False)
         self.assertExpected(onnx_ish, subname='f2')
 
+    def test_shape_analysis_loop(self):
+        def foo(a, b, x):
+            c = a
+            for _ in range(2):
+                a = c + b
+                c = x
+                b = x
+            return a
+
+        self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), False)
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):

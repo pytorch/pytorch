@@ -196,28 +196,21 @@ struct Environment {
   // Given that after emitting statements in a block, we've added block inputs
   // for all value references and assignments, delete inputs for which there was
   // no assignment, only references.
-  void deleteExtraInputs(const SourceRange& loc, size_t skip_num = 0) {
-    std::vector<size_t> inputs_to_delete;
-    int i = skip_num;
-    for (const auto& x : captured_inputs) {
-      if (b->inputs()[i] == getValueInThisFrame(loc, x)) {
-        inputs_to_delete.push_back(i);
+  void deleteExtraInputs(const SourceRange& loc) {
+    // note: skip i == 0, it is the loop trip count for inputs
+    // and the loop condition for outputs
+    JIT_ASSERT(b->inputs().size() == b->outputs().size());
+    JIT_ASSERT(b->inputs().size() == captured_inputs.size() + 1);
+    for(size_t i = b->inputs().size() - 1; i > 0; i--) {
+      // nothing changed along this loop
+      if(b->inputs()[i] == b->outputs()[i]) {
+        auto name = captured_inputs[i - 1];
+        Value* orig = findInParentFrame(name)->asValue(loc, method);
+        b->inputs()[i]->replaceAllUsesWith(orig);
+        b->eraseInput(i);
+        b->eraseOutput(i);
+        captured_inputs.erase(captured_inputs.begin() + i - 1);
       }
-      i++;
-    }
-
-    for (auto ritr = inputs_to_delete.rbegin(); ritr != inputs_to_delete.rend();
-         ++ritr) {
-      auto name = captured_inputs[*ritr - skip_num];
-      Value* v = getValueInThisFrame(loc, name);
-      Value* orig = findInParentFrame(name)->asValue(loc, method);
-      // Replace all matching node inputs with original value
-      // from an enclosing scope
-      v->replaceAllUsesWith(orig);
-
-      // Actually remove the input
-      b->eraseInput(*ritr);
-      captured_inputs.erase(captured_inputs.begin() + *ritr - skip_num);
     }
   }
   std::vector<std::string> definedVariables() {
@@ -633,7 +626,6 @@ private:
     n->addInput(cond_val);
     auto* body_block = n->addBlock();
     Value* trip_count = body_block->addInput(); // Iteration num
-    size_t skip_inputs_num = 1;
 
     {
       pushFrame(body_block);
@@ -654,16 +646,24 @@ private:
 
       auto body_frame = popFrame();
       auto outer_frame = environment_stack;
-      // Remove inputs for values that did not mutate within the
-      // block
-      body_frame->deleteExtraInputs(range, skip_inputs_num);
 
-      // Add block outputs
+      // Add block outputs to correspond to each captured input
+      // some of these will be removed.
       for (const auto& x : body_frame->captured_inputs) {
         auto fv = body_frame->getValueInThisFrame(range, x);
         body_block->registerOutput(fv);
+      }
+
+      // Remove inputs for values that did not mutate within the
+      // block
+      body_frame->deleteExtraInputs(range);
+
+      // register node inputs/outputs for the true loop carried deps,
+      for(size_t i = 0; i < body_frame->captured_inputs.size(); ++i) {
+        auto x = body_frame->captured_inputs[i];
         n->addInput(outer_frame->getVar(x, range));
-        outer_frame->setVar(range, x, n->addOutput()->setType(fv->type()));
+        auto typ = body_block->inputs()[i + 1]->type();
+        outer_frame->setVar(range, x, n->addOutput()->setType(typ));
       }
 
     }
