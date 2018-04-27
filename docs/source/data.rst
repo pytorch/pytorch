@@ -6,9 +6,9 @@ torch.utils.data
 .. autoclass:: TensorDataset
 .. autoclass:: ConcatDataset
 .. autoclass:: DataLoader
-.. autoclass:: torch.utils.data.sampler.Sampler
-.. autoclass:: torch.utils.data.sampler.SequentialSampler
-.. autoclass:: torch.utils.data.sampler.RandomSampler
-.. autoclass:: torch.utils.data.sampler.SubsetRandomSampler
-.. autoclass:: torch.utils.data.sampler.WeightedRandomSampler
+.. autoclass:: torch.utils.data.Sampler
+.. autoclass:: torch.utils.data.SequentialSampler
+.. autoclass:: torch.utils.data.RandomSampler
+.. autoclass:: torch.utils.data.SubsetRandomSampler
+.. autoclass:: torch.utils.data.WeightedRandomSampler
 .. autoclass:: torch.utils.data.distributed.DistributedSampler

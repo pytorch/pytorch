@@ -3,7 +3,7 @@ import torch
 import torch.multiprocessing as multiprocessing
 from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
     _remove_worker_pids, _error_if_any_worker_fails
-from .sampler import SequentialSampler, RandomSampler, BatchSampler
+from . import SequentialSampler, RandomSampler, BatchSampler
 import signal
 import functools
 import collections
