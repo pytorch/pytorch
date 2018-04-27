@@ -489,7 +489,7 @@
     CPU: log_softmax_cpu
     CUDA: log_softmax_cuda
 
-- func: log_softmax_backward(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+- func: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
   dispatch:
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
@@ -686,7 +686,7 @@
     CPU: softmax_cpu
     CUDA: softmax_cuda
 
-- func: softmax_backward(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+- func: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
