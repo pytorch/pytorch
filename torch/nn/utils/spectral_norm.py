@@ -2,13 +2,8 @@
 Spectral Normalization from https://arxiv.org/abs/1802.05957
 """
 import torch
+from torch.nn.functional import normalize
 from torch.nn.parameter import Parameter
-
-
-def l2normalize(v, eps=1e-12):
-    """Scale to inputs norm to 1."""
-    denom = v.norm(p=2) + eps
-    return v / denom
 
 
 class SpectralNorm(object):
@@ -21,11 +16,11 @@ class SpectralNorm(object):
     def compute_weight(self, module):
         weight = module._parameters[self.name + '_org']
         u = module._buffers[self.name + '_u']
-        height, _cuda = weight.size(0), weight.is_cuda
+        height = weight.size(0)
         weight_mat = weight.view(height, -1)
         for _ in range(self.n_power_iterations):
-            v = l2normalize(torch.matmul(weight_mat.t(), u), self.eps)
-            u = l2normalize(torch.matmul(weight_mat, v), self.eps)
+            v = normalize(torch.matmul(weight_mat.t(), u), dim=0, eps=self.eps)
+            u = normalize(torch.matmul(weight_mat, v), dim=0, eps=self.eps)
 
         sigma = torch.dot(u, torch.matmul(weight_mat, v))
         weight.data /= sigma
@@ -49,7 +44,7 @@ class SpectralNorm(object):
         weight = module._parameters[name]
         height = weight.size(0)
 
-        u = l2normalize(weight.data.new(height).normal_(0, 1), fn.eps)
+        u = normalize(weight.data.new(height).normal_(0, 1), dim=0, eps=fn.eps)
         module.register_parameter(fn.name + "_org", weight)
         module.register_buffer(fn.name + "_u", u)
 
