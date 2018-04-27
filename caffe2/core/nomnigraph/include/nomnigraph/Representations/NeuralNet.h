@@ -40,7 +40,7 @@ class NeuralNetData;
 /// to use them.
 class Annotation {
 public:
-  enum class AnnotationKind { Generic, Device };
+  enum class AnnotationKind { Generic, Caffe2 };
 
   Annotation(AnnotationKind K) : Kind(K) {}
   Annotation() : Kind(AnnotationKind::Generic) {}
@@ -56,22 +56,6 @@ public:
 private:
   const AnnotationKind Kind;
   void *Saved = nullptr;
-};
-
-class DeviceAnnotation : public Annotation {
-public:
-  DeviceAnnotation() : Annotation(AnnotationKind::Device) {}
-  DeviceAnnotation(std::string device)
-      : Annotation(AnnotationKind::Device), Device(device) {}
-  void setDevice(std::string device) { Device = device; }
-  const std::string getDevice() const { return Device; }
-
-  static bool classof(const Annotation *A) {
-    return A->getKind() == AnnotationKind::Device;
-  }
-
-private:
-  std::string Device = 0;
 };
 
 class NeuralNetOperator : public Instruction {

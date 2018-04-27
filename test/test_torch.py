@@ -92,6 +92,9 @@ class TestTorch(TestCase):
             for i, j in zip(v1, v2):
                 res2 += i * j
             self.assertEqual(res1, res2)
+            out = torch.randn(()).type(tname)
+            torch.dot(v1, v2, out=out)
+            self.assertEqual(res1, out)
 
         # Test 0-strided
         for tname, _prec in types.items():
@@ -102,6 +105,9 @@ class TestTorch(TestCase):
             for i, j in zip(v1, v2):
                 res2 += i * j
             self.assertEqual(res1, res2)
+            out = torch.randn(()).type(tname)
+            torch.dot(v1, v2, out=out)
+            self.assertEqual(res1, out)
 
     def test_ger(self):
         types = {
@@ -2024,6 +2030,25 @@ class TestTorch(TestCase):
     def test_diagonal(self):
         self._test_diagonal(self, dtype=torch.float32, device='cpu')
 
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_diagonal_multidim(self):
+        x = torch.randn(10, 11, 12, 13)
+        xn = x.numpy()
+        for args in [(2, 2, 3),
+                     (2,),
+                     (-2, 1, 2),
+                     (0, -2, -1)]:
+            result = torch.diagonal(x, *args)
+            expected = xn.diagonal(*args)
+            self.assertEqual(expected.shape, result.shape)
+            self.assertTrue(np.allclose(expected, result.numpy()))
+        # test non-continguous
+        xp = x.permute(1, 2, 3, 0)
+        result = torch.diagonal(xp, 0, -2, -1)
+        expected = xp.numpy().diagonal(0, -2, -1)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertTrue(np.allclose(expected, result.numpy()))
+
     @staticmethod
     def _test_diagflat(self, dtype, device):
         # Basic sanity test
@@ -2595,6 +2620,10 @@ class TestTorch(TestCase):
                             # test torch.matmul function as well
                             torch_result = maybe_squeeze_result(l, r, torch.matmul(l, r))
                             self.assertEqual(truth, torch_result)
+                            # test torch.matmul with out
+                            out = torch.zeros_like(torch_result)
+                            torch.matmul(l, r, out=out)
+                            self.assertEqual(truth, maybe_squeeze_result(l, r, out))
 
                 # compare to bmm
                 bmm_result = (torch.bmm(lhs_expanded.contiguous().view(-1, *lhs_mat_dims),
@@ -5828,6 +5857,31 @@ class TestTorch(TestCase):
                           lambda: torch.isclose(x, x, torch.tensor(1, requires_grad=True), torch.tensor(1)).all())
         self.assertRaises(TypeError,
                           lambda: torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1., requires_grad=True)).all())
+
+    def test_parsing_intlist(self):
+        #  parse with integer variables
+        self.assertEqual(torch.Size([3, 4]), torch.ones((torch.tensor(3), torch.tensor(4))).shape)
+        self.assertEqual(torch.Size([3, 4]), torch.ones(torch.tensor(3), torch.tensor(4)).shape)
+        # parse with numpy integers
+        if TEST_NUMPY:
+            self.assertEqual(torch.Size([3, 4]), torch.ones((np.array(3), np.int64(4))).shape)
+            self.assertEqual(torch.Size([3, 4]), torch.ones(np.array(3), np.int64(4)).shape)
+            self.assertEqual(torch.Size([3, 4]), torch.ones((np.int64(3), np.array(4))).shape)
+            self.assertEqual(torch.Size([3, 4]), torch.ones(np.int64(3), np.array(4)).shape)
+
+        # fail parse with float variables
+        self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3.), torch.tensor(4))))
+        # fail parse with numpy floats
+        if TEST_NUMPY:
+            self.assertRaises(TypeError, lambda: torch.ones((np.float(3.), torch.tensor(4))))
+            self.assertRaises(TypeError, lambda: torch.ones((np.array(3.), torch.tensor(4))))
+
+        # fail parse with > 1 element variables
+        self.assertRaises(TypeError, lambda: torch.ones(torch.tensor(3, 3)))
+        self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3, 3))))
+        if TEST_NUMPY:
+            self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
+            self.assertRaises(TypeError, lambda: torch.ones((np.array(3, 3))))
 
     def _test_serialization(self, filecontext_lambda, test_use_filename=True):
         a = [torch.randn(5, 5).float() for i in range(2)]
