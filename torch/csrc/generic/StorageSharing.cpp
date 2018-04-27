@@ -367,7 +367,7 @@ PyObject * THPStorage_(newWithWeakPtr)(PyObject *_unused, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(ref.get()),
       "_new_with_weak_ptr(): arg.cdata must be an 'int'");
   THStorage *storage = (THStorage*)PyLong_AsVoidPtr(ref.get());
-  if (THStorage_(retainIfLive)(storage)) {
+  if (THStorage_(retainIfLive)(LIBRARY_STATE storage)) {
     return THPStorage_(New)(storage);
   }
   Py_RETURN_NONE;
