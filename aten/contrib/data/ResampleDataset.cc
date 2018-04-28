@@ -10,7 +10,7 @@ ResampleDataset::ResampleDataset(Dataset& dataset) {
    size_ = dataset.size();
    perm_ = std::vector<uint64_t>();
    perm_.reserve(size_);
-   for(int n = 0; n < size_; ++n)
+   for(uint64_t n = 0; n < size_; ++n)
       perm_[n] = n;
 }
 
@@ -37,7 +37,7 @@ void ResampleDataset::getField(uint64_t idx, std::string& fieldkey, at::Tensor& 
 void ResampleDataset::resample() {
    if(permfunc_) {
       perm_.reserve(size_);
-      for(int n = 0; n < size_; ++n)
+      for(uint64_t n = 0; n < size_; ++n)
          perm_[n] = permfunc_(n);
    }
 }
