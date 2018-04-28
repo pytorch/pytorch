@@ -55,4 +55,5 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
    else
      "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
    fi
+   "$CPP_BUILD"/libtorch/bin/test_api
 fi
