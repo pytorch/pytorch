@@ -94,7 +94,7 @@ std::unordered_map<std::string, operator_constructor> constructors = {
 
 std::string getDescriptor(jit::Node* n) {
   std::stringstream s;
-  JIT_ASSERT(n->kind().is_aten());
+  JIT_ASSERTM(n->kind().is_aten(), "%s is not an ATen op", n->kind().toDisplayString());
   s << n->kind().toUnqualString();
   if (tensor_vararg_fns.count(n->kind()) == 0)
     s << "-" << n->inputs().size();

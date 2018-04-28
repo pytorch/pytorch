@@ -736,6 +736,35 @@ Operation getOperation(jit::Node* node, bool values_are_variables) {
       return 0;
     };
   IR_ELSE()
+    switch (node->kind()) {
+      case onnx::Reshape: {
+        return [=](Stack& stack) {
+          auto shape = pop(stack).contiguous();
+          auto input = pop(stack);
+          JIT_ASSERT(shape.ndimension() == 1);
+          at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
+          stack.push_back(input.reshape(shape_list));
+          return 0;
+        };
+      } break;
+      case onnx::Shape: {
+        return [=](Stack& stack) {
+          auto t = pop(stack);
+          at::IntList sizes = t.sizes();
+          auto sizes_tensor = at::CPU(at::kLong).tensor(sizes.size());
+          auto accessor = sizes_tensor.accessor<int64_t, 1>();
+          for (size_t i=0; i<sizes.size(); ++i) {
+            accessor[i] = sizes[i];
+          }
+          if (values_are_variables) {
+            sizes_tensor = torch::autograd::make_variable(sizes_tensor);
+          }
+          stack.push_back(sizes_tensor);
+          return 0;
+        };
+      } break;
+      default: ;
+    };
     return getTensorOp(node).op;
   IR_END()
 }

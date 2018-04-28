@@ -131,6 +131,8 @@ struct Environment {
 
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
+    if (as_simple_value)
+      as_simple_value->setUniqueName(name);
     // prevent re-assignment involving any sugared values
     // any reassignment like:
     // a = ...

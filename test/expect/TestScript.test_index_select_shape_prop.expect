@@ -1,5 +1,5 @@
-graph(%x : Double(2, 2)
-      %y : Long(4)) {
-  %2 : Double(2, 4) = aten::index_select[dim=1](%x, %y)
+graph(%x.1 : Double(2, 2)
+      %y.1 : Long(4)) {
+  %2 : Double(2, 4) = aten::index_select[dim=1](%x.1, %y.1)
   return (%2);
 }

@@ -6,6 +6,7 @@ are to make all dynamic sizes operations traceble.
 
 import torch
 import torch.onnx
+import torch.onnx.utils
 
 
 def _shape_as_tensor(g, input):

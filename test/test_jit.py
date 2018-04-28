@@ -2695,8 +2695,10 @@ class TestScript(TestCase):
                 return x + x
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_python_fail(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2717,9 +2719,11 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         f = io.BytesIO()
         with self.assertRaisesRegex(RuntimeError, "Couldn't export Python operator"):
-            torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+            torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False,
+                               example_outputs=outputs)
 
     def test_onnx_export_script_inline_trace(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2740,8 +2744,10 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2763,8 +2769,10 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_module_loop(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -2778,9 +2786,10 @@ class TestScript(TestCase):
                 return x
 
         mte = ModuleToExport()
-        f = io.BytesIO()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -2794,8 +2803,10 @@ class TestScript(TestCase):
                 return x
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3, dtype=torch.long))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2824,7 +2835,8 @@ class TestScript(TestCase):
         reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
         self.assertEqual(result, reference)
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.ones(2, 3),), None, verbose=False))
+            mte, (torch.ones(2, 3),), None, verbose=False,
+            example_outputs=result, propagate=True))
 
     def test_trace_with_size(self):
         @torch.jit.trace(torch.zeros(1, 1))
@@ -2877,18 +2889,36 @@ class TestScript(TestCase):
             return x.t()
 
         f1 = Foo(transpose)
+        outputs_f1 = f1(torch.ones(1, 10, dtype=torch.float))
         f2 = Foo(linear)
+        outputs_f2 = f2(torch.ones(1, 10, dtype=torch.float))
 
         onnx_ish = torch.onnx._export_to_pretty_string(
             f1,
             (torch.ones(1, 10, dtype=torch.float), ),
-            None, verbose=False)
+            None, verbose=False, example_outputs=outputs_f1)
         self.assertExpected(onnx_ish, subname='f1')
         onnx_ish = torch.onnx._export_to_pretty_string(
             f2,
             (torch.ones(1, 10, dtype=torch.float), ),
-            None, verbose=False)
+            None, verbose=False, example_outputs=outputs_f2)
         self.assertExpected(onnx_ish, subname='f2')
+
+    def test_onnx_export_shape_reshape(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                import torch.onnx.operators
+                x = x.repeat(5, 1, 1)
+                shape = torch.onnx.operators.shape_as_tensor(x)
+                reshaped = torch.onnx.operators.reshape_from_tensor_shape(x, shape)
+                return reshaped
+
+        foo = torch.jit.trace(torch.zeros(1, 2, 3))(Foo())
+        outputs = foo(torch.zeros(1, 2, 3))
+        f = io.BytesIO()
+        s = torch.onnx._export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
+                                                example_outputs=outputs)
+        self.assertExpected(s)
 
     def test_shape_analysis_loop(self):
         def foo(a, b, x):

@@ -5,11 +5,11 @@ ModelProto {
   graph:
     GraphProto {
       name: "torch-jit-export"
-      inputs: [{name: "x", type:Tensor dims: 1 2 3}]
+      inputs: [{name: "x.1", type:Tensor dims: 1 2 3}]
       outputs: [{name: "1", type:Tensor dims: 1 2 3}]
       initializers: []
       nodes: [
-        Node {type: "Add", inputs: [x,x], outputs: [1], attributes: []}
+        Node {type: "Add", inputs: [x.1,x.1], outputs: [1], attributes: []}
       ]
     }
   opset_import: [OperatorSetIdProto { domain: }],

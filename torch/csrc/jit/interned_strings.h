@@ -104,7 +104,8 @@ _(onnx, Sub) \
 _(onnx, Transpose) \
 _(onnx, Unsqueeze) \
 _(onnx, Loop) \
-_(onnx, If)
+_(onnx, If) \
+_(onnx, Reshape)
 /* end */
 
 // These symbols are attribute keys.  They are shared between both ONNX and ATen
