@@ -36,13 +36,13 @@ Tensor _bincount_cpu_template(
     output = zeros(weights.type(), {nbins});
     weights_t* output_p = output.contiguous().data<weights_t>();
     const weights_t* weights_p = weights.contiguous().data<weights_t>();
-    for (size_t i = 0; i < self.size(0); i++) {
+    for (ssize_t i = 0; i < self.size(0); i++) {
       output_p[self_p[i]] += weights_p[i];
     }
   } else {
     output = zeros(CPU(kLong), {nbins});
     int64_t* output_p = output.contiguous().data<int64_t>();
-    for (size_t i = 0; i < self.size(0); i++) {
+    for (ssize_t i = 0; i < self.size(0); i++) {
       output_p[self_p[i]] += 1L;
     }
   }
