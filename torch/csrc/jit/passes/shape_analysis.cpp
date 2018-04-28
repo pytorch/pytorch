@@ -342,6 +342,18 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       setDynamicType(node);
       handled = true;
     } break;
+    case onnx::Shape: {
+      if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1, {})) {
+        std::vector<int64_t> dim_vec = {(int64_t)types.at(0)->sizes().size()};
+        at::IntList dims(dim_vec);
+        node->output()->setType(
+            std::make_shared<TensorType>(at::kLong, -1, dims));
+      }
+    } break;
+    case onnx::Reshape: {
+      setDynamicType(node);
+      handled = true;
+    }
     default: {
     } break;
   }

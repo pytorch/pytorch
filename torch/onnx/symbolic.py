@@ -277,9 +277,10 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
-    self_sizes = self.type().sizes()
-    if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
-        return g.op("Flatten", self, axis_i=1)
+    if self.isTensor():
+        self_sizes = self.type().sizes()
+        if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
+            return g.op("Flatten", self, axis_i=1)
     shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
 
@@ -700,10 +701,11 @@ def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
 
 
 def repeat(g, self, repeats):
-    sizes = self.type().sizes()
-    diff_dims = len(repeats) - len(sizes)
-    if diff_dims > 0:
-        self = view(g, self, [1] * diff_dims + sizes)
+    if self.isTensor():
+        sizes = self.type().sizes()
+        diff_dims = len(repeats) - len(sizes)
+        if diff_dims > 0:
+            self = view(g, self, [1] * diff_dims + sizes)
     return g.op("Tile", self, g.op("Constant", value_t=torch.LongTensor(repeats)))
 
 
