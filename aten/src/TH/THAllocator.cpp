@@ -58,9 +58,9 @@ typedef struct {
   int refcount;
 } THMapInfo;
 
-char * unknown_filename = "filename not specified";
+const char * unknown_filename = "filename not specified";
 #ifdef _WIN32
-char * unknown_eventname = "eventname not specified";
+const char * unknown_eventname = "eventname not specified";
 #endif
 
 THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags)
@@ -73,22 +73,24 @@ THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags
     THError("TH_ALLOCATOR_MAPPED_EXCLUSIVE flag requires opening the file "
         "in shared mode");
 
-  if (filename) {
-    ctx->filename = static_cast<char*>(THAlloc(strlen(filename)+1));
-    strcpy(ctx->filename, filename);
+  if (!filename) {
+    filename = unknown_filename;
+  }
+  ctx->filename = static_cast<char*>(THAlloc(strlen(filename)+1));
+  strcpy(ctx->filename, filename);
 #ifdef _WIN32
-    char *suffixname = "_event";
+  if (filename == unknown_filename) {
+    size_t namelen = strlen(unknown_eventname)+1;
+    ctx->eventname = static_cast<char*>(THAlloc(namelen));
+    strcpy(ctx->eventname, unknown_eventname);
+  } else {
+    const char *suffixname = "_event";
     size_t namelen = strlen(filename)+1+strlen(suffixname);
     ctx->eventname = static_cast<char*>(THAlloc(namelen));
     strcpy(ctx->eventname, ctx->filename);
     strcat(ctx->eventname, suffixname);
-#endif
-  } else {
-    ctx->filename = unknown_filename;
-#ifdef _WIN32
-    ctx->eventname = unknown_eventname;
-#endif
   }
+#endif
 
   ctx->flags = flags;
   ctx->size = 0;
@@ -134,12 +136,10 @@ ptrdiff_t THMapAllocatorContext_size(THMapAllocatorContext *ctx)
 
 void THMapAllocatorContext_free(THMapAllocatorContext *ctx)
 {
-  if (ctx->filename != unknown_filename) {
-    THFree(ctx->filename);
+  THFree(ctx->filename);
 #ifdef _WIN32
-    THFree(ctx->eventname);
+  THFree(ctx->eventname);
 #endif
-  }
   THFree(ctx);
 }
 

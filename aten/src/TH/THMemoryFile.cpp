@@ -355,7 +355,7 @@ READ_WRITE_METHODS(double, Double,
                    nByteWritten = snprintf((char*) mfself->storage->data+mfself->position, mfself->storage->size-mfself->position, "%.17g", data[i]),
                    1)
 
-static ssize_t THMemoryFile_readLong(THFile *self, int64_t *data, size_t n)
+static ssize_t THMemoryFile_readLong(THFile *self, int64_t *data, ssize_t n)
 {
   THMemoryFile *mfself = (THMemoryFile*)self;
   ssize_t nread = 0L;
