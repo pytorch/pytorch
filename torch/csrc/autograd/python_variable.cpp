@@ -209,13 +209,7 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   if (!THPVariable_Check(data)) {
     throw torch::TypeError("Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
   }
-  Tensor tensor = THPVariable_UnpackData(data);
-  if (self->cdata.data().type() != tensor.type()) {
-    // we change the type of var.data so we must change the type of var
-    auto newType = VariableType::getType(tensor);
-    self->cdata.temporary_hack_set_type(newType);
-  }
-  self->cdata.data() = std::move(tensor);
+  at::detail::set_data(self->cdata, THPVariable_UnpackData(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
@@ -232,7 +226,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
   if (py_grad == Py_None) {
-    var.reset_grad();
+    var.grad().reset();
     return 0;
   }
 
