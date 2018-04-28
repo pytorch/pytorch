@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorage.c"
+#define THC_GENERIC_FILE "generic/THCStorage.cpp"
 #else
 
 real* THCStorage_(data)(THCState *state, const THCStorage *self)
@@ -61,7 +61,7 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
 
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
-  storage->refcount = 1;
+  new (&storage->refcount) std::atomic<int>(1);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
@@ -169,7 +169,20 @@ void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char fla
 void THCStorage_(retain)(THCState *state, THCStorage *self)
 {
   if(self && (self->flag & TH_STORAGE_REFCOUNTED))
-    THAtomicIncrementRef(&self->refcount);
+    self->refcount++;
+}
+
+int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage)
+{
+  // TODO: Check if THC_STORAGE_REFCOUNTED?
+  int refcount = storage->refcount.load();
+  while (refcount > 0) {
+    if (storage->refcount.compare_exchange_strong(refcount, refcount + 1)) {
+      return 1;
+    }
+    refcount = storage->refcount.load();
+  }
+  return 0;
 }
 
 void THCStorage_(free)(THCState *state, THCStorage *self)
@@ -177,7 +190,7 @@ void THCStorage_(free)(THCState *state, THCStorage *self)
   if(!(self->flag & TH_STORAGE_REFCOUNTED))
     return;
 
-  if (THAtomicDecrementRef(&self->refcount))
+  if (--self->refcount == 0)
   {
     if(self->flag & TH_STORAGE_FREEMEM) {
       THCudaCheck(
@@ -186,6 +199,7 @@ void THCStorage_(free)(THCState *state, THCStorage *self)
     if(self->flag & TH_STORAGE_VIEW) {
       THCStorage_(free)(state, self->view);
     }
+    self->refcount.~atomic<int>();
     THFree(self);
   }
 }

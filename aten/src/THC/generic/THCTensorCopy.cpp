@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorCopy.c"
+#define THC_GENERIC_FILE "generic/THCTensorCopy.cpp"
 #else
 
 /* specific methods */

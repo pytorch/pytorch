@@ -1,4 +1,5 @@
 #include "THFile.h"
+#include "THStorage.hpp"
 #include "THFilePrivate.h"
 
 #define IMPLEMENT_THFILE_RW(TYPEC, TYPE)                          \

@@ -4,7 +4,6 @@
 #include "torch/csrc/python_headers.h"
 #include <THC/THC.h>
 
-
 struct THCPStream {
   PyObject_HEAD
   THCStream *cdata;

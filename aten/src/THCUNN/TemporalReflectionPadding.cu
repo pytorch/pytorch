@@ -5,6 +5,8 @@
 #include "THCDeviceUtils.cuh"
 #include "THCReduceApplyUtils.cuh"
 #include <THC/THCApply.cuh>
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"

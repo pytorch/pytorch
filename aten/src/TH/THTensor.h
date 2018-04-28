@@ -7,9 +7,6 @@
 #define THTensor          TH_CONCAT_3(TH,Real,Tensor)
 #define THTensor_(NAME)   TH_CONCAT_4(TH,Real,Tensor_,NAME)
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 /* basics */
 #include "generic/THTensor.h"
 #include "THGenerateAllTypes.h"
@@ -41,7 +38,4 @@ extern "C" {
 /* lapack support */
 #include "generic/THTensorLapack.h"
 #include "THGenerateFloatTypes.h"
-#ifdef __cplusplus
-}
-#endif
 #endif

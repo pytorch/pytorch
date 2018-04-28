@@ -1,4 +1,5 @@
 #include "THCGeneral.h"
+#include "THCStream.hpp"
 #include "TH.h"
 #include "THCAllocator.h"
 #include "THCCachingHostAllocator.h"
@@ -774,8 +775,8 @@ cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* 
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE
 
-#include "THCStorage.c"
-#include "THCAllocator.c"
+#include "THCStorage.cpp"
+#include "THCAllocator.cpp"
 
 /* from THCHalf.h */
 

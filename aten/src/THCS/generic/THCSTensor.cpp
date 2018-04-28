@@ -74,7 +74,7 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
   self->coalesced = 0;
   self->nnz = 0;
   // self->flag = TH_TENSOR_REFCOUNTED;
-  self->refcount = 1;
+  new (&self->refcount) std::atomic<int>(1);
 }
 
 THCSTensor* THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, int64_t *size) {
@@ -381,18 +381,19 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
 {
   if(!self)
     return;
-  if(THAtomicDecrementRef(&self->refcount))
+  if(--self->refcount == 0)
   {
     THFree(self->size);
     THCIndexTensor_(free)(state, self->indices);
     THCTensor_(free)(state, self->values);
+    self->refcount.~atomic<int>();
     THFree(self);
   }
 }
 
 void THCSTensor_(retain)(THCState *state, THCSTensor *self)
 {
-  THAtomicIncrementRef(&self->refcount);
+  self->refcount++;
 }
 
 int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...)

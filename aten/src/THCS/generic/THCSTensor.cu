@@ -3,6 +3,7 @@
 #else
 
 #include "THCThrustAllocator.cuh"
+#include "THCTensor.hpp"
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/gather.h>

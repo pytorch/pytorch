@@ -70,8 +70,8 @@ static void tensorNewWithSize(rpc::RPCMessage& raw_message) {
   THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
 
-  at::IntList sz(size->data, size->size);
-  at::IntList str(stride->data, stride->size);
+  at::IntList sz(THLongStorage_data(size), THLongStorage_size(size));
+  at::IntList str(THLongStorage_data(stride), THLongStorage_size(stride));
   workerTensors.emplace(
     id,
     createTensor(type, sz, str)
@@ -89,8 +89,8 @@ static void tensorNewWithStorage(rpc::RPCMessage& raw_message) {
   THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
 
-  at::IntList sz(size->data, size->size);
-  at::IntList str(stride->data, stride->size);
+  at::IntList sz(THLongStorage_data(size), THLongStorage_size(size));
+  at::IntList str(THLongStorage_data(stride), THLongStorage_size(stride));
   workerTensors.emplace(
     id,
     createTensorWithStorage(type, storage, storageOffset, sz, str)
@@ -124,7 +124,7 @@ static void tensorResize(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  at::ArrayRef<int64_t> sizeRef(size->data, size->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(size), THLongStorage_size(size));
   tensor.resize_(sizeRef);
   THLongStorage_free(size);
 }
@@ -180,8 +180,8 @@ static void tensorSetStorage(rpc::RPCMessage& raw_message) {
   THLongStorage *size = unpackTHLongStorage(raw_message);
   THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  at::ArrayRef<int64_t> sizeRef(size->data, size->size);
-  at::ArrayRef<int64_t> strideRef(stride->data, stride->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(size), THLongStorage_size(size));
+  at::ArrayRef<int64_t> strideRef(THLongStorage_data(stride), THLongStorage_size(stride));
   tensor.set_(
       *storage,
       storageOffset,
@@ -220,8 +220,8 @@ static void tensorSetStorage2d(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
   THLongStorage *sizes = THLongStorage_newWithSize2(size0, size1);
   THLongStorage *strides = THLongStorage_newWithSize2(stride0, stride1);
-  at::ArrayRef<int64_t> sizeRef(sizes->data, sizes->size);
-  at::ArrayRef<int64_t> strideRef(strides->data, strides->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(sizes), THLongStorage_size(sizes));
+  at::ArrayRef<int64_t> strideRef(THLongStorage_data(strides), THLongStorage_size(strides));
   tensor.set_(
     *storage,
     storageOffset,
@@ -245,8 +245,8 @@ static void tensorSetStorage3d(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
   THLongStorage *sizes = THLongStorage_newWithSize3(size0, size1, size2);
   THLongStorage *strides = THLongStorage_newWithSize3(stride0, stride1, stride2);
-  at::ArrayRef<int64_t> sizeRef(sizes->data, sizes->size);
-  at::ArrayRef<int64_t> strideRef(strides->data, strides->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(sizes), THLongStorage_size(sizes));
+  at::ArrayRef<int64_t> strideRef(THLongStorage_data(strides), THLongStorage_size(strides));
   tensor.set_(
     *storage,
     storageOffset,
@@ -273,8 +273,8 @@ static void tensorSetStorage4d(rpc::RPCMessage& raw_message) {
   THLongStorage *sizes = THLongStorage_newWithSize4(size0, size1, size2, size3);
   THLongStorage *strides = THLongStorage_newWithSize4(stride0, stride1,
                                                       stride2, stride3);
-  at::ArrayRef<int64_t> sizeRef(sizes->data, sizes->size);
-  at::ArrayRef<int64_t> strideRef(strides->data, strides->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(sizes), THLongStorage_size(sizes));
+  at::ArrayRef<int64_t> strideRef(THLongStorage_data(strides), THLongStorage_size(strides));
   tensor.set_(
     *storage,
     storageOffset,

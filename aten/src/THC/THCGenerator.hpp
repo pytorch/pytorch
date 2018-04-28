@@ -1,6 +1,9 @@
-#ifndef THC_GENERATOR_INC
-#define THC_GENERATOR_INC
+#pragma once
 
+// STOP!!! Thinking of including this header directly?  Please
+// read Note [TH abstraction violation]
+
+#include <atomic>
 #include <mutex>
 
 typedef struct THCGeneratorState {
@@ -8,12 +11,10 @@ typedef struct THCGeneratorState {
   struct mtgp32_kernel_params *kernel_params;
   int initf;
   uint64_t initial_seed;
-  int64_t philox_seed_offset;
+  std::atomic<int64_t> philox_seed_offset;
 } THCGeneratorState;
 
 struct THCGenerator {
   std::mutex mutex; /* mutex for using this generator */
   THCGeneratorState state;
 };
-
-#endif
