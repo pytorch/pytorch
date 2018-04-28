@@ -1,5 +1,7 @@
 #include "THMemoryFile.h"
+#include "THStorage.hpp"
 #include "THFilePrivate.h"
+#include "THDiskFile.h"
 #include "stdint.h"
 
 #ifndef _WIN32
@@ -353,8 +355,6 @@ READ_WRITE_METHODS(double, Double,
                    nByteWritten = snprintf((char*) mfself->storage->data+mfself->position, mfself->storage->size-mfself->position, "%.17g", data[i]),
                    1)
 
-int THDiskFile_isLittleEndianCPU(void);
-
 static ssize_t THMemoryFile_readLong(THFile *self, int64_t *data, ssize_t n)
 {
   THMemoryFile *mfself = (THMemoryFile*)self;
@@ -527,7 +527,7 @@ static ssize_t THMemoryFile_writeLong(THFile *self, int64_t *data, ssize_t n)
 
 static int8_t* THMemoryFile_cloneString(const int8_t *str, ssize_t size)
 {
-  int8_t *cstr = THAlloc(size);
+  int8_t *cstr = static_cast<int8_t*>(THAlloc(size));
   memcpy(cstr, str, size);
   return cstr;
 }
@@ -665,7 +665,7 @@ THFile *THMemoryFile_newWithStorage(THCharStorage *storage, const char *mode)
     storage->data[0] = '\0';
   }
 
-  mfself = THAlloc(sizeof(THMemoryFile));
+  mfself = static_cast<THMemoryFile*>(THAlloc(sizeof(THMemoryFile)));
 
   mfself->storage = storage;
   mfself->size = (storage ? storage->size-1 : 0);

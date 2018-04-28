@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.cpp"
 #else
 
-#include "THGenerator.h"
+#include "THGenerator.hpp"
 
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
 {

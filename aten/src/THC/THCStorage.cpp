@@ -1,8 +1,9 @@
-#include "THCStorage.h"
+#include "THCStorage.hpp"
 #include "THCGeneral.h"
-#include "THAtomic.h"
 
 #include "THCHalf.h"
 
-#include "generic/THCStorage.c"
+#include <new>
+
+#include "generic/THCStorage.cpp"
 #include "THCGenerateAllTypes.h"

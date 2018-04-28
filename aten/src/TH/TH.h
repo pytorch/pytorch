@@ -8,7 +8,6 @@
 #include "THLapack.h"
 #endif
 
-#include "THAtomic.h"
 #include "THVector.h"
 #include "THLogAdd.h"
 #include "THRandom.h"

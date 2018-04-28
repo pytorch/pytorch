@@ -1,16 +1,15 @@
-#include "THAtomic.h"
-#include "THStorage.h"
+#include "THStorage.hpp"
 
-#include "generic/THStorage.c"
+#include "generic/THStorage.cpp"
 #include "THGenerateAllTypes.h"
 
-#include "generic/THStorage.c"
+#include "generic/THStorage.cpp"
 #include "THGenerateHalfType.h"
 
-#include "generic/THStorageCopy.c"
+#include "generic/THStorageCopy.cpp"
 #include "THGenerateAllTypes.h"
 
-#include "generic/THStorageCopy.c"
+#include "generic/THStorageCopy.cpp"
 #include "THGenerateHalfType.h"
 
 
@@ -56,7 +55,7 @@ int THLongStorage_inferSize2(THLongStorage *output, int64_t *sizesA, int64_t dim
   THArgCheck(dimsB, 1, "Can't expand empty tensor b");
   ptrdiff_t ndim = dimsA > dimsB ? dimsA : dimsB;
 
-  int64_t *expandedSizes = THAlloc(sizeof(int64_t)*ndim);
+  int64_t *expandedSizes = static_cast<int64_t*>(THAlloc(sizeof(int64_t)*ndim));
 
   for (int64_t i = ndim - 1; i >= 0; --i) {
     int64_t offset = ndim - 1 - i;
@@ -92,7 +91,7 @@ int THLongStorage_inferSizeN(THLongStorage *output, int n, int64_t **sizes, int6
     ndim = dims[ j ] > ndim ? dims[ j ] : ndim;
   }
 
-  int64_t *expandedSizes = THAlloc(sizeof(int64_t)*ndim);
+  int64_t *expandedSizes = static_cast<int64_t*>(THAlloc(sizeof(int64_t)*ndim));
 
   for (int64_t i = ndim - 1; i >= 0; --i) {
     expandedSizes[ i ] = 1;
@@ -121,8 +120,8 @@ int THLongStorage_inferExpandGeometry(int64_t *tensorSizes, int64_t *tensorStrid
                                         char *error_buffer, int buffer_len) {
   ptrdiff_t ndim = THLongStorage_size(sizes);
 
-  int64_t *expandedSizesCalc = THAlloc(sizeof(int64_t)*ndim);
-  int64_t *expandedStridesCalc = THAlloc(sizeof(int64_t)*ndim);
+  int64_t *expandedSizesCalc = static_cast<int64_t*>(THAlloc(sizeof(int64_t)*ndim));
+  int64_t *expandedStridesCalc = static_cast<int64_t*>(THAlloc(sizeof(int64_t)*ndim));
 
   // create a new geometry for the tensors
   for (int64_t i = ndim - 1; i >= 0; --i) {

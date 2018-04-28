@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THTensor.cpp"
 #else
 
+#include <new>
+
 /**** access methods ****/
 THStorage *THTensor_(storage)(const THTensor *self)
 {
@@ -697,7 +699,7 @@ ptrdiff_t THTensor_(nElement)(const THTensor *self)
 void THTensor_(retain)(THTensor *self)
 {
   if(self->flag & TH_TENSOR_REFCOUNTED)
-    THAtomicIncrementRef(&self->refcount);
+    ++self->refcount;
 }
 
 void THTensor_(free)(THTensor *self)
@@ -707,12 +709,13 @@ void THTensor_(free)(THTensor *self)
 
   if(self->flag & TH_TENSOR_REFCOUNTED)
   {
-    if(THAtomicDecrementRef(&self->refcount))
+    if(--self->refcount == 0)
     {
       THFree(self->size);
       THFree(self->stride);
       if(self->storage)
         THStorage_(free)(self->storage);
+      self->refcount.~atomic<int>();
       THFree(self);
     }
   }
@@ -730,7 +733,7 @@ void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
 
 static void THTensor_(rawInit)(THTensor *self)
 {
-  self->refcount = 1;
+  new (&self->refcount) std::atomic<int>(1);
   self->storage = THStorage_(new)();
   self->storageOffset = 0;
   self->size = NULL;
