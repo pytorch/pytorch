@@ -388,6 +388,7 @@ void initJitScriptBindings(PyObject* module) {
       return m.graph();
     })
     .def("propagate_shapes", &Method::propagate_shapes)
+    .def("propagate_and_assign_input_and_output_shapes", &Method::propagate_and_assign_input_and_output_shapes)
     .def("params", &Method::params);
 
   m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
