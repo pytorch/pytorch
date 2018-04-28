@@ -167,10 +167,10 @@
   self: grad * ((self >= min) * (self <= max)).type_as(grad)
 
 - name: clamp_min(Tensor self, Scalar min)
-  self: grad * (self > min).type_as(grad)
+  self: grad * (self >= min).type_as(grad)
 
 - name: clamp_max(Tensor self, Scalar max)
-  self: grad * (self < max).type_as(grad)
+  self: grad * (self <= max).type_as(grad)
 
 - name: clone(Tensor self)
   self: grad
