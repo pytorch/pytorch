@@ -301,7 +301,7 @@ fi
 add_package 'glog'
 add_package 'gflags'
 add_package 'opencv'
-CAFFE2_CMAKE_ARGS+=("-DUSE_LMDB=OFF")
+caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 
 
 # Add packages required for pytorch
