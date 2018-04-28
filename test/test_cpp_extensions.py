@@ -106,6 +106,67 @@ class TestCppExtension(common.TestCase):
         has_value = cpp_extension.function_taking_optional(None)
         self.assertFalse(has_value)
 
+    def test_inline_jit_compile_extension(self):
+        cpp_source1 = '''
+        #include <torch/torch.h>
+        at::Tensor sin_add(at::Tensor x, at::Tensor y) {
+          return x.sin() + y.sin();
+        }
+        '''
+
+        cpp_source2 = '''
+        #include <torch/torch.h>
+
+        void cos_add_cuda(const double* x, const double* y, double* output, int size);
+        at::Tensor sin_add(at::Tensor x, at::Tensor y);
+        at::Tensor cos_add(at::Tensor x, at::Tensor y) {
+          auto output = at::zeros_like(x);
+          cos_add_cuda(x.data<double>(), y.data<double>(), output.data<double>(), output.numel());
+          return output;
+        }
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+          m.def("sin_add", &sin_add, "sin(x) + sin(y)");
+          m.def("cos_add", &cos_add, "cos(x) + cos(y)");
+        }
+        '''
+
+        cuda_source = '''
+        #include <cuda.h>
+        #include <cuda_runtime.h>
+        #include <ATen/ATen.h>
+
+        __global__ void cos_add_kernel(
+            const double* __restrict__ x,
+            const double* __restrict__ y,
+            double* __restrict__ output,
+            const int size) {
+          const auto index = blockIdx.x * blockDim.x + threadIdx.x;
+          if (index < size) {
+            output[index] = __cosf(x[index]) + __cosf(y[index]);
+          }
+        }
+
+        void cos_add_cuda(const double* x, const double* y, double* output, int size) {
+          const int threads = 1024;
+          const int blocks = (size + threads - 1) / threads;
+          cos_add_kernel<<<blocks, threads>>>(x, y, output, size);
+        }
+        '''
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='inline_jit_extension',
+            cpp_sources=[cpp_source1, cpp_source2],
+            cuda_sources=cuda_source,
+            verbose=True)
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        z = module.sin_add(x, y)
+        self.assertEqual(z, x.sin() + y.sin())
+
+        z = module.cos_add(x, y)
+        self.assertEqual(z, x.cos() + y.cos())
+
 
 if __name__ == '__main__':
     common.run_tests()

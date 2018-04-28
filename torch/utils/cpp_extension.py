@@ -461,20 +461,95 @@ def load(name,
                 extra_cflags=['-O2'],
                 verbose=True)
     '''
+    return _jit_compile_sources(
+        name,
+        [sources] if isinstance(sources, str) else sources,
+        extra_cflags,
+        extra_cuda_cflags,
+        extra_ldflags,
+        extra_include_paths,
+        build_directory or _get_build_directory(name, verbose),
+        verbose)
 
-    verify_ninja_availability()
 
-    # Allows sources to be a single path or a list of paths.
-    if isinstance(sources, str):
-        sources = [sources]
+def load_inline(name,
+                cpp_sources,
+                cuda_sources=None,
+                extra_cflags=None,
+                extra_cuda_cflags=None,
+                extra_ldflags=None,
+                extra_include_paths=None,
+                build_directory=None,
+                verbose=False):
+    '''
+    Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
-    if build_directory is None:
-        build_directory = _get_build_directory(name, verbose)
+    This function behaves exactly like :func:`load`, but takes its sources as
+    strings rather than filenames. These strings are stored to files in the
+    build directory, after which the behavior of :func:`load_inline` is
+    identical to :func:`load`. Strings passed in ``cpp_sources`` (a string or
+    list of strings) are stored with a `.cpp` extension, and the string or list
+    of strings passed in ``cuda_sources`` are stored with a ``.cu`` extension.
 
+    Example:
+        >>> from torch.utils.cpp_extension import load_inline
+        >>> source = \'\'\'
+        #include <torch/torch.h>
+        at::Tensor sin_add(at::Tensor x, at::Tensor y) {
+          return x.sin() + y.sin();
+        }
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+          m.def("sin_add", &sin_add, "sin(x) + sin(y)");
+        }
+        \'\'\'
+        >>> module = load_inline(name='inline_extension', cpp_sources=[source])
+    '''
+    build_directory = build_directory or _get_build_directory(name, verbose)
+
+    source_files = []
+
+    if isinstance(cpp_sources, str):
+        cpp_sources = [cpp_sources]
+    cuda_sources = cuda_sources or []
+    if isinstance(cuda_sources, str):
+        cuda_sources = [cuda_sources]
+
+    # We use the index into each respective list as the filename (with
+    # extension), i.e. 0.cpp, 1.cpp, 0.cu, 1.cu ...
+    for sources, extension in [(cpp_sources, 'cpp'), (cuda_sources, 'cu')]:
+        for index, source in enumerate(sources):
+            path = os.path.join(build_directory, '{}.{}'.format(
+                index, extension))
+            source_files.append(path)
+            with open(path, 'w') as file:
+                file.write(source)
+
+    if verbose:
+        print('Saved source files: {}'.format(', '.join(source_files)))
+
+    return _jit_compile_sources(
+        name,
+        source_files,
+        extra_cflags,
+        extra_cuda_cflags,
+        extra_ldflags,
+        extra_include_paths,
+        build_directory,
+        verbose)
+
+
+def _jit_compile_sources(name,
+                         sources,
+                         extra_cflags,
+                         extra_cuda_cflags,
+                         extra_ldflags,
+                         extra_include_paths,
+                         build_directory,
+                         verbose):
     baton = FileBaton(os.path.join(build_directory, 'lock'))
-
     if baton.try_acquire():
         try:
+            verify_ninja_availability()
             check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
             with_cuda = any(map(_is_cuda_file, sources))
             extra_ldflags = _prepare_ldflags(
