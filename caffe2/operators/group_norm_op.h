@@ -157,14 +157,6 @@ class GroupNormGradientOp final : public Operator<Context> {
   Tensor<Context> ds_;
   Tensor<Context> db_;
 
-  Tensor<Context> buffer_; // NxC size
-  Tensor<Context> buffer1_; // NxC size
-
-  Tensor<Context> buffer2_; // NxG size
-  Tensor<Context> buffer3_; // NxG size
-
-  Tensor<Context> sum_multiplier_; // max(HxW, dim_per_gp, N)
-
   // Input: dY, X, gamma, beta, mu, inv_sig
   // Output: dX, dgamma, dbeta
   INPUT_TAGS(OUTPUT_GRAD, INPUT, GAMMA, BETA, MU, INV_SIGMA);
