@@ -534,21 +534,26 @@ def load_inline(name,
                 function_name, docstring))
         cpp_sources.append('}')
 
-    cuda_sources.insert(0, '#include <ATen/ATen.h>')
-    cuda_sources.insert(1, '#include <cuda.h>')
-    cuda_sources.insert(2, '#include <cuda_runtime.h>')
-
     cpp_source_path = os.path.join(build_directory, 'main.cpp')
     with open(cpp_source_path, 'w') as cpp_source_file:
         cpp_source_file.write('\n'.join(cpp_sources))
 
-    cuda_source_path = os.path.join(build_directory, 'cuda.cu')
-    with open(cuda_source_path, 'w') as cuda_source_file:
-        cuda_source_file.write('\n'.join(cuda_sources))
+    sources = [cpp_source_path]
+
+    if cuda_sources:
+        cuda_sources.insert(0, '#include <ATen/ATen.h>')
+        cuda_sources.insert(1, '#include <cuda.h>')
+        cuda_sources.insert(2, '#include <cuda_runtime.h>')
+
+        cuda_source_path = os.path.join(build_directory, 'cuda.cu')
+        with open(cuda_source_path, 'w') as cuda_source_file:
+            cuda_source_file.write('\n'.join(cuda_sources))
+
+        sources.append(cuda_source_path)
 
     return _jit_compile(
         name,
-        [cpp_source_path, cuda_source_path],
+        sources,
         extra_cflags,
         extra_cuda_cflags,
         extra_ldflags,
