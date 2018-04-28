@@ -8,10 +8,10 @@ source:
 
 build:
   number: 0
-  string: py{{py}}_{{ environ.get('PYTORCH_BUILD_VERSION') }}
+  string: py{{py}}_{{ environ.get('PYTORCH_BUILD_DATE') }}
   skip: True  # [win]
   script_env:
-    - CONDA_CAFFE2_CMAKE_ARGS
+    - CAFFE2_CMAKE_ARGS
     - PACKAGE_CUDA_LIBS
     - BUILD_WITH_CUDA
   # features section here
