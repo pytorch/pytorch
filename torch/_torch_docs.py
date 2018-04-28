@@ -615,48 +615,24 @@ Arguments:
     input (Tensor): 1-d int tensor
     weights (Tensor): optional, weight for each value in the input tensor.
         Should be of same size as input tensor.
-    minlength (int): optional, min number of bins in the output tensor.
-        Should be non-negative.
+    minlength (int): optional, min number of bins. Should be non-negative.
+
+Shape:
+    output (Tensor): ``Size([argmax(input) + 1])``
 
 Example::
 
     >>> input = torch.randint(0, 8, (5,), dtype=torch.int64)
     >>> weights = torch.linspace(0, 1, steps=5)
     >>> input, weights
-    (
-     4
-     3
-     6
-     3
-     4
-    [torch.LongTensor of size (5,)]
-    ,
-     0.0000
-     0.2500
-     0.5000
-     0.7500
-     1.0000
-    [torch.FloatTensor of size (5,)]
-    )
+    (tensor([4, 3, 6, 3, 4]),
+     tensor([ 0.0000,  0.2500,  0.5000,  0.7500,  1.0000])
+
     >>> torch.bincount(input)
-     0
-     0
-     0
-     2
-     2
-     0
-     1
-    [torch.LongTensor of size (7,)]
+    tensor([0, 0, 0, 2, 2, 0, 1])
 
     >>> input.bincount(weights)
-     0.0000
-     0.0000
-     0.0000
-     1.0000
-     1.0000
-     0.0000
-     0.5000
-    [torch.DoubleTensor of size (7,)]
+    tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
 """)
 
 add_docstr(torch.bmm,

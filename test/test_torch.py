@@ -6546,34 +6546,59 @@ class TestTorch(TestCase):
             lambda: torch.unique(torch.cuda.FloatTensor([0., 1.])),
         )
 
-    def test_bincount_cpu(self):
-        long_t = torch.int64
+    @staticmethod
+    def _test_bincount(self, device):
+        # negative input throws
+        with self.assertRaisesRegex(RuntimeError, '1-d non-negative integral'):
+            torch.bincount(torch.tensor([1, -1], device=device))
+        # n-d input, with n > 1 throws
+        with self.assertRaisesRegex(RuntimeError, '1-d non-negative integral'):
+            torch.bincount(torch.tensor([[1, 2], [3, 4]], device=device))
+        # floating input type throws
+        with self.assertRaisesRegex(RuntimeError, 'not implemented'):
+            torch.bincount(torch.tensor([1., 0.3], device=device))
+        # minlength < 0 throws
+        with self.assertRaisesRegex(RuntimeError, 'minlength should be >= 0'):
+            torch.bincount(torch.tensor([1, 3], device=device),
+                           torch.tensor([.2, .2], device=device),
+                           minlength=-1)
+        # input and weights dim mismatch
+        with self.assertRaisesRegex(RuntimeError, 'same length'):
+            torch.bincount(torch.tensor([1, 0], device=device),
+                           torch.tensor([1., 0.3, 0.5], device=device))
+
+        # test tensor method without weights
+        long_counts = torch.tensor(
+            [0, 3, 2, 1, 3], dtype=torch.uint8, device=device).bincount()
+        self.assertEqual(
+            torch.tensor([1, 1, 1, 2], dtype=torch.int64, device=device),
+            long_counts)
+        # test minlength functionality
+        int_counts = torch.bincount(
+            torch.tensor([1, 1, 1, 1], device=device), minlength=5)
+        self.assertEqual(
+            torch.tensor([0, 4, 0, 0, 0], dtype=torch.int64, device=device),
+            int_counts)
         # test weights
         byte_counts = torch.bincount(
-            torch.tensor([0, 1, 1, 1, 4], dtype=torch.uint8),
-            torch.tensor([.1, .2, .3, .4, .5]))
-        self.assertEqual(torch.tensor([0.1, 0.9, 0, 0, 0.5]), byte_counts)
-        # test tensor method without weights
-        long_counts = torch.tensor([0, 3, 2, 1, 3]).bincount()
-        self.assertEqual(torch.tensor([1, 1, 1, 2], dtype=long_t), long_counts)
-        # test minlength functionality
-        int_counts = torch.bincount(torch.tensor([1, 1, 1, 1]), minlength=5)
-        self.assertEqual(torch.tensor([0, 4, 0, 0, 0], dtype=long_t), int_counts)
+            torch.tensor([0, 1, 1, 1, 4], device=device),
+            torch.tensor([.1, .2, .3, .4, .5], device=device))
+        self.assertEqual(
+            torch.tensor([0.1, 0.9, 0, 0, 0.5], device=device), byte_counts)
+        # test large number of bins - global memory use
+        big_exp = torch.zeros(10000000, device=device)
+        big_exp[-1] = 50.0
+        big_w = torch.tensor([.5] * 100, device=device)
+        big_out = torch.tensor([9999999] * 100, device=device).bincount(big_w)
+        self.assertEqual(big_exp, big_out)
+        # test large input size
+        big_exp = torch.zeros(2, device=device)
+        big_exp[1] = 1000000
+        big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
+        self.assertEqual(big_exp, big_out)
 
-        # negative input throws
-        with self.assertRaises(RuntimeError):
-            torch.bincount(torch.tensor([1, -1]))
-        # n-d input, with n > 1 throws
-        with self.assertRaises(RuntimeError):
-            torch.bincount(torch.tensor([[1, 2], [3, 4]]))
-        # minlength < 0 throws
-        with self.assertRaises(RuntimeError):
-            torch.bincount(torch.tensor([1, 3]),
-                           torch.tensor([.2, .2]),
-                           minlength=-1)
-        # floating input type throws
-        with self.assertRaises(RuntimeError):
-            torch.bincount(torch.tensor([1., 0.3]))
+    def test_bincount_cpu(self):
+        self._test_bincount(self, device='cpu')
 
 
 # Functions to test negative dimension wrapping

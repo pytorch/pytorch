@@ -1,8 +1,6 @@
 #include "ATen/ATen.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 
-#include <type_traits>
-
 namespace at { namespace native {
 
 ///////////////// bincount /////////////////
@@ -16,14 +14,13 @@ Tensor _bincount_cuda_template(
     AT_ERROR("minlength should be >= 0");
   }
   if (self.dim() != 1 || self.numel() == 0 ||
-      !isIntegralType(self.type().scalarType()) ||
       (!std::is_same<integral_t, uint8_t>::value &&
        *self.min().toBackend(kCPU).data<integral_t>() < 0)) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
 
   bool has_weights = weights.defined();
-  if (has_weights && weights.numel() != self.numel()) {
+  if (has_weights && weights.size(0) != self.size(0)) {
     AT_ERROR("input and weights should have the same length");
   }
 
