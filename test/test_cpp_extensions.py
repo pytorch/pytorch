@@ -100,6 +100,12 @@ class TestCppExtension(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
+    def test_optional(self):
+        has_value = cpp_extension.function_taking_optional(torch.ones(5))
+        self.assertTrue(has_value)
+        has_value = cpp_extension.function_taking_optional(None)
+        self.assertFalse(has_value)
+
 
 if __name__ == '__main__':
     common.run_tests()
