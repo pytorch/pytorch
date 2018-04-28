@@ -4,19 +4,7 @@
 
 #define TH_TENSOR_REFCOUNTED 1
 
-typedef struct THCTensor
-{
-    int64_t *size;
-    int64_t *stride;
-    int nDimension;
-
-    THCStorage *storage;
-    ptrdiff_t storageOffset;
-    int refcount;
-
-    char flag;
-
-} THCTensor;
+typedef struct THCTensor THCTensor;
 
 
 /**** access methods ****/

@@ -113,8 +113,8 @@ THDTensor *THDTensor_(newWithTensor)(THDTensor *self) {
 THDTensor *THDTensor_(newWithSize)(THLongStorage *size, THLongStorage *stride) {
   THDTensor* tensor = THDTensor_(_alloc)();
   if (size && stride)
-    THArgCheck(size->size == stride->size, 4, "inconsistent size");
-  THDTensor_(_resize)(tensor, size->size, size->data, stride ? stride->data : nullptr);
+    THArgCheck(THLongStorage_size(size) == THLongStorage_size(stride), 4, "inconsistent size");
+  THDTensor_(_resize)(tensor, THLongStorage_size(size), THLongStorage_data(size), stride ? THLongStorage_data(stride) : nullptr);
   RPCType constructed_type = type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
@@ -165,9 +165,9 @@ THDTensor *THDTensor_(newWithStorage)(THDStorage *storage, ptrdiff_t storageOffs
     tensor,
     storage,
     storageOffset,
-    (size ? size->size : (stride ? stride->size : 0)),
-    (size ? size->data : nullptr),
-    (stride ? stride->data : nullptr)
+    (size ? THLongStorage_size(size) : (stride ? THLongStorage_size(stride) : 0)),
+    (size ? THLongStorage_data(size) : nullptr),
+    (stride ? THLongStorage_data(stride) : nullptr)
   );
   RPCType constructed_type = type_traits<real>::type;
   masterCommandChannel->sendMessage(
@@ -289,7 +289,7 @@ THDTensor *THDTensor_(newExpand)(THDTensor *tensor, THLongStorage *size) {
 void THDTensor_(resize)(THDTensor *tensor, THLongStorage *size, THLongStorage *stride) {
   THArgCheck(size != NULL, 2, "invalid size");
   if (stride)
-    THArgCheck(stride->size == size->size, 3, "invalid stride");
+    THArgCheck(THLongStorage_size(stride) == THLongStorage_size(size), 3, "invalid stride");
 
   masterCommandChannel->sendMessage(
     packMessage(
@@ -300,7 +300,7 @@ void THDTensor_(resize)(THDTensor *tensor, THLongStorage *size, THLongStorage *s
     ),
     THDState::s_current_worker
   );
-  THDTensor_(_resize)(tensor, size->size, size->data, stride ? stride->data : nullptr);
+  THDTensor_(_resize)(tensor, THLongStorage_size(size), THLongStorage_data(size), stride ? THLongStorage_data(stride) : nullptr);
 }
 
 void THDTensor_(resizeAs)(THDTensor *tensor, THDTensor *src) {
@@ -427,15 +427,15 @@ void THDTensor_(setStorage)(THDTensor *self, THDStorage *storage,
     THDState::s_current_worker
   );
   if (size && stride)
-    THArgCheck(size->size == stride->size, 5, "inconsistent number of sizes and strides");
+    THArgCheck(THLongStorage_size(size) == THLongStorage_size(stride), 5, "inconsistent number of sizes and strides");
 
   THDTensor_(_set)(
     self,
     storage,
     storageOffset,
-    (size ? size->size : (stride ? stride->size : 0)),
-    (size ? size->data : nullptr),
-    (stride ? stride->data : nullptr)
+    (size ? THLongStorage_size(size) : (stride ? THLongStorage_size(stride) : 0)),
+    (size ? THLongStorage_data(size) : nullptr),
+    (stride ? THLongStorage_data(stride) : nullptr)
   );
 }
 
@@ -805,10 +805,10 @@ int THDTensor_(isSetTo)(const THDTensor *self, const THDTensor *src) {
 }
 
 int THDTensor_(isSize)(const THDTensor *self, const THLongStorage *dims) {
-  if (self->nDimension != dims->size)
+  if (self->nDimension != THLongStorage_size(dims))
     return 0;
   for (std::size_t d = 0; d < self->nDimension; d++)
-    if (self->size[d] != dims->data[d])
+    if (self->size[d] != THLongStorage_get(dims, d))
       return 0;
   return 1;
 }
@@ -827,7 +827,7 @@ ptrdiff_t THDTensor_(nElement)(const THDTensor *self) {
 
 void THDTensor_(retain)(THDTensor *tensor) {
   if (tensor->flag & TH_TENSOR_REFCOUNTED)
-    THAtomicIncrementRef(&tensor->refcount);
+    tensor->refcount++;
 }
 
 void THDTensor_(free)(THDTensor *tensor) {
@@ -835,7 +835,7 @@ void THDTensor_(free)(THDTensor *tensor) {
     return;
 
   // TODO: check refcounted flag?
-  if (THAtomicDecrementRef(&tensor->refcount)) {
+  if (--tensor->refcount == 0) {
     delete[] tensor->size;
     delete[] tensor->stride;
     masterCommandChannel->sendMessage(

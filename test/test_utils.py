@@ -28,10 +28,13 @@ from common import TestCase, run_tests, download_file
 
 try:
     import cffi
-    from torch.utils.ffi import compile_extension
     HAS_CFFI = True
 except ImportError:
     HAS_CFFI = False
+
+
+if HAS_CFFI:
+    from torch.utils.ffi import create_extension
 
 
 class SimplePlugin(Plugin):
@@ -357,16 +360,17 @@ class TestFFI(TestCase):
         shutil.rmtree(self.tmpdir)
 
     @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
+    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
     def test_cpu(self):
-        compile_extension(
+        create_extension(
             name='test_extensions.cpulib',
-            header=test_dir + '/ffi/src/cpu/lib.h',
+            headers=[test_dir + '/ffi/src/cpu/lib.h'],
             sources=[
                 test_dir + '/ffi/src/cpu/lib1.c',
                 test_dir + '/ffi/src/cpu/lib2.c',
             ],
             verbose=False,
-        )
+        ).build()
         from test_extensions import cpulib
         tensor = torch.ones(2, 2).float()
 
@@ -385,16 +389,17 @@ class TestFFI(TestCase):
                           lambda: cpulib.bad_func(tensor, 2, 1.5))
 
     @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
+    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
     def test_gpu(self):
-        compile_extension(
+        create_extension(
             name='gpulib',
-            header=test_dir + '/ffi/src/cuda/cudalib.h',
+            headers=[test_dir + '/ffi/src/cuda/cudalib.h'],
             sources=[
                 test_dir + '/ffi/src/cuda/cudalib.c',
             ],
             with_cuda=True,
             verbose=False,
-        )
+        ).build()
         import gpulib
         tensor = torch.ones(2, 2).float()
 

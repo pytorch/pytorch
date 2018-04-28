@@ -16,11 +16,9 @@
 
 #include "ATen/native/Distributions.h"
 
-#include <TH/THAtomic.h>
-
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>
-#include <THC/THCGenerator.h>
+#include <THC/THCGenerator.hpp>
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
 
@@ -32,7 +30,7 @@ THCGenerator* THCRandom_getGenerator(THCState* state);
 namespace {
 std::pair<uint64_t, uint64_t> next_philox_seed(at::Generator* gen, uint64_t increment) {
   auto gen_ = THCRandom_getGenerator(at::globalContext().thc_state);
-  uint64_t offset = THAtomicAddLong(&gen_->state.philox_seed_offset, increment);
+  uint64_t offset = gen_->state.philox_seed_offset.fetch_add(increment);
   return std::make_pair(gen_->state.initial_seed, offset);
 }
 

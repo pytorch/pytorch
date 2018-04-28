@@ -34,7 +34,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     int batch_size = THTensor_(size)(input, 0);
     THTensor_(resize1d)(output, batch_size);
 
-    int invalid_target = -1;  // We cannot throw an exception inside omp parallel
+    std::atomic<int> invalid_target(-1);  // We cannot throw an exception inside omp parallel
     int i;
     #pragma omp parallel for private(i)
     for (i = 0; i < batch_size; i++) {
@@ -48,12 +48,13 @@ void THNN_(ClassNLLCriterion_updateOutput)(
           real cur_weight = weights ? THTensor_fastGet1d(weights, cur_target) : 1.0f;
           THTensor_fastSet1d(output, i, -THTensor_fastGet2d(input, i, cur_target) * cur_weight);
       } else {
-        THAtomicCompareAndSwap(&invalid_target, -1, cur_target);
+        int tmp = -1;
+        invalid_target.compare_exchange_strong(tmp, cur_target);
       }
     }
 
-    if (invalid_target >= 0) {
-        THError("Target %d out of bounds", invalid_target);
+    if (invalid_target.load() >= 0) {
+        THError("Target %d out of bounds", invalid_target.load());
     }
 
     return;

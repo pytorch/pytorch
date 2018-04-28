@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensor.c"
+#define THC_GENERIC_FILE "generic/THCTensor.cpp"
 #else
 
 /**** access methods ****/
@@ -695,7 +695,7 @@ ptrdiff_t THCTensor_(nElement)(THCState *state, const THCTensor *self)
 void THCTensor_(retain)(THCState *state, THCTensor *self)
 {
   if(self->flag & TH_TENSOR_REFCOUNTED)
-    THAtomicIncrementRef(&self->refcount);
+    self->refcount++;
 }
 
 void THCTensor_(free)(THCState *state, THCTensor *self)
@@ -705,12 +705,13 @@ void THCTensor_(free)(THCState *state, THCTensor *self)
 
   if(self->flag & TH_TENSOR_REFCOUNTED)
   {
-    if(THAtomicDecrementRef(&self->refcount))
+    if(--self->refcount == 0)
     {
       THFree(self->size);
       THFree(self->stride);
       if(self->storage)
         THCStorage_(free)(state, self->storage);
+      self->refcount.~atomic<int>();
       THFree(self);
     }
   }
@@ -728,7 +729,7 @@ void THCTensor_(freeCopyTo)(THCState *state, THCTensor *self, THCTensor *dst)
 
 static void THCTensor_(rawInit)(THCState *state, THCTensor *self)
 {
-  self->refcount = 1;
+  new (&self->refcount) std::atomic<int>(1);
   self->storage = THCStorage_(new)(state);
   self->storageOffset = 0;
   self->size = NULL;

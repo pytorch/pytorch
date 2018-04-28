@@ -1,15 +1,7 @@
 #include "THAllocator.h"
-#include "THAtomic.h"
 
-/* needed for ATOMIC_INT_LOCK_FREE */
-/* cannot go in THAtomic.h because of interactions with OpenMP giving
-   sorry not implemented errors */
-#if defined(USE_C11_ATOMICS)
-#include <stdatomic.h>
+#include <atomic>
 #if ATOMIC_INT_LOCK_FREE == 2
-#define TH_ATOMIC_IPC_REFCOUNT 1
-#endif
-#elif defined(USE_MSC_ATOMICS) || defined(USE_GCC_ATOMICS)
 #define TH_ATOMIC_IPC_REFCOUNT 1
 #endif
 
@@ -66,14 +58,14 @@ typedef struct {
   int refcount;
 } THMapInfo;
 
-char * unknown_filename = "filename not specified";
+const char * unknown_filename = "filename not specified";
 #ifdef _WIN32
-char * unknown_eventname = "eventname not specified";
+const char * unknown_eventname = "eventname not specified";
 #endif
 
 THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags)
 {
-  THMapAllocatorContext *ctx = THAlloc(sizeof(THMapAllocatorContext));
+  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext*>(THAlloc(sizeof(THMapAllocatorContext)));
 
   if (!(flags & TH_ALLOCATOR_MAPPED_SHARED) && !(flags & TH_ALLOCATOR_MAPPED_SHAREDMEM))
     flags &= ~TH_ALLOCATOR_MAPPED_NOCREATE;
@@ -81,22 +73,24 @@ THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags
     THError("TH_ALLOCATOR_MAPPED_EXCLUSIVE flag requires opening the file "
         "in shared mode");
 
-  if (filename) {
-    ctx->filename = THAlloc(strlen(filename)+1);
-    strcpy(ctx->filename, filename);
+  if (!filename) {
+    filename = unknown_filename;
+  }
+  ctx->filename = static_cast<char*>(THAlloc(strlen(filename)+1));
+  strcpy(ctx->filename, filename);
 #ifdef _WIN32
-    char *suffixname = "_event";
+  if (filename == unknown_filename) {
+    size_t namelen = strlen(unknown_eventname)+1;
+    ctx->eventname = static_cast<char*>(THAlloc(namelen));
+    strcpy(ctx->eventname, unknown_eventname);
+  } else {
+    const char *suffixname = "_event";
     size_t namelen = strlen(filename)+1+strlen(suffixname);
-    ctx->eventname = THAlloc(namelen);
+    ctx->eventname = static_cast<char*>(THAlloc(namelen));
     strcpy(ctx->eventname, ctx->filename);
     strcat(ctx->eventname, suffixname);
-#endif
-  } else {
-    ctx->filename = unknown_filename;
-#ifdef _WIN32
-    ctx->eventname = unknown_eventname;
-#endif
   }
+#endif
 
   ctx->flags = flags;
   ctx->size = 0;
@@ -142,12 +136,10 @@ ptrdiff_t THMapAllocatorContext_size(THMapAllocatorContext *ctx)
 
 void THMapAllocatorContext_free(THMapAllocatorContext *ctx)
 {
-  if (ctx->filename != unknown_filename) {
-    THFree(ctx->filename);
+  THFree(ctx->filename);
 #ifdef _WIN32
-    THFree(ctx->eventname);
+  THFree(ctx->eventname);
 #endif
-  }
   THFree(ctx);
 }
 
@@ -178,7 +170,7 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
   if (size == 0)
     return NULL;
 
-  THMapAllocatorContext *ctx = ctx_;
+  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext*>(ctx_);
   void *data = NULL;
 
 #ifdef _WIN32
@@ -451,7 +443,7 @@ static void THMapAllocator_free(void* ctx_, void* data) {
   if (data == NULL)
     return;
 
-  THMapAllocatorContext *ctx = ctx_;
+  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext *>(ctx_);
 
 #ifdef _WIN32
   if ((ctx->flags & TH_ALLOCATOR_MAPPED_KEEPFD) || (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM))
@@ -514,7 +506,7 @@ static void THMapAllocator_free(void* ctx, void* data) {
 #if (defined(_WIN32) || defined(HAVE_MMAP)) && defined(TH_ATOMIC_IPC_REFCOUNT)
 
 static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
-  THMapAllocatorContext *ctx = _ctx;
+  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext *>(_ctx);
 
   if (ctx->flags & TH_ALLOCATOR_MAPPED_FROMFD)
     THError("THRefcountedMapAllocator doesn't support TH_ALLOCATOR_MAPPED_FROMFD flag");
@@ -544,7 +536,7 @@ static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
   if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
     map_info->refcount = 1;
   else
-    THAtomicIncrementRef(&map_info->refcount);
+    map_info->refcount++;
 
   return (void*)data;
 }
@@ -555,11 +547,11 @@ static void *THRefcountedMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t si
 }
 
 static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
-  THMapAllocatorContext *ctx = ctx_;
+  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext *>(ctx_);
 
 #ifdef _WIN32
   THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
-  if (THAtomicDecrementRef(&info->refcount)) {
+  if (--info->refcount == 0) {
     SetEvent(ctx->event); 
   }
   if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0)
@@ -567,7 +559,7 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
 #else /* _WIN32 */
 
   THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
-  if (THAtomicDecrementRef(&info->refcount)) {
+  if (--info->refcount == 0) {
 #ifdef HAVE_SHM_UNLINK
     if (shm_unlink(ctx->filename) == -1)
       THError("could not unlink the shared memory file %s", ctx->filename);
@@ -585,13 +577,13 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
 void THRefcountedMapAllocator_incref(THMapAllocatorContext *ctx, void *data)
 {
   THMapInfo *map_info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
-  THAtomicIncrementRef(&map_info->refcount);
+  ++map_info->refcount;
 }
 
 int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
 {
   THMapInfo *map_info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
-  return THAtomicDecrementRef(&map_info->refcount);
+  return --map_info->refcount == 0;
 }
 
 #else

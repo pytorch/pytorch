@@ -1,6 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THStorage.c"
+#define TH_GENERIC_FILE "generic/THStorage.cpp"
 #else
+
+#include <new>
 
 real* THStorage_(data)(const THStorage *self)
 {
@@ -31,10 +33,10 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                         THAllocator *allocator,
                                         void *allocatorContext)
 {
-  THStorage *storage = THAlloc(sizeof(THStorage));
-  storage->data = allocator->malloc(allocatorContext, sizeof(real)*size);
+  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
+  storage->data = static_cast<real*>(allocator->malloc(allocatorContext, sizeof(real)*size));
   storage->size = size;
-  storage->refcount = 1;
+  new (&storage->refcount) std::atomic<int>(1);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
@@ -104,7 +106,20 @@ void THStorage_(clearFlag)(THStorage *storage, const char flag)
 void THStorage_(retain)(THStorage *storage)
 {
   if(storage && (storage->flag & TH_STORAGE_REFCOUNTED))
-    THAtomicIncrementRef(&storage->refcount);
+    ++storage->refcount;
+}
+
+int THStorage_(retainIfLive)(THStorage *storage)
+{
+  // TODO: Check if TH_STORAGE_REFCOUNTED?
+  int refcount = storage->refcount.load();
+  while (refcount > 0) {
+    if (storage->refcount.compare_exchange_strong(refcount, refcount + 1)) {
+      return 1;
+    }
+    refcount = storage->refcount.load();
+  }
+  return 0;
 }
 
 void THStorage_(free)(THStorage *storage)
@@ -112,9 +127,9 @@ void THStorage_(free)(THStorage *storage)
   if(!storage)
     return;
 
-  if((storage->flag & TH_STORAGE_REFCOUNTED) && (THAtomicGet(&storage->refcount) > 0))
+  if((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0))
   {
-    if(THAtomicDecrementRef(&storage->refcount))
+    if(--storage->refcount == 0)
     {
       if(storage->flag & TH_STORAGE_FREEMEM) {
         storage->allocator->free(storage->allocatorContext, storage->data);
@@ -122,6 +137,7 @@ void THStorage_(free)(THStorage *storage)
       if(storage->flag & TH_STORAGE_VIEW) {
         THStorage_(free)(storage->view);
       }
+      storage->refcount.~atomic<int>();
       THFree(storage);
     }
   }
@@ -136,7 +152,7 @@ THStorage* THStorage_(newWithData)(real *data, ptrdiff_t size)
 THStorage* THStorage_(newWithDataAndAllocator)(real* data, ptrdiff_t size,
                                                THAllocator* allocator,
                                                void* allocatorContext) {
-  THStorage *storage = THAlloc(sizeof(THStorage));
+  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
   storage->data = data;
   storage->size = size;
   storage->refcount = 1;
@@ -157,9 +173,9 @@ void THStorage_(resize)(THStorage *storage, ptrdiff_t size)
       if (size == 0) {
         storage->data = NULL;
       } else {
-        storage->data = storage->allocator->malloc(
+        storage->data = static_cast<real*>(storage->allocator->malloc(
             storage->allocatorContext,
-            sizeof(real)*size);
+            sizeof(real)*size));
       }
       storage->size = size;
       if (old_data != NULL) {
@@ -173,10 +189,10 @@ void THStorage_(resize)(THStorage *storage, ptrdiff_t size)
         storage->allocator->free(storage->allocatorContext, old_data);
       }
     } else {
-      storage->data = storage->allocator->realloc(
+      storage->data = static_cast<real*>(storage->allocator->realloc(
               storage->allocatorContext,
               storage->data,
-              sizeof(real)*size);
+              sizeof(real)*size));
       storage->size = size;
     }
   } else {

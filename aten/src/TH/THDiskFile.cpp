@@ -105,7 +105,7 @@ size_t fread__(void *ptr, size_t size, size_t nitems, FILE *stream)
       {                                                                 \
         if(sizeof(TYPE) > 1)                                            \
         {                                                               \
-          char *buffer = THAlloc(sizeof(TYPE)*n);                       \
+          char *buffer = static_cast<char*>(THAlloc(sizeof(TYPE)*n));   \
           THDiskFile_reverseMemory(buffer, data, sizeof(TYPE), n);      \
           nwrite = fwrite(buffer, sizeof(TYPE), n, dfself->handle);     \
           THFree(buffer);                                               \
@@ -396,7 +396,7 @@ static ssize_t THDiskFile_readLong(THFile *self, int64_t *data, ssize_t n)
     else /* if(dfself->longSize == 8) */
     {
       int big_endian = !THDiskFile_isLittleEndianCPU();
-      int32_t *buffer = THAlloc(8*n);
+      int32_t *buffer = static_cast<int32_t*>(THAlloc(8*n));
       nread = fread__(buffer, 8, n, dfself->handle);
       ssize_t i;
       for(i = nread; i > 0; i--)
@@ -449,14 +449,14 @@ static ssize_t THDiskFile_writeLong(THFile *self, int64_t *data, ssize_t n)
       }
       else
       {
-        char *buffer = THAlloc(sizeof(int64_t)*n);
+        char *buffer = static_cast<char*>(THAlloc(sizeof(int64_t)*n));
         THDiskFile_reverseMemory(buffer, data, sizeof(int64_t), n);
         nwrite = fwrite(buffer, sizeof(int64_t), n, dfself->handle);
         THFree(buffer);
       }
     } else if(dfself->longSize == 4)
     {
-      int32_t *buffer = THAlloc(4*n);
+      int32_t *buffer = static_cast<int32_t*>(THAlloc(4*n));
       ssize_t i;
       for(i = 0; i < n; i++)
         buffer[i] = (int32_t) data[i];
@@ -468,7 +468,7 @@ static ssize_t THDiskFile_writeLong(THFile *self, int64_t *data, ssize_t n)
     else /* if(dfself->longSize == 8) */
     {
       int big_endian = !THDiskFile_isLittleEndianCPU();
-      int32_t *buffer = THAlloc(8*n);
+      int32_t *buffer = static_cast<int32_t*>(THAlloc(8*n));
       ssize_t i;
       for(i = 0; i < n; i++)
       {
@@ -517,7 +517,7 @@ static ssize_t THDiskFile_readString(THFile *self, const char *format, char **st
 
   if(format[1] == 'a')
   {
-    char *p = THAlloc(TBRS_BSZ);
+    char *p = static_cast<char*>(THAlloc(TBRS_BSZ));
     ssize_t total = TBRS_BSZ;
     ssize_t pos = 0;
 
@@ -526,7 +526,7 @@ static ssize_t THDiskFile_readString(THFile *self, const char *format, char **st
       if(total-pos == 0) /* we need more space! */
       {
         total += TBRS_BSZ;
-        p = THRealloc(p, total);
+        p = static_cast<char*>(THRealloc(p, total));
       }
       pos += fread(p+pos, 1, total-pos, dfself->handle);
       if (pos < total) /* eof? */
@@ -548,7 +548,7 @@ static ssize_t THDiskFile_readString(THFile *self, const char *format, char **st
   }
   else
   {
-    char *p = THAlloc(TBRS_BSZ);
+    char *p = static_cast<char*>(THAlloc(TBRS_BSZ));
     ssize_t total = TBRS_BSZ;
     ssize_t pos = 0;
     ssize_t size;
@@ -558,7 +558,7 @@ static ssize_t THDiskFile_readString(THFile *self, const char *format, char **st
       if(total-pos <= 1) /* we can only write '\0' in there! */
       {
         total += TBRS_BSZ;
-        p = THRealloc(p, total);
+        p = static_cast<char*>(THRealloc(p, total));
       }
       if (fgets(p+pos, (int) (total-pos), dfself->handle) == NULL) /* eof? */
       {
@@ -677,10 +677,10 @@ THFile *THDiskFile_new(const char *name, const char *mode, int isQuiet)
       THError("cannot open <%s> in mode %c%c", name, (isReadable ? 'r' : ' '), (isWritable ? 'w' : ' '));
   }
 
-  self = THAlloc(sizeof(THDiskFile));
+  self = static_cast<THDiskFile*>(THAlloc(sizeof(THDiskFile)));
 
   self->handle = handle;
-  self->name = THAlloc(strlen(name)+1);
+  self->name = static_cast<char*>(THAlloc(strlen(name)+1));
   strcpy(self->name, name);
   self->isNativeEncoding = 1;
   self->longSize = 0;
@@ -781,10 +781,10 @@ THFile *THPipeFile_new(const char *name, const char *mode, int isQuiet)
       THError("cannot open <%s> in mode %c%c.  This might be because eg the executable doesn't exist, but it could also be because you are out of memory.", name, (isReadable ? 'r' : ' '), (isWritable ? 'w' : ' '));
   }
 
-  self = THAlloc(sizeof(THDiskFile));
+  self = static_cast<THDiskFile*>(THAlloc(sizeof(THDiskFile)));
 
   self->handle = handle;
-  self->name = THAlloc(strlen(name)+1);
+  self->name = static_cast<char*>(THAlloc(strlen(name)+1));
   strcpy(self->name, name);
   self->isNativeEncoding = 1;
   self->longSize = 0;

@@ -2,6 +2,7 @@
 #define TH_GENERIC_FILE "generic/THVector.h"
 #else
 
+// Opaque C++ struct
 struct THGenerator;
 
 TH_API void THVector_(fill)(real *x, const real c, const ptrdiff_t n);

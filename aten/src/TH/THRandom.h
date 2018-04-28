@@ -3,13 +3,10 @@
 
 #include "THGeneral.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 #define _MERSENNE_STATE_N 624
 #define _MERSENNE_STATE_M 397
 
-/* Struct definition is moved to THGenerator.h, because THRandom.h
+/* Struct definition is moved to THGenerator.hpp, because THRandom.h
 needs to be C-compatible in order to be included in C FFI extensions. */
 typedef struct THGenerator THGenerator;
 typedef struct THGeneratorState THGeneratorState;
@@ -82,7 +79,5 @@ TH_API int THRandom_geometric(THGenerator *_generator, double p);
 
 /* Returns true with probability $p$ and false with probability $1-p$ (p > 0). */
 TH_API int THRandom_bernoulli(THGenerator *_generator, double p);
-#ifdef __cplusplus
-}
-#endif
+
 #endif

@@ -21,16 +21,8 @@
 #define TH_STORAGE_FREEMEM    4
 #define TH_STORAGE_VIEW       8
 
-typedef struct THStorage
-{
-    real *data;
-    ptrdiff_t size;
-    int refcount;
-    char flag;
-    THAllocator *allocator;
-    void *allocatorContext;
-    struct THStorage *view;
-} THStorage;
+// Struct definition is moved to THStorage.hpp (so this file stays C compatible)
+typedef struct THStorage THStorage;
 
 TH_API real* THStorage_(data)(const THStorage*);
 TH_API ptrdiff_t THStorage_(size)(const THStorage*);
@@ -62,6 +54,9 @@ TH_API void THStorage_(setFlag)(THStorage *storage, const char flag);
 TH_API void THStorage_(clearFlag)(THStorage *storage, const char flag);
 TH_API void THStorage_(retain)(THStorage *storage);
 TH_API void THStorage_(swap)(THStorage *storage1, THStorage *storage2);
+
+/* used by StorageSharing */
+TH_API int THStorage_(retainIfLive)(THStorage *storage);
 
 /* might differ with other API (like CUDA) */
 TH_API void THStorage_(free)(THStorage *storage);

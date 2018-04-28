@@ -1,5 +1,4 @@
 #include "THGeneral.h"
-#include "THAtomic.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -23,9 +22,9 @@
 
 #ifdef TH_BLAS_MKL
 // this is the C prototype, while mkl_set_num_threads is the fortran prototype
-extern void MKL_Set_Num_Threads(int);
+TH_EXTERNC void MKL_Set_Num_Threads(int);
 // this is the C prototype, while mkl_get_max_threads is the fortran prototype
-extern int  MKL_Get_Max_Threads(void);
+TH_EXTERNC int  MKL_Get_Max_Threads(void);
 #endif
 
 /* Torch Error Handling */

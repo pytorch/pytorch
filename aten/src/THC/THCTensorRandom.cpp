@@ -1,5 +1,5 @@
 #include "THCTensorRandom.h"
-#include "THCGenerator.h"
+#include "THCGenerator.hpp"
 
 #include <random>
 #include <curand.h>
