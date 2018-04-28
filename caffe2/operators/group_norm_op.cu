@@ -7,6 +7,8 @@
 
 #include "group_norm_op.h"
 
+#include <array>
+
 #include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"
