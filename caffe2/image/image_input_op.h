@@ -7,6 +7,7 @@
 #include <iostream>
 #include <algorithm>
 
+#include "caffe2/core/common.h"
 #include "caffe/proto/caffe.pb.h"
 #include "caffe2/core/db.h"
 #include "caffe2/utils/cast.h"
