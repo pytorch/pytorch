@@ -105,18 +105,16 @@ struct SquareFunctor<ResT, half> {
 template <typename T>
 struct ReduceMin {
   inline __device__ T operator()(T a, T b) const {
-    // a != a means a == NaN
     return (THCNumerics<T>::lt(a, b) ||
-            THCNumerics<T>::ne(a, a)) ? a : b;
+            THCNumerics<T>::isnan(a)) ? a : b;
   }
 };
 
 template <typename T>
 struct ReduceMax {
   inline __device__ T operator()(T a, T b) const {
-    // a != a means a == NaN
     return (THCNumerics<T>::gt(a, b) ||
-            THCNumerics<T>::ne(a, a)) ? a : b;
+            THCNumerics<T>::isnan(a)) ? a : b;
   }
 };
 
@@ -124,7 +122,7 @@ template <typename InT, typename AccT>
 struct ReduceMaxTo {
   inline __device__ AccT operator()(InT a, InT b) const {
     return ScalarConvert<InT, AccT>::to(
-      (THCNumerics<InT>::gt(a, b) || THCNumerics<InT>::ne(a, a)) ? a : b);
+      (THCNumerics<InT>::gt(a, b) || THCNumerics<InT>::isnan(a)) ? a : b);
   }
 };
 
@@ -134,7 +132,7 @@ struct ReduceMaxTo<half, float> {
   inline __device__ float operator()(float a, half b) const {
     float b_f = __half2float(b);
     return ((THCNumerics<float>::gt(a, b_f) ||
-             THCNumerics<float>::ne(a, a)) ? a : b_f);
+             THCNumerics<float>::isnan(a)) ? a : b_f);
   }
 };
 #endif // CUDA_HALF_TENSOR
@@ -795,9 +793,8 @@ struct MaxValuePair {
   __host__ __device__
   thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
                                     const thrust::pair<T, Index>& b) {
-    // catch NaN with a != a
     return (THCNumerics<T>::ge(a.first, b.first) ||
-            THCNumerics<T>::ne(a.first, a.first)) ? a : b;
+            THCNumerics<T>::isnan(a.first)) ? a : b;
   }
 };
 
@@ -806,9 +803,8 @@ struct MinValuePair {
   __host__ __device__
   thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
                                     const thrust::pair<T, Index>& b) {
-    // catch NaN with a != a
     return (THCNumerics<T>::le(a.first, b.first) ||
-            THCNumerics<T>::ne(a.first, a.first)) ? a : b;
+            THCNumerics<T>::isnan(a.first)) ? a : b;
   }
 };
 
