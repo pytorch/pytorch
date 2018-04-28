@@ -237,6 +237,22 @@ ELSE()
 ENDIF()
 ADD_DEPENDENCIES(ATen aten_files_are_generated)
 
+if(NOT MSVC)
+  target_compile_options(ATen
+    PRIVATE
+    -Wall
+    -Wextra
+    -fexceptions
+    -Wno-missing-field-initializers
+    -Wno-type-limits
+    -Wno-unused-parameter
+    -Wno-unknown-pragmas)
+
+  if ($ENV{WERROR})
+    target_compile_options(ATen PRIVATE -Werror)
+  endif()
+endif()
+
 set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/../third_party/tbb")
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
 set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)

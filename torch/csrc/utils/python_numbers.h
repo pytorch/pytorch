@@ -57,6 +57,32 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
   return (int64_t)value;
 }
 
+inline bool THPUtils_checkIndex(PyObject *obj) {
+  if (PyBool_Check(obj)) {
+    return false;
+  }
+  if (THPUtils_checkLong(obj)) {
+    return true;
+  }
+  auto index = THPObjectPtr(PyNumber_Index(obj));
+  if (!index) {
+    PyErr_Clear();
+    return false;
+  }
+  return true;
+}
+
+inline int64_t THPUtils_unpackIndex(PyObject* obj) {
+  if (!THPUtils_checkLong(obj)) {
+    auto index = THPObjectPtr(PyNumber_Index(obj));
+    if (index == nullptr) {
+      throw python_error();
+    }
+    obj = index.get();
+  }
+  return THPUtils_unpackLong(obj);
+}
+
 inline bool THPUtils_checkDouble(PyObject* obj) {
 #if PY_MAJOR_VERSION == 2
   return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj);

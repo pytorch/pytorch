@@ -533,6 +533,8 @@ else:
         '-Wno-missing-field-initializers',
         '-Wno-write-strings',
         '-Wno-zero-length-array',
+        # This is required for Python 2 declarations that are deprecated in 3.
+        '-Wno-deprecated-declarations',
         # Python 2.6 requires -fno-strict-aliasing, see
         # http://legacy.python.org/dev/peps/pep-3123/
         # We also depend on it in our code (even Python 3).

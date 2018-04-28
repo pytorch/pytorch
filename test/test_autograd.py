@@ -611,6 +611,78 @@ class TestAutograd(TestCase):
 
         TestFn.apply(b).sum().backward()
 
+    def test_free_deep_graph(self):
+        def scope():
+            depth = 150000
+            x = torch.randn(1, requires_grad=True)
+            y = x.clone()
+
+            # build a "chain" computation graph
+            for i in range(depth):
+                y = y + y * 0.000001
+
+            # triggers graph deletion
+            del x
+
+        # Should not stack overflow
+        scope()
+
+    def test_free_deep_graph_complicated(self):
+        def scope():
+            depth = 100000
+            randchoice = torch.randint(2, [depth, 2])
+            x = torch.randn(1, requires_grad=True)
+            y = x.clone()
+
+            # Hold the two previous values
+            prev_values = [None, None]
+
+            # Build a "chain with skip connections" graph
+            for i in range(depth):
+                prev_tensors = [tensor for tensor in prev_values[:-1]
+                                if tensor is not None]
+                prev_values.append(y)
+                prev_values.pop(0)
+
+                # Definitely pick one tensor to add
+                y += y * 0.000001
+
+                # Possibly add other tensors
+                nprev = len(prev_tensors)
+                if nprev == 2:
+                    y += randchoice[depth].mul(torch.cat(prev_tensors)).sum()
+
+            # triggers graph deletion
+            del x
+
+        # Should not stack overflow
+        scope()
+
+    def test_free_deep_graph_pyfunction(self):
+        class MyOp(Function):
+            @staticmethod
+            def forward(ctx, tensor1, tensor2):
+                return tensor1 + tensor2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output
+
+        def scope():
+            depth = 150000
+            x = torch.randn(1, requires_grad=True)
+            y = x.clone()
+
+            # build deeply nested computation graph
+            for i in range(depth):
+                y = MyOp.apply(y, y)
+
+            # triggers graph deletion
+            del x
+
+        # Should not stack overflow
+        scope()
+
     def test_no_grad(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4)
@@ -638,7 +710,7 @@ class TestAutograd(TestCase):
         self.assertFalse(y.requires_grad)
 
     def test_indexing(self):
-        x = torch.arange(1, 17).view(4, 4)
+        x = torch.arange(1., 17).view(4, 4)
         y = Variable(x, requires_grad=True)
 
         def compare(x, y, idx, indexed_tensor, indexed_var):
@@ -681,7 +753,7 @@ class TestAutograd(TestCase):
         check_index(x, y, ([0]))
         check_index(x, y, ([0], ))
 
-        x = torch.arange(1, 49).view(4, 3, 4)
+        x = torch.arange(1., 49).view(4, 3, 4)
         y = Variable(x, requires_grad=True)
 
         check_index(x, y, (slice(None), [0], [0]))
@@ -717,7 +789,7 @@ class TestAutograd(TestCase):
         compare(x, y, seq, indexed_tensor, indexed_var)
 
     def test_indexing_duplicates(self):
-        x = torch.arange(1, 17).view(4, 4)
+        x = torch.arange(1., 17).view(4, 4)
         y = Variable(x, requires_grad=True)
 
         idx = torch.LongTensor([1, 1, 3, 2, 1, 2])
@@ -728,7 +800,7 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, expected_grad)
 
         # with advanced indexing
-        x = torch.arange(1, 17).view(4, 4)
+        x = torch.arange(1., 17).view(4, 4)
         y = Variable(x, requires_grad=True)
 
         idx = [[1, 1, 3, 2, 1, 2], [0]]
@@ -740,7 +812,7 @@ class TestAutograd(TestCase):
 
         self.assertEqual(y.grad.data, expected_grad)
 
-        x = torch.arange(1, 17).view(4, 4)
+        x = torch.arange(1., 17).view(4, 4)
         y = Variable(x, requires_grad=True)
         idx = [[[1, 2], [0, 0]], [[0, 1], [1, 1]]]
         y[idx].sum().backward()
@@ -750,7 +822,7 @@ class TestAutograd(TestCase):
                                       [0, 0, 0, 0]])
         self.assertEqual(y.grad.data, expected_grad)
 
-        x = torch.arange(1, 65).view(4, 4, 4)
+        x = torch.arange(1., 65).view(4, 4, 4)
         y = Variable(x, requires_grad=True)
 
         idx = [[1, 1, 1], slice(None), slice(None)]
@@ -1952,7 +2024,7 @@ class TestAutograd(TestCase):
             self.assertTrue(hasattr(x, key))
 
     def test_as_strided(self):
-        x = Variable(torch.arange(0, 25).view(5, 5), requires_grad=True)
+        x = Variable(torch.arange(0., 25).view(5, 5), requires_grad=True)
 
         def as_strided(x):
             return x.as_strided([3, 3], [6, 2], 2)
@@ -2253,7 +2325,7 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
 def random_fullrank_matrix_distinct_singular_value(l):
     A = torch.randn(l, l)
     u, _, v = A.svd()
-    s = torch.arange(1, l + 1).mul_(1.0 / (l + 1))
+    s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
     return u.mm(torch.diag(s)).mm(v.t())
 
 

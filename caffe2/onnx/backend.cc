@@ -289,7 +289,8 @@ Caffe2Backend::get_renamed_operators() const {
       {"Equal", "EQ"},
       {"Less", "LT"},
       {"Greater", "GT"},
-      {"Unsqueeze", "ExpandDims"}};
+      {"Unsqueeze", "ExpandDims"},
+      {"Tile", "NumpyTile"}};
   return kRenamedOperators;
 }
 
