@@ -17,6 +17,13 @@ struct CallsiteDescriptor {
   bool allow_varargs;
 };
 
+struct NamedValue {
+  NamedValue(const SourceRange& loc, const std::string& name, Value* value)
+  : loc(loc), name(name), value(value) {}
+  SourceRange loc;
+  std::string name;
+  Value* value;
+};
 
 // The AST can contain nodes like `self`, `self.b` or `python_fn` that
 // are not first-class values in the graph representation, but instead
@@ -52,7 +59,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     SourceRange loc,
     Method & m,
     at::ArrayRef<Value*> inputs,
-    List<Attribute> attributes,
+    at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
 // n_binders is always set to the number of variables an expression is
 // syntactically bound to:
@@ -108,7 +115,7 @@ struct BuiltinFunction : public SugaredValue {
     SourceRange loc,
     Method & m,
     at::ArrayRef<Value*> inputs_,
-    List<Attribute> attributes,
+    at::ArrayRef<NamedValue> attributes,
     size_t n_binders) override;
 };
 

@@ -1656,7 +1656,7 @@ class TestScript(TestCase):
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "at most 2 inputs"):
+        with self.assertRaisesRegex(RuntimeError, "expected 1 input"):
             @torch.jit.script
             def func(x):
                 return torch.cat((x, x), x, dim=0)
@@ -2310,6 +2310,20 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
 
+    def test_constant_as_attr(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['dim']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.dim = 1
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return torch.cat([v, v, v], dim=self.dim)
+        v = torch.zeros(1, 1)
+        self.assertEqual(torch.cat([v, v, v], dim=1), M()(v))
+
     class StarTestSumStarred(torch.nn.Module):
         def __init__(self):
             super(TestScript.StarTestSumStarred, self).__init__()
@@ -2835,7 +2849,7 @@ class TestScript(TestCase):
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         foo.graph.propagate_shapes((a, b), False)
-        self.assertExpected(str(foo.graph))
+        self.assertExpected(str(torch._C._jit_pass_canonicalize(foo.graph)))
 
     def test_onnx_export_speculate(self):
 
@@ -2875,6 +2889,25 @@ class TestScript(TestCase):
             (torch.ones(1, 10, dtype=torch.float), ),
             None, verbose=False)
         self.assertExpected(onnx_ish, subname='f2')
+
+    def test_shape_analysis_loop(self):
+        def foo(a, b, x):
+            c = a
+            # on the first iteration of the loop it appears that
+            # c should have a expand to the size of b
+            # but on the second+ iterations, there is no broadcast and the
+            # sizes are different.
+            # previously this would cause the compiler to (1) enter an infinite
+            # loop trying to compute the shape, and (2) insert invalid
+            # broadcasts.
+            # this test ensure we don't regress on these issues
+            for _ in range(2):
+                a = c + b
+                c = x
+                b = x
+            return a
+
+        self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), False)
 
 
 # Smoke tests for export methods
