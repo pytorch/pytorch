@@ -54,7 +54,9 @@ Tensor batch_norm(
                && input.size(0) <= 131070
                && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #else
-  (void)cudnn_enabled; // avoid unused parameter warning
+  // avoid unused parameter warning
+  (void)use_cudnn;
+  (void)cudnn_enabled;
 #endif
 
 #if AT_CUDNN_ENABLED()

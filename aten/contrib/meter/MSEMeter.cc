@@ -18,7 +18,7 @@ void MSEMeter::add(Tensor& output, Tensor& target) {
   Tensor t = output.sub(target);
   Tensor result = t.mul(t).contiguous().toType(CPU(kDouble));
   double * data = result.data<double>();
-  for(uint64_t n = 0; n < numel(result); ++n) {
+  for(long n = 0; n < numel(result); ++n) {
     n_++;
     val_ += ( (1. / ((double)n_ - 1.) * val_) +
               ((1. /  (double)n_) * data[n]));
