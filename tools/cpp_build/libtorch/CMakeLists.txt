@@ -174,6 +174,7 @@ set(COMMON_INCLUDES
   "${ATEN_BUILD_PATH}/src/TH"
   "${TORCH_SRC_DIR}/csrc/api/"
   "${TORCH_SRC_DIR}/csrc/api/include"
+  "${TORCH_SRC_DIR}/../third_party" # For cereal/
   "${TORCH_SRC_DIR}/../"
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CUDA_INCLUDE_DIRS}")
