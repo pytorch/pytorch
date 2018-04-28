@@ -1,3 +1,5 @@
+#include <Python.h>
+
 #include "tensor_conversion_dispatch.h"
 
 #include "torch/csrc/utils/auto_gil.h"

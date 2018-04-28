@@ -54,13 +54,16 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
       COMPARE_ATTRIBUTEVALUE(is)
       COMPARE_ATTRIBUTEVALUE(s)
       COMPARE_ATTRIBUTEVALUE(ss)
-      case AttributeKind::t:
+      case AttributeKind::t: {
         if (!tensorEqual(lhs->t(name), rhs->t(name))) return false;
         break;
-      case AttributeKind::ts:
+      }
+      case AttributeKind::ts: {
         if (!tensorListEqual(lhs->ts(name), rhs->ts(name))) return false;
-      default:
-        // NB: Comparison of nodes with graph(s) will return false.
+        break;
+      }
+      case AttributeKind::g:
+      case AttributeKind::gs:
         return false;
     }
 

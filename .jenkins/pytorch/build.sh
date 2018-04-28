@@ -27,7 +27,7 @@ if ! which conda; then
   pip install mkl mkl-devel
 fi
 
-python setup.py install
+WERROR=1 python setup.py install
 
 # Add the ATen test binaries so that they won't be git clean'ed away
 git add -f aten/build/src/ATen/test
@@ -63,5 +63,5 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   echo "Building libtorch with NO_PYTHON"
   # NB: Install outside of source directory (at the same level as the root
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-  VERBOSE=1 tools/cpp_build/build_all.sh "$PWD/../cpp-build"
+  WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$PWD/../cpp-build"
 fi

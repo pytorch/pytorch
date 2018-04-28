@@ -1,11 +1,16 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
+
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/generated/aten_dispatch.h"
 
 #include <ATen/ExpandUtils.h>
 
+#include <exception>
 #include <iostream>
+#include <memory>
+#include <utility>
+#include <vector>
 
 namespace torch { namespace jit {
 
