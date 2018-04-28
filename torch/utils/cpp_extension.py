@@ -461,7 +461,7 @@ def load(name,
                 extra_cflags=['-O2'],
                 verbose=True)
     '''
-    return _jit_compile_sources(
+    return _jit_compile(
         name,
         [sources] if isinstance(sources, str) else sources,
         extra_cflags,
@@ -527,7 +527,7 @@ def load_inline(name,
     if verbose:
         print('Saved source files: {}'.format(', '.join(source_files)))
 
-    return _jit_compile_sources(
+    return _jit_compile(
         name,
         source_files,
         extra_cflags,
@@ -538,14 +538,14 @@ def load_inline(name,
         verbose)
 
 
-def _jit_compile_sources(name,
-                         sources,
-                         extra_cflags,
-                         extra_cuda_cflags,
-                         extra_ldflags,
-                         extra_include_paths,
-                         build_directory,
-                         verbose):
+def _jit_compile(name,
+                 sources,
+                 extra_cflags,
+                 extra_cuda_cflags,
+                 extra_ldflags,
+                 extra_include_paths,
+                 build_directory,
+                 verbose):
     baton = FileBaton(os.path.join(build_directory, 'lock'))
     if baton.try_acquire():
         try:
