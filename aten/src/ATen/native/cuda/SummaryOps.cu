@@ -5,7 +5,7 @@ namespace at { namespace native {
 
 ///////////////// bincount /////////////////
 namespace {
-template <typename weights_t, typename integral_t>
+template <typename input_t, typename weights_t>
 Tensor _bincount_cuda_template(
     const Tensor& self,
     const Tensor& weights,
@@ -14,8 +14,8 @@ Tensor _bincount_cuda_template(
     AT_ERROR("minlength should be >= 0");
   }
   if (self.dim() != 1 || self.numel() == 0 ||
-      (!std::is_same<integral_t, uint8_t>::value &&
-       *self.min().toBackend(kCPU).data<integral_t>() < 0)) {
+      (!std::is_same<input_t, uint8_t>::value &&
+       *self.min().toBackend(kCPU).data<input_t>() < 0)) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
 
@@ -30,12 +30,12 @@ Tensor _bincount_cuda_template(
   // alloc output counter on GPU
   Tensor output;
   if (has_weights) {
-    output = weights.type().zeros({nbins});
-    auto ret = at::cuda::CUDA_tensor_histogram<weights_t, integral_t>(
+    output = zeros(weights.type(), {nbins});
+    auto ret = at::cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
         output, self, weights, nbins, 1);
   } else {
     output = zeros(CUDA(kLong), {nbins});
-    auto ret = at::cuda::CUDA_tensor_histogram<int64_t, integral_t>(
+    auto ret = at::cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, 1);
   }
   return output;
@@ -45,9 +45,11 @@ Tensor _bincount_cuda_template(
 Tensor
 _bincount_cuda(const Tensor& self, const Tensor& weights, int64_t minlength) {
   return AT_DISPATCH_INTEGRAL_TYPES(self.type(), "bincount", [&] {
-    if (weights.type().scalarType() == ScalarType::Float)
-      return _bincount_cuda_template<float, scalar_t>(self, weights, minlength);
-    return _bincount_cuda_template<double, scalar_t>(self, weights, minlength);
+    const auto scalar = weights.type().scalarType();
+    if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
+      return _bincount_cuda_template<scalar_t, float>(self, weights, minlength);
+    return _bincount_cuda_template<scalar_t, double>(
+        self, weights.toType(CUDA(kDouble)), minlength);
   });
 }
 

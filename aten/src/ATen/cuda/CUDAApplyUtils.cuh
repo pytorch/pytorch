@@ -1093,7 +1093,7 @@ __global__ void kernelHistogram1D(
     case: MIN_NUMBER_BINS_FOR_GLOBAL_MEM <= #bins
         GLOBAL: all threads atomically update to a single **global** hist copy.
  */
-template <typename scalar1, typename scalar2>
+template <typename scalar1, typename scalar2, bool HasWeights>
 bool CUDA_tensor_histogram(
     at::Tensor a, /* output */
     at::Tensor b, /* input */
@@ -1104,11 +1104,10 @@ bool CUDA_tensor_histogram(
     TensorArgType bType = TensorArgType::ReadOnly,
     TensorArgType cType = TensorArgType::ReadOnly) {
   checkBackend("CUDA_tensor_histogram", {a, b}, Backend::CUDA);
-  constexpr int has_weights = !std::is_integral<scalar1>::value;
-  if (has_weights) {
+  if (HasWeights) {
     checkBackend("CUDA_tensor_histogram", {c}, Backend::CUDA);
   }
-  int64_t totalElements = b.numel();
+  auto totalElements = b.size(0);
 
   const dim3 block = getApplyBlock();
   dim3 grid;
@@ -1137,7 +1136,7 @@ bool CUDA_tensor_histogram(
     memType = CUDAHistogramMemoryType::GLOBAL;
   }
   // alloc memory for MULTI_BLOCK
-  using IndexType = uint64_t;
+  using IndexType = int64_t;
   auto aInfo = detail::getTensorInfo<scalar1, IndexType>(a);
   auto bInfo = detail::getTensorInfo<scalar2, IndexType>(b);
   detail::TensorInfo<scalar1, IndexType> pInfo = aInfo;
@@ -1147,7 +1146,7 @@ bool CUDA_tensor_histogram(
     pInfo = detail::getTensorInfo<scalar1, IndexType>(partial_output);
   }
 
-  if (has_weights) {
+  if (HasWeights) {
     auto cInfo = detail::getTensorInfo<scalar1, IndexType>(c);
     const auto getWeightsOp = [cInfo] __device__(IndexType cIndex) {
       const IndexType cOffset =
