@@ -2,17 +2,18 @@
 
 #include <atomic>
 #include <memory>
-#include <iostream>
 
 #include "ATen/Retainable.h"
 #include "ATen/ScalarType.h"
 
 namespace at {
-
-struct Type;
 class Scalar;
+struct Type;
 struct Storage;
+struct Tensor;
+} // namespace at
 
+namespace at {
 struct TensorImpl : public Retainable {
   explicit TensorImpl(Type * type)
   : is_scalar(false), type_(type) {}
@@ -50,9 +51,30 @@ struct TensorImpl : public Retainable {
   void setScalar(bool s) {
     is_scalar = s;
   }
+
+  // ~~~~~ Autograd API ~~~~~
+  // Some methods below are defined in TensorImpl.cpp because Tensor is an
+  // incomplete type.
+
+  AT_API virtual void set_requires_grad(bool requires_grad) {
+    AT_ERROR("set_requires_grad is not implemented for Tensor");
+  }
+  AT_API virtual bool requires_grad() const {
+    AT_ERROR("requires_grad is not implemented for Tensor");
+  }
+
+  AT_API virtual Tensor& grad();
+  AT_API virtual const Tensor& grad() const;
+
+  AT_API virtual Tensor detach() const;
+  AT_API virtual void detach_() {
+    AT_ERROR("detach_ is not implemented for Tensor");
+  }
+
+  AT_API virtual void set_data(Tensor new_data);
+
 protected:
   bool is_scalar;
   Type * type_;
 };
-
-}
+} // namespace at

@@ -395,7 +395,7 @@ static void _wrap_outputs(THPFunction *self,
       }
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
-      var.reset_grad();
+      var.grad().reset();
       var.clear_hooks();
       if (auto grad_acc_fn = var.try_get_grad_accumulator()) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
