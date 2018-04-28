@@ -75,8 +75,6 @@ class GroupNormOp final : public Operator<Context> {
   const float epsilon_;
   const StorageOrder order_;
 
-  Tensor<Context> moments_buffer_;
-
   // Input: X, gamma, beta
   // Output: Y, mu, inv_sig
   INPUT_TAGS(INPUT, GAMMA, BETA);
