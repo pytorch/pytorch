@@ -488,7 +488,7 @@ def load_inline(name,
     strings rather than filenames. These strings are stored to files in the
     build directory, after which the behavior of :func:`load_inline` is
     identical to :func:`load`. Strings passed in ``cpp_sources`` (a string or
-    list of strings) are stored with a `.cpp` extension, and the string or list
+    list of strings) are stored with a ``.cpp`` extension, and the string or list
     of strings passed in ``cuda_sources`` are stored with a ``.cu`` extension.
 
     Example:
