@@ -301,6 +301,8 @@ fi
 add_package 'glog'
 add_package 'gflags'
 add_package 'opencv'
+CAFFE2_CMAKE_ARGS+=("-DUSE_LMDB=OFF")
+
 
 # Add packages required for pytorch
 if [[ -n $pytorch_too ]]; then
