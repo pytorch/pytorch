@@ -155,6 +155,9 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter_autograd_function.cpp
   ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/containers.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
   )
 
 add_library(torch SHARED ${TORCH_SRCS})
@@ -169,6 +172,9 @@ set(COMMON_INCLUDES
   "${ATEN_INCLUDE_DIR}/TH"
   "${ATEN_BUILD_INCLUDE_DIR}"
   "${ATEN_BUILD_PATH}/src/TH"
+  "${TORCH_SRC_DIR}/csrc/api/"
+  "${TORCH_SRC_DIR}/csrc/api/include"
+  "${TORCH_SRC_DIR}/../"
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CUDA_INCLUDE_DIRS}")
 
@@ -193,9 +199,9 @@ install(TARGETS torch
   LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
-set(TORCH_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
+# JIT Tests. TODO: Put into test/cpp/jit folder
 
-add_executable(test_jit ${TORCH_TEST_SRCS})
+add_executable(test_jit ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
 
 target_link_libraries(test_jit torch)
 
@@ -204,7 +210,23 @@ target_include_directories(test_jit PUBLIC
   "${TORCH_SRC_DIR}/../third_party/catch/single_include"
   "${COMMON_INCLUDES}")
 
-install(TARGETS test_jit
-  RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
-  LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
-  ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+# API Tests
+
+add_executable(test_api
+  ${TORCH_SRC_DIR}/../test/cpp/api/test.cpp
+  ${TORCH_SRC_DIR}/../test/cpp/api/container_t.cpp
+  ${TORCH_SRC_DIR}/../test/cpp/api/misc_t.cpp
+  ${TORCH_SRC_DIR}/../test/cpp/api/rnn_t.cpp
+  ${TORCH_SRC_DIR}/../test/cpp/api/integration_t.cpp
+  ${TORCH_SRC_DIR}/../test/cpp/api/optim_t.cpp
+  ${TORCH_SRC_DIR}/../test/cpp/api/serialization_t.cpp
+)
+
+target_compile_options(test_api PRIVATE -Dlest_FEATURE_AUTO_REGISTER=1)
+
+add_custom_command(
+  TARGET test_api PRE_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/mnist" "${CMAKE_CURRENT_BINARY_DIR}/mnist"
+)
+
+target_link_libraries(test_api torch)

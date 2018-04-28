@@ -11,7 +11,7 @@
 #include <cuda_runtime.h>
 #endif
 
-#include "detail.h"
+#include "torch/detail.h"
 
 namespace autograd {
 namespace detail {

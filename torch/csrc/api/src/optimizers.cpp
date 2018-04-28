@@ -1,4 +1,4 @@
-#include "optimizers.h"
+#include "torch/optimizers.h"
 
 namespace autograd {
 
@@ -7,7 +7,7 @@ void OptimizerImpl::zero_grad() {
     auto& grad = p.second.grad();
     if (grad.defined()) {
       grad = grad.detach();
-      grad.data().zero_();
+      torch::autograd::as_variable_ref(grad).data().zero_();
     }
   }
 }
@@ -24,7 +24,7 @@ void SGD::step() {
     if (!grad.defined())
       continue;
 
-    auto d_p = grad.data();
+    auto d_p = torch::autograd::as_variable_ref(grad).data();
     if (weight_decay_ > 0) {
       d_p.add_(p, weight_decay_);
     };
@@ -64,7 +64,7 @@ void Adagrad::step() {
     if (!grad.defined())
       continue;
 
-    auto d_p = grad.data();
+    auto d_p = torch::autograd::as_variable_ref(grad).data();
     if (weight_decay_ > 0) {
       d_p.add_(p, weight_decay_);
     };
@@ -109,7 +109,7 @@ void RMSprop::step() {
       };
     };
 
-    auto d_p = grad.data();
+    auto d_p = torch::autograd::as_variable_ref(grad).data();
     if (weight_decay_ > 0) {
       d_p.add_(p, weight_decay_);
     };
@@ -165,7 +165,7 @@ void Adam::step() {
 
     step += 1;
 
-    auto d_p = grad.data();
+    auto d_p = torch::autograd::as_variable_ref(grad).data();
     if (weight_decay_ > 0) {
       d_p.add_(p, weight_decay_);
     }

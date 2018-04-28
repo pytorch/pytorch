@@ -1,7 +1,7 @@
 #pragma once
 
-#include "containers.h"
-#include "detail.h"
+#include "torch/containers.h"
+#include "torch/detail.h"
 
 #include "cereal/access.hpp"
 #include "cereal/cereal.hpp"
