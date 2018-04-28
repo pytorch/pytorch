@@ -35,7 +35,7 @@ class ONNXWhileOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() {
-    return DispatchHelper<TensorTypes<int, bool, long, long long>>::call(this, Input(1));
+    return DispatchHelper<TensorTypes<int, bool, long>>::call(this, Input(1));
   }
 
   // Operator

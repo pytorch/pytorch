@@ -24,8 +24,8 @@ class NumpyTileOp : public Operator<Context> {
 
     // Check that the `repeats` tensor has the correct rank, has a number of
     // elements equal to the number of axes of `input`.
-    CAFFE_ENFORCE(repeats.ndim() == 1, "repeats input must be a 1-d tensor");
-    CAFFE_ENFORCE(repeats.size() == input.ndim(), "repeats input have the same"
+    CAFFE_ENFORCE_EQ(repeats.ndim(), 1, "repeats input must be a 1-d tensor");
+    CAFFE_ENFORCE_EQ(repeats.size(), input.ndim(), "repeats input have the same"
                             " number of elements as `inputs` has dimensions.");
     const int64_t *repeats_data = repeats.template data<int64_t>();
     for (size_t i=0; i<repeats.size(); ++i) {
@@ -37,7 +37,7 @@ class NumpyTileOp : public Operator<Context> {
     // Alternate inputs and outputs between two buffers. Repeatedly apply the
     // Tile kernel along each axis. Then copy out the resulting data into the
     // output tensor.
-    Tensor<Context> *src = &buffer_a, *dst = &buffer_b;
+    Tensor<Context> *src = &buffer, *dst = output;
     src->CopyFrom(input);
     vector<TIndex> output_dims(input.dims());
     for (size_t i = 0; i < repeats.size(); ++i) {
@@ -81,10 +81,8 @@ class NumpyTileOp : public Operator<Context> {
     // NB: because we have the swap at the end of the above loop, our real
     // result tensor is going to live in *src when we reach this line
     // whether we entered the loop or not :)
-    output->CopyFrom(*src);
-
-    // reshape output to be input tiled along the axis
-    output->Reshape(output_dims);
+    if (output != src)
+      output->CopyFrom(*src);
 
     return true;
   }
@@ -108,7 +106,7 @@ class NumpyTileOp : public Operator<Context> {
     }
   }
 
-  Tensor<Context> buffer_a, buffer_b;
+  Tensor<Context> buffer;
 };
 
 } // namespace caffe2
