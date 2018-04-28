@@ -151,10 +151,10 @@ bool test_mnist(uint32_t batch_size, uint32_t num_epochs, bool useGPU,
      return data.toBackend(useGPU ? at::kCUDA : at::kCPU);
    };
 
-   auto trdata = readData("tests/mnist/train-images-idx3-ubyte");
-   auto trlabel = readLabels("tests/mnist/train-labels-idx1-ubyte");
-   auto tedata = readData("tests/mnist/t10k-images-idx3-ubyte");
-   auto telabel = readLabels("tests/mnist/t10k-labels-idx1-ubyte");
+   auto trdata = readData("test/cpp/api/mnist/train-images-idx3-ubyte");
+   auto trlabel = readLabels("test/cpp/api/mnist/train-labels-idx1-ubyte");
+   auto tedata = readData("test/cpp/api/mnist/t10k-images-idx3-ubyte");
+   auto telabel = readLabels("test/cpp/api/mnist/t10k-labels-idx1-ubyte");
 
    if (useGPU) {
      model->cuda();

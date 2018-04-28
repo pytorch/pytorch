@@ -174,7 +174,7 @@ set(COMMON_INCLUDES
   "${ATEN_BUILD_PATH}/src/TH"
   "${TORCH_SRC_DIR}/csrc/api/"
   "${TORCH_SRC_DIR}/csrc/api/include"
-  "${TORCH_SRC_DIR}/../third_party" # For cereal/
+  "${TORCH_SRC_DIR}/../third_party/cereal/include" # For cereal/
   "${TORCH_SRC_DIR}/../"
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CUDA_INCLUDE_DIRS}")
@@ -213,21 +213,17 @@ target_include_directories(test_jit PUBLIC
 
 # API Tests
 
+set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
+
 add_executable(test_api
-  ${TORCH_SRC_DIR}/../test/cpp/api/test.cpp
-  ${TORCH_SRC_DIR}/../test/cpp/api/container_t.cpp
-  ${TORCH_SRC_DIR}/../test/cpp/api/misc_t.cpp
-  ${TORCH_SRC_DIR}/../test/cpp/api/rnn_t.cpp
-  ${TORCH_SRC_DIR}/../test/cpp/api/integration_t.cpp
-  ${TORCH_SRC_DIR}/../test/cpp/api/optim_t.cpp
-  ${TORCH_SRC_DIR}/../test/cpp/api/serialization_t.cpp
+  ${TORCH_API_TEST_DIR}/test.cpp
+  ${TORCH_API_TEST_DIR}/container_t.cpp
+  ${TORCH_API_TEST_DIR}/misc_t.cpp
+  ${TORCH_API_TEST_DIR}/rnn_t.cpp
+  ${TORCH_API_TEST_DIR}/integration_t.cpp
+  ${TORCH_API_TEST_DIR}/optim_t.cpp
+  ${TORCH_API_TEST_DIR}/serialization_t.cpp
 )
 
 target_compile_options(test_api PRIVATE -Dlest_FEATURE_AUTO_REGISTER=1)
-
-add_custom_command(
-  TARGET test_api PRE_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/mnist" "${CMAKE_CURRENT_BINARY_DIR}/mnist"
-)
-
 target_link_libraries(test_api torch)
