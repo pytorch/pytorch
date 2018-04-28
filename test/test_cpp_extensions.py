@@ -143,7 +143,6 @@ class TestCppExtension(common.TestCase):
         self.assertEqual(
             module.tanh_add.__doc__.split('\n')[2], 'Tanh and then sum :D')
 
-
     def test_inline_jit_compile_extension_multiple_sources_and_no_functions(self):
         cpp_source1 = '''
         at::Tensor sin_add(at::Tensor x, at::Tensor y) {
