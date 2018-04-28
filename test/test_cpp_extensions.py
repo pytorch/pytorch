@@ -116,16 +116,35 @@ class TestCppExtension(common.TestCase):
 
         cpp_source2 = '''
         #include <torch/torch.h>
+        at::Tensor sin_add(at::Tensor x, at::Tensor y);
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+          m.def("sin_add", &sin_add, "sin(x) + sin(y)");
+        }
+        '''
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='inline_jit_extension',
+            cpp_sources=[cpp_source1, cpp_source2],
+            verbose=True)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        z = module.sin_add(x, y)
+        self.assertEqual(z, x.sin() + y.sin())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_inline_jit_compile_cuda_extension(self):
+        cpp_source = '''
+        #include <torch/torch.h>
 
         void cos_add_cuda(const double* x, const double* y, double* output, int size);
-        at::Tensor sin_add(at::Tensor x, at::Tensor y);
         at::Tensor cos_add(at::Tensor x, at::Tensor y) {
           auto output = at::zeros_like(x);
           cos_add_cuda(x.data<double>(), y.data<double>(), output.data<double>(), output.numel());
           return output;
         }
         PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-          m.def("sin_add", &sin_add, "sin(x) + sin(y)");
           m.def("cos_add", &cos_add, "cos(x) + cos(y)");
         }
         '''
@@ -154,15 +173,12 @@ class TestCppExtension(common.TestCase):
         '''
 
         module = torch.utils.cpp_extension.load_inline(
-            name='inline_jit_extension',
-            cpp_sources=[cpp_source1, cpp_source2],
+            name='inline_jit_cuda_extension',
+            cpp_sources=cpp_source,
             cuda_sources=cuda_source,
             verbose=True)
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
-
-        z = module.sin_add(x, y)
-        self.assertEqual(z, x.sin() + y.sin())
 
         z = module.cos_add(x, y)
         self.assertEqual(z, x.cos() + y.cos())
