@@ -1,16 +1,196 @@
-// Copyright 2004-present Facebook. All Rights Reserved.
-
 #include "group_norm_op.h"
 
+#include <array>
+
+#include "caffe2/utils/math.h"
+
 namespace caffe2 {
+
+namespace {
+
+template <typename T>
+inline T Cube(const T& x) {
+  return x * x * x;
+}
+
+template <typename T, StorageOrder kOrder>
+void GroupNormForward(
+    const std::array<int, 4>& dims,
+    const T* X,
+    const T* mu,
+    const T* rsig,
+    const T* gamma,
+    const T* beta,
+    T* Y) {
+  constexpr int kGDim = kOrder == StorageOrder::NCHW ? 1 : 2;
+  constexpr int kDDim = kOrder == StorageOrder::NCHW ? 2 : 3;
+  const int size = dims[0] * dims[1] * dims[2] * dims[3];
+  std::array<int, 4> index = {0, 0, 0, 0};
+  for (int i = 0; i < size; ++i) {
+    const int i_mu = index[0] * dims[kGDim] + index[kGDim];
+    const int i_gamma = index[kGDim] * dims[kDDim] + index[kDDim];
+    Y[i] = gamma[i_gamma] * (X[i] - mu[i_mu]) * rsig[i_mu] + beta[i_gamma];
+    math::internal::IncreaseIndexInDims(4, dims.data(), index.data());
+  }
+}
+
+template <typename T, StorageOrder kOrder>
+void ComputeInternalGradients(
+    const std::array<int, 4>& dims,
+    const T* dY,
+    const T* X,
+    const T* gamma,
+    T* ds,
+    T* db) {
+  constexpr int kGDim = kOrder == StorageOrder::NCHW ? 1 : 2;
+  constexpr int kDDim = kOrder == StorageOrder::NCHW ? 2 : 3;
+  const int size = dims[0] * dims[1] * dims[2] * dims[3];
+  std::array<int, 4> index = {0, 0, 0, 0};
+  for (int i = 0; i < size; ++i) {
+    const int i_mu = index[0] * dims[kGDim] + index[kGDim];
+    const int i_gamma = index[kGDim] * dims[kDDim] + index[kDDim];
+    ds[i_mu] += gamma[i_gamma] * dY[i] * X[i];
+    db[i_mu] += gamma[i_gamma] * dY[i];
+    math::internal::IncreaseIndexInDims(4, dims.data(), index.data());
+  }
+}
+
+template <typename T, StorageOrder kOrder>
+void GroupNormBackward(
+    const std::array<int, 4>& dims,
+    const T* dY,
+    const T* X,
+    const T* mu,
+    const T* rsig,
+    const T* gamma,
+    const T* ds,
+    const T* db,
+    T* dX,
+    T* dgamma,
+    T* dbeta) {
+  constexpr int kGDim = kOrder == StorageOrder::NCHW ? 1 : 2;
+  constexpr int kDDim = kOrder == StorageOrder::NCHW ? 2 : 3;
+  const int size = dims[0] * dims[1] * dims[2] * dims[3];
+  const int HxW = kOrder == StorageOrder::NCHW ? dims[3] : dims[1];
+  const T denom = T(1) / static_cast<T>(dims[kDDim] * HxW);
+  std::array<int, 4> index = {0, 0, 0, 0};
+  for (int i = 0; i < size; ++i) {
+    const int i_mu = index[0] * dims[kGDim] + index[kGDim];
+    const int i_gamma = index[kGDim] * dims[kDDim] + index[kDDim];
+    const T u =
+        (db[i_mu] * mu[i_mu] - ds[i_mu]) * (X[i] - mu[i_mu]) * Cube(rsig[i_mu]);
+    const T v = db[i_mu] * rsig[i_mu];
+    dX[i] = gamma[i_gamma] * dY[i] * rsig[i_mu] + (u - v) * denom;
+    dgamma[i_gamma] += dY[i] * (X[i] - mu[i_mu]) * rsig[i_mu];
+    dbeta[i_gamma] += dY[i];
+    math::internal::IncreaseIndexInDims(4, dims.data(), index.data());
+  }
+}
+
+} // namespace
+
+template <typename T, class Context>
+bool GroupNormOp<T, Context>::RunOnDeviceImpl(
+    const int N,
+    const int G,
+    const int D,
+    const int HxW,
+    const T* X_data,
+    const T* gamma_data,
+    const T* beta_data,
+    T* Y_data,
+    T* mu_data,
+    T* rsig_data) {
+  const std::array<int, 4> dims = order_ == StorageOrder::NCHW
+      ? std::array<int, 4>{N, G, D, HxW}
+      : std::array<int, 4>{N, HxW, G, D};
+  const std::array<int, 2> axes = order_ == StorageOrder::NCHW
+      ? std::array<int, 2>{2, 3}
+      : std::array<int, 2>{1, 3};
+  math::Moments<T, Context>(
+      4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
+  EigenArrayMap<T>(rsig_data, N, G) += epsilon_;
+  math::InvSqrt<T, Context>(N * G, rsig_data, rsig_data, &context_);
+  if (order_ == StorageOrder::NCHW) {
+    GroupNormForward<T, StorageOrder::NCHW>(
+        dims, X_data, mu_data, rsig_data, gamma_data, beta_data, Y_data);
+  } else {
+    GroupNormForward<T, StorageOrder::NHWC>(
+        dims, X_data, mu_data, rsig_data, gamma_data, beta_data, Y_data);
+  }
+  return true;
+}
+
+template <typename T, class Context>
+bool GroupNormGradientOp<T, Context>::RunOnDeviceImpl(
+    const int N,
+    const int G,
+    const int D,
+    const int HxW,
+    const T* dY_data,
+    const T* X_data,
+    const T* mu_data,
+    const T* rsig_data,
+    const T* gamma_data,
+    T* dX_data,
+    T* dgamma_data,
+    T* dbeta_data) {
+  const std::array<int, 4> dims = order_ == StorageOrder::NCHW
+      ? std::array<int, 4>{N, G, D, HxW}
+      : std::array<int, 4>{N, HxW, G, D};
+  const int C = G * D;
+  ds_.Resize(N, G);
+  db_.Resize(N, G);
+  T* ds_data = ds_.template mutable_data<T>();
+  T* db_data = db_.template mutable_data<T>();
+  math::Set<T, Context>(N * G, T(0), ds_data, &context_);
+  math::Set<T, Context>(N * G, T(0), db_data, &context_);
+  if (order_ == StorageOrder::NCHW) {
+    ComputeInternalGradients<T, StorageOrder::NCHW>(
+        dims, dY_data, X_data, gamma_data, ds_data, db_data);
+  } else {
+    ComputeInternalGradients<T, StorageOrder::NHWC>(
+        dims, dY_data, X_data, gamma_data, ds_data, db_data);
+  }
+  math::Set<T, Context>(C, T(0), dgamma_data, &context_);
+  math::Set<T, Context>(C, T(0), dbeta_data, &context_);
+  if (order_ == StorageOrder::NCHW) {
+    GroupNormBackward<T, StorageOrder::NCHW>(
+        dims,
+        dY_data,
+        X_data,
+        mu_data,
+        rsig_data,
+        gamma_data,
+        ds_data,
+        db_data,
+        dX_data,
+        dgamma_data,
+        dbeta_data);
+  } else {
+    GroupNormBackward<T, StorageOrder::NHWC>(
+        dims,
+        dY_data,
+        X_data,
+        mu_data,
+        rsig_data,
+        gamma_data,
+        ds_data,
+        db_data,
+        dX_data,
+        dgamma_data,
+        dbeta_data);
+  }
+  return true;
+}
 
 REGISTER_CPU_OPERATOR(GroupNorm, GroupNormOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
     GroupNormGradient,
     GroupNormGradientOp<float, CPUContext>);
 
-/* Warning: mu and sig are for backward usage or reference. They should NOT be
-used as forward activations as they have no direct gradients computed */
+// Warning: mu and rsig are for backward usage or reference. They should NOT be
+// used as forward activations as they have no direct gradients computed.
 
 // Input: X, gamma, beta; Output: Y, mu, sig
 OPERATOR_SCHEMA(GroupNorm)
