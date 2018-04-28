@@ -1,7 +1,7 @@
 import torch
-from torch.autograd import Variable
 import warnings
 from torch.distributions import constraints
+from torch.distributions.utils import lazy_property
 
 
 class Distribution(object):
@@ -28,9 +28,12 @@ class Distribution(object):
             self._validate_args = validate_args
         if self._validate_args:
             for param, constraint in self.arg_constraints.items():
-                if not constraints.is_dependent(constraint):
-                    if not constraint.check(self.__getattribute__(param)).all():
-                        raise ValueError("The parameter {} has invalid values".format(param))
+                if constraints.is_dependent(constraint):
+                    continue  # skip constraints that cannot be checked
+                if param not in self.__dict__ and isinstance(getattr(type(self), param), lazy_property):
+                    continue  # skip checking lazily-constructed args
+                if not constraint.check(getattr(self, param)).all():
+                    raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
     def batch_shape(self):
@@ -146,7 +149,7 @@ class Distribution(object):
         of the result will be `(cardinality,) + batch_shape + event_shape`
         (where `event_shape = ()` for univariate distributions).
 
-        Note that this enumerates over all batched variables in lock-step
+        Note that this enumerates over all batched tensors in lock-step
         `[[0, 0], [1, 1], ...]`. To iterate over the full Cartesian product
         use `itertools.product(m.enumerate_support())`.
 

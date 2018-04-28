@@ -489,14 +489,11 @@ REGISTER_GRADIENT(MakeTwoClass, GetMakeTwoClassGradient);
 struct GetSigmoidCrossEntropyWithLogitsGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    ArgumentHelper argsHelper(def_);
-    auto log_D_trick = argsHelper.GetSingleArgument<bool>("log_D_trick", false);
     return SingleGradientDef(
         "SigmoidCrossEntropyWithLogitsGradient",
         "",
         vector<string>{GO(0), I(0), I(1)},
-        vector<string>{GI(0)},
-        vector<Argument>{MakeArgument<bool>("log_D_trick", log_D_trick)});
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(

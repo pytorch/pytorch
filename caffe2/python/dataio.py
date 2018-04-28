@@ -509,31 +509,30 @@ class CompositeReader(Reader):
         super(CompositeReader, self).__init__(schema=Struct(*[
             (name, reader.schema()) for name, reader in zip(names, readers)
         ]))
+        self._names = names
         self._readers = readers
-        self._should_stop = None
 
     def setup_ex(self, init_net, finish_net):
         for reader in self._readers:
             reader.setup_ex(init_net, finish_net)
-        if self._should_stop is None:
-            self._should_stop = init_net.ConstantFill(
-                [], shape=[], dtype=core.DataType.BOOL, value=False)
 
     def read_ex(self, local_init_net, local_finish_net):
         """
         Stops when one of the reader finished
         """
+        local_should_stop = local_init_net.ConstantFill(
+            [], shape=[], dtype=core.DataType.BOOL, value=False)
         read_nets = []
         fields = []
-        check_done_net = core.Net('any_reader_finished')
-        for reader in self._readers:
-            read_net, should_stop, record = reader.read_record_ex(
+        for name, reader in zip(self._names, self._readers):
+            sub_read_nets, should_stop, record = reader.read_record_ex(
                 local_init_net, local_finish_net)
-            read_nets.append(read_net)
-            check_done_net.Or([self._should_stop, should_stop],
-                              [self._should_stop])
+            stop_net = core.Net("{}_stop".format(name))
+            stop_net.Copy(should_stop, local_should_stop)
+            sub_read_nets.append(stop_net)
+            read_nets.extend(sub_read_nets)
             fields.extend(record.field_blobs())
-        return read_nets + [check_done_net], self._should_stop, fields
+        return read_nets, local_should_stop, fields
 
     def reset(self, net):
         for reader in self._readers:

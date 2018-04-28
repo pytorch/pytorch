@@ -41,7 +41,7 @@ class TransposeOp final : public Operator<Context> {
       CAFFE_ENFORCE_EQ(ndim, axes_.size());
     }
     // Do the actual transpose, which is implemented in DoRunWithType().
-    return DispatchHelper<TensorTypes<float, double, int, long>>::call(
+    return DispatchHelper<TensorTypes<float, double, int, TIndex>>::call(
         this, Input(0));
   }
 
@@ -58,10 +58,8 @@ class TransposeOp final : public Operator<Context> {
     }
     Y->Resize(Y_dims);
     math::Transpose<T, Context>(
-        X.size(),
-        axes_.size(),
+        X_dims.size(),
         X_dims.data(),
-        Y_dims.data(),
         axes_.data(),
         X.template data<T>(),
         Y->template mutable_data<T>(),

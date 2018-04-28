@@ -540,7 +540,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         gpu_args = [to_gpu(arg) for arg in cpu_args]
         if t.__name__ == 'HalfTensor':
             cpu_tensor = cpu_tensor.float()
-            cpu_args = [arg.float() if torch.is_tensor(arg) and is_half(arg) else arg for arg in cpu_args]
+            cpu_args = [arg.float() if isinstance(arg, torch.Tensor) and is_half(arg) else arg for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
         try:
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
@@ -1363,33 +1363,51 @@ class TestCuda(TestCase):
 
     def test_advancedindex_mixed_cpu_cuda(self):
         def test(x, ia, ib):
+            # test getitem
             self.assertEqual(x[:, ia, None, ib, 0].cpu(),
                              x.cpu()[:, ia.cpu(), None, ib.cpu(), 0])
             self.assertEqual(x[ia], x.cpu()[ia.cpu()])
+            # test setitem
+            x_clone1 = x.clone()
+            x_clone2 = x.clone()
+            first_shape = x[:, ia, None, ib, 0].shape
+            second_shape = x[ia].shape
+            x_clone1[:, ia, None, ib, 0] = torch.randn(first_shape).to(x_clone1)
+            x_clone2[ia] = torch.randn(second_shape).to(x_clone2)
 
-        # Index cpu tensor with cuda tensor
-        x = torch.randn(3, 4, 4, 4, 3)
-        ia = torch.cuda.LongTensor([0, 2, 1])
-        ib = torch.cuda.LongTensor([0, 2, 1])
-        test(x, ia, ib)
+        cpu = torch.device('cpu')
+        for device in ['cuda:0', 'cuda:1'] if torch.cuda.device_count() > 1 else ['cuda']:
+            # Index cpu tensor with cuda tensor
+            x = torch.randn(3, 4, 4, 4, 3)
+            ia = torch.tensor([0, 2, 1]).to(device)
+            ib = torch.tensor([0, 2, 1]).to(device)
+            test(x, ia, ib)
 
-        # Index cuda tensor with cpu tensor
-        x = x.cuda()
-        ia = ia.cpu()
-        ib = ib.cpu()
-        test(x, ia, ib)
+            # Index cuda tensor with cpu tensor
+            x = x.to(device)
+            ia = ia.to(cpu)
+            ib = ib.to(cpu)
+            test(x, ia, ib)
 
-        # Index cpu tensor with mixed cpu, cuda tensors
-        x = x.cpu()
-        ia = ia.cpu()
-        ib = ib.cuda()
-        test(x, ia, ib)
+            # Index cpu tensor with mixed cpu, cuda tensors
+            x = x.to(cpu)
+            ia = ia.to(cpu)
+            ib = ib.to(device)
+            test(x, ia, ib)
 
-        # Index cuda tensor with mixed cpu, cuda tensors
-        x = x.cuda()
-        ia = ia.cpu()
-        ib = ib.cuda()
-        test(x, ia, ib)
+            # Index cuda tensor with mixed cpu, cuda tensors
+            x = x.to(device)
+            ia = ia.to(cpu)
+            ib = ib.to(device)
+            test(x, ia, ib)
+
+            if torch.cuda.device_count() > 1:
+                other_device = 'cuda:0' if device != 'cuda:0' else 'cuda:1'
+                # Index cuda tensor with mixed cpu, cuda tensors on different devices
+                x = x.to(device)
+                ia = ia.to(cpu)
+                ib = ib.to(other_device)
+                test(x, ia, ib)
 
     def test_advancedindex_big(self):
         TestTorch._test_advancedindex_big(self, lambda t: t.cuda())
@@ -1558,6 +1576,10 @@ class TestCuda(TestCase):
     def test_diagflat(self):
         TestTorch._test_diagflat(self, dtype=torch.float32, device='cuda')
 
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_trtrs(self):
+        TestTorch._test_trtrs(self, lambda t: t.cuda())
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_get_set_rng_state_all(self):
         states = torch.cuda.get_rng_state_all()
@@ -1577,6 +1599,18 @@ class TestCuda(TestCase):
 
     def test_random_neg_values(self):
         TestTorch._test_random_neg_values(self, use_cuda=True)
+
+    def test_overlapped_indices(self):
+        a = torch.arange(0, 128).view(32, 4).cuda()
+        b = torch.arange(0, 128).view(32, 4).cuda()
+        b = b.set_(b.storage(), storage_offset=0, size=(65, 64), stride=(1, 1))
+        b += 5
+        b = b.set_(b.storage(),
+                   storage_offset=0,
+                   size=a.size(),
+                   stride=a.stride())
+        a += 5
+        self.assertEqual(a, b)
 
     def test_bincount_cuda(self):
         TestTorch._test_bincount(self, device='cuda')

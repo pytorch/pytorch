@@ -1,6 +1,7 @@
 #ifndef CAFFE2_VIDEO_VIDEO_IO_H_
 #define CAFFE2_VIDEO_VIDEO_IO_H_
 
+#include <caffe2/core/common.h>
 #include <caffe/proto/caffe.pb.h>
 #include <caffe2/video/optical_flow.h>
 #include <caffe2/video/video_decoder.h>

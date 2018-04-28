@@ -1,7 +1,6 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
@@ -16,7 +15,7 @@ class Poisson(ExponentialFamily):
 
     Example::
 
-        >>> m = Poisson(torch.Tensor([4]))
+        >>> m = Poisson(torch.tensor([4]))
         >>> m.sample()
          3
         [torch.LongTensor of size 1]

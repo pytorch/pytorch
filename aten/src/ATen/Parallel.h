@@ -15,7 +15,7 @@ namespace internal {
 // for a certain number of workers. If there are multiple threads making
 // a request at the size of the maximum number of threads, they will
 // be allocated a number proportional to the other requests.
-void init_tbb_num_threads();
+AT_API void init_tbb_num_threads();
 // This parameter is heuristically chosen to determine the minimum number of
 // work that warrants paralellism. For example, when summing an array, it is
 // deemed inefficient to parallelise over arrays shorter than 32768. Further,

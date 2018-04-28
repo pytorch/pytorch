@@ -117,6 +117,11 @@ endfunction()
 # Helper function to automatically generate __init__.py files where python
 # sources reside but there are no __init__.py present.
 function(caffe_autogen_init_py_files)
+  if (CAFFE2_AUTOGEN_INIT_PY_ALREADY_RUN)
+    message(STATUS
+        "A previous caffe2 cmake run already created the __init__.py files.")
+    return()
+  endif()
   file(GLOB_RECURSE all_python_files RELATIVE ${PROJECT_SOURCE_DIR}
        "${PROJECT_SOURCE_DIR}/caffe2/*.py")
   set(python_paths_need_init_py)
@@ -142,6 +147,8 @@ function(caffe_autogen_init_py_files)
       file(WRITE ${tmp}/__init__.py "")
     endif()
   endforeach()
+  set(CAFFE2_AUTOGEN_INIT_PY_ALREADY_RUN TRUE CACHE INTERNAL
+      "Helper variable to record if autogen_init_py is already run or not.")
 endfunction()
 
 ###
@@ -216,3 +223,31 @@ function(pycmd outvar cmd)
   string(STRIP "${_output}" _output)
   set(${outvar} "${_output}" PARENT_SCOPE)
 endfunction()
+
+###
+# Helper function to print out everything that cmake knows about a target
+#
+# Copied from https://stackoverflow.com/questions/32183975/how-to-print-all-the-properties-of-a-target-in-cmake
+# This isn't called anywhere, but it's very useful when debugging cmake
+# NOTE: This doesn't work for INTERFACE_LIBRARY or INTERFACE_LINK_LIBRARY targets
+
+function(print_target_properties tgt)
+  if(NOT TARGET ${tgt})
+    message("There is no target named '${tgt}'")
+    return()
+  endif()
+
+  # Get a list of all cmake properties TODO cache this lazily somehow
+  execute_process(COMMAND cmake --help-property-list OUTPUT_VARIABLE CMAKE_PROPERTY_LIST)
+  STRING(REGEX REPLACE ";" "\\\\;" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
+  STRING(REGEX REPLACE "\n" ";" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
+
+  foreach (prop ${CMAKE_PROPERTY_LIST})
+    string(REPLACE "<CONFIG>" "${CMAKE_BUILD_TYPE}" prop ${prop})
+    get_property(propval TARGET ${tgt} PROPERTY ${prop} SET)
+    if (propval)
+      get_target_property(propval ${tgt} ${prop})
+      message ("${tgt} ${prop} = ${propval}")
+    endif()
+  endforeach(prop)
+endfunction(print_target_properties)

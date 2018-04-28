@@ -26,7 +26,7 @@ from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost
-from torch.autograd import Variable, variable
+from torch.autograd import Variable
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
@@ -114,10 +114,7 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    if isinstance(tensor, Variable):
-        return tensor.new_tensor(float('inf')).expand_as(tensor)
-    else:
-        return tensor.new([float('inf')]).expand_as(tensor)
+    return tensor.new_tensor(float('inf')).expand_as(tensor)
 
 
 def _x_log_x(tensor):
@@ -201,12 +198,12 @@ def _kl_beta_beta(p, q):
 def _kl_binomial_binomial(p, q):
     # from https://math.stackexchange.com/questions/2214993/
     # kullback-leibler-divergence-for-binomial-distributions-p-and-q
-    if p.total_count > q.total_count:
-        return _infinite_like(p.probs)
-    elif p.total_count == q.total_count:
-        return p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
-    else:
+    if (p.total_count < q.total_count).any():
         raise NotImplementedError('KL between Binomials where q.total_count > p.total_count is not implemented')
+    kl = p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
+    inf_idxs = p.total_count > q.total_count
+    kl[inf_idxs] = _infinite_like(kl[inf_idxs])
+    return kl
 
 
 @register_kl(Categorical, Categorical)

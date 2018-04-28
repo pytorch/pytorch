@@ -3,7 +3,6 @@
 #include "caffe2/core/net_async_tracing.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/utils/string_utils.h"
 
 CAFFE2_DEFINE_int(
     caffe2_streams_per_gpu,
@@ -37,18 +36,6 @@ CAFFE2_DEFINE_bool(
     true,
     "Select next non-busy stream");
 
-CAFFE2_DEFINE_string(
-    caffe2_net_async_tracing_filepath,
-    "/tmp",
-    "Path to save tracing information");
-
-CAFFE2_DEFINE_string(
-    caffe2_net_async_names_to_trace,
-    "",
-    "Comma-separated list of net names to trace");
-
-CAFFE2_DEFINE_int(caffe2_net_async_tracing_nth, 100, "Trace every Nth batch");
-
 namespace caffe2 {
 
 thread_local std::vector<int> AsyncNetBase::stream_counters_;
@@ -80,30 +67,15 @@ AsyncNetBase::AsyncNetBase(
   }
 
   num_workers_ = net_def->has_num_workers() ? net_def->num_workers() : -1;
-  batch_iter_ = 0;
 
-  initTracer(net_def);
-}
-
-void AsyncNetBase::initTracer(const std::shared_ptr<const NetDef>& net_def) {
-  auto tracing_nets = caffe2::split(',', FLAGS_caffe2_net_async_names_to_trace);
-  trace_net_ = !net_def->name().empty() &&
-      std::find(tracing_nets.begin(), tracing_nets.end(), net_def->name()) !=
-          tracing_nets.end();
-  trace_batch_ = false;
-  timer_.Start();
-  if (trace_net_) {
-    auto fn = net_def->name();
-    std::replace(fn.begin(), fn.end(), '/', '_');
-    tracer_ = caffe2::make_unique<tracing::Tracer>();
-    tracer_->init(
-        this, FLAGS_caffe2_net_async_tracing_filepath + "/" + fn + ".json");
+  tracer_ = tracing::create(this, net_def->name());
+  if (tracer_) {
+    LOG(INFO) << "Tracing net: " << net_def->name();
   }
 }
 
 bool AsyncNetBase::RunAsync() {
-  trace_batch_ =
-      trace_net_ && (++batch_iter_ % FLAGS_caffe2_net_async_tracing_nth == 0);
+  tracing::startIter(tracer_);
   for (auto& op : GetOperators()) {
     op->ResetEvent();
   }
@@ -236,10 +208,6 @@ void AsyncNetBase::asyncWait(
     events.push_back(&event(wait_task_id));
   }
   first_op->WaitEvents(events, stream_id);
-}
-
-OperatorBase* AsyncNetBase::op(int op_idx) const {
-  return operators_[op_idx];
 }
 
 void AsyncNetBase::run(int task_id, int stream_id) {

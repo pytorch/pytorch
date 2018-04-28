@@ -161,7 +161,7 @@ class TestIndexing(TestCase):
         self.assertEqual(a[1].data_ptr(), a[one.short()].data_ptr())
 
         # scalar indexed with scalar
-        r = torch.tensor(0.).normal_()
+        r = torch.randn(())
         with self.assertRaises(RuntimeError):
             r[:]
         with self.assertRaises(IndexError):
@@ -184,7 +184,7 @@ class TestIndexing(TestCase):
         self.assertEqual(7.7, a[1, 0])
 
         # scalar indexed with scalars
-        r = torch.tensor(0.).normal_()
+        r = torch.randn(())
         with self.assertRaises(RuntimeError):
             r[:] = 8.8
         with self.assertRaises(IndexError):
@@ -218,7 +218,7 @@ class TestIndexing(TestCase):
         self.assertEqual(x.tolist(), [[0, 1], [5, 6]])
 
     def test_byte_tensor_assignment(self):
-        x = torch.arange(0, 16).view(4, 4)
+        x = torch.arange(0., 16).view(4, 4)
         b = torch.ByteTensor([True, False, True, False])
         value = torch.tensor([3., 4., 5., 6.])
         x[b] = value
@@ -475,7 +475,7 @@ class NumpyTests(TestCase):
 
     def test_broadcast_subspace(self):
         a = torch.zeros((100, 100))
-        v = torch.arange(0, 100)[:, None]
+        v = torch.arange(0., 100)[:, None]
         b = torch.arange(99, -1, -1).long()
         a[b] = v
         expected = b.double().unsqueeze(1).expand(100, 100)

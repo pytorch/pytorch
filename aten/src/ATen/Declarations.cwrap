@@ -1045,25 +1045,55 @@
   name: all
   types:
     - Byte
+  variants:
+    - method
+    - function
   backends:
     - CPU
     - CUDA
-  cname: logicalall
-  return: real
-  arguments:
-    - THTensor* self
+  options:
+    - cname: logicalAndAll
+      return: real
+      arguments:
+        - THTensor* self
+    - cname: logicalAnd
+      return: argument 0
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - arg: bool keepdim
+          default: "false"
 ]]
 [[
   name: any
   types:
     - Byte
+  variants:
+    - method
+    - function
   backends:
     - CPU
     - CUDA
-  cname: logicalany
-  return: real
-  arguments:
-    - THTensor* self
+  options:
+    - cname: logicalAnyAll
+      return: real
+      arguments:
+        - THTensor* self
+    - cname: logicalAny
+      return: argument 0
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - arg: bool keepdim
+          default: "false"
 ]]
 [[
   name: getDevice
@@ -1084,7 +1114,6 @@
     - Int
     - Short
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1131,7 +1160,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1324,7 +1352,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1370,7 +1397,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1445,7 +1471,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1665,7 +1690,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1711,7 +1735,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1728,7 +1751,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1745,7 +1767,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1762,7 +1783,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -2257,7 +2277,7 @@
         - THTensor* self
 ]]
 [[
-  name: _sum
+  name: _th_sum
   variants:
     - method
     - function
@@ -2286,7 +2306,7 @@
         - THTensor* self
 ]]
 [[
-  name: _prod
+  name: _th_prod
   variants:
     - method
     - function
@@ -2304,7 +2324,8 @@
           default: "false"
 ]]
 [[
-  name: cumsum
+  name: _cumsum
+  cname: cumsum
   variants:
     - method
     - function
@@ -2317,7 +2338,8 @@
       wrap_dim: self
 ]]
 [[
-  name: cumprod
+  name: _cumprod
+  cname: cumprod
   variants:
     - method
     - function
@@ -3234,6 +3256,7 @@
     - Double
   backends:
     - CPU
+    - CUDA
   variants:
     - method
     - function
@@ -3809,26 +3832,6 @@
       default: nullptr
       kwarg_only: True
     - THTensor* self
-]]
-[[
-  name: _standard_gamma
-  types:
-    - floating_point
-  backends:
-    - CPU
-  return: argument 0
-  variants:
-    - method
-    - function
-  options:
-    - cname: standard_gamma
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - arg: THGenerator* generator
-          default: nullptr
-          kwarg_only: True
-        - THTensor* self
 ]]
 [[
   name: _dirichlet_grad

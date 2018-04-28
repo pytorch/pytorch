@@ -28,13 +28,9 @@ if("${isSystemDir}" STREQUAL "-1")
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
-IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wextra -Wno-missing-field-initializers -Wno-type-limits -Wno-unused-parameter -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
-  set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
-  if ($ENV{WERROR})
-    set(CMAKE_CXX_FLAGS "-Werror ${CMAKE_CXX_FLAGS}")
-  endif()
-ENDIF(NOT MSVC)
+if(NOT MSVC)
+  set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
+endif()
 
 INCLUDE(CheckCXXSourceCompiles)
 
@@ -135,7 +131,7 @@ ENDIF()
 
 IF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
   MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.CudaHalfTensor")
-  LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__")
+  LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__")
   SET(CMAKE_C_FLAGS "-DCUDA_HAS_FP16=1 ${CMAKE_C_FLAGS}")
 ELSE(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
   MESSAGE(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
@@ -468,7 +464,9 @@ else()
   add_subdirectory(src/THCS)
 endif()
 
-find_package(CuDNN)
+IF (NOT NO_CUDA)
+  find_package(CuDNN)
+ENDIF()
 IF(NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
   MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
   set(AT_CUDNN_ENABLED 0)
@@ -506,7 +504,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN)
 add_subdirectory(src/ATen)
 include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src
-${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/utils/catch/single_include
+${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include
 ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 if(NOT NO_CUDA)
   include_directories(${CUDA_INCLUDE_DIRS})

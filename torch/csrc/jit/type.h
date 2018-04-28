@@ -38,6 +38,13 @@ protected:
 
 public:
   virtual bool operator==(const Type& rhs) const = 0;
+
+  // subtyping relation. By default, we return true for the case
+  // when the type is exactly equal
+  virtual bool isSubtypeOf(const Type& rhs) const {
+    return *this == rhs;
+  }
+  virtual std::string name() const = 0;
   TypeKind kind() const {
     return kind_;
   }
@@ -72,19 +79,26 @@ public:
   virtual ~Type() {}
 };
 
+inline bool operator!=(const Type & lhs, const Type & rhs) {
+  return !(lhs == rhs);
+}
 
+// This node represents a single Tensor value, with an unknown shape.
 struct DynamicType : public Type {
   DynamicType()
   : Type(TypeKind::DynamicType) {}
   virtual bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
+  virtual std::string name() const override {
+    return "Tensor";
+  }
   static const TypeKind Kind = TypeKind::DynamicType;
   // global singleton
   static TypePtr get();
 };
 
-// This node represents a single Tensor value
+// This node represents a single Tensor value with a specific size
 struct TensorType : public Type {
   friend struct Type;
   TensorType(const at::Tensor& tensor)
@@ -132,6 +146,17 @@ struct TensorType : public Type {
            strides() == rt->strides() &&
            device() == rt->device();
   }
+  virtual bool isSubtypeOf(const Type& rhs) const override {
+    return *this == rhs || rhs.kind() == TypeKind::DynamicType;
+  }
+  virtual std::string name() const override {
+    std::string retval = std::string(at::toString(scalarType())) + "Tensor[";
+    for (size_t i=0; i < sizes_.size(); ++i) {
+      retval += std::to_string(sizes_[i]) + (i == sizes_.size() - 1 ? "" : ",");
+    }
+    retval += "]";
+    return retval;
+  }
 private:
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
@@ -173,6 +198,9 @@ struct HandleType : public Type {
   virtual bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
+  virtual std::string name() const override {
+    return "Handle";
+  }
   static const TypeKind Kind = TypeKind::HandleType;
   // global singleton
   static TypePtr get();
@@ -188,17 +216,44 @@ struct TupleType : public Type {
     return elements_;
   }
   virtual bool operator==(const Type& rhs) const override {
-    if(rhs.kind() != kind())
-      return false;
-    return rhs.cast<TupleType>()->elements().equals(elements());
+    return compare(rhs, [](const Type& a, const Type& b) {
+      return a == b;
+    });
+  }
+  virtual bool isSubtypeOf(const Type& rhs) const override {
+    return compare(rhs, [](const Type& a, const Type&b) {
+      return a.isSubtypeOf(b);
+    });
+  }
+  virtual std::string name() const override {
+    std::stringstream ss;
+    ss << "(";
+    for(size_t i = 0; i < elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << elements()[i]->name();
+    }
+    ss << ")";
+    return ss.str();
   }
 private:
+  bool compare(const Type& rhs, std::function<bool(const Type&, const Type&)> fn) const {
+    if(rhs.kind() != kind())
+      return false;
+    const auto & l_elements = elements();
+    const auto & r_elements = rhs.cast<TupleType>()->elements();
+    if(l_elements.size() != r_elements.size())
+      return false;
+    for(size_t i = 0; i < l_elements.size(); ++i) {
+      if(!fn(*l_elements[i], *r_elements[i]))
+        return false;
+    }
+    return true;
+  }
   std::vector<TypePtr> elements_;
 };
 
-inline bool operator!=(const Type & lhs, const Type & rhs) {
-  return !(lhs == rhs);
-}
+
 
 std::ostream& operator<<(std::ostream & out, const Type & t);
 

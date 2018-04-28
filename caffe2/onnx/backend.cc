@@ -289,7 +289,8 @@ Caffe2Backend::get_renamed_operators() const {
       {"Equal", "EQ"},
       {"Less", "LT"},
       {"Greater", "GT"},
-      {"Unsqueeze", "ExpandDims"}};
+      {"Unsqueeze", "ExpandDims"},
+      {"Tile", "NumpyTile"}};
   return kRenamedOperators;
 }
 
@@ -405,7 +406,7 @@ Caffe2Ops Caffe2Backend::CreateCast(OnnxNode* onnx_node, int opset_version) {
       "' dtype is not supported");
 
   CAFFE_ENFORCE_EQ(
-      c2_op.ops[0].arg().size(),
+      c2_op.ops.Get(0).arg().size(),
       1,
       "Unexpected number of attributes in 'Cast'");
   c2_op.ops.Mutable(0)->mutable_arg(0)->set_i(c2_dtype);
@@ -1197,10 +1198,9 @@ void Caffe2Backend::BuildTensorFillingOp(
     const ::google::protobuf::RepeatedField<double>* src = &tmp;
     if (!TryConvertingTensorRawValues<double>(onnx_tensor, &tmp)) {
       src = &onnx_tensor.double_data();
-    } else {
-      for (const auto i : *src) {
-        c2_values->add_floats(i);
-      }
+    }
+    for (const auto i : *src) {
+      c2_values->add_floats(i);
     }
   } else if (onnx_tensor.data_type() == TensorProto::INT64) {
     c2_op->set_type("GivenTensorInt64Fill");
@@ -1217,10 +1217,9 @@ void Caffe2Backend::BuildTensorFillingOp(
     if (!TryConvertingTensorRawValues<::google::protobuf::uint64>(
             onnx_tensor, &tmp)) {
       src = &onnx_tensor.uint64_data();
-    } else {
-      for (const auto i : *src) {
-        c2_values->add_ints(i);
-      }
+    }
+    for (const auto i : *src) {
+      c2_values->add_ints(i);
     }
   } else if (
       onnx_tensor.data_type() == TensorProto::BOOL ||
@@ -1238,10 +1237,9 @@ void Caffe2Backend::BuildTensorFillingOp(
     if (!TryConvertingTensorRawValues<::google::protobuf::int32>(
             onnx_tensor, &tmp)) {
       src = &onnx_tensor.int32_data();
-    } else {
-      for (const auto i : *src) {
-        c2_values->add_ints(i);
-      }
+    }
+    for (const auto i : *src) {
+      c2_values->add_ints(i);
     }
   } else if (onnx_tensor.data_type() == TensorProto::STRING) {
     c2_op->set_type("GivenTensorStringFill");

@@ -93,7 +93,7 @@ if (compute_requires_grad( ${args_with_derivatives} )) {
 """)
 
 ASSIGN_GRAD_FN = CodeTemplate("""\
-grad_fn = std::make_shared<${op}>(${op_ctor});
+grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
@@ -318,7 +318,7 @@ def emit_body(declaration):
     def emit_record_trace(env):
         # Operations involving Generator, Storage, Type are not traceable
         # at the moment
-        if any(arg['simple_type'] in {'Generator', 'Storage', 'ScalarType', 'Type'}
+        if any(arg['simple_type'] in {'Generator', 'Storage', 'ScalarType', 'Type', 'optional<ScalarType>'}
                for arg in declaration['arguments']):
             return ('', '')
         # We can't trace functions which don't have any Tensor or TensorList returns

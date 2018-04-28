@@ -1,5 +1,3 @@
-#define EIGEN_USE_THREADS
-
 #include "caffe2/operators/transpose_op.h"
 
 #ifdef CAFFE2_USE_MKL

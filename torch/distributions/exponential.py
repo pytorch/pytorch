@@ -12,7 +12,7 @@ class Exponential(ExponentialFamily):
 
     Example::
 
-        >>> m = Exponential(torch.Tensor([1.0]))
+        >>> m = Exponential(torch.tensor([1.0]))
         >>> m.sample()  # Exponential distributed with rate=1
          0.1046
         [torch.FloatTensor of size 1]

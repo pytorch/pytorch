@@ -1,0 +1,19 @@
+PyTorch version: 0.5.0a0
+Is debug build: No
+CUDA used to build PyTorch: None
+
+OS: Mac OSX 10.13.X
+GCC version: Could not collect
+CMake version: version 3.9.X
+
+Python version: 3.6
+Is CUDA available: No
+CUDA runtime version: No CUDA
+GPU models and configuration: No CUDA
+Nvidia driver version: No CUDA
+cuDNN version: No CUDA
+
+Versions of relevant libraries:
+[pip] numpy (1.14.X)
+[pip] torch (0.5.0a0)
+[conda] torch                     0.5.0a0           <pip>

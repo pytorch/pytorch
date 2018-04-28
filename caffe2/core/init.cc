@@ -49,4 +49,16 @@ bool GlobalInit(int* pargc, char*** pargv) {
   // TODO: if we fail GlobalInit(), should we continue?
   return success;
 }
+
+#if CAFFE2_MOBILE
+bool GlobalInit() {
+  // On mobile devices, run global init here, since we cannot pass the
+  // command line options to caffe2, no arguments are passed.
+  int mobile_argc = 1;
+  char caffe2_name[] = "caffe2";
+  char* mobile_name = &caffe2_name[0];
+  char** mobile_argv = &mobile_name;
+  return ::caffe2::GlobalInit(&mobile_argc, &mobile_argv);
+}
+#endif
 }  // namespace caffe2

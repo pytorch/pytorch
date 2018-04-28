@@ -95,12 +95,8 @@ DataChannelTCP::DataChannelTCP(InitMethod::Config config, int timeout)
 
 
 DataChannelTCP::~DataChannelTCP() {
-  destroy();
-}
 
-
-void DataChannelTCP::destroy() {
- if (_socket != -1)
+  if (_socket != -1)
     ::close(_socket);
 
   for (const auto& process : _processes) {
@@ -108,6 +104,9 @@ void DataChannelTCP::destroy() {
       ::close(process.socket);
   }
 }
+
+
+void DataChannelTCP::destroy() {}
 
 
 bool DataChannelTCP::initWorker() {

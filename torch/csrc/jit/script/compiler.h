@@ -17,6 +17,13 @@ struct CallsiteDescriptor {
   bool allow_varargs;
 };
 
+struct NamedValue {
+  NamedValue(const SourceRange& loc, const std::string& name, Value* value)
+  : loc(loc), name(name), value(value) {}
+  SourceRange loc;
+  std::string name;
+  Value* value;
+};
 
 // The AST can contain nodes like `self`, `self.b` or `python_fn` that
 // are not first-class values in the graph representation, but instead
@@ -52,7 +59,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     SourceRange loc,
     Method & m,
     at::ArrayRef<Value*> inputs,
-    List<Attribute> attributes,
+    at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
 // n_binders is always set to the number of variables an expression is
 // syntactically bound to:
@@ -108,7 +115,7 @@ struct BuiltinFunction : public SugaredValue {
     SourceRange loc,
     Method & m,
     at::ArrayRef<Value*> inputs_,
-    List<Attribute> attributes,
+    at::ArrayRef<NamedValue> attributes,
     size_t n_binders) override;
 };
 
@@ -116,7 +123,7 @@ using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& 
 void defineMethodsInModule(
   Module & m,
   const std::vector<Def>& definitions,
-  const Resolver& resolver, /* determines how we handle free variables*/
+  const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
   std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
 );
 
@@ -128,7 +135,8 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
 // a SimpleValue, otherwise pack all the values into a Tuple.
 std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values);
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
-
+void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
+void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
 
 } // namespace script
 } // namespace jit

@@ -92,18 +92,6 @@ bool THCTensor_(indexShouldBeMajor)(TensorInfo<real, unsigned int> &info,
   return false;
 }
 
-void THCTensor_(indexCopy_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, THCTensor *src)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
-
-  THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
-  THCudaLongTensor_copyLong(state, indices_, indices);
-
-  THCTensor_(indexCopy)(state, dst, dim, indices_, src);
-
-  THCudaLongTensor_free(state, indices_);
-}
-
 void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, THCTensor *src)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
@@ -293,18 +281,6 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
   }
 }
 
-void THCTensor_(indexAdd_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, THCTensor *src)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
-
-  THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
-  THCudaLongTensor_copyLong(state, indices_, indices);
-
-  THCTensor_(indexAdd)(state, dst, dim, indices_, src);
-
-  THCudaLongTensor_free(state, indices_);
-}
-
 void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, THCTensor *src)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
@@ -426,18 +402,6 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
 #undef LARGE_INDEX
 }
 
-void THCTensor_(indexFill_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, real val)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, dst));
-
-  THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
-  THCudaLongTensor_copyLong(state, indices_, indices);
-
-  THCTensor_(indexFill)(state, dst, dim, indices_, val);
-
-  THCudaLongTensor_free(state, indices_);
-}
-
 void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, real val)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, dst));
@@ -542,20 +506,6 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
 #undef SMALL_INDEX
 #undef LARGE_INDEX
-}
-
-
-void THCTensor_(indexSelect_long)(THCState *state, THCTensor *dst, THCTensor *src, int dim, THLongTensor *indices)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
-  THArgCheck(indices->nDimension <= 1, 3, "Index is supposed to be an empty tensor or a vector");
-
-  THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
-  THCudaLongTensor_copyLong(state, indices_, indices);
-
-  THCTensor_(indexSelect)(state, dst, src, dim, indices_);
-
-  THCudaLongTensor_free(state, indices_);
 }
 
 void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, int dim, THCudaLongTensor *indices)
@@ -700,89 +650,5 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 #undef SMALL_INDEX
 #undef LARGE_INDEX
 }
-
-#define MAX_ADVINDEX_CALC_DIMS 5
-
-void THCTensor_(calculateAdvancedIndexingOffsets)(
-  THCState *state,
-  THCudaLongTensor *output,
-  THCTensor *indexed,
-  ptrdiff_t baseOffset,
-  THCudaLongTensor **indexers)
-{
-  int ndim = THCTensor_(nDimension)(state, indexed);
-  THAssert(ndim <= MAX_ADVINDEX_CALC_DIMS);
-
-  // Assert all Tensors are on the same GPU, and that the indexing Tensors are
-  // contiguous
-  for (int i = 0; i < ndim; ++i) {
-    if (indexers[i] != NULL) {
-      THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, output, indexers[i]));
-      THAssert(THCudaLongTensor_isContiguous(state, indexers[i]));
-    }
-  }
-
-  // Set grid, block dims
-  ptrdiff_t nElement = THCudaLongTensor_nElement(state, output);
-  const dim3 block = getApplyBlock();
-  dim3 grid;
-  THAssert(getApplyGrid(state, nElement, grid));
-
-#define HANDLE_CASE(INDEX_TYPE, DIMS)                                                           \
-{                                                                                               \
-  LinearIndexCalcData<INDEX_TYPE, DIMS> data;                                                   \
-  for (int i = 0; i < DIMS; ++i) {                                                              \
-    data.baseSizes[i] = THCTensor_(size)(state, indexed, i);                                    \
-    data.sizes[i] = indexers[i] != NULL ?                                                       \
-      THCudaLongTensor_nElement(state, indexers[i]) :                                           \
-        THCTensor_(size)(state, indexed, i);                                                    \
-    data.strides[i] = THCTensor_(stride)(state, indexed, i);                                    \
-    data.advIndexTensors[i] = indexers[i] != NULL ?                                             \
-      THCudaLongTensor_data(state, indexers[i]) : NULL;                                         \
-  }                                                                                             \
-                                                                                                \
-  calculateLinearIndices<INDEX_TYPE, DIMS>                                                      \
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(                                     \
-    THCudaLongTensor_data(state, output),                                                       \
-    nElement,                                                                                   \
-    baseOffset,                                                                                 \
-    data                                                                                        \
-  );                                                                                            \
-}
-
-#define RUN_T(INDEX_TYPE)         \
-  switch (ndim) {                 \
-    case 1:                       \
-      HANDLE_CASE(INDEX_TYPE, 1)  \
-      break;                      \
-    case 2:                       \
-      HANDLE_CASE(INDEX_TYPE, 2)  \
-      break;                      \
-    case 3:                       \
-      HANDLE_CASE(INDEX_TYPE, 3)  \
-      break;                      \
-    case 4:                       \
-      HANDLE_CASE(INDEX_TYPE, 4)  \
-      break;                      \
-    case 5:                       \
-      HANDLE_CASE(INDEX_TYPE, 5)  \
-      break;                      \
-    default:                      \
-      THAssert(false);            \
-}
-
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, indexed)) {
-    RUN_T(unsigned int);
-  } else {
-    RUN_T(uint64_t);
-  }
-
-#undef HANDLE_CASE
-#undef RUN_T
-
-  THCudaCheck(cudaGetLastError());
-}
-
-#undef MAX_ADVINDEX_CALC_DIMS
 
 #endif

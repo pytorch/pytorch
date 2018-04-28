@@ -1,11 +1,16 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
+
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/generated/aten_dispatch.h"
 
 #include <ATen/ExpandUtils.h>
 
+#include <exception>
 #include <iostream>
+#include <memory>
+#include <utility>
+#include <vector>
 
 namespace torch { namespace jit {
 
@@ -26,7 +31,7 @@ at::Tensor representativeTensor(const TensorType * type) {
   return attype.tensor(type->sizes(), type->strides()).zero_();
 }
 
-void PropagateShapeOnBlock(Block * block);
+void PropagateShapeOnBlock(Block * block, bool insert_expands=true);
 
 std::pair<std::vector<TensorType*>, bool> gatherTypes(at::ArrayRef<Value*> values) {
   std::vector<TensorType*> types;
@@ -44,17 +49,19 @@ bool mergeTypes(ArrayRef<Value*> lhs, ArrayRef<Value*> rhs, ArrayRef<Value*> out
   JIT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
   bool changed = false;
   for(size_t i = 0; i < lhs.size(); ++i) {
+    auto old_output_type = outputs[i]->type();
     if(*lhs[i]->type() == *rhs[i]->type()) {
       outputs[i]->setType(lhs[i]->type());
     } else {
       outputs[i]->setType(DynamicType::get());
-      changed = true;
     }
+    if(*old_output_type != *outputs[i]->type())
+      changed = true;
   }
   return changed;
 }
 
-void PropagateShapeOnNode(Node * node);
+void PropagateShapeOnNode(Node * node, bool insert_expands=true);
 
 void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
   JIT_ASSERT(types.size() == 2);
@@ -76,7 +83,25 @@ void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
   types[1] = node->inputs().at(1)->type()->expect<TensorType>();
 }
 
-void PropagateShapeOnNode(Node * node) {
+void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>& types) {
+  auto op_info = getTensorOp(node);
+  std::vector<at::Tensor> stack;
+
+  for(auto & type : types) {
+    stack.push_back(representativeTensor(type));
+  }
+  // XXX: we're not catching any exceptions from the op for now. This
+  // is to uncover any mistakes we could make when editing this code,
+  // and eventually it shouldn't matter, because this phase should be
+  // preceded by schema checking.
+  op_info.op(stack);
+  JIT_ASSERT(stack.size() == node->outputs().size());
+  for(size_t i = 0; i < stack.size(); ++i) {
+    node->outputs()[i]->inferTypeFrom(stack[i]);
+  }
+}
+
+void PropagateShapeOnNode(Node * node, bool insert_expands) {
   using AKind = AttributeKind;
   // These don't require the types and present flag. Return early after we
   // process them
@@ -102,8 +127,14 @@ void PropagateShapeOnNode(Node * node) {
       auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
 
       do {
-        PropagateShapeOnBlock(body_block);
+        PropagateShapeOnBlock(body_block, /*insert_expands=*/false);
+        // note: inserting expands is unsafe at this point, we don't know
+        // if the types are stable yet, so the arguments to expand may change
       } while(mergeTypes(loop_carried_block, loop_carried_outputs, loop_carried_block));
+
+      // now that the types are stable, we can insert the expands
+      PropagateShapeOnBlock(body_block, /*insert_expands=*/true);
+
 
       for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
         node->outputs()[i]->setType(loop_carried_block[i]->type());
@@ -153,7 +184,7 @@ void PropagateShapeOnNode(Node * node) {
     case aten::ge:
     case aten::eq:
     case aten::ne: {
-      if (node->inputs().size() == 2) {
+      if (node->inputs().size() == 2 && insert_expands) {
         broadcastPointwise(node, types);
       }
       // NB: we don't handle the nodes in any other way, because the type casting
@@ -267,6 +298,26 @@ void PropagateShapeOnNode(Node * node) {
         node->output()->setType(types.at(0)->withSizes(sizes));
       }
     } break;
+    case aten::expand: {
+      if(check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
+                         {{AKind::is, attr::size}})) {
+        // it is safe to run this, even if we have an integer input tensor
+        PropagateShapeOnNodeByRunningIt(node, types);
+      }
+    } break;
+    case aten::index_select: {
+      if(check_overload(/*num_inputs=*/2, /*num_outputs=*/1,
+                        {{AKind::i, attr::dim}})) {
+        auto ten = types.at(0);
+        auto index = types.at(1);
+        int64_t dim = node->i(attr::dim);
+        SHAPE_ASSERT(index->sizes().size() == 1);
+        SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < ten->sizes().size());
+        std::vector<int64_t> sizes = ten->sizes();
+        sizes[dim] = index->sizes()[0];
+        node->output()->setType(ten->withSizes(sizes));
+      }
+    } break;
     case prim::ReplaceIfUndef: {
       // If types[0] has a type, then it is not defined, and the type will
       // get set to types[0] because that will be the value propagated.
@@ -298,40 +349,25 @@ void PropagateShapeOnNode(Node * node) {
   // If we haven't manage to handle the op so far, we fall back to inferring the
   // shapes by doing an example run of the op (if we can).
   if (!handled) {
-    auto op_info = getTensorOp(node);
-    std::vector<at::Tensor> stack;
-    bool shape_inferenceable = true;
     // Integral typed inputs are often an indicator that we're indexing into
     // a tensor, so we should special-case these ops in the shape propagation.
     // Additionally, passing in a zero representative tensor into an integer
     // division op causes divide-by-zero errors
-    for(auto & type : types) {
-      if (at::isIntegralType(type->scalarType())) {
-        shape_inferenceable = false;
-        break;
-      }
-      stack.push_back(representativeTensor(type));
-    }
+    bool shape_inferenceable = !std::any_of(types.begin(), types.end(), [](TensorType* t){
+      return at::isIntegralType(t->scalarType());
+    });
     if (!shape_inferenceable) {
       setDynamicType(node);
     } else {
-      // XXX: we're not catching any exceptions from the op for now. This
-      // is to uncover any mistakes we could make when editing this code,
-      // and eventually it shouldn't matter, because this phase should be
-      // preceded by schema checking.
-      op_info.op(stack);
-      JIT_ASSERT(stack.size() == node->outputs().size());
-      for(size_t i = 0; i < stack.size(); ++i) {
-        node->outputs()[i]->inferTypeFrom(stack[i]);
-      }
+      PropagateShapeOnNodeByRunningIt(node, types);
     }
   }
 }
 
-void PropagateShapeOnBlock(Block * block) {
+void PropagateShapeOnBlock(Block * block, bool insert_expands) {
   for (Node * node : block->nodes()) {
     try {
-      PropagateShapeOnNode(node);
+      PropagateShapeOnNode(node, insert_expands);
     } catch(propagation_error& e) {
       setDynamicType(node);
     } catch(std::exception & e) {

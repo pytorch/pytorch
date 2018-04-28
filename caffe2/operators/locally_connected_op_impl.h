@@ -238,10 +238,8 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
     column_buffer_data += column_stride * group_;
   }
   math::Transpose(
-      column_buffer->size(),
       shape.column_dims.size(),
       shape.column_dims.data(),
-      shape.column_transposed_dims.data(),
       shape.column_axes.data(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
@@ -274,10 +272,8 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
         &context_);
   }
   math::Transpose(
-      Y_transposed_buffer->size(),
       shape.Y_transposed_dims.size(),
       shape.Y_transposed_dims.data(),
-      shape.Y_dims.data(),
       shape.Y_axes.data(),
       Y_transposed_buffer_data,
       Y_data,
@@ -321,10 +317,8 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         &context_);
   }
   math::Transpose(
-      column_buffer->size(),
       shape.column_dims.size(),
       shape.column_dims.data(),
-      shape.column_transposed_dims.data(),
       shape.column_axes.data(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
@@ -343,10 +337,8 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       Y_transposed_buffer_data,
       &context_);
   math::Transpose(
-      Y_transposed_buffer->size(),
       shape.Y_transposed_dims.size(),
       shape.Y_transposed_dims.data(),
-      shape.Y_dims.data(),
       shape.Y_axes.data(),
       Y_transposed_buffer_data,
       Y_data,
@@ -599,20 +591,16 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
     column_buffer_data += column_stride * group_;
   }
   math::Transpose(
-      column_buffer->size(),
       shape.column_dims.size(),
       shape.column_dims.data(),
-      shape.column_transposed_dims.data(),
       shape.column_axes.data(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
 
   math::Transpose(
-      dY_transposed_buffer->size(),
       shape.Y_dims.size(),
       shape.Y_dims.data(),
-      shape.Y_transposed_dims.data(),
       shape.Y_axes.data(),
       dY_data,
       dY_transposed_buffer_data,
@@ -663,10 +651,8 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
         column_transposed_buffer->template mutable_data<T>(),
         &context_);
     math::Transpose(
-        column_transposed_buffer->size(),
-        shape.column_dims.size(),
+        shape.column_transposed_dims.size(),
         shape.column_transposed_dims.data(),
-        shape.column_dims.data(),
         shape.column_axes.data(),
         column_transposed_buffer->template data<T>(),
         column_buffer->template mutable_data<T>(),
@@ -754,19 +740,15 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         &context_);
   }
   math::Transpose(
-      column_buffer->size(),
       shape.column_dims.size(),
       shape.column_dims.data(),
-      shape.column_transposed_dims.data(),
       shape.column_axes.data(),
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
   math::Transpose(
-      dY_transposed_buffer->size(),
       shape.Y_dims.size(),
       shape.Y_dims.data(),
-      shape.Y_transposed_dims.data(),
       shape.Y_axes.data(),
       dY_data,
       dY_transposed_buffer_data,
@@ -817,10 +799,8 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         column_transposed_buffer->template mutable_data<T>(),
         &context_);
     math::Transpose(
-        column_transposed_buffer->size(),
-        shape.column_dims.size(),
+        shape.column_transposed_dims.size(),
         shape.column_transposed_dims.data(),
-        shape.column_dims.data(),
         shape.column_axes.data(),
         column_transposed_buffer->template data<T>(),
         column_buffer->template mutable_data<T>(),

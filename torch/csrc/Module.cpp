@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <sys/types.h>
 
 #ifndef _MSC_VER
@@ -34,6 +34,7 @@
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
 #include "torch/csrc/jit/python_ir.h"
+#include "torch/csrc/onnx/init.h"
 
 #ifdef WITH_CUDNN
 #include "cudnn.h"
@@ -345,6 +346,15 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPModule_isDefaultTypeCuda(PyObject *_unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (torch::tensor::get_default_tensor_type().is_cuda()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       NULL},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  NULL},
@@ -371,6 +381,7 @@ static PyMethodDef TorchMethods[] = {
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  NULL},
+  {"_is_default_type_cuda", (PyCFunction)THPModule_isDefaultTypeCuda, METH_NOARGS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 
@@ -478,6 +489,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPEngine_initModule(module));
   torch::autograd::initAutogradClosureBindings(module);
   torch::jit::initJITBindings(module);
+  torch::onnx::initONNXBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
 #ifdef WITH_CUDA
