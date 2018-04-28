@@ -26,7 +26,7 @@ at::Tensor representativeTensor(const TensorType * type) {
   return attype.tensor(type->sizes(), type->strides()).zero_();
 }
 
-void PropagateShapeOnBlock(Block * block);
+void PropagateShapeOnBlock(Block * block, bool insert_expands=true);
 
 std::pair<std::vector<TensorType*>, bool> gatherTypes(at::ArrayRef<Value*> values) {
   std::vector<TensorType*> types;
@@ -44,17 +44,19 @@ bool mergeTypes(ArrayRef<Value*> lhs, ArrayRef<Value*> rhs, ArrayRef<Value*> out
   JIT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
   bool changed = false;
   for(size_t i = 0; i < lhs.size(); ++i) {
+    auto old_output_type = outputs[i]->type();
     if(*lhs[i]->type() == *rhs[i]->type()) {
       outputs[i]->setType(lhs[i]->type());
     } else {
       outputs[i]->setType(DynamicType::get());
-      changed = true;
     }
+    if(*old_output_type != *outputs[i]->type())
+      changed = true;
   }
   return changed;
 }
 
-void PropagateShapeOnNode(Node * node);
+void PropagateShapeOnNode(Node * node, bool insert_expands=true);
 
 void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
   JIT_ASSERT(types.size() == 2);
@@ -94,7 +96,7 @@ void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>&
   }
 }
 
-void PropagateShapeOnNode(Node * node) {
+void PropagateShapeOnNode(Node * node, bool insert_expands) {
   using AKind = AttributeKind;
   // These don't require the types and present flag. Return early after we
   // process them
@@ -120,8 +122,14 @@ void PropagateShapeOnNode(Node * node) {
       auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
 
       do {
-        PropagateShapeOnBlock(body_block);
+        PropagateShapeOnBlock(body_block, /*insert_expands=*/false);
+        // note: inserting expands is unsafe at this point, we don't know
+        // if the types are stable yet, so the arguments to expand may change
       } while(mergeTypes(loop_carried_block, loop_carried_outputs, loop_carried_block));
+
+      // now that the types are stable, we can insert the expands
+      PropagateShapeOnBlock(body_block, /*insert_expands=*/true);
+
 
       for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
         node->outputs()[i]->setType(loop_carried_block[i]->type());
@@ -171,7 +179,7 @@ void PropagateShapeOnNode(Node * node) {
     case aten::ge:
     case aten::eq:
     case aten::ne: {
-      if (node->inputs().size() == 2) {
+      if (node->inputs().size() == 2 && insert_expands) {
         broadcastPointwise(node, types);
       }
       // NB: we don't handle the nodes in any other way, because the type casting
@@ -351,10 +359,10 @@ void PropagateShapeOnNode(Node * node) {
   }
 }
 
-void PropagateShapeOnBlock(Block * block) {
+void PropagateShapeOnBlock(Block * block, bool insert_expands) {
   for (Node * node : block->nodes()) {
     try {
-      PropagateShapeOnNode(node);
+      PropagateShapeOnNode(node, insert_expands);
     } catch(propagation_error& e) {
       setDynamicType(node);
     } catch(std::exception & e) {
