@@ -293,7 +293,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only 
+  This ensures that each element of the tensor is operated on once and only
   once.
   */
   Tensor oldA;
@@ -482,7 +482,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only 
+  This ensures that each element of the tensor is operated on once and only
   once.
   */
   Tensor oldA;
@@ -715,7 +715,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only 
+  This ensures that each element of the tensor is operated on once and only
   once.
   */
   Tensor oldA;
@@ -950,9 +950,9 @@ bool CUDA_tensor_apply4(at::Tensor a,
        i += gridDim.x * blockDim.x)
 
 /*
-Memory types used for the 3 histogram implementations.
-See `CUDA_tensor_histogram` below.
-*/
+  Memory types used for the 3 histogram implementations.
+  See `CUDA_tensor_histogram` below.
+ */
 enum class CUDAHistogramMemoryType { MULTI_BLOCK, SHARED, GLOBAL };
 
 /*
@@ -1078,19 +1078,20 @@ __global__ void kernelHistogram1D(
 /*
   Calculate the frequesncy of the input values.
 
-  `a` contains the final output or the histogram. Input `b` is assumed to
-  be 1-D non-negative int array. `c` optionally contains the weight vector.
+  `a` contains the final output or the histogram.
+  Input `b` is assumed to be 1-D non-negative int array.
+  `c` optionally contains the weight vector.
   See `help torch.bincount` for details on the math.
 
   3 implementations based of input size and memory usage:
-    SHARED: Each block atomically adds to it's own **shared** hist copy, then
-        atomically updates the global tensor.
-        case: #bins < blockDim.x
-    MULTI_BLOCK: Each block atomically adds to it's own **global** hist copy,
-        then  atomically updates the global tensor.
-        case: blockDim.x <= #bins < MIN_NUMBER_BINS_FOR_GLOBAL_MEM
-    GLOBAL: all threads atomically update to a single **global** hist copy.
-        case: MIN_NUMBER_BINS_FOR_GLOBAL_MEM <= #bins
+    case: #bins < blockDim.x
+        SHARED: Each block atomically adds to it's own **shared** hist copy,
+        then atomically updates the global tensor.
+    case: blockDim.x <= #bins < MIN_NUMBER_BINS_FOR_GLOBAL_MEM
+        MULTI_BLOCK: Each block atomically adds to it's own **global** hist
+        copy, then atomically updates the global tensor.
+    case: MIN_NUMBER_BINS_FOR_GLOBAL_MEM <= #bins
+        GLOBAL: all threads atomically update to a single **global** hist copy.
  */
 template <typename scalar1, typename scalar2>
 bool CUDA_tensor_histogram(
@@ -1135,7 +1136,7 @@ bool CUDA_tensor_histogram(
   } else {
     memType = CUDAHistogramMemoryType::GLOBAL;
   }
-  // alloc memory for SHARED and MULTI_BLOCK
+  // alloc memory for MULTI_BLOCK
   using IndexType = uint64_t;
   auto aInfo = detail::getTensorInfo<scalar1, IndexType>(a);
   auto bInfo = detail::getTensorInfo<scalar2, IndexType>(b);

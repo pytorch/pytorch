@@ -23,7 +23,7 @@ Tensor _bincount_cpu_template(
   }
 
   bool has_weights = weights.defined();
-  if (has_weights && weights.numel() != self.numel()) {
+  if (has_weights && weights.size(0) != self.size(0)) {
     AT_ERROR("input and weights should have the same length");
   }
 
