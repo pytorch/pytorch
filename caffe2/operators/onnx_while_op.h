@@ -34,13 +34,18 @@ class ONNXWhileOp final : public Operator<Context> {
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
+  bool RunOnDevice() {
+    return DispatchHelper<TensorTypes<int, bool, long>>::call(this, Input(1));
+  }
+
   // Operator
   //  Inputs: max trip count, condition, initial loop-carried dependencies
   //  Outputs: Final loop-carried dependencies, scan_outputs
   // Body
   //  Inputs: iteration number, condition, loop-carried dependencies
   //  Outputs: condition, loop-carried dependencies, scan_outputs
-  bool RunOnDevice() override {
+  template <typename CondVarType>
+  bool DoRunWithType() {
     // Clear workspaces from the previous invocations of the loop
     // and setup a local scope for the first iteration
     ws_stack_.clear();
@@ -58,7 +63,7 @@ class ONNXWhileOp final : public Operator<Context> {
       num_loop_carried_deps = InputSize() - num_inputs_before_lcds;
     }
     int64_t max_trip_count = *Input(0).template data<int64_t>();
-    const bool first_iter_condition = *Input(1).template data<bool>();
+    const bool first_iter_condition = *Input(1).template data<CondVarType>();
 
     // Body graph has 1+N+K outputs: recalculated condition variable, N
     // loop-carried dependencies, and K scan_outputs
@@ -81,7 +86,7 @@ class ONNXWhileOp final : public Operator<Context> {
     scope_->set_iteration(0ll);
 
     // Initialize input condition variable
-    scope_->set_input_condition(first_iter_condition);
+    scope_->template set_input_condition<CondVarType>(first_iter_condition);
 
     auto valid_iter_num = [this, max_trip_count](int64_t i) {
       if (has_trip_count_) {
@@ -125,7 +130,7 @@ class ONNXWhileOp final : public Operator<Context> {
         }
 
         cur_ws = scope_->workspace();
-        cur_output_condition = scope_->output_condition();
+        cur_output_condition = scope_->template output_condition<CondVarType>();
         if (save_scopes_) {
           loop_ws = ws_stack_.pushForwardWorkspace(parent_ws_).get();
           scope_ = std::make_shared<LocalScope>(loop_ws, body_net_def_);
@@ -175,7 +180,7 @@ class ONNXWhileOp final : public Operator<Context> {
           }
         }
         scope_->set_iteration(itr + 1ll);
-        scope_->set_input_condition(cur_output_condition);
+        scope_->template set_input_condition<CondVarType>(cur_output_condition);
       } else {
         break;
       }
@@ -260,16 +265,18 @@ class ONNXWhileOp final : public Operator<Context> {
       *iteration_var_ptr = itr;
     }
 
+    template <typename CondVarType>
     void set_input_condition(bool cond_value) {
       input_condition_var_->Resize(1);
       auto* input_condition_var_ptr =
-          input_condition_var_->template mutable_data<bool>();
+          input_condition_var_->template mutable_data<CondVarType>();
       *input_condition_var_ptr = cond_value;
     }
 
+    template <typename CondVarType>
     bool output_condition() const {
       auto* condition_var_ptr =
-          condition_var_->template mutable_data<bool>();
+          condition_var_->template mutable_data<CondVarType>();
       return *condition_var_ptr;
     }
 
