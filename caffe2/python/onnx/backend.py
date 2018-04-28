@@ -167,6 +167,7 @@ class Caffe2Backend(Backend):
         'Greater':               'GT',
         'Unsqueeze':             'ExpandDims',
         'Loop':                  'ONNXWhile',
+        'Tile':                  'NumpyTile',
     }
 
     _global_renamed_attrs = {'kernel_shape': 'kernels'}
@@ -1006,6 +1007,11 @@ class Caffe2Backend(Backend):
             ops = [ops]
         return Caffe2Ops(ops, [], [])
 
+    _broadcast_operators = {
+        'Add',
+        'Sub',
+    }
+
     @classmethod
     def _common_onnx_node_to_caffe2_op(cls, init_model, pred_model, onnx_node, opset_version):
         """
@@ -1044,6 +1050,13 @@ class Caffe2Backend(Backend):
                 return cls._global_renamed_attrs[k]
             return k
         c2_op.arg.extend(onnx_node.attrs.caffe2(kmap=kmap))
+        if c2_op.type in cls._broadcast_operators:
+            already_broadcast = False
+            for arg in c2_op.arg:
+                if arg.name == 'broadcast':
+                    already_broadcast = True
+            if not already_broadcast:
+                c2_op.arg.extend([caffe2.python.utils.MakeArgument('broadcast', 1)])
 
         return c2_op
 
