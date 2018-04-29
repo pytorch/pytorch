@@ -1,6 +1,7 @@
 // ------------------------------------------------------------------
-// GroupNorm op in Caffe2
+// GroupNorm op in Caffe2 for GPU
 // Written by Kaiming He
+// Improved by Xiaomeng Yang
 // see https://arxiv.org/abs/1803.08494
 // This is a stand-alone op: Y = gamma * (X - mu) / sig + beta
 // ------------------------------------------------------------------
@@ -107,6 +108,17 @@ __global__ void ComputeInternalGradientsCUDAKernel(
   }
 }
 
+// Math:
+// Y = gamma * (X - mu) * rsig + beta
+// let s = gamma * rsig
+// let b = beta - mu * rsig
+// Y = s * X + b
+// let n = D * HxW
+// dL/dX = dL/dY * dY/dX = dL/dY * (d(s * X)/dX + db/dX)
+// d(s * X)/dX = s + X * ds/dX = s + gamma * X * drsig/dX
+// db/dX = -u * drsig/dX - rsig * dmu/dX
+// drsig/dX = -rsig^3 * (X - mu) / n
+// dmu/dX = 1 / n
 template <typename T, StorageOrder kOrder>
 __global__ void GroupNormBackwardCUDAKernel(
     const int size,
@@ -207,13 +219,19 @@ bool GroupNormOp<float, CUDAContext>::RunOnDeviceImpl(
   const std::array<int, 2> axes = order_ == StorageOrder::NCHW
       ? std::array<int, 2>{2, 3}
       : std::array<int, 2>{1, 3};
+
+  // Computes mean and variance.
   math::Moments<float, CUDAContext>(
       4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
+
+  // Uses rsqrt to computes 1 / std which is much faster than computes std.
   InvStdCUDAKernel<float>
       <<<CAFFE_GET_BLOCKS(N * G),
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(N * G, epsilon_, rsig_data, rsig_data);
+
+  // Computes Y = gamma * (X - mu) * rsig + beta.
   const int size = N * G * D * HxW;
   if (order_ == StorageOrder::NCHW) {
     GroupNormForwardCUDAKernel<float, StorageOrder::NCHW>
@@ -251,6 +269,10 @@ bool GroupNormOp<float, CUDAContext>::RunOnDeviceImpl(
   return true;
 }
 
+// Math:
+// let: s = gamma * rsig
+// let: b = beta - mu * gamma * rsig
+// then: Y = s * X + b
 template <>
 bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
     const int N,
@@ -272,12 +294,17 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
   float* ds_data = ds_.mutable_data<float>();
   float* db_data = db_.mutable_data<float>();
   if (order_ == StorageOrder::NCHW) {
+    // Computes dL/ds and dL/db.
+    // dL/ds = Sum(dL/dY * gamma * X)
+    // dL/db = Sum(dL/dY * gamma)
     ComputeInternalGradientsCUDAKernel<float, StorageOrder::NCHW>
         <<<std::min(N * G, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
             N, G, D, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
+
+    // Computes dL/dX.
     GroupNormBackwardCUDAKernel<float, StorageOrder::NCHW>
         <<<CAFFE_GET_BLOCKS(size),
            CAFFE_CUDA_NUM_THREADS,
@@ -295,6 +322,8 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
             ds_data,
             db_data,
             dX_data);
+
+    // Computes dL/dgamma and dL/dbeta.
     GammaBetaBackwardCUDAKernel<float, StorageOrder::NCHW>
         <<<std::min(C, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,
@@ -311,12 +340,17 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
             dgamma_data,
             dbeta_data);
   } else {
+    // Computes dL/ds and dL/db.
+    // dL/ds = Sum(dL/dY * gamma * X)
+    // dL/db = Sum(dL/dY * gamma)
     ComputeInternalGradientsCUDAKernel<float, StorageOrder::NHWC>
         <<<std::min(N * G, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
             N, G, D, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
+
+    // Computes dL/dX.
     GroupNormBackwardCUDAKernel<float, StorageOrder::NHWC>
         <<<CAFFE_GET_BLOCKS(size),
            CAFFE_CUDA_NUM_THREADS,
@@ -334,6 +368,8 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
             ds_data,
             db_data,
             dX_data);
+
+    // Computes dL/dgamma and dL/dbeta.
     GammaBetaBackwardCUDAKernel<float, StorageOrder::NHWC>
         <<<std::min(C, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,

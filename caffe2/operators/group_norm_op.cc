@@ -1,3 +1,11 @@
+// ------------------------------------------------------------------
+// GroupNorm op in Caffe2 for CPU
+// Written by Kaiming He
+// Improved by Xiaomeng Yang
+// see https://arxiv.org/abs/1803.08494
+// This is a stand-alone op: Y = gamma * (X - mu) / sig + beta
+// ------------------------------------------------------------------
+
 #include "group_norm_op.h"
 
 #include <array>
@@ -55,6 +63,17 @@ void ComputeInternalGradients(
   }
 }
 
+// Math:
+// Y = gamma * (X - mu) * rsig + beta
+// let s = gamma * rsig
+// let b = beta - mu * rsig
+// Y = s * X + b
+// let n = D * HxW
+// dL/dX = dL/dY * dY/dX = dL/dY * (d(s * X)/dX + db/dX)
+// d(s * X)/dX = s + X * ds/dX = s + gamma * X * drsig/dX
+// db/dX = -u * drsig/dX - rsig * dmu/dX
+// drsig/dX = -rsig^3 * (X - mu) / n
+// dmu/dX = 1 / n
 template <typename T, StorageOrder kOrder>
 void GroupNormBackward(
     const std::array<int, 4>& dims,
@@ -107,10 +126,16 @@ bool GroupNormOp<T, Context>::RunOnDeviceImpl(
   const std::array<int, 2> axes = order_ == StorageOrder::NCHW
       ? std::array<int, 2>{2, 3}
       : std::array<int, 2>{1, 3};
+
+  // Computes mean and variance.
   math::Moments<T, Context>(
       4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
+
+  // Uses rsqrt to computes 1 / std which is much faster than computes std.
   EigenArrayMap<T>(rsig_data, N, G) += epsilon_;
   math::InvSqrt<T, Context>(N * G, rsig_data, rsig_data, &context_);
+
+  // Computes Y = gamma * (X - mu) * rsig + beta.
   if (order_ == StorageOrder::NCHW) {
     GroupNormForward<T, StorageOrder::NCHW>(
         dims, X_data, mu_data, rsig_data, gamma_data, beta_data, Y_data);
@@ -121,6 +146,10 @@ bool GroupNormOp<T, Context>::RunOnDeviceImpl(
   return true;
 }
 
+// Math:
+// let: s = gamma * rsig
+// let: b = beta - mu * gamma * rsig
+// then: Y = s * X + b
 template <typename T, class Context>
 bool GroupNormGradientOp<T, Context>::RunOnDeviceImpl(
     const int N,
@@ -138,6 +167,10 @@ bool GroupNormGradientOp<T, Context>::RunOnDeviceImpl(
   const std::array<int, 4> dims = order_ == StorageOrder::NCHW
       ? std::array<int, 4>{N, G, D, HxW}
       : std::array<int, 4>{N, HxW, G, D};
+
+  // Computes dL/ds and dL/db.
+  // dL/ds = Sum(dL/dY * gamma * X)
+  // dL/db = Sum(dL/dY * gamma)
   const int C = G * D;
   ds_.Resize(N, G);
   db_.Resize(N, G);
@@ -152,6 +185,8 @@ bool GroupNormGradientOp<T, Context>::RunOnDeviceImpl(
     ComputeInternalGradients<T, StorageOrder::NHWC>(
         dims, dY_data, X_data, gamma_data, ds_data, db_data);
   }
+
+  // Computes dL/dX, dL/dgamma and dL/dbeta.
   math::Set<T, Context>(C, T(0), dgamma_data, &context_);
   math::Set<T, Context>(C, T(0), dbeta_data, &context_);
   if (order_ == StorageOrder::NCHW) {
