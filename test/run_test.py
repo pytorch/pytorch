@@ -94,27 +94,15 @@ def test_cpp_extensions(python, test_module, test_directory, options):
     python_path = os.environ.get('PYTHONPATH', '')
     try:
         cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
-        if sys.platform == 'win32':
-            install_directory = os.path.join(cpp_extensions, 'install')
-            install_directories = get_shell_output(
-                'where -r "{}" *.pyd'.format(install_directory)).split('\r\n')
-
-            assert install_directories, 'install_directory must not be empty'
-
-            if len(install_directories) >= 1:
-                install_directory = install_directories[0]
-
-            install_directory = os.path.dirname(install_directory)
-            split_char = ';'
-        else:
-            install_directory = get_shell_output(
-                "find {}/install -name *-packages".format(cpp_extensions))
-            split_char = ':'
+        install_directory = ''
+        # install directory is the one that is named site-packages
+        for root, directories, _ in os.walk(os.path.join(cpp_extensions, 'install')):
+            for directory in directories:
+                if '-packages' in directory:
+                    install_directory = os.path.join(root, directory)
 
         assert install_directory, 'install_directory must not be empty'
-        install_directory = os.path.join(test_directory, install_directory)
-        os.environ['PYTHONPATH'] = '{}{}{}'.format(install_directory,
-                                                   split_char, python_path)
+        os.environ['PYTHONPATH'] = os.pathsep.join([install_directory, python_path])
         return run_test(python, test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
