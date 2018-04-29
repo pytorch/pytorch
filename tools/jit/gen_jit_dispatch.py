@@ -109,7 +109,7 @@ def gen_jit_dispatch(declarations, out):
         else:
             return CALL_METHOD.substitute(name=decl['name'], first=args[0], args=args[1:])
 
-    def emit_decl_variant(decl, is_positional_arg, has_tensorlist, indices_to_replace=None):
+    def emit_decl_variant(decl, is_positional_arg, has_tensorlist, override_types=None):
         # is_positional_arg is a boolean list the same length as decl['arguments']
         # that indicates if the argument should come from the postional list
         # of inputs. If false, the argument comes from the constant attributes
@@ -117,7 +117,13 @@ def gen_jit_dispatch(declarations, out):
         attr_names = []
         pos_assignments = []
         arguments = []
-        indices_to_replace = indices_to_replace or set()
+
+        if override_types is not None:
+            dec = deepcopy(decl)
+
+            for idx, new_type in override_types.items():
+                for key in ['type', 'dynamic_type', 'simple_type']:
+                    decl['arguments'][idx][key] = new_type
 
         if has_tensorlist:
             kw_assignments.append('size_t varargs_length = node->inputs().size();')
@@ -153,11 +159,6 @@ def gen_jit_dispatch(declarations, out):
                 pos_assignments.append(assign)
                 arguments.append(arg['name'])
             else:
-                if i in indices_to_replace:
-                    arg = deepcopy(arg)
-                    for key in ['type', 'dynamic_type', 'simple_type']:
-                        arg[key] = 'int64_t'
-
                 attr_method = ATTR_METHOD_MAP[arg['simple_type']]
                 assign = KW_ASSIGNMENT.substitute(type_cast=TYPE_CASTS.get(arg['simple_type'], arg['simple_type']),
                                                   name=arg['name'],
@@ -222,15 +223,15 @@ def gen_jit_dispatch(declarations, out):
         only_tensors_are_inputs = tuple(is_tensor_arg(arg) for arg in arguments)
 
         sized_intlist_args = [i for i, a in enumerate(arguments) if is_sized_intlist_arg(a)]
-        inds_to_replace_powerset = (c
-                                    for r in range(len(sized_intlist_args) + 1)
-                                    for c in combinations(sized_intlist_args, r))
+        overrides_powerset = ({idx: 'int64_t' for idx in c}
+                              for r in range(len(sized_intlist_args) + 1)
+                              for c in combinations(sized_intlist_args, r))
 
         # NB: if there are no scalar args then both options on LHS are equivalent, so deduplicate them.
         for variant in {all_arguments_are_inputs, only_tensors_are_inputs}:
             if variant is only_tensors_are_inputs:
-                for indices in inds_to_replace_powerset:
-                    emit_decl_variant(decl, variant, has_tensorlist, indices)
+                for override in overrides_powerset:
+                    emit_decl_variant(decl, variant, has_tensorlist, override)
             else:
                 emit_decl_variant(decl, variant, has_tensorlist)
 
