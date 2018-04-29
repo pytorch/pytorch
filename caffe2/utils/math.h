@@ -203,7 +203,7 @@ void Broadcast(
     T* Y,
     Context* context);
 
-// COmputes mean and variance over axes.
+// Computes mean and variance over axes.
 template <typename T, class Context>
 void Moments(
     const int num_dims,
