@@ -1492,7 +1492,7 @@ class TestNN(NNTestCase):
                  [0, 0],
                  [1, 2],
                  [3, 4]], device=device, dtype=dtype)
-        else:
+        elif mode == 'mean':
             expected_output = torch.tensor(
                 [[13. / 3, 16. / 3],
                  [13. / 3, 16. / 3]], device=device, dtype=dtype)
@@ -1502,6 +1502,16 @@ class TestNN(NNTestCase):
                  [0., 0.],
                  [1. / 3, 2. / 3],
                  [3. / 3, 4. / 3]], device=device, dtype=dtype)
+        elif mode == 'max':
+            expected_output = torch.tensor(
+                [[7, 8],
+                 [9, 10]], device=device, dtype=dtype)
+            expected_grad_weight = torch.tensor(
+                [[0, 0],
+                 [0, 0],
+                 [0, 0],
+                 [1, 2],
+                 [3, 4]], device=device, dtype=dtype)
 
         output = es(input, offsets)
         output.backward(grad_output)
@@ -1536,8 +1546,10 @@ class TestNN(NNTestCase):
             output = es(input.view(-1), offsets)
             if mode == 'sum':
                 ref_output = e(input).sum(1)
-            else:
+            elif mode == 'mean':
                 ref_output = e(input).mean(1)
+            elif mode == 'max':
+                ref_output = e(input).max(1)[0]
 
             self.assertEqual(output, ref_output, dtype2prec[dtype])
 
@@ -1546,7 +1558,10 @@ class TestNN(NNTestCase):
             es_weight_grad = es.weight.grad.data
             if sparse:
                 es_weight_grad = es.weight.grad.data.to_dense()
-            self.assertEqual(es_weight_grad, e.weight.grad, dtype2prec[dtype])
+
+            # We have more floating point error here because we are dealing with larger numbers
+            needed_prec = dtype2prec[dtype] * 2
+            self.assertEqual(es_weight_grad, e.weight.grad, needed_prec)
 
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
         _test_vs_Embedding(N, D, B, L)
@@ -1614,6 +1629,8 @@ class TestNN(NNTestCase):
     def test_embedding_bag(self):
         self._test_EmbeddingBag(False, 'sum', False)
         self._test_EmbeddingBag(False, 'mean', False)
+        self._test_EmbeddingBag(False, 'max', False)
+
         self._test_EmbeddingBag(False, 'sum', True)
         self._test_EmbeddingBag(False, 'mean', True)
 
@@ -1622,6 +1639,7 @@ class TestNN(NNTestCase):
     def test_embedding_bag_cuda(self, dtype=torch.float):
         self._test_EmbeddingBag(True, 'sum', False, dtype)
         self._test_EmbeddingBag(True, 'mean', False, dtype)
+        self._test_EmbeddingBag(True, 'max', False, dtype)
         if dtype != torch.half:
             # torch.cuda.sparse.HalfTensor is not enabled.
             self._test_EmbeddingBag(True, 'sum', True, dtype)
