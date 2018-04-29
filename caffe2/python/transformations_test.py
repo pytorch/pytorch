@@ -23,6 +23,14 @@ from caffe2.python import core, workspace, test_util
 from caffe2.python.transformations import addNNPACK, fuseNNPACKConvRelu
 
 
+def compareStringsOrBytes(a, b, encoding="utf8"):
+    if isinstance(a, bytes):
+        a = a.decode(encoding)
+    if isinstance(b, bytes):
+        b = b.decode(encoding)
+    return a == b
+
+
 class TestTransformations(test_util.TestCase):
     def test_addNNPACK(self):
         net = core.Net("net")
@@ -31,7 +39,7 @@ class TestTransformations(test_util.TestCase):
         )
         net.Relu(["Y"], ["Y2"])
         addNNPACK(net)
-        assert (net.Proto().op[0].engine == "NNPACK")
+        assert compareStringsOrBytes(net.Proto().op[0].engine, "NNPACK")
 
 
     def test_fuseNNPACKConvRelu(self):
@@ -41,13 +49,13 @@ class TestTransformations(test_util.TestCase):
         )
         net.Relu(["Y"], ["Y2"])
         addNNPACK(net) # get the NNPACK engine
-        assert (net.Proto().op[0].engine == "NNPACK")
+        assert compareStringsOrBytes(net.Proto().op[0].engine, "NNPACK")
         fuseNNPACKConvRelu(net)
         assert (len(net.Proto().op) == 1)
         has_activation_arg = False
         for arg in net.Proto().op[0].arg:
-            if arg.name == "activation":
-                assert (arg.s == "Relu")
+            if compareStringsOrBytes(arg.name, "activation"):
+                assert compareStringsOrBytes(arg.s, b"Relu")
                 has_activation_arg = True
         assert has_activation_arg
 
@@ -64,7 +72,8 @@ class TestTransformations(test_util.TestCase):
         assert (len(net.Proto().op) == 3)
         has_activation_arg = False
         for arg in net.Proto().op[0].arg:
-            if arg.name == "activation" and arg.s == "Relu":
+            if (compareStringsOrBytes(arg.name, "activation") and
+                    compareStringsOrBytes(arg.s, "Relu")):
                 has_activation_arg = True
         assert not has_activation_arg
 
@@ -80,8 +89,8 @@ class TestTransformations(test_util.TestCase):
         assert (len(net.Proto().op) == 1)
         has_activation_arg = False
         for arg in net.Proto().op[0].arg:
-            if arg.name == "activation":
-                assert (arg.s == "Relu")
+            if compareStringsOrBytes(arg.name, "activation"):
+                assert compareStringsOrBytes(arg.s, "Relu")
                 has_activation_arg = True
         assert has_activation_arg
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
@@ -98,8 +107,8 @@ class TestTransformations(test_util.TestCase):
         assert (len(net.Proto().op) == 1)
         has_activation_arg = False
         for arg in net.Proto().op[0].arg:
-            if arg.name == "activation":
-                assert (arg.s == "Relu")
+            if compareStringsOrBytes(arg.name, "activation"):
+                assert compareStringsOrBytes(arg.s, "Relu")
                 has_activation_arg = True
         assert has_activation_arg
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
