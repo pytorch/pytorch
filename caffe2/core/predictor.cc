@@ -49,13 +49,16 @@ const NetDef& getNet(const MetaNetDef& def, const std::string& name) {
 
 const ::google::protobuf::RepeatedPtrField<::std::string>& getBlobs(
     const MetaNetDef& def,
-    const std::string& name) {
+    const std::string& name,
+    const bool optional = false) {
   for (const auto& b : def.blobs()) {
     if (b.key() == name) {
       return b.value();
     }
   }
-  CAFFE_THROW("Blob not found: ", name);
+  CAFFE_ENFORCE(optional, "Blob not found: ", name);
+  static ::google::protobuf::RepeatedPtrField<::std::string> emptyVec;
+  return emptyVec;
 }
 } // namespace
 
@@ -73,8 +76,8 @@ Predictor::Predictor(const MetaNetDef& def, Workspace* parent, bool run_init)
     inputNames_.insert(input);
   }
 
-  const auto& outputs =
-      getBlobs(def, PredictorConsts::default_instance().outputs_blob_type());
+  const auto& outputs = getBlobs(
+      def, PredictorConsts::default_instance().outputs_blob_type(), true);
   for (const auto& output : outputs) {
     outputNames_.emplace_back(output);
   }
