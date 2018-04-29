@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 cmake_policy(VERSION 3.0)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -161,6 +161,12 @@ set(TORCH_SRCS
   )
 
 add_library(torch SHARED ${TORCH_SRCS})
+
+target_compile_options(torch PRIVATE -Wall -Wextra)
+
+if ($ENV{WERROR})
+  target_compile_options(torch PRIVATE -Werror)
+endif()
 
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}

@@ -123,11 +123,11 @@ class ContainerListImpl : public Container_CRTP<Derived> {
     return children_.size();
   }
 
-  auto begin() {
+  std::vector<Container>::iterator begin() {
     return children_.begin();
   }
 
-  auto end() {
+  std::vector<Container>::iterator end() {
     return children_.end();
   }
 
@@ -178,8 +178,8 @@ AUTOGRAD_CONTAINER_CLASS(Functional) {
  public:
   Functional(std::function<variable_list(variable_list)> fun) : fun_(fun){};
   Functional(std::function<Variable(Variable)> fun)
-      : fun_([f = std::move(fun)](variable_list input) {
-          return variable_list({f(input[0])});
+      : fun_([fun](variable_list input) {
+          return variable_list({fun(input[0])});
         }){};
 
   variable_list forward(variable_list input) override {
