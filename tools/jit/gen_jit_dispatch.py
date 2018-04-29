@@ -1,6 +1,5 @@
 import os
 import argparse
-from copy import deepcopy
 from itertools import count, combinations
 from ..autograd.utils import CodeTemplate, write, uninplace_api_name
 from ..autograd.gen_autograd import load_aten_declarations
@@ -117,13 +116,7 @@ def gen_jit_dispatch(declarations, out):
         attr_names = []
         pos_assignments = []
         arguments = []
-
-        if override_types is not None:
-            dec = deepcopy(decl)
-
-            for idx, new_type in override_types.items():
-                for key in ['type', 'dynamic_type', 'simple_type']:
-                    decl['arguments'][idx][key] = new_type
+        override_types = override_types or {}
 
         if has_tensorlist:
             kw_assignments.append('size_t varargs_length = node->inputs().size();')
@@ -159,8 +152,10 @@ def gen_jit_dispatch(declarations, out):
                 pos_assignments.append(assign)
                 arguments.append(arg['name'])
             else:
-                attr_method = ATTR_METHOD_MAP[arg['simple_type']]
-                assign = KW_ASSIGNMENT.substitute(type_cast=TYPE_CASTS.get(arg['simple_type'], arg['simple_type']),
+                simple_type = override_types.get(arg['name'], arg['simple_type'])
+
+                attr_method = ATTR_METHOD_MAP[simple_type]
+                assign = KW_ASSIGNMENT.substitute(type_cast=TYPE_CASTS.get(simple_type, simple_type),
                                                   name=arg['name'],
                                                   method=attr_method)
                 kw_assignments.append(assign)
@@ -222,8 +217,8 @@ def gen_jit_dispatch(declarations, out):
         all_arguments_are_inputs = tuple(True for _ in arguments)
         only_tensors_are_inputs = tuple(is_tensor_arg(arg) for arg in arguments)
 
-        sized_intlist_args = [i for i, a in enumerate(arguments) if is_sized_intlist_arg(a)]
-        overrides_powerset = ({idx: 'int64_t' for idx in c}
+        sized_intlist_args = [a['name'] for a in arguments if is_sized_intlist_arg(a)]
+        overrides_powerset = ({name: 'int64_t' for name in c}
                               for r in range(len(sized_intlist_args) + 1)
                               for c in combinations(sized_intlist_args, r))
 
