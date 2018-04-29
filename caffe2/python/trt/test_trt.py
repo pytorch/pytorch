@@ -59,7 +59,7 @@ def _download_onnx_model(model_name):
         os.makedirs(model_dir)
 
         # On Windows, NamedTemporaryFile can not be opened for a
-        #second time
+        # second time
         url = '{}/{}.tar.gz'.format(_BASE_URL, model_name)
         download_file = tempfile.NamedTemporaryFile(delete=False)
         try:
