@@ -3,8 +3,8 @@ import unittest
 import torch
 import torch.utils.cpp_extension
 try:
-    import torch_test_cpp_extension as cpp_extension
-except ModuleNotFoundError:
+    import torch_test_cpp_extension.cpp as cpp_extension
+except ImportError:
     print("\'test_cpp_extensions.py\' cannot be invoked directly. " +
           "Run \'python run_test.py -i cpp_extensions\' for the \'test_cpp_extensions.py\' tests.")
     raise
@@ -70,7 +70,7 @@ class TestCppExtension(common.TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_extension(self):
-        import torch_test_cuda_extension as cuda_extension
+        import torch_test_cpp_extension.cuda as cuda_extension
 
         x = torch.FloatTensor(100).zero_().cuda()
         y = torch.FloatTensor(100).zero_().cuda()
