@@ -245,7 +245,13 @@ class BuildExtension(build_ext):
         check_compiler_abi_compatibility(compiler)
 
     def _define_torch_extension_name(self, extension):
-        define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
+        # pybind11 doesn't support dots in the names
+        # so in order to support extensions in the packages
+        # like torch._C, we take the last part of the string
+        # as the library name
+        names = extension.name.split('.')
+        name = names[-1]
+        define = '-DTORCH_EXTENSION_NAME={}'.format(name)
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
                 args.append(define)
