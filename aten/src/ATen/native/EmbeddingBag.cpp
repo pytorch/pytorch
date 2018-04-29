@@ -56,7 +56,7 @@ static void index_select_add(const Tensor &select_indices,
   auto src_data = src.data<T>();
   auto output_data = output.data<T>();
   auto numel = add_indices.numel();
-  int64_t ddim = src.sizes()[1];
+  int64_t ddim = src.size(1);
   for (int64_t i = 0; i < numel; i++) {
     axpy<T>(ddim, 1, src_data + ddim * select_indices_data[i], 1,
             output_data + ddim * add_indices_data[i], 1);
@@ -66,11 +66,11 @@ static void index_select_add(const Tensor &select_indices,
 static void make_bag_size(const Tensor &offsets, const Tensor &indices,
                           const int64_t mode, Tensor &bag_size) {
   if (mode == 1) { // MODE_MEAN
-    if (offsets.sizes()[0] != 1) {
-      bag_size.slice(0, 0, bag_size.sizes()[0] - 1, 1) =
-          offsets.slice(0, 1, offsets.sizes()[0], 1) -
-          offsets.slice(0, 0, offsets.sizes()[0] - 1, 1);
-      bag_size[-1] = indices.sizes()[0] - offsets[-1];
+    if (offsets.size(0) != 1) {
+      bag_size.slice(0, 0, bag_size.size(0) - 1, 1) =
+          offsets.slice(0, 1, offsets.size(0), 1) -
+          offsets.slice(0, 0, offsets.size(0) - 1, 1);
+      bag_size[-1] = indices.size(0) - offsets[-1];
     }
   }
 }
@@ -79,8 +79,8 @@ static Tensor apply_bag_size(const Tensor &offsets, const Tensor &indices,
                              const int64_t mode, Tensor &output,
                              const Tensor &bag_size) {
   if (mode == 1) { // MODE_MEAN
-    if (offsets.sizes()[0] == 1) {
-      auto bag_size_ = indices.sizes()[0];
+    if (offsets.size(0) == 1) {
+      auto bag_size_ = indices.size(0);
       output /= bag_size_;
     } else {
       auto bag_size_ =
@@ -96,8 +96,8 @@ static Tensor apply_bag_size_backward(const Tensor &offsets,
                                       Tensor &output, const Tensor &offset2bag,
                                       const Tensor &bag_size) {
   if (mode == 1) { // MODE_MEAN
-    if (offsets.sizes()[0] == 1) {
-      auto bag_size_ = indices.sizes()[0];
+    if (offsets.size(0) == 1) {
+      auto bag_size_ = indices.size(0);
       output /= bag_size_;
     } else {
       auto inv_bag_size_ = (1 / bag_size.toType(output.type()))
@@ -114,10 +114,10 @@ template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
   const Tensor& weight, const Tensor &indices, const Tensor& offset2bag, const Tensor& output, const Tensor& bag_size, const Tensor& offsets) {
     
-    auto max_indices = at::zeros(indices.type(), {offsets.sizes()[0], weight.sizes()[1]});
+    auto max_indices = at::zeros(indices.type(), {offsets.size(0), weight.size(1)});
 
     int64_t numel = indices.numel();
-    int64_t dims = weight.sizes()[1];
+    int64_t dims = weight.size(1);
     auto indices_data = indices.data<int64_t>();
     auto offset2bag_data = offset2bag.data<int64_t>();
 
@@ -165,9 +165,9 @@ embedding_bag_cpu(const Tensor &weight, const Tensor &indices__,
 
   auto bag_size = at::zeros(indices.type(), offsets.sizes());
   auto offset2bag =
-      at::zeros(indices__.type(), {indices.sizes()[0]}); // offset2bag = [0 0 0 0 0]
+      at::zeros(indices__.type(), {indices.size(0)}); // offset2bag = [0 0 0 0 0]
   make_offset2bag(offsets, indices, offset2bag);
-  auto output = at::zeros(weight.type(), {offsets.sizes()[0], weight.sizes()[1]});
+  auto output = at::zeros(weight.type(), {offsets.size(0), weight.size(1)});
 
   if (mode == MODE_MEAN || mode == MODE_SUM) {
     if (weight.type().scalarType() == kFloat) {
@@ -256,7 +256,7 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
   }
 
   auto index_grad_weight =
-      at::zeros(grad.type(), {num_weights, grad.sizes()[1]}).contiguous();
+      at::zeros(grad.type(), {num_weights, grad.size(1)}).contiguous();
 
   std::vector<int64_t> counts_uniq;
   counts_uniq.reserve(num_weights);
@@ -281,18 +281,18 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
             scale /= counts[indices_data[i]];
           }
           if (mode == 1) { // MODE_MEAN
-            if (offsets_.sizes()[0] == 1) {
-              auto bag_size = indices.sizes()[0];
+            if (offsets_.size(0) == 1) {
+              auto bag_size = indices.size(0);
               scale /= bag_size;
             } else {
-              if (source == offsets_.sizes()[0] - 1) {
-                scale /= indices.sizes()[0] - offsets_data[offsets_.sizes()[0] - 1];
+              if (source == offsets_.size(0) - 1) {
+                scale /= indices.size(0) - offsets_data[offsets_.size(0) - 1];
               } else {
                 scale /= offsets_data[source + 1] - offsets_data[source];
               }
             }
           }
-          int64_t ddim = grad.sizes()[1];
+          int64_t ddim = grad.size(1);
           if (grad.type().scalarType() == kFloat) {
             auto igwd = index_grad_weight.data<float>();
             auto gd = grad.data<float>();
@@ -307,7 +307,7 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
         }
       } 
   } else if (mode == MODE_MAX) {
-    for (int64_t dim = 0; dim < grad.sizes()[1]; dim++) {
+    for (int64_t dim = 0; dim < grad.size(1); dim++) {
       index_grad_weight.select(1, dim).index_add_(0, max_indices_.select(1, dim), grad_.select(1, dim));
     }
   }
