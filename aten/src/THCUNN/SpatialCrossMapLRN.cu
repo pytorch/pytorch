@@ -1,6 +1,8 @@
 #include "THCUNN.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 #include "common.h"
 
 template <typename Dtype, typename Acctype>

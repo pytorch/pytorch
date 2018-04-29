@@ -85,7 +85,35 @@ struct Method {
     for (auto inp : member_inputs) {
       inputs.push_back(*inp);
     }
-    PropagateInputShapes(*retval, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+    PropagateInputShapes(
+      *retval,
+      ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+    return retval;
+  }
+
+  std::shared_ptr<Graph> propagate_and_assign_input_and_output_shapes(std::vector<at::Tensor> inputs, std::vector<at::Tensor> outputs, bool with_grad=false, bool propagate=true) {
+    auto retval = graph_->copy();
+    for (auto inp : member_inputs) {
+      inputs.push_back(*inp);
+    }
+    if (propagate) {
+      auto inputs_copy = inputs;
+      PropagateInputShapes(*retval, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs_copy))));
+    }
+    JIT_ASSERT(retval->inputs().size() == inputs.size());
+    for (size_t i=0; i < retval->inputs().size(); ++i) {
+      auto scalar_type = inputs[i].type().scalarType();
+      auto sizes = inputs[i].sizes();
+      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      retval->inputs()[i]->setType(type);
+    }
+    JIT_ASSERT(retval->outputs().size() == outputs.size());
+    for (size_t i=0; i < retval->outputs().size(); ++i) {
+      auto scalar_type = outputs[i].type().scalarType();
+      auto sizes = outputs[i].sizes();
+      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      retval->outputs()[i]->setType(type);
+    }
     return retval;
   }
 

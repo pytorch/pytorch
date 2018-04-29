@@ -277,9 +277,10 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
-    self_sizes = self.type().sizes()
-    if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
-        return g.op("Flatten", self, axis_i=1)
+    if self.isTensor():
+        self_sizes = self.type().sizes()
+        if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
+            return g.op("Flatten", self, axis_i=1)
     shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
 
@@ -403,6 +404,20 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
              kernel_shape_i=_pair(kernel_size),
              pads_i=_pair(padding) * 2,
              strides_i=_pair(stride))
+    return r, None
+
+
+def max_pool3d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+    if ceil_mode:
+        return _unimplemented("max_pool3d", "ceil_mode")
+    if set(_triple(dilation)) != {1}:
+        return _unimplemented("max_pool3d", "dilation")
+    if not stride:
+        stride = kernel_size
+    r = g.op("MaxPool", input,
+             kernel_shape_i=_triple(kernel_size),
+             pads_i=_triple(padding) * 2,
+             strides_i=_triple(stride))
     return r, None
 
 
@@ -539,7 +554,9 @@ def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
 
-def elu(g, input, alpha, inplace=False):
+def elu(g, input, alpha, scale):
+    if scale and scale != 1.:
+        return _unimplemented("scale", "does not support scale in Elu")
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
 
@@ -681,6 +698,15 @@ def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
         _unimplemented("TopK", "Ascending TopK is not supported")
 
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
+
+
+def repeat(g, self, repeats):
+    if self.isTensor():
+        sizes = self.type().sizes()
+        diff_dims = len(repeats) - len(sizes)
+        if diff_dims > 0:
+            self = view(g, self, [1] * diff_dims + sizes)
+    return g.op("Tile", self, g.op("Constant", value_t=torch.LongTensor(repeats)))
 
 
 def instance_norm(g, input, **kwargs):

@@ -19,7 +19,7 @@
 # - The conda version and gcc version given in BUILD_ENVIRONMENT are ignored.
 #   These versions are determined by calling the binaries with --version
 #
-# The special flags SKIP_CONDA_TESTS, CAFFE2_ANACONDA_ORG_ACCESS_TOKEN, and
+# The special values CAFFE2_ANACONDA_ORG_ACCESS_TOKEN, and
 # ANACONDA_USERNAME can only be passed in as environment variables.
 #
 # This script works by
@@ -51,7 +51,7 @@ fi
 
 # remove_lines_with: Given a string, removes any line that contains it
 remove_lines_with () {
-  portable_sed "/$1/d" $META_YAML
+  portable_sed "/$1/d" $meta_yaml
 }
 
 # add_before <some marker> <some insertion> <in this file>
@@ -75,7 +75,7 @@ add_before() {
   portable_sed 's@( *)'"${1}@"'\1'"${2}\\"$'\n''\1'"${1}@" $3
 }
 append_to_section () {
-  add_before "# ${1} section here" "$2" $META_YAML
+  add_before "# ${1} section here" "$2" $meta_yaml
 }
 # add_package <package_name> <optional package version specifier>
 # Takes a package name and version and finagles the meta.yaml to specify that
@@ -88,9 +88,9 @@ add_package () {
 ###########################################################
 # Parse options from both command line and from BUILD_ENVIRONMENT
 ###########################################################
-CONDA_BUILD_ARGS=()
-CAFFE2_CMAKE_ARGS=()
-CONDA_CHANNEL=()
+conda_build_args=()
+caffe2_cmake_args=()
+conda_channel=()
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   CUDA_VERSION="$(echo $BUILD_ENVIRONMENT | grep --only-matching -P '(?<=cuda)[0-9]\.[0-9]')"
 fi
@@ -98,13 +98,43 @@ if [[ $BUILD_ENVIRONMENT == *cudnn* ]]; then
   CUDNN_VERSION="$(echo $BUILD_ENVIRONMENT | grep --only-matching -P '(?<=cudnn)[0-9](\.[0-9])?')"
 fi
 if [[ $BUILD_ENVIRONMENT == *full* ]]; then
-  BUILD_FULL=1
+  build_full=1
 fi
+
+# Support legacy way of passing in these parameters
+if [[ -n $SKIP_CONDA_TESTS ]]; then
+  skip_tests=1
+fi
+if [[ -n $UPLOAD_TO_CONDA ]]; then
+  upload_to_conda=1
+fi
+if [[ -n $CONDA_INSTALL_LOCALLY ]]; then
+  install_locally=1
+fi
+if [[ -n $BUILD_INTEGRATED ]]; then
+  pytorch_too=1
+fi
+
+# Parameters passed in by command line. These override those set by environment
+# variables
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name)
       shift
-      PACKAGE_NAME=$1
+      package_name=$1
+      ;;
+    --suffix)
+      shift
+      package_name_suffix=$1
+      ;;
+    --skip-tests)
+      skip_tests=1
+      ;;
+    --upload)
+      upload_to_conda=1
+      ;;
+    --install-locally)
+      install_locally=1
       ;;
     --cuda)
       shift
@@ -115,17 +145,20 @@ while [[ $# -gt 0 ]]; do
       CUDNN_VERSION="$1"
       ;;
     --full)
-      BUILD_FULL=1
+      build_full=1
       ;;
     --integrated)
-      BUILD_INTEGRATED=1
+      pytorch_too=1
+      ;;
+    --pytorch-too)
+      pytorch_too=1
       ;;
     --conda)
       shift
-      CONDA_BUILD_ARGS+=("$1")
+      conda_build_args+=("$1")
       ;;
     *)
-      CAFFE2_CMAKE_ARGS+=("$1")
+      caffe2_cmake_args+=("$1")
       ;;
   esac
   shift
@@ -134,11 +167,11 @@ done
 # Verify that the CUDA version is supported
 if [[ -n $CUDA_VERSION ]]; then
   if [[ $CUDA_VERSION == 9.1* ]]; then
-    CUDA_FEATURE_NAME=cuda91
+    cuda_feature_name=cuda91
   elif [[ $CUDA_VERSION == 9.0* ]]; then
-    CUDA_FEATURE_NAME=cuda90
+    cuda_feature_name=cuda90
   elif [[ $CUDA_VERSION == 8.0* ]]; then
-    CUDA_FEATURE_NAME=cuda80
+    cuda_feature_name=cuda80
   else
     echo "Unsupported CUDA version $CUDA_VERSION"
     echo "Changes have already been made to the meta.yaml, you may have to revert them"
@@ -151,12 +184,19 @@ if [[ -n $CUDA_VERSION ]]; then
   echo "Detected CUDA_VERSION $CUDA_VERSION"
 fi
 
+# Only allow uploading to Anaconda if the tests were run
+if [[ -n $skip_tests && -n $upload_to_conda ]]; then
+  echo "Uploading to Anaconda only allowed if tests are run. Upload turned off"
+  upload_to_conda=''
+fi
+
 ###########################################################
 # Set the build version
-if [[ -n $BUILD_INTEGRATED ]]; then
+export PYTORCH_BUILD_DATE="$(date +"%Y.%m.%d")"
+if [[ -n $pytorch_too ]]; then
   export PYTORCH_BUILD_VERSION="$(date +"%Y.%m.%d")"
 else
-  export PYTORCH_BUILD_VERSION="0.8.dev.$(date +"%Y.%m.%d")"
+  export PYTORCH_BUILD_VERSION="0.8.dev"
 fi
 
 
@@ -177,36 +217,37 @@ if [[ "$PYTHON_VERSION" == 3.6* ]]; then
   # This is needed or else conda tries to move packages to python3/site-packages
   # instead of python3.6/site-packages. Specifically 3.6 because that's what
   # the latest Anaconda version is
-  CONDA_BUILD_ARGS+=(" --python 3.6")
+  conda_build_args+=(" --python 3.6")
 fi
 
 
 ###########################################################
 # Pick the correct conda-build folder
 ###########################################################
-PYTORCH_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
-CONDA_BUILD_DIR="${PYTORCH_ROOT}/conda"
-if [[ -n $BUILD_INTEGRATED ]]; then
-  # This cp is so only one meta.yaml is used
-  \cp -r "$CONDA_BUILD_DIR/caffe2/normal/meta.yaml" "$CONDA_BUILD_DIR/integrated/meta.yaml"
-  CONDA_BUILD_DIR="${CONDA_BUILD_DIR}/integrated"
-elif [[ -n $BUILD_FULL ]]; then
-  CONDA_BUILD_DIR="${CONDA_BUILD_DIR}/caffe2/full"
+# And copy the meta.yaml to the correct build folder
+pytorch_root="$( cd "$(dirname "$0")"/.. ; pwd -P)"
+build_dir="${pytorch_root}/conda"
+if [[ -n $pytorch_too ]]; then
+  \cp -r "${build_dir}/caffe2/meta.yaml" "${build_dir}/integrated/meta.yaml"
+  build_dir="${build_dir}/integrated"
+elif [[ -n $build_full ]]; then
+  build_dir="${build_dir}/caffe2/full"
 else
-  CONDA_BUILD_DIR="${CONDA_BUILD_DIR}/caffe2/normal"
+  \cp -r "${build_dir}/caffe2/meta.yaml" "${build_dir}/caffe2/normal/meta.yaml"
+  build_dir="${build_dir}/caffe2/normal"
 fi
-META_YAML="${CONDA_BUILD_DIR}/meta.yaml"
-portable_sed "s#path:.*#path: $PYTORCH_ROOT#" $META_YAML
+meta_yaml="${build_dir}/meta.yaml"
+portable_sed "s#path:.*#path: $pytorch_root#" $meta_yaml
 
 
 ###########################################################
 # Build the package name and build string depending on gcc and CUDA
 ###########################################################
-BUILD_STRING='py{{py}}'
-if [[ -z $PACKAGE_NAME ]]; then
-  PACKAGE_NAME='caffe2'
-  if [[ -n $BUILD_INTEGRATED ]]; then
-    PACKAGE_NAME="pytorch-${PACKAGE_NAME}"
+build_string='py{{py}}'
+if [[ -z $package_name ]]; then
+  package_name='caffe2'
+  if [[ -n $pytorch_too ]]; then
+    package_name="pytorch-${package_name}"
   fi
 fi
 if [[ -n $CUDA_VERSION ]]; then
@@ -215,32 +256,35 @@ if [[ -n $CUDA_VERSION ]]; then
   # the package name in meta.yaml based off of these values, we let Caffe2
   # take the CUDA and cuDNN versions that it finds in the build environment,
   # and manually set the package name ourself.
-  BUILD_STRING="${BUILD_STRING}_cuda${CUDA_VERSION}_cudnn${CUDNN_VERSION}_nccl2"
+  package_name="${package_name}_cuda${CUDA_VERSION}_cudnn${CUDNN_VERSION}"
+  build_string="${build_string}_cuda${CUDA_VERSION}_cudnn${CUDNN_VERSION}_nccl2"
 else
-  BUILD_STRING="${BUILD_STRING}_cpu"
+  build_string="${build_string}_cpu"
 fi
-if [[ "$(uname)" != 'Darwin' && -z $BUILD_INTEGRATED && $GCC_USE_C11 -eq 0 ]]; then
+if [[ "$(uname)" != 'Darwin' && -z $pytorch_too && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
-  BUILD_STRING="${BUILD_STRING}_gcc${GCC_VERSION:0:3}"
+  package_name="${package_name}_gcc${GCC_VERSION:0:3}"
+  build_string="${build_string}_gcc${GCC_VERSION:0:3}"
 fi
-if [[ -n $BUILD_FULL ]]; then
-  BUILD_STRING="${BUILD_STRING}_full"
+if [[ -n $build_full ]]; then
+  package_name="${package_name}_full"
+  build_string="${build_string}_full"
 fi
-portable_sed "s/name: caffe2.*\$/name: ${PACKAGE_NAME}/" $META_YAML
-portable_sed "s/string:.*\$/string: ${BUILD_STRING}/" $META_YAML
+portable_sed "s/name: caffe2.*\$/name: ${package_name}/" $meta_yaml
+#portable_sed "s/string:.*\$/string: ${build_string}/" $meta_yaml
 
 
 ###########################################################
 # Handle tests
 ###########################################################
-if [[ -n $SKIP_CONDA_TESTS ]]; then
+if [[ -n $skip_tests ]]; then
   remove_lines_with 'test:'
   remove_lines_with 'imports:'
   remove_lines_with 'caffe2.python.core'
-elif [[ -n $BUILD_INTEGRATED ]]; then
+elif [[ -n $pytorch_too ]]; then
   if [[ -n $CUDA_VERSION ]]; then
     append_to_section 'test' 'requires:'
-    append_to_section 'test' "  - $CUDA_FEATURE_NAME"
+    append_to_section 'test' "  - $cuda_feature_name"
     append_to_section 'test' '  - nccl2'
   fi
   append_to_section 'test' 'source_files:'
@@ -257,9 +301,11 @@ fi
 add_package 'glog'
 add_package 'gflags'
 add_package 'opencv'
+caffe2_cmake_args+=("-DUSE_LMDB=OFF")
+
 
 # Add packages required for pytorch
-if [[ -n $BUILD_INTEGRATED ]]; then
+if [[ -n $pytorch_too ]]; then
   remove_lines_with 'numpy'
   add_package 'cffi'
   add_package 'mkl' '>=2018'
@@ -268,13 +314,14 @@ if [[ -n $BUILD_INTEGRATED ]]; then
   add_package 'typing'
   append_to_section 'build' '- pyyaml'
   append_to_section 'build' '- setuptools'
-  CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
+  #caffe2_cmake_args+=("-DBLAS=MKL")
   if [[ -n $CUDA_VERSION ]]; then
     append_to_section 'features' features:
-    append_to_section 'features' "  - $CUDA_FEATURE_NAME" 
+    append_to_section 'features' "  - $cuda_feature_name" 
     append_to_section 'features' '  - nccl2'
-    add_package $CUDA_FEATURE_NAME
-    CONDA_CHANNEL+=('-c pytorch')
+    add_package $cuda_feature_name
+    conda_channel+=('-c pytorch')
+    export BUILD_WITH_CUDA=1
   fi
 else
   add_package 'leveldb'
@@ -282,23 +329,23 @@ fi
 
 # Flags required for CUDA for Caffe2
 if [[ -n $CUDA_VERSION ]]; then
-  CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=ON")
-  CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=ON")
+  caffe2_cmake_args+=("-DUSE_CUDA=ON")
+  caffe2_cmake_args+=("-DUSE_NCCL=ON")
 
   # NCCL and GLOO don't work with static CUDA right now. Cmake changes are
   # needed
-  #CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=OFF")
-  #CAFFE2_CMAKE_ARGS+=("-DUSE_GLOO=OFF")
-  #CAFFE2_CMAKE_ARGS+=("-DCAFFE2_STATIC_LINK_CUDA=ON")
+  #caffe2_cmake_args+=("-DUSE_NCCL=OFF")
+  #caffe2_cmake_args+=("-DUSE_GLOO=OFF")
+  #caffe2_cmake_args+=("-DCAFFE2_STATIC_LINK_CUDA=ON")
 else
   # Flags required for CPU for Caffe2
-  CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=OFF")
-  CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=OFF")
-  if [[ -z $BUILD_INTEGRATED ]]; then
-    #CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
-    #add_package 'mkl'
-    #add_package 'mkl-include'
-  fi
+  caffe2_cmake_args+=("-DUSE_CUDA=OFF")
+  caffe2_cmake_args+=("-DUSE_NCCL=OFF")
+  #if [[ -z $pytorch_too ]]; then
+  #  #caffe2_cmake_args+=("-DBLAS=MKL")
+  #  #add_package 'mkl'
+  #  #add_package 'mkl-include'
+  #fi
 fi
 
 # Change flags based on target gcc ABI
@@ -312,8 +359,8 @@ if [[ "$(uname)" != 'Darwin' && "$GCC_USE_C11" -eq 0 ]]; then
     add_package 'numpy' '>1.11'
   fi
   # Default conda channels use gcc 7.2, conda-forge uses gcc 4.8.5
-  CAFFE2_CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=0")
-  CONDA_CHANNEL+=('-c conda-forge')
+  caffe2_cmake_args+=("-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=0")
+  conda_channel+=('-c conda-forge')
 fi
 
 
@@ -321,9 +368,9 @@ fi
 # Set flags needed for uploading to Anaconda. This is only allowed if testing
 # is enabled
 ###########################################################
-if [[ -z $SKIP_CONDA_TESTS && -n $UPLOAD_TO_CONDA ]]; then
-  CONDA_BUILD_ARGS+=(" --user ${ANACONDA_USERNAME}")
-  CONDA_BUILD_ARGS+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
+if [[ $upload_to_conda ]]; then
+  conda_build_args+=(" --user ${ANACONDA_USERNAME}")
+  conda_build_args+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
 
   # If building a redistributable, then package the CUDA libraries with it
   # TODO this doesn't work on Ubuntu right now
@@ -334,15 +381,15 @@ fi
 
 # Show what the final meta.yaml looks like
 echo "Finalized meta.yaml is"
-cat $META_YAML
+cat $meta_yaml
 
 
 ###########################################################
 # Build Caffe2 with conda-build
 ###########################################################
-CONDA_CAFFE2_CMAKE_ARGS=${CAFFE2_CMAKE_ARGS[@]} conda build $CONDA_BUILD_DIR ${CONDA_CHANNEL[@]} ${CONDA_BUILD_ARGS[@]} "$@"
+CAFFE2_CMAKE_ARGS=${caffe2_cmake_args[@]} conda build $build_dir ${conda_channel[@]} ${conda_build_args[@]}
 
 # Install Caffe2 from the built package into the local conda environment
-if [ -n "$CONDA_INSTALL_LOCALLY" ]; then
-  conda install -y ${CONDA_CHANNEL[@]} $PACKAGE_NAME --use-local
+if [[ -n $install_locally ]]; then
+  conda install -y ${conda_channel[@]} $package_name --use-local
 fi

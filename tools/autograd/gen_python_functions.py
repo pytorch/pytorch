@@ -19,7 +19,7 @@ SKIP_PYTHON_BINDINGS = [
     '.*_forward_out', 'sparse_raw_resize_', '_unsafe_view', 'tensor',
     'sparse_coo_tensor', '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
-    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*',
+    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*', 'arange.*',
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
@@ -73,10 +73,9 @@ PY_VARIABLE_OUT_CHECK_TYPE = CodeTemplate("""\
 if (r.isNone(${out_idx})) {
   ${call_dispatch}
 } else {
-  if (!r.isNone(${type_idx})) {
-    check_out_type_matches(r.tensor(${out_idx}), r.scalartype(${type_idx}), r.layout(${layout_idx}),
-                           r.device(${device_idx}), r.isNone(${device_idx}));
-  }
+  check_out_type_matches(r.tensor(${out_idx}), r.scalartype(${type_idx}), r.isNone(${type_idx}),
+                         r.layout(${layout_idx}), r.isNone(${layout_idx}),
+                         r.device(${device_idx}), r.isNone(${device_idx}));
   ${call_dispatch_out}
 }
 """)

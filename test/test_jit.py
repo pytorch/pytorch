@@ -1656,7 +1656,7 @@ class TestScript(TestCase):
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "at most 2 inputs"):
+        with self.assertRaisesRegex(RuntimeError, "expected 1 input"):
             @torch.jit.script
             def func(x):
                 return torch.cat((x, x), x, dim=0)
@@ -1890,8 +1890,8 @@ class TestScript(TestCase):
             w = -q
             return w * w
 
-        x = torch.arange(4, requires_grad=True)
-        y = torch.arange(0, 8, 2, requires_grad=True)
+        x = torch.arange(4., requires_grad=True)
+        y = torch.arange(0., 8, 2, requires_grad=True)
         self.checkScript(func, [x, y], optimize=True, capture_output=True)
 
     def test_multiple_assignment(self):
@@ -2041,7 +2041,7 @@ class TestScript(TestCase):
             c = F.prelu(x, slope)
             return a, b, c
 
-        x = torch.arange(-3, 4)
+        x = torch.arange(-3., 4)
         slope = torch.tensor([0.5])
         self.checkScript(fn, [x, slope], optimize=True)
 
@@ -2309,6 +2309,20 @@ class TestScript(TestCase):
                 return v
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
+
+    def test_constant_as_attr(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['dim']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.dim = 1
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return torch.cat([v, v, v], dim=self.dim)
+        v = torch.zeros(1, 1)
+        self.assertEqual(torch.cat([v, v, v], dim=1), M()(v))
 
     class StarTestSumStarred(torch.nn.Module):
         def __init__(self):
@@ -2613,22 +2627,26 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
             M()
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_trace_of_script(self):
         @torch.jit.script
         def foo(a, c):
-            b = 0
-            if a == 0:
-                b = 1
+            b = 0.0
+            if a == 0.0:
+                b = 1.0
             return b + c
 
-        a = torch.ones(1, dtype=torch.long)
+        a = torch.ones(1, dtype=torch.float)
 
-        @torch.jit.trace(torch.zeros(1, dtype=torch.long))
+        @torch.jit.trace(torch.zeros(1, dtype=torch.float))
         def use(b):
-            return foo(b - 1, a) + 1
+            return foo(b - 1.0, a) + 1.0
 
-        self.assertEqual(3, use(torch.ones(1, dtype=torch.long)))
-        self.assertEqual(2, use(torch.zeros(1, dtype=torch.long)))
+        # test we propagated shapes through the function
+        self.assertTrue("Dynamic" not in str(use.graph))
+
+        self.assertEqual(3, use(torch.ones(1, dtype=torch.float)))
+        self.assertEqual(2, use(torch.zeros(1, dtype=torch.float)))
 
     def test_if_define(self):
         @torch.jit.script
@@ -2677,8 +2695,10 @@ class TestScript(TestCase):
                 return x + x
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_python_fail(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2699,9 +2719,11 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         f = io.BytesIO()
         with self.assertRaisesRegex(RuntimeError, "Couldn't export Python operator"):
-            torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+            torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False,
+                               example_outputs=outputs)
 
     def test_onnx_export_script_inline_trace(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2722,8 +2744,10 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2745,8 +2769,10 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_module_loop(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -2760,9 +2786,10 @@ class TestScript(TestCase):
                 return x
 
         mte = ModuleToExport()
-        f = io.BytesIO()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -2776,8 +2803,10 @@ class TestScript(TestCase):
                 return x
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3, dtype=torch.long))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2806,7 +2835,8 @@ class TestScript(TestCase):
         reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
         self.assertEqual(result, reference)
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.ones(2, 3),), None, verbose=False))
+            mte, (torch.ones(2, 3),), None, verbose=False,
+            example_outputs=result, propagate=True))
 
     def test_trace_with_size(self):
         @torch.jit.trace(torch.zeros(1, 1))
@@ -2831,7 +2861,83 @@ class TestScript(TestCase):
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         foo.graph.propagate_shapes((a, b), False)
-        self.assertExpected(str(foo.graph))
+        self.assertExpected(str(torch._C._jit_pass_canonicalize(foo.graph)))
+
+    def test_onnx_export_speculate(self):
+
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self, m):
+                super(Foo, self).__init__()
+                self.m = m
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x += x
+                if True:
+                    if True:
+                        y = self.m(x)
+                    else:
+                        y = self.m(x)
+                else:
+                    y = self.m(x)
+                return y
+
+        linear = torch.jit.trace(torch.zeros(1, 10, dtype=torch.float))(nn.Linear(10, 20).float())
+
+        @torch.jit.script
+        def transpose(x):
+            return x.t()
+
+        f1 = Foo(transpose)
+        outputs_f1 = f1(torch.ones(1, 10, dtype=torch.float))
+        f2 = Foo(linear)
+        outputs_f2 = f2(torch.ones(1, 10, dtype=torch.float))
+
+        onnx_ish = torch.onnx._export_to_pretty_string(
+            f1,
+            (torch.ones(1, 10, dtype=torch.float), ),
+            None, verbose=False, example_outputs=outputs_f1)
+        self.assertExpected(onnx_ish, subname='f1')
+        onnx_ish = torch.onnx._export_to_pretty_string(
+            f2,
+            (torch.ones(1, 10, dtype=torch.float), ),
+            None, verbose=False, example_outputs=outputs_f2)
+        self.assertExpected(onnx_ish, subname='f2')
+
+    def test_onnx_export_shape_reshape(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                import torch.onnx.operators
+                x = x.repeat(5, 1, 1)
+                shape = torch.onnx.operators.shape_as_tensor(x)
+                reshaped = torch.onnx.operators.reshape_from_tensor_shape(x, shape)
+                return reshaped
+
+        foo = torch.jit.trace(torch.zeros(1, 2, 3))(Foo())
+        outputs = foo(torch.zeros(1, 2, 3))
+        f = io.BytesIO()
+        s = torch.onnx._export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
+                                                example_outputs=outputs)
+        self.assertExpected(s)
+
+    def test_shape_analysis_loop(self):
+        def foo(a, b, x):
+            c = a
+            # on the first iteration of the loop it appears that
+            # c should have a expand to the size of b
+            # but on the second+ iterations, there is no broadcast and the
+            # sizes are different.
+            # previously this would cause the compiler to (1) enter an infinite
+            # loop trying to compute the shape, and (2) insert invalid
+            # broadcasts.
+            # this test ensure we don't regress on these issues
+            for _ in range(2):
+                a = c + b
+                c = x
+                b = x
+            return a
+
+        self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), False)
 
 
 # Smoke tests for export methods

@@ -1,23 +1,29 @@
 #include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/jit/ir.h"
+
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/peephole.h"
+#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/inplace_check.h"
-#include "torch/csrc/jit/passes/batch_mm.h"
+#include "torch/csrc/jit/passes/peephole.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
 
-#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/jit/script/compiler.h"
 
+#include <cstdint>
+#include <memory>
+#include <mutex>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace torch { namespace jit {
 
@@ -216,9 +222,29 @@ private:
     auto input_values = fmap(input_vars, [&](const Variable& v) {
       return tracer::getValueTrace(state, v);
     });
+
+    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
     input_vars.clear(); // don't hold inputs during execution
     auto outputs = runFallback(std::move(inputs));
-    auto output_values = script::inlineCallTo(*state->graph, *this->graph, input_values);
+
+    auto all_dynamic = [](const at::ArrayRef<Value*> xs) {
+      for(Value* x : xs) {
+        if(x->type()->kind() != TypeKind::DynamicType)
+          return false;
+      }
+      return true;
+    };
+    // Traces always have types propagated through them, so we make sure to
+    // also propagate types through the graph we are inserting here.
+    // However, this->graph itself may already have been generated with
+    // tracing and so we only do the type propgation if no concrete types have
+    // been set.
+    auto local_graph = this->graph;
+    if(all_dynamic(local_graph->inputs()) && all_dynamic(local_graph->outputs())) {
+      local_graph = this->graph->copy();
+      PropagateInputShapes(*local_graph, spec);
+    }
+    auto output_values = script::inlineCallTo(*state->graph, *local_graph, input_values);
 
     for(size_t i = 0; i < outputs.size(); ++i) {
       tracer::setValueTrace(state, outputs[i], output_values[i]);

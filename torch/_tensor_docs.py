@@ -2240,7 +2240,7 @@ Args:
 
 Example::
 
-    >>> x = torch.arange(1, 8)
+    >>> x = torch.arange(1., 8)
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.,  6.,  7.])
     >>> x.unfold(0, 2, 1)
