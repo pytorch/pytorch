@@ -26,16 +26,14 @@ inline __device__ T CubeCUDA(const T x) {
   return x * x * x;
 }
 
-__global__ void InvStdCUDAKernel(
-    const int size,
-    const float epsilon,
-    const float* var,
-    float* rsig) {
+template <typename T>
+__global__ void
+InvStdCUDAKernel(const int size, const float epsilon, const T* var, T* rsig) {
   CUDA_1D_KERNEL_LOOP(i, size) {
 #if __CUDA_ARCH__ >= 350
-    rsig[i] = rsqrtf(__ldg(var + i) + epsilon);
+    rsig[i] = rsqrt(__ldg(var + i) + static_cast<T>(epsilon));
 #else
-    rsig[i] = rsqrtf(var[i] + epsilon);
+    rsig[i] = rsqrt(var[i] + static_cast<T>(epsilon));
 #endif
   }
 }
@@ -60,7 +58,8 @@ __global__ void GroupNormForwardCUDAKernel(
     const int i_gamma = kOrder == StorageOrder::NCHW ? (i / HxW) % C : i % C;
 #if __CUDA_ARCH__ >= 350
     Y[i] = __ldg(gamma + i_gamma) * (__ldg(X + i) - __ldg(mu + i_mu)) *
-           __ldg(rsig + i_mu) + __ldg(beta + i_gamma);
+            __ldg(rsig + i_mu) +
+        __ldg(beta + i_gamma);
 #else
     Y[i] = gamma[i_gamma] * (X[i] - mu[i_mu]) * rsig[i_mu] + beta[i_gamma];
 #endif
@@ -210,11 +209,11 @@ bool GroupNormOp<float, CUDAContext>::RunOnDeviceImpl(
       : std::array<int, 2>{1, 3};
   math::Moments<float, CUDAContext>(
       4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
-  InvStdCUDAKernel<<<
-      CAFFE_GET_BLOCKS(N * G),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(N * G, epsilon_, rsig_data, rsig_data);
+  InvStdCUDAKernel<float>
+      <<<CAFFE_GET_BLOCKS(N * G),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(N * G, epsilon_, rsig_data, rsig_data);
   const int size = N * G * D * HxW;
   if (order_ == StorageOrder::NCHW) {
     GroupNormForwardCUDAKernel<float, StorageOrder::NCHW>
