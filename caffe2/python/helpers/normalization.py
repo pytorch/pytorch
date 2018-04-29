@@ -164,7 +164,7 @@ def spatial_gn(model, blob_in, blob_out, dim_in,
 
     blob_out = blob_out or model.net.NextName()
     # Input: input, scale, bias
-    # Output: output, group_mean, group_std
+    # Output: output, group_mean, group_inv_std
     # scale: initialize with init_scale (default 1.)
     # [recommendation: set init_scale = 0. in the last layer for each res block]
     # bias: initialize with init_bias (default 0.)
