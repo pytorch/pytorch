@@ -487,7 +487,11 @@ void TensorRTTransformer::Transform(
 
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
   onnx::OnnxExporter exporter(nullptr, true);
-  auto importer = tensorrt::TrtObject(onnx2trt::createImporter(nullptr));
+  tensorrt::TrtLogger logger;
+  auto trt_builder = tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
+  auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
+  auto importer =
+      tensorrt::TrtObject(nvonnxparser::createParser(*trt_network, logger));
 
   // function to tell whether TensorRT supports a given C2 op or not
   auto supports =
@@ -500,7 +504,7 @@ void TensorRTTransformer::Transform(
 
         auto results = exporter.Caffe2OpToOnnxNodes(op, shape_hints);
         for (const auto& n : results.first) {
-          if (!importer->supports(n)) {
+          if (!importer->supportsOperator(n.op_type().c_str())) {
             LOG(INFO) << "TRT does not support ONNX node " << n.op_type();
             return false;
           }
