@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 cmake_policy(VERSION 3.0)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -155,9 +155,18 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter_autograd_function.cpp
   ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/containers.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
   )
 
 add_library(torch SHARED ${TORCH_SRCS})
+
+target_compile_options(torch PRIVATE -Wall -Wextra)
+
+if ($ENV{WERROR})
+  target_compile_options(torch PRIVATE -Werror)
+endif()
 
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
@@ -169,6 +178,10 @@ set(COMMON_INCLUDES
   "${ATEN_INCLUDE_DIR}/TH"
   "${ATEN_BUILD_INCLUDE_DIR}"
   "${ATEN_BUILD_PATH}/src/TH"
+  "${TORCH_SRC_DIR}/csrc/api/"
+  "${TORCH_SRC_DIR}/csrc/api/include"
+  "${TORCH_SRC_DIR}/../third_party/cereal/include" # For cereal/
+  "${TORCH_SRC_DIR}/../"
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CUDA_INCLUDE_DIRS}")
 
@@ -193,9 +206,9 @@ install(TARGETS torch
   LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
-set(TORCH_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
+# JIT Tests. TODO: Put into test/cpp/jit folder
 
-add_executable(test_jit ${TORCH_TEST_SRCS})
+add_executable(test_jit ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
 
 target_link_libraries(test_jit torch)
 
@@ -204,7 +217,19 @@ target_include_directories(test_jit PUBLIC
   "${TORCH_SRC_DIR}/../third_party/catch/single_include"
   "${COMMON_INCLUDES}")
 
-install(TARGETS test_jit
-  RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
-  LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
-  ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+# API Tests
+
+set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
+
+add_executable(test_api
+  ${TORCH_API_TEST_DIR}/test.cpp
+  ${TORCH_API_TEST_DIR}/container_t.cpp
+  ${TORCH_API_TEST_DIR}/misc_t.cpp
+  ${TORCH_API_TEST_DIR}/rnn_t.cpp
+  ${TORCH_API_TEST_DIR}/integration_t.cpp
+  ${TORCH_API_TEST_DIR}/optim_t.cpp
+  ${TORCH_API_TEST_DIR}/serialization_t.cpp
+)
+
+target_compile_options(test_api PRIVATE -Dlest_FEATURE_AUTO_REGISTER=1)
+target_link_libraries(test_api torch)
