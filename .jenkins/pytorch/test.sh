@@ -55,4 +55,6 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
    else
      "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
    fi
+   python tools/download_mnist.py -d test/cpp/api/mnist
+   "$CPP_BUILD"/libtorch/bin/test_api
 fi

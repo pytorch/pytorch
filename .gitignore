@@ -55,6 +55,7 @@ test/.coverage
 test/data/legacy_serialized.pt
 test/data/linear.pt
 .mypy_cache
+test/cpp/api/mnist
 
 # IPython notebook checkpoints
 .ipynb_checkpoints
