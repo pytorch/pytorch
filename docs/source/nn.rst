@@ -404,7 +404,13 @@ Normalization layers
 .. autoclass:: BatchNorm3d
     :members:
 
-:hidden:`InstanceNorm1d`
+:hidden:`GroupNorm
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: GroupNorm
+    :members:
+
+    :hidden:`InstanceNorm1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: InstanceNorm1d
