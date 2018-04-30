@@ -2938,7 +2938,7 @@ class TestScript(TestCase):
             return a
 
         self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), False)
-        
+
     def test_intlist_args(self):
         def func_1(x):
             return torch.nn.functional.adaptive_avg_pool1d(x, 1)
