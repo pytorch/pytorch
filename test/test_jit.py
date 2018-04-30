@@ -2641,7 +2641,7 @@ class TestScript(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"too many values .* need 2 but found 3"):
             @torch.jit.script
-            def script_fn(x):
+            def script_fn2(x):
                 x, y = fn(x, x)
 
         def fn_unpack(x):
@@ -2704,13 +2704,13 @@ class TestScript(TestCase):
 
             with self.assertRaisesRegex(RuntimeError, r"too many values .* need 2 but found 3"):
                 @torch.jit.script
-                def bad_fn(x):
+                def bad_fn2(x):
                     x, y = fn(x, x, x)
                     return y
 
             with self.assertRaisesRegex(RuntimeError, r"need 4 values .* found only 3"):
                 @torch.jit.script
-                def bad_fn(x):
+                def bad_fn3(x):
                     x, y, z, w = fn(x, x, x)
                     return y
 
