@@ -95,9 +95,15 @@ inline size_t cudnnRuntimeVersion() {
 // Check compatibility of compiled and runtime cuDNN versions
 inline void CheckCuDNNVersions() {
   // Version format is major*1000 + minor*100 + patch
-  // Major, minor and patch versions must all match
+  // If compiled with version < 7, major, minor and patch must all match
+  // If compiled with version >= 7, then either
+  //    runtime_version > compiled_version
+  //    major and minor match
   bool version_match = cudnnCompiledVersion() == cudnnRuntimeVersion();
-  CAFFE_ENFORCE(version_match,
+  bool compiled_with_7 = cudnnCompiledVersion() >= 7000;
+  bool backwards_compatible_7 = compiled_with_7 && cudnnRuntimeVersion() >= cudnnCompiledVersion();
+  bool patch_compatible = compiled_with_7 && (cudnnRuntimeVersion() / 100) == (cudnnCompiledVersion() / 100);
+  CAFFE_ENFORCE(version_match || backwards_compatible_7 || patch_compatible,
                 "cuDNN compiled (", cudnnCompiledVersion(), ") and "
                 "runtime (", cudnnRuntimeVersion(), ") versions mismatch");
 }
