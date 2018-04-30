@@ -2939,6 +2939,21 @@ class TestScript(TestCase):
 
         self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), False)
 
+    def test_intlist_args(self):
+        def func_1(x):
+            return torch.nn.functional.adaptive_avg_pool1d(x, 1)
+
+        def func_2(x):
+            return torch.nn.functional.adaptive_avg_pool1d(x, output_size=1)
+
+        def func_3(x):
+            return torch.nn.functional.adaptive_avg_pool1d(x, output_size=[1])
+
+        x = torch.randn(8, 8, 8)
+        self.checkScript(func_1, [x], optimize=True)
+        self.checkScript(func_2, [x], optimize=True)
+        self.checkScript(func_3, [x], optimize=True)
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
