@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.proto import caffe2_pb2
 from caffe2.python import recurrent, workspace
 from caffe2.python.model_helper import ModelHelper
 from hypothesis import given
@@ -29,12 +28,8 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         output_t = step.net.Mul([input_t, output_t_internal])
         step.net.AddExternalOutput(output_t)
 
-        devices = [hu.cpu_do]
-        if workspace.has_gpu_support:
-            devices += [hu.gpu_do]
-        for dev in devices:
-            self.simple_rnn(T, n, d, model, step, input_t, output_t, output_t_prev,
-                            input_blob, initial_input_blob, dev)
+        self.simple_rnn(T, n, d, model, step, input_t, output_t, output_t_prev,
+                        input_blob, initial_input_blob)
 
     @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
@@ -51,12 +46,8 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         output_t = step.net.Mul([input_t, output_t_prev])
         step.net.AddExternalOutput(output_t)
 
-        devices = [hu.cpu_do]
-        if workspace.has_gpu_support:
-            devices += [hu.gpu_do]
-        for dev in devices:
-            self.simple_rnn(T, n, d, model, step, input_t, output_t, output_t_prev,
-                            input_blob, initial_input_blob, dev)
+        self.simple_rnn(T, n, d, model, step, input_t, output_t, output_t_prev,
+                        input_blob, initial_input_blob)
 
     @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
@@ -111,15 +102,11 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             )
 
     def simple_rnn(self, T, n, d, model, step, input_t, output_t, output_t_prev,
-                   input_blob, initial_input_blob, dev):
+                   input_blob, initial_input_blob):
 
-        workspace.ResetWorkspace()
         input = np.random.randn(T, n, d).astype(np.float32)
         initial_input = np.random.randn(1, n, d).astype(np.float32)
         print(locals())
-
-        for op in step.Proto().op:
-            op.device_option.CopyFrom(dev)
         recurrent.recurrent_net(
             net=model.net,
             cell_net=step.net,
@@ -128,8 +115,8 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             links={output_t_prev: output_t},
             scope="test_rnn_sum_mull",
         )
-        workspace.FeedBlob(input_blob, input, device_option=dev)
-        workspace.FeedBlob(initial_input_blob, initial_input, device_option=dev)
+        workspace.blobs[input_blob] = input
+        workspace.blobs[initial_input_blob] = initial_input
 
         op = model.net._net.op[-1]
         # Just conviniently store all inputs in an array in the same
@@ -140,19 +127,16 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             global_ws_name = workspace.CurrentWorkspace()
             input_all = workspace.blobs[input_blob]
 
-            workspace.SwitchWorkspace(
-                "ref_" + ("cuda" if dev.device_type == caffe2_pb2.CUDA else "cpu"),
-                create_if_missing=True)
-            workspace.FeedBlob(input_blob, input, device_option=dev)
-            workspace.FeedBlob(output_t_prev, initial_input.reshape(n, d),
-                device_option=dev)
+            workspace.SwitchWorkspace("ref", create_if_missing=True)
+            workspace.blobs[input_blob] = input
+            workspace.blobs[output_t_prev] = initial_input.reshape(n, d)
             res_all = np.zeros(shape=input.shape, dtype=np.float32)
 
             for t_cur in range(T):
-                workspace.FeedBlob(input_t, input_all[t_cur], device_option=dev)
+                workspace.blobs[input_t] = input_all[t_cur]
                 workspace.RunNetOnce(step.net)
                 result_t = workspace.blobs[output_t]
-                workspace.FeedBlob(output_t_prev, result_t, device_option=dev)
+                workspace.blobs[output_t_prev] = result_t
                 res_all[t_cur] = result_t
 
             workspace.SwitchWorkspace(global_ws_name)
@@ -162,7 +146,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
             return (res_all, res_all[-1].reshape(shape))
 
         self.assertReferenceChecks(
-            device_option=dev,
+            device_option=hu.cpu_do,
             op=op,
             inputs=inputs,
             reference=reference,
@@ -171,7 +155,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         )
 
         self.assertGradientChecks(
-            device_option=dev,
+            device_option=hu.cpu_do,
             op=op,
             inputs=inputs,
             outputs_to_check=0,
