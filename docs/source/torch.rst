@@ -33,6 +33,7 @@ Creation Ops
     range of distributions.
 
 .. autofunction:: tensor
+.. autofunction:: as_tensor
 .. autofunction:: from_numpy
 .. autofunction:: zeros
 .. autofunction:: zeros_like
