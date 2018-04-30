@@ -103,3 +103,5 @@ if [ "$(uname)" == "Darwin" ]; then
 else
   cmake --build . -- "-j$(nproc)"
 fi
+
+cmake -P cmake_install.cmake
