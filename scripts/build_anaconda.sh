@@ -103,7 +103,9 @@ fi
 
 # Support legacy way of passing in these parameters
 if [[ -n $SKIP_CONDA_TESTS ]]; then
-  skip_tests=1
+  conda_build_args+=("--no-test")
+  conda_build_args+=("--no-anaconda-upload")
+  upload_to_conda=''
 fi
 if [[ -n $UPLOAD_TO_CONDA ]]; then
   upload_to_conda=1
@@ -128,7 +130,9 @@ while [[ $# -gt 0 ]]; do
       package_name_suffix=$1
       ;;
     --skip-tests)
-      skip_tests=1
+      conda_build_args+=("--no-test")
+      conda_build_args+=("--no-anaconda-upload")
+      upload_to_conda=''
       ;;
     --upload)
       upload_to_conda=1
@@ -182,12 +186,6 @@ if [[ -n $CUDA_VERSION ]]; then
     echo "CuDNN that it finds first, and will break if there is no CuDNN found."
   fi
   echo "Detected CUDA_VERSION $CUDA_VERSION"
-fi
-
-# Only allow uploading to Anaconda if the tests were run
-if [[ -n $skip_tests && -n $upload_to_conda ]]; then
-  echo "Uploading to Anaconda only allowed if tests are run. Upload turned off"
-  upload_to_conda=''
 fi
 
 ###########################################################
@@ -277,11 +275,7 @@ portable_sed "s/name: caffe2.*\$/name: ${package_name}/" $meta_yaml
 ###########################################################
 # Handle tests
 ###########################################################
-if [[ -n $skip_tests ]]; then
-  remove_lines_with 'test:'
-  remove_lines_with 'imports:'
-  remove_lines_with 'caffe2.python.core'
-elif [[ -n $pytorch_too ]]; then
+if [[ -n $pytorch_too ]]; then
   if [[ -n $CUDA_VERSION ]]; then
     append_to_section 'test' 'requires:'
     append_to_section 'test' "  - $cuda_feature_name"
