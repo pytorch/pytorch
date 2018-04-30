@@ -621,8 +621,9 @@ class TestAutograd(TestCase):
             for i in range(depth):
                 y = y + y * 0.000001
 
-            # triggers graph deletion
-            del x
+            # graph deletion occurs when the above locals go out of scope.
+            # In this case `del y` will trigger it but it's easier to leave
+            # it to Python to delete the locals.
 
         # Should not stack overflow
         scope()
@@ -652,8 +653,7 @@ class TestAutograd(TestCase):
                 if nprev == 2:
                     y += randchoice[depth].mul(torch.cat(prev_tensors)).sum()
 
-            # triggers graph deletion
-            del x
+            # graph deletion occurs when the above locals go out of scope.
 
         # Should not stack overflow
         scope()
@@ -677,8 +677,7 @@ class TestAutograd(TestCase):
             for i in range(depth):
                 y = MyOp.apply(y, y)
 
-            # triggers graph deletion
-            del x
+            # graph deletion occurs when the above locals go out of scope.
 
         # Should not stack overflow
         scope()
