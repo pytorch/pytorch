@@ -467,20 +467,119 @@ def load(name,
                 extra_cflags=['-O2'],
                 verbose=True)
     '''
+    return _jit_compile(
+        name,
+        [sources] if isinstance(sources, str) else sources,
+        extra_cflags,
+        extra_cuda_cflags,
+        extra_ldflags,
+        extra_include_paths,
+        build_directory or _get_build_directory(name, verbose),
+        verbose)
 
-    verify_ninja_availability()
 
-    # Allows sources to be a single path or a list of paths.
-    if isinstance(sources, str):
-        sources = [sources]
+def load_inline(name,
+                cpp_sources,
+                cuda_sources=None,
+                functions=None,
+                extra_cflags=None,
+                extra_cuda_cflags=None,
+                extra_ldflags=None,
+                extra_include_paths=None,
+                build_directory=None,
+                verbose=False):
+    '''
+    Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
-    if build_directory is None:
-        build_directory = _get_build_directory(name, verbose)
+    This function behaves exactly like :func:`load`, but takes its sources as
+    strings rather than filenames. These strings are stored to files in the
+    build directory, after which the behavior of :func:`load_inline` is
+    identical to :func:`load`. Strings passed in ``cpp_sources`` (a string or
+    list of strings) are stored with a ``.cpp`` extension, and the string or list
+    of strings passed in ``cuda_sources`` are stored with a ``.cu`` extension.
 
+    Example:
+        >>> from torch.utils.cpp_extension import load_inline
+        >>> source = \'\'\'
+        at::Tensor sin_add(at::Tensor x, at::Tensor y) {
+          return x.sin() + y.sin();
+        }
+        \'\'\'
+        >>> module = load_inline(name='inline_extension',
+                                 cpp_sources=[source],
+                                 functions=['sin_add'])
+    '''
+    build_directory = build_directory or _get_build_directory(name, verbose)
+
+    source_files = []
+
+    if isinstance(cpp_sources, str):
+        cpp_sources = [cpp_sources]
+    cuda_sources = cuda_sources or []
+    if isinstance(cuda_sources, str):
+        cuda_sources = [cuda_sources]
+
+    cpp_sources.insert(0, '#include <torch/torch.h>')
+
+    # If `functions` is supplied, we create the pybind11 bindings for the user.
+    # Here, `functions` is (or becomes, after some processing) a map from
+    # function names to function docstrings.
+    if functions is not None:
+        cpp_sources.append('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {')
+        if isinstance(functions, str):
+            functions = [functions]
+        if isinstance(functions, list):
+            # Make the function docstring the same as the function name.
+            functions = dict((f, f) for f in functions)
+        elif not isinstance(functions, dict):
+            raise ValueError(
+                "Expected 'functions' to be a list or dict, but was {}".format(
+                    type(functions)))
+        for function_name, docstring in functions.items():
+            cpp_sources.append('m.def("{0}", &{0}, "{1}");'.format(
+                function_name, docstring))
+        cpp_sources.append('}')
+
+    cpp_source_path = os.path.join(build_directory, 'main.cpp')
+    with open(cpp_source_path, 'w') as cpp_source_file:
+        cpp_source_file.write('\n'.join(cpp_sources))
+
+    sources = [cpp_source_path]
+
+    if cuda_sources:
+        cuda_sources.insert(0, '#include <ATen/ATen.h>')
+        cuda_sources.insert(1, '#include <cuda.h>')
+        cuda_sources.insert(2, '#include <cuda_runtime.h>')
+
+        cuda_source_path = os.path.join(build_directory, 'cuda.cu')
+        with open(cuda_source_path, 'w') as cuda_source_file:
+            cuda_source_file.write('\n'.join(cuda_sources))
+
+        sources.append(cuda_source_path)
+
+    return _jit_compile(
+        name,
+        sources,
+        extra_cflags,
+        extra_cuda_cflags,
+        extra_ldflags,
+        extra_include_paths,
+        build_directory,
+        verbose)
+
+
+def _jit_compile(name,
+                 sources,
+                 extra_cflags,
+                 extra_cuda_cflags,
+                 extra_ldflags,
+                 extra_include_paths,
+                 build_directory,
+                 verbose):
     baton = FileBaton(os.path.join(build_directory, 'lock'))
-
     if baton.try_acquire():
         try:
+            verify_ninja_availability()
             check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
             with_cuda = any(map(_is_cuda_file, sources))
             extra_ldflags = _prepare_ldflags(
