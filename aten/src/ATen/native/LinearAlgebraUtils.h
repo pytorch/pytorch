@@ -12,7 +12,15 @@ namespace at { namespace native {
  *   P.data_ptr()[b * M * N] is of the same corresponding batch as the M' by N'
  *   matrix starting at Q.data_ptr()[b * M' * N'].
  */
-Tensor cloneBatchedColumnMajor(const Tensor& src);
+static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
+  // If src is already in batched column major format, then
+  // this will be efficient (no reordering of the data will occur)
+  // because the first transpose will make the tensor contiguous,
+  // and cloning a contiguous tensor is fast.
+  auto result = src.transpose(-2, -1).clone();
+  result.transpose_(-2, -1);
+  return result;
+}
 
 /*
  * Given batches of matrices with arbitrary batch dim,

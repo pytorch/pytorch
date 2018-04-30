@@ -59,6 +59,15 @@ static magma_queue_t createMagmaQueue(const Tensor& tensor) {
 }
 #endif
 
+static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
+  auto result = static_cast<magma_int_t>(value);
+  if (static_cast<int64_t>(result) != value) {
+    AT_ERROR("magma: The value of %s (%lld) is too large to fit into a magma_int_t (%llu bytes)",
+             varname, (long long)value, sizeof(magma_int_t));
+  }
+  return result;
+}
+
 // Creates an array of size elements of type T, backed by pinned memory
 // wrapped in a Storage
 template<class T>
@@ -84,9 +93,9 @@ AT_ERROR("gesv: MAGMA library not found in "
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
 
-  magma_int_t batch_size = batchCount(A);
-  magma_int_t n = A.size(-2);
-  magma_int_t nrhs = b.size(-1);
+  magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
+  magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
+  magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
   magma_int_t* info_array;
   magma_int_t* ipiv_data;

@@ -1757,6 +1757,15 @@ Example::
     >>> torch.dist(B, torch.mm(A, X))
     tensor(1.00000e-06 *
            7.0977)
+
+    >>> # Batched solver example
+    >>> A = torch.randn(2, 3, 1, 4, 4)
+    >>> B = torch.randn(2, 3, 1, 4, 6)
+    >>> X, LU = torch.gesv(B, A)
+    >>> torch.dist(B, A.matmul(X))
+    tensor(1.00000e-06 *
+       3.6386)
+
 """)
 
 add_docstr(torch.get_default_dtype,
@@ -1776,11 +1785,6 @@ Example::
     >>> torch.get_default_dtype()  # changed to torch.float32, the dtype for torch.FloatTensor
     torch.float32
 
-    >>> # Batched solver example
-    >>> A = torch.randn(2, 3, 1, 4, 4)
-    >>> B = torch.randn(2, 3, 1, 4, 6)
-    >>> X, LU = torch.gesv(B, A)
-    >>> torch.dist(B, A.matmul(X))  # should be small
 """)
 
 add_docstr(torch.get_num_threads,
