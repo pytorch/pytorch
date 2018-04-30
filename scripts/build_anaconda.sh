@@ -301,6 +301,7 @@ fi
 add_package 'glog'
 add_package 'gflags'
 add_package 'opencv'
+caffe2_cmake_args+=("-DUSE_LEVELDB=OFF")
 caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 
 
@@ -323,8 +324,6 @@ if [[ -n $pytorch_too ]]; then
     conda_channel+=('-c pytorch')
     export BUILD_WITH_CUDA=1
   fi
-else
-  add_package 'leveldb'
 fi
 
 # Flags required for CUDA for Caffe2
