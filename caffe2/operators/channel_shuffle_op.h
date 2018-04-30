@@ -106,8 +106,13 @@ class ChannelShuffleGradientOp final : public ConvPoolOpBase<Context> {
     const auto G = this->group_;
     CAFFE_ENFORCE(C % G == 0, "");
     const auto K = C / G;
+<<<<<<< HEAD
     std::array<int, 2> dims = {K, G};
     std::array<int, 2> axes = {1, 0};
+=======
+    std::vector<int> dims = {K, G};
+    std::vector<int> axes = {1, 0};
+>>>>>>> b91f8379b... Fix pending splits being skipped
     for (auto i = 0; i < dY.size(); i += C) {
       // Transpose each C = KxG matrix
       math::Transpose(
