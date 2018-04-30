@@ -142,7 +142,8 @@ Tensor einsum(std::string eqn, TensorList tensors) {
       dims_in_operand++;
     }
     AT_ASSERT((int64_t) tensors.size()>operand, "more operands in equation than tensors"); // we cannot have a longer equation than operands. We need to check here before we check the dimensions
-    AT_ASSERT(dims_in_operand == tensors[operand].dim(), "dimension mismatch for operand %zd: equation %zd, tensor %zd", operand, dims_in_operand, tensors[operand].dim());
+    AT_ASSERT(dims_in_operand == tensors[operand].dim(),
+              "dimension mismatch for operand ", operand, ": equation ", dims_in_operand, ", tensor ", tensors[operand].dim());
     operand++;
   }
   AT_ASSERT((int64_t) tensors.size()==operand, "more tensors than operands in equation");  // we need ==, but > is captured above, so the error message can be specific that it is <.
@@ -158,7 +159,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
     for (auto &c : eqn.substr(pos+2)) {
       AT_ASSERT(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
       int64_t index_num = c-'a';
-      AT_ASSERT(sorted_position[index_num] == -1, "index %c occurs twice in output", c);
+      AT_ASSERT(sorted_position[index_num] == -1, "index ", c, " occurs twice in output");
       sorted_position[index_num] = num_output_dims;
       position_labels.push_back(index_num);
       num_output_dims++;
@@ -250,7 +251,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 		  IntList expand1_, IntList expand2_, IntList expand3_,
 		  IntList sumdim_, int64_t unroll_dim) {
   int64_t total_dim = i1_.dim()+expand1_.size();
-  AT_ASSERT((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,%zd]", total_dim-1);
+  AT_ASSERT((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,", total_dim-1, "]");
   auto expand1 = dim_list_to_bitset(expand1_, total_dim);
   auto expand2 = dim_list_to_bitset(expand2_, total_dim);
   auto expand3 = dim_list_to_bitset(expand3_, total_dim);
@@ -316,22 +317,20 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 }
 
 Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {
-  AT_ASSERT(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got %lld and %lld",
-            (long long)input1.dim(), (long long)input2.dim());
+  AT_ASSERT(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
   for (int64_t i = 0; i < input1.dim() - 1; i++) {
     AT_ASSERT(input1.size(i) == input2.size(i),
-              "bilinear(): input batch dimensions do not match at dim %lld: got %lld and %lld",
-              (long long)i, (long long)input1.size(i), (long long)input2.size(i));
+              "bilinear(): input batch dimensions do not match at dim ", i, ": got ", input1.size(i), " and ", input2.size(i));
   }
   AT_ASSERT(input1.size(input1.dim() - 1) == weight.size(1),
-            "bilinear(): input1 size does not match weight size: got %lld but expected %lld",
-            (long long)input1.size(input1.dim() - 1), (long long)weight.size(1));
+            "bilinear(): input1 size does not match weight size: got ",
+            input1.size(input1.dim() - 1), " but expected ", weight.size(1));
   AT_ASSERT(input2.size(input2.dim() - 1) == weight.size(2),
-            "bilinear(): input2 size does not match weight size: got %lld but expected %lld",
-            (long long)input2.size(input2.dim() - 1), (long long)weight.size(2));
+            "bilinear(): input2 size does not match weight size: got ",
+            input2.size(input2.dim() - 1), " but expected ", weight.size(2));
   AT_ASSERT(!bias.defined() || bias.size(0) == weight.size(0),
-            "bilinear(): bias size does not match weight size: got %lld but expected %lld",
-            (long long)bias.size(0), (long long)weight.size(0));
+            "bilinear(): bias size does not match weight size: got ",
+            bias.size(0), " but expected ", weight.size(0));
 
   std::vector<int64_t> output_size;
   auto size1 = input1.sizes();

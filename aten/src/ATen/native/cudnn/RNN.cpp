@@ -365,7 +365,7 @@ namespace {
       case CUDNN_RNN_TANH:
         return 2;
       default:
-        AT_ERROR("unknown cuDNN RNN mode %d", mode);
+        AT_ERROR("unknown cuDNN RNN mode ", mode);
     }
   }
 
@@ -436,11 +436,11 @@ namespace {
                 filter_dim_a.data<int>()
                 ));
 
-          AT_ASSERT(nb_dims <= min_dim, "cudnnGetFilterNdDescriptor failed nb_dims (%d) <= min_dim (%d)", nb_dims, min_dim);
+          AT_ASSERT(nb_dims <= min_dim, "cudnnGetFilterNdDescriptor failed nb_dims (", nb_dims, ") <= min_dim (", min_dim, ")");
           filter_dim_a = filter_dim_a.slice(0, 0, nb_dims);
           auto elem_size = dataSize(rnn.datatype);
           auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
-          AT_ASSERT(offset_bytes % elem_size == 0, "offset_bytes `mod` elem_size != 0 (%d %% %d)", offset_bytes, elem_size);
+          AT_ASSERT(offset_bytes % elem_size == 0, "offset_bytes `mod` elem_size != 0 (", offset_bytes, " % ", elem_size, ")");
           size_t offset = offset_bytes / elem_size;
 
           // for all the RNN types provided by CUDNN, all the ih weights
@@ -466,7 +466,7 @@ namespace {
       if (layer == 0) {
         global_layer_params_count = layer_params_count;
       } else {
-        AT_ASSERT(global_layer_params_count == layer_params_count, "%d (global) != %d", global_layer_params_count, layer_params_count);
+        AT_ASSERT(global_layer_params_count == layer_params_count, global_layer_params_count, " (global) != ", layer_params_count);
       }
     } // for layer
     return std::make_pair(params, global_layer_params_count);
