@@ -353,7 +353,8 @@ def CreateOperator(
         operator.arg.extend(arg)
     # Add all other arguments
     for key, value in viewitems(kwargs):
-        operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
+        if value is not None:
+            operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
 
     if workspace.IsImmediate():
         workspace.RunOperatorImmediate(operator)
