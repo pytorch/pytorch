@@ -1408,6 +1408,8 @@ class TestTorch(TestCase):
         E = torch.randn(7, 9)
         F = torch.randn(2, 3, 5, 7)
         G = torch.randn(7, 11, 13)
+        H = torch.randn(4, 4)
+        I = torch.randn(3, 4, 4)
         l = torch.randn(5, 10)
         r = torch.randn(5, 20)
         w = torch.randn(30, 10, 20)
@@ -1434,14 +1436,22 @@ class TestTorch(TestCase):
             ("ijk,jk->ij", C, A),       # tensor matrix contraction with double indices
             ("ijk,ik->j", C, B),        # non contiguous
             ("ijk,ik->jk", C, B),       # non contiguous with double indices
+            # -- Diagonal
+            ("ii", H),                 # trace
+            ("ii->i", H),              # diagonal
+            # -- Ellipsis
+            ("i...->...", H),
+            ("ki,...k->i...", A.t(), B),
+            ("k...,jk", A.t(), B),
+            ("...ii->...i", I),       # batch diagonal
             # -- Other
             ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
         ]
         for test in test_list:
             actual = torch.einsum(test[0], test[1:])
             expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
-            self.assertEqual(expected.shape, actual.shape)
-            self.assertTrue(np.allclose(expected, actual.numpy()))
+            self.assertEqual(expected.shape, actual.shape, test[0])
+            self.assertTrue(np.allclose(expected, actual.numpy()), test[0])
 
             def do_einsum(*args):
                 return torch.einsum(test[0], args)
