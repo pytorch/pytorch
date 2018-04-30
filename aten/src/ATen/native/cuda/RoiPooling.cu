@@ -133,7 +133,7 @@ std::tuple<Tensor, Tensor> RoiPooling2d_forward_cuda(
   RoiPooling2d_forward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
     output.numel(), input.data<float>(), rois.data<float>(), static_cast<float>(spatialScale), inputChannels,
     inputHeight, inputWidth, pooledHeight, pooledWidth, output.data<float>(), argmaxes.data<int>());
-  AT_ASSERT(cudaGetLastError() == cudaSuccess);
+  AT_CHECK(cudaGetLastError() == cudaSuccess, "RoiPooling2d_forward_kernel failed with error code ", cudaGetLastError());
 
   return std::make_tuple(output, argmaxes);
 }
@@ -201,7 +201,7 @@ Tensor RoiPooling2d_backward_cuda(
     gradOutput.numel(), gradOutput.data<float>(), argmaxes.data<int>(), proposals,
     static_cast<float>(spatialScale), inputChannels, inputHeight, inputWidth,
     pooledHeight, pooledWidth, gradInput.data<float>(), rois.data<float>());
-  AT_ASSERT(cudaGetLastError() == cudaSuccess);
+  AT_CHECK(cudaGetLastError() == cudaSuccess, "RoiPooling2d_backward_kernel failed with error code ", cudaGetLastError());
 
   return gradInput;
 }

@@ -37,13 +37,13 @@ struct IndexRangeGenerator {
 
 void copy_range(variable_list& out, IndexRange range, const Tensor & t) {
   AT_ASSERT(range.second <= out.size());
-  AT_ASSERT(range.second - range.first == 1);
+  AT_ASSERTM(range.second - range.first == 1, "inconsistent range for Tensor output");
   out[range.first] = t;
 }
 
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   AT_ASSERT(range.second <= out.size());
-  AT_ASSERT(range.second - range.first == t.size());
+  AT_ASSERTM(range.second - range.first == t.size(), "inconsistent range for TensorList output");
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
