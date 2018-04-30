@@ -12,28 +12,50 @@ set -ex
 
 # Options for building only a subset of the libraries
 WITH_CUDA=0
-if [[ "$1" == "--with-cuda" ]]; then
-  WITH_CUDA=1
-  shift
-fi
-
+WITH_CUDNN=0
+WITH_NCCL=0
 WITH_NNPACK=0
-if [[ "$1" == "--with-nnpack" ]]; then
-  WITH_NNPACK=1
-  shift
-fi
-
 WITH_MKLDNN=0
-if [[ "$1" == "--with-mkldnn" ]]; then
-  WITH_MKLDNN=1
-  shift
-fi
-
+WITH_SYSTEM_NCCL=0
+WITH_DISTRIBUTED=0
+WITH_DISTRIBUTED_MW=0
 WITH_GLOO_IBVERBS=0
-if [[ "$1" == "--with-gloo-ibverbs" ]]; then
-  WITH_GLOO_IBVERBS=1
-  shift
-fi
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --with-cuda)
+            WITH_CUDA=1
+            ;;
+        --with-cudnn)
+            WITH_CUDNN=1
+            ;;
+        --with-nccl)
+            WITH_NCCL=1
+            ;;
+        --with-nnpack)
+            WITH_NNPACK=1
+            ;;
+        --with-mkldnn)
+            WITH_MKLDNN=1
+            ;;
+        --with-system-nccl)
+            WITH_SYSTEM_NCCL=1
+            ;;
+        --with-distributed)
+            WITH_DISTRIBUTED=1
+            ;;
+        --with-distributed-mw)
+            WITH_DISTRIBUTED_MW=1
+            ;;
+        --with-gloo-ibverbs)
+            WITH_GLOO_IBVERBS=1
+            ;;
+        *)
+            echo "Invalid option: $1"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 WITH_DISTRIBUTED_MW=0
 if [[ "$1" == "--with-distributed-mw" ]]; then
@@ -207,6 +229,48 @@ function build_nccl() {
   popd
 }
 
+# purpusefully not using build() because we need torch C to build the same
+# regardless of whether it is inside pytorch or not, so it
+# cannot take any special flags
+# special flags need to be part of the torch C build itself
+#
+# However, we do explicitly pass library paths when setup.py has already
+# detected them (to ensure that we have a consistent view between the
+# builds.)
+function build_torch() {
+  mkdir -p build
+  pushd build
+  ${CMAKE_VERSION} .. \
+  ${CMAKE_GENERATOR} \
+      -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+      -DUSE_CUDA=$WITH_CUDA \
+      -DUSE_CUDNN=$WITH_CUDNN \
+      -DUSE_NCCL=$WITH_NCCL \
+      -DUSE_MKLML=$WITH_MKLDNN \
+      -DUSE_NNPACK=$WITH_NNPACK \
+      -DUSE_DISTRIBUTED=$WITH_DISTRIBUTED \
+      -DUSE_DISTRIBUTED_MW=$WITH_DISTRIBUTED_MW \
+      -DUSE_SYSTEM_NCCL=$WITH_SYSTEM_NCCL \
+      -DUSE_GLOO_IBVERBS=$WITH_GLOO_IBVERBS \
+      -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
+      -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
+      -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
+      -DMKLDNN_INCLUDE_DIR=$MKLDNN_INCLUDE_DIR \
+      -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
+      -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
+      -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+      -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+      -DCMAKE_C_FLAGS="$USER_CFLAGS" \
+      -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
+      -DCMAKE_EXE_LINKER_FLAGS="$USER_LDFLAGS" \
+      -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
+      # STOP!!! Are you trying to add a C or CXX flag?  Add it
+      # to torch/csrc/CMakeLists.txt, not here.  We need the
+      # vanilla cmake build to work.
+  ${CMAKE_INSTALL} -j"$NUM_JOBS"
+  popd
+}
+
 # purpusefully not using build() because we need ATen to build the same
 # regardless of whether it is inside pytorch or not, so it
 # cannot take any special flags
@@ -214,7 +278,7 @@ function build_nccl() {
 #
 # However, we do explicitly pass library paths when setup.py has already
 # detected them (to ensure that we have a consistent view between the
-# PyTorch and ATen builds.)
+# builds.)
 function build_aten() {
   mkdir -p build
   pushd build
@@ -256,6 +320,10 @@ for arg in "$@"; do
     elif [[ "$arg" == "gloo" ]]; then
         pushd "$THIRD_PARTY_DIR"
         build gloo $GLOO_FLAGS
+        popd
+    elif [[ "$arg" == "torch" ]]; then
+        pushd "$BASE_DIR/torch"
+        build_torch
         popd
     elif [[ "$arg" == "ATen" ]]; then
         pushd "$BASE_DIR/aten"
