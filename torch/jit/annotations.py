@@ -35,6 +35,26 @@ except ImportError:
         return isinstance(ann, TupleInstance)
 
 
+class Module(object):
+    def __init__(self, name, members):
+        self.name = name
+        self.members = members
+
+    def __getattr__(self, name):
+        try:
+            return self.members[name]
+        except KeyError:
+            raise RuntimeError("Module {} has no member called {}".format(self.name, name))
+
+
+_eval_env = {
+    'torch': Module('torch', {'Tensor': torch.Tensor}),
+    'Tensor': torch.Tensor,
+    'typing': Module('typing', {'Tuple': Tuple}),
+    'Tuple': Tuple,
+}
+
+
 def get_signature(fn, _n_arguments=None, _n_binders=None):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
     if PY35:
@@ -66,23 +86,19 @@ def parse_type_line(type_line):
     arg_ann_str, ret_ann_str = split_type_line(type_line)
 
     try:
-        arg_ann = ast.parse(arg_ann_str, mode='eval').body
+        arg_ann = eval(arg_ann_str, _eval_env)
     except SyntaxError:
         raise RuntimeError("Failed to parse the argument list of a type annotation")
 
-    if type(arg_ann) is ast.Tuple:
-        arg_ann = arg_ann.elts
-    else:
+    if not isinstance(arg_ann, tuple):
         arg_ann = (arg_ann,)
 
     try:
-        ret_ann = ast.parse(ret_ann_str, mode='eval').body
+        ret_ann = eval(ret_ann_str, _eval_env)
     except SyntaxError:
-        raise RuntimeError("Failed to parse the return type of a the annotation")
+        raise RuntimeError("Failed to parse the return type of a type annotation")
 
-    arg_types = [ann_to_type(interpret_ann(ann)) for ann in arg_ann]
-    ret_type = ann_to_type(interpret_ann(ret_ann))
-    return arg_types, ret_type
+    return [ann_to_type(ann) for ann in arg_ann], ann_to_type(ret_ann)
 
 
 def default_signature(fn, source, _n_arguments, _n_binders):
@@ -106,9 +122,14 @@ def default_signature(fn, source, _n_arguments, _n_binders):
         if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
             raise RuntimeError("expected a single top-level function")
         py_def = py_ast.body[0]
-        arg_types = [DynamicType() for _ in py_def.args.args]
-        if inspect.ismethod(fn):
-            arg_types = arg_types[1:]
+        # TODO: ideally we'd ignore the type of varargs entirely, but we currently don't
+        # allow passing in anything else than tensors anyway.
+        if py_def.args.vararg is not None:
+            arg_types = [DynamicType()] * _n_arguments
+        else:
+            arg_types = [DynamicType() for _ in py_def.args.args]
+            if inspect.ismethod(fn):
+                arg_types = arg_types[1:]
     else:
         arg_types = [DynamicType()] * _n_arguments
 
@@ -180,48 +201,3 @@ def ann_to_type(ann):
     elif is_tuple(ann):
         return TupleType([ann_to_type(a) for a in ann.__args__])
     raise ValueError("The only supported annotations kinds are Tensor and Tuple[...]")
-
-
-class Module(object):
-    def __init__(self, name, members):
-        self.name = name
-        self.members = members
-
-    def __getattr__(self, name):
-        try:
-            return self.members[name]
-        except KeyError:
-            raise RuntimeError("Module {} has no member called {}".format(self.name, name))
-
-
-env = {
-    'torch': Module('torch', {'Tensor': torch.Tensor}),
-    'Tensor': torch.Tensor,
-    'typing': Module('typing', {'Tuple': Tuple}),
-    'Tuple': Tuple,
-}
-
-
-def interpret_ann(expr):
-    kind = type(expr)
-    if kind is ast.Name:
-        return env[expr.id]
-    elif kind is ast.Subscript:
-        base = interpret_ann(expr.value)
-        idx = interpret_slice(expr.slice)
-        return base[idx]
-    raise RuntimeError("Unsupported expression found in type annotation")
-
-
-def interpret_slice(val):
-    kind = type(val)
-    if kind is ast.Slice or kind is ast.ExtSlice:
-        raise RuntimeError("Slices can't appear in type annotations")
-    elif kind is ast.Index:
-        idx = val.value
-        idx_kind = type(idx)
-        if idx_kind is ast.Tuple:
-            return tuple(interpret_ann(elem) for elem in idx.elts)
-        else:
-            return interpret_ann(idx)
-    raise RuntimeError("Unexpected kind in interpret_slice. File a bug report")

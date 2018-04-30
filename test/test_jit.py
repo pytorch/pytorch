@@ -2656,6 +2656,24 @@ class TestScript(TestCase):
         self.checkScript(fn_unpack, (x,), optimize=True)
         self.checkScript(fn_index, (x,), optimize=True)
 
+    def test_type_annotations_varargs(self):
+        def fn_varargs(x, *args):
+            return args[0] if args else x
+
+        def fn1(x, y, z):
+            return fn_varargs(x)
+
+        def fn2(x, y, z):
+            return fn_varargs(x, y)
+
+        def fn3(x, y, z):
+            return fn_varargs(x, y, z)
+
+        x, y, z = [torch.randn(2, 2) for _ in range(3)]
+        self.checkScript(fn1, (x, y, z), optimize=True)
+        self.checkScript(fn2, (x, y, z), optimize=True)
+        self.checkScript(fn3, (x, y, z), optimize=True)
+
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_type_annotation_py3(self):
         import importlib.util
