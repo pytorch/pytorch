@@ -1826,7 +1826,7 @@ class TestTorch(TestCase):
         check_value(torch.empty(shape), default_dtype, torch.strided, -1, None, False)
         check_value(torch.full(shape, -5), default_dtype, torch.strided, -1, None, False)
         for dtype in dtypes:
-            for rg in [True, False]:
+            for rg in {dtype.is_floating_point, False}:
                 int64_dtype = get_int64_dtype(dtype)
                 v = torch.empty(shape, dtype=dtype, device=device, layout=layout, requires_grad=rg)
                 check_value(v, dtype, layout, device, None, rg)
@@ -1837,8 +1837,8 @@ class TestTorch(TestCase):
                 check_value(v.new_empty(shape, dtype=int64_dtype, device=device, requires_grad=rg),
                             int64_dtype, layout, device, None, rg)
                 check_value(torch.empty_like(v), dtype, layout, device, None, False)
-                check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=rg),
-                            int64_dtype, layout, device, None, rg)
+                check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
+                            int64_dtype, layout, device, None, False)
 
                 if dtype is not torch.float16 and layout != torch.sparse_coo:
                     fv = 3
@@ -1852,8 +1852,8 @@ class TestTorch(TestCase):
                                 int64_dtype, layout, device, fv + 3, rg)
                     check_value(torch.full_like(v, fv + 4), dtype, layout, device, fv + 4, False)
                     check_value(torch.full_like(v, fv + 5,
-                                                dtype=int64_dtype, layout=layout, device=device, requires_grad=rg),
-                                int64_dtype, layout, device, fv + 5, rg)
+                                                dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
+                                int64_dtype, layout, device, fv + 5, False)
 
     def test_empty_full(self):
         self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))

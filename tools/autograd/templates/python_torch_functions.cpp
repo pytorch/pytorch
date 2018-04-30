@@ -31,6 +31,9 @@ using namespace torch::autograd::utils;
 namespace torch { namespace autograd {
 
 static Tensor set_requires_grad(Tensor self, bool requires_grad) {
+  if (requires_grad && !at::isFloatingType(self.type().scalarType())) {
+    throw std::runtime_error("only Tensors of floating point dtype can require gradients");
+  }
   as_variable_ref(self).set_requires_grad(requires_grad);
   return self;
 }
