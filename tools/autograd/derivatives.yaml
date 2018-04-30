@@ -163,14 +163,17 @@
 - name: ceil(Tensor self)
   self: zeros_like(grad)
 
+# For clamp, clamp_min, and clamp_max, gradient is not defined at the
+# boundaries. But empirically it's helpful to be able to get gradient on min and
+# max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar min, Scalar max)
-  self: grad * (self > min).type_as(grad) * (self < max).type_as(grad)
+  self: grad * ((self >= min) * (self <= max)).type_as(grad)
 
 - name: clamp_min(Tensor self, Scalar min)
-  self: grad * (self > min).type_as(grad)
+  self: grad * (self >= min).type_as(grad)
 
 - name: clamp_max(Tensor self, Scalar max)
-  self: grad * (self < max).type_as(grad)
+  self: grad * (self <= max).type_as(grad)
 
 - name: clone(Tensor self)
   self: grad
