@@ -50,8 +50,8 @@ inline Tensor Tensor::operator[](Scalar index) const {
 inline Tensor Tensor::operator[](Tensor index) const {
   // These properties are checked in the Scalar constructor, but we already
   // check them here to provide more useful diagnostics for the user.
-  AT_ASSERT(index.defined(), "Can only index with tensors that are defined");
-  AT_ASSERT(
+  AT_CHECK(index.defined(), "Can only index with tensors that are defined");
+  AT_CHECK(
       index.dim() == 0,
       "Can only index with tensors that are scalars (zero-dim)");
   // The Scalar(Tensor) constructor is explicit, so we need to call it.

@@ -51,7 +51,7 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   int64_t nDims = self.dim();
   int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
   int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
-  AT_ASSERT(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
+  AT_CHECK(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
   int64_t diag_size;
   int64_t storage_offset = self.storage_offset();
   // compute storage offset and size for the diagonal
@@ -68,7 +68,7 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
     diag_size = std::min(self.size(dim1)+offset, self.size(dim2));
     storage_offset -= offset * self.stride(dim1);
   }
-  AT_ASSERT(diag_size > 0, "invalid diagonal offset ", offset); // the diagonal offset was too large in magnitude
+  AT_CHECK(diag_size > 0, "invalid diagonal offset ", offset); // the diagonal offset was too large in magnitude
 
   // construct new size and stride: we drop dim1 and dim2 (maximum first for not changing the index of the minumum)
   // the new ("joint") dimension is appended to the end of the shape / stride to match numpy semantics
@@ -107,7 +107,7 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
-  AT_ASSERT(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
   if (start < 0 || start >= cur_size) {
     AT_ERROR("start out of range");
@@ -260,7 +260,7 @@ Tensor reshape(const Tensor& self, IntList proposed_shape) {
 
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
-  AT_ASSERT(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
+  AT_CHECK(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
@@ -282,7 +282,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
 
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
-  AT_ASSERT(ndim > 0, "slice() cannot be applied to a 0-dim tensor.");
+  AT_CHECK(ndim > 0, "slice() cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, ndim);
   auto sizes = std::vector<int64_t>(self.sizes());
   auto strides = std::vector<int64_t>(self.strides());

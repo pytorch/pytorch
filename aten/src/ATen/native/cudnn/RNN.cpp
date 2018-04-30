@@ -458,7 +458,7 @@ namespace {
             params.emplace_back(std::move(param));
             layer_params_count++;
           } else {
-            AT_ASSERT(cur_offset == offset, "cur_offset == offset");
+            AT_ASSERT(cur_offset == offset);
           }
           cur_offset = offset + mat_numel;
         }

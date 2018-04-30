@@ -117,7 +117,7 @@ public:
 
 #define AT_ASSERT(cond, ...) \
   if (!(cond)) {             \
-    AT_ERROR(at::str(#cond, " ASSERT FAILED. ", __VA_ARGS__));   \
+    AT_ERROR(at::str(#cond, " ASSERT FAILED, please report a bug to PyTorch. ", __VA_ARGS__));   \
   }
 
 #define AT_CHECK(cond, ...) \

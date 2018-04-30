@@ -131,7 +131,7 @@ at::optional<FrameInformation> parse_frame_information(
 
 #endif // !defined(_WIN32)
 
-std::string get_backtrace(size_t frames_to_skip, size_t maximum_number_of_frames) {
+std::string get_backtrace(size_t frames_to_skip = 0, size_t maximum_number_of_frames = 64) {
 
 #if !defined(_WIN32)
 
@@ -204,9 +204,9 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
   return out;
 }
 
-Error::Error()
+Error::Error(SourceLocation source_location, std::string err)
   : what_without_backtrace_(err)
-  , what_(str("\n", err, " (", source_location, ")\n", get_backtrace(/*frames_to_skip=*/2)))
+  , what_(str(err, " (", source_location, ")\n", get_backtrace(/*frames_to_skip=*/2)))
   {}
 
 } // namespace at
