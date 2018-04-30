@@ -20,7 +20,7 @@ class SpectralNorm(object):
         weight_mat = weight.view(height, -1)
         for _ in range(self.n_power_iterations):
             # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
-            # are the first left and right singular vecors.
+            # are the first left and right singular vectors.
             # This power iteration produces approximations of `u` and `v`.
             v = normalize(torch.matmul(weight_mat.t(), u), dim=0, eps=self.eps)
             u = normalize(torch.matmul(weight_mat, v), dim=0, eps=self.eps)
