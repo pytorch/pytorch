@@ -56,9 +56,6 @@ class ObserverConfig {
     return skipIters_;
   }
   static void setReporter(unique_ptr<NetObserverReporter> reporter) {
-    if (reporter_) {
-      reporter_.reset(nullptr);
-    }
     reporter_ = std::move(reporter);
   }
   static NetObserverReporter* getReporter() {
