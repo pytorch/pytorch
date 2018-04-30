@@ -161,7 +161,6 @@ class RecurrentNetworkExecutorBase {
             }
           }
         }
-        rnn_op.op->DisableEvent();
 
         timestep_ops_[t].emplace_back(rnn_op);
       }
