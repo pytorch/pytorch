@@ -115,7 +115,12 @@ public:
 #define AT_ERROR(...) \
   throw at::Error({__func__, __FILE__, __LINE__}, at::str(__VA_ARGS__))
 
-#define AT_ASSERT(cond, ...) \
+#define AT_ASSERT(cond) \
+  if (!(cond)) {             \
+    AT_ERROR(#cond " ASSERT FAILED, please report a bug to PyTorch.");   \
+  }
+
+#define AT_ASSERTM(cond, ...) \
   if (!(cond)) {             \
     AT_ERROR(at::str(#cond, " ASSERT FAILED, please report a bug to PyTorch. ", __VA_ARGS__));   \
   }
