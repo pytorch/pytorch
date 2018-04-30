@@ -17,6 +17,8 @@ from caffe2.python.control_ops_grad import \
     gen_do_gradient, gen_if_gradient, gen_while_gradient
 
 import caffe2.python._import_c_extension as C
+
+import copy
 import pickle
 import numpy as np
 import sys
@@ -1430,7 +1432,7 @@ class Net(object):
         # make sure that this net name hasn't been used before
         self._net.name = Net._get_next_net_name(name)
 
-    def AppendNet(self, net):
+    def AppendNet(self, net, device_option=None):
         assert isinstance(net, Net)
         for i in net.Proto().external_input:
             if (
@@ -1445,7 +1447,12 @@ class Net(object):
                 if o not in self.Proto().external_output
             ]
         )
-        self._ExtendOps(net.Proto().op)
+        ops = net.Proto().op
+        if device_option is not None:
+            ops = [copy.deepcopy(op) for op in ops]
+            map(lambda x: x.device_option.CopyFrom(device_option), ops)
+
+        self._ExtendOps(ops)
         return self
 
     def LogInfo(self, *msg_or_blobs):
