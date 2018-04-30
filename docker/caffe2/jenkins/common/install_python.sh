@@ -103,7 +103,7 @@ fi
 # This is required for the non-standard Python version
 # installed on Ubuntu. They
 if [ -n "${INSTALL_SETUPTOOLS}" ]; then
-  curl -O https://pypi.python.org/packages/6c/54/f7e9cea6897636a04e74c3954f0d8335cc38f7d01e27eec98026b049a300/setuptools-38.5.1.zip
+  curl -O https://files.pythonhosted.org/packages/6c/54/f7e9cea6897636a04e74c3954f0d8335cc38f7d01e27eec98026b049a300/setuptools-38.5.1.zip
   unzip setuptools-38.5.1.zip
   pushd setuptools-38.5.1
   "$PYTHON" setup.py install
