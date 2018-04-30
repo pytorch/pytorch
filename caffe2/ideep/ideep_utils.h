@@ -4,8 +4,8 @@
 
 // All caffe2 ideep related headers
 #include <ideep.hpp>
-#include <caffe2/contrib/ideep/utils/ideep_context.h>
-#include <caffe2/contrib/ideep/utils/ideep_operator.h>
+#include <caffe2/ideep/utils/ideep_context.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
 
 namespace caffe2 {
 
