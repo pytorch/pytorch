@@ -78,6 +78,7 @@ for test in $INSTALL_PREFIX/test/*; do
   tmp_exit_code="$?"
   if [ "$exit_code" -eq 0 ]; then
     exit_code="$tmp_exit_code"
+    exit "$exit_code"
   fi
 done
 
