@@ -496,6 +496,10 @@ def load_inline(name,
     build directory, after which the behavior of :func:`load_inline` is
     identical to :func:`load`.
 
+    See `the
+    tests<https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions.py>_`
+    for good examples of using this function.
+
     Sources may omit two required parts of a typical non-inline C++ extension:
     the necessary header includes, as well as the (pybind11) binding code. More
     precisely, strings passed to ``cpp_sources`` are first concatenated into a
