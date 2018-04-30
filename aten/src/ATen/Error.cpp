@@ -2,8 +2,6 @@
 
 namespace at {
 
-namespace detail {
-
 #if defined(_MSC_VER)
 // Windows does not have cxxabi.h, so we will simply return the original.
 std::string demangle(const char* name) {
@@ -58,6 +56,8 @@ struct FrameInformation {
   /// the symbol originates from, i.e. either an executable or a library.
   std::string object_file;
 };
+
+namespace {
 
 at::optional<FrameInformation> parse_frame_information(
     const std::string &frame_string) {
@@ -126,10 +126,10 @@ at::optional<FrameInformation> parse_frame_information(
   return frame;
 }
 
+} // anonymous namespace
+
 
 #endif // !defined(_WIN32)
-
-}
 
 std::string get_backtrace(size_t frames_to_skip, size_t maximum_number_of_frames) {
 
@@ -174,7 +174,7 @@ std::string get_backtrace(size_t frames_to_skip, size_t maximum_number_of_frames
 
   for (size_t frame_number = 0; frame_number < callstack.size();
        ++frame_number) {
-    const auto frame = detail::parse_frame_information(symbols[frame_number]);
+    const auto frame = parse_frame_information(symbols[frame_number]);
 
     // frame #<number>:
     stream << "frame #" << frame_number << ": ";
@@ -198,5 +198,15 @@ std::string get_backtrace(size_t frames_to_skip, size_t maximum_number_of_frames
   return "(no backtrace available)";
 #endif
 }
+
+std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
+  out << loc.function << " at " << loc.file << ":" << loc.line;
+  return out;
+}
+
+Error::Error()
+  : what_without_backtrace_(err)
+  , what_(str("\n", err, " (", source_location, ")\n", get_backtrace(/*frames_to_skip=*/2)))
+  {}
 
 } // namespace at

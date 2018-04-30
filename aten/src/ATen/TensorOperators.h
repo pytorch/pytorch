@@ -41,10 +41,10 @@ inline Tensor& Tensor::operator/=(Scalar other) {
   return div_(other);
 }
 inline Tensor Tensor::operator[](Scalar index) const {
-  AT_ASSERT(
+  AT_CHECK(
       index.local().isIntegral(),
-      "Can only index tensors with integral scalars (got %s)",
-      index.toTensor().type().toString());
+      "Can only index tensors with integral scalars (got ",
+      index.toTensor().type().toString(), ")");
   return select(0, index.toLong());
 }
 inline Tensor Tensor::operator[](Tensor index) const {

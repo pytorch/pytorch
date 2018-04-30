@@ -25,22 +25,32 @@
 #define __func__ __FUNCTION__
 #endif
 
-// This is a mash-up of ATen/Error.h and caffe2/core/logging.h
-
 namespace at {
 
 namespace detail {
 
-// Utility to demangle a function name
+inline std::ostream& _str(std::ostream& ss) { return ss; }
+
+template <typename T>
+inline std::ostream& _str(std::ostream& ss, const T& t) {
+  ss << t;
+  return ss;
+}
+
+template <typename T, typename... Args>
+inline std::ostream&
+_str(std::ostream& ss, const T& t, const Args&... args) {
+  return _str(_str(ss, t), args...);
+}
+
+} // namespace detail
+
+/// Utility to demangle a function name
 std::string demangle(const char* name);
 
-/**
- * Returns the printable name of the type.
- *
- * Works for all types, not only the ones registered with CAFFE_KNOWN_TYPE
- */
+/// Returns the printable name of the type.
 template <typename T>
-static const char* demangle_type() {
+inline const char* demangle_type() {
 #ifdef __GXX_RTTI
   static const std::string name = demangle(typeid(T).name());
   return name.c_str();
@@ -49,26 +59,10 @@ static const char* demangle_type() {
 #endif // __GXX_RTTI
 }
 
-inline void _str(std::stringstream& /*ss*/) {}
-
-template <typename T>
-inline void _str(std::stringstream& ss, const T& t) {
-  ss << t;
-}
-
-template <typename T, typename... Args>
-inline void
-_str(std::stringstream& ss, const T& t, const Args&... args) {
-  _str(ss, t);
-  _str(ss, args...);
-}
-
-} // namespace detail
-
 // Convert a list of string-like arguments into a single string.
 template <typename... Args>
 inline std::string str(const Args&... args) {
-  std::stringstream ss;
+  std::ostringstream ss;
   detail::_str(ss, args...);
   return ss.str();
 }
@@ -89,14 +83,7 @@ struct SourceLocation {
   uint32_t line;
 };
 
-inline std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
-  out << loc.function << " at " << loc.file << ":" << loc.line;
-  return out;
-}
-
-std::string get_backtrace(
-    size_t frames_to_skip = 0,
-    size_t maximum_number_of_frames = 64);
+std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
 
 /// The primary ATen error class.
 /// Provides a complete error message with source location information via
@@ -107,18 +94,15 @@ class AT_API Error : public std::exception {
   std::string what_;
 
 public:
-  Error(SourceLocation source_location, std::string err)
-    : what_without_backtrace_(err)
-    , what_(str("\n", err, " (", source_location, ")\n", get_backtrace(/*frames_to_skip=*/2)))
-  {}
+  Error(SourceLocation source_location, std::string err);
 
   /// Returns the complete error message, including the source location.
-  inline const char* what() const noexcept override {
+  const char* what() const noexcept override {
     return what_.c_str();
   }
 
   /// Returns only the error message string, without source location.
-  inline const char* what_without_backtrace() const noexcept {
+  const char* what_without_backtrace() const noexcept {
     return what_without_backtrace_.c_str();
   }
 };
@@ -133,7 +117,7 @@ public:
 
 #define AT_ASSERT(cond, ...) \
   if (!(cond)) {             \
-    AT_ERROR(at::str(#cond, " ", __VA_ARGS__));   \
+    AT_ERROR(at::str(#cond, " ASSERT FAILED. ", __VA_ARGS__));   \
   }
 
 #define AT_CHECK(cond, ...) \
