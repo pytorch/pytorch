@@ -394,27 +394,34 @@ Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
 }
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
-  int64_t ndimI = self._indices().size(0);
+  int64_t ndimI = self._dimI();
   if (dim0 >= ndimI || dim1 >= ndimI) {
     AT_ERROR(
-        "sparse transpose_: transposed dimensions must be sparse ",
+        "sparse transpose: transposed dimensions must be sparse ",
         "Got nDimI: ", ndimI, ", d0: ", dim0, ", d1: ", dim1);
   }
 
-  auto indices = self._indices();
-  auto row0 = indices.select(0, dim0);
-  auto row1 = indices.select(0, dim1);
+  if (self._indices().numel() == 0 && self._values().numel() == 0) {
+    std::vector<int64_t> sizes(self.sizes());
+    std::swap(sizes[dim0], sizes[dim1]);
 
-  // swap row0 and row1
-  auto tmp = at::zeros_like(row0);
-  tmp.copy_(row0);
-  row0.copy_(row1);
-  row1.copy_(tmp);
+    return self.sparse_raw_resize_(sizes, self._dimI(), self._dimV());
+  } else {
+    auto indices = self._indices();
+    auto row0 = indices.select(0, dim0);
+    auto row1 = indices.select(0, dim1);
 
-  std::vector<int64_t> sizes(self.sizes());
-  std::swap(sizes[dim0], sizes[dim1]);
+    // swap row0 and row1
+    auto tmp = at::zeros_like(row0);
+    tmp.copy_(row0);
+    row0.copy_(row1);
+    row1.copy_(tmp);
 
-  return self.sparse_raw_resize_(sizes, -1, -1);
+    std::vector<int64_t> sizes(self.sizes());
+    std::swap(sizes[dim0], sizes[dim1]);
+
+    return self.sparse_raw_resize_(sizes, -1, -1);
+  }
 }
 
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
@@ -436,10 +443,45 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   return self.as_strided_(sizes, strides);
 }
 
-Tensor & t_(Tensor & self) {
-  if (self.ndimension() != 2) {
-    AT_ERROR("t_() expects a 2D tensor, but self is ", self.ndimension());
+Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
+  auto ndims = self.dim();
+  dim0 = maybe_wrap_dim(dim0, ndims);
+  dim1 = maybe_wrap_dim(dim1, ndims);
+  if (dim0 == dim1) {
+    return self;
   }
+
+  if (self.is_sparse()) {
+    Tensor self_clone = self.clone();  // yes, this is what THS does
+    return sparse_transpose_(self_clone, dim0, dim1);
+  }
+
+  std::vector<int64_t> strides(self.strides());
+  std::vector<int64_t> sizes(self.sizes());
+  std::swap(strides[dim0], strides[dim1]);
+  std::swap(sizes[dim0], sizes[dim1]);
+  return self.as_strided(sizes, strides);
+}
+
+static void check_t(const Tensor& self, const char *fn) {
+  if (self.is_sparse()) {
+    int64_t nDimI = self._dimI();
+    int64_t nDimV = self._dimV();
+    if (!(nDimI == 2 && nDimV == 0)) {
+      AT_ERROR(fn, " expects a 2D sparse tensor, but self is ", nDimI, "D indices and ", nDimV, "D values");
+    }
+  } else if (self.ndimension() != 2) {
+    AT_ERROR(fn, " expects a 2D tensor, but self is ", self.ndimension());
+  }
+}
+
+Tensor t(const Tensor & self) {
+  check_t(self, "t()");
+  return self.transpose(0, 1);
+}
+
+Tensor & t_(Tensor & self) {
+  check_t(self, "t_()");
   return self.transpose_(0, 1);
 }
 

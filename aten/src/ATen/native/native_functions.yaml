@@ -786,8 +786,12 @@
     CPU: _prod_out_cpu
     CUDA: _prod_out_cuda
 
+- func: t(Tensor self) -> Tensor
+
 - func: t_(Tensor self) -> Tensor
   variants: method
+
+- func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method

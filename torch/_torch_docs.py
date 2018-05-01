@@ -4238,7 +4238,7 @@ Examples::
 
 add_docstr(torch.t,
            r"""
-t(input, out=None) -> Tensor
+t(input) -> Tensor
 
 Expects :attr:`input` to be a matrix (2-D tensor) and transposes dimensions 0
 and 1.
@@ -4247,7 +4247,6 @@ Can be seen as a short-hand function for :meth:`transpose(input, 0, 1)`
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -4382,7 +4381,7 @@ Example::
 
 add_docstr(torch.transpose,
            r"""
-transpose(input, dim0, dim1, out=None) -> Tensor
+transpose(input, dim0, dim1) -> Tensor
 
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
@@ -4395,7 +4394,6 @@ Args:
     input (Tensor): the input tensor
     dim0 (int): the first dimension to be transposed
     dim1 (int): the second dimension to be transposed
-    out (Tensor, optional): the output tensor
 
 Example::
 

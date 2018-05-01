@@ -385,6 +385,19 @@ class TestSparse(TestCase):
         self.assertTrue(x_coalesced.is_coalesced())
         self.assertFalse(y_uncoalesced.is_coalesced())
 
+    def test_t_empty(self):
+        x = self.SparseTensor(2, 3)
+        x.t_()
+        self.assertEqual(torch.Size([3, 2]), x.size())
+        self.assertEqual(0, x._indices().numel())
+        self.assertEqual(0, x._values().numel())
+
+        x = self.SparseTensor(2, 3)
+        y = x.t()
+        self.assertEqual(torch.Size([3, 2]), y.size())
+        self.assertEqual(0, y._indices().numel())
+        self.assertEqual(0, y._values().numel())
+
     @cpu_only
     def test_mm(self):
         def test_shape(di, dj, dk):
@@ -688,7 +701,7 @@ class TestSparse(TestCase):
         to_test_one_arg = {
             'zeros_like': lambda x: torch.zeros_like(x),
             'transpose': lambda x: x.transpose(0, 1),
-            'transpose_': lambda x: x.transpose(0, 1),
+            'transpose_': lambda x: x.transpose_(0, 1),
             't': lambda x: x.t(),
             't_': lambda x: x.t_(),
             'div': lambda x: x.div(2),
