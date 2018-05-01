@@ -107,6 +107,60 @@ if("${isSystemDir}" STREQUAL "-1")
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
+
+# Generate files
+set(TOOLS_PATH "${TORCH_SRC_DIR}/../tools")
+
+configure_file("${ATEN_PATH}/src/ATen/common_with_cwrap.py"
+               "${TOOLS_PATH}/shared/cwrap_common.py"
+               COPYONLY)
+
+add_custom_command(
+  OUTPUT
+  "${TORCH_SRC_DIR}/csrc/nn/THNN.cpp"
+  "${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods_dispatch.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_dispatch.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_dispatch.h"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_dispatch.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
+  COMMAND
+  python tools/setup_helpers/generate_code.py
+    --declarations-path "${ATEN_BUILD_PATH}/src/ATen/ATen/Declarations.yaml"
+    --nn-path "aten/src/"
+  DEPENDS
+  "${ATEN_BUILD_PATH}/src/ATen/ATen/Declarations.yaml"
+  "${ATEN_PATH}/src/THNN/generic/THNN.h"
+  "${ATEN_PATH}/src/THCUNN/generic/THCUNN.h"
+  "${TOOLS_PATH}/autograd/templates/VariableType.h"
+  "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
+  "${TOOLS_PATH}/autograd/templates/Functions.h"
+  "${TOOLS_PATH}/autograd/templates/Functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_functions.h"
+  "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_variable_methods_dispatch.h"
+  "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_torch_functions_dispatch.h"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
+  "${TOOLS_PATH}/jit/templates/aten_dispatch.h"
+  "${TOOLS_PATH}/jit/templates/aten_dispatch.cpp"
+  "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
+  WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
+
 set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
@@ -156,8 +210,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
   ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
   ${TORCH_SRC_DIR}/csrc/api/src/containers.cpp
-  ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
-  )
+  ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp)
 
 add_library(torch SHARED ${TORCH_SRCS})
 
