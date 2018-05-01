@@ -865,8 +865,7 @@ void ReduceMeanImpl(
       const int* axes,                                         \
       const T* X,                                              \
       T* Y,                                                    \
-      CPUContext* context,                                     \
-      Tensor<CPUContext>* /* scratch_ptr */) {                 \
+      CPUContext* context) {                                   \
     ReduceTensor(                                              \
         num_dims,                                              \
         dims,                                                  \
@@ -890,8 +889,7 @@ CAFFE2_SPECIALIZED_REDUCE_MIN(float)
       const int* axes,                                         \
       const T* X,                                              \
       T* Y,                                                    \
-      CPUContext* context,                                     \
-      Tensor<CPUContext>* /* scratch_ptr */) {                 \
+      CPUContext* context) {                                   \
     ReduceTensor(                                              \
         num_dims,                                              \
         dims,                                                  \
@@ -915,8 +913,7 @@ CAFFE2_SPECIALIZED_REDUCE_MAX(float)
       const int* axes,                                                        \
       const T* X,                                                             \
       T* Y,                                                                   \
-      CPUContext* context,                                                    \
-      Tensor<CPUContext>* /* scratch_ptr */) {                                \
+      CPUContext* context) {                                                  \
     ReduceTensor(                                                             \
         num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context); \
   }
