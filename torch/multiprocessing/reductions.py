@@ -88,14 +88,27 @@ def rebuild_storage_filename(cls, manager, handle, size):
     return storage._shared_decref()
 
 
-def rebuild_storage_cuda(cls, device, handle, size, offset, view_size):
+def rebuild_storage_cuda(cls, device, handle, size, offset, view_size, originating_pid):
     storage = storage_from_cache(cls, handle)
-    if storage is not None:
-        return storage._new_view(offset, view_size)
-    torch.cuda._lazy_init()
-    storage = cls._new_shared_cuda(device, handle, size, offset, view_size)
-    shared_cache[handle] = storage._weak_ref(StorageRef)
-    return storage
+    if storage is None:
+        torch.cuda._lazy_init()
+        storage = cls._new_shared_cuda(device, handle, size, offset, view_size)
+        shared_cache[handle] = storage._weak_ref(StorageRef)
+        return storage
+
+    # The storage exists in the cache.
+    # Depending on the process, it is cached differently:
+    # 1) Different process from process that created the tensor
+    #    The storage, created from the handle in rebuild_storage_cuda,
+    #    points to the base of the cuda allocation block.
+    #    The desired storage exists "offset" away from the base storage.
+    # 2) Same process as process that created the tensor
+    #    The storage saved (from reduce_storage) IS the desired storage,
+    #    not a storage pointing to the base of the allocation.
+    #    Because it is the desired storage, we ignore "offset".
+    if os.getpid() == originating_pid:
+        return storage._new_view(0, view_size)
+    return storage._new_view(offset, view_size)
 
 
 def rebuild_storage_empty(cls):
@@ -105,7 +118,7 @@ def rebuild_storage_empty(cls):
 def reduce_storage(storage):
     from . import get_sharing_strategy
     if storage.is_cuda:
-        metadata = storage._share_cuda_()
+        metadata = storage._share_cuda_() + (os.getpid(),)
         cache_key = metadata[1]
         rebuild = rebuild_storage_cuda
     elif get_sharing_strategy() == 'file_system':
