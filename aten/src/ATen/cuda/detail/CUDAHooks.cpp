@@ -23,4 +23,31 @@ std::unique_ptr<Generator> CUDAHooks::initCUDAGenerator(Context* context) const 
   return std::unique_ptr<Generator>(new CUDAGenerator(context));
 }
 
+bool CUDAHooks::hasCUDA() const {
+  int count;
+  cudaError_t err = cudaGetDeviceCount(&count);
+  if (err == cudaErrorInsufficientDriver) {
+    return false;
+  }
+  return true;
+}
+
+cudaStream_t CUDAHooks::getCurrentCUDAStream(THCState* thc_state) const {
+  return THCState_getCurrentStream(thc_state);
+}
+struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(THCState* thc_state) const {
+  return THCState_getCurrentDeviceProperties(thc_state);
+}
+struct cudaDeviceProp* CUDAHooks::getDeviceProperties(THCState* thc_state, int device) const {
+  return THCState_getDeviceProperties(thc_state, device);
+}
+
+int64_t CUDAHooks::current_device() const {
+  int device;
+  cudaError_t err = cudaGetDevice(&device);
+  if (err == cudaSuccess) {
+    return device;
+  }
+}
+
 }}} // namespace at::cuda::detail

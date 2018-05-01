@@ -1,6 +1,6 @@
 #include <ATen/Registry.h>
-
-#include "ATen/Generator.h"
+#include <ATen/Generator.h>
+#include <ATen/Error.h>
 
 // Forward declare these CUDA types here to avoid including CUDA headers in
 // ATen headers, which would make ATen always require CUDA to build.
@@ -35,11 +35,31 @@ struct CUDAHooksInterface {
 
   // Initialize THCState and, transitively, the CUDA state
   virtual std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const {
-    throw std::runtime_error("cannot initialize CUDA without ATen_cuda library");
+    AT_ERROR("cannot initialize CUDA without ATen_cuda library");
   }
 
   virtual std::unique_ptr<Generator> initCUDAGenerator(Context*) const  {
-    throw std::runtime_error("cannot initialize CUDA generator without ATen_cuda library");
+    AT_ERROR("cannot initialize CUDA generator without ATen_cuda library");
+  }
+
+  virtual bool hasCUDA() const {
+    return false;
+  }
+
+  virtual cudaStream_t getCurrentCUDAStream(THCState*) const {
+    AT_ERROR("cannot getCurrentCUDAStream() without ATen_cuda library");
+  }
+
+  virtual struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const {
+    AT_ERROR("cannot getCurrentDeviceProperties() without ATen_cuda library");
+  }
+
+  virtual struct cudaDeviceProp* getDeviceProperties(THCState*, int device) const {
+    AT_ERROR("cannot getDeviceProperties() without ATen_cuda library");
+  }
+
+  virtual int64_t current_device() const {
+    return -1;
   }
 
 };

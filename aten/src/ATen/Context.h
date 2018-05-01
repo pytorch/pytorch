@@ -46,8 +46,12 @@ public:
     return *generator;
   }
   bool hasMKL() const;
-  bool hasCUDA() const;
-  int64_t current_device() const;
+  bool hasCUDA() const {
+    return detail::getCUDAHooks().hasCUDA();
+  }
+  int64_t current_device() const {
+    return detail::getCUDAHooks().current_device();
+  }
   // defined in header so that getType has ability to inline
   // call_once check. getType is called fairly frequently
   THCState* lazyInitCUDA() {
@@ -64,9 +68,15 @@ public:
     return thc_state.get();
   }
 
-  cudaStream_t getCurrentCUDAStream() const;
-  cudaDeviceProp* getCurrentDeviceProperties() const;
-  cudaDeviceProp* getDeviceProperties(int device) const;
+  cudaStream_t getCurrentCUDAStream() const {
+    return detail::getCUDAHooks().getCurrentCUDAStream(thc_state.get());
+  }
+  cudaDeviceProp* getCurrentDeviceProperties() const {
+    return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
+  }
+  cudaDeviceProp* getDeviceProperties(int device) const {
+    return detail::getCUDAHooks().getDeviceProperties(thc_state.get(), device);
+  }
 
   bool setFlushDenormal(bool on);
 
