@@ -103,13 +103,13 @@ std::tuple<Tensor, Tensor> RoiPooling2d_forward_cuda(
 
   // Input is the output of the last convolutional layer in the Backbone network, so
   // it should be in the format of NCHW
-  AT_ASSERT(input.ndimension() == 4, "Input to RoI Pooling should be a NCHW Tensor");
+  AT_CHECK(input.ndimension() == 4, "Input to RoI Pooling should be a NCHW Tensor");
 
   // ROIs is the set of region proposals to process. It is a 2D Tensor where the first
   // dim is the # of proposals, and the second dim is the proposal itself in the form
   // [batch_index startW startH endW endH]
-  AT_ASSERT(rois.ndimension() == 2, "RoI Proposals should be a 2D Tensor, (batch_sz x proposals)");
-  AT_ASSERT(rois.size(1) == 5, "Proposals should be of the form [batch_index startW startH endW enH]");
+  AT_CHECK(rois.ndimension() == 2, "RoI Proposals should be a 2D Tensor, (batch_sz x proposals)");
+  AT_CHECK(rois.size(1) == 5, "Proposals should be of the form [batch_index startW startH endW enH]");
 
   auto proposals = rois.size(0);
   auto inputChannels = input.size(1);
@@ -125,15 +125,15 @@ std::tuple<Tensor, Tensor> RoiPooling2d_forward_cuda(
   // the argmaxes Tensor should be the same size as the output Tensor
   auto argmaxes = input.type().toScalarType(kInt).tensor({proposals, inputChannels, pooledHeight, pooledWidth});
 
-  AT_ASSERT(input.is_contiguous(), "input must be contiguous");
-  AT_ASSERT(rois.is_contiguous(), "rois must be contiguous");
+  AT_CHECK(input.is_contiguous(), "input must be contiguous");
+  AT_CHECK(rois.is_contiguous(), "rois must be contiguous");
 
   dim3 block(512);
   dim3 grid((output.numel() + 512 - 1) / 512);
   RoiPooling2d_forward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
     output.numel(), input.data<float>(), rois.data<float>(), static_cast<float>(spatialScale), inputChannels,
     inputHeight, inputWidth, pooledHeight, pooledWidth, output.data<float>(), argmaxes.data<int>());
-  AT_ASSERT(cudaGetLastError() == cudaSuccess, "RoiPooling2d_forward_kernel failed");
+  AT_CHECK(cudaGetLastError() == cudaSuccess, "RoiPooling2d_forward_kernel failed with error code ", cudaGetLastError());
 
   return std::make_tuple(output, argmaxes);
 }
@@ -201,7 +201,7 @@ Tensor RoiPooling2d_backward_cuda(
     gradOutput.numel(), gradOutput.data<float>(), argmaxes.data<int>(), proposals,
     static_cast<float>(spatialScale), inputChannels, inputHeight, inputWidth,
     pooledHeight, pooledWidth, gradInput.data<float>(), rois.data<float>());
-  AT_ASSERT(cudaGetLastError() == cudaSuccess, "RoiPooling2d_forward_kernel failed");
+  AT_CHECK(cudaGetLastError() == cudaSuccess, "RoiPooling2d_backward_kernel failed with error code ", cudaGetLastError());
 
   return gradInput;
 }

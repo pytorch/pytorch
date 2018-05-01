@@ -345,7 +345,9 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
 // Note dims[0] - we need to dynamically allocate the dims.
 struct TensorInfo {
   void * data;
+#pragma GCC diagnostic ignored "-Wpedantic"
   uint32_t sizes_strides[0];
+#pragma GCC diagnostic pop
 
   uint32_t* sizes(size_t nDim) { return &sizes_strides[0]; }
   uint32_t* strides(size_t nDim) { return &sizes_strides[nDim]; }
@@ -696,7 +698,9 @@ struct CPUFusionFunction : public CompiledFusionFunction {
       disas(so_file.name());
     }
     so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
+#pragma GCC diagnostic ignored "-Wpedantic"
     kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name.c_str()));
+#pragma GCC diagnostic pop
   }
 protected:
   virtual at::Backend backend() const override {

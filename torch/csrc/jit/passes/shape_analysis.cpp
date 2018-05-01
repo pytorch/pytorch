@@ -155,7 +155,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
   // XXX: real attributes of node can be a superset of attrs
   // XXX: if this returns true then you are obliged to set the types
   auto check_overload = [&](size_t num_inputs, size_t num_outputs,
-                            std::vector<std::pair<AttributeKind,Symbol>> attrs = {}) -> bool {
+                            std::vector<std::pair<AttributeKind,Symbol>> attrs) {
     JIT_ASSERT(!handled);
     if (node->inputs().size() != num_inputs) return false;
     if (node->outputs().size() != num_outputs) return false;
@@ -191,11 +191,11 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       // logic in scalar cases is non-trivial. It's better to just run them.
     } break;
     case aten::neg: {
-      if (!check_overload(/*num_inputs=*/1, /*num_outputs=*/1)) break;
+      if (!check_overload(/*num_inputs=*/1, /*num_outputs=*/1, {})) break;
       node->output()->setType(types.at(0)->contiguous());
     } break;
     case aten::mm: {
-      if (!check_overload(/*num_inputs=*/2, /*num_outputs=*/1)) break;
+      if (!check_overload(/*num_inputs=*/2, /*num_outputs=*/1, {})) break;
       auto lhs_type = types.at(0);
       auto rhs_type = types.at(1);
       SHAPE_ASSERT(lhs_type->sizes().size() == 2 && rhs_type->sizes().size() == 2);
@@ -204,7 +204,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
         at::IntList{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
     } break;
     case aten::t: {
-      if (!check_overload(/*num_inputs=*/1, /*num_outputs=*/1)) break;
+      if (!check_overload(/*num_inputs=*/1, /*num_outputs=*/1, {})) break;
       auto tp = types.at(0);
       auto sizes = tp->sizes();
       auto strides = tp->strides();
@@ -240,7 +240,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
           sizes.erase(sizes.begin() + dim);
         }
         node->output()->setType(tp->withSizes(sizes));
-      } else if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1)) {
+      } else if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1, {})) {
         node->output()->setType(types.at(0)->withSizes({}));
       }
     } break;

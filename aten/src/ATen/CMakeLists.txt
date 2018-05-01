@@ -205,7 +205,6 @@ SET(all_cpp ${base_cpp} ${native_cpp} ${native_cudnn_cpp} ${native_mkl_cpp} ${na
 INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
 IF(NOT NO_CUDA)
   INCLUDE_DIRECTORIES(${ATen_CUDA_INCLUDE})
-  INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
   INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/cuda")
   SET(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${aten_cuda_cu} ${native_cuda_cu})
   SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS})

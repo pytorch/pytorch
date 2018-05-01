@@ -139,9 +139,9 @@ Args:
 Example::
 
     >>> tensor = torch.tensor((), dtype=torch.float64)
-    >>> tensor.new_ones((2, 3))
-    tensor([[ 1.,  1.,  1.],
-            [ 1.,  1.,  1.]], dtype=torch.float64)
+    >>> tensor.new_zeros((2, 3))
+    tensor([[ 0.,  0.,  0.],
+            [ 0.,  0.,  0.]], dtype=torch.float64)
 
 """.format(**new_common_args))
 

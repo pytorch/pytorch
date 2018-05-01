@@ -144,7 +144,7 @@ static ScalarType infer_scalar_type(PyObject *obj) {
     }
     return *scalarType;
   }
-  AT_ERROR("Could not infer dtype of %s", Py_TYPE(obj)->tp_name);
+  AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }
 
 static void recursive_store(char* data, IntList sizes, IntList strides, int64_t dim,

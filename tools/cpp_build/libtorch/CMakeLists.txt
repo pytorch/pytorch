@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 cmake_policy(VERSION 3.0)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -76,14 +76,13 @@ if(NOT TORCH_INSTALL_LIB_DIR)
 endif()
 
 if(NOT NO_CUDA)
-  add_definitions( -DWITH_CUDA )
+  add_definitions(-DWITH_CUDA)
 
   set(TORCH_CUDA_LIBRARIES
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libcuda.so
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvrtc.so
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
-    ${CUDA_LIBRARIES}
-  )
+    ${CUDA_LIBRARIES})
 
   set(CUDA_INCLUDE_DIRS
       ${CUDA_INCLUDE_DIRS}
@@ -104,12 +103,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
 if("${isSystemDir}" STREQUAL "-1")
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-endif()
-
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-missing-field-initializers -Wno-type-limits -Wno-unused-parameter -Wno-vla ${CMAKE_CXX_FLAGS}")
-set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
-if ($ENV{WERROR})
-  set(CMAKE_CXX_FLAGS "-Werror ${CMAKE_CXX_FLAGS}")
 endif()
 
 set(TORCH_SRCS
@@ -155,28 +148,60 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter_autograd_function.cpp
   ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/containers.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
   )
 
 add_library(torch SHARED ${TORCH_SRCS})
 
+# https://gcc.gnu.org/onlinedocs/gcc-4.0.3/gcc/Warning-Options.html
+target_compile_options(torch
+  PRIVATE
+  -Wall
+  -Wextra
+  -pedantic
+  -Wcast-align
+  -Wcast-qual
+  -Wctor-dtor-privacy
+  -Wdisabled-optimization
+  -Wformat=2
+  -Winit-self
+  -Wmissing-include-dirs
+  -Woverloaded-virtual
+  -Wsign-promo
+  -Wstrict-overflow=5
+  -Wundef
+  -fdiagnostics-show-option
+  -Wno-unused-parameter)
+
+if ($ENV{WERROR})
+  target_compile_options(torch PRIVATE -Werror)
+endif()
+
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
-  ${ATEN_LIBRARY}
-)
+  ${ATEN_LIBRARY})
 
-set(COMMON_INCLUDES
+target_include_directories(torch
+  PUBLIC
   "${ATEN_INCLUDE_DIR}"
   "${ATEN_INCLUDE_DIR}/TH"
   "${ATEN_BUILD_INCLUDE_DIR}"
   "${ATEN_BUILD_PATH}/src/TH"
-  "${CMAKE_CURRENT_SOURCE_DIR}"
-  "${CUDA_INCLUDE_DIRS}")
-
-target_include_directories(torch
-  PUBLIC
-  "${COMMON_INCLUDES}"
+  "${TORCH_SRC_DIR}/csrc/api/"
+  "${TORCH_SRC_DIR}/csrc/api/include"
   "${TORCH_SRC_DIR}/../"
+  "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# SYSTEM headers are included with -isystem and thus do not trigger warnings.
+target_include_directories(torch SYSTEM PUBLIC
+  "${TORCH_SRC_DIR}/../third_party/cereal/include" # For cereal/
   "${TORCH_SRC_DIR}/../third_party/nanopb")
+
+if(NOT NO_CUDA)
+  target_include_directories(torch SYSTEM PUBLIC "${CUDA_INCLUDE_DIRS}")
+endif()
 
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
@@ -193,18 +218,31 @@ install(TARGETS torch
   LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
-set(TORCH_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
+# JIT Tests. TODO: Put into test/cpp/jit folder
 
-add_executable(test_jit ${TORCH_TEST_SRCS})
+add_executable(test_jit ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
 
 target_link_libraries(test_jit torch)
 
 target_include_directories(test_jit PUBLIC
-  "${TORCH_SRC_DIR}/../"
-  "${TORCH_SRC_DIR}/../third_party/catch/single_include"
-  "${COMMON_INCLUDES}")
+  "${TORCH_SRC_DIR}/../third_party/catch/single_include")
 
-install(TARGETS test_jit
-  RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
-  LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
-  ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+# API Tests
+
+set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
+
+add_executable(test_api
+  ${TORCH_API_TEST_DIR}/main.cpp
+  ${TORCH_API_TEST_DIR}/container.cpp
+  ${TORCH_API_TEST_DIR}/misc.cpp
+  ${TORCH_API_TEST_DIR}/rnn.cpp
+  ${TORCH_API_TEST_DIR}/integration.cpp
+  ${TORCH_API_TEST_DIR}/optim.cpp
+  ${TORCH_API_TEST_DIR}/serialization.cpp
+)
+
+target_include_directories(test_api
+  PUBLIC
+  "${TORCH_SRC_DIR}/../third_party/catch/single_include")
+
+target_link_libraries(test_api torch)

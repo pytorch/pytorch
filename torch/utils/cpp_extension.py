@@ -494,9 +494,41 @@ def load_inline(name,
     This function behaves exactly like :func:`load`, but takes its sources as
     strings rather than filenames. These strings are stored to files in the
     build directory, after which the behavior of :func:`load_inline` is
-    identical to :func:`load`. Strings passed in ``cpp_sources`` (a string or
-    list of strings) are stored with a ``.cpp`` extension, and the string or list
-    of strings passed in ``cuda_sources`` are stored with a ``.cu`` extension.
+    identical to :func:`load`.
+
+    See `the
+    tests <https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions.py>`_
+    for good examples of using this function.
+
+    Sources may omit two required parts of a typical non-inline C++ extension:
+    the necessary header includes, as well as the (pybind11) binding code. More
+    precisely, strings passed to ``cpp_sources`` are first concatenated into a
+    single ``.cpp`` file. This file is then prepended with ``#include
+    <torch/torch.h>``.
+
+    Furthermore, if the ``functions`` argument is supplied, bindings will be
+    automatically generated for each function specified. ``functions`` can
+    either be a list of function names, or a dictionary mapping from function
+    names to docstrings. If a list is given, the name of each function is used
+    as its docstring.
+
+    The sources in ``cuda_sources`` are concatenated into a separate ``.cu``
+    file and  prepended with ``ATen/ATen.h``, ``cuda.h`` and ``cuda_runtime.h``
+    includes. The ``.cpp`` and ``.cu`` files are compiled separately, but
+    ultimately linked into a single library. Note that no bindings are
+    generated for functions in ``cuda_sources`` per  se. To bind to a CUDA
+    kernel, you must create a C++ function that calls it, and either declare or
+    define this C++ function in one of the ``cpp_sources`` (and include its
+    name in ``functions``).
+
+    See :func:`load` for a description of arguments omitted below.
+
+    Args:
+        cpp_sources: A string, or list of strings, containing C++ source code.
+        cuda_sources: A string, or list of strings, containing CUDA source code.
+        functions: A list of function names for which to generate function
+            bindings. If a dictionary is given, it should map function names to
+            docstrings (which are otherwise just the function names).
 
     Example:
         >>> from torch.utils.cpp_extension import load_inline

@@ -6,11 +6,11 @@ namespace at {
 namespace native {
 
 Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, int64_t pad) {
-  AT_ASSERT(self.dim() == 3, "Input must have 3 dims: time, batch, "
+  AT_CHECK(self.dim() == 3, "Input must have 3 dims: time, batch, "
       "in_channel");
-  AT_ASSERT(weight.dim() == 3, "Weight tensor must have 3 dims: kernel_width,"
+  AT_CHECK(weight.dim() == 3, "Weight tensor must have 3 dims: kernel_width,"
       " in_channels, out_channels.");
-  AT_ASSERT(bias.dim() == 1, "Bias must be 1-D");
+  AT_CHECK(bias.dim() == 1, "Bias must be 1-D");
 
   auto input_size = self.sizes();
   auto weight_size = weight.sizes();
@@ -27,9 +27,9 @@ Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, in
   // Input = (time, batch, in_channels)
   // Weight = (kernel_width, in_channels, out_channels)
   // Bias = (out_channels)
-  AT_ASSERT(inputPlanes == weight_size[1], "Input dim 2 (input channels) "
+  AT_CHECK(inputPlanes == weight_size[1], "Input dim 2 (input channels) "
       "is not == dim 1 in the weight tensor");
-  AT_ASSERT(weight_size[2] == bias.sizes()[0], "Bias size must equal dim 2 in "
+  AT_CHECK(weight_size[2] == bias.sizes()[0], "Bias size must equal dim 2 in "
       "the weight tensor (output channels).");
 
   // input * weights + bias -> output_features

@@ -1,5 +1,5 @@
-#include <caffe2/contrib/ideep/operators/operator_fallback_ideep.h>
-#include <caffe2/contrib/ideep/utils/ideep_operator.h>
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
 
 #include <caffe2/operators/cross_entropy_op.h>
 #include <caffe2/operators/filler_op.h>

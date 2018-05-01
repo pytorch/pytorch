@@ -10,7 +10,7 @@ IntList ${Tensor}::strides() const {
 }
 Scalar ${Tensor}::localScalar() {
   int64_t numel = ${THTensor}_nElement(${state,}tensor);
-  AT_ASSERT(numel == 1,"localScalar() called on Tensor with %" PRId64 " elements",numel);
+  AT_CHECK(numel == 1,"localScalar() called on Tensor with ", numel, " elements");
   return Scalar(${to_at_type}(${THStorage}_get(${state,}tensor->storage, tensor->storageOffset)));
 }
 std::unique_ptr<Storage> ${Tensor}::storage() {
