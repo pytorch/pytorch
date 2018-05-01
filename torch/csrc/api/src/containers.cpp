@@ -54,7 +54,7 @@ void ContainerImpl::cuda() {
   for (auto pair : params_) {
     pair.second.data().copy_(copied[pair.first].data());
   }
-};
+}
 
 void ContainerImpl::cpu() {
   for (auto& pair : children_) {
@@ -67,7 +67,7 @@ void ContainerImpl::cpu() {
   for (auto pair : params_) {
     pair.second.data().copy_(copied[pair.first].data());
   }
-};
+}
 
 void ContainerImpl::train() {
   for (auto& pair : children_) {

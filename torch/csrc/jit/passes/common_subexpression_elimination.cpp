@@ -19,7 +19,7 @@ bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
 bool tensorListEqual(const std::vector<at::Tensor>& lhs, const std::vector<at::Tensor>& rhs) {
   if (lhs.size() != rhs.size()) return false;
   return std::equal(lhs.begin(), lhs.end(), rhs.begin(), tensorEqual);
-};
+}
 
 
 // Check whether two nodes have the same attributes in CSE.

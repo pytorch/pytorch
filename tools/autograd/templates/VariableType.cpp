@@ -130,7 +130,7 @@ static VariableTypeRegistry registry;
 bool VariableType::isVariableType(const at::Type& type) {
   // Since all VariableTypes are allocated contiguously in types_vec, we can
   // just check that the pointer is inside the correct range.
-  ptrdiff_t offset = (char*)&type - (char*)registry.types_vec.data();
+  ptrdiff_t offset = reinterpret_cast<const char*>(&type) - reinterpret_cast<const char*>(registry.types_vec.data());
   ptrdiff_t extent = VariableTypeRegistry::MaxTypes * sizeof(VariableType);
   return offset >= 0 && offset < extent;
 }

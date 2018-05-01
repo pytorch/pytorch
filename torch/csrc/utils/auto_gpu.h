@@ -59,7 +59,7 @@ private:
   static void cudaCheck(cudaError_t err) {
     if (err != cudaSuccess) {
       std::string msg = "CUDA error (";
-      msg += std::to_string(err);
+      msg += std::to_string(static_cast<int>(err));
       msg += "): ";
       msg += cudaGetErrorString(err);
       throw std::runtime_error(msg);
