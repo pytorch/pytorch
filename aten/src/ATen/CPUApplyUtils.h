@@ -166,6 +166,13 @@ template <typename Arg, typename... Args>
 inline void iterate(Arg& iter, Args&... iter_tail) {
   iter.counter_[iter.dim_ - 1]++;
   iter.data_ += iter.strides_[iter.dim_ - 1];
+  iterate(iter_tail...);
+}
+
+inline void iterate_overflow(){};
+
+template <typename Arg, typename... Args>
+inline void iterate_overflow(Arg& iter, Args&... iter_tail) {
   if (iter.counter_[iter.dim_ - 1] == iter.sizes_[iter.dim_ - 1]) {
     for (int64_t i = iter.dim_ - 1; i > 0; i--) {
       if (iter.counter_[i] == iter.sizes_[i]) {
@@ -176,7 +183,7 @@ inline void iterate(Arg& iter, Args&... iter_tail) {
       }
     }
   }
-  iterate(iter_tail...);
+  iterate_overflow(iter_tail...);
 }
 
 inline void forward(int64_t offset){};
@@ -216,7 +223,9 @@ apply_op(int64_t numel, int64_t offset, const Op& op, Args... iters) {
     forward(offset, iters...);
   for (int64_t i = 0; i < numel; i++) {
     op(*iters.data_...);
+    // Splitting this into two helps the compiler create faster assembly
     iterate(iters...);
+    iterate_overflow(iters...);
   }
 }
 
