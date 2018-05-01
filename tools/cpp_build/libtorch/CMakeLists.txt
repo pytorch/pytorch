@@ -109,9 +109,10 @@ endif()
 
 
 # Generate files
+set(TOOLS_PATH "${TORCH_SRC_DIR}/../tools")
 
 configure_file("${ATEN_PATH}/src/ATen/common_with_cwrap.py"
-               "${TORCH_SRC_DIR}/../tools/shared/cwrap_common.py"
+               "${TOOLS_PATH}/shared/cwrap_common.py"
                COPYONLY)
 
 add_custom_command(
@@ -138,7 +139,26 @@ add_custom_command(
   python tools/setup_helpers/generate_code.py
     --declarations-path "${ATEN_BUILD_PATH}/src/ATen/ATen/Declarations.yaml"
     --nn-path "aten/src/"
-  DEPENDS "${ATEN_BUILD_PATH}/src/ATen/ATen/Declarations.yaml"
+  DEPENDS
+  "${ATEN_BUILD_PATH}/src/ATen/ATen/Declarations.yaml"
+  "${ATEN_PATH}/src/THNN/generic/THNN.h"
+  "${ATEN_PATH}/src/THCUNN/generic/THCUNN.h"
+  "${TOOLS_PATH}/autograd/templates/VariableType.h"
+  "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
+  "${TOOLS_PATH}/autograd/templates/Functions.h"
+  "${TOOLS_PATH}/autograd/templates/Functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_functions.h"
+  "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_variable_methods_dispatch.h"
+  "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_torch_functions_dispatch.h"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
+  "${TOOLS_PATH}/jit/templates/aten_dispatch.h"
+  "${TOOLS_PATH}/jit/templates/aten_dispatch.cpp"
+  "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
   WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
 
 set(TORCH_SRCS
