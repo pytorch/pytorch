@@ -39,7 +39,8 @@ option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_ATEN "Use ATen" OFF)
-option(USE_CUDA "Use Cuda" ON)
+option(USE_CUDA "Use Cuda" OFF)
+option(USE_HIP "Use HIP" ON)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" ON)
 option(USE_GLOG "Use GLOG" ON)
@@ -236,6 +237,11 @@ if (USE_CUDA)
 
 endif()
 
+if (USE_HIP)
+  # TODO: check if we should include other hip dependency libraries
+  # to the interface as well.
+
+endif()
 # Note(jiayq): when building static libraries, all PRIVATE dependencies
 # will also become interface libraries, and as a result if there are any
 # dependency libraries that are not exported, the following install export
