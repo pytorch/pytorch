@@ -416,6 +416,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_list': List[AtFormal],
     'condition': str,
     'auto_gpu': bool,
+    'with_gil': bool,
     'cpu_half': bool,
     # options should be List[FunctionOption]
     'options': Any,
@@ -448,6 +449,8 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('returns', List[ReturnType]),
     ('inplace', bool),
     ('abstract', bool),
+    ('auto_gpu', bool),
+    ('with_gil', bool),
 ])
 
 
@@ -785,6 +788,8 @@ def create_generic(top_env, declarations):
             inplace=option['inplace'],
             # See Note [Abstract ATen methods]
             abstract=abstract,
+            auto_gpu=option.get('auto_gpu', True),
+            with_gil=option.get('with_gil', False),
         ))
 
     def native_get_formals(option, include_constants=False):
@@ -987,6 +992,8 @@ def create_generic(top_env, declarations):
             inplace=option['inplace'],
             # See Note [Abstract ATen methods]
             abstract=abstract,
+            auto_gpu=option.get('auto_gpu', True),
+            with_gil=option.get('with_gil', False),
         ))
 
     output_declarations = []  # type: List[OutputDeclaration]
