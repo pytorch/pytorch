@@ -96,16 +96,13 @@ def wrap_function(name, type, arguments):
 
 
 def generate_wrappers(nn_root=None):
-    if nn_root is not None:
-        nn_path = os.path.join(nn_root, 'THNN', 'generic', 'THNN.h')
-        cunn_path = os.path.join(nn_root, 'THCUNN', 'generic', 'THCUNN.h')
-    wrap_nn(nn_path)
-    wrap_cunn(cunn_path)
+    wrap_nn(os.path.join(nn_root, 'THNN', 'generic', 'THNN.h') if nn_root else None)
+    wrap_cunn(os.path.join(nn_root, 'THCUNN', 'generic', 'THCUNN.h') if nn_root else None)
 
 
 def wrap_nn(thnn_h_path):
     wrapper = '#include <TH/TH.h>\n\n\n'
-    nn_functions = thnn_utils.parse_header(thnn_h_path or nn_utils.THNN_H_PATH)
+    nn_functions = thnn_utils.parse_header(thnn_h_path or thnn_utils.THNN_H_PATH)
     for fn in nn_functions:
         for t in ['Float', 'Double']:
             wrapper += wrap_function(fn.name, t, fn.arguments)

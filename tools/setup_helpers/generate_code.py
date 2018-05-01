@@ -63,7 +63,7 @@ def generate_code_ninja(w):
 
 
 def generate_code(ninja_global=None,
-                  declarations_path=DECLARATIONS_PATH,
+                  declarations_path=None,
                   nn_path=None):
     # if ninja is enabled, we just register this file as something
     # ninja will need to call if needed
@@ -87,8 +87,8 @@ def generate_code(ninja_global=None,
     for d in (autograd_gen_dir, jit_gen_dir):
         if not os.path.exists(d):
             os.mkdir(d)
-    gen_autograd(declarations_path, autograd_gen_dir)
-    gen_jit_dispatch(declarations_path, jit_gen_dir)
+    gen_autograd(declarations_path or DECLARATIONS_PATH, autograd_gen_dir)
+    gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir)
 
 
 def main():
