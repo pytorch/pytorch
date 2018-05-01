@@ -328,7 +328,7 @@ class ReduceLROnPlateau(object):
             self.cooldown_counter -= 1
             self.num_bad_epochs = 0  # ignore any bad epochs in cooldown
 
-        if self.num_bad_epochs > self.patience:
+        if self.num_bad_epochs >= self.patience:
             self._reduce_lr(epoch)
             self.cooldown_counter = self.cooldown
             self.num_bad_epochs = 0
