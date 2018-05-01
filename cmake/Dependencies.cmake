@@ -394,6 +394,17 @@ if(USE_CUDA)
   endif()
 endif()
 
+# ---[ HIP
+if(USE_HIP)
+  include(cmake/Hip.cmake)
+  if(HAVE_HIP)
+    message(WARNING "Compiling with HIP for AMD.")
+  else()
+    message(WARNING "Not compiling with HIP for AMD.")
+    set(USE_HIP OFF)
+  endif()
+endif()
+
 # ---[ NCCL
 if(USE_NCCL)
   if(NOT USE_CUDA)
@@ -415,6 +426,16 @@ if(USE_CUDA)
     include_directories(${CUB_INCLUDE_DIRS})
   else()
     include_directories(${PROJECT_SOURCE_DIR}/third_party/cub)
+  endif()
+endif()
+
+# ---[ HIP
+if(USE_HIP)
+  include(${HIP_PATH}/cmake/FindHIP.cmake)
+  if(HAVE_HIP)
+    message(WARNING "Compiling with HIP for AMD.")
+  else()
+    message(WARNING "Not compiling with HIP for AMD.")
   endif()
 endif()
 
