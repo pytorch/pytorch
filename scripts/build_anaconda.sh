@@ -317,6 +317,8 @@ if [[ -n $pytorch_too ]]; then
     add_package $cuda_feature_name
     conda_channel+=('-c pytorch')
     export BUILD_WITH_CUDA=1
+
+    caffe2_cmake_args+=("-DUSE_ATEN=ON")
   fi
 fi
 
