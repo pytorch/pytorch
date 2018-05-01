@@ -433,10 +433,7 @@ def emit_body(declaration):
     def emit_history():
         fn = 'rebase' if modifies_arguments and not is_view else 'set'
         output_names = [r['name'] for r in differentiable_outputs]
-        if len(output_names) == 1:
-            outs = output_names[0]
-        else:
-            outs = CodeTemplate("flatten_variables( ${outs} )").substitute(outs=output_names)
+        outs = CodeTemplate("flatten( ${outs} )").substitute(outs=output_names)
         return SET_HISTORY.substitute(fn=fn, differentiable_outputs=outs)
 
     def emit_save_outputs():

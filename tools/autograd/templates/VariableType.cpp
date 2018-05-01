@@ -203,27 +203,6 @@ static std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
       return SavedVariable{tensor, false /* is output */}; });
 }
 
-template <typename... Tensors, size_t... Is>
-std::tuple<Tensors...> as_variable_impl(
-    std::tuple<Tensors...> tensors,
-    Indices<Is...>) {
-  // Expand the integer parameter pack into a sequence of Variable
-  // constructions. This turns into (boolean omitted):
-  // Variable(std::get<0>(tensors)), Variable(std::get<1>(tensors)), ...
-  return std::tuple<Tensors...>(
-      make_variable(std::get<Is>(tensors), /*requires_grad=*/false)...);
-}
-
-template <typename... Tensors>
-std::tuple<Tensors...> as_variable(std::tuple<Tensors...> tensors) {
-  // `sizeof...(Tensors)` gets us the size of the `Tensors` parameter pack at
-  // compile time. We use it to parameterize a `MakeIndices` class, which will
-  // expand into an Indices object containing the numbers 0 to
-  // sizeof...(Tensors) - 1.
-  return as_variable_impl(
-      tensors, typename MakeIndices<sizeof...(Tensors)>::indices());
-}
-
 static Tensor as_variable(Tensor tensor) {
   return make_variable(std::move(tensor), /*requires_grad=*/false);
 }
@@ -234,6 +213,29 @@ static std::vector<Tensor> as_variable(TensorList tl) {
     variables.emplace_back(make_variable(std::move(t), /*requires_grad=*/false));
   }
   return variables;
+}
+
+template <typename... Tensors, size_t... Is>
+std::tuple<Tensors...> as_variable_impl(
+    std::tuple<Tensors...> tensors,
+    Indices<Is...>) {
+  // Expand the integer parameter pack into a sequence of Variable
+  // constructions. This turns into (boolean omitted):
+  // Variable(std::get<0>(tensors)), Variable(std::get<1>(tensors)), ...
+  return std::tuple<Tensors...>(
+      as_variable(std::get<Is>(tensors))...);
+}
+
+// NB: Because this was not forward declared, recursive std::tuple won't work.
+// You can probably rejigger this to make it supported if you really need it.
+template <typename... Tensors>
+std::tuple<Tensors...> as_variable(std::tuple<Tensors...> tensors) {
+  // `sizeof...(Tensors)` gets us the size of the `Tensors` parameter pack at
+  // compile time. We use it to parameterize a `MakeIndices` class, which will
+  // expand into an Indices object containing the numbers 0 to
+  // sizeof...(Tensors) - 1.
+  return as_variable_impl(
+      tensors, typename MakeIndices<sizeof...(Tensors)>::indices());
 }
 
 static Tensor as_view(const Tensor & base, Tensor tensor) {
@@ -288,45 +290,37 @@ static void throw_error_out_requires_grad(const char* name) {
       "but one of the arguments requires grad.");
 }
 
-static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
-  if (grad_fn && tensor.defined()) {
-    auto& var = as_variable_ref(tensor);
+// TODO: Blegh, bare references
+
+static void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
+  if (grad_fn && var.defined()) {
     grad_fn->set_num_inputs(1);
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
 
-static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
+static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->set_num_inputs(tensors.size());
+    grad_fn->set_num_inputs(vars.size());
     uint32_t output_nr = 0;
-    for (auto& tensor : tensors) {
-      if (tensor.defined()) {
-        auto& var = as_variable_ref(const_cast<Tensor&>(tensor));
-        var.rebase_history({grad_fn, output_nr});
+    for (auto& var : vars) {
+      if (var.defined()) {
+        // TODO: eliminate const_cast
+        const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
       }
       output_nr++;
     }
   }
 }
 
-// var must be the only differentiable output of the function. Use the ArrayRef
-// overload for functions with multiple differentiable outputs.
-static void set_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
-  if (grad_fn && tensor.defined()) {
-    auto& var = as_variable_ref(tensor);
-    autograd::create_gradient_edge(var, std::move(grad_fn));
-  }
-}
-
-static void set_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
+static void set_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->set_num_inputs(tensors.size());
+    grad_fn->set_num_inputs(vars.size());
     uint32_t output_nr = 0;
-    for (auto& tensor : tensors) {
-      if (tensor.defined()) {
-        auto& var = as_variable_ref(const_cast<Tensor&>(tensor));
-        var.set_gradient_edge({grad_fn, output_nr});
+    for (auto& var : vars) {
+      if (var.defined()) {
+        // TODO: eliminate const_cast
+        const_cast<Variable&>(var).set_gradient_edge({grad_fn, output_nr});
       }
       output_nr++;
     }
@@ -343,22 +337,6 @@ struct Flatten : IterArgs<Flatten> {
 };
 
 template<typename... Args> inline variable_list flatten(Args&&... args) {
-  variable_list out;
-  out.reserve(count_tensors(std::forward<Args>(args)...));
-  Flatten(out).apply(std::forward<Args>(args)...);
-  return out; // RVO
-}
-
-struct FlattenVariables : IterArgs<FlattenVariables> {
-  FlattenVariables(variable_list& out) : out(out) {}
-  variable_list& out;
-  void operator()(const Variable& x) { out.emplace_back(x); }
-  void operator()(at::ArrayRef<Variable> xs) {
-    out.insert(out.end(), xs.begin(), xs.end());
-  }
-};
-
-template<typename... Args> inline variable_list flatten_variables(Args&&... args) {
   variable_list out;
   out.reserve(count_tensors(std::forward<Args>(args)...));
   Flatten(out).apply(std::forward<Args>(args)...);
@@ -391,7 +369,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   }
   baseType->s_copy_(self_, src_, non_blocking);
   increment_version(self);
-  rebase_history(self, std::move(grad_fn));
+  rebase_history(as_variable_ref( self ), std::move(grad_fn));
   return self;
 }
 
