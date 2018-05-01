@@ -92,6 +92,11 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
+TYPE_DERIVED_DEFINITION_NATIVE_MISSING = CodeTemplate("""\
+${return_type} ${Type}::${api_name}(${type_method_formals}) const {
+    AT_ERROR("${api_name} not supported on ${Type}");
+}
+""")
 TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
 ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 """)
@@ -1400,14 +1405,15 @@ def create_derived(backend_type_env, declarations):
                     backend_type_env['ScalarName'])
             if pair in option['backend_type_pairs']:
                 native_dispatch = dispatch.get(pair[0])
-                if native_dispatch is None:
-                    raise Exception('could not find backend {} in native function dispatch specification {}'
-                                    .format(pair[0], dispatch))
-                option['native_type_method_dispatch'] = native_dispatch
                 type_object_declarations.append(
                     TYPE_DERIVED_DECLARATION.substitute(env))
-                type_object_definitions.append(
-                    TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
+                if native_dispatch is None:
+                    type_object_definitions.append(
+                        TYPE_DERIVED_DEFINITION_NATIVE_MISSING.substitute(env))
+                else:
+                    option['native_type_method_dispatch'] = native_dispatch
+                    type_object_definitions.append(
+                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
