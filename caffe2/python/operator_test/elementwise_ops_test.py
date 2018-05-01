@@ -147,6 +147,27 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-2)
 
+    @given(X=hu.tensor(elements=st.floats(0.1, 10.0), dtype=np.float32),
+           inplace=st.booleans(), **hu.gcs)
+    def test_rsqrt(self, X, inplace, gc, dc):
+        op = core.CreateOperator(
+            "RSqrt",
+            ["X"],
+            ["X"] if inplace else ["Y"],
+        )
+
+        def rsqrt_ref(X):
+            return [1.0 / np.sqrt(X)]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=rsqrt_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=5e-3)
+
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     def test_swish(self, n, m, gc, dc, seed):
