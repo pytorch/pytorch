@@ -13,6 +13,7 @@ struct CUDAHooks : public at::detail::CUDAHooksInterface {
   struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const override;
   struct cudaDeviceProp* getDeviceProperties(THCState*, int device) const override;
   int64_t current_device() const override;
+  std::unique_ptr<Allocator> newPinnedMemoryAllocator() const override;
 };
 
 // Sigh, the registry doesn't support namespaces :(

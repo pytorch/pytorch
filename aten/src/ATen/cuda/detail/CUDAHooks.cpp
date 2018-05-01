@@ -1,8 +1,10 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <ATen/CUDAGenerator.h>
+
+#include "THC/THC.h"
 
 #include <cuda.h>
-#include "THC/THC.h"
-#include "ATen/CUDAGenerator.h"
 
 namespace at { namespace cuda { namespace detail {
 
@@ -49,6 +51,10 @@ int64_t CUDAHooks::current_device() const {
     return device;
   }
   return -1;
+}
+
+std::unique_ptr<Allocator> newPinnedMemoryAllocator() const {
+  return std::unique_ptr<Allocator>(new PinnedMemoryAllocator());
 }
 
 }}} // namespace at::cuda::detail

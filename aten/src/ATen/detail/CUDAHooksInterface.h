@@ -1,6 +1,9 @@
+#pragma once
+
 #include <ATen/Registry.h>
 #include <ATen/Generator.h>
 #include <ATen/Error.h>
+#include <ATen/Allocator.h>
 
 // Forward declare these CUDA types here to avoid including CUDA headers in
 // ATen headers, which would make ATen always require CUDA to build.
@@ -60,6 +63,10 @@ struct CUDAHooksInterface {
 
   virtual int64_t current_device() const {
     return -1;
+  }
+
+  virtual std::unique_ptr<Allocator> newPinnedMemoryAllocator() const {
+    AT_ERROR("pinned memory requires CUDA");
   }
 
 };
