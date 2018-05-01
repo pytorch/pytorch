@@ -12,6 +12,7 @@ import numpy as np
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import unittest
 
 
 class TestAdagrad(hu.HypothesisTestCase):
@@ -88,7 +89,7 @@ class TestAdagrad(hu.HypothesisTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_adagrad_output_effective_lr(self, inputs, lr, epsilon, gc, dc):
         param, momentum, grad = inputs
         lr = np.array([lr], dtype=np.float32)
@@ -112,7 +113,7 @@ class TestAdagrad(hu.HypothesisTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_adagrad_output_effective_lr_and_update(
             self, inputs, lr, epsilon, gc, dc):
         param, momentum, grad = inputs
