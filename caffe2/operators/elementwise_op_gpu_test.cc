@@ -7,7 +7,7 @@ CAFFE2_DECLARE_string(caffe_test_root);
 
 template <>
 void CopyVector<caffe2::CUDAContext>(const int N, const bool* x, bool* y) {
-  cudaMemcpy(y, x, N * sizeof(bool), cudaMemcpyHostToDevice);
+  CUDA_CHECK(cudaMemcpy(y, x, N * sizeof(bool), cudaMemcpyHostToDevice));
 }
 
 template <>
