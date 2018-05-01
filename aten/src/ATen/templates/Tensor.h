@@ -109,7 +109,7 @@ struct Tensor : public detail::TensorBase {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-    AT_ASSERT(dim() == N, "expected %d dims but tensor has %d",N,dim());
+    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
 
