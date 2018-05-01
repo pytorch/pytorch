@@ -50,7 +50,9 @@ endif()
 file(GLOB tbb_src "${TBB_ROOT_DIR}/src/tbb/*.cpp" "${TBB_ROOT_DIR}/src/old/*.cpp")
 list(APPEND tbb_src ${TBB_ROOT_DIR}/src/rml/client/rml_tbb.cpp)
 file(GLOB to_remove "${TBB_ROOT_DIR}/src/old/test*.cpp")
-list(REMOVE_ITEM tbb_src ${to_remove})
+if (NOT "${to_remove}" STREQUAL "")
+  list(REMOVE_ITEM tbb_src ${to_remove})
+endif()
 
 set(tbbmalloc_static_src
   src/tbbmalloc/backend.cpp
