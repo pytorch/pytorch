@@ -48,4 +48,15 @@ AT_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface);
 AT_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface);
 #define REGISTER_CUDA_HOOKS(clsname) AT_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
+const CUDAHooksInterface& getCUDAHooks() {
+  static std::unique_ptr<CUDAHooksInterface> cuda_hooks;
+  if (!cuda_hooks) {
+    cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks");
+    if (!cuda_hooks) {
+      cuda_hooks = std::unique_ptr<CUDAHooksInterface>(new CUDAHooksInterface());
+    }
+  }
+  return *cuda_hooks;
+}
+
 }} // namespace at::detail
