@@ -7,6 +7,15 @@ SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P )"
 pushd $SCRIPTPATH
 source ./build_common.sh
 
+echo "Generating code"
+
+pushd "../.."
+cp aten/src/ATen/common_with_cwrap.py tools/shared/cwrap_common.py
+python tools/setup_helpers/generate_code.py \
+  --declarations-path "$ATEN_BUILDPATH/src/ATen/ATen/Declarations.yaml" \
+  --nn-path "aten/src/"
+popd
+
 echo "Building Torch"
 
 mkdir -p $LIBTORCH_BUILDPATH
