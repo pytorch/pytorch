@@ -262,9 +262,9 @@ template <bool B, class T = void>
 using enable_if_t = typename std::enable_if<B, T>::type;
 
 template <typename T, typename U>
-constexpr bool inheritedFrom() {
-  return std::is_base_of<U, T>::value && !std::is_same<U, T>::value;
-}
+struct inheritedFrom {
+    static constexpr bool value = std::is_base_of<U, T>::value && !std::is_same<U, T>::value;
+};
 
 // This is just a way to fix issues when the isa<> implementation
 // can't automatically downcast.
@@ -276,7 +276,7 @@ struct is_impl {
 };
 
 template <typename T, typename N>
-struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>()>> {
+struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static bool impl(N n) {
     if (!isa<NeuralNetOperator>(n->data().get())) {
       return false;
@@ -287,7 +287,7 @@ struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>()>> {
 };
 
 template <typename T, typename N>
-struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>()>> {
+struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static bool impl(N n) {
     if (!isa<NeuralNetData>(n->data().get())) {
       return false;
@@ -312,7 +312,7 @@ struct get_impl {
 };
 
 template <typename T, typename N>
-struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>()>> {
+struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
       assert(0 && "Cannot get type from node");
@@ -324,7 +324,7 @@ struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>()>> {
 };
 
 template <typename T, typename N>
-struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>()>> {
+struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
       assert(0 && "Cannot get type from node");
