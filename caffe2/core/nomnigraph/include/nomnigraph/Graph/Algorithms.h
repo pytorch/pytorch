@@ -119,7 +119,8 @@ Graph<typename G::NodeRef, int> dominatorTree(
   nextPass.insert(source);
 
   while (nextPass.size()) {
-    for (auto parent : nextPass) {
+    for (auto parent_iter = nextPass.begin(); parent_iter != nextPass.end(); ) {
+      auto parent = *parent_iter;
       for (auto child : dominatorMap[parent]) {
         while (mapToTreeNode[child]->getInEdges().size()) {
           tree.deleteEdge(mapToTreeNode[child]->getInEdges().front());
@@ -129,7 +130,7 @@ Graph<typename G::NodeRef, int> dominatorTree(
           nextPass.insert(child);
         }
       }
-      nextPass.erase(parent);
+      nextPass.erase(parent_iter++);
     }
   }
 
