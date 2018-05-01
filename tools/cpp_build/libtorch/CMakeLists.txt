@@ -14,6 +14,8 @@ find_path(ATEN_INCLUDE_DIR ATen/ATen.h PATHS "${ATEN_PATH}/src/" NO_DEFAULT_PATH
 find_path(ATEN_BUILD_INCLUDE_DIR ATen/Type.h PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
 find_library(ATEN_LIBRARY ATen PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
 
+find_library(NANOPB_LIBRARY protobuf-nanopb PATHS "${NANOPB_BUILD_PATH}" NO_DEFAULT_PATH)
+
 find_path(TORCH_SRC_DIR torch.h PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch" NO_DEFAULT_PATH)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -147,6 +149,10 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter_autograd_function.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/import.cpp
+  ${TORCH_SRC_DIR}/csrc/onnx/onnx.cpp
+  ${TORCH_SRC_DIR}/csrc/onnx/onnx.pb.cpp
   ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
   ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
   ${TORCH_SRC_DIR}/csrc/api/src/containers.cpp
@@ -181,7 +187,9 @@ endif()
 
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
-  ${ATEN_LIBRARY})
+  ${ATEN_LIBRARY}
+  ${NANOPB_LIBRARY}
+)
 
 target_include_directories(torch
   PUBLIC
@@ -246,3 +254,4 @@ target_include_directories(test_api
   "${TORCH_SRC_DIR}/../third_party/catch/single_include")
 
 target_link_libraries(test_api torch)
+

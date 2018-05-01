@@ -81,6 +81,21 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         self.assertExpected(str(trace), *args, **kwargs)
 
+    def assertExportImport(self, trace, inputs):
+        initializers = []
+        graph1 = trace.graph()
+
+        ge1 = torch._C.GraphExecutor(graph1, False)
+        out1 = ge1(*inputs)
+        proto, _ = trace.graph().export(initializers, onnx_opset_version=0,
+                                        defer_weight_export=False, export_raw_ir=True)
+
+        graph2, initializers = torch._C._jit_import_graph(proto)
+        ge2 = torch._C.GraphExecutor(graph2, False)
+        out2 = ge2(*inputs)
+
+        self.assertEqual(out1, out2)
+
     def test_simple(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
@@ -90,6 +105,7 @@ class TestJit(TestCase):
 
         trace, z = torch.jit.get_trace_graph(f, (x, y), nderivs=0)
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, y))
 
     # matmul is currently implemented as a native function, which
     # exercises different codepaths in the JIT.  The following two
@@ -104,6 +120,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, y))
 
     def test_matmul_native_run(self):
         x = Variable(torch.Tensor([[0.4]]), requires_grad=True)
@@ -171,6 +188,7 @@ class TestJit(TestCase):
 
         trace, z = torch.jit.get_trace_graph(f, (x, y), nderivs=0)
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, y))
 
     def test_scopes_intermediate_node(self):
 
@@ -181,6 +199,7 @@ class TestJit(TestCase):
         net = Net()
         t = Variable(torch.ones(2), requires_grad=True)
         trace, _ = torch.jit.get_trace_graph(net, (t, ))
+        self.assertExportImport(trace, (t, ))
         torch.onnx._optimize_trace(trace, False)
 
         self.assertExpectedTrace(trace)
@@ -208,6 +227,8 @@ class TestJit(TestCase):
         with torch.onnx.set_training(model, False):
             trace, _ = torch.jit.get_trace_graph(model, (t, ))
 
+        self.assertExportImport(trace, (t, ) + tuple(model.parameters()))
+
         torch.onnx._optimize_trace(trace, False)
 
         self.assertExpectedTrace(trace)
@@ -224,6 +245,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_dce(trace.graph())
         torch._C._jit_pass_lint(trace.graph())
+        self.assertExportImport(trace, (input, hx, cx) + tuple(module.parameters()))
         torch._C._jit_pass_fuse(trace.graph())
         self.assertExpectedTrace(trace)
 
@@ -283,6 +305,7 @@ class TestJit(TestCase):
             return torch.cat((hx + cx, hx * cx))
 
         trace, _ = torch.jit.get_trace_graph(Foo, (hx, cx))
+        self.assertExportImport(trace, (hx, cx))
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_fuse(trace.graph())
         self.assertExpectedTrace(trace)
@@ -299,6 +322,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace, 'raw')
+        self.assertExportImport(trace, (x, y))
         torch._C._jit_pass_fuse(trace.graph())
         self.assertExpectedTrace(trace)
 
@@ -362,6 +386,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_cse(trace.graph())
 
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, y))
 
     def test_compile_run_twice(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
@@ -544,6 +569,7 @@ class TestJit(TestCase):
         y = m(inputs[0])
         torch._C._tracer_exit((y,))
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, inputs)
 
     def test_legacy_fail(self):
 
@@ -571,6 +597,7 @@ class TestJit(TestCase):
         y = fn(*inputs)
         torch._C._tracer_exit((y,))
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, inputs)
 
     def test_inplace_flags(self):
         class InplaceFn(Function):
@@ -1113,6 +1140,7 @@ class TestJit(TestCase):
         x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.get_trace_graph(torchvision.models.AlexNet(), x)
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, ))
         # NB: Purposely NOT testing protobuf export here
 
     def test_debug_info(self):
@@ -1153,6 +1181,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, ))
 
     def test_index_trace(self):
         x = Variable(torch.randn(4, 4), requires_grad=True)
@@ -1191,6 +1220,7 @@ class TestJit(TestCase):
         x = Variable(torch.randn(2, 2))
         trace, _ = torch.jit.get_trace_graph(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, ))
 
     def checkGraphExecutor(self, func, reference_tensors, input_tensors=None,
                            optimize=True, drop=None, allow_unused=False):
