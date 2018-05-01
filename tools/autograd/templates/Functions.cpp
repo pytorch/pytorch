@@ -36,14 +36,14 @@ struct IndexRangeGenerator {
 };
 
 void copy_range(variable_list& out, IndexRange range, const Tensor & t) {
-  AT_ASSERT(range.second <= out.size(), "range out of bounds");
-  AT_ASSERT(range.second - range.first == 1, "inconsistent range for Tensor output");
+  AT_ASSERT(range.second <= out.size());
+  AT_ASSERTM(range.second - range.first == 1, "inconsistent range for Tensor output");
   out[range.first] = t;
 }
 
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
-  AT_ASSERT(range.second <= out.size(), "range out of bounds");
-  AT_ASSERT(range.second - range.first == t.size(), "inconsistent range for TensorList output");
+  AT_ASSERT(range.second <= out.size());
+  AT_ASSERTM(range.second - range.first == t.size(), "inconsistent range for TensorList output");
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
@@ -972,7 +972,7 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
 Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
-  AT_ASSERT(!grads[0].defined(), "slogdet's sign output should never have gradient");
+  AT_ASSERTM(!grads[0].defined(), "slogdet's sign output should never have gradient");
   auto signdet_val = signdet.toCDouble();
   if (signdet_val != 0 /* det != 0, invertible */) {
     return grads[1] * self.inverse().t();
@@ -1275,7 +1275,7 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
   if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO);
   if (output_mask[1] && !gG.defined()) {
-    AT_ASSERT(affine, "gamma should always be defined when it requires grad");
+    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
     gG = at::zeros_like(gamma);
   }
   if (output_mask[2] && !gI.defined()) gI = at::zeros_like(input);

@@ -63,7 +63,7 @@ virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals
 """)
 TYPE_METHOD_DEFINITION_ABSTRACT = CodeTemplate("""\
 ${return_type} Type::${method_prefix_derived}${api_name}(${type_method_formals}) const {
-    AT_ERROR("${method_prefix_derived}${api_name} is not implemented for type %s", toString());
+    AT_ERROR("${method_prefix_derived}${api_name} is not implemented for type ", toString());
 }
 """)
 TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\

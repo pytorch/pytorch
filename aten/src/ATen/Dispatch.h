@@ -17,7 +17,7 @@
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)       \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)         \
       default:                                                                \
-        AT_ERROR("%s not implemented for '%s'", (NAME), the_type.toString()); \
+        AT_ERROR(#NAME, " not implemented for '", the_type.toString(), "'"); \
     }                                                                         \
   }()
 
@@ -29,7 +29,7 @@
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)         \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Half, Half, __VA_ARGS__)           \
       default:                                                                \
-        AT_ERROR("%s not implemented for '%s'", (NAME), the_type.toString()); \
+        AT_ERROR(#NAME, " not implemented for '", the_type.toString(), "'"); \
     }                                                                         \
   }()
 
@@ -45,7 +45,7 @@
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)        \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)       \
       default:                                                                \
-        AT_ERROR("%s not implemented for '%s'", (NAME), the_type.toString()); \
+        AT_ERROR(#NAME, " not implemented for '", the_type.toString(), "'"); \
     }                                                                         \
   }()
 
@@ -62,6 +62,6 @@
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)       \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Half, Half, __VA_ARGS__)           \
       default:                                                                \
-        AT_ERROR("%s not implemented for '%s'", (NAME), the_type.toString()); \
+        AT_ERROR(#NAME, " not implemented for '", the_type.toString(), "'"); \
     }                                                                         \
   }()

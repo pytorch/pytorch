@@ -35,7 +35,7 @@ ${tensor_method_definitions}
 #define DEFINE_CAST(T,name,_) \
 template<> \
 inline T* Tensor::data() const { \
-  AT_ASSERT(type().scalarType() == ScalarType::name, \
+  AT_CHECK(type().scalarType() == ScalarType::name, \
     "expected scalar type % s but found %s", #name, \
     at::toString(type().scalarType())); \
   return static_cast<T*>(this->data_ptr()); \

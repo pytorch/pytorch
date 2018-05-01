@@ -229,8 +229,7 @@ static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) 
 
 Tensor index(const Tensor & self, TensorList indices) {
   if (indices.size() > (size_t)self.dim()) {
-   AT_ERROR("too many indices for tensor of dimension %d (got %d)",
-      (int)self.dim(), (int)indices.size());
+   AT_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
 
   Tensor src, linearIndex;
@@ -240,8 +239,7 @@ Tensor index(const Tensor & self, TensorList indices) {
 
 Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value) {
   if (indices.size() > (size_t)self.dim()) {
-   AT_ERROR("too many indices for tensor of dimension %d (got %d)",
-      (int)self.dim(), (int)indices.size());
+   AT_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
 
   Tensor src, linearIndex, expandedValue;
@@ -255,19 +253,16 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
 
   if (index.dim() >= 2) {
    AT_ERROR(
-        "index_copy_(): Index should have dimension 1 or 0 (got %d)",
-        (int)index.dim());
+        "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
   }
   int64_t numIndices = index.numel();
   if (source.dim() == 0 && numIndices != 1) {
    AT_ERROR(
-        "index_copy_(): When source is scalar, index should have one element (got %d)",
-        (int)numIndices);
+        "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
   }
   if (source.dim() > 0 && numIndices != source.size(dim)) {
    AT_ERROR(
-        "index_copy_(): Number of indices (%d) should be equal to source.size(dim) (%d)",
-        (int)numIndices, (int)source.size(dim));
+        "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
   }
   if (index.type().scalarType() != ScalarType::Long) {
    AT_ERROR("index_copy_(): Expected LongTensor for index");
