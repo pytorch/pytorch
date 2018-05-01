@@ -30,7 +30,7 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
     }
   }
   return grad_inputs;
-};
+}
 
 CopySlices::CopySlices(
     const Variable& base_var,
