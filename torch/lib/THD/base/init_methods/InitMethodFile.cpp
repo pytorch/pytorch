@@ -11,8 +11,6 @@
 #include <iterator>
 
 namespace thd {
-namespace init {
-
 namespace {
 
 void lockLoop(int fd, struct flock &oflock) {
@@ -150,9 +148,6 @@ parseFile(std::fstream& file, rank_type world_size, std::string group_name) {
   return std::make_tuple(master_port, master_addrs, ranks);
 }
 
-} // anonymous namespace
-
-
 InitMethod::Config initFile(std::string argument,
                             int world_size_r,
                             std::string group_name,
@@ -232,5 +227,24 @@ InitMethod::Config initFile(std::string argument,
   return config;
 }
 
-} // namespace init
+class InitMethodFile : public InitMethod {
+ public:
+  explicit InitMethodFile() : InitMethod() {
+  }
+
+  virtual ~InitMethodFile() {
+  }
+
+  InitMethod::Config init(std::string argument,
+                          int world_size_r,
+                          std::string group_name,
+                          int assigned_rank) {
+    return initFile(argument, world_size_r, group_name, assigned_rank);
+  }
+};
+
+} // anonymous namespace
+
+AT_REGISTER_TYPED_CLASS(InitMethodRegistry, "file://", InitMethodFile);
+
 } // namespace thd

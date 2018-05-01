@@ -2,8 +2,6 @@
 #include "InitMethodUtils.hpp"
 
 namespace thd {
-namespace init {
-
 namespace {
 
 constexpr char RANK_ENV[] = "RANK";
@@ -41,8 +39,6 @@ rank_type maybeLoadEnv(const char* env_name, int value, std::string parameter_na
   return convertToRank(env_value);
 }
 
-} // anonymous namespace
-
 InitMethod::Config initEnv(std::string argument, /* unused */
                            int world_size_r,
                            std::string group_name,
@@ -69,5 +65,24 @@ InitMethod::Config initEnv(std::string argument, /* unused */
   return config;
 }
 
-} // namespace init
+class InitMethodEnv : public InitMethod {
+ public:
+  explicit InitMethodEnv() : InitMethod() {
+  }
+
+  virtual ~InitMethodEnv() {
+  }
+
+  InitMethod::Config init(std::string argument,
+                          int world_size_r,
+                          std::string group_name,
+                          int assigned_rank) {
+    return initEnv(argument, world_size_r, group_name, assigned_rank);
+  }
+};
+
+} // anonymous namespace
+
+AT_REGISTER_TYPED_CLASS(InitMethodRegistry, "env://", InitMethodEnv);
+
 } // namespace thd

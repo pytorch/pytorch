@@ -716,7 +716,7 @@ if WITH_DISTRIBUTED:
         ]
         extra_compile_args += ['-DWITH_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
-    main_link_args += [THD_LIB]
+    main_link_args += ['-Wl,--whole-archive', THD_LIB, '-Wl,--no-whole-archive']
 
 if WITH_CUDA:
     nvtoolext_lib_name = None
