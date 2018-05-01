@@ -6,6 +6,7 @@ source_files = {'.py', '.cpp', '.h'}
 
 DECLARATIONS_PATH = 'torch/lib/tmp_install/share/ATen/Declarations.yaml'
 
+
 # TODO: This is a little inaccurate, because it will also pick
 # up setup_helper scripts which don't affect code generation
 def all_generator_source():
