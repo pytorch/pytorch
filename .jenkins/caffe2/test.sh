@@ -44,8 +44,6 @@ if [[ "$BUILD_ENVIRONMENT" != conda* ]]; then
   export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/lib"
 fi
 
-exit_code=0
-
 cd "$ROOT_DIR"
 
 if [ -d $TEST_DIR ]; then
@@ -75,9 +73,9 @@ for test in $INSTALL_PREFIX/test/*; do
   esac
 
   "$test" --gtest_output=xml:"$TEST_DIR"/cpp/$(basename "$test").xml
-  tmp_exit_code="$?"
-  if [ "$exit_code" -eq 0 ]; then
-    exit_code="$tmp_exit_code"
+  exit_code="$?"
+  if [ "$exit_code" -ne 0 ]; then
+    exit "$exit_code"
   fi
 done
 
@@ -112,10 +110,7 @@ echo "Running Python tests.."
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
 
-tmp_exit_code="$?"
-if [ "$exit_code" -eq 0 ]; then
-  exit_code="$tmp_exit_code"
-fi
+exit_code="$?"
 
 # Exit with the first non-zero status we got
 exit "$exit_code"
