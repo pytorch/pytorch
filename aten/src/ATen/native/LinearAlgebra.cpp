@@ -98,7 +98,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
   if (t.dim() != 1) {
-   AT_ERROR("%s: Expected 1-D argument %s, but got %d-D", fn, arg, t.dim());
+   AT_ERROR(fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
   }
 }
 
@@ -282,8 +282,8 @@ Tensor matmul(at::optional<Tensor> out_opt, const Tensor& tensor1, const Tensor&
     return has_out ? out.set_(output) : output;
   }
 
- AT_ERROR("both arguments to matmul need to be at least 1D, but they are %dD and %dD",
-                dim_tensor1, dim_tensor2);
+ AT_ERROR("both arguments to matmul need to be at least 1D, but they are ",
+          dim_tensor1, "D and ", dim_tensor2, "D");
 
 }
 

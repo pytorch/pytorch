@@ -24,7 +24,7 @@ Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const
 }
 
 Tensor Type::copy(const Tensor & src, bool non_blocking) const {
-  AT_ASSERT(src.defined(), "attempt to copy an undefined tensor");
+  AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   if (is_sparse()) {
     auto indices = src._indices();
     auto values = src._values();

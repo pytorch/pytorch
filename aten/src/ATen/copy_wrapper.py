@@ -51,7 +51,7 @@ Tensor & ${Type}::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) 
   switch (src.type().ID()) {
     ${copy_body}
     default:
-      AT_ERROR("copy does not support %s to %s copy.", src.type().toString(), toString());
+      AT_ERROR("copy does not support ", src.type().toString(), " to ", toString(), " copy.");
       break;
   }
   self.pImpl->setScalar(src.pImpl->isScalar());

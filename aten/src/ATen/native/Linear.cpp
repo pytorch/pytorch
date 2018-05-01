@@ -12,7 +12,7 @@ namespace at { namespace native {
 static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed (so that all dimensions match - after broadcasting)
   // but makes no other assumptions on the order of dimensions
-  AT_ASSERT(left_.dim()==right_.dim(), "number of dimensions must match");
+  AT_CHECK(left_.dim()==right_.dim(), "number of dimensions must match");
   if (sum_dims_.size() == 0)
     return at::mul(left_, right_);
   int64_t dim = left_.dim();
@@ -29,7 +29,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList
     auto sr = right.size(i)>1;
     if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
       if (sl && sr) {  // dimensions nontrivially in both left and right must be of the same size
-	AT_ASSERT(left.size(i)==right.size(i), "non-broadcast dimensions must match");
+	AT_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
 	sum_size *= left.size(i);
       } else if (sl) { // if it is only in one of left and right, we can sum right away
 	left = left.sum(i, true);
@@ -38,7 +38,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList
       }
     } else if (sl && sr) { // now deal with dimensions  dimensions that will be in the output
       // dimensions nontrivially in both left and right must be of the same size
-      AT_ASSERT(left.size(i)==right.size(i), "non-broadcast dimensions must match");
+      AT_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
       lro.push_back(i);
       lro_size *= left.size(i);
     } else if (sl) { // keep track of dimensions appearing only once
@@ -129,7 +129,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
     std::getline(eqn_stream, term, ',');  // term = string with indices of current term
     int64_t dims_in_operand = 0;
     for (auto &c : term) {                // c    = character with a single index
-      AT_ASSERT(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
+      AT_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
       int64_t index_num = c-'a';          // index_num  = index to be used in the vectors above
       number_of_occurrences[index_num]++;
       // when there are two occurrences we need to take a diagonal with respect to the dimensions
@@ -137,15 +137,16 @@ Tensor einsum(std::string eqn, TensorList tensors) {
       // e.g. einsum('ii->i', [A]) should return the diagonal
       // This waits for the general diagonal handling discussed in #6479
       // for now, we error out here
-      AT_ASSERT(last_occurrence[index_num] < operand, "diagonals (multiple occurrences of the same index for one tensor) not implemented yet")
+      AT_CHECK(last_occurrence[index_num] < operand, "diagonals (multiple occurrences of the same index for one tensor) not implemented yet")
       last_occurrence[index_num] = operand;
       dims_in_operand++;
     }
-    AT_ASSERT((int64_t) tensors.size()>operand, "more operands in equation than tensors"); // we cannot have a longer equation than operands. We need to check here before we check the dimensions
-    AT_ASSERT(dims_in_operand == tensors[operand].dim(), "dimension mismatch for operand %zd: equation %zd, tensor %zd", operand, dims_in_operand, tensors[operand].dim());
+    AT_CHECK((int64_t) tensors.size()>operand, "more operands in equation than tensors"); // we cannot have a longer equation than operands. We need to check here before we check the dimensions
+    AT_CHECK(dims_in_operand == tensors[operand].dim(),
+              "dimension mismatch for operand ", operand, ": equation ", dims_in_operand, ", tensor ", tensors[operand].dim());
     operand++;
   }
-  AT_ASSERT((int64_t) tensors.size()==operand, "more tensors than operands in equation");  // we need ==, but > is captured above, so the error message can be specific that it is <.
+  AT_CHECK((int64_t) tensors.size()==operand, "more tensors than operands in equation");  // we need ==, but > is captured above, so the error message can be specific that it is <.
 
   // the following parses or infers output (right hand side)
   // it also assigns the sorted_positions ((letter) index -> dimension in Tensors) and position_labels (dimensions in Tensors -> index)
@@ -156,9 +157,9 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   std::vector<int64_t> position_labels;
   if (pos != std::string::npos) {            // parse the user provided right hand side
     for (auto &c : eqn.substr(pos+2)) {
-      AT_ASSERT(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
+      AT_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
       int64_t index_num = c-'a';
-      AT_ASSERT(sorted_position[index_num] == -1, "index %c occurs twice in output", c);
+      AT_CHECK(sorted_position[index_num] == -1, "index ", c, " occurs twice in output");
       sorted_position[index_num] = num_output_dims;
       position_labels.push_back(index_num);
       num_output_dims++;
@@ -250,7 +251,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 		  IntList expand1_, IntList expand2_, IntList expand3_,
 		  IntList sumdim_, int64_t unroll_dim) {
   int64_t total_dim = i1_.dim()+expand1_.size();
-  AT_ASSERT((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,%zd]", total_dim-1);
+  AT_CHECK((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,", total_dim-1, "]");
   auto expand1 = dim_list_to_bitset(expand1_, total_dim);
   auto expand2 = dim_list_to_bitset(expand2_, total_dim);
   auto expand3 = dim_list_to_bitset(expand3_, total_dim);
@@ -316,22 +317,20 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 }
 
 Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {
-  AT_ASSERT(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got %lld and %lld",
-            (long long)input1.dim(), (long long)input2.dim());
+  AT_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
   for (int64_t i = 0; i < input1.dim() - 1; i++) {
-    AT_ASSERT(input1.size(i) == input2.size(i),
-              "bilinear(): input batch dimensions do not match at dim %lld: got %lld and %lld",
-              (long long)i, (long long)input1.size(i), (long long)input2.size(i));
+    AT_CHECK(input1.size(i) == input2.size(i),
+              "bilinear(): input batch dimensions do not match at dim ", i, ": got ", input1.size(i), " and ", input2.size(i));
   }
-  AT_ASSERT(input1.size(input1.dim() - 1) == weight.size(1),
-            "bilinear(): input1 size does not match weight size: got %lld but expected %lld",
-            (long long)input1.size(input1.dim() - 1), (long long)weight.size(1));
-  AT_ASSERT(input2.size(input2.dim() - 1) == weight.size(2),
-            "bilinear(): input2 size does not match weight size: got %lld but expected %lld",
-            (long long)input2.size(input2.dim() - 1), (long long)weight.size(2));
-  AT_ASSERT(!bias.defined() || bias.size(0) == weight.size(0),
-            "bilinear(): bias size does not match weight size: got %lld but expected %lld",
-            (long long)bias.size(0), (long long)weight.size(0));
+  AT_CHECK(input1.size(input1.dim() - 1) == weight.size(1),
+            "bilinear(): input1 size does not match weight size: got ",
+            input1.size(input1.dim() - 1), " but expected ", weight.size(1));
+  AT_CHECK(input2.size(input2.dim() - 1) == weight.size(2),
+            "bilinear(): input2 size does not match weight size: got ",
+            input2.size(input2.dim() - 1), " but expected ", weight.size(2));
+  AT_CHECK(!bias.defined() || bias.size(0) == weight.size(0),
+            "bilinear(): bias size does not match weight size: got ",
+            bias.size(0), " but expected ", weight.size(0));
 
   std::vector<int64_t> output_size;
   auto size1 = input1.sizes();

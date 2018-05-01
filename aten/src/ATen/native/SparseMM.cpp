@@ -19,8 +19,8 @@ namespace native {
 template <class scalar_t>
 void sspaddmm_TH_dispatch(Tensor & result, Scalar beta, const Tensor& self,
     Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
- AT_ERROR("sspaddmm NYI for types %s %s %s",
-      self.type().toString(), mat1.type().toString(), mat2.type().toString());
+ AT_ERROR("sspaddmm NYI for types ",
+      self.type().toString(), " ", mat1.type().toString(), " ", mat2.type().toString());
 }
 
 template <>
