@@ -566,7 +566,9 @@ include_dirs += [
 library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
-ATEN_LIB = os.path.join(lib_path, 'libATen.so')
+ATEN_LIBS = [os.path.join(lib_path, 'libATen_cpu.so')]
+if WITH_CUDA:
+    ATEN_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libATen_cuda.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 
@@ -574,11 +576,15 @@ NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if IS_DARWIN:
-    ATEN_LIB = os.path.join(lib_path, 'libATen.dylib')
+    ATEN_LIBS = [os.path.join(lib_path, 'libATen_cpu.dylib')]
+    if WITH_CUDA:
+        ATEN_LIBS.append(os.path.join(lib_path, 'libATen_cuda.dylib'))
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
-    ATEN_LIB = os.path.join(lib_path, 'ATen.lib')
+    ATEN_LIBS = [os.path.join(lib_path, 'ATen_cpu.lib')]
+    if WITH_CUDA:
+        ATEN_LIBS.append(os.path.join(lib_path, 'ATen_cuda.lib'))
     if DEBUG:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
     else:
@@ -586,7 +592,7 @@ if IS_WINDOWS:
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [ATEN_LIB, NANOPB_STATIC_LIB]
+main_link_args = ATEN_LIBS + [NANOPB_STATIC_LIB]
 main_sources = [
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
@@ -660,6 +666,7 @@ main_sources = [
     "torch/csrc/jit/script/init.cpp",
     "torch/csrc/jit/script/python_tree_views.cpp",
     "torch/csrc/autograd/init.cpp",
+    "torch/csrc/autograd/aten_variable_hooks.cpp",
     "torch/csrc/autograd/grad_mode.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
@@ -885,8 +892,10 @@ if __name__ == '__main__':
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
+                'lib/include/ATen/detail/*.h',
                 'lib/include/ATen/cuda/*.h',
                 'lib/include/ATen/cuda/*.cuh',
+                'lib/include/ATen/cuda/detail/*.h',
                 'lib/include/ATen/cudnn/*.h',
                 'lib/include/ATen/cuda/detail/*.cuh',
                 'lib/include/pybind11/*.h',

@@ -14,7 +14,8 @@ set(ATEN_INCLUDE_DIR "${ATEN_PATH}/src/")
 set(ATEN_BUILD_INCLUDE_DIR "${ATEN_BUILD_PATH}/src/ATen")
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch")
 
-find_library(ATEN_LIBRARY ATen PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
+find_library(ATEN_CPU_LIBRARY ATen_cpu PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
+find_library(ATEN_CUDA_LIBRARY ATen_cuda PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
 find_library(NANOPB_LIBRARY protobuf-nanopb PATHS "${NANOPB_BUILD_PATH}" NO_DEFAULT_PATH)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -251,9 +252,12 @@ endif()
 
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
-  ${ATEN_LIBRARY}
+  ${ATEN_CPU_LIBRARY}
   ${NANOPB_LIBRARY}
 )
+if(NOT NO_CUDA)
+  target_link_libraries(torch ${ATEN_CUDA_LIBRARY})
+endif()
 
 target_include_directories(torch
   PUBLIC
