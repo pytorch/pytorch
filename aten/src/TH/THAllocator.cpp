@@ -55,7 +55,7 @@ struct THMapAllocatorContext_ {
 #define TH_ALLOC_ALIGNMENT 64
 
 typedef struct {
-  int refcount;
+  std::atomic<int> refcount;
 } THMapInfo;
 
 const char * unknown_filename = "filename not specified";
