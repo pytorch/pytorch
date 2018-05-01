@@ -525,7 +525,7 @@ class TestBottleneck(TestCase):
         if scriptargs != '':
             scriptargs = ' {}'.format(scriptargs)
         rc, out, err = self._run(
-            'python -m torch.utils.bottleneck {}{}'.format(filepath, scriptargs))
+            '{} -m torch.utils.bottleneck {}{}'.format(sys.executable, filepath, scriptargs))
         return rc, out, err
 
     def _check_run_args(self):
