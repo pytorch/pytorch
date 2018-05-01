@@ -403,7 +403,7 @@ Example::
 
 add_docstr(torch.as_tensor,
            r"""
-as_tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
+as_tensor(data, dtype=None, device=None) -> Tensor
 
 Convert the data into a `torch.Tensor`.  If the data is already a `Tensor` of the same `dtype` and `device`, no copy
 will be performed.  Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and the `device` is the cpu,
