@@ -21,10 +21,6 @@
   return: self
   cname: resize
   cpu_half: True
-  before_call:
-    THPUtils_assert(arg_self->storage->flag & TH_STORAGE_RESIZABLE,
-      "calling resize_ on a tensor that has non-resizable storage. Clone it first "
-      "or create a new tensor instead.");
   arguments:
     - THTensor* self
     - arg: THSize* size
@@ -61,7 +57,6 @@
         - THTensor* self
         - CONSTANT NULL, 0, NULL, NULL
     - cname: setStorage
-      before_call: THLongStoragePtr __storage_size(THLongStorage_newWithSize1(THStorage_(size)(LIBRARY_STATE arg_storage)));
       scalar_check: False
       arguments:
         - THTensor* self
@@ -424,9 +419,6 @@
     - method
     - function
   return: argument 0
-  before_call: |
-    THLongStoragePtr _size(THIndexTensor_(newSizeOf)(LIBRARY_STATE arg_index));
-    THTensor_(resize)(LIBRARY_STATE arg_result, _size, NULL);
   arguments:
     - arg: THTensor* result
       output: True
@@ -2741,9 +2733,7 @@
   return: accreal
   arguments:
     - arg: THTensor* self
-      assert_ndim: 1
     - arg: THTensor* tensor
-      assert_ndim: 1
 ]]
 [[
   name: tril
@@ -2973,10 +2963,6 @@
     - function
   return: argument 0
   scalar_check: False
-  before_call: |
-    long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
-    long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 0);
-    THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
   arguments:
     - arg: THTensor* result
       output: True
@@ -2995,12 +2981,6 @@
     - method
     - function
   return: argument 0
-  before_call: |
-    long s = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
-    THTensor_(resize1d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s);
-    #if !IS_CUDA
-    THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
-    #endif
   arguments:
     - arg: THTensor* result
       output: True
@@ -3020,13 +3000,6 @@
   return: argument 0
   options:
     - cname: addmm
-      before_call: |
-        long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
-        long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 1);
-        THTensor_(resize2d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2);
-        #if !IS_CUDA
-        THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
-        #endif
       arguments:
         - arg: THTensor* result
           output: True
@@ -3045,14 +3018,6 @@
     - method
     - function
   return: argument 0
-  before_call: |
-    long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
-    long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 1);
-    long s3 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 2);
-    THTensor_(resize3d)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, s1, s2, s3);
-    #if !IS_CUDA
-    THTensor_(zero)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata);
-    #endif
   arguments:
     - arg: THTensor* result
       output: True
