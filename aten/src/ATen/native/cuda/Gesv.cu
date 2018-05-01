@@ -18,10 +18,10 @@ namespace at {
 namespace native {
 
 #ifdef USE_MAGMA
-template<class real>
+template<class scalar_t>
 void magmaGesvBatched(
-    magma_int_t n, magma_int_t nrhs, real** dA_array, magma_int_t ldda,
-    magma_int_t** dipiv_array, real** dB_array, magma_int_t lddb,
+    magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
+    magma_int_t** dipiv_array, scalar_t** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, magma_queue_t queue) {
   AT_ERROR("gesv only takes float or double Tensors");
 }
@@ -82,14 +82,14 @@ static inline std::unique_ptr<Storage> pin_memory(int64_t size, Tensor dummy) {
   auto storage_##name = pin_memory<type>(size, dummy_tensor); \
   name = reinterpret_cast<type*>(storage_##name->data());
 
-template <typename real>
+template <typename scalar_t>
 static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
 #ifndef USE_MAGMA
 AT_ERROR("gesv: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
-  real* A_data = static_cast<real*>(A.data_ptr());
-  real* b_data = static_cast<real*>(b.data_ptr());
+  auto A_data = A.data<scalar_t>();
+  auto b_data = b.data<scalar_t>();
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
 
@@ -100,14 +100,14 @@ AT_ERROR("gesv: MAGMA library not found in "
   magma_int_t* info_array;
   magma_int_t* ipiv_data;
   magma_int_t** ipiv_array;
-  real** A_array;
-  real** b_array;
+  scalar_t** A_array;
+  scalar_t** b_array;
 
   ALLOCATE_ARRAY(info_array, magma_int_t, batch_size, b);
   ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n, b);
   ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size, b);
-  ALLOCATE_ARRAY(A_array, real*, batch_size, b);
-  ALLOCATE_ARRAY(b_array, real*, batch_size, b);
+  ALLOCATE_ARRAY(A_array, scalar_t*, batch_size, b);
+  ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
 
   // Set up the created arrays
   for (int64_t i = 0; i < batch_size; i++) {
@@ -116,7 +116,7 @@ AT_ERROR("gesv: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * n];
   }
 
-  magmaGesvBatched<real>(
+  magmaGesvBatched<scalar_t>(
       n, nrhs, A_array, n, ipiv_array, b_array, n,
       info_array, batch_size, createMagmaQueue(b));
 

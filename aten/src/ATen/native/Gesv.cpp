@@ -22,10 +22,10 @@ extern "C" void sgesv_(
 
 namespace at { namespace native {
 
-template<class real>
+template<class scalar_t>
 void lapackGesv(
-    int n, int nrhs, real* a, int lda, int* ipiv,
-    real* b, int ldb, int* info) {
+    int n, int nrhs, scalar_t* a, int lda, int* ipiv,
+    scalar_t* b, int ldb, int* info) {
   AT_ERROR("gesv only takes float or double Tensors");
 }
 
@@ -43,13 +43,13 @@ template<> void lapackGesv<double>(
 }
 #endif
 
-template <typename real>
+template <typename scalar_t>
 static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
 #ifndef USE_LAPACK
   AT_ERROR("gesv: LAPACK library not found in compilation");
 #endif
-  real* A_data = (real*)A.data_ptr();
-  real* b_data = (real*)b.data_ptr();
+  auto A_data = A.data<scalar_t>();
+  auto b_data = b.data<scalar_t>();
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
 
@@ -57,13 +57,13 @@ static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
-  auto ipiv = b.type().toScalarType(kLong).tensor(n);
+  auto ipiv = b.type().toScalarType(kInt).tensor(n);
 
   for (int64_t i = 0; i < batch_size; i++) {
     int info;
-    real* A_working_ptr = &A_data[i * A_mat_stride];
-    real* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackGesv<real>(n, nrhs, A_working_ptr, n, (int*)ipiv.data_ptr(),
+    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+    scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+    lapackGesv<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(),
         b_working_ptr, n, &info);
     infos[i] = info;
     if (info != 0) {
