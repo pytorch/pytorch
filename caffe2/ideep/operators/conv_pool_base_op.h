@@ -1,6 +1,6 @@
 #pragma once
 
-#include <caffe2/contrib/ideep/ideep_utils.h>
+#include <caffe2/ideep/ideep_utils.h>
 #include <caffe2/operators/conv_pool_op_base.h>
 
 namespace caffe2 {
