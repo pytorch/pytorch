@@ -349,6 +349,22 @@ template<typename... Args> inline variable_list flatten(Args&&... args) {
   return out; // RVO
 }
 
+struct FlattenVariables : IterArgs<FlattenVariables> {
+  FlattenVariables(variable_list& out) : out(out) {}
+  variable_list& out;
+  void operator()(const Variable& x) { out.emplace_back(x); }
+  void operator()(at::ArrayRef<Variable> xs) {
+    out.insert(out.end(), xs.begin(), xs.end());
+  }
+};
+
+template<typename... Args> inline variable_list flatten_variables(Args&&... args) {
+  variable_list out;
+  out.reserve(count_tensors(std::forward<Args>(args)...));
+  Flatten(out).apply(std::forward<Args>(args)...);
+  return out; // RVO
+}
+
 static void increment_version(Tensor & t) {
   as_variable_ref(t).bump_version();
 }

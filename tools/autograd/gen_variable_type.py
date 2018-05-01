@@ -436,7 +436,7 @@ def emit_body(declaration):
         if len(output_names) == 1:
             outs = output_names[0]
         else:
-            outs = CodeTemplate("{ ${outs} }").substitute(outs=output_names)
+            outs = CodeTemplate("flatten_variables( ${outs} )").substitute(outs=output_names)
         return SET_HISTORY.substitute(fn=fn, differentiable_outputs=outs)
 
     def emit_save_outputs():
