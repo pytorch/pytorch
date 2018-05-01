@@ -1,7 +1,5 @@
 #include "ATen/Config.h"
 
-#if AT_CUDA_ENABLED()
-
 #include "ATen/CUDAGenerator.h"
 #include "ATen/Context.h"
 #include "THCTensorRandom.h"
@@ -53,4 +51,3 @@ void * CUDAGenerator::unsafeGetTH() {
 }
 
 } // namespace at
-#endif //AT_CUDA_ENABLED
