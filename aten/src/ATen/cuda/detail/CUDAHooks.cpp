@@ -48,6 +48,7 @@ int64_t CUDAHooks::current_device() const {
   if (err == cudaSuccess) {
     return device;
   }
+  return -1;
 }
 
 }}} // namespace at::cuda::detail
