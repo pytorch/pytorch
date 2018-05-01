@@ -166,7 +166,7 @@ ELSE()
 ENDIF()
 
 SET(GEN_COMMAND
-    ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG}
+    ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/gen.py
     -s ${CMAKE_CURRENT_SOURCE_DIR}
     ${cwrap_files}
 )

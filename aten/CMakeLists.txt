@@ -466,7 +466,6 @@ add_subdirectory(src/THS)
 
 if(NO_CUDA)
   message("disabling CUDA because NO_CUDA is set")
-  SET(CUDA_FLAG -n)
   SET(AT_CUDA_ENABLED 0)
 else()
   SET(AT_CUDA_ENABLED 1)

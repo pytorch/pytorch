@@ -1,6 +1,18 @@
 from code_template import CodeTemplate
 from function_wrapper import nested_dict
 
+# Here's our strategy
+#
+# First, the easy bits:
+#   - CPU types should get codegen for all CPU types
+#   - CUDA types should get codegen for all CPU and CUDA types
+#
+# For CPU-to-CUDA, we have two options:
+#   - Good old fashioned double dispatch.  x.s_copy_(y) calls y.s_copy_into_(x)
+#     when a fall-through happens, and CUDA can handle this just fine
+#   - Use CUDAHooks to do it
+
+
 FILE = CodeTemplate("""\
 #include "ATen/Config.h"
 
