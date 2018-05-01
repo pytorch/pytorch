@@ -5,6 +5,7 @@
 #include "nomnigraph/Support/Casting.h"
 
 #include <functional>
+#include <map>
 #include <iostream>
 #include <sstream>
 

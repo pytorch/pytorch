@@ -10,7 +10,6 @@ target_include_directories(nomnigraph PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 list(APPEND Caffe2_DEPENDENCY_LIBS nomnigraph)
 set(Caffe2_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS} PARENT_SCOPE)
 
-
 if (BUILD_TEST)
   foreach(test_src ${NOMNI_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
