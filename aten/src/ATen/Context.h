@@ -85,7 +85,6 @@ public:
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
-  // TODO: Consider making this private
 private:
   void initCUDAIfNeeded(Backend p) {
     if(p == Backend::CUDA)
