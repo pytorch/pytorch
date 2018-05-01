@@ -76,14 +76,13 @@ if(NOT TORCH_INSTALL_LIB_DIR)
 endif()
 
 if(NOT NO_CUDA)
-  add_definitions( -DWITH_CUDA )
+  add_definitions(-DWITH_CUDA)
 
   set(TORCH_CUDA_LIBRARIES
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libcuda.so
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvrtc.so
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
-    ${CUDA_LIBRARIES}
-  )
+    ${CUDA_LIBRARIES})
 
   set(CUDA_INCLUDE_DIRS
       ${CUDA_INCLUDE_DIRS}
@@ -182,26 +181,27 @@ endif()
 
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
-  ${ATEN_LIBRARY}
-)
+  ${ATEN_LIBRARY})
 
-set(COMMON_INCLUDES
+target_include_directories(torch
+  PUBLIC
   "${ATEN_INCLUDE_DIR}"
   "${ATEN_INCLUDE_DIR}/TH"
   "${ATEN_BUILD_INCLUDE_DIR}"
   "${ATEN_BUILD_PATH}/src/TH"
   "${TORCH_SRC_DIR}/csrc/api/"
   "${TORCH_SRC_DIR}/csrc/api/include"
-  "${TORCH_SRC_DIR}/../third_party/cereal/include" # For cereal/
   "${TORCH_SRC_DIR}/../"
-  "${CMAKE_CURRENT_SOURCE_DIR}"
-  "${CUDA_INCLUDE_DIRS}")
+  "${CMAKE_CURRENT_SOURCE_DIR}")
 
-target_include_directories(torch
-  PUBLIC
-  "${COMMON_INCLUDES}"
-  "${TORCH_SRC_DIR}/../"
+# SYSTEM headers are included with -isystem and thus do not trigger warnings.
+target_include_directories(torch SYSTEM PUBLIC
+  "${TORCH_SRC_DIR}/../third_party/cereal/include" # For cereal/
   "${TORCH_SRC_DIR}/../third_party/nanopb")
+
+if(NOT NO_CUDA)
+  target_include_directories(torch SYSTEM PUBLIC "${CUDA_INCLUDE_DIRS}")
+endif()
 
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
@@ -225,9 +225,7 @@ add_executable(test_jit ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
 target_link_libraries(test_jit torch)
 
 target_include_directories(test_jit PUBLIC
-  "${TORCH_SRC_DIR}/../"
-  "${TORCH_SRC_DIR}/../third_party/catch/single_include"
-  "${COMMON_INCLUDES}")
+  "${TORCH_SRC_DIR}/../third_party/catch/single_include")
 
 # API Tests
 
