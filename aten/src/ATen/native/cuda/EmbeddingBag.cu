@@ -256,7 +256,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
     int64_t *max_indices, scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t stride, int64_t numBags) {
 
-  using accscalar_t = cuda::acc_type<scalar_t>;
+  using accscalar_t = acc_type<scalar_t, true>;
 
   int64_t chunksPerBag = THCCeilDiv(stride, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;

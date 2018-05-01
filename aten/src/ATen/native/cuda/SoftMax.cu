@@ -479,7 +479,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_){
   Tensor output = at::native::empty_like(input);
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
-  AT_ASSERT(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
+  AT_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
   int64_t inner_size = 1;
@@ -531,7 +531,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
   auto grad = grad_.contiguous();
   Tensor gI = at::native::empty_like(grad);
   if (grad.dim() == 0) grad = grad.view(1);
-  AT_ASSERT(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
+  AT_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
   auto output = output_.contiguous();
   if (output.dim() == 0) output = output.view(1);
   int64_t outer_size = 1;
