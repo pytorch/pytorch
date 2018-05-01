@@ -42,7 +42,7 @@ def set_training(model, mode):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=False,
-           input_names=None, output_names=None, aten=False):
+           input_names=None, output_names=None, aten=False, export_raw_ir=False):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -80,11 +80,14 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
         aten (bool, default False): export the model in aten mode. If using aten mode,
             all the ops original exported by the functions in symbolic.py are exported
             as ATen ops.
+        export_raw_ir (bool, default False): export the internal IR directly instead
+            of converting it to ONNX ops.
     """
-    _export(model, args, f, export_params, verbose, training, input_names, output_names, aten)
+    _export(model, args, f, export_params, verbose, training, input_names, output_names,
+            aten, export_raw_ir=export_raw_ir)
 
 
-def _optimize_graph(graph, aten):
+def _optimize_graph(graph, aten, export_raw_ir=False):
     # run dce first to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
 
@@ -93,10 +96,11 @@ def _optimize_graph(graph, aten):
 
     torch._C._jit_pass_peephole(graph)
     torch._C._jit_pass_lint(graph)
-    graph = torch._C._jit_pass_onnx(graph, aten)
-    torch._C._jit_pass_lint(graph)
-    torch._C._jit_pass_onnx_peephole(graph)
-    torch._C._jit_pass_lint(graph)
+    if not export_raw_ir:
+        graph = torch._C._jit_pass_onnx(graph, aten)
+        torch._C._jit_pass_lint(graph)
+        torch._C._jit_pass_onnx_peephole(graph)
+        torch._C._jit_pass_lint(graph)
     torch._C._jit_pass_dce(graph)
     torch._C._jit_pass_lint(graph)
     torch._C._jit_pass_fixup_onnx_loops(graph)
@@ -119,6 +123,7 @@ def _trace(func, args, return_outs=False, aten=False):
 
 
 def _trace_and_get_graph_from_model(model, args, training):
+
     # A basic sanity check: make sure the state_dict keys are the same
     # before and after running the model.  Fail fast!
     orig_state_dict_keys = _unique_state_dict(model).keys()
@@ -140,7 +145,7 @@ def _trace_and_get_graph_from_model(model, args, training):
 
 def _model_to_graph(model, args, f, verbose=False, training=False,
                     input_names=None, output_names=None, aten=False,
-                    example_outputs=None, propagate=False):
+                    export_raw_ir=False, example_outputs=None, propagate=False):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.Tensor):
         args = (args, )
@@ -162,7 +167,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
         params = list(_unique_state_dict(model).values())
 
-    graph = _optimize_graph(graph, aten)
+    graph = _optimize_graph(graph, aten, export_raw_ir)
 
     _set_input_and_output_names(graph, input_names, output_names)
     if verbose:
@@ -172,15 +177,15 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
-                             input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE,
-                             example_outputs=None, propagate=False):
+                             input_names=None, output_names=None, aten=False, export_raw_ir=False,
+                             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False):
     graph, params, torch_out = _model_to_graph(model, args, f, verbose,
                                                training, input_names,
-                                               output_names, aten,
+                                               output_names, aten, export_raw_ir,
                                                example_outputs, propagate)
 
     from torch.onnx.symbolic import _onnx_opset_version
-    return graph.prettyPrintExport(params, _onnx_opset_version, False)
+    return graph.prettyPrintExport(params, _onnx_opset_version, False, export_raw_ir)
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
@@ -188,19 +193,20 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 # this output will be None, since we are not doing any tracing but rather
 # directly extracting the graph.
 def _export(model, args, f, export_params=True, verbose=False, training=False,
-            input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE,
-            example_outputs=None, propagate=False):
+            input_names=None, output_names=None, aten=False, export_raw_ir=False,
+            export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False):
     graph, params, torch_out = _model_to_graph(model, args, f, verbose,
                                                training, input_names,
-                                               output_names, aten,
+                                               output_names, aten, export_raw_ir,
                                                example_outputs, propagate)
+
     # TODO: Don't allocate a in-memory string for the protobuf
     from torch.onnx.symbolic import _onnx_opset_version
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
-        proto, export_map = graph.export(params, _onnx_opset_version, defer_weight_export)
+        proto, export_map = graph.export(params, _onnx_opset_version, defer_weight_export, export_raw_ir)
     else:
-        proto, export_map = graph.export([], _onnx_opset_version, False)
+        proto, export_map = graph.export([], _onnx_opset_version, False, export_raw_ir)
 
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)
