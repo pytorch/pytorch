@@ -47,7 +47,10 @@ OPERATOR_SCHEMA(Moments)
   If keepdims equals False, then the resulted tensor have the reduced dimension
   pruned.
 )DOC")
-    .Arg("axes", "A list of integers, along which to reduce.")
+    .Arg(
+        "axes",
+        "A list of integers, along which to reduce. If axes is not provided, "
+        "the op computes the element-wise mean and variance.")
     .Arg(
         "keepdims",
         "Keep the reduced dimension(s) or not, default True keeps the reduced "
