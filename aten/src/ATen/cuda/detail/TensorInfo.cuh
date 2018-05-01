@@ -10,7 +10,7 @@ namespace detail {
 
 // CUDA kernel argument that defines tensor layout
 template <typename T, typename IndexType>
-struct TensorInfo {
+struct AT_API TensorInfo {
   TensorInfo(T* p,
              int dim,
              IndexType sz[MAX_TENSORINFO_DIMS],
@@ -73,57 +73,60 @@ template <typename T, typename IndexType>
 int
 TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
 
-  int stopDim = (excludeDim == -1) ? dims : excludeDim;
-  int nidx = -1;
-  int cidx = 0;
-  int rVal = -1;
+  assert(excludeDim >= -1 && excludeDim < dims);
 
-  while (cidx < dims) {
+  int stopDim = (excludeDim == -1) ? dims : excludeDim;
+  int newIndex = -1;
+  int oldIndex = 0;
+  int remappedExcludedDim = -1;
+
+  while (oldIndex < dims) {
     // Finds a dimension to collapse into
-    for (; cidx < stopDim; ++cidx) {
-      if (sizes[cidx] == 1) {
+    for (; oldIndex < stopDim; ++oldIndex) {
+      if (sizes[oldIndex] == 1) {
         continue;
       }
-      ++nidx;
-      sizes[nidx] = sizes[cidx];
-      strides[nidx] = strides[cidx];
-      ++cidx;
+      
+      ++newIndex;
+      sizes[newIndex] = sizes[oldIndex];
+      strides[newIndex] = strides[oldIndex];
+      ++oldIndex;
       break; 
     }
 
     // Collapses dims
-    for (; cidx < stopDim; ++cidx) {
-      if (sizes[cidx] == 1) {
+    for (; oldIndex < stopDim; ++oldIndex) {
+      if (sizes[oldIndex] == 1) {
         continue;
       }
   
-      if (strides[nidx] == sizes[cidx] * strides[cidx]) {
-        sizes[nidx] *= sizes[cidx];
-        strides[nidx] = strides[cidx];
+      if (strides[newIndex] == sizes[oldIndex] * strides[oldIndex]) {
+        sizes[newIndex] *= sizes[oldIndex];
+        strides[newIndex] = strides[oldIndex];
       } else {
-        ++nidx;
-        sizes[nidx] = sizes[cidx];
-        strides[nidx] = strides[cidx];
+        ++newIndex;
+        sizes[newIndex] = sizes[oldIndex];
+        strides[newIndex] = strides[oldIndex];
       }
     }
 
-    // Handles excludeDim being set (cidx == excludeDim)
-    if (cidx != dims) {
+    // Handles excludeDim being set (oldIndex == excludeDim)
+    if (oldIndex != dims) {
       
       // Preserves excluded dimension
-      ++nidx;
-      sizes[nidx] = sizes[cidx];
-      strides[nidx] = strides[cidx];
-      rVal = nidx;
+      ++newIndex;
+      sizes[newIndex] = sizes[oldIndex];
+      strides[newIndex] = strides[oldIndex];
+      remappedExcludedDim = newIndex;
 
       // Restarts iteration after excludeDim
-      ++cidx;
+      ++oldIndex;
       stopDim = dims;
     }
   }
 
   // Handles special case of all dims size 1
-  if (nidx == -1 || (nidx == 0 && sizes[0] == 1)) {
+  if (newIndex == -1 || (newIndex == 0 && sizes[0] == 1)) {
     dims = 1;
     sizes[0] = 1;
     strides[0] = 1;
@@ -131,8 +134,8 @@ TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
     return 0;
   }
 
-  dims = nidx + 1;
-  return rVal;
+  dims = newIndex + 1;
+  return remappedExcludedDim;
 }
 
 // Translate a linear index for the apply to a T* offset;
