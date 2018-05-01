@@ -39,7 +39,7 @@ void setSeed(uint64_t seed) {
     THCRandom_manualSeedAll(at::globalContext().lazyInitCUDA(), seed);
   }
 #endif
-};
+}
 
 int getNumGPUs() {
 #if AT_CUDA_ENABLED()
@@ -49,7 +49,7 @@ int getNumGPUs() {
     return 0;
   } else if (err != cudaSuccess) {
     std::string msg = "CUDA error (";
-    msg += std::to_string(err);
+    msg += std::to_string(static_cast<int>(err));
     msg += "): ";
     msg += cudaGetErrorString(err);
     throw std::runtime_error(msg);
