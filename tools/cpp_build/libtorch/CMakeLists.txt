@@ -156,11 +156,24 @@ set(TORCH_SRCS
 
 add_library(torch SHARED ${TORCH_SRCS})
 
+# https://gcc.gnu.org/onlinedocs/gcc-4.0.3/gcc/Warning-Options.html
 target_compile_options(torch
   PRIVATE
   -Wall
   -Wextra
   -pedantic
+  -Wcast-align
+  -Wcast-qual
+  -Wctor-dtor-privacy
+  -Wdisabled-optimization
+  -Wformat=2
+  -Winit-self
+  -Wmissing-include-dirs
+  -Woverloaded-virtual
+  -Wsign-promo
+  -Wstrict-overflow=5
+  -Wundef
+  -fdiagnostics-show-option
   -Wno-unused-parameter)
 
 if ($ENV{WERROR})
