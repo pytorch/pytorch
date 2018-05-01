@@ -2043,6 +2043,45 @@ class TestTorch(TestCase):
             self.assertIs(torch.int, res1.dtype)
             self.assertEqual(res1.get_device(), expected.get_device())
 
+    def test_as_tensor(self):
+        # from python data
+        x = [[0, 1], [2, 3]]
+        self.assertEqual(torch.tensor(x), torch.as_tensor(x))
+        self.assertEqual(torch.tensor(x, dtype=torch.float32), torch.as_tensor(x, dtype=torch.float32))
+
+        # from tensor (doesn't copy unless type is different)
+        y = torch.tensor(x)
+        self.assertIs(y, torch.as_tensor(y))
+        self.assertIsNot(y, torch.as_tensor(y, dtype=torch.float32))
+        if torch.cuda.is_available():
+            self.assertIsNot(y, torch.as_tensor(y, device='cuda'))
+            y_cuda = y.to('cuda')
+            self.assertIs(y_cuda, torch.as_tensor(y_cuda))
+            self.assertIs(y_cuda, torch.as_tensor(y_cuda, device='cuda'))
+
+        if TEST_NUMPY:
+            # doesn't copy
+            n = np.random.rand(5, 6)
+            n_astensor = torch.as_tensor(n)
+            self.assertEqual(torch.tensor(n), n_astensor)
+            n_astensor[0][0] = 250.7
+            self.assertEqual(torch.tensor(n), n_astensor)
+
+            # changing dtype causes copy
+            n = np.random.rand(5, 6).astype(np.float32)
+            n_astensor = torch.as_tensor(n, dtype=torch.float64)
+            self.assertEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
+            n_astensor[0][1] = 250.8
+            self.assertNotEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
+
+            # changing device causes copy
+            if torch.cuda.is_available():
+                n = np.random.randn(5, 6)
+                n_astensor = torch.as_tensor(n, device='cuda')
+                self.assertEqual(torch.tensor(n, device='cuda'), n_astensor)
+                n_astensor[0][2] = 250.9
+                self.assertNotEqual(torch.tensor(n, device='cuda'), n_astensor)
+
     def test_diag(self):
         x = torch.rand(100, 100)
         res1 = torch.diag(x)

@@ -46,6 +46,19 @@ factory_like_common_args = parse_kwargs("""
         returned tensor. Default: ``False``.
 """)
 
+factory_data_common_args = parse_kwargs("""
+    data (array_like): Initial data for the tensor. Can be a list, tuple,
+        NumPy ``ndarray``, scalar, and other types.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if None, infers data type from :attr:`data`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+""")
+
 add_docstr(torch.abs,
            r"""
 abs(input, out=None) -> Tensor
@@ -387,6 +400,35 @@ Example::
             [ 2.,  4.],
             [ 3.,  6.]])
 """)
+
+add_docstr(torch.as_tensor,
+           r"""
+as_tensor(data, dtype=None, device=None) -> Tensor
+
+Convert the data into a `torch.Tensor`.  If the data is already a `Tensor` of the same `dtype` and `device`, no copy
+will be performed.  Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and the `device` is the cpu,
+no copy will be performed.
+
+Args:
+    {data}
+    {dtype}
+    {device}
+
+Example::
+
+    >>> torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]])
+    tensor([[ 0.1000,  1.2000],
+            [ 2.2000,  3.1000],
+            [ 4.9000,  5.2000]])
+
+    >>> a = numpy.array([1, 2, 3])
+    >>> t = torch.from_numpy(a)
+    >>> t
+    tensor([ 1,  2,  3])
+    >>> t[0] = -1
+    >>> a
+    array([-1,  2,  3])
+""".format(**factory_data_common_args))
 
 add_docstr(torch.asin,
            r"""
@@ -3514,16 +3556,10 @@ Constructs a tensor with :attr:`data`.
     :func:`torch.from_numpy`.
 
 Args:
-    data (array_like): Initial data for the tensor. Can be a list, tuple,
-        NumPy ``ndarray``, scalar, and other types.
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if None, infers data type from :attr:`data`.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
-        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
-        for CPU tensor types and the current CUDA device for CUDA tensor types.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: ``False``.
+    {data}
+    {dtype}
+    {device}
+    {requires_grad}
 
 
 Example::
@@ -3546,7 +3582,7 @@ Example::
 
     >>> torch.tensor([])  # Create an empty tensor (of size (0,))
     tensor([])
-""")
+""".format(**factory_data_common_args))
 
 add_docstr(torch.range,
            r"""

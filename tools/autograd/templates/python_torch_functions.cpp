@@ -136,6 +136,13 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  return THPVariable_Wrap(torch::utils::as_tensor(default_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 // The Python clamp() syntax has to be mapped to one of three C++ functions
 static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* kwargs)
 {
@@ -215,6 +222,7 @@ ${py_methods}
 
 static PyMethodDef torch_functions[] = {
   {"arange", (PyCFunction)THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"as_tensor", (PyCFunction)THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"dsmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
