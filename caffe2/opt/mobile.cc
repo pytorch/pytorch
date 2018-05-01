@@ -75,7 +75,7 @@ caffe2::NetDef addNNPACK(caffe2::NetDef net, bool low_memory) {
       precompute_argument->set_s("PRECOMPUTE");
     }
   }
-  return convertToCaffe2Proto(nn);
+  return convertToCaffe2Proto(nn, net);
 }
 
 namespace {
@@ -156,7 +156,7 @@ caffe2::NetDef fuseNNPACKConvRelu(caffe2::NetDef net) {
     arg->set_name("activation");
     arg->set_s("Relu");
   }
-  return convertToCaffe2Proto(nn);
+  return convertToCaffe2Proto(nn, net);
 }
 
 } // namespace opt

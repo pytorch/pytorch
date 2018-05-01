@@ -413,6 +413,14 @@ caffe2::OperatorDef convertToOperatorDef(repr::NNGraph::NodeRef instrNode) {
 
 caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m) {
   auto predictNet = caffe2::NetDef();
+  return convertToCaffe2Proto(m, predictNet);
+}
+
+caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& oldNet) {
+  auto predictNet = caffe2::NetDef();
+  // We copy the old net rather than mutate it.
+  predictNet.CopyFrom(oldNet);
+  predictNet.mutable_op()->Clear();
 
   repr::nn::coalesceInsertedDataDependencies(&m);
 
