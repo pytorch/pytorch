@@ -4,11 +4,6 @@ BUILD_PATH="${1:-$SCRIPTPATH/build}"
 INSTALL_PREFIX="$BUILD_PATH/install"
 PYTORCHPATH="$SCRIPTPATH/../.."
 
-if [ ! -d "$PYTORCHPATH/torch/csrc/autograd/generated" ]; then
-  echo "Generated files are not present.\nRun the generators through `python setup.py build` or copy the generated files over."
-  exit 1
-fi
-
 NO_CUDA=ON
 if [ -x "$(command -v nvcc)" ]; then
   NO_CUDA=OFF
