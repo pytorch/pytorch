@@ -31,7 +31,7 @@ namespace at { namespace detail {
 // TODO: Consider putting the stub definitions in another class, so that one
 // never forgets to implement each virtual function in the real implementation
 // in CUDAHooks.  This probably doesn't buy us much though.
-class CUDAHooksInterface {
+struct CUDAHooksInterface {
 
   // Initialize THCState and, transitively, the CUDA state
   virtual std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const {

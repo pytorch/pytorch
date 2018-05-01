@@ -6,6 +6,7 @@
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
 #include "ATen/Error.h"
+#include "ATen/detail/CUDAHooksInterface.h"
 
 #include <memory>
 #include <mutex>
@@ -51,9 +52,16 @@ public:
   // call_once check. getType is called fairly frequently
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
-      doInitCUDA();
+      thc_state = detail::getCUDAHooks().initCUDA();
+      generator_registry[static_cast<int>(Backend::CUDA)] =
+        detail::getCUDAHooks().initCUDAGenerator(this);
     });
-    return thc_state;
+    return thc_state.get();
+  }
+
+  THCState* getTHCState() {
+    AT_ASSERT(thc_state);
+    return thc_state.get();
   }
 
   cudaStream_t getCurrentCUDAStream() const;
@@ -72,24 +80,22 @@ public:
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-  ~Context();
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Backend::NumOptions)];
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
   // TODO: Consider making this private
-  THCState * thc_state;
 private:
   void initCUDAIfNeeded(Backend p) {
     if(p == Backend::CUDA)
       lazyInitCUDA();
   }
-  void doInitCUDA();
   std::once_flag thc_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
+  std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
 };
 
 AT_API Context & globalContext();

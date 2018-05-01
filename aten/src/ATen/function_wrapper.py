@@ -1162,7 +1162,7 @@ def create_derived(backend_type_env, declarations):
         is_nn = option['mode'] == 'NN'
         actuals = get_arguments(cimpl['arguments'], option)
         if is_cuda or is_nn:
-            actuals = ['context->thc_state'] + actuals
+            actuals = ['context->getTHCState()'] + actuals
 
         cname = cimpl['cname']
         if option.get('sparse', False):

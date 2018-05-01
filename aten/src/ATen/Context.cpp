@@ -40,22 +40,6 @@ Context::Context()
     .reset(new CPUGenerator(this));
   Type::registerAll(this);
 }
-void Context::doInitCUDA() {
-#if AT_CUDA_ENABLED()
-  thc_state = THCState_alloc();
-  THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
-  thc_state->cudaHostAllocator = &THCCachingHostAllocator;
-  THCudaInit(thc_state);
-  generator_registry[static_cast<int>(Backend::CUDA)]
-    .reset(new CUDAGenerator(this));
-#endif
-}
-Context::~Context() {
-#if AT_CUDA_ENABLED()
-  if(thc_state)
-    THCState_free(thc_state);
-#endif
-}
 
 Context & globalContext() {
   static Context globalContext_;

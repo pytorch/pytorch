@@ -71,7 +71,7 @@ def create_one(env, all_types):
         if src_type['Backend'] == 'CUDA':
             cuda = 'Cuda'
         if env['Backend'] == 'CUDA' or src_type['Backend'] == 'CUDA':
-            state.append('context->thc_state')
+            state.append('context->getTHCState()')
 
         combined = nested_dict({
             'src_scalar_name': src_type['ScalarName'],
