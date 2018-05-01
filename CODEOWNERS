@@ -11,3 +11,4 @@
 /setup.py @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /requirements.txt @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /torch/csrc/api/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ebetica @goldsborough
+/test/cpp/api/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ebetica @goldsborough
