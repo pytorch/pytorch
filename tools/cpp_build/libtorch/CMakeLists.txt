@@ -106,12 +106,6 @@ if("${isSystemDir}" STREQUAL "-1")
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-missing-field-initializers -Wno-type-limits -Wno-unused-parameter -Wno-vla ${CMAKE_CXX_FLAGS}")
-set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
-if ($ENV{WERROR})
-  set(CMAKE_CXX_FLAGS "-Werror ${CMAKE_CXX_FLAGS}")
-endif()
-
 set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
@@ -162,7 +156,12 @@ set(TORCH_SRCS
 
 add_library(torch SHARED ${TORCH_SRCS})
 
-target_compile_options(torch PRIVATE -Wall -Wextra)
+target_compile_options(torch
+  PRIVATE
+  -Wall
+  -Wextra
+  -pedantic
+  -Wno-unused-parameter)
 
 if ($ENV{WERROR})
   target_compile_options(torch PRIVATE -Werror)

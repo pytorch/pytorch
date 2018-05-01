@@ -39,7 +39,7 @@ void setSeed(uint64_t seed) {
     THCRandom_manualSeedAll(at::globalContext().lazyInitCUDA(), seed);
   }
 #endif
-};
+}
 
 int getNumGPUs() {
 #if AT_CUDA_ENABLED()
