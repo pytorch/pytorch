@@ -879,11 +879,10 @@ class Caffe2Backend(Backend):
                 with z.open(name, 'r') as blob_file:
                     raw_values_dict[name] = blob_file.read()
 
-        cls._external_value_resolution_pass(model, raw_values_dict)
-        return cls.prepare(model, device, **kwargs)
+        return cls.prepare(model, device, raw_values_dict=raw_values_dict, **kwargs)
 
     @classmethod
-    def prepare(cls, model, device='CPU', **kwargs):
+    def prepare(cls, model, device='CPU', raw_values_dict=None, **kwargs):
         '''
         For Onnx Caffe2Backend, we require that init_graph don't initialize the actual input of the predict_graph,
 
@@ -933,6 +932,8 @@ class Caffe2Backend(Backend):
                 del init_model
 
             cbackend = C.Caffe2Backend(cls._dummy_name)
+            if raw_values_dict:
+                cls._external_value_resolution_pass(model, raw_values_dict)
             rep = cbackend.prepare(model.SerializeToString(), device, c2_rnn_ops)
             # For testing
             # Dump the net descriptions to file for comparison with the Python ones
@@ -952,6 +953,11 @@ class Caffe2Backend(Backend):
             ws = Workspace()
             device_option = get_device_option(Device(device))
 
+            init_net, predict_net = cls._onnx_model_to_caffe2_net(model, device, opset_version, False)
+
+            if raw_values_dict:
+                cls._external_value_resolution_pass(model, raw_values_dict)
+
             # Directly load initializer data into blobs in workspace
             cls._direct_initialize_parameters(
                 model.graph.initializer,
@@ -970,7 +976,6 @@ class Caffe2Backend(Backend):
 
             uninitialized = [value_info.name for value_info in model.graph.input if value_info.name not in initialized]
 
-            init_net, predict_net = cls._onnx_model_to_caffe2_net(model, device, opset_version, False)
             if "ONNX_CAFFE2_DEBUG" in os.environ:
                 with open("python.txt", "w") as f:
                     f.write("pred_net: \n{}".format(predict_net))
