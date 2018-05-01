@@ -222,14 +222,17 @@ target_include_directories(test_jit PUBLIC
 set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
 
 add_executable(test_api
-  ${TORCH_API_TEST_DIR}/test.cpp
-  ${TORCH_API_TEST_DIR}/container_t.cpp
-  ${TORCH_API_TEST_DIR}/misc_t.cpp
-  ${TORCH_API_TEST_DIR}/rnn_t.cpp
-  ${TORCH_API_TEST_DIR}/integration_t.cpp
-  ${TORCH_API_TEST_DIR}/optim_t.cpp
-  ${TORCH_API_TEST_DIR}/serialization_t.cpp
+  ${TORCH_API_TEST_DIR}/main.cpp
+  ${TORCH_API_TEST_DIR}/container.cpp
+  ${TORCH_API_TEST_DIR}/misc.cpp
+  ${TORCH_API_TEST_DIR}/rnn.cpp
+  ${TORCH_API_TEST_DIR}/integration.cpp
+  ${TORCH_API_TEST_DIR}/optim.cpp
+  ${TORCH_API_TEST_DIR}/serialization.cpp
 )
 
-target_compile_options(test_api PRIVATE -Dlest_FEATURE_AUTO_REGISTER=1)
+target_include_directories(test_api
+  PUBLIC
+  "${TORCH_SRC_DIR}/../third_party/catch/single_include")
+
 target_link_libraries(test_api torch)
