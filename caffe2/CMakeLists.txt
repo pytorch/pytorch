@@ -205,7 +205,7 @@ if(USE_HIP)
         ${Caffe2_DEPENDENCY_LIBS}
         ${Caffe2_HIP_DEPENDENCY_LIBS})
   endif()
-  caffe_add_linker_flag(caffe2_hip Caffe2_HIP_LINK)
+  #caffe_add_linker_flag(caffe2_hip Caffe2_HIP_LINK)
   list(APPEND Caffe2_MAIN_LIBS_ORDER caffe2_hip)
   list(APPEND Caffe2_MAIN_LIBS ${Caffe2_HIP_LINK})
   list(APPEND Caffe2_MAIN_LIBS_ORDER caffe2_hip)
@@ -268,7 +268,7 @@ if (BUILD_TEST)
     install(TARGETS ${test_name} DESTINATION test)
   endforeach()
 endif()
-
+endif()
 
 if (BUILD_PYTHON)
   # Python site-packages
