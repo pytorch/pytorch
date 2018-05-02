@@ -157,6 +157,9 @@ while [[ $# -gt 0 ]]; do
     --pytorch-too)
       pytorch_too=1
       ;;
+    --slim)
+      slim=1
+      ;;
     --conda)
       shift
       conda_build_args+=("$1")
@@ -294,7 +297,6 @@ fi
 # Add packages required for all Caffe2 builds
 add_package 'glog'
 add_package 'gflags'
-add_package 'opencv'
 caffe2_cmake_args+=("-DUSE_LEVELDB=OFF")
 caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 
@@ -320,6 +322,10 @@ if [[ -n $pytorch_too ]]; then
 
     caffe2_cmake_args+=("-DUSE_ATEN=ON")
   fi
+fi
+
+if [[ -z $slim ]]; then
+  add_package 'opencv'
 fi
 
 # Flags required for CUDA for Caffe2
