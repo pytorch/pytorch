@@ -119,7 +119,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
 
     @given(
         log_D_trick=st.just(False),
-        **hu.gcs
+        **hu.gcs_cpu_only
     )
     def test_cross_entropy_and_unjoied_cross_entropy_relation(
         self, log_D_trick, gc, dc
