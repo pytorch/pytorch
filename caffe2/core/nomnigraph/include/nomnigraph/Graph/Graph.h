@@ -55,6 +55,14 @@ class Edge : public StorageType<U> {
     return Head;
   }
 
+  void setTail(NodeRef n) {
+    Tail = n;
+  }
+
+  void setHead(NodeRef n) {
+    Head = n;
+  }
+
  private:
   NodeRef Tail;
   NodeRef Head;
@@ -90,6 +98,7 @@ class Node : public StorageType<T>, public Notifier<Node<T, U>> {
   /// \p e A reference to an edge that will be removed from in-edges.
   void removeInEdge(EdgeRef e) {
     auto iter = std::find(inEdges.begin(), inEdges.end(), e);
+    assert(iter != inEdges.end() && "Attempted to remove edge that isn't connected to this node");
     inEdges.erase(iter);
   }
 
@@ -97,6 +106,7 @@ class Node : public StorageType<T>, public Notifier<Node<T, U>> {
   /// \p e A reference to an edge that will be removed from out-edges.
   void removeOutEdge(EdgeRef e) {
     auto iter = std::find(outEdges.begin(), outEdges.end(), e);
+    assert(iter != outEdges.end() && "Attempted to remove edge that isn't connected to this node");
     outEdges.erase(iter);
   }
 
@@ -248,17 +258,15 @@ class Graph {
     const auto outEdges = old->getOutEdges();
 
     for (const auto& inEdge : inEdges) {
-      createEdge(inEdge->tail(), newTail);
-    }
-    for (const auto& inEdge : inEdges) {
-      deleteEdge(inEdge);
+      inEdge->setHead(newTail);
+      old->removeInEdge(inEdge);
+      newTail->addInEdge(inEdge);
     }
 
     for (const auto& outEdge : outEdges) {
-      createEdge(newHead, outEdge->head());
-    }
-    for (const auto& outEdge : outEdges) {
-      deleteEdge(outEdge);
+      outEdge->setTail(newHead);
+      old->removeOutEdge(outEdge);
+      newTail->addOutEdge(outEdge);
     }
   }
 

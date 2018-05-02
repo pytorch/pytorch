@@ -27,14 +27,16 @@ inline __device__ T CubeCUDA(const T x) {
   return x * x * x;
 }
 
-template <typename T>
-__global__ void
-InvStdCUDAKernel(const int size, const float epsilon, const T* var, T* rsig) {
+__global__ void InvStdCUDAKernel(
+    const int size,
+    const float epsilon,
+    const float* var,
+    float* rsig) {
   CUDA_1D_KERNEL_LOOP(i, size) {
 #if __CUDA_ARCH__ >= 350
-    rsig[i] = rsqrt(__ldg(var + i) + static_cast<T>(epsilon));
+    rsig[i] = rsqrtf(__ldg(var + i) + epsilon);
 #else
-    rsig[i] = rsqrt(var[i] + static_cast<T>(epsilon));
+    rsig[i] = rsqrtf(var[i] + epsilon);
 #endif
   }
 }
@@ -225,11 +227,11 @@ bool GroupNormOp<float, CUDAContext>::RunOnDeviceImpl(
       4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
 
   // Uses rsqrt to computes 1 / std which is much faster than computes std.
-  InvStdCUDAKernel<float>
-      <<<CAFFE_GET_BLOCKS(N * G),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(N * G, epsilon_, rsig_data, rsig_data);
+  InvStdCUDAKernel<<<
+      CAFFE_GET_BLOCKS(N * G),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(N * G, epsilon_, rsig_data, rsig_data);
 
   // Computes Y = gamma * (X - mu) * rsig + beta.
   const int size = N * G * D * HxW;

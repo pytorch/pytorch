@@ -75,7 +75,7 @@ caffe2::NetDef addNNPACK(caffe2::NetDef net, bool low_memory) {
       precompute_argument->set_s("PRECOMPUTE");
     }
   }
-  return convertToCaffe2Proto(nn);
+  return convertToCaffe2Proto(nn, net);
 }
 
 namespace {
@@ -149,14 +149,24 @@ caffe2::NetDef fuseNNPACKConvRelu(caffe2::NetDef net) {
     }
     auto relu_output = relu_outputs.front();
 
-    nn.dataFlow.replaceNode(relu_output, conv_output);
-    nn.dataFlow.deleteNode(relu_node);
-    nn.dataFlow.deleteNode(relu_output);
+    auto output_tensor = repr::nn::get<repr::Tensor>(relu_output);
+    auto input_tensor = repr::nn::get<repr::Tensor>(repr::nn::getInputs(conv_node).front());
+
+    if (output_tensor->getName() != input_tensor->getName()) {
+      nn.dataFlow.replaceNode(conv_output, relu_output);
+      nn.dataFlow.deleteNode(relu_node);
+      nn.dataFlow.deleteNode(conv_output);
+    } else {
+      nn.dataFlow.replaceNode(relu_output, conv_output);
+      nn.dataFlow.deleteNode(relu_node);
+      nn.dataFlow.deleteNode(relu_output);
+    }
+
     auto* arg = op->add_arg();
     arg->set_name("activation");
     arg->set_s("Relu");
   }
-  return convertToCaffe2Proto(nn);
+  return convertToCaffe2Proto(nn, net);
 }
 
 } // namespace opt

@@ -76,10 +76,13 @@
 	url = https://github.com/onnx/onnx.git
 [submodule "third_party/ideep"]
 	path = third_party/ideep
-	url = https://github.com/intel/ideep.git
+	url = https://github.com/pytorch/ideep.git
 [submodule "third_party/cereal"]
 	path = third_party/cereal
 	url = https://github.com/USCiLab/cereal
 [submodule "third_party/onnx-tensorrt"]
 	path = third_party/onnx-tensorrt
 	url = https://github.com/onnx/onnx-tensorrt
+[submodule "third_party/sleef"]
+	path = third_party/sleef
+	url = https://github.com/shibatch/sleef

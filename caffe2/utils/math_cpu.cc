@@ -43,16 +43,7 @@
 #include <process.h>
 #endif
 
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-#include "unsupported/Eigen/CXX11/Tensor"
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
 namespace caffe2 {
-
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-template <typename T, int D>
-using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D>>;
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
 namespace math {
 
@@ -701,108 +692,6 @@ int GetIndexFromDims(const int n, const int* dims, const int* index) {
 
 namespace {
 
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
-template <typename T, class Reducer, int kNumDims, int kNumAxes>
-void EigenReduceTensorImpl(
-    const int* dims,
-    const int* axes,
-    const Reducer& reducer,
-    const T* X,
-    T* Y) {
-  Eigen::DSizes<Eigen::DenseIndex, kNumDims> X_dims;
-  Eigen::DSizes<Eigen::DenseIndex, kNumDims> Y_dims;
-  Eigen::array<Eigen::DenseIndex, kNumAxes> reduce_dims;
-  for (int i = 0; i < kNumDims; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
-  }
-  for (int i = 0; i < kNumAxes; ++i) {
-    Y_dims[kNumDims - 1 - axes[i]] = static_cast<Eigen::DenseIndex>(1);
-    reduce_dims[kNumAxes - 1 - i] =
-        static_cast<Eigen::DenseIndex>(kNumDims - 1 - axes[i]);
-  }
-  EigenTensorMap<T, kNumDims>(Y, Y_dims) =
-      EigenTensorMap<T, kNumDims>(const_cast<T*>(X), X_dims)
-          .reduce(reduce_dims, reducer);
-}
-
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
-template <typename T, class Reducer>
-bool EigenReduceTensor(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const Reducer& reducer,
-    const T* X,
-    T* Y) {
-  switch (num_dims) {
-    case 1: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 1, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 2: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 2, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 2, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 3: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 3, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 3, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 3: {
-          EigenReduceTensorImpl<T, Reducer, 3, 3>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 4: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 4, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 4, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 3: {
-          EigenReduceTensorImpl<T, Reducer, 4, 3>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 4: {
-          EigenReduceTensorImpl<T, Reducer, 4, 4>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    default: { return false; }
-  }
-}
-
 template <typename T, class Reducer>
 void ReduceTensor(
     const int num_dims,
@@ -814,6 +703,7 @@ void ReduceTensor(
     const T* X,
     T* Y,
     CPUContext* context) {
+  CAFFE_ENFORCE_LE(num_axes, num_dims);
   std::vector<int> Y_dims(dims, dims + num_dims);
   for (int i = 0; i < num_axes; ++i) {
     Y_dims[axes[i]] = 1;
@@ -833,100 +723,6 @@ void ReduceTensor(
 }
 
 template <typename T>
-void ReduceMinImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::MinReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ReduceTensor(
-      num_dims,
-      dims,
-      num_axes,
-      axes,
-      [](const T& a, const T& b) { return std::min(a, b); },
-      std::numeric_limits<T>::max(),
-      X,
-      Y,
-      context);
-}
-
-template <typename T>
-void ReduceMaxImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::MaxReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ReduceTensor(
-      num_dims,
-      dims,
-      num_axes,
-      axes,
-      [](const T& a, const T& b) { return std::max(a, b); },
-      std::numeric_limits<T>::lowest(),
-      X,
-      Y,
-      context);
-}
-
-template <typename T>
-void ReduceSumImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::SumReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ReduceTensor(
-      num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context);
-}
-
-template <typename T>
 void ReduceMeanImpl(
     const int num_dims,
     const int* dims,
@@ -935,19 +731,6 @@ void ReduceMeanImpl(
     const T* X,
     T* Y,
     CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::MeanReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   ReduceTensor(
       num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context);
   const int X_size =
@@ -962,49 +745,77 @@ void ReduceMeanImpl(
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_REDUCE_MIN(T)                             \
-  template <>                                                        \
-  void ReduceMin<T, CPUContext>(                                     \
-      const int num_dims,                                            \
-      const int* dims,                                               \
-      const int num_axes,                                            \
-      const int* axes,                                               \
-      const T* X,                                                    \
-      T* Y,                                                          \
-      CPUContext* context) {                                         \
-    ReduceMinImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_REDUCE_MIN(T)                       \
+  template <>                                                  \
+  void ReduceMin<T, CPUContext>(                               \
+      const int num_dims,                                      \
+      const int* dims,                                         \
+      const int num_axes,                                      \
+      const int* axes,                                         \
+      const T* X,                                              \
+      T* Y,                                                    \
+      CPUContext* context) {                                   \
+    ReduceTensor(                                              \
+        num_dims,                                              \
+        dims,                                                  \
+        num_axes,                                              \
+        axes,                                                  \
+        [](const T& a, const T& b) { return std::min(a, b); }, \
+        std::numeric_limits<T>::max(),                         \
+        X,                                                     \
+        Y,                                                     \
+        context);                                              \
   }
+CAFFE2_SPECIALIZED_REDUCE_MIN(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_MIN(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_MIN(float)
+CAFFE2_SPECIALIZED_REDUCE_MIN(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MIN
 
-#define CAFFE2_SPECIALIZED_REDUCE_MAX(T)                             \
-  template <>                                                        \
-  void ReduceMax<T, CPUContext>(                                     \
-      const int num_dims,                                            \
-      const int* dims,                                               \
-      const int num_axes,                                            \
-      const int* axes,                                               \
-      const T* X,                                                    \
-      T* Y,                                                          \
-      CPUContext* context) {                                         \
-    ReduceMaxImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_REDUCE_MAX(T)                       \
+  template <>                                                  \
+  void ReduceMax<T, CPUContext>(                               \
+      const int num_dims,                                      \
+      const int* dims,                                         \
+      const int num_axes,                                      \
+      const int* axes,                                         \
+      const T* X,                                              \
+      T* Y,                                                    \
+      CPUContext* context) {                                   \
+    ReduceTensor(                                              \
+        num_dims,                                              \
+        dims,                                                  \
+        num_axes,                                              \
+        axes,                                                  \
+        [](const T& a, const T& b) { return std::max(a, b); }, \
+        std::numeric_limits<T>::lowest(),                      \
+        X,                                                     \
+        Y,                                                     \
+        context);                                              \
   }
+CAFFE2_SPECIALIZED_REDUCE_MAX(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_MAX(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_MAX(float)
+CAFFE2_SPECIALIZED_REDUCE_MAX(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MAX
 
-#define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                             \
-  template <>                                                        \
-  void ReduceSum<T, CPUContext>(                                     \
-      const int num_dims,                                            \
-      const int* dims,                                               \
-      const int num_axes,                                            \
-      const int* axes,                                               \
-      const T* X,                                                    \
-      T* Y,                                                          \
-      CPUContext* context) {                                         \
-    ReduceSumImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                                      \
+  template <>                                                                 \
+  void ReduceSum<T, CPUContext>(                                              \
+      const int num_dims,                                                     \
+      const int* dims,                                                        \
+      const int num_axes,                                                     \
+      const int* axes,                                                        \
+      const T* X,                                                             \
+      T* Y,                                                                   \
+      CPUContext* context) {                                                  \
+    ReduceTensor(                                                             \
+        num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context); \
   }
+CAFFE2_SPECIALIZED_REDUCE_SUM(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_SUM(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_SUM(float)
+CAFFE2_SPECIALIZED_REDUCE_SUM(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_SUM
 
 #define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                             \
@@ -1065,7 +876,10 @@ void BroadcastImpl(
       CPUContext* /* context */) {                          \
     BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, X, Y); \
   }
+CAFFE2_SPECIALIZED_BROADCAST(std::int32_t)
+CAFFE2_SPECIALIZED_BROADCAST(std::int64_t)
 CAFFE2_SPECIALIZED_BROADCAST(float)
+CAFFE2_SPECIALIZED_BROADCAST(double)
 #undef CAFFE2_SPECIALIZED_BROADCAST
 
 namespace {
@@ -2065,68 +1879,6 @@ void TransposeCPUImpl(
   }
 }
 
-template <typename T, int D>
-void EigenTransposeImpl(const int* dims, const int* axes, const T* X, T* Y) {
-  Eigen::DSizes<Eigen::DenseIndex, D> X_dims;
-  Eigen::DSizes<Eigen::DenseIndex, D> Y_dims;
-  Eigen::array<Eigen::DenseIndex, D> axes_array;
-#pragma unroll
-  for (int i = 0; i < D; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - axes[i]]);
-    axes_array[D - 1 - i] = static_cast<Eigen::DenseIndex>(D - 1 - axes[i]);
-  }
-  EigenTensorMap<T, D>(Y, Y_dims) =
-      EigenTensorMap<T, D>(const_cast<T*>(X), X_dims).shuffle(axes_array);
-}
-
-template <typename T>
-bool EigenTranspose(
-    const int ndim,
-    const int* dims,
-    const int* axes,
-    const T* X,
-    T* Y) {
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  switch (ndim) {
-    case 1: {
-      EigenTransposeImpl<T, 1>(dims, axes, X, Y);
-      return true;
-    }
-    case 2: {
-      EigenTransposeImpl<T, 2>(dims, axes, X, Y);
-      return true;
-    }
-    case 3: {
-      EigenTransposeImpl<T, 3>(dims, axes, X, Y);
-      return true;
-    }
-    case 4: {
-      EigenTransposeImpl<T, 4>(dims, axes, X, Y);
-      return true;
-    }
-    case 5: {
-      EigenTransposeImpl<T, 5>(dims, axes, X, Y);
-      return true;
-    }
-    case 6: {
-      EigenTransposeImpl<T, 6>(dims, axes, X, Y);
-      return true;
-    }
-    case 7: {
-      EigenTransposeImpl<T, 7>(dims, axes, X, Y);
-      return true;
-    }
-    case 8: {
-      EigenTransposeImpl<T, 8>(dims, axes, X, Y);
-      return true;
-    }
-    default: { return false; }
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  return false;
-}
-
 } // namespace
 
 template <>
@@ -2142,9 +1894,6 @@ void Transpose<float, CPUContext>(
     return;
   }
 #endif // CAFFE2_USE_HPTT
-  if (EigenTranspose(ndim, dims, axes, X, Y)) {
-    return;
-  }
   TransposeCPUImpl(ndim, dims, axes, X, Y);
 }
 
@@ -2157,9 +1906,6 @@ void Transpose<float, CPUContext>(
       const T* X,                                 \
       T* Y,                                       \
       CPUContext* /* context */) {                \
-    if (EigenTranspose(ndim, dims, axes, X, Y)) { \
-      return;                                     \
-    }                                             \
     TransposeCPUImpl(ndim, dims, axes, X, Y);     \
   }
 CAFFE2_SPECIALIZED_TRANSPOSE(double)
