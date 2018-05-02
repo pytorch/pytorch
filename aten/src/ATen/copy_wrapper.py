@@ -22,19 +22,28 @@ CUDA_INCLUDES = """\
 """
 
 COPY = CodeTemplate("""\
-${THTensor}_copy${cuda}${src_scalar_name}(${state,}static_cast<${dst_tensor}*>(dst.pImpl)->tensor, static_cast<${src_tensor}*>(src.pImpl)->tensor);
+${THTensor}_copy${cuda}${src_scalar_name}(
+    ${state,}
+    static_cast<${dst_tensor}*>(dst.pImpl)->tensor,
+    static_cast<${src_tensor}*>(src.pImpl)->tensor);
 """)
 
 COPY_ASYNC_CPU = CodeTemplate("""\
 if (non_blocking) {
-    ${THTensor}_copyAsyncCPU(${state,}static_cast<${dst_tensor}*>(dst.pImpl)->tensor, static_cast<${src_tensor}*>(src.pImpl)->tensor);
+    ${THTensor}_copyAsyncCPU(
+        ${state,}
+        static_cast<${dst_tensor}*>(dst.pImpl)->tensor,
+        static_cast<${src_tensor}*>(src.pImpl)->tensor);
     break;
 }
 """)
 
 COPY_ASYNC_CUDA = CodeTemplate("""\
 if (non_blocking) {
-    ${THTensor}_copyAsyncCuda(${state,}static_cast<${dst_tensor}*>(dst.pImpl)->tensor, static_cast<${src_tensor}*>(src.pImpl)->tensor);
+    ${THTensor}_copyAsyncCuda(
+        ${state,}
+        static_cast<${dst_tensor}*>(dst.pImpl)->tensor,
+        static_cast<${src_tensor}*>(src.pImpl)->tensor);
     break;
 }
 """)
@@ -88,7 +97,6 @@ Tensor & ${Type}::s_copy_from(const Tensor & src, Tensor & dst, bool non_blockin
   return dst.type().s_copy_(dst, src, non_blocking);
 }
 """)
-
 
 
 # all_types contains ONLY cpu types for a CPU

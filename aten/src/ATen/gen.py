@@ -347,9 +347,11 @@ def iterate_types():
 def declare_outputs():
     files = ['Declarations.yaml', 'Type.h', 'Type.cpp', 'Tensor.h',
              'TensorMethods.h', 'Functions.h',
-             'CPUCopy.cpp', 'CUDACopy.cpp', 'NativeFunctions.h']
+             'CPUCopy.cpp', 'NativeFunctions.h']
     for f in files:
         file_manager.will_write(f)
+    if not options.no_cuda:
+        file_manager.will_write('CUDACopy.cpp')
     for fname in sorted(generators.keys()):
         if generators[fname]['name'] in backends:
             file_manager.will_write(fname)
