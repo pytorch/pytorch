@@ -76,7 +76,7 @@
 	url = https://github.com/onnx/onnx.git
 [submodule "third_party/ideep"]
 	path = third_party/ideep
-	url = https://github.com/intel/ideep.git
+	url = https://github.com/pytorch/ideep.git
 [submodule "third_party/cereal"]
 	path = third_party/cereal
 	url = https://github.com/USCiLab/cereal
