@@ -20,10 +20,19 @@ struct CallsiteDescriptor {
 struct NamedValue {
   NamedValue(const SourceRange& loc, const std::string& name, Value* value)
   : loc(loc), name(name), value(value) {}
+  NamedValue(const SourceRange& loc, int i, Value* value)
+  : loc(loc), name("argument " + std::to_string(i)), value(value) {}
+
   SourceRange loc;
   std::string name;
   Value* value;
 };
+
+static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
+  return fmap(nvs, [](const NamedValue& v) {
+    return v.value;
+  });
+}
 
 // The AST can contain nodes like `self`, `self.b` or `python_fn` that
 // are not first-class values in the graph representation, but instead
@@ -58,7 +67,8 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   virtual std::shared_ptr<SugaredValue> call(
     SourceRange loc,
     Method & m,
-    at::ArrayRef<Value*> inputs,
+    // note: names for args will be 'argument 0', 'argument 1', etc..
+    at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
 // n_binders is always set to the number of variables an expression is
@@ -103,10 +113,10 @@ private:
 };
 
 struct BuiltinFunction : public SugaredValue {
-  BuiltinFunction(const std::string& name, Value* value=nullptr)
-    : name(name), value(value) {}
+  BuiltinFunction(const std::string& name, at::optional<NamedValue> value)
+    : name(name), value(std::move(value)) {}
   std::string name;
-  Value* value;
+  at::optional<NamedValue> value;
 
   virtual std::string kind() const override {
     return "builtin";
@@ -114,8 +124,8 @@ struct BuiltinFunction : public SugaredValue {
   virtual std::shared_ptr<SugaredValue> call(
     SourceRange loc,
     Method & m,
-    at::ArrayRef<Value*> inputs_,
     at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> inputs,
     size_t n_binders) override;
 };
 

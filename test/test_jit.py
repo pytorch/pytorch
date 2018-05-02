@@ -1573,7 +1573,7 @@ class TestScript(TestCase):
             os.close(r)
             os.close(w)
 
-    def checkScript(self, script, inputs, optimize, outputs=None, name='func', capture_output=False, frames_up=1):
+    def checkScript(self, script, inputs, optimize=True, outputs=None, name='func', capture_output=False, frames_up=1):
         if isinstance(script, str):
             cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
             ge = getattr(cu, name)
@@ -1656,11 +1656,11 @@ class TestScript(TestCase):
     def test_keyword(self):
         @torch.jit.script
         def func(x):
-            return torch.sum(x, dim=0, keepdim=True)
+            return torch.sum(x, dim=0)
 
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         y = func(x)
-        y2 = torch.sum(x, dim=0, keepdim=True)
+        y2 = torch.sum(x, dim=0)
         self.assertEqual(y, y2)
 
     def test_literal(self):
@@ -1705,7 +1705,7 @@ class TestScript(TestCase):
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "expected 1 input"):
+        with self.assertRaisesRegex(RuntimeError, "expected at most"):
             @torch.jit.script
             def func(x):
                 return torch.cat((x, x), x, dim=0)
@@ -2468,7 +2468,7 @@ class TestScript(TestCase):
 
     def test_script_module_star_assign_fail_pythonop(self):
 
-        with self.assertRaisesRegex(RuntimeError, "value cannot be used as a tuple"):
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             class M2(torch.jit.ScriptModule):
                 def __init__(self):
                     super(M2, self).__init__(True)
@@ -2486,7 +2486,7 @@ class TestScript(TestCase):
             m(torch.zeros(4, 3))
 
     def test_script_module_star_assign_fail_builtin(self):
-        with self.assertRaisesRegex(RuntimeError, "value cannot be used as a tuple"):
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             class M2(torch.jit.ScriptModule):
                 def __init__(self):
                     super(M2, self).__init__(True)
@@ -2544,7 +2544,7 @@ class TestScript(TestCase):
         torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
     def test_script_outputs(self):
-        with self.assertRaisesRegex(RuntimeError, "value cannot be used as a tuple"):
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             @torch.jit.script
             def foo(a):
                 c, d = a + a
@@ -3040,7 +3040,7 @@ class TestScript(TestCase):
 
         @torch.jit.script
         def foo(x, y):
-            return torch.index_select(x, y, dim=1)
+            return torch.index_select(x, index=y, dim=1)
 
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
@@ -3137,6 +3137,72 @@ class TestScript(TestCase):
         self.checkScript(func_1, [x], optimize=True)
         self.checkScript(func_2, [x], optimize=True)
         self.checkScript(func_3, [x], optimize=True)
+
+    def test_builtin_args_fails(self):
+
+        with self.assertRaisesRegex(RuntimeError, 'expected at most'):
+            @torch.jit.script
+            def f0(a):
+                torch.sum(a, a, a, a)
+
+        with self.assertRaisesRegex(RuntimeError, 'unknown keyword argument'):
+            @torch.jit.script
+            def f1(a):
+                torch.sum(foo=4)
+
+        with self.assertRaisesRegex(RuntimeError, 'previously set'):
+            @torch.jit.script
+            def f2(a):
+                torch.sum(a, self=a)
+
+        with self.assertRaisesRegex(RuntimeError, 'not provided'):
+            @torch.jit.script
+            def f3(a):
+                torch.sum(dim=4)
+
+        with self.assertRaisesRegex(RuntimeError, 'expected a tuple of tensors for'):
+            @torch.jit.script
+            def f4(a):
+                torch.cat(a)
+
+        with self.assertRaisesRegex(RuntimeError, 'expected a tuple of tensors for'):
+            @torch.jit.script
+            def f5(a):
+                torch.cat([[a]])
+
+        with self.assertRaisesRegex(RuntimeError, 'expected a list of integers'):
+            @torch.jit.script
+            def f6(a):
+                a.expand(size=[3, [4]])
+
+        with self.assertRaisesRegex(RuntimeError, 'expected a tensor for'):
+            @torch.jit.script
+            def f7(a):
+                torch.sum([4])
+
+    def test_builtin_args(self):
+
+        def t0(a):
+            # default arg dim
+            return torch.cat([a, a])
+
+        self.checkScript(t0, (torch.zeros(1, 1)))
+
+        def t1(a):
+            # keywords out of order
+            return torch.cat(dim=1, tensors=[a, a])
+
+        self.checkScript(t1, (torch.zeros(1, 1, 2)))
+
+        def t2(a):
+            # mix const/non-const attributes
+            if True:
+                b = 1
+            else:
+                b = 0
+            return torch.sum(a, dim=b, keepdim=False)
+
+        self.checkScript(t2, (torch.zeros(1, 1, 2)))
 
 
 # Smoke tests for export methods
