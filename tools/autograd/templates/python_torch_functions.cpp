@@ -12,6 +12,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/utils/python_variables.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_new.h"
@@ -26,17 +27,11 @@ using at::Tensor;
 using at::Scalar;
 using at::ScalarType;
 using at::Backend;
+using torch::autograd::utils::set_requires_grad;
+
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
-
-static Tensor set_requires_grad(Tensor self, bool requires_grad) {
-  if (requires_grad && !at::isFloatingType(self.type().scalarType())) {
-    throw std::runtime_error("only Tensors of floating point dtype can require gradients");
-  }
-  as_variable_ref(self).set_requires_grad(requires_grad);
-  return self;
-}
 
 static void check_out_type_matches(Tensor result,
                                    ScalarType scalarType, bool scalarType_is_none,

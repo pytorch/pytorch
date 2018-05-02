@@ -1834,8 +1834,8 @@ class TestTorch(TestCase):
                 check_value(torch.empty(shape, out=out, device=device, layout=layout, requires_grad=rg),
                             dtype, layout, device, None, rg)
                 check_value(v.new_empty(shape), dtype, layout, device, None, False)
-                check_value(v.new_empty(shape, dtype=int64_dtype, device=device, requires_grad=rg),
-                            int64_dtype, layout, device, None, rg)
+                check_value(v.new_empty(shape, dtype=int64_dtype, device=device, requires_grad=False),
+                            int64_dtype, layout, device, None, False)
                 check_value(torch.empty_like(v), dtype, layout, device, None, False)
                 check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                             int64_dtype, layout, device, None, False)
@@ -1848,8 +1848,8 @@ class TestTorch(TestCase):
                     out = v.new()
                     check_value(torch.full(shape, fv + 2, out=out, device=device, layout=layout, requires_grad=rg),
                                 dtype, layout, device, fv + 2, rg)
-                    check_value(v.new_full(shape, fv + 3, dtype=int64_dtype, device=device, requires_grad=rg),
-                                int64_dtype, layout, device, fv + 3, rg)
+                    check_value(v.new_full(shape, fv + 3, dtype=int64_dtype, device=device, requires_grad=False),
+                                int64_dtype, layout, device, fv + 3, False)
                     check_value(torch.full_like(v, fv + 4), dtype, layout, device, fv + 4, False)
                     check_value(torch.full_like(v, fv + 5,
                                                 dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
@@ -2623,12 +2623,12 @@ class TestTorch(TestCase):
 
     def test_scalars_as_floats(self):
         "zero-dim variables that don't require grad should bind to scalar arguments"
-        x = torch.tensor(2)
-        y = torch.tensor(3)
+        x = torch.tensor(2.)
+        y = torch.tensor(3.)
         # 3 + (3 * 3) * 2
         self.assertEqual(y.addcmul(y, y, value=x), 21)
 
-        x = torch.tensor(2, requires_grad=True)
+        x = torch.tensor(2., requires_grad=True)
         self.assertRaises(Exception, lambda: y.addcmul(y, y, value=x))
 
     @staticmethod
@@ -5947,8 +5947,6 @@ class TestTorch(TestCase):
         self.assertEqual(x, torch.cumsum(torch.ones(5, 5), torch.tensor(0)))
         # doesn't accept floating point variables
         self.assertRaises(TypeError, lambda: torch.cumsum(torch.ones(5, 5), torch.tensor(0.)))
-        # doesn't accept variables with requires_grad
-        self.assertRaises(TypeError, lambda: torch.cumsum(torch.ones(5, 5), torch.tensor(0, requires_grad=True)))
 
     def test_parsing_double(self):
         # accepts floating point and integer arguments
@@ -5960,8 +5958,6 @@ class TestTorch(TestCase):
         self.assertTrue(torch.isclose(x, x, torch.tensor(1), torch.tensor(1)).all())
         self.assertTrue(torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1.)).all())
         # doesn't accept variables with requires_grad
-        self.assertRaises(TypeError,
-                          lambda: torch.isclose(x, x, torch.tensor(1, requires_grad=True), torch.tensor(1)).all())
         self.assertRaises(TypeError,
                           lambda: torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1., requires_grad=True)).all())
 
