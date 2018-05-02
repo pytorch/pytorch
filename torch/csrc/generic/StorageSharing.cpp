@@ -355,6 +355,39 @@ static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *weak_ref_clas
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPStorage_(weakRefNoUnwrap)(THPStorage *self, PyObject *weak_ref_class) {
+  HANDLE_TH_ERRORS
+  THStorage* storage = self->cdata;
+  bool hasWeakAllocator;
+#ifdef THC_GENERIC_FILE
+  hasWeakAllocator = storage->allocator == &THCStorageWeakRefAllocator;
+#else
+  hasWeakAllocator = storage->allocator == &THStorageWeakRefAllocator;
+#endif
+  if (hasWeakAllocator) {
+    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
+    Py_INCREF(allocator_obj->object.get());
+    return allocator_obj->object.get();
+  }
+
+  THPObjectPtr args(Py_BuildValue("(N)", PyLong_FromVoidPtr(storage)));
+  if (!args) return NULL;
+  THPObjectPtr ref(PyObject_Call(weak_ref_class, args, NULL));
+  if (!ref) return NULL;
+#ifdef THC_GENERIC_FILE
+  storage->allocatorContext = new CudaStorageWeakRefAllocator(
+        ref.get(), storage->allocator, storage->allocatorContext);
+  storage->allocator = &THCStorageWeakRefAllocator;
+#else
+  storage->allocatorContext = new StorageWeakRefAllocator(
+        ref.get(), storage->allocator, storage->allocatorContext);
+  storage->allocator = &THStorageWeakRefAllocator;
+#endif
+  return ref.release();
+  END_HANDLE_TH_ERRORS
+}
+
+
 PyObject * THPStorage_(newWithWeakPtr)(PyObject *_unused, PyObject *arg)
 {
   HANDLE_TH_ERRORS
@@ -439,6 +472,7 @@ static PyMethodDef THPStorage_(sharingMethods)[] = {
   {"_new_using_filename", (PyCFunction)THPStorage_(pyNewFilenameStorage), METH_VARARGS | METH_STATIC, NULL},
 #endif
   {"_weak_ref", (PyCFunction)THPStorage_(weakRef), METH_O, NULL},
+  {"_weak_ref_no_unwrap", (PyCFunction)THPStorage_(weakRefNoUnwrap), METH_O, NULL},
   {"_new_view", (PyCFunction)THPStorage_(newView), METH_VARARGS, NULL},
   {"_shared_decref", (PyCFunction)THPStorage_(sharedDecref), METH_NOARGS, NULL},
   {"_shared_incref", (PyCFunction)THPStorage_(sharedIncref), METH_NOARGS, NULL},

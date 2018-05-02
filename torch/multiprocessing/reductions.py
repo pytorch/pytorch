@@ -26,6 +26,9 @@ class StorageRef(object):
 # mapping from handles to StorageRef objects
 shared_cache = weakref.WeakValueDictionary()
 
+# Cache for cuda storages that originate from this process
+originating_cuda_cache = weakref.WeakValueDictionary()
+
 
 def rebuild_event(handle):
     return torch.cuda.Event(_handle=handle)
@@ -63,6 +66,25 @@ def storage_from_cache(cls, key):
     return cls._new_with_weak_ptr(storage_ref)
 
 
+def originating_cuda_cache_key(handle, offset):
+    return '{}_{}'.format(handle, offset)
+
+
+def mark_originating(storage, handle, offset):
+    key = originating_cuda_cache_key(handle, offset)
+    # storage._weak_ref(StorageRef) unwraps all storage views and is
+    # undesireable here because we want to save a ref to storage as-is.
+    originating_cuda_cache[key] = storage._weak_ref_no_unwrap(StorageRef)
+
+
+def maybe_original_cuda_storage(cls, handle, offset):
+    key = originating_cuda_cache_key(handle, offset)
+    storage_ref = originating_cuda_cache.get(key)
+    if storage_ref is None:
+        return None
+    return cls._new_with_weak_ptr(storage_ref)
+
+
 def rebuild_storage_fd(cls, df, size):
     if sys.version_info[0] == 2:
         fd = multiprocessing.reduction.rebuild_handle(df)
@@ -89,9 +111,30 @@ def rebuild_storage_filename(cls, manager, handle, size):
 
 
 def rebuild_storage_cuda(cls, device, handle, size, offset, view_size):
+    '''
+    Let's say a storage "originates" from a process if that process created it
+    (as opposed to opened a handle to the cuda allocation block where
+    the storage lives).
+
+    There are two main cases:
+    1) The storage originated from this process.
+       Return the storage from the cache of originating storages.
+    2) The storage did not originate from this process. Open the handle
+       to retrieve the allocation block; then build the storage by adding
+       "offset" to the base of the allocation block.
+    '''
+    # Check if the storage originated from this process
+    storage = maybe_original_cuda_storage(cls, handle, offset)
+    if storage is not None:
+        return storage
+
+    # Check if a storage pointing to the base of the allocation block is cached
     storage = storage_from_cache(cls, handle)
     if storage is not None:
         return storage._new_view(offset, view_size)
+
+    # Open the handle to get a storage pointing to the base of the allocation
+    # block and cache it.
     torch.cuda._lazy_init()
     storage = cls._new_shared_cuda(device, handle, size, offset, view_size)
     shared_cache[handle] = storage._weak_ref(StorageRef)
@@ -106,8 +149,18 @@ def reduce_storage(storage):
     from . import get_sharing_strategy
     if storage.is_cuda:
         metadata = storage._share_cuda_()
-        cache_key = metadata[1]
-        rebuild = rebuild_storage_cuda
+        _, handle, _, offset, _ = metadata
+
+        # If the storage originated from this process and if this process
+        # receives this storage again, it should NOT attempt to open the
+        # handle to the allocation block (because the handle is already open,
+        # and we only allow one open handle to the same allocation block per
+        # process).
+        # Instead, we cache the storage in a special cache so that if this
+        # process receives it again it is able to return it.
+        if handle not in shared_cache:
+            mark_originating(storage, handle, offset)
+        return (rebuild_storage_cuda, (type(storage),) + metadata)
     elif get_sharing_strategy() == 'file_system':
         metadata = storage._share_filename_()
         cache_key = metadata[1]
