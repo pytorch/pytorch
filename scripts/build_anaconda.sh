@@ -157,6 +157,9 @@ while [[ $# -gt 0 ]]; do
     --pytorch-too)
       pytorch_too=1
       ;;
+    --slim)
+      slim=1
+      ;;
     --conda)
       shift
       conda_build_args+=("$1")
@@ -259,7 +262,7 @@ if [[ -n $CUDA_VERSION ]]; then
 else
   build_string="${build_string}_cpu"
 fi
-if [[ "$(uname)" != 'Darwin' && -z $pytorch_too && $GCC_USE_C11 -eq 0 ]]; then
+if [[ "$(uname)" != 'Darwin' && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
   package_name="${package_name}_gcc${GCC_VERSION:0:3}"
   build_string="${build_string}_gcc${GCC_VERSION:0:3}"
@@ -294,7 +297,6 @@ fi
 # Add packages required for all Caffe2 builds
 add_package 'glog'
 add_package 'gflags'
-add_package 'opencv'
 caffe2_cmake_args+=("-DUSE_LEVELDB=OFF")
 caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 
@@ -317,7 +319,13 @@ if [[ -n $pytorch_too ]]; then
     add_package $cuda_feature_name
     conda_channel+=('-c pytorch')
     export BUILD_WITH_CUDA=1
+
+    caffe2_cmake_args+=("-DUSE_ATEN=ON")
   fi
+fi
+
+if [[ -z $slim ]]; then
+  add_package 'opencv'
 fi
 
 # Flags required for CUDA for Caffe2

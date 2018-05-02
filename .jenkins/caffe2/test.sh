@@ -93,6 +93,7 @@ fi
 # TODO find out why this breaks for conda builds
 if [[ $BUILD_ENVIRONMENT == conda* ]]; then
   conda_ignore_test="--ignore $CAFFE2_PYPATH/python/tt_core_test.py"
+  conda_ignore_test="--ignore $CAFFE2_PYPATH/caffe2/python/dataio_test.py"
 fi
 
 # Python tests
