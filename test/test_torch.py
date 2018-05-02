@@ -6867,6 +6867,10 @@ class TestTorch(TestCase):
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
 
+    def test_t_not_2d_error(self):
+        self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t())
+        self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t_())
+
     # unit test for THTensor_(copyTranspose)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_big_transpose(self):
