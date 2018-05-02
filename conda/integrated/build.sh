@@ -30,9 +30,14 @@ export PYTORCH_BUILD_VERSION=$PKG_VERSION
 export PYTORCH_BUILD_NUMBER=$PKG_BUILDNUM
 
 # Pytorch CUDA flags
-if [[ -n $BUILD_WITH_CUDA ]]; then #TODO
-  # compile for Kepler, Kepler+Tesla, Maxwell, Pascal, Volta
-  export TORCH_CUDA_ARCH_LIST="3.5;5.2+PTX;6.0;6.1;7.0"
+if [[ -n $CUDA_VERSION ]]; then
+  if [[ $CUDA_VERSION == 9* ]]; then
+    # compile for Kepler, Kepler+Tesla, Maxwell, Pascal, Volta
+    export TORCH_CUDA_ARCH_LIST="3.5;5.2+PTX;6.0;6.1;7.0"
+  else
+    # don't compile for Volta
+    export TORCH_CUDA_ARCH_LIST="3.5;5.2+PTX;6.0;6.1"
+  fi
   export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
   export NCCL_ROOT_DIR=/usr/local/cuda
   #export USE_STATIC_CUDNN=1
@@ -80,7 +85,7 @@ python setup.py install
 #########################################################################
 # Copies libnvrtc and libnvToolsExt to the site-packages/torch/lib/ directory
 # All other CUDA libraries should be statically linked
-if [[ -z $BUILD_WITH_CUDA || -z $PACKAGE_CUDA_LIBS ]]; then
+if [[ -z $CUDA_VERSION || -z $PACKAGE_CUDA_LIBS ]]; then
   exit 0
 fi
 
