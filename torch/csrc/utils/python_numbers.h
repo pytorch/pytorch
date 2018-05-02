@@ -31,7 +31,7 @@ inline PyObject* THPUtils_packUInt64(uint64_t value) {
 inline PyObject* THPUtils_packDoubleAsInt(double value) {
 #if PY_MAJOR_VERSION == 2
   if (value <= INT32_MAX && value >= INT32_MIN) {
-    return PyInt_FromLong(static_cast<long>(value));
+    return PyLong_FromDouble(value);
   }
 #endif
   return PyLong_FromDouble(value);

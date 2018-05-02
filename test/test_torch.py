@@ -260,6 +260,10 @@ class TestTorch(TestCase):
             input = []
             input.append(list(range(-5, 5)))
             input.append([x + 1e-6 for x in range(-5, 5)])
+            input.append([x + 1e-10 for x in range(-5, 5)])
+            input.append([x + 1e10 for x in range(-5, 5)])
+            input.append([x + 1e-30 for x in range(-5, 5)])
+            input.append([x + 1e30 for x in range(-5, 5)])
             input.append(torch.randn(10).tolist())
             input.append((torch.randn(10) + 1e6).tolist())
             input.append([math.pi * (x / 2) for x in range(-5, 5)])
