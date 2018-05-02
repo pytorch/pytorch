@@ -9,10 +9,9 @@ endif()
 
 # Find modules
 list(APPEND CMAKE_MODULE_PATH
-  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules
-  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix
   /usr/lib/x86_64-linux-gnu/
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake)
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
 list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
 
 
