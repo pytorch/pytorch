@@ -89,6 +89,9 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
 /// Provides a complete error message with source location information via
 /// `what()`, and a more concise message via `what_without_backtrace()`. Should
 /// primarily be used with the `AT_ERROR` macro.
+///
+/// NB: at::Error is handled specially by the default torch to suppress the
+/// backtrace, see torch/csrc/Exceptions.h
 class AT_API Error : public std::exception {
   std::string what_without_backtrace_;
   std::string what_;
@@ -117,12 +120,12 @@ public:
 
 #define AT_ASSERT(cond) \
   if (!(cond)) {             \
-    AT_ERROR(#cond " ASSERT FAILED, please report a bug to PyTorch.");   \
+    AT_ERROR(#cond " ASSERT FAILED at ", __FILE__, ":", __LINE__, ", please report a bug to PyTorch.");   \
   }
 
 #define AT_ASSERTM(cond, ...) \
   if (!(cond)) {             \
-    AT_ERROR(at::str(#cond, " ASSERT FAILED, please report a bug to PyTorch. ", __VA_ARGS__));   \
+    AT_ERROR(at::str(#cond, " ASSERT FAILED at ", __FILE__, ":", __LINE__, ", please report a bug to PyTorch. ", __VA_ARGS__));   \
   }
 
 #define AT_CHECK(cond, ...) \
