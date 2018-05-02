@@ -23,6 +23,52 @@ void adagrad_update(
   }
 }
 
+template <typename Context>
+void adagrad_update_output_effective_lr(
+    int N,
+    const float* paramIn,
+    const float* gradIn,
+    const float* momentIn,
+    float* paramOut,
+    float* momentOut,
+    float* effectiveLROut,
+    float epsilon,
+    float decay,
+    const float* lr,
+    Context* /*context*/) {
+  for (auto i = 0; i < N; ++i) {
+    float grad = gradIn[i];
+    float moment = momentOut[i] = decay * momentIn[i] + grad * grad;
+    float effective_lr = effectiveLROut[i] =
+        lr[0] / (std::sqrt(moment) + epsilon);
+    paramOut[i] = paramIn[i] + effective_lr * grad;
+  }
+}
+
+template <typename Context>
+void adagrad_update_output_effective_lr_and_update(
+    int N,
+    const float* paramIn,
+    const float* gradIn,
+    const float* momentIn,
+    float* paramOut,
+    float* momentOut,
+    float* effectiveLROut,
+    float* updateOut,
+    float epsilon,
+    float decay,
+    const float* lr,
+    Context* /*context*/) {
+  for (auto i = 0; i < N; ++i) {
+    float grad = gradIn[i];
+    float moment = momentOut[i] = decay * momentIn[i] + grad * grad;
+    float effective_lr = effectiveLROut[i] =
+        lr[0] / (std::sqrt(moment) + epsilon);
+    float update = updateOut[i] = effective_lr * grad;
+    paramOut[i] = paramIn[i] + update;
+  }
+}
+
 template <typename T, class Context>
 class AdagradOp final : public Operator<Context> {
  public:
@@ -37,17 +83,50 @@ class AdagradOp final : public Operator<Context> {
     CAFFE_ENFORCE(Input(GRAD).size() == Input(PARAM).size());
     Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
     Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
-    adagrad_update<Context>(
-        Input(GRAD).size(),
-        Input(PARAM).template data<T>(),
-        Input(GRAD).template data<T>(),
-        Input(MOMENT_1).template data<T>(),
-        Output(OUTPUT_PARAM)->template mutable_data<T>(),
-        Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
-        epsilon_,
-        decay_,
-        Input(LR).template data<T>(),
-        &context_);
+    if (OutputSize() == 2) {
+      adagrad_update<Context>(
+          Input(GRAD).size(),
+          Input(PARAM).template data<T>(),
+          Input(GRAD).template data<T>(),
+          Input(MOMENT_1).template data<T>(),
+          Output(OUTPUT_PARAM)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
+          epsilon_,
+          decay_,
+          Input(LR).template data<T>(),
+          &context_);
+    } else if (OutputSize() == 3) {
+      Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(GRAD));
+      adagrad_update_output_effective_lr<Context>(
+          Input(GRAD).size(),
+          Input(PARAM).template data<T>(),
+          Input(GRAD).template data<T>(),
+          Input(MOMENT_1).template data<T>(),
+          Output(OUTPUT_PARAM)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
+          Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>(),
+          epsilon_,
+          decay_,
+          Input(LR).template data<T>(),
+          &context_);
+    } else {
+      Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(GRAD));
+      Output(OUTPUT_UPDATE)->ResizeLike(Input(GRAD));
+      adagrad_update_output_effective_lr_and_update<Context>(
+          Input(GRAD).size(),
+          Input(PARAM).template data<T>(),
+          Input(GRAD).template data<T>(),
+          Input(MOMENT_1).template data<T>(),
+          Output(OUTPUT_PARAM)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
+          Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>(),
+          Output(OUTPUT_UPDATE)->template mutable_data<T>(),
+          epsilon_,
+          decay_,
+          Input(LR).template data<T>(),
+          &context_);
+    }
+
     return true;
   }
 
@@ -55,7 +134,11 @@ class AdagradOp final : public Operator<Context> {
   T epsilon_;
   T decay_;
   INPUT_TAGS(PARAM, MOMENT_1, GRAD, LR);
-  OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
+  OUTPUT_TAGS(
+      OUTPUT_PARAM,
+      OUTPUT_MOMENT_1,
+      OUTPUT_EFFECTIVE_LR,
+      OUTPUT_UPDATE);
 };
 
 template <typename T, class Context>
