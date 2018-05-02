@@ -1,18 +1,6 @@
 from code_template import CodeTemplate
 from function_wrapper import nested_dict
 
-# Here's our strategy
-#
-# First, the easy bits:
-#   - CPU types should get codegen for all CPU types
-#   - CUDA types should get codegen for all CPU and CUDA types
-#
-# For CPU-to-CUDA, we have two options:
-#   - Good old fashioned double dispatch.  x.s_copy_(y) calls y.s_copy_into_(x)
-#     when a fall-through happens, and CUDA can handle this just fine
-#   - Use CUDAHooks to do it
-
-
 FILE = CodeTemplate("""\
 #include "ATen/Config.h"
 
@@ -83,7 +71,7 @@ def create_one(env, all_types):
         if src_type['Backend'] == 'CUDA':
             cuda = 'Cuda'
         if env['Backend'] == 'CUDA' or src_type['Backend'] == 'CUDA':
-            state.append('context->getTHCState()')
+            state.append('context->thc_state')
 
         combined = nested_dict({
             'src_scalar_name': src_type['ScalarName'],
