@@ -156,6 +156,10 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
   "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
   "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
+  "${TOOLS_PATH}/autograd/gen_autograd.py"
+  "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
+  "${TOOLS_PATH}/autograd/gen_python_functions.py"
+  "${TOOLS_PATH}/autograd/gen_variable_type.py"
   "${TOOLS_PATH}/jit/templates/aten_dispatch.h"
   "${TOOLS_PATH}/jit/templates/aten_dispatch.cpp"
   "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
@@ -224,7 +228,6 @@ target_compile_options(torch
   -Wcast-qual
   -Wctor-dtor-privacy
   -Wdisabled-optimization
-  -Wformat=2
   -Winit-self
   -Wmissing-include-dirs
   -Woverloaded-virtual
@@ -232,7 +235,9 @@ target_compile_options(torch
   -Wstrict-overflow=5
   -Wundef
   -fdiagnostics-show-option
-  -Wno-unused-parameter)
+  -Wno-unused-parameter
+  -Wno-missing-braces # This warning is buggy
+  -Wno-unknown-pragmas)
 
 if ($ENV{WERROR})
   target_compile_options(torch PRIVATE -Werror)
@@ -307,4 +312,3 @@ target_include_directories(test_api
   "${TORCH_SRC_DIR}/../third_party/catch/single_include")
 
 target_link_libraries(test_api torch)
-
