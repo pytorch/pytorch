@@ -24,8 +24,13 @@ set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
+option(BUILD_CAFFE2 "Build Caffe2" ON)
+option(BUILD_TORCH "Build Torch" OFF)
+cmake_dependent_option(
+    BUILD_ATEN "Build ATen" ON
+    "BUILD_TORCH" OFF)
 option(BUILD_BINARY "Build C++ binaries" ON)
-option(BUILD_DOCS "Build documentation" OFF)
+option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
@@ -35,31 +40,56 @@ cmake_dependent_option(
 cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
-option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
+cmake_dependent_option(
+    BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_ATEN "Use ATen" OFF)
-option(USE_CUDA "Use Cuda" ON)
+option(USE_CUDA "Use CUDA" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
+cmake_dependent_option(
+    USE_CUDNN "Use cuDNN" ON
+    "USE_CUDA" OFF)  # New option
 option(USE_FFMPEG "Use ffmpeg" OFF)
-option(USE_GFLAGS "Use GFLAGS" ON)
-option(USE_GLOG "Use GLOG" ON)
+cmake_dependent_option(
+    USE_GFLAGS "Use GFLAGS" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_GLOG "Use GLOG" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_GLOO "Use Gloo" ON)
-option(USE_LEVELDB "Use LEVELDB" ON)
+option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)  # New option
+cmake_dependent_option(
+    USE_LEVELDB "Use LEVELDB" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
-option(USE_LMDB "Use LMDB" ON)
-option(USE_METAL "Use Metal for iOS build" ON)
-option(USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON)
-option(USE_MPI "Use MPI" ON)
+cmake_dependent_option(
+    USE_LMDB "Use LMDB" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_METAL "Use Metal for iOS build" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_MPI "Use MPI" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
+option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)  # New option
 option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
-option(USE_NUMA "Use NUMA (only available on Linux)" ON)
+cmake_dependent_option(
+    USE_NUMA "Use NUMA (only available on Linux)" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
-option(USE_OPENCV "Use openCV" ON)
+cmake_dependent_option(
+    USE_OPENCV "Use OpenCV" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" OFF)
 option(USE_PROF "Use profiling" OFF)
 option(USE_REDIS "Use Redis" OFF)
@@ -68,8 +98,40 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
-option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
-option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
+cmake_dependent_option(
+    USE_IDEEP "Use IDEEP interface in MKL BLAS" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_MKLML "Use MKLML interface in MKL BLAS" ON
+    "BUILD_CAFFE2" OFF)
+option(USE_DISTRIBUTED "Use THD (distributed)" OFF)  # New option
+option(USE_DISTRIBUTED_MW "Use THD (distributed) MW" OFF)  # New option
+
+# Legacy options, which we will eventually remove
+cmake_dependent_option(
+    WITH_CUDA "Legacy CUDA" ON
+    "USE_CUDA" OFF)
+cmake_dependent_option(
+    NO_CUDA "Legacy no CUDA" OFF
+    "USE_CUDA" ON)
+cmake_dependent_option(
+    NO_PYTHON "Legacy Python" OFF
+    "BUILD_PYTHON" ON)
+cmake_dependent_option(
+    WITH_CUDNN "Legacy cuDNN" ON
+    "USE_CUDNN" OFF)
+cmake_dependent_option(
+    WITH_NCCL "Legacy NCCL" ON
+    "USE_NCCL" OFF)
+cmake_dependent_option(
+    WITH_DISTRIBUTED "Legacy THD (distributed)" ON
+    "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    WITH_DISTRIBUTED_MW "Legacy THD (distributed) MW" ON
+    "USE_DISTRIBUTED_MW" OFF)
+cmake_dependent_option(
+    WITH_GLOO_IBVERBS "Legacy Gloo IB verbs for distributed support" ON
+    "USE_GLOO_IBVERBS" OFF)
 
 
 # ---[ CMake scripts + modules
@@ -93,6 +155,7 @@ include(cmake/BuildVariables.cmake)
 # External projects
 include(ExternalProject)
 
+# ---[ Utils
 # TODO: merge the following 3 files into cmake/public/utils.cmake.
 include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
@@ -139,6 +202,8 @@ else()
         string(REGEX REPLACE "/MT" "/MD" ${flag_var} "${${flag_var}}")
       endif()
     endif()
+    # /bigobj increases number of sections in .obj file, which is needed to link
+    # against libaries in Python 2.7 under Windows
     set(${flag_var} "${${flag_var}} /MP /bigobj")
   endforeach(flag_var)
 endif()
@@ -166,69 +231,80 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 # in PROJECT_SOURCE_DIR.
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
-# ---[ Old caffe protobuf.
-add_subdirectory(caffe/proto)
+# ---[ Torch build
+if(BUILD_TORCH)
+  add_subdirectory(aten)
+  add_subdirectory(torch)
+endif()
 
-# ---[ Main build
-add_subdirectory(caffe2)
+# ---[ Caffe2 build
+if(BUILD_CAFFE2)
+  # ---[ Old caffe protobuf
+  add_subdirectory(caffe/proto)
 
-# Documentation Option
-if(BUILD_DOCS)
-  # check if Doxygen is installed
-  find_package(Doxygen)
-  if (DOXYGEN_FOUND)
-    message("Generating documentation")
+  # ---[ Main build
+  add_subdirectory(caffe2)
 
-    set(DOXYGEN_C_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/.Doxyfile-c)
-    set(DOXYGEN_C_OUT ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/Doxyfile-c)
-    set(DOXYGEN_P_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/.Doxyfile-python)
-    set(DOXYGEN_P_OUT ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/Doxyfile-python)
+  # --[ Documentation
+  if(BUILD_DOCS)
+    # check if Doxygen is installed
+    find_package(Doxygen)
+    if (DOXYGEN_FOUND)
+      message("Generating documentation")
 
-    if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
-      file(REMOVE_RECURSE ${CMAKE_CURRENT_BINARY_DIR}/docs)
-    endif (EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
+      set(DOXYGEN_C_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/.Doxyfile-c)
+      set(DOXYGEN_C_OUT ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/Doxyfile-c)
+      set(DOXYGEN_P_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/.Doxyfile-python)
+      set(DOXYGEN_P_OUT ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/Doxyfile-python)
 
-    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/docs)
-    configure_file(${DOXYGEN_C_IN} ${DOXYGEN_C_OUT} @ONLY)
-    configure_file(${DOXYGEN_P_IN} ${DOXYGEN_P_OUT} @ONLY)
+      if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
+        file(REMOVE_RECURSE ${CMAKE_CURRENT_BINARY_DIR}/docs)
+      endif (EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
 
-    add_custom_target(doc_doxygen_c ALL
-        COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_C_OUT}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Generating C++ API documentation with Doxygen"
-        VERBATIM)
+      file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/docs)
+      configure_file(${DOXYGEN_C_IN} ${DOXYGEN_C_OUT} @ONLY)
+      configure_file(${DOXYGEN_P_IN} ${DOXYGEN_P_OUT} @ONLY)
 
-    add_custom_target(doc_doxygen_python ALL
-        COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_P_OUT}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Generating Python API documentation with Doxygen"
-        VERBATIM)
-  else (DOXYGEN_FOUND)
-    message(FATAL_ERROR "Doxygen needs to be installed to generate the documentation")
-  endif (DOXYGEN_FOUND)
-endif (BUILD_DOCS)
+      add_custom_target(doc_doxygen_c ALL
+          COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_C_OUT}
+          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+          COMMENT "Generating C++ API documentation with Doxygen"
+          VERBATIM)
 
-# ---[ CMake related files
-# Uninistall option.
-if(NOT TARGET caffe2_uninstall)
-  configure_file(
-      ${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in
-      ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake
-      IMMEDIATE @ONLY)
+      add_custom_target(doc_doxygen_python ALL
+          COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_P_OUT}
+          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+          COMMENT "Generating Python API documentation with Doxygen"
+          VERBATIM)
+    else (DOXYGEN_FOUND)
+      message(FATAL_ERROR "Doxygen needs to be installed to generate the documentation")
+    endif (DOXYGEN_FOUND)
+  endif (BUILD_DOCS)
 
-  add_custom_target(caffe2_uninstall
-      COMMAND ${CMAKE_COMMAND} -P
-      ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
+  # ---[ CMake related files
+  # Uninistall option.
+  if(NOT TARGET caffe2_uninstall)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake
+        IMMEDIATE @ONLY)
+
+    add_custom_target(caffe2_uninstall
+        COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
+  endif()
 endif()
 
 # ---[ Make configuration files for cmake to allow dependent libraries
 # easier access to Caffe2.
 
-if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
-  message(WARNING
-      "Generated cmake files are only fully tested if one builds "
-      "with system glog, gflags, and protobuf. Other settings may "
-      "generate files that are not well tested.")
+if (BUILD_CAFFE2)
+  if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
+    message(WARNING
+        "Generated cmake files are only fully tested if one builds "
+        "with system glog, gflags, and protobuf. Other settings may "
+        "generate files that are not well tested.")
+  endif()
 endif()
 
 if (USE_CUDA)
@@ -237,55 +313,57 @@ if (USE_CUDA)
 
 endif()
 
-# Note(jiayq): when building static libraries, all PRIVATE dependencies
-# will also become interface libraries, and as a result if there are any
-# dependency libraries that are not exported, the following install export
-# script will fail. As a result, we will only provide the targets cmake
-# files for shared lib installation. For more info, read:
-# https://cmake.org/pipermail/cmake/2016-May/063400.html
-if (BUILD_SHARED_LIBS)
-  configure_file(
-      ${PROJECT_SOURCE_DIR}/cmake/Caffe2ConfigVersion.cmake.in
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
-      @ONLY)
-  configure_file(
-      ${PROJECT_SOURCE_DIR}/cmake/Caffe2Config.cmake.in
-      ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
-      @ONLY)
-  install(FILES
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
-      ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
-      DESTINATION share/cmake/Caffe2
-      COMPONENT dev)
-  install(FILES
-      ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
-      ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
-      ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
-      ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
-      ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
-      ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
-      DESTINATION share/cmake/Caffe2/public
-      COMPONENT dev)
-  install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
-      FILE Caffe2Targets.cmake
-      COMPONENT dev)
-else()
-  message(WARNING
-      "Generated cmake files are only available when building "
-      "shared libs.")
-endif()
+if(BUILD_CAFFE2)
+  # Note(jiayq): when building static libraries, all PRIVATE dependencies
+  # will also become interface libraries, and as a result if there are any
+  # dependency libraries that are not exported, the following install export
+  # script will fail. As a result, we will only provide the targets cmake
+  # files for shared lib installation. For more info, read:
+  # https://cmake.org/pipermail/cmake/2016-May/063400.html
+  if (BUILD_SHARED_LIBS)
+    configure_file(
+        ${PROJECT_SOURCE_DIR}/cmake/Caffe2ConfigVersion.cmake.in
+        ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
+        @ONLY)
+    configure_file(
+        ${PROJECT_SOURCE_DIR}/cmake/Caffe2Config.cmake.in
+        ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
+        @ONLY)
+    install(FILES
+        ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
+        ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
+        DESTINATION share/cmake/Caffe2
+        COMPONENT dev)
+    install(FILES
+        ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
+        ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
+        ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
+        ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
+        ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
+        ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
+        DESTINATION share/cmake/Caffe2/public
+        COMPONENT dev)
+    install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
+        FILE Caffe2Targets.cmake
+        COMPONENT dev)
+  else()
+    message(WARNING
+        "Generated cmake files are only available when building "
+        "shared libs.")
+  endif()
 
-# ---[ Modules
-add_subdirectory(modules)
+  # ---[ Modules
+  add_subdirectory(modules)
 
-# ---[ Binaries
-# Binaries will be built after the Caffe2 main libraries and the modules
-# are built. For the binaries, they will be linked to the Caffe2 main
-# libraries, as well as all the modules that are built with Caffe2 (the ones
-# built in the previous Modules section above).
+  # ---[ Binaries
+  # Binaries will be built after the Caffe2 main libraries and the modules
+  # are built. For the binaries, they will be linked to the Caffe2 main
+  # libraries, as well as all the modules that are built with Caffe2 (the ones
+  # built in the previous Modules section above).
 
-if (BUILD_BINARY)
-  add_subdirectory(binaries)
+  if (BUILD_BINARY)
+    add_subdirectory(binaries)
+  endif()
 endif()
 
 include(cmake/Summary.cmake)
