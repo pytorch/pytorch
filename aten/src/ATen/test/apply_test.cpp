@@ -109,10 +109,3 @@ TEST_CASE("Roving Exclusion", "Collapses a 4D tensor to a 3D tensor") {
     REQUIRE(ti.sizes[2] == 2);
     REQUIRE(ti.strides[2] == 2);
 }
-
-TEST_CASE("Invalid Exclusion", "Attempts to exclude a nonexisting dimension") {
-    int sizes[] = {1, 1, 1};
-    int strides[] = {17, 12, 3};
-    ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 3, sizes, strides};
-    REQUIRE_THROWS(ti.collapseDims(5));
-}
