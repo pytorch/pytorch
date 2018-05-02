@@ -40,9 +40,6 @@ options = parser.parse_args()
 if options.output_dir is not None and not os.path.exists(options.output_dir):
     os.makedirs(options.output_dir)
 
-if not os.path.exists(os.path.join(options.output_dir, 'cuda')):
-    os.makedirs(os.path.join(options.output_dir, 'cuda'))
-
 
 class FileManager(object):
     def __init__(self):
@@ -123,6 +120,7 @@ FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
 
 file_manager = FileManager()
+cuda_file_manager = FileManager()
 
 generators = {
     'CPUGenerator.h': {
@@ -298,22 +296,26 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['type_derived_method_declarations'] = declarations
     env['type_derived_method_definitions'] = definitions
 
+    fm = file_manager
+    if env['DenseBackend'] == 'CUDA':
+        fm = cuda_file_manager
+
     if density != 'Sparse':
         # there are no special storage types for Sparse, they are composed
         # of Dense tensors
-        file_manager.write(env['Storage'] + ".cpp", STORAGE_DERIVED_CPP.substitute(env))
-        file_manager.write(env['Storage'] + ".h", STORAGE_DERIVED_H.substitute(env))
+        fm.write(env['Storage'] + ".cpp", STORAGE_DERIVED_CPP.substitute(env))
+        fm.write(env['Storage'] + ".h", STORAGE_DERIVED_H.substitute(env))
         env['TensorDenseOrSparse'] = TENSOR_DENSE_CPP.substitute(env)
         env['THTensor_nDimension'] = 'tensor->nDimension'
     else:
         env['TensorDenseOrSparse'] = TENSOR_SPARSE_CPP.substitute(env)
         env['THTensor_nDimension'] = 'tensor->nDimensionI + tensor->nDimensionV'
 
-    file_manager.write(env['Type'] + ".cpp", TYPE_DERIVED_CPP.substitute(env))
-    file_manager.write(env['Type'] + ".h", TYPE_DERIVED_H.substitute(env))
+    fm.write(env['Type'] + ".cpp", TYPE_DERIVED_CPP.substitute(env))
+    fm.write(env['Type'] + ".h", TYPE_DERIVED_H.substitute(env))
 
-    file_manager.write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP.substitute(env))
-    file_manager.write(env['Tensor'] + ".h", TENSOR_DERIVED_H.substitute(env))
+    fm.write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP.substitute(env))
+    fm.write(env['Tensor'] + ".h", TENSOR_DERIVED_H.substitute(env))
 
     type_register = (('context->type_registry[static_cast<int>(Backend::{})]' +
                       '[static_cast<int>(ScalarType::{})].reset(new {}(context));')
@@ -345,8 +347,7 @@ def declare_outputs():
              'CPUCopy.cpp', 'NativeFunctions.h']
     for f in files:
         file_manager.will_write(f)
-    if not options.no_cuda:
-        file_manager.will_write('CUDACopy.cpp')
+    cuda_file_manager.will_write('CUDACopy.cpp')
     for fname in sorted(generators.keys()):
         if generators[fname]['name'] == 'CUDA':
             fname = os.path.join('cuda', fname)
@@ -357,8 +358,11 @@ def declare_outputs():
         for kind in ["Storage", "Type", "Tensor"]:
             if kind == 'Storage' and density == "Sparse":
                 continue
-            file_manager.will_write("{}{}{}.h".format(full_backend, scalar_name, kind))
-            file_manager.will_write("{}{}{}.cpp".format(full_backend, scalar_name, kind))
+            fm = file_manager
+            if backend == 'CUDA':
+                fm = cuda_file_manager
+            fm.will_write("{}{}{}.h".format(full_backend, scalar_name, kind))
+            fm.will_write("{}{}{}.cpp".format(full_backend, scalar_name, kind))
 
 
 def filter_by_extension(files, *extensions):
@@ -409,15 +413,16 @@ def generate_outputs():
     file_manager.write('Functions.h', FUNCTIONS_H.substitute(top_env))
 
     file_manager.write('CPUCopy.cpp', copy_wrapper.create(all_types, 'CPU'))
-    if not options.no_cuda:
-        file_manager.write('CUDACopy.cpp', copy_wrapper.create(all_types, 'CUDA'))
+    cuda_file_manager.write('CUDACopy.cpp', copy_wrapper.create(all_types, 'CUDA'))
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H.substitute(top_env))
 
     file_manager.check_all_files_written()
+    cuda_file_manager.check_all_files_written()
 
 
 declare_outputs()
 if options.output_dependencies is not None:
     file_manager.write_outputs(options.output_dependencies)
+    cuda_file_manager.write_outputs(options.output_dependencies + "-cuda")
 else:
     generate_outputs()
