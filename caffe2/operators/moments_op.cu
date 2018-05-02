@@ -9,8 +9,6 @@ namespace caffe2 {
 
 namespace {
 
-constexpr int kCUDAMomentsMaxDims = 8;
-
 template <typename T, int D>
 __global__ void ComputeMomentsGradientCUDAKernel(
     const int dX_size,
@@ -86,119 +84,6 @@ void ComputeMomentsGradientCUDAImpl(
           dX);
 }
 
-template <typename T>
-void ComputeMomentsGradientCUDA(
-    const std::vector<int>& dY_dims,
-    const std::vector<int>& dX_dims,
-    const T* dmean,
-    const T* dvariance,
-    const T* X,
-    const T* mean,
-    T* dX,
-    CUDAContext* context) {
-  const int ndim = dX_dims.size();
-  CAFFE_ENFORCE_LE(ndim, kCUDAMomentsMaxDims);
-  switch (ndim) {
-    case 1: {
-      ComputeMomentsGradientCUDAImpl<T, 1>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dmean,
-          dvariance,
-          X,
-          mean,
-          dX,
-          context);
-      break;
-    }
-    case 2: {
-      ComputeMomentsGradientCUDAImpl<T, 2>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dmean,
-          dvariance,
-          X,
-          mean,
-          dX,
-          context);
-      break;
-    }
-    case 3: {
-      ComputeMomentsGradientCUDAImpl<T, 3>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dmean,
-          dvariance,
-          X,
-          mean,
-          dX,
-          context);
-      break;
-    }
-    case 4: {
-      ComputeMomentsGradientCUDAImpl<T, 4>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dmean,
-          dvariance,
-          X,
-          mean,
-          dX,
-          context);
-      break;
-    }
-    case 5: {
-      ComputeMomentsGradientCUDAImpl<T, 5>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dmean,
-          dvariance,
-          X,
-          mean,
-          dX,
-          context);
-      break;
-    }
-    case 6: {
-      ComputeMomentsGradientCUDAImpl<T, 6>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dmean,
-          dvariance,
-          X,
-          mean,
-          dX,
-          context);
-      break;
-    }
-    case 7: {
-      ComputeMomentsGradientCUDAImpl<T, 7>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dmean,
-          dvariance,
-          X,
-          mean,
-          dX,
-          context);
-      break;
-    }
-    case 8: {
-      ComputeMomentsGradientCUDAImpl<T, 8>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dmean,
-          dvariance,
-          X,
-          mean,
-          dX,
-          context);
-      break;
-    }
-    default: { break; }
-  }
-}
-
 } // namespace
 
 template <>
@@ -210,9 +95,13 @@ bool MomentsGradientOp<float, CUDAContext>::Compute(
     const float* X_data,
     const float* mean_data,
     float* dX_data) {
-  ComputeMomentsGradientCUDA<float>(
-      dY_dims,
-      dX_dims,
+  const int ndim = dY_dims.size();
+  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
+      ndim,
+      ComputeMomentsGradientCUDAImpl,
+      float,
+      dY_dims.data(),
+      dX_dims.data(),
       dmean_data,
       dvariance_data,
       X_data,
