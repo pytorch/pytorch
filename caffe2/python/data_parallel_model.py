@@ -23,6 +23,7 @@ log = logging.getLogger("data_parallel_model")
 log.setLevel(logging.INFO)
 
 _DEFAULT_TIMEOUT_SEC = 30
+_DEFAULT_BARRIER_NET_TIMEOUT_SEC = 300
 
 
 def Parallelize_GPU(*args, **kwargs):
@@ -56,6 +57,7 @@ def Parallelize(
     num_threads_per_device=4,
     shared_model=False,
     combine_spatial_bn=False,
+    barrier_net_timeout_sec=_DEFAULT_BARRIER_NET_TIMEOUT_SEC,
 ):
     '''
     Function to create a model that can run on many GPUs or CPUs.
@@ -113,6 +115,10 @@ def Parallelize(
                         all devices within the node. If False, batch
                         normalization will be done separately for each device.
                         This option is currently only supported on the CPU.
+      barrier_net_timeout_sec:
+                        The timeout in seconds of the barrier net, which is run
+                        to synchronize shards before a training epoch starts.
+                        Defaults to 300 seconds.
     '''
     assert scope.CurrentDeviceScope() is None \
         or scope.CurrentDeviceScope().device_type == caffe2_pb2.CPU, \
@@ -152,7 +158,8 @@ def Parallelize(
     # Store some information in the model -- a bit ugly
     model_helper_obj._devices = devices
     model_helper_obj._rendezvous = rendezvous
-    model_helper_obj._barrier_net = None
+    model_helper_obj._sync_barrier_net = None
+
     model_helper_obj._broadcast_context = None
     model_helper_obj._grad_names = []
 
@@ -361,10 +368,15 @@ def Parallelize(
     if dynamic_memory_management:
         _AddDynamicMemoryOptimization(model_helper_obj, blobs_to_keep, devices)
 
+
     model_helper_obj._data_parallel_model_init_nets = [
         model_helper_obj.param_init_net,
     ]
-    model_helper_obj._data_parallel_model_nets = [model_helper_obj.net]
+
+    model_helper_obj._data_parallel_model_nets = [
+        model_helper_obj.net
+    ]
+    _AddBarrierToModelNets(model_helper_obj, barrier_net_timeout_sec)
 
     if shared_model:
         _RemapParameterBlobsForSharedModel(model_helper_obj, all_params)
@@ -399,7 +411,8 @@ def Parallelize_BMUF(
     max_concurrent_distributed_ops=4,
     add_blobs_to_sync=None,
     num_threads_per_device=4,
-    cpu_device=False
+    cpu_device=False,
+    barrier_net_timeout_sec=_DEFAULT_BARRIER_NET_TIMEOUT_SEC,
 ):
     '''
     Function to create model that run on many GPUs and creates a net for
@@ -436,7 +449,7 @@ def Parallelize_BMUF(
 
     model_helper_obj._devices = devices
     model_helper_obj._rendezvous = rendezvous
-    model_helper_obj._barrier_net = None
+    model_helper_obj._sync_barrier_net = None
     model_helper_obj._broadcast_context = None
     model_helper_obj._shared_model = False
     master_dev_opt = core.DeviceOption(model_helper_obj._device_type, master_device)
@@ -671,6 +684,7 @@ def Parallelize_BMUF(
         model_helper_obj.net,
         (model_helper_obj._global_model_param_updates_net, 1)
     ]
+    _AddBarrierToModelNets(model_helper_obj, barrier_net_timeout_sec)
 
 
 def RunInitNet(model):
@@ -696,38 +710,55 @@ def RunNet(model, num_iterations):
             workspace.RunNet(net_iter, num_iterations)
 
 
-def Synchronize(model, timeout_sec=_DEFAULT_TIMEOUT_SEC):
+def _AddBarrierToModelNets(model, barrier_net_timeout_sec):
+    if model._rendezvous is not None and model._rendezvous['engine'] == 'GLOO':
+        # Synchronize DPM at the start of each epoch. This allows shards that
+        # starts an epoch sooner to wait for slower shards.  Without this,
+        # shards that are faster than others will begin training the next epoch
+        # while stragglers are blocked on IO, and may timeout after 30 seconds
+        # (_DEFAULT_TIMEOUT_SEC).
+        model._barrier_net = _CreateBarrierNet(model,
+                "pre_training", barrier_net_timeout_sec)
+        model._data_parallel_model_nets.insert(0, model._barrier_net)
+
+
+def _CreateBarrierNet(model, name_prefix, timeout_sec):
+    log.info("Creating barrier net")
+    assert model._rendezvous['engine'] == 'GLOO', "Engine does not support barrier"
+    barrier_init_net = core.Net(name_prefix + "_barrier_init_net")
+    comm_world = _CreateOrCloneCommonWorld(
+        barrier_init_net,
+        name_prefix + "_barrier_cw",
+        rendezvous=model._rendezvous,
+        status_blob=name_prefix + "_barrier_cw_status",
+        timeout_sec=timeout_sec,
+    )
+    workspace.RunNetOnce(barrier_init_net)
+    barrier_net = core.Net(name_prefix + "_barrier_net")
+    barrier_net.Barrier(
+        inputs=[comm_world],
+        outputs=[],
+        engine=model._rendezvous['engine'],
+        status_blob=name_prefix + "_barrier_status",
+    )
+    return barrier_net
+
+
+def Synchronize(model, timeout_sec=_DEFAULT_BARRIER_NET_TIMEOUT_SEC):
     if model._rendezvous is None or model._rendezvous['num_shards'] <= 1:
         # Single host case
         return
 
-    if model._barrier_net is None:
-        log.info("Creating synchronization barrier net")
-        assert model._rendezvous['engine'] == 'GLOO', "Engine does not support barrier"
-        barrier_init_net = core.Net("sync_barrier_init_net")
-        comm_world = _CreateOrCloneCommonWorld(
-            barrier_init_net,
-            "sync_barrier_cw",
-            rendezvous=model._rendezvous,
-            status_blob="sync_barrier_cw_status",
-            timeout_sec=timeout_sec,
-        )
-        workspace.RunNetOnce(barrier_init_net)
-        barrier_net = core.Net("sync_barrier_net")
-        barrier_net.Barrier(
-            inputs=[comm_world],
-            outputs=[],
-            engine=model._rendezvous['engine'],
-            status_blob="sync_barrier_status",
-        )
-        workspace.CreateNet(barrier_net)
-        model._barrier_net = barrier_net
-        model._barrier_net_timeout = timeout_sec
-    assert model._barrier_net_timeout == timeout_sec, \
+    if model._sync_barrier_net is None:
+        model._sync_barrier_net = _CreateBarrierNet(model, "sync", timeout_sec)
+        workspace.CreateNet(model._sync_barrier_net)
+        model._sync_barrier_net_timeout = timeout_sec
+    assert model._sync_barrier_net_timeout == timeout_sec, \
         "Must use fixed timeout, {} != {}".format(
-            model._barrier_net_timeout, timeout_sec
+            model._sync_barrier_net_timeout, timeout_sec
         )
-    workspace.RunNet(model._barrier_net)
+    log.info("Synchronize run barrier net.")
+    workspace.RunNet(model._sync_barrier_net)
 
 
 def ConvertNetForDevice(net, device=None):

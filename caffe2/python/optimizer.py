@@ -470,7 +470,8 @@ class WeightDecayBuilder(Optimizer):
 class AdagradOptimizer(Optimizer):
     def __init__(self, alpha=0.01, epsilon=1e-4, decay=1, policy="fixed",
                  sparse_dedup_aggregator=None, rowWise=False, engine='',
-                 lars=None, **kwargs):
+                 lars=None, output_effective_lr=False,
+                 output_effective_lr_and_update=False, **kwargs):
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
@@ -480,6 +481,8 @@ class AdagradOptimizer(Optimizer):
         self.rowWise = rowWise
         self.engine = engine
         self.lars = lars
+        self.output_effective_lr = output_effective_lr
+        self.output_effective_lr_and_update = output_effective_lr_and_update
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
@@ -564,9 +567,16 @@ class AdagradOptimizer(Optimizer):
                 engine=self.engine
             )
         else:
+            output_args = [param, param_squared_sum]
+            if self.output_effective_lr_and_update:
+                output_args.append(str(param) + '_effective_lr')
+                output_args.append(str(param) + '_update')
+            elif self.output_effective_lr:
+                output_args.append(str(param) + '_effective_lr')
+
             net.Adagrad(
                 [param, param_squared_sum, grad, lr],
-                [param, param_squared_sum],
+                output_args,
                 epsilon=self.epsilon,
                 decay=float(self.decay),
                 engine=self.engine

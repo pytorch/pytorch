@@ -12,12 +12,15 @@ import numpy as np
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import unittest
 
 
 class TestAdagrad(hu.HypothesisTestCase):
 
     @staticmethod
-    def ref_adagrad(param_in, mom_in, grad, lr, epsilon, using_fp16=False):
+    def ref_adagrad(param_in, mom_in, grad, lr, epsilon, using_fp16=False,
+                    output_effective_lr=False,
+                    output_effective_lr_and_update=False):
         mom_in_f32 = mom_in
         param_in_f32 = param_in
         if(using_fp16):
@@ -25,8 +28,26 @@ class TestAdagrad(hu.HypothesisTestCase):
             param_in_f32 = param_in.astype(np.float32)
 
         mom_out = mom_in_f32 + np.square(grad)
-        grad_adj = lr * grad / (np.sqrt(mom_out) + epsilon)
+        effective_lr = lr / (np.sqrt(mom_out) + epsilon)
+        grad_adj = effective_lr * grad
         param_out = param_in_f32 + grad_adj
+
+        if output_effective_lr_and_update:
+            if(using_fp16):
+                return (param_out.astype(np.float16), mom_out.astype(np.float16),
+                        effective_lr.astype(np.float16),
+                        grad_adj.astype(np.float16))
+            else:
+                return (param_out.astype(np.float32), mom_out.astype(np.float32),
+                        effective_lr.astype(np.float32),
+                        grad_adj.astype(np.float32))
+        elif output_effective_lr:
+            if(using_fp16):
+                return (param_out.astype(np.float16), mom_out.astype(np.float16),
+                        effective_lr.astype(np.float16))
+            else:
+                return (param_out.astype(np.float32), mom_out.astype(np.float32),
+                        effective_lr.astype(np.float32))
 
         if(using_fp16):
             return (param_out.astype(np.float16), mom_out.astype(np.float16))
@@ -62,6 +83,55 @@ class TestAdagrad(hu.HypothesisTestCase):
             gc, op,
             [param, momentum, grad, lr],
             functools.partial(self.ref_adagrad, epsilon=epsilon))
+
+    @given(inputs=hu.tensors(n=3),
+           lr=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
+           epsilon=st.floats(min_value=0.01, max_value=0.99,
+                             allow_nan=False, allow_infinity=False),
+           **hu.gcs_cpu_only)
+    def test_adagrad_output_effective_lr(self, inputs, lr, epsilon, gc, dc):
+        param, momentum, grad = inputs
+        lr = np.array([lr], dtype=np.float32)
+
+        op = core.CreateOperator(
+            "Adagrad",
+            ["param", "momentum", "grad", "lr"],
+            ["param", "momentum", "effective_lr"],
+            epsilon=epsilon,
+            device_option=gc,
+        )
+
+        self.assertReferenceChecks(
+            gc, op,
+            [param, momentum, grad, lr],
+            functools.partial(self.ref_adagrad, epsilon=epsilon,
+                              output_effective_lr=True))
+
+    @given(inputs=hu.tensors(n=3),
+           lr=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
+           epsilon=st.floats(min_value=0.01, max_value=0.99,
+                             allow_nan=False, allow_infinity=False),
+           **hu.gcs_cpu_only)
+    def test_adagrad_output_effective_lr_and_update(
+            self, inputs, lr, epsilon, gc, dc):
+        param, momentum, grad = inputs
+        lr = np.array([lr], dtype=np.float32)
+
+        op = core.CreateOperator(
+            "Adagrad",
+            ["param", "momentum", "grad", "lr"],
+            ["param", "momentum", "effective_lr", "update"],
+            epsilon=epsilon,
+            device_option=gc,
+        )
+
+        self.assertReferenceChecks(
+            gc, op,
+            [param, momentum, grad, lr],
+            functools.partial(self.ref_adagrad, epsilon=epsilon,
+                              output_effective_lr_and_update=True))
 
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
