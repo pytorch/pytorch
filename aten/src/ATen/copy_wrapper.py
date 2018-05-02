@@ -110,7 +110,7 @@ def create_one_copy(dst_type, all_types):
         cuda = ''
         state = []
         if src_type['Backend'] == 'CUDA' or dst_type['Backend'] == 'CUDA':
-            state.append('context->thc_state')
+            state.append('context->getTHCState()')
         if src_type['Backend'] == 'CUDA':
             if dst_type['Backend'] == 'CUDA':
                 cuda = 'Cuda'
@@ -165,7 +165,7 @@ def create_one_copy_from(src_type, all_types):
         if src_type['Backend'] == 'CUDA':
             cuda = 'Cuda'
         if dst_type['Backend'] == 'CUDA' or src_type['Backend'] == 'CUDA':
-            state = ['context->thc_state']
+            state = ['context->getTHCState()']
 
         body_env = nested_dict({
             'src_scalar_name': src_type['ScalarName'],
