@@ -262,7 +262,7 @@ if [[ -n $CUDA_VERSION ]]; then
 else
   build_string="${build_string}_cpu"
 fi
-if [[ "$(uname)" != 'Darwin' && -z $pytorch_too && $GCC_USE_C11 -eq 0 ]]; then
+if [[ "$(uname)" != 'Darwin' && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
   package_name="${package_name}_gcc${GCC_VERSION:0:3}"
   build_string="${build_string}_gcc${GCC_VERSION:0:3}"
