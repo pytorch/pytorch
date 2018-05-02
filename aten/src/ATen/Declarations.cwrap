@@ -346,10 +346,6 @@
     - CPU
     - CUDA
   return: argument 0
-  before_arg_assign: |
-    PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
-        "and will be removed in 0.3. Note that arange generates values in [start; end), "
-        "not [start; end].", 1);
   arguments:
     - arg: THTensor* result
       output: True
