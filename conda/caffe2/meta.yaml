@@ -13,7 +13,7 @@ build:
   script_env:
     - CAFFE2_CMAKE_ARGS
     - PACKAGE_CUDA_LIBS
-    - BUILD_WITH_CUDA
+    - CUDA_VERSION
   # features section here
 
 requirements:
