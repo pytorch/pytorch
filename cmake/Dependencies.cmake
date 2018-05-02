@@ -1,19 +1,15 @@
-# ---[ Macro to update cached options.
-macro (caffe2_update_option variable value)
-  get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
-  set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
-endmacro()
-
 # ---[ Custom Protobuf
 include("cmake/ProtoBuf.cmake")
 
 # ---[ Threads
-include(cmake/public/threads.cmake)
-if (TARGET Threads::Threads)
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
-else()
-  message(FATAL_ERROR
-      "Cannot find threading library. Caffe2 requires Threads to compile.")
+if(BUILD_CAFFE2)
+  include(cmake/public/threads.cmake)
+  if (TARGET Threads::Threads)
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
+  else()
+    message(FATAL_ERROR
+        "Cannot find threading library. Caffe2 requires Threads to compile.")
+  endif()
 endif()
 
 # ---[ protobuf
@@ -46,7 +42,7 @@ message(STATUS "The BLAS backend of choice:" ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
   # Eigen is header-only and we do not have any dependent libraries
-  set(CAFFE2_USE_EIGEN_FOR_BLAS 1)
+  set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
   include_directories(${ATLAS_INCLUDE_DIRS})
@@ -571,16 +567,6 @@ endif()
 if (USE_NNAPI AND NOT ANDROID)
   message(WARNING "NNApi is only used in android builds.")
   caffe2_update_option(USE_NNAPI OFF)
-endif()
-
-if (USE_ATEN)
-  list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen ATen)
-  if (USE_CUDA)
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen ATen)
-  endif()
-  include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten/aten/src/ATen)
-  include_directories(${PROJECT_SOURCE_DIR}/aten/src)
-  include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
 endif()
 
 if (USE_ZSTD)
