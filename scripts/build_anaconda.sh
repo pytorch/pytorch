@@ -88,14 +88,14 @@ add_package () {
 ###########################################################
 # Parse options from both command line and from BUILD_ENVIRONMENT
 ###########################################################
-conda_build_args=()
+conda_args=()
 caffe2_cmake_args=()
 conda_channel=()
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
-  CUDA_VERSION="$(echo $BUILD_ENVIRONMENT | grep --only-matching -P '(?<=cuda)[0-9]\.[0-9]')"
+  cuda_ver="$(echo $BUILD_ENVIRONMENT | grep --only-matching -P '(?<=cuda)[0-9]\.[0-9]')"
 fi
 if [[ $BUILD_ENVIRONMENT == *cudnn* ]]; then
-  CUDNN_VERSION="$(echo $BUILD_ENVIRONMENT | grep --only-matching -P '(?<=cudnn)[0-9](\.[0-9])?')"
+  cudnn_ver="$(echo $BUILD_ENVIRONMENT | grep --only-matching -P '(?<=cudnn)[0-9](\.[0-9])?')"
 fi
 if [[ $BUILD_ENVIRONMENT == *full* ]]; then
   build_full=1
@@ -103,8 +103,8 @@ fi
 
 # Support legacy way of passing in these parameters
 if [[ -n $SKIP_CONDA_TESTS ]]; then
-  conda_build_args+=("--no-test")
-  conda_build_args+=("--no-anaconda-upload")
+  conda_args+=("--no-test")
+  conda_args+=("--no-anaconda-upload")
   upload_to_conda=''
 fi
 if [[ -n $UPLOAD_TO_CONDA ]]; then
@@ -130,8 +130,8 @@ while [[ $# -gt 0 ]]; do
       package_name_suffix=$1
       ;;
     --skip-tests)
-      conda_build_args+=("--no-test")
-      conda_build_args+=("--no-anaconda-upload")
+      conda_args+=("--no-test")
+      conda_args+=("--no-anaconda-upload")
       upload_to_conda=''
       ;;
     --upload)
@@ -142,11 +142,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --cuda)
       shift
-      CUDA_VERSION="$1"
+      cuda_ver="$1"
       ;;
     --cudnn)
       shift
-      CUDNN_VERSION="$1"
+      cudnn_ver="$1"
       ;;
     --full)
       build_full=1
@@ -162,7 +162,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --conda)
       shift
-      conda_build_args+=("$1")
+      conda_args+=("$1")
       ;;
     *)
       caffe2_cmake_args+=("$1")
@@ -172,23 +172,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Verify that the CUDA version is supported
-if [[ -n $CUDA_VERSION ]]; then
-  if [[ $CUDA_VERSION == 9.1* ]]; then
+if [[ -n $cuda_ver ]]; then
+  if [[ $cuda_ver == 9.1* ]]; then
     cuda_feature_name=cuda91
-  elif [[ $CUDA_VERSION == 9.0* ]]; then
+  elif [[ $cuda_ver == 9.0* ]]; then
     cuda_feature_name=cuda90
-  elif [[ $CUDA_VERSION == 8.0* ]]; then
+  elif [[ $cuda_ver == 8.0* ]]; then
     cuda_feature_name=cuda80
   else
-    echo "Unsupported CUDA version $CUDA_VERSION"
-    echo "Changes have already been made to the meta.yaml, you may have to revert them"
+    echo "Unsupported CUDA version $cuda_ver"
     exit 1
   fi
-  if [[ -z $CUDNN_VERSION ]]; then
+  if [[ -z $cudnn_ver ]]; then
     echo "No CuDNN version given. Caffe2 will still build against whatever"
     echo "CuDNN that it finds first, and will break if there is no CuDNN found."
   fi
-  echo "Detected CUDA_VERSION $CUDA_VERSION"
+  echo "Detected CUDA version $cuda_ver"
 fi
 
 ###########################################################
@@ -204,9 +203,9 @@ fi
 ###########################################################
 # Read the gcc version to see what ABI to build for
 if [[ "$(uname)" != 'Darwin' ]]; then
-  GCC_VERSION="$(gcc --version | grep --only-matching '[0-9]\.[0-9]\.[0-9]*' | head -1)"
+  gcc_ver="$(gcc --version | grep --only-matching '[0-9]\.[0-9]\.[0-9]*' | head -1)"
 fi
-if [[ "$GCC_VERSION" == 4* ]]; then
+if [[ $gcc_ver == 4* ]]; then
   GCC_USE_C11=0
 else
   GCC_USE_C11=1
@@ -218,7 +217,7 @@ if [[ "$PYTHON_VERSION" == 3.6* ]]; then
   # This is needed or else conda tries to move packages to python3/site-packages
   # instead of python3.6/site-packages. Specifically 3.6 because that's what
   # the latest Anaconda version is
-  conda_build_args+=(" --python 3.6")
+  conda_args+=(" --python 3.6")
 fi
 
 
@@ -251,21 +250,21 @@ if [[ -z $package_name ]]; then
     package_name="pytorch-${package_name}"
   fi
 fi
-if [[ -n $CUDA_VERSION ]]; then
+if [[ -n $cuda_ver ]]; then
   # CUDA 9.0 and 9.1 are not in conda, and cuDNN is not in conda, so instead of
   # pinning CUDA and cuDNN versions in the conda_build_config and then setting
   # the package name in meta.yaml based off of these values, we let Caffe2
   # take the CUDA and cuDNN versions that it finds in the build environment,
   # and manually set the package name ourself.
-  package_name="${package_name}_cuda${CUDA_VERSION}_cudnn${CUDNN_VERSION}"
-  build_string="${build_string}_cuda${CUDA_VERSION}_cudnn${CUDNN_VERSION}_nccl2"
+  package_name="${package_name}_cuda${cuda_ver}_cudnn${cudnn_ver}"
+  build_string="${build_string}_cuda${cuda_ver}_cudnn${cudnn_ver}_nccl2"
 else
   build_string="${build_string}_cpu"
 fi
 if [[ "$(uname)" != 'Darwin' && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
-  package_name="${package_name}_gcc${GCC_VERSION:0:3}"
-  build_string="${build_string}_gcc${GCC_VERSION:0:3}"
+  package_name="${package_name}_gcc${gcc_ver:0:3}"
+  build_string="${build_string}_gcc${gcc_ver:0:3}"
 fi
 if [[ -n $build_full ]]; then
   package_name="${package_name}_full"
@@ -279,7 +278,7 @@ portable_sed "s/name: caffe2.*\$/name: ${package_name}/" $meta_yaml
 # Handle tests
 ###########################################################
 if [[ -n $pytorch_too ]]; then
-  if [[ -n $CUDA_VERSION ]]; then
+  if [[ -n $cuda_ver ]]; then
     append_to_section 'test' 'requires:'
     append_to_section 'test' "  - $cuda_feature_name"
     append_to_section 'test' '  - nccl2'
@@ -312,13 +311,12 @@ if [[ -n $pytorch_too ]]; then
   append_to_section 'build' '- pyyaml'
   append_to_section 'build' '- setuptools'
   #caffe2_cmake_args+=("-DBLAS=MKL")
-  if [[ -n $CUDA_VERSION ]]; then
+  if [[ -n $cuda_ver ]]; then
     append_to_section 'features' features:
     append_to_section 'features' "  - $cuda_feature_name" 
     append_to_section 'features' '  - nccl2'
     add_package $cuda_feature_name
     conda_channel+=('-c pytorch')
-    export BUILD_WITH_CUDA=1
 
     caffe2_cmake_args+=("-DUSE_ATEN=ON")
   fi
@@ -329,7 +327,7 @@ if [[ -z $slim ]]; then
 fi
 
 # Flags required for CUDA for Caffe2
-if [[ -n $CUDA_VERSION ]]; then
+if [[ -n $cuda_ver ]]; then
   caffe2_cmake_args+=("-DUSE_CUDA=ON")
   caffe2_cmake_args+=("-DUSE_NCCL=ON")
 
@@ -370,12 +368,12 @@ fi
 # is enabled
 ###########################################################
 if [[ $upload_to_conda ]]; then
-  conda_build_args+=(" --user ${ANACONDA_USERNAME}")
-  conda_build_args+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
+  conda_args+=(" --user ${ANACONDA_USERNAME}")
+  conda_args+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
 
   # If building a redistributable, then package the CUDA libraries with it
   # TODO this doesn't work on Ubuntu right now
-  #if [[ -n $CUDA_VERSION ]]; then
+  #if [[ -n $cuda_ver ]]; then
   #  export PACKAGE_CUDA_LIBS=1
   #fi
 fi
@@ -388,7 +386,7 @@ cat $meta_yaml
 ###########################################################
 # Build Caffe2 with conda-build
 ###########################################################
-CAFFE2_CMAKE_ARGS=${caffe2_cmake_args[@]} conda build $build_dir ${conda_channel[@]} ${conda_build_args[@]}
+CAFFE2_CMAKE_ARGS=${caffe2_cmake_args[@]} CUDA_VERSION=$cuda_ver conda build $build_dir ${conda_channel[@]} ${conda_args[@]}
 
 # Install Caffe2 from the built package into the local conda environment
 if [[ -n $install_locally ]]; then
