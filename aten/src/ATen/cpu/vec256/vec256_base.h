@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstring>
+#include <functional>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -58,11 +59,35 @@ struct Vec256 {
     }
     return ret;
   }
+  Vec256<T> acos() const {
+    return map(std::acos);
+  }
+  Vec256<T> asin() const {
+    return map(std::asin);
+  }
+  Vec256<T> atan() const {
+    return map(std::atan);
+  }
+  Vec256<T> erf() const {
+    return map(std::erf);
+  }
   Vec256<T> exp() const {
     return map(std::exp);
   }
+  Vec256<T> expm1() const {
+    return map(std::expm1);
+  }
   Vec256<T> log() const {
     return map(std::log);
+  }
+  Vec256<T> log10() const {
+    return map(std::log10);
+  }
+  Vec256<T> log1p() const {
+    return map(std::log1p);
+  }
+  Vec256<T> log2() const {
+    return map(std::log2);
   }
   Vec256<T> ceil() const {
     return map(std::ceil);
@@ -99,6 +124,14 @@ template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != c.size; i++) {
     c.values[i] = a.values[i] * b.values[i];
+  }
+  return c;
+}
+
+template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != c.size; i++) {
+    c.values[i] = a.values[i] / b.values[i];
   }
   return c;
 }
