@@ -61,6 +61,10 @@ def _broadcast_if_scalar(x):
         return {"broadcast_i": 1}
 
 
+def _is_value(x):
+    return isinstance(x, torch._C.Value)
+
+
 def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
 
@@ -262,6 +266,13 @@ def embedding_bag(g,
                 sparse_i=sparse)
 
 
+def size(g, self, dim):
+    if _is_value(dim):
+        raise RuntimeError("ONNX export only supports constant dim values in .size()")
+    full_shape = g.op("Shape", self)
+    return select(g, full_shape, dim=0, index=dim)
+
+
 def transpose(g, self, dim0, dim1):
     if dim0 == dim1:  # micro-optimization
         return self
@@ -279,12 +290,22 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
-    if self.isTensor():
-        self_sizes = self.type().sizes()
-        if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
-            return g.op("Flatten", self, axis_i=1)
-    shape = g.op("Constant", value_t=torch.LongTensor(size))
+    if _is_value(size):
+        shape = size
+    else:
+        if self.isTensor():
+            self_sizes = self.type().sizes()
+            if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
+                return g.op("Flatten", self, axis_i=1)
+        shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
+
+
+def stack(g, *tensors, dim):
+    if len(tensors) < 2:
+        raise RuntimeError("Expected at least two arguments to stack node")
+    unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in tensors]
+    return g.op("Concat", *unsqueezed, axis_i=dim)
 
 
 def split(g, self, split_size, dim):
