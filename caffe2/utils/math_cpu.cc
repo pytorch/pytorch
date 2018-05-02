@@ -974,7 +974,10 @@ void ReduceMeanImpl(
       CPUContext* context) {                                         \
     ReduceMinImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
   }
+CAFFE2_SPECIALIZED_REDUCE_MIN(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_MIN(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_MIN(float)
+CAFFE2_SPECIALIZED_REDUCE_MIN(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MIN
 
 #define CAFFE2_SPECIALIZED_REDUCE_MAX(T)                             \
@@ -989,7 +992,10 @@ CAFFE2_SPECIALIZED_REDUCE_MIN(float)
       CPUContext* context) {                                         \
     ReduceMaxImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
   }
+CAFFE2_SPECIALIZED_REDUCE_MAX(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_MAX(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_MAX(float)
+CAFFE2_SPECIALIZED_REDUCE_MAX(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MAX
 
 #define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                             \
@@ -1004,7 +1010,10 @@ CAFFE2_SPECIALIZED_REDUCE_MAX(float)
       CPUContext* context) {                                         \
     ReduceSumImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
   }
+CAFFE2_SPECIALIZED_REDUCE_SUM(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_SUM(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_SUM(float)
+CAFFE2_SPECIALIZED_REDUCE_SUM(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_SUM
 
 #define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                             \
@@ -1065,7 +1074,10 @@ void BroadcastImpl(
       CPUContext* /* context */) {                          \
     BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, X, Y); \
   }
+CAFFE2_SPECIALIZED_BROADCAST(std::int32_t)
+CAFFE2_SPECIALIZED_BROADCAST(std::int64_t)
 CAFFE2_SPECIALIZED_BROADCAST(float)
+CAFFE2_SPECIALIZED_BROADCAST(double)
 #undef CAFFE2_SPECIALIZED_BROADCAST
 
 namespace {

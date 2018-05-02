@@ -2433,7 +2433,10 @@ void ReduceMeanCUDAImpl(
         Y,                                    \
         context);                             \
   }
+CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(std::int32_t)
+CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(std::int64_t)
 CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(float)
+CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(double)
 #undef CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN
 
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(T) \
@@ -2457,7 +2460,10 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(float)
         Y,                                    \
         context);                             \
   }
+CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(std::int32_t)
+CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(std::int64_t)
 CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(float)
+CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(double)
 #undef CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX
 
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(T)                             \
@@ -2473,7 +2479,10 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(float)
     ReduceTensorCUDA(                                                     \
         num_dims, dims, num_axes, axes, cub::Sum(), T(0), X, Y, context); \
   }
+CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(std::int32_t)
+CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(std::int64_t)
 CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(float)
+CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(double)
 #undef CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM
 
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_MEAN(T)                            \
@@ -2611,7 +2620,10 @@ void BroadcastCUDA(
         Y_ndim, kCUDABroadcastMaxDims, "Y_ndim exceeds compile time max."); \
     BroadcastCUDA<T>(X_ndim, X_dims, Y_ndim, Y_dims, X, Y, context);        \
   }
+CAFFE2_SPECIALIZED_CUDA_BROADCAST(std::int32_t)
+CAFFE2_SPECIALIZED_CUDA_BROADCAST(std::int64_t)
 CAFFE2_SPECIALIZED_CUDA_BROADCAST(float)
+CAFFE2_SPECIALIZED_CUDA_BROADCAST(double)
 #undef CAFFE2_SPECIALIZED_CUDA_BROADCAST
 
 namespace {
