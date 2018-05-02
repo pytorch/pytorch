@@ -43,16 +43,7 @@
 #include <process.h>
 #endif
 
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-#include "unsupported/Eigen/CXX11/Tensor"
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
 namespace caffe2 {
-
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-template <typename T, int D>
-using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D>>;
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
 namespace math {
 
@@ -700,108 +691,6 @@ int GetIndexFromDims(const int n, const int* dims, const int* index) {
 } // namespace internal
 
 namespace {
-
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
-template <typename T, class Reducer, int kNumDims, int kNumAxes>
-void EigenReduceTensorImpl(
-    const int* dims,
-    const int* axes,
-    const Reducer& reducer,
-    const T* X,
-    T* Y) {
-  Eigen::DSizes<Eigen::DenseIndex, kNumDims> X_dims;
-  Eigen::DSizes<Eigen::DenseIndex, kNumDims> Y_dims;
-  Eigen::array<Eigen::DenseIndex, kNumAxes> reduce_dims;
-  for (int i = 0; i < kNumDims; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
-  }
-  for (int i = 0; i < kNumAxes; ++i) {
-    Y_dims[kNumDims - 1 - axes[i]] = static_cast<Eigen::DenseIndex>(1);
-    reduce_dims[kNumAxes - 1 - i] =
-        static_cast<Eigen::DenseIndex>(kNumDims - 1 - axes[i]);
-  }
-  EigenTensorMap<T, kNumDims>(Y, Y_dims) =
-      EigenTensorMap<T, kNumDims>(const_cast<T*>(X), X_dims)
-          .reduce(reduce_dims, reducer);
-}
-
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
-template <typename T, class Reducer>
-bool EigenReduceTensor(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const Reducer& reducer,
-    const T* X,
-    T* Y) {
-  switch (num_dims) {
-    case 1: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 1, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 2: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 2, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 2, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 3: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 3, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 3, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 3: {
-          EigenReduceTensorImpl<T, Reducer, 3, 3>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 4: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 4, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 4, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 3: {
-          EigenReduceTensorImpl<T, Reducer, 4, 3>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 4: {
-          EigenReduceTensorImpl<T, Reducer, 4, 4>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    default: { return false; }
-  }
-}
 
 template <typename T, class Reducer>
 void ReduceTensor(
@@ -1988,68 +1877,6 @@ void TransposeCPUImpl(
     }
     internal::IncreaseIndexInDims(itr_axes, Y_dims.data(), index.data());
   }
-}
-
-template <typename T, int D>
-void EigenTransposeImpl(const int* dims, const int* axes, const T* X, T* Y) {
-  Eigen::DSizes<Eigen::DenseIndex, D> X_dims;
-  Eigen::DSizes<Eigen::DenseIndex, D> Y_dims;
-  Eigen::array<Eigen::DenseIndex, D> axes_array;
-#pragma unroll
-  for (int i = 0; i < D; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - axes[i]]);
-    axes_array[D - 1 - i] = static_cast<Eigen::DenseIndex>(D - 1 - axes[i]);
-  }
-  EigenTensorMap<T, D>(Y, Y_dims) =
-      EigenTensorMap<T, D>(const_cast<T*>(X), X_dims).shuffle(axes_array);
-}
-
-template <typename T>
-bool EigenTranspose(
-    const int ndim,
-    const int* dims,
-    const int* axes,
-    const T* X,
-    T* Y) {
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  switch (ndim) {
-    case 1: {
-      EigenTransposeImpl<T, 1>(dims, axes, X, Y);
-      return true;
-    }
-    case 2: {
-      EigenTransposeImpl<T, 2>(dims, axes, X, Y);
-      return true;
-    }
-    case 3: {
-      EigenTransposeImpl<T, 3>(dims, axes, X, Y);
-      return true;
-    }
-    case 4: {
-      EigenTransposeImpl<T, 4>(dims, axes, X, Y);
-      return true;
-    }
-    case 5: {
-      EigenTransposeImpl<T, 5>(dims, axes, X, Y);
-      return true;
-    }
-    case 6: {
-      EigenTransposeImpl<T, 6>(dims, axes, X, Y);
-      return true;
-    }
-    case 7: {
-      EigenTransposeImpl<T, 7>(dims, axes, X, Y);
-      return true;
-    }
-    case 8: {
-      EigenTransposeImpl<T, 8>(dims, axes, X, Y);
-      return true;
-    }
-    default: { return false; }
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  return false;
 }
 
 } // namespace

@@ -4,13 +4,12 @@
 #include <functional>
 #include <vector>
 
+#include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 
 namespace caffe2 {
 
 namespace {
-
-constexpr int kCUDAReduceGradientMaxDims = 8;
 
 template <typename T, int D>
 __global__ void ComputeReduceMinMaxGradientCUDAKernel(
@@ -75,109 +74,6 @@ void ComputeReduceMinMaxGradientCUDAImpl(
           dX_data);
 }
 
-template <typename T>
-void ComputeReduceMinMaxGradientCUDA(
-    const std::vector<int>& dY_dims,
-    const std::vector<int>& dX_dims,
-    const T* dY_data,
-    const T* X_data,
-    const T* Y_data,
-    T* dX_data,
-    CUDAContext* context) {
-  const int ndim = dY_dims.size();
-  switch (ndim) {
-    case 1: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 1>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 2: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 2>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 3: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 3>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 4: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 4>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 5: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 5>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 6: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 6>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 7: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 7>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 8: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 8>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    default: { break; }
-  }
-}
-
 } // namespace
 
 template <>
@@ -190,9 +86,18 @@ bool MinReducer<CUDAContext>::Backward(
     const T* Y_data,
     T* dX_data,
     CUDAContext* context) const {
-  CAFFE_ENFORCE_LE(dY_dims.size(), kCUDAReduceGradientMaxDims);
-  ComputeReduceMinMaxGradientCUDA(
-      dY_dims, dX_dims, dY_data, X_data, Y_data, dX_data, context);
+  const int ndim = dY_dims.size();
+  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
+      ndim,
+      ComputeReduceMinMaxGradientCUDAImpl,
+      T,
+      dY_dims.data(),
+      dX_dims.data(),
+      dY_data,
+      X_data,
+      Y_data,
+      dX_data,
+      context);
   return true;
 }
 
@@ -206,9 +111,18 @@ bool MaxReducer<CUDAContext>::Backward(
     const T* Y_data,
     T* dX_data,
     CUDAContext* context) const {
-  CAFFE_ENFORCE_LE(dY_dims.size(), kCUDAReduceGradientMaxDims);
-  ComputeReduceMinMaxGradientCUDA(
-      dY_dims, dX_dims, dY_data, X_data, Y_data, dX_data, context);
+  const int ndim = dY_dims.size();
+  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
+      ndim,
+      ComputeReduceMinMaxGradientCUDAImpl,
+      T,
+      dY_dims.data(),
+      dX_dims.data(),
+      dY_data,
+      X_data,
+      Y_data,
+      dX_data,
+      context);
   return true;
 }
 
