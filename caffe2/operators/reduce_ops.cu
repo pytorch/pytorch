@@ -4,13 +4,12 @@
 #include <functional>
 #include <vector>
 
+#include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 
 namespace caffe2 {
 
 namespace {
-
-constexpr int kCUDAReduceGradientMaxDims = 8;
 
 template <typename T, int D>
 __global__ void ComputeReduceMinMaxGradientCUDAKernel(
@@ -75,153 +74,105 @@ void ComputeReduceMinMaxGradientCUDAImpl(
           dX_data);
 }
 
+} // namespace
+
+template <>
 template <typename T>
-void ComputeReduceMinMaxGradientCUDA(
+bool MinReducer<CUDAContext>::Backward(
     const std::vector<int>& dY_dims,
     const std::vector<int>& dX_dims,
     const T* dY_data,
     const T* X_data,
     const T* Y_data,
     T* dX_data,
-    CUDAContext* context) {
+    CUDAContext* context) const {
   const int ndim = dY_dims.size();
-  switch (ndim) {
-    case 1: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 1>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 2: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 2>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 3: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 3>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 4: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 4>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 5: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 5>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 6: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 6>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 7: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 7>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    case 8: {
-      ComputeReduceMinMaxGradientCUDAImpl<T, 8>(
-          dY_dims.data(),
-          dX_dims.data(),
-          dY_data,
-          X_data,
-          Y_data,
-          dX_data,
-          context);
-      break;
-    }
-    default: { break; }
-  }
+  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
+      ndim,
+      ComputeReduceMinMaxGradientCUDAImpl,
+      T,
+      dY_dims.data(),
+      dX_dims.data(),
+      dY_data,
+      X_data,
+      Y_data,
+      dX_data,
+      context);
+  return true;
 }
 
-} // namespace
+template <>
+template <typename T>
+bool MaxReducer<CUDAContext>::Backward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& dX_dims,
+    const T* dY_data,
+    const T* X_data,
+    const T* Y_data,
+    T* dX_data,
+    CUDAContext* context) const {
+  const int ndim = dY_dims.size();
+  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
+      ndim,
+      ComputeReduceMinMaxGradientCUDAImpl,
+      T,
+      dY_dims.data(),
+      dX_dims.data(),
+      dY_data,
+      X_data,
+      Y_data,
+      dX_data,
+      context);
+  return true;
+}
 
-template <typename T, typename Context>
-class ReduceMinMaxGradientCudaOp final
-    : public ReduceGradientOpBase<T, Context> {
- public:
-  USE_OPERATOR_FUNCTIONS(Context);
-
-  ReduceMinMaxGradientCudaOp(const OperatorDef& operator_def, Workspace* ws)
-      : ReduceGradientOpBase<T, Context>(operator_def, ws) {}
-
- protected:
-  bool Compute(
-      const std::vector<int>& dY_dims,
-      const std::vector<int>& dX_dims,
-      const T* dY_data,
-      const T* X_data,
-      const T* Y_data,
-      T* dX_data) override {
-    CAFFE_ENFORCE_LE(dY_dims.size(), kCUDAReduceGradientMaxDims);
-    ComputeReduceMinMaxGradientCUDA(
-        dY_dims, dX_dims, dY_data, X_data, Y_data, dX_data, &context_);
-    return true;
-  }
-};
-
-REGISTER_CUDA_OPERATOR(ReduceMin, ReduceMinOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ReduceMin,
+    ReduceOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CUDAContext,
+        MinReducer<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     ReduceMinGradient,
-    ReduceMinMaxGradientCudaOp<float, CUDAContext>);
+    ReduceGradientOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CUDAContext,
+        MinReducer<CUDAContext>>);
 
-REGISTER_CUDA_OPERATOR(ReduceMax, ReduceMaxOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ReduceMax,
+    ReduceOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CUDAContext,
+        MaxReducer<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     ReduceMaxGradient,
-    ReduceMinMaxGradientCudaOp<float, CUDAContext>);
+    ReduceGradientOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CUDAContext,
+        MaxReducer<CUDAContext>>);
 
-REGISTER_CUDA_OPERATOR(ReduceSum, ReduceSumOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ReduceSum,
+    ReduceOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CUDAContext,
+        SumReducer<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     ReduceSumGradient,
-    ReduceSumGradientOp<float, CUDAContext>);
+    ReduceGradientOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CUDAContext,
+        SumReducer<CUDAContext>>);
 
-REGISTER_CUDA_OPERATOR(ReduceMean, ReduceMeanOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ReduceMean,
+    ReduceOp<TensorTypes<float>, CUDAContext, MeanReducer<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     ReduceMeanGradient,
-    ReduceMeanGradientOp<float, CUDAContext>);
+    ReduceGradientOp<
+        TensorTypes<float>,
+        CUDAContext,
+        MeanReducer<CUDAContext>>);
 
 } // namespace caffe2

@@ -33,33 +33,48 @@ void ComputeReduceMinMaxGradient(
 
 } // namespace
 
+template <>
 template <typename T>
-class ReduceMinMaxGradientOp<T, CPUContext> final
-    : public ReduceGradientOpBase<T, CPUContext> {
- public:
-  USE_OPERATOR_FUNCTIONS(CPUContext);
+bool MinReducer<CPUContext>::Backward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& dX_dims,
+    const T* dY_data,
+    const T* X_data,
+    const T* Y_data,
+    T* dX_data,
+    CPUContext* /* context */) const {
+  ComputeReduceMinMaxGradient(
+      dY_dims, dX_dims, dY_data, X_data, Y_data, dX_data);
+  return true;
+}
 
-  ReduceMinMaxGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ReduceGradientOpBase<T, CPUContext>(operator_def, ws) {}
+template <>
+template <typename T>
+bool MaxReducer<CPUContext>::Backward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& dX_dims,
+    const T* dY_data,
+    const T* X_data,
+    const T* Y_data,
+    T* dX_data,
+    CPUContext* /* context */) const {
+  ComputeReduceMinMaxGradient(
+      dY_dims, dX_dims, dY_data, X_data, Y_data, dX_data);
+  return true;
+}
 
- protected:
-  bool Compute(
-      const std::vector<int>& dY_dims,
-      const std::vector<int>& dX_dims,
-      const T* dY_data,
-      const T* X_data,
-      const T* Y_data,
-      T* dX_data) override {
-    ComputeReduceMinMaxGradient(
-        dY_dims, dX_dims, dY_data, X_data, Y_data, dX_data);
-    return true;
-  }
-};
-
-REGISTER_CPU_OPERATOR(ReduceMin, ReduceMinOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    ReduceMin,
+    ReduceOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CPUContext,
+        MinReducer<CPUContext>>);
 REGISTER_CPU_OPERATOR(
     ReduceMinGradient,
-    ReduceMinMaxGradientOp<float, CPUContext>);
+    ReduceGradientOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CPUContext,
+        MinReducer<CPUContext>>);
 
 OPERATOR_SCHEMA(ReduceMin)
     .NumInputs(1)
@@ -80,10 +95,18 @@ OPERATOR_SCHEMA(ReduceMin)
 
 OPERATOR_SCHEMA(ReduceMinGradient).NumInputs(3).NumOutputs(1);
 
-REGISTER_CPU_OPERATOR(ReduceMax, ReduceMaxOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    ReduceMax,
+    ReduceOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CPUContext,
+        MaxReducer<CPUContext>>);
 REGISTER_CPU_OPERATOR(
     ReduceMaxGradient,
-    ReduceMinMaxGradientOp<float, CPUContext>);
+    ReduceGradientOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CPUContext,
+        MaxReducer<CPUContext>>);
 
 OPERATOR_SCHEMA(ReduceMax)
     .NumInputs(1)
@@ -104,10 +127,18 @@ OPERATOR_SCHEMA(ReduceMax)
 
 OPERATOR_SCHEMA(ReduceMaxGradient).NumInputs(3).NumOutputs(1);
 
-REGISTER_CPU_OPERATOR(ReduceSum, ReduceSumOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    ReduceSum,
+    ReduceOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CPUContext,
+        SumReducer<CPUContext>>);
 REGISTER_CPU_OPERATOR(
     ReduceSumGradient,
-    ReduceSumGradientOp<float, CPUContext>);
+    ReduceGradientOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CPUContext,
+        SumReducer<CPUContext>>);
 
 OPERATOR_SCHEMA(ReduceSum)
     .NumInputs(1)
@@ -128,10 +159,12 @@ OPERATOR_SCHEMA(ReduceSum)
 
 OPERATOR_SCHEMA(ReduceSumGradient).NumInputs(3).NumOutputs(1);
 
-REGISTER_CPU_OPERATOR(ReduceMean, ReduceMeanOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    ReduceMean,
+    ReduceOp<TensorTypes<float>, CPUContext, MeanReducer<CPUContext>>);
 REGISTER_CPU_OPERATOR(
     ReduceMeanGradient,
-    ReduceMeanGradientOp<float, CPUContext>);
+    ReduceGradientOp<TensorTypes<float>, CPUContext, MeanReducer<CPUContext>>);
 
 OPERATOR_SCHEMA(ReduceMean)
     .NumInputs(1)

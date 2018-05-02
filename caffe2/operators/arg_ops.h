@@ -11,17 +11,24 @@
 
 namespace caffe2 {
 
-template <typename T, class Context>
-class ArgOpBase : public Operator<Context> {
+template <class Context, class Reducer>
+class ArgOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  ArgOpBase(const OperatorDef& operator_def, Workspace* ws)
+  ArgOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
         OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
 
   bool RunOnDevice() override {
+    return DispatchHelper<
+        TensorTypes<std::int32_t, std::int64_t, float, double>>::
+        call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
     const int ndim = X.ndim();
@@ -48,59 +55,43 @@ class ArgOpBase : public Operator<Context> {
     }
     Y->Resize(Y_dims);
     const TIndex n = X_dims[axis_];
-    return Compute(
-        X.template data<T>(),
+    return reducer_(
         prev_size,
         next_size,
         n,
-        Y->template mutable_data<TIndex>());
+        X.template data<T>(),
+        Y->template mutable_data<TIndex>(),
+        &context_);
   }
-
- protected:
-  virtual bool Compute(
-      const T* X,
-      const TIndex prev_size,
-      const TIndex next_size,
-      const TIndex n,
-      TIndex* Y) = 0;
 
  private:
   int axis_;
   const bool keep_dims_;
+  Reducer reducer_{};
 };
 
-template <typename T, class Context>
-class ArgMaxOp final : public ArgOpBase<T, Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-
-  ArgMaxOp(const OperatorDef& operator_def, Workspace* ws)
-      : ArgOpBase<T, Context>(operator_def, ws) {}
-
- protected:
-  bool Compute(
-      const T* X,
+template <class Context>
+struct ArgMaxReducer {
+  template <typename T>
+  bool operator()(
       const TIndex prev_size,
       const TIndex next_size,
       const TIndex n,
-      TIndex* Y) override;
+      const T* X,
+      TIndex* Y,
+      Context* context) const;
 };
 
-template <typename T, class Context>
-class ArgMinOp final : public ArgOpBase<T, Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-
-  ArgMinOp(const OperatorDef& operator_def, Workspace* ws)
-      : ArgOpBase<T, Context>(operator_def, ws) {}
-
- protected:
-  bool Compute(
-      const T* X,
+template <class Context>
+struct ArgMinReducer {
+  template <typename T>
+  bool operator()(
       const TIndex prev_size,
       const TIndex next_size,
       const TIndex n,
-      TIndex* Y) override;
+      const T* X,
+      TIndex* Y,
+      Context* context) const;
 };
 
 } // namespace caffe2
