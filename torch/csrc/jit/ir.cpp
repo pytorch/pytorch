@@ -666,4 +666,39 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
+inline Value* Value::setUniqueName(const std::string & name) {
+  if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
+    throw std::runtime_error("names may not be integers: " + name);
+  }
+
+  auto & names = node()->owningGraph()->unique_names_;
+
+  // clear any old name from the map
+  if(hasUniqueName()) {
+    names.erase(unique_name_);
+    unique_name_ = "";
+  }
+
+  // allow "" to clear the uniquename
+  if(name == "")
+    return this;
+
+  // if someone else has this name, then rename the other value
+  auto old_owner_of_name = names.find(name);
+  if(old_owner_of_name != names.end()) {
+    size_t suffix = 1;
+    std::string replacement_name;
+    do {
+      std::stringstream ss;
+      ss << name << "." << suffix++;
+      replacement_name = ss.str();
+    } while(names.count(replacement_name) > 0);
+    old_owner_of_name->second->setUniqueName(replacement_name);
+  }
+
+  names[name] = this;
+  unique_name_ = name;
+  return this;
+}
+
 }} // namespace torch::jit
