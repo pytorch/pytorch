@@ -208,7 +208,9 @@ int main(int argc, char** argv) {
         : caffe2::FLAGS_backend == "eigen" ? "EIGEN"
                                            : caffe2::FLAGS_backend == "mkl"
                 ? "MKLDNN"
-                : caffe2::FLAGS_backend == "default" ? "" : "NONE";
+                : caffe2::FLAGS_backend == "dnnlowp"
+                    ? "DNNLOWP"
+                    : caffe2::FLAGS_backend == "default" ? "" : "NONE";
     CAFFE_ENFORCE(engine != "NONE", "Backend is not supported");
     for (int i = 0; i < net_def.op_size(); i++) {
       caffe2::OperatorDef* op_def = net_def.mutable_op(i);
