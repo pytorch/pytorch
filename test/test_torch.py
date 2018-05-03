@@ -1010,14 +1010,14 @@ class TestTorch(TestCase):
             x = torch.randn(100).mul(10).to(dtype)
             y = x // 3
             self.assertEqual(y.dtype, x.dtype)
-            z = torch.tensor([math.trunc(v.item() / 3) for v in x], dtype=y.dtype)
+            z = torch.tensor([math.trunc(v.item() / 3.) for v in x], dtype=y.dtype)
             self.assertEqual(y, z)
 
     def test_rdiv(self):
         for dtype in torch.testing.get_all_dtypes():
             if dtype is torch.float16:
                 continue
-            x = torch.rand(10).add(1).mul(4).to(dtype)
+            x = torch.rand(100).add(1).mul(4).to(dtype)
             y = 30 / x
             if dtype.is_floating_point:
                 z = torch.tensor([30 / v.item() for v in x], dtype=dtype)
