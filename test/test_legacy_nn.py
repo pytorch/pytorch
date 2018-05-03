@@ -6,10 +6,10 @@ from copy import deepcopy
 
 import torch
 import torch.legacy.nn as nn
+from common import to_gpu, freeze_rng_state, run_tests, TEST_CUDA
 from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
-    module_tests, criterion_tests, TEST_CUDA, PRECISION
+    module_tests, criterion_tests, PRECISION
 from torch.autograd.gradcheck import get_numerical_jacobian
-from common import to_gpu, freeze_rng_state, run_tests
 from torch.autograd import Variable
 
 

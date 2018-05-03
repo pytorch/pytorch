@@ -26,12 +26,13 @@ from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
-from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
-    module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, \
-    smoothl1loss_reference, kldivloss_reference
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
-    TEST_SCIPY, download_file, PY3, PY34, to_gpu, get_function_arglist
+    TEST_SCIPY, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION, \
+    download_file, PY3, PY34, to_gpu, get_function_arglist, \
+    make_cuda_memory_checked_test
+from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
+    module_tests, criterion_tests, loss_reference_fns, get_size_average, \
+    get_weight, smoothl1loss_reference, kldivloss_reference
 
 if TEST_SCIPY:
     from scipy import stats
@@ -7376,4 +7377,16 @@ add_test(NewModuleTest(
     check_gradgrad=False,))
 
 if __name__ == '__main__':
+    # wrap all CUDA tests in with CUDA memory check
+    def load_tests(loader, tests, pattern):
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                if '_cuda' in test.id().lower():
+                    # add memory checks
+                    test_suite.addTest(make_cuda_memory_checked_test(test))
+                else:
+                    test_suite.addTest(test)
+        return test_suite
+
     run_tests()

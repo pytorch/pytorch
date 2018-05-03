@@ -2,6 +2,7 @@ import sys
 import os
 import platform
 import re
+import gc
 import inspect
 import argparse
 import unittest
@@ -59,6 +60,11 @@ except ImportError:
     TEST_SCIPY = False
 
 TEST_MKL = torch.backends.mkl.is_available()
+
+TEST_CUDA = torch.cuda.is_available()
+TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
+TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.cuda.FloatTensor(1))
+TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 
 
 def skipIfNoLapack(fn):
@@ -122,6 +128,34 @@ def set_rng_seed(seed):
     random.seed(seed)
     if TEST_NUMPY:
         numpy.random.seed(seed)
+
+# Used below in `make_cuda_memory_checked_test` to test if it has initialized
+# CUDA context and RNG.
+_cuda_ctx_rng_initialized = False
+
+
+# `test` must be a unittest.TestCase. This returns a wrapper function around
+# `test` so that it checks CUDA memory usage stays the same before and after
+# operations in `test`.
+def make_cuda_memory_checked_test(test):
+    global _cuda_ctx_rng_initialized
+    if TEST_CUDA and not _cuda_ctx_rng_initialized:
+        # initialize cuda context and rng for memory tests
+        torch.randn(1, device="cuda")
+        _cuda_ctx_rng_initialized = True
+
+    def cuda_memory_checked_test(*args, **kwargs):
+        torch.cuda.synchronize()
+        gc.collect()
+        start = torch.cuda.memory_allocated()
+        test(*args, **kwargs)
+        torch.cuda.synchronize()
+        gc.collect()
+        end = torch.cuda.memory_allocated()
+        test.assertEqual(start, end, '{} leaked {} bytes GPU memory'.format(
+                         test, end - start))
+
+    return cuda_memory_checked_test
 
 
 @contextlib.contextmanager

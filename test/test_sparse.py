@@ -4,8 +4,7 @@ from torch import sparse
 import itertools
 import random
 import unittest
-from common import TestCase, run_tests
-from common_nn import TEST_CUDA
+from common import TEST_CUDA, TestCase, run_tests
 from test_torch import TestTorch
 from numbers import Number
 
