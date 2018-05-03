@@ -360,7 +360,7 @@ def sparse_(tensor, sparsity, std=0.01):
         raise ValueError("Only tensors with 2 dimensions are supported")
 
     rows, cols = tensor.shape
-    num_zeros = int(math.ceil(rows * sparsity))
+    num_zeros = int(math.ceil(sparsity * rows))
 
     with torch.no_grad():
         tensor.normal_(0, std)
