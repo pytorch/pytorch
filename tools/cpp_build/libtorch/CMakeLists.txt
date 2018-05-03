@@ -256,7 +256,7 @@ target_include_directories(torch
   "${ATEN_INCLUDE_DIR}/TH"
   "${ATEN_BUILD_INCLUDE_DIR}"
   "${ATEN_BUILD_PATH}/src/TH"
-  "${TORCH_SRC_DIR}/../"
+  "${TORCH_SRC_DIR}/.."
   "${CMAKE_CURRENT_SOURCE_DIR}")
 
 if (NOT NO_API)

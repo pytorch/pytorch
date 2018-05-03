@@ -1,4 +1,4 @@
-#include <torch/torch.h>
+#include <torch/python.h>
 
 struct Doubler {
   Doubler(int A, int B) {
