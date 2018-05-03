@@ -159,6 +159,10 @@ def div(g, self, other):
     return g.op("Div", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
 
 
+def reciprocal(g, self):
+    return g.op("Div", _if_scalar_type_as(torch.ones(1), self), self, broadcast_i=1)
+
+
 # This syntax is Python 2 portable
 def cat(g, *tensors, **kwargs):
     dim = kwargs.pop("dim")
@@ -600,8 +604,8 @@ def type_as(g, self, other):
         # no-op
         return self
     else:
-        # TODO: This should be pretty easy, just implement it with Cast
-        return _unimplemented("type_as", "non no-op application")
+        other_type_name = self.type().scalarType().lower()
+        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
 
 
 # ignore clone operators that are inserted by PyTorch autograd
