@@ -154,7 +154,8 @@ std::vector<at::Type*> VariableType::allTypes() {
   res.reserve(static_cast<int>(Backend::NumOptions) * static_cast<int>(ScalarType::NumOptions));
   for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      res.emplace_back(context.type_registry[static_cast<int>(at::IsVariable::Variable)][p][s].get());
+      auto* r = context.type_registry[static_cast<int>(at::IsVariable::Variable)][p][s].get();
+      if (r) res.emplace_back(r);
     }
   }
   return res;
