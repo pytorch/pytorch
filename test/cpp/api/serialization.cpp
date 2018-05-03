@@ -1,6 +1,6 @@
 #include <catch.hpp>
 
-#include <torch/python.h>
+#include <torch/torch.h>
 
 #include "cereal/archives/portable_binary.hpp"
 
