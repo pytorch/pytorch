@@ -5227,7 +5227,7 @@ class TestNNInit(TestCase):
 
                 for col_idx in range(input_tensor.size(1)):
                     column = input_tensor[:, col_idx]
-                    assert column[column == 0].nelement() >= math.ceil(sparsity * cols)
+                    assert column[column == 0].nelement() >= math.ceil(sparsity * rows)
 
                 assert self._is_normal(input_tensor[input_tensor != 0], 0, std)
 
