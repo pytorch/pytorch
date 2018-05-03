@@ -602,6 +602,10 @@ void RNNBase<Derived>::cpu() {
   flatten_parameters();
 }
 
+template class RNNBase<LSTM>;
+template class RNNBase<GRU>;
+template class RNNBase<RNN>;
+
 variable_list Dropout::forward(variable_list inputs) {
   if (p_ == 0 || !this->train_)
     return inputs;

@@ -10,6 +10,7 @@
 namespace autograd {
 class ContainerImpl {
  public:
+  virtual ~ContainerImpl() = default;
   // Only construct parameters in initialize_parameters, and
   // containers in initialize_containers. Most of the time, the containers are
   // the only thing you need to add.
@@ -408,8 +409,6 @@ class RNNBase : public Container_CRTP<Derived> {
 };
 
 // We must instantiate these templates so we can put implementations in the .cpp
-class LSTM;
-template class RNNBase<LSTM>;
 class LSTM : public RNNBase<LSTM> {
  public:
   LSTM(uint32_t inp_size, uint32_t hid_size) : RNNBase(inp_size, hid_size) {
@@ -417,8 +416,6 @@ class LSTM : public RNNBase<LSTM> {
   }
 };
 
-class GRU;
-template class RNNBase<GRU>;
 class GRU : public RNNBase<GRU> {
  public:
   GRU(uint32_t inp_size, uint32_t hid_size) : RNNBase(inp_size, hid_size) {
@@ -426,8 +423,6 @@ class GRU : public RNNBase<GRU> {
   }
 };
 
-class RNN;
-template class RNNBase<RNN>;
 class RNN : public RNNBase<RNN> {
  public:
   enum Mode { Tanh, Relu };
