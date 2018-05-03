@@ -63,12 +63,15 @@ class IDEEPFallbackOp final : public IDEEPOperator {
 
   bool RunOnDevice() override {
     for (int i = 0; i < InputSize(); ++i) {
-      if (InputIsType<itensor>(i) && Input(i).get_data_type() == itensor::data_type::f32) {
-        itensor::dims src_dims = Input(i).get_dims();
-        vector<TIndex> dst_dims (src_dims.begin(), src_dims.end());
+      auto& input = Input(i);
+      if (InputIsType<itensor>(i) && input.get_data_type() == itensor::data_type::f32) {
         auto dtensor = local_input_blobs_[i]->template GetMutable<TensorCPU>();
-        dtensor->Resize(dst_dims);
-        Input(i).reorder_to(dtensor->template mutable_data<float>());
+        dtensor->Resize(input.get_dims());
+        if (input.is_public_format()) {
+          dtensor->ShareExternalPointer(static_cast<float*>(input.get_data_handle()));
+        } else {
+          input.reorder_to(dtensor->template mutable_data<float>());
+        }
       } else {
         VLOG(1) << "Input " << i << " is not ideep::tensor. Skipping copy.";
         // Note(jiayq): This removes a const but conceptually
