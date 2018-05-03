@@ -373,7 +373,7 @@ TARGET_LINK_LIBRARIES(ATen cpuinfo)
 # ---[ Configure SLEEF
 IF(NOT TARGET sleef)
   add_subdirectory("cpu/sleef")
-  include_directories(${CMAKE_BINARY_DIR}/include)
+  include_directories(SYSTEM ${CMAKE_BINARY_DIR}/include)
 ENDIF()
 TARGET_LINK_LIBRARIES(ATen sleef)
 
