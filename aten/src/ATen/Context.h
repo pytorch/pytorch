@@ -64,7 +64,7 @@ public:
   }
 
   THCState* getTHCState() {
-    AT_ASSERT(thc_state);
+    // AT_ASSERT(thc_state);
     return thc_state.get();
   }
 
