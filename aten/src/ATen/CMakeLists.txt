@@ -128,11 +128,6 @@ function(filter_list output input)
 endfunction()
 
 
-IF ($ENV{TH_BINARY_BUILD})
-  MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
-  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
-ENDIF()
-
 # Can be compiled standalone
 IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DIR OR NOT AT_INSTALL_SHARE_DIR)
   SET(AT_INSTALL_BIN_DIR "bin" CACHE PATH "AT install binary subdirectory")
