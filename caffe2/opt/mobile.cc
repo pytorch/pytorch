@@ -150,16 +150,38 @@ caffe2::NetDef fuseNNPACKConvRelu(caffe2::NetDef net) {
     auto relu_output = relu_outputs.front();
 
     auto output_tensor = repr::nn::get<repr::Tensor>(relu_output);
+    auto output_node = relu_output;
     auto input_tensor = repr::nn::get<repr::Tensor>(repr::nn::getInputs(conv_node).front());
 
+    // Conv cannot be in-place
     if (output_tensor->getName() != input_tensor->getName()) {
       nn.dataFlow.replaceNode(conv_output, relu_output);
       nn.dataFlow.deleteNode(relu_node);
       nn.dataFlow.deleteNode(conv_output);
     } else {
       nn.dataFlow.replaceNode(relu_output, conv_output);
+      output_tensor = repr::nn::get<repr::Tensor>(conv_output);
+      output_node = conv_output;
       nn.dataFlow.deleteNode(relu_node);
       nn.dataFlow.deleteNode(relu_output);
+    }
+
+    // We may have accidentally made the next op in-place
+    // In future iterations of transformations this won't be an issue,
+    // but current caffe2 predictor usage requires things like 
+    // external_input and output to be unchanged.
+    bool rectify_inplace = false;
+    for (auto& consumer : repr::nn::getConsumers(output_node)) {
+      for (auto& consumer_output : repr::nn::getOutputs(consumer)) {
+        auto co_name = repr::nn::get<repr::Tensor>(consumer_output)->getName();
+        if (co_name == output_tensor->getName()) {
+          rectify_inplace = true;
+        }
+      }
+    }
+    if (rectify_inplace) {
+      auto new_output = nn.dataFlow.createNode(make_unique<repr::Tensor>(output_tensor->getName() + "_fusion_fix"));
+      nn.dataFlow.replaceNode(output_node, new_output);
     }
 
     auto* arg = op->add_arg();
