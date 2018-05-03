@@ -4094,7 +4094,8 @@ Example::
 .. function:: sum(input, dim, keepdim=False, out=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`.
+dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
+reduce over all of them.
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
@@ -4103,7 +4104,7 @@ the output tensor having 1 fewer dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
+    dim (int or tuple of ints): the dimension or dimensions to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
     out (Tensor, optional): the output tensor
 
@@ -4117,6 +4118,9 @@ Example::
             [ 0.3637, -0.9906, -0.4752, -1.5197]])
     >>> torch.sum(a, 1)
     tensor([-0.4598, -0.1381,  1.3708, -2.6217])
+    >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
+    >>> torch.sum(b, (2, 1))
+    tensor([  435.,  1335.,  2235.,  3135.])
 """)
 
 add_docstr(torch.svd,

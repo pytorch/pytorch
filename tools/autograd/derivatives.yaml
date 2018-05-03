@@ -610,7 +610,7 @@
 - name: _sum(Tensor self)
   self: grad.expand(self.sizes())
 
-- name: _sum(Tensor self, int64_t dim, bool keepdim)
+- name: _sum(Tensor self, IntList dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: svd(Tensor self, bool some)

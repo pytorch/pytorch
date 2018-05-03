@@ -875,28 +875,25 @@
     CPU: _sum_cpu
     CUDA: _sum_cuda
 
-- func: sum(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+- func: sum(Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
 
-- func: sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: sum(Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
 
-- func: sum(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: sum(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
 
-- func: _sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: _sum(Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
 
-- func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+- func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function
 
-- func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
   variants: function
 
-- func: sum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: sum_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
   variants: function
 
-- func: _sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: _sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
   variants: function
-  dispatch:
-    CPU: _sum_out_cpu
-    CUDA: _sum_out_cuda
 
 - func: sqrt(Tensor self) -> Tensor
 
