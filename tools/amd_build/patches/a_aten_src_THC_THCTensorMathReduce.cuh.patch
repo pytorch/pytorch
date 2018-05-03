@@ -1,0 +1,31 @@
+diff --git a/aten/src/THC/THCTensorMathReduce.cuh b/aten/src/THC/THCTensorMathReduce.cuh
+index b5282d97e..b21f25fc4 100644
+--- a/aten/src/THC/THCTensorMathReduce.cuh
++++ b/aten/src/THC/THCTensorMathReduce.cuh
+@@ -105,14 +105,24 @@ struct SquareFunctor<ResT, half> {
+ template <typename T>
+ struct ReduceMin {
+   inline __device__ T operator()(T a, T b) const {
+-    return THCNumerics<T>::lt(a, b) ? a : b;
++    #if defined(__HIP_PLATFORM_HCC__)
++       T diff = THCNumerics<T>::sub(a, b);
++       return (diff < 0 ) ? a : b;
++    #else
++      return THCNumerics<T>::lt(a, b) ? a : b;
++    #endif
+   }
+ };
+ 
+ template <typename T>
+ struct ReduceMax {
+   inline __device__ T operator()(T a, T b) const {
+-    return THCNumerics<T>::gt(a, b) ? a : b;
++    #if defined(__HIP_PLATFORM_HCC__)
++       T diff = THCNumerics<T>::sub(a, b);
++       return (diff > 0 ) ? a : b;
++    #else
++      return THCNumerics<T>::gt(a, b) ? a : b;
++    #endif
+   }
+ };
+ 

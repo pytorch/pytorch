@@ -19,7 +19,7 @@ THC_API void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, do
   real *data = THCTensor_(data)(state, self);
 
   hipLaunchKernelGGL((generate_uniform), dim3(NUM_BLOCKS), dim3(BLOCK_SIZE), 0, THCState_getCurrentStream(state),
-      gen->gen_states, static_cast<int>(size), data, a, b);
+      gen->gen_states, static_cast<int>(size), data, static_cast<std::conditional<typeid(real) == typeid(float), float, double>::type>(a), static_cast<std::conditional<typeid(real) == typeid(float), float, double>::type>(b));
 
   THCTensor_(freeCopyTo)(state, self, self_);
 };

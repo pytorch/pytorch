@@ -1,0 +1,32 @@
+diff --git a/aten/src/THCUNN/THCHalfAutoNumerics.cuh b/aten/src/THCUNN/THCHalfAutoNumerics.cuh
+index 2653fed0b..c4e9089e0 100644
+--- a/aten/src/THCUNN/THCHalfAutoNumerics.cuh
++++ b/aten/src/THCUNN/THCHalfAutoNumerics.cuh
+@@ -19,13 +19,17 @@ inline __host__ __device__ float fmaxType(float x, half y) {
+ }
+ #endif
+ 
++/* In ROCm we have a conversion from half to __fp16, and then there's a
++conversion operator from __fp16 to double (w/ the standard conversion
++double to float), so comment out these two lines to prevent ambiguous calls
++for fmaxType when half is passed in.
+ inline __host__ __device__ float fmaxType(float x, float y) {
+   return fmaxf(x, y);
+ }
+ 
+ inline __host__ __device__ double fmaxType(double x, double y) {
+   return fmax(x, y);
+-}
++}*/
+ 
+ #ifdef CUDA_HALF_TENSOR
+ 
+@@ -196,7 +200,7 @@ inline __host__ __device__ half tanh(half a) {
+   return THCNumerics<half>::tanh(a);
+ }
+ 
+-#if defined(_MSC_VER) && CUDA_VERSION >= 9000
++#if defined(_MSC_VER) && CUDA_VERSION >= 9000 || defined(__HIP_PLATFORM_HCC__)
+ inline __host__ __device__ half operator+(half a, int b) {
+   return THCNumerics<half>::add(a, ScalarConvert<int, half>::to(b));
+ }

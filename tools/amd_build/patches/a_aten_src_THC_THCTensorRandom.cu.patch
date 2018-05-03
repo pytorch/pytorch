@@ -1,0 +1,13 @@
+diff --git a/aten/src/THC/generic/THCTensorRandom.cu b/aten/src/THC/generic/THCTensorRandom.cu
+index ce49c5c88..9a80d707b 100644
+--- a/aten/src/THC/generic/THCTensorRandom.cu
++++ b/aten/src/THC/generic/THCTensorRandom.cu
+@@ -16,7 +16,7 @@ THC_API void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, do
+   real *data = THCTensor_(data)(state, self);
+ 
+   generate_uniform<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+-      gen->gen_states, size, data, a, b);
++      gen->gen_states, static_cast<int>(size), data, static_cast<std::conditional<std::is_same<real,float>::value, float, double>::type>(a), static_cast<std::conditional<std::is_same<real,float>::value, float, double>::type>(b)); 
+ 
+   THCTensor_(freeCopyTo)(state, self, self_);
+ };

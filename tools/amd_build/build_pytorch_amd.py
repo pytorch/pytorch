@@ -35,7 +35,8 @@ for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
     subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=out_dir)
 
 # Make various replacements inside AMD_BUILD/torch directory
-ignore_files =  ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp", "csrc/cuda/cuda_check.h", "csrc/jit/fusion_compiler.cpp"]
+ignore_files = ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp",
+                "csrc/cuda/cuda_check.h", "csrc/jit/fusion_compiler.cpp"]
 for root, _directories, files in os.walk(os.path.join(out_dir, "torch")):
     for filename in files:
         if filename.endswith(".cpp") or filename.endswith(".h"):

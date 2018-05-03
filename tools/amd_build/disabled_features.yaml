@@ -15,16 +15,46 @@
         "constants": {
             "HIPBLAS_DATA_HALF": "0"
         }
+      },
+      {
+        "path": "aten/src/THCUNN/SoftMaxCommon.cuh",
+        "functions": {
+          "hipOccupancyMaxActiveBlocksPerMultiprocessor": "16"
+        }
+      },
+      {
+        "path": "aten/src/THC/THCStream.cpp",
+        "functions": {
+          "hipStreamCreateWithFlags": "HIPBLAS_STATUS_INTERNAL_ERROR"
+        }
+      },
+      {
+        "path": "aten/src/THC/THCAllocator.c",
+        "functions": {
+          "hipMallocManaged": "HIPBLAS_STATUS_INTERNAL_ERROR"
+        }
+      },
+      {
+        "path": "aten/src/TH/generic/THTensorMath.c",
+        "constants": {
+          "#ifdef _OPENMP": "#if defined(_OPENMP) && !defined(__HIP_DEVICE_COMPILE__)"
+        }
       }
     ],
   "disabled_modules": [
-    "aten/src/ATen/cuda/CUDAHalf.cu",
-    "aten/src/ATen/cuda/CUDAHalf.cuh",
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
-    "aten/src/ATen/native/cuda/Distributions.cu"
+    "aten/src/ATen/native/cuda/Distributions.cu",
+    "aten/src/THCUNN/ca.cu",
+    "aten/src/THCUNN/RReLU.cu"
   ],
   "disabled_functions": [
+    {
+      "path": "aten/src/THCUNN/LookupTable.cu",
+      "functions": [
+        "warpHasCollision"
+      ]
+    },
     {
       "path": "aten/src/ATen/native/cuda/Distributions.cu",
       "functions": [
