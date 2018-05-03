@@ -418,6 +418,9 @@ def generate_outputs():
     file_manager.write('Type.h', TYPE_H.substitute(top_env))
     file_manager.write('Type.cpp', TYPE_CPP.substitute(top_env))
 
+    cuda_file_manager.write('RegisterCUDA.h', REGISTER_CUDA_H.substitute(top_env))
+    cuda_file_manager.write('RegisterCUDA.cpp', REGISTER_CUDA_CPP.substitute(top_env))
+
     file_manager.write('Tensor.h', TENSOR_H.substitute(top_env))
     file_manager.write('TensorMethods.h', TENSOR_METHODS_H.substitute(top_env))
     file_manager.write('Functions.h', FUNCTIONS_H.substitute(top_env))

@@ -69,6 +69,10 @@ struct CUDAHooksInterface {
     AT_ERROR("pinned memory requires CUDA");
   }
 
+  virtual void registerCUDATypes(Context*) const {
+    AT_ERROR("cannot registerCUDATypes() without ATen_cuda library");
+  }
+
 };
 
 AT_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface);

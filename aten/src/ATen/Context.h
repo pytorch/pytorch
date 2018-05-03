@@ -59,6 +59,7 @@ public:
       thc_state = detail::getCUDAHooks().initCUDA();
       generator_registry[static_cast<int>(Backend::CUDA)] =
         detail::getCUDAHooks().initCUDAGenerator(this);
+      detail::getCUDAHooks().registerCUDATypes(this);
     });
     return thc_state.get();
   }
