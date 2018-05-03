@@ -4,12 +4,12 @@
 
 using namespace torch;
 
-AUTOGRAD_CONTAINER_CLASS(TestModel) {
+class TestModel : public torch::nn::CloneableModule<TestModel> {
  public:
   void initialize_containers() override {
-    add(Linear(10, 3).make(), "l1");
-    add(Linear(3, 5).make(), "l2");
-    add(Linear(5, 100).make(), "l3");
+    add(make(Linear(10, 3)), "l1");
+    add(make(Linear(3, 5)), "l2");
+    add(make(Linear(5, 100)), "l3");
   }
 
   variable_list forward(variable_list input) override {
@@ -17,11 +17,11 @@ AUTOGRAD_CONTAINER_CLASS(TestModel) {
   };
 };
 
-AUTOGRAD_CONTAINER_CLASS(NestedModel) {
+class NestedModel : public torch::nn::CloneableModule<NestedModel> {
  public:
   void initialize_containers() override {
-    add(Linear(5, 20).make(), "l1");
-    add(TestModel().make(), "test");
+    add(make(Linear(5, 20)), "l1");
+    add(make(TestModel()), "test");
   }
 
   void initialize_parameters() override {
@@ -36,7 +36,7 @@ AUTOGRAD_CONTAINER_CLASS(NestedModel) {
 TEST_CASE("containers") {
   SECTION("conv") {
     SECTION("1d") {
-      auto model = Conv1d(3, 2, 3).stride(2).make();
+      auto model = make(Conv1d(3, 2, 3).stride(2));
       auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5}), true);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -53,7 +53,7 @@ TEST_CASE("containers") {
 
     SECTION("2d") {
       SECTION("even") {
-        auto model = Conv2d(3, 2, 3).stride(2).make();
+        auto model = make(Conv2d(3, 2, 3).stride(2));
         auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5, 5}), true);
         auto y = model->forward({x})[0];
         Variable s = y.sum();
@@ -69,7 +69,7 @@ TEST_CASE("containers") {
       }
 
       SECTION("uneven") {
-        auto model = Conv2d(3, 2, IntVec({3, 2})).stride(2).make();
+        auto model = make(Conv2d(3, 2, IntVec({3, 2})).stride(2));
         auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5, 4}), true);
         auto y = model->forward({x})[0];
         Variable s = y.sum();
@@ -86,7 +86,7 @@ TEST_CASE("containers") {
     }
 
     SECTION("3d") {
-      auto model = Conv3d(3, 2, 3).stride(2).make();
+      auto model = make(Conv3d(3, 2, 3).stride(2));
       auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5, 5, 5}), true);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -105,7 +105,7 @@ TEST_CASE("containers") {
 
   SECTION("linear") {
     SECTION("basic1") {
-      auto model = Linear(5, 2).make();
+      auto model = make(Linear(5, 2));
       auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -120,11 +120,10 @@ TEST_CASE("containers") {
     }
 
     SECTION("sequential") {
-      auto model = ContainerList()
-                       .append(Linear(10, 3).make())
-                       .append(Linear(3, 5).make())
-                       .append(Linear(5, 100).make())
-                       .make();
+      auto model = make(ContainerList()
+                            .append(make(Linear(10, 3)))
+                            .append(make(Linear(3, 5)))
+                            .append(make(Linear(5, 100))));
 
       auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
       for (auto layer : *model) {
@@ -140,10 +139,10 @@ TEST_CASE("containers") {
     }
 
     SECTION("simple") {
-      auto model = SimpleContainer().make();
-      auto l1 = model->add(Linear(10, 3).make(), "l1");
-      auto l2 = model->add(Linear(3, 5).make(), "l2");
-      auto l3 = model->add(Linear(5, 100).make(), "l3");
+      auto model = make(SimpleContainer());
+      auto l1 = model->add(make(Linear(10, 3)), "l1");
+      auto l2 = model->add(make(Linear(3, 5)), "l2");
+      auto l3 = model->add(make(Linear(5, 100)), "l3");
 
       auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
       x = l1->forward({x})[0].clamp_min(0);
@@ -159,7 +158,7 @@ TEST_CASE("containers") {
   }
 
   SECTION("clone") {
-    auto model = TestModel().make();
+    auto model = make(TestModel());
 
     auto model2 = model->clone();
     auto m1param = model->parameters();
@@ -176,7 +175,7 @@ TEST_CASE("containers") {
   SECTION("embedding") {
     SECTION("basic") {
       int dict_size = 10;
-      auto model = Embedding(dict_size, 2).make();
+      auto model = make(Embedding(dict_size, 2));
       // Cannot get gradients to change indices (input) - only for embedding
       // params
       auto x = Var(at::CPU(at::kLong).tensor({10}).fill_(dict_size - 1), false);
@@ -193,7 +192,7 @@ TEST_CASE("containers") {
     }
 
     SECTION("list") {
-      auto model = Embedding(6, 4).make();
+      auto model = make(Embedding(6, 4));
       auto x = Var(at::CPU(at::kLong).tensor({2, 3}).fill_(5), false);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -207,7 +206,7 @@ TEST_CASE("containers") {
   }
 
   SECTION("dropout") {
-    auto dropout = Dropout(0.5).make();
+    auto dropout = make(Dropout(0.5));
     Variable x = Var(at::CPU(at::kFloat).ones(100));
     Variable y = dropout->forward({x})[0];
 
@@ -225,7 +224,7 @@ TEST_CASE("containers") {
   }
 
   SECTION("param") {
-    auto model = NestedModel().make();
+    auto model = make(NestedModel());
     REQUIRE(model->param("param").size(0) == 3);
     REQUIRE(model->param("param").size(1) == 2);
     REQUIRE(model->param("param").size(2) == 21);
@@ -246,7 +245,7 @@ TEST_CASE("containers") {
 
 TEST_CASE("containers_cuda", "[cuda]") {
   SECTION("1") {
-    auto model = Linear(5, 2).make();
+    auto model = make(Linear(5, 2));
     model->cuda();
     auto x = Var(at::CUDA(at::kFloat).randn({10, 5}), true);
     auto y = model->forward({x})[0];
@@ -262,7 +261,7 @@ TEST_CASE("containers_cuda", "[cuda]") {
   }
 
   SECTION("2") {
-    auto model = Linear(5, 2).make();
+    auto model = make(Linear(5, 2));
     model->cuda();
     model->cpu();
     auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);

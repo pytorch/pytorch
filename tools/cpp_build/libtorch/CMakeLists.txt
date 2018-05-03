@@ -213,7 +213,8 @@ if (NOT NO_API)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/containers.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp)
+    ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp)
 endif()
 
 add_library(torch SHARED ${TORCH_SRCS})

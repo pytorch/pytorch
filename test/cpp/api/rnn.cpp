@@ -7,10 +7,10 @@ using namespace torch;
 template <typename R, typename Func>
 bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   auto nhid = 32;
-  auto model = SimpleContainer().make();
-  auto l1 = model->add(Linear(1, nhid).make(), "l1");
+  auto model = make(SimpleContainer());
+  auto l1 = model->add(make(Linear(1, nhid)), "l1");
   auto rnn = model->add(model_maker(nhid), "rnn");
-  auto lo = model->add(Linear(nhid, 1).make(), "lo");
+  auto lo = model->add(make(Linear(nhid, 1)), "lo");
 
   auto optim = Adam(model, 1e-2).make();
 
@@ -86,7 +86,7 @@ void check_lstm_sizes(variable_list tup) {
 TEST_CASE("rnn") {
   SECTION("lstm") {
     SECTION("sizes") {
-      auto model = LSTM(128, 64).nlayers(3).dropout(0.2).make();
+      auto model = make(LSTM(128, 64).nlayers(3).dropout(0.2));
       Variable x = Var(at::CPU(at::kFloat).randn({10, 16, 128}));
       auto tup = model->forward({x});
       auto y = x.mean();
@@ -106,7 +106,7 @@ TEST_CASE("rnn") {
 
     SECTION("outputs") {
       // Make sure the outputs match pytorch outputs
-      auto model = LSTM(2, 2).make();
+      auto model = make(LSTM(2, 2));
       for (auto& v : model->parameters()) {
         float size = v.second.numel();
         auto p = static_cast<float*>(v.second.data().storage()->data());
@@ -167,24 +167,24 @@ TEST_CASE("rnn") {
   SECTION("integration") {
     SECTION("LSTM") {
       REQUIRE(test_RNN_xor<LSTM>(
-          [](int s) { return LSTM(s, s).nlayers(2).make(); }));
+          [](int s) { return make(LSTM(s, s).nlayers(2)); }));
     }
 
     SECTION("gru") {
       REQUIRE(
-          test_RNN_xor<GRU>([](int s) { return GRU(s, s).nlayers(2).make(); }));
+          test_RNN_xor<GRU>([](int s) { return make(GRU(s, s).nlayers(2)); }));
     }
 
     SECTION("rnn") {
       SECTION("relu") {
         REQUIRE(test_RNN_xor<RNN>([](int s) {
-          return RNN(s, s, RNN::Mode::Relu).nlayers(2).make();
+          return make(RNN(s, s, RNN::Mode::Relu).nlayers(2));
         }));
       }
 
       SECTION("tanh") {
         REQUIRE(test_RNN_xor<RNN>([](int s) {
-          return RNN(s, s, RNN::Mode::Tanh).nlayers(2).make();
+          return make(RNN(s, s, RNN::Mode::Tanh).nlayers(2));
         }));
       }
     }
@@ -214,24 +214,24 @@ TEST_CASE("rnn_cuda", "[cuda]") {
 
   SECTION("lstm") {
     REQUIRE(test_RNN_xor<LSTM>(
-        [](int s) { return LSTM(s, s).nlayers(2).make(); }, true));
+        [](int s) { return make(LSTM(s, s).nlayers(2)); }, true));
   }
 
   SECTION("gru") {
     REQUIRE(test_RNN_xor<GRU>(
-        [](int s) { return GRU(s, s).nlayers(2).make(); }, true));
+        [](int s) { return make(GRU(s, s).nlayers(2)); }, true));
   }
 
   SECTION("rnn") {
     SECTION("Relu") {
       REQUIRE(test_RNN_xor<RNN>(
-          [](int s) { return RNN(s, s, RNN::Mode::Relu).nlayers(2).make(); },
+          [](int s) { return make(RNN(s, s, RNN::Mode::Relu).nlayers(2)); },
           true));
     }
 
     SECTION("tanh") {
       REQUIRE(test_RNN_xor<RNN>(
-          [](int s) { return RNN(s, s, RNN::Mode::Tanh).nlayers(2).make(); },
+          [](int s) { return make(RNN(s, s, RNN::Mode::Tanh).nlayers(2)); },
           true));
     }
   }

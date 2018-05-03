@@ -1,102 +1,23 @@
 #pragma once
 
+#include <torch/nn/module.h>
 #include "detail.h"
 
 #include "torch/csrc/autograd/variable.h"
 
-#define AUTOGRAD_CONTAINER_CLASS(Type) \
-  class Type : public torch::Container_CRTP<Type>
-
 namespace torch {
-class ContainerImpl {
- public:
-  virtual ~ContainerImpl() = default;
-  // Only construct parameters in initialize_parameters, and
-  // containers in initialize_containers. Most of the time, the containers are
-  // the only thing you need to add.
-  // You are guaranteed that containers are added before parameters.
-  virtual void initialize_containers(){};
-  virtual void initialize_parameters(){};
-  virtual void reset_parameters(){};
-
-  virtual variable_list forward(variable_list) = 0;
-  virtual Container clone() const = 0;
-
-  std::map<std::string, Variable> parameters() const;
-  Variable& param(std::string const&);
-
-  virtual void cuda();
-  virtual void cpu();
-  void train();
-  void eval();
-
-  at::Type& DefaultTensor(at::ScalarType s);
-
-  std::unordered_map<std::string, Container> children_;
-  std::unordered_map<std::string, Variable> params_;
-  bool cuda_ = false;
-  bool train_ = true;
-
-  template <class Archive>
-  void save(Archive& ar) const {
-    auto params = parameters();
-    std::size_t size = params.size();
-    ar(size);
-    for (auto& p : params) {
-      ar(p.first, p.second);
-    }
-  }
-
-  template <class Archive>
-  void load(Archive& ar) {
-    auto params = parameters();
-    std::size_t size;
-    ar(size);
-    std::string name;
-    for (std::size_t i = 0; i < size; i++) {
-      ar(name);
-      ar(params[name]);
-    }
-  }
-
- protected:
-  Container add(Container, std::string const&);
-  // Be careful when registering Tensors that are not variables
-  Variable& add(Variable, std::string const&);
-};
+template <class Module>
+std::shared_ptr<typename std::decay<Module>::type> make(Module&& module) {
+  auto ptr = std::make_shared<typename std::decay<Module>::type>(
+      std::forward<Module>(module));
+  ptr->initialize_containers();
+  ptr->initialize_parameters();
+  ptr->reset_parameters();
+  return ptr;
+}
 
 template <class Derived>
-class Container_CRTP : public ContainerImpl {
- public:
-  std::shared_ptr<Derived> make() const {
-    auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
-    ptr->initialize_containers();
-    ptr->initialize_parameters();
-    ptr->reset_parameters();
-    return ptr;
-  }
-
-  Container clone() const override {
-    auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
-    ptr->children_.clear();
-    ptr->params_.clear();
-    ptr->initialize_containers();
-    ptr->initialize_parameters();
-    auto newParams = ptr->parameters();
-    for (auto& param : parameters()) {
-      newParams[param.first].data().copy_(param.second.data());
-    }
-    if (cuda_) {
-      ptr->cuda();
-    } else {
-      ptr->cpu();
-    }
-    return ptr;
-  }
-};
-
-template <class Derived>
-class ContainerListImpl : public Container_CRTP<Derived> {
+class ContainerListImpl : public nn::CloneableModule<Derived> {
   // Lets you use a container like a vector without making a new class,
   // just for simple implementations
  public:
@@ -112,7 +33,7 @@ class ContainerListImpl : public Container_CRTP<Derived> {
 
   ContainerListImpl<Derived>& append(Container m) {
     children_.push_back(m);
-    ContainerImpl::add(children_.back(), std::to_string(size() - 1));
+    nn::Module::add(children_.back(), std::to_string(size() - 1));
     return *this;
   }
 
@@ -156,12 +77,12 @@ class Sequential : public ContainerListImpl<Sequential> {
       name = std::to_string(size());
     }
     children_.push_back(m);
-    ContainerImpl::add(children_.back(), name);
+    nn::Module::add(children_.back(), name);
     return *this;
   }
 };
 
-AUTOGRAD_CONTAINER_CLASS(SimpleContainer) {
+class SimpleContainer : public torch::nn::CloneableModule<SimpleContainer> {
   // Lets you use a container without making a new class,
   // for experimental implementations
  public:
@@ -170,10 +91,10 @@ AUTOGRAD_CONTAINER_CLASS(SimpleContainer) {
         "SimpleContainer has no forward, maybe you"
         " wanted to subclass and override this function?");
   }
-  using ContainerImpl::add;
+  using nn::Module::add;
 };
 
-AUTOGRAD_CONTAINER_CLASS(Functional) {
+class Functional : public torch::nn::CloneableModule<Functional> {
   // Lets you create a container from a function, designed for use in
   // Sequential.
  public:
@@ -190,7 +111,7 @@ AUTOGRAD_CONTAINER_CLASS(Functional) {
   std::function<variable_list(variable_list)> fun_;
 };
 
-AUTOGRAD_CONTAINER_CLASS(Linear) {
+class Linear : public torch::nn::CloneableModule<Linear> {
  public:
   Linear(uint32_t nin, uint32_t nout) : nin(nin), nout(nout) {}
 
@@ -203,7 +124,7 @@ AUTOGRAD_CONTAINER_CLASS(Linear) {
   uint32_t nin, nout;
 };
 
-AUTOGRAD_CONTAINER_CLASS(Embedding) {
+class Embedding : public torch::nn::CloneableModule<Embedding> {
  public:
   Embedding(uint32_t num_embeddings, uint32_t embedding_dim)
       : num_embeddings(num_embeddings), embedding_dim(embedding_dim) {}
@@ -216,7 +137,7 @@ AUTOGRAD_CONTAINER_CLASS(Embedding) {
   uint32_t num_embeddings, embedding_dim;
 };
 
-AUTOGRAD_CONTAINER_CLASS(Conv) {
+class Conv : public torch::nn::CloneableModule<Conv> {
  private:
   Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan)
       : Nd_(Nd),
@@ -314,7 +235,7 @@ class Conv3d : public Conv {
   Conv3d(uint32_t i, uint32_t o, IntVec ks) : Conv(3, i, o, ks) {}
 };
 
-AUTOGRAD_CONTAINER_CLASS(BatchNorm) {
+class BatchNorm : public torch::nn::CloneableModule<BatchNorm> {
  public:
   BatchNorm(uint32_t num_features) : num_features_(num_features) {}
 
@@ -336,7 +257,7 @@ AUTOGRAD_CONTAINER_CLASS(BatchNorm) {
   uint32_t num_features_;
 };
 
-AUTOGRAD_CONTAINER_CLASS(Dropout) {
+class Dropout : public torch::nn::CloneableModule<Dropout> {
  public:
   Dropout(double p = 0.5) : p_(p) {
     assert(p < 1 && p >= 0);
@@ -347,7 +268,7 @@ AUTOGRAD_CONTAINER_CLASS(Dropout) {
   double p_;
 };
 
-AUTOGRAD_CONTAINER_CLASS(Dropout2d) {
+class Dropout2d : public torch::nn::CloneableModule<Dropout2d> {
  public:
   Dropout2d(double p = 0.5) : p_(p) {
     assert(p < 1 && p >= 0);
@@ -359,7 +280,7 @@ AUTOGRAD_CONTAINER_CLASS(Dropout2d) {
 };
 
 template <typename Derived>
-class RNNBase : public Container_CRTP<Derived> {
+class RNNBase : public nn::CloneableModule<Derived> {
  public:
   // These must line up with the CUDNN mode codes
   enum RNNMode : int64_t { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };

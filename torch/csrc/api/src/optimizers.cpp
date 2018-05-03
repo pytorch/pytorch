@@ -1,5 +1,7 @@
 #include "torch/optimizers.h"
 
+#include <torch/nn/module.h>
+
 namespace torch {
 
 void OptimizerImpl::zero_grad() {

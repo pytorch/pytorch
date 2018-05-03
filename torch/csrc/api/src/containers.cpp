@@ -132,6 +132,7 @@ at::Type& ContainerImpl::DefaultTensor(at::ScalarType s) {
     return at::CPU(s);
 }
 
+
 variable_list Linear::forward(variable_list input) {
   return variable_list({linear(input[0], weight, bias)});
 }
@@ -616,13 +617,13 @@ variable_list RNNBase<Derived>::forward(variable_list inputs) {
 
 template <typename Derived>
 void RNNBase<Derived>::cuda() {
-  Container_CRTP<Derived>::cuda();
+  nn::Module::cuda();
   flatten_parameters();
 }
 
 template <typename Derived>
 void RNNBase<Derived>::cpu() {
-  Container_CRTP<Derived>::cpu();
+  nn::Module::cpu();
   flatten_parameters();
 }
 
@@ -657,5 +658,4 @@ variable_list Dropout2d::forward(variable_list inputs) {
   }
   return lst;
 }
-
 } // namespace torch
