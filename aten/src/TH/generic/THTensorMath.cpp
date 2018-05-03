@@ -832,6 +832,7 @@ void THTensor_(add)(THTensor *r_, THTensor *t, real value)
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data + value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
     }
 #else
+    (void)r_Size;
     serial_path = 1;
 #endif
   }
@@ -873,6 +874,7 @@ void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data * value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
     }
 #else
+    (void)r_Size;
     serial_path = 1;
 #endif
   }
@@ -899,6 +901,7 @@ void THTensor_(div)(THTensor *r_, THTensor *t, real value)
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data / value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
     }
 #else
+    (void)r_Size;
     serial_path = 1;
 #endif
   }
@@ -1877,6 +1880,9 @@ void THTensor_(addcmul)(THTensor *r_, THTensor *t, real value, THTensor *src1, T
       TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, src1Contig, src2Contig, real, r_, real, src1, real, src2, *r__data += value * *src1_data * *src2_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
 #else
+    (void)r_Contig;
+    (void)src1Contig;
+    (void)src2Contig;
     serial_path = 1;
 #endif
   } else {
@@ -1910,6 +1916,9 @@ void THTensor_(addcdiv)(THTensor *r_, THTensor *t, real value, THTensor *src1, T
       TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, src1Contig, src2Contig, real, r_, real, src1, real, src2, *r__data += value * *src1_data / *src2_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
 #else
+    (void)r_Contig;
+    (void)src1Contig;
+    (void)src2Contig;
     serial_path = 1;
 #endif
   } else {
@@ -3833,8 +3842,8 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 #define LAB_IMPLEMENT_VECTORIZED_FUNCTION(...) EXPAND(LAB_IMPLEMENT_VECTORIZED_FUNCTION_CHOOSE(__VA_ARGS__)(__VA_ARGS__))
 
 /*
- * LAB_IMPLEMENT_BASIC_FUNCTION is a macro with optional parameters, you can use it flexibly. 
- * The macro will discard the invalid openmp threshold if openmp is unavailable. The macro will give a default threshold even if you forget to pass one. 
+ * LAB_IMPLEMENT_BASIC_FUNCTION is a macro with optional parameters, you can use it flexibly.
+ * The macro will discard the invalid openmp threshold if openmp is unavailable. The macro will give a default threshold even if you forget to pass one.
  * In other word,
  * (A), If openmp is UNavailable, the two usage below is both right.
  *      (1) LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD) // discard the invalid openmp threshold

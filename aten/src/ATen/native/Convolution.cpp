@@ -231,7 +231,7 @@ at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0}}, groups);
+                         false, {0}, groups);
 }
 
 at::Tensor conv2d(
