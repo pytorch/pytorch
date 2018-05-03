@@ -10,6 +10,7 @@ namespace autograd {
 class OptimizerImpl {
  public:
   OptimizerImpl(Container model) : model_(model) {}
+  virtual ~OptimizerImpl() = default;
   virtual void init_state() {}
   virtual void step() = 0;
   void zero_grad();
