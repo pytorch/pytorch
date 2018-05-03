@@ -22,28 +22,25 @@ CUDA_INCLUDES = """\
 """
 
 COPY = CodeTemplate("""\
-${THTensor}_copy${cuda}${src_scalar_name}(
-    ${state,}
-    static_cast<${dst_tensor}*>(dst.pImpl)->tensor,
-    static_cast<${src_tensor}*>(src.pImpl)->tensor);
+${THTensor}_copy${cuda}${src_scalar_name}(${state,}\
+static_cast<${dst_tensor}*>(dst.pImpl)->tensor, \
+static_cast<${src_tensor}*>(src.pImpl)->tensor);
 """)
 
 COPY_ASYNC_CPU = CodeTemplate("""\
 if (non_blocking) {
-    ${THTensor}_copyAsyncCPU(
-        ${state,}
-        static_cast<${dst_tensor}*>(dst.pImpl)->tensor,
-        static_cast<${src_tensor}*>(src.pImpl)->tensor);
+    ${THTensor}_copyAsyncCPU(${state,}\
+static_cast<${dst_tensor}*>(dst.pImpl)->tensor, \
+static_cast<${src_tensor}*>(src.pImpl)->tensor);
     break;
 }
 """)
 
 COPY_ASYNC_CUDA = CodeTemplate("""\
 if (non_blocking) {
-    ${THTensor}_copyAsyncCuda(
-        ${state,}
-        static_cast<${dst_tensor}*>(dst.pImpl)->tensor,
-        static_cast<${src_tensor}*>(src.pImpl)->tensor);
+    ${THTensor}_copyAsyncCuda(${state,}\
+static_cast<${dst_tensor}*>(dst.pImpl)->tensor, \
+static_cast<${src_tensor}*>(src.pImpl)->tensor);
     break;
 }
 """)
@@ -165,7 +162,7 @@ def create_one_copy_from(src_type, all_types):
         if src_type['Backend'] == 'CUDA':
             cuda = 'Cuda'
         if dst_type['Backend'] == 'CUDA' or src_type['Backend'] == 'CUDA':
-            state = ['context->thc_state']
+            state.append('context->thc_state')
 
         body_env = nested_dict({
             'src_scalar_name': src_type['ScalarName'],
