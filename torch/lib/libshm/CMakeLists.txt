@@ -21,17 +21,6 @@ ELSE ()
   SET(CMAKE_CXX_STANDARD 11)
 ENDIF ()
 
-IF ($ENV{PYTORCH_BINARY_BUILD})
-  MESSAGE(STATUS "PYTORCH_BINARY_BUILD detected. Statically linking libstdc++")
-  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
-
-  IF (UNIX AND NOT APPLE)
-    # hiding statically linked library symbols, this flag is not available for the linker under macOS
-    SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
-  ENDIF(UNIX AND NOT APPLE)
-
-ENDIF()
-
 ADD_LIBRARY(shm SHARED core.cpp)
 ADD_EXECUTABLE(torch_shm_manager manager.cpp)
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
