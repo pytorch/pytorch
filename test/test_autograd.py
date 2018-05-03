@@ -2621,6 +2621,8 @@ method_tests = [
     ('sum', (), NO_ARGS, 'scalar'),
     ('sum', (), (0,), 'scalar_dim', [0]),
     ('sum', (), (0, True,), 'scalar_keepdim_dim', [0]),
+    ('sum', (S, S, S), ([1, 2],), 'multi_dim'),
+    ('sum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
     ('prod', (S, S, S), NO_ARGS),
     ('prod', (S, S, S), (1,), 'dim', [0]),
     ('prod', (S, S, S), (1, True,), 'keepdim_dim', [0]),
