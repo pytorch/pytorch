@@ -1,6 +1,7 @@
 import math
 import types
 import random
+import warnings
 
 import torch
 
@@ -37,8 +38,8 @@ class Ones(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.ones(w)
-        >>> ones_init = nn.init.ones()
+        >>> nn.init.ones_(w)
+        >>> ones_init = nn.init.ones_()
         >>> ones_init(w)
     """
     def __call__(self, tensor):
@@ -54,8 +55,8 @@ class Zeros(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.zeros(w)
-        >>> zeros_init = nn.init.zeros()
+        >>> nn.init.zeros_(w)
+        >>> zeros_init = nn.init.zeros_()
         >>> zeros_init(w)
     """
     def __call__(self, tensor):
@@ -72,8 +73,8 @@ class Constant(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.constant(w, 0.3)
-        >>> const_init = nn.init.constant(0.3)
+        >>> nn.init.constant_(w, 0.3)
+        >>> const_init = nn.init.constant_(0.3)
         >>> const_init(w)
     """
     def __init__(self, val):
@@ -94,8 +95,8 @@ class Eye(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.eye(w)
-        >>> eye_init = nn.init.eye()
+        >>> nn.init.eye_(w)
+        >>> eye_init = nn.init.eye_()
         >>> eye_init(w)
     """
     def __call__(self, tensor):
@@ -120,8 +121,8 @@ class Orthogonal(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.orthogonal(w)
-        >>> orth_init = nn.init.orthogonal(5)
+        >>> nn.init.orthogonal_(w)
+        >>> orth_init = nn.init.orthogonal_(5)
         >>> orth_init(w)
     """
     def __init__(self, gain=1):
@@ -163,8 +164,8 @@ class Uniform(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.uniform(w, 4, 5)
-        >>> uniform_init = nn.init.uniform(4, 5)
+        >>> nn.init.uniform_(w, 4, 5)
+        >>> uniform_init = nn.init.uniform_(4, 5)
         >>> uniform_init(w)
     """
     def __init__(self, a=0, b=1):
@@ -187,8 +188,8 @@ class Normal(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.normal(w)
-        >>> normal_init = nn.init.normal()
+        >>> nn.init.normal_(w)
+        >>> normal_init = nn.init.normal_()
         >>> normal_init(w)
     """
     def __init__(self, mean=0, std=1):
@@ -210,8 +211,8 @@ class Dirac(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 16, 5, 5)
-        >>> nn.init.dirac(w)
-        >>> dirac_init = nn.init.dirac()
+        >>> nn.init.dirac_(w)
+        >>> dirac_init = nn.init.dirac_()
         >>> dirac_init(w)
     """
     def __call__(self, tensor):
@@ -248,8 +249,8 @@ class Sparse(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.sparse(w, sparsity=0.1)
-        >>> sparse_init = nn.init.sparse(sparsity=0.1)
+        >>> nn.init.sparse_(w, sparsity=0.1)
+        >>> sparse_init = nn.init.sparse_(sparsity=0.1)
         >>> sparse_init(w)
     """
     def __init__(self, sparsity, std=0.01):
@@ -328,8 +329,8 @@ class XavierUniform(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.xavier_uniform(w, gain=nn.init.calculate_gain('relu'))
-        >>> xavier_init = nn.init.xavier_uniform(gain=nn.init.calculate_gain('relu'))
+        >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain('relu'))
+        >>> xavier_init = nn.init.xavier_uniform_(gain=nn.init.calculate_gain('relu'))
         >>> xavier_init(w)
     """
     def __init__(self, gain=1.):
@@ -360,8 +361,8 @@ class XavierNormal(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.xavier_normal(w)
-        >>> xavier_init = nn.init.xavier_normal(gain=nn.init.calculate_gain('relu'))
+        >>> nn.init.xavier_normal_(w)
+        >>> xavier_init = nn.init.xavier_normal_(gain=nn.init.calculate_gain('relu'))
         >>> xavier_init(w)
     """
     def __init__(self, gain=1.):
@@ -397,8 +398,8 @@ class KaimingUniform(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.kaiming_uniform(w, mode='fan_in')
-        >>> he_init = nn.init.kaiming_uniform(mode='fan_in')
+        >>> nn.init.kaiming_uniform_(w, mode='fan_in')
+        >>> he_init = nn.init.kaiming_uniform_(mode='fan_in')
         >>> he_init(w)
     """
     def __init__(self, a=0, mode="fan_in"):
@@ -434,8 +435,8 @@ class KaimingNormal(Initializer):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.kaiming_normal(w, mode='fan_out')
-        >>> he_init = nn.init.kaiming_normal(mode='fan_out')
+        >>> nn.init.kaiming_normal_(w, mode='fan_out')
+        >>> he_init = nn.init.kaiming_normal_(mode='fan_out')
         >>> he_init(w)
     """
     def __init__(self, a=0, mode="fan_in"):
@@ -449,29 +450,65 @@ class KaimingNormal(Initializer):
     def __call__(self, tensor):
         return self.vs(tensor)
 
+
 ##########################
 # aliases
 ##########################
 
+ones_ = Ones
+zeros_ = Zeros
+constant_ = Constant
+eye_ = Eye
+orthogonal_ = Orthogonal
+uniform_ = Uniform
+normal_ = Normal
+dirac_ = Dirac
+sparse_ = Sparse
+xavier_uniform_ = XavierUniform
+xavier_normal_ = XavierNormal
+kaiming_uniform_ = KaimingUniform
+kaiming_normal_ = KaimingNormal
 
-ones = Ones
-zeros = Zeros
-constant = Constant
-eye = Eye
-orthogonal = Orthogonal
-uniform = Uniform
-normal = Normal
-dirac = Dirac
-sparse = Sparse
-xavier_uniform = XavierUniform
-xavier_normal = XavierNormal
-kaiming_uniform = KaimingUniform
-kaiming_normal = KaimingNormal
+
+##########################
+# deprecate
+##########################
+
+# for backward compatibility
+def _make_deprecate(meth):
+    new_name = meth.__name__
+    old_name = new_name[:-1]
+
+    def deprecated_init(*args, **kwargs):
+        warnings.warn("nn.init.{} is now deprecated in favor of nn.init.{}."
+                      .format(old_name, new_name), stacklevel=2)
+        return meth(*args, **kwargs)
+
+    deprecated_init.__doc__ = r"""
+    {old_name}(...)
+    .. warning::
+        This method is now deprecated in favor of :func:`torch.nn.init.{new_name}`.
+    See :func:`~torch.nn.init.{new_name}` for details.""".format(
+        old_name=old_name, new_name=new_name)
+    return deprecated_init
+
+
+uniform = _make_deprecate(uniform_)
+normal = _make_deprecate(normal_)
+constant = _make_deprecate(constant_)
+eye = _make_deprecate(eye_)
+dirac = _make_deprecate(dirac_)
+xavier_uniform = _make_deprecate(xavier_uniform_)
+xavier_normal = _make_deprecate(xavier_normal_)
+kaiming_uniform = _make_deprecate(kaiming_uniform_)
+kaiming_normal = _make_deprecate(kaiming_normal_)
+orthogonal = _make_deprecate(orthogonal_)
+sparse = _make_deprecate(sparse_)
+
 
 ##########################
 # utility functions
 ##########################
-
 
 def calculate_gain(nonlinearity, param=None):
     """Return the recommended gain value for the given nonlinearity function.

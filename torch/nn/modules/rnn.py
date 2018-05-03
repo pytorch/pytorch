@@ -14,8 +14,8 @@ class RNNBase(Module):
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0, bidirectional=False,
-                 weight_init=init.xavier_uniform, hidden_init=init.orthogonal,
-                 bias_init=init.zeros):
+                 weight_init=init.xavier_uniform_, hidden_init=init.orthogonal_,
+                 bias_init=init.zeros_):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -569,8 +569,8 @@ class RNNCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh",
-                 weight_init=init.xavier_uniform, hidden_init=init.orthogonal,
-                 bias_init=init.zeros):
+                 weight_init=init.xavier_uniform_, hidden_init=init.orthogonal_,
+                 bias_init=init.zeros_):
         super(RNNCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -678,8 +678,8 @@ class LSTMCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True,
-                 weight_init=init.xavier_uniform, hidden_init=init.orthogonal,
-                 bias_init=init.zeros):
+                 weight_init=init.xavier_uniform_, hidden_init=init.orthogonal_,
+                 bias_init=init.zeros_):
         super(LSTMCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -772,8 +772,8 @@ class GRUCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True,
-                 weight_init=init.xavier_uniform, hidden_init=init.orthogonal,
-                 bias_init=init.zeros):
+                 weight_init=init.xavier_uniform_, hidden_init=init.orthogonal_,
+                 bias_init=init.zeros_):
         super(GRUCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size

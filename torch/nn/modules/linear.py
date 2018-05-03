@@ -39,7 +39,7 @@ class Linear(Module):
     """
 
     def __init__(self, in_features, out_features, bias=True,
-                 weight_init=init.xavier_uniform, bias_init=init.zeros):
+                 weight_init=init.xavier_uniform_, bias_init=init.zeros_):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -101,7 +101,7 @@ class Bilinear(Module):
     """
 
     def __init__(self, in1_features, in2_features, out_features, bias=True,
-                 weight_init=init.xavier_uniform, bias_init=init.zeros):
+                 weight_init=init.xavier_uniform_, bias_init=init.zeros_):
         super(Bilinear, self).__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features

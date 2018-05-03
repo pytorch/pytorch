@@ -4238,7 +4238,7 @@ class TestNNInit(TestCase):
                 input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50, as_variable=as_variable)
                 a = self._random_float(-3, 3)
                 b = a + self._random_float(1, 5)
-                init.uniform(input_tensor, a=a, b=b)
+                init.uniform_(input_tensor, a=a, b=b)
                 assert self._is_uniform(input_tensor, a, b)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
@@ -4248,7 +4248,7 @@ class TestNNInit(TestCase):
                 input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50, as_variable=as_variable)
                 mean = self._random_float(-3, 3)
                 std = self._random_float(1, 5)
-                init.normal(input_tensor, mean=mean, std=std)
+                init.normal_(input_tensor, mean=mean, std=std)
 
                 assert self._is_normal(input_tensor, mean, std)
 
@@ -4257,16 +4257,38 @@ class TestNNInit(TestCase):
             for dims in [1, 2, 4]:
                 input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
                 val = self._random_float(1, 10)
-                init.constant(input_tensor, val)
+                init.constant_(input_tensor, val)
                 if as_variable:
                     input_tensor = input_tensor.data
 
                 self.assertEqual(input_tensor, input_tensor.clone().fill_(val))
 
+    def test_ones(self):
+        for as_variable in [True, False]:
+            for dims in [1, 2, 4]:
+                input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
+                val = self._random_float(1, 10)
+                init.ones_(input_tensor)
+                if as_variable:
+                    input_tensor = input_tensor.data
+
+                self.assertEqual(input_tensor, input_tensor.clone().fill_(1))
+
+    def test_zeros(self):
+        for as_variable in [True, False]:
+            for dims in [1, 2, 4]:
+                input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
+                val = self._random_float(1, 10)
+                init.zeros_(input_tensor)
+                if as_variable:
+                    input_tensor = input_tensor.data
+
+                self.assertEqual(input_tensor, input_tensor.clone().fill_(0))
+
     def test_eye(self):
         for as_variable in [True, False]:
             input_tensor = self._create_random_nd_tensor(2, size_min=1, size_max=5, as_variable=as_variable)
-            init.eye(input_tensor)
+            init.eye_(input_tensor)
             if as_variable:
                 input_tensor = input_tensor.data
 
@@ -4283,13 +4305,13 @@ class TestNNInit(TestCase):
             for dims in [1, 3]:
                 with self.assertRaises(ValueError):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
-                    init.eye(tensor)
+                    init.eye_(tensor)
 
     def test_dirac_properties(self):
         for as_variable in [True, False]:
             for dims in [3, 4, 5]:
                 input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
-                init.dirac(input_tensor)
+                init.dirac_(input_tensor)
                 if as_variable:
                     input_tensor = input_tensor.data
 
@@ -4305,7 +4327,7 @@ class TestNNInit(TestCase):
         # Test 1D
         input_var = Variable(torch.randn(batch, in_c, size))
         filter_var = Variable(torch.zeros(out_c, in_c, kernel_size))
-        init.dirac(filter_var)
+        init.dirac_(filter_var)
         output_var = F.conv1d(input_var, filter_var)
         input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
         self.assertEqual(input_tensor[:, :, 1:-1], output_tensor[:, :in_c, :])  # Assert in_c outputs are preserved
@@ -4314,7 +4336,7 @@ class TestNNInit(TestCase):
         # Test 2D
         input_var = Variable(torch.randn(batch, in_c, size, size))
         filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size))
-        init.dirac(filter_var)
+        init.dirac_(filter_var)
         output_var = F.conv2d(input_var, filter_var)
         input_tensor, output_tensor = input_var.data, output_var.data
         self.assertEqual(input_tensor[:, :, 1:-1, 1:-1], output_tensor[:, :in_c, :, :])
@@ -4323,7 +4345,7 @@ class TestNNInit(TestCase):
         # Test 3D
         input_var = Variable(torch.randn(batch, in_c, size, size, size))
         filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size, kernel_size))
-        init.dirac(filter_var)
+        init.dirac_(filter_var)
         output_var = F.conv3d(input_var, filter_var)
         input_tensor, output_tensor = input_var.data, output_var.data
         self.assertEqual(input_tensor[:, :, 1:-1, 1:-1, 1:-1], output_tensor[:, :in_c, :, :])
@@ -4334,21 +4356,21 @@ class TestNNInit(TestCase):
             for dims in [1, 2, 6]:
                 with self.assertRaises(ValueError):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
-                    init.dirac(tensor)
+                    init.dirac_(tensor)
 
     def test_xavier_uniform_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
             for dims in [0, 1]:
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1, as_variable=as_variable)
                 with self.assertRaises(ValueError):
-                    init.xavier_uniform(tensor)
+                    init.xavier_uniform_(tensor)
 
     def test_xavier_normal_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
             for dims in [0, 1]:
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1, as_variable=as_variable)
                 with self.assertRaises(ValueError):
-                    init.xavier_normal(tensor)
+                    init.xavier_normal_(tensor)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_xavier_uniform(self):
@@ -4361,9 +4383,9 @@ class TestNNInit(TestCase):
 
                     if use_gain:
                         gain = self._random_float(0.1, 2)
-                        init.xavier_uniform(input_tensor, gain=gain)
+                        init.xavier_uniform_(input_tensor, gain=gain)
                     else:
-                        init.xavier_uniform(input_tensor)
+                        init.xavier_uniform_(input_tensor)
 
                     if as_variable:
                         input_tensor = input_tensor.data
@@ -4389,9 +4411,9 @@ class TestNNInit(TestCase):
 
                     if use_gain:
                         gain = self._random_float(0.1, 2)
-                        init.xavier_normal(input_tensor, gain=gain)
+                        init.xavier_normal_(input_tensor, gain=gain)
                     else:
-                        init.xavier_normal(input_tensor)
+                        init.xavier_normal_(input_tensor)
 
                     if as_variable:
                         input_tensor = input_tensor.data
@@ -4410,14 +4432,14 @@ class TestNNInit(TestCase):
             for dims in [0, 1]:
                 with self.assertRaises(ValueError):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1, as_variable=as_variable)
-                    init.kaiming_uniform(tensor)
+                    init.kaiming_uniform_(tensor)
 
     def test_kaiming_normal_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
             for dims in [0, 1]:
                 with self.assertRaises(ValueError):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1, as_variable=as_variable)
-                    init.kaiming_normal(tensor)
+                    init.kaiming_normal_(tensor)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_uniform(self):
@@ -4429,10 +4451,10 @@ class TestNNInit(TestCase):
                                                                      as_variable=as_variable)
                         if use_a:
                             a = self._random_float(0.1, 2)
-                            init.kaiming_uniform(input_tensor, a=a, mode=mode)
+                            init.kaiming_uniform_(input_tensor, a=a, mode=mode)
                         else:
                             a = 0
-                            init.kaiming_uniform(input_tensor, mode=mode)
+                            init.kaiming_uniform_(input_tensor, mode=mode)
 
                         if as_variable:
                             input_tensor = input_tensor.data
@@ -4462,10 +4484,10 @@ class TestNNInit(TestCase):
                                                                      as_variable=as_variable)
                         if use_a:
                             a = self._random_float(0.1, 2)
-                            init.kaiming_normal(input_tensor, a=a, mode=mode)
+                            init.kaiming_normal_(input_tensor, a=a, mode=mode)
                         else:
                             a = 0
-                            init.kaiming_normal(input_tensor, mode=mode)
+                            init.kaiming_normal_(input_tensor, mode=mode)
 
                         if as_variable:
                             input_tensor = input_tensor.data
@@ -4490,7 +4512,7 @@ class TestNNInit(TestCase):
                 with self.assertRaises(ValueError):
                     sparsity = self._random_float(0.1, 0.9)
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
-                    init.sparse(tensor, sparsity)
+                    init.sparse_(tensor, sparsity)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_sparse_default_std(self):
@@ -4503,9 +4525,9 @@ class TestNNInit(TestCase):
                 std = 0.01  # default std
                 if use_random_std:
                     std = self._random_float(0.01, 0.2)
-                    init.sparse(input_tensor, sparsity=sparsity, std=std)
+                    init.sparse_(input_tensor, sparsity=sparsity, std=std)
                 else:
-                    init.sparse(input_tensor, sparsity=sparsity)
+                    init.sparse_(input_tensor, sparsity=sparsity)
 
                 if as_variable:
                     input_tensor = input_tensor.data
@@ -4529,9 +4551,9 @@ class TestNNInit(TestCase):
 
                     if use_gain:
                         gain = self._random_float(0.1, 2)
-                        init.orthogonal(input_tensor, gain=gain)
+                        init.orthogonal_(input_tensor, gain=gain)
                     else:
-                        init.orthogonal(input_tensor)
+                        init.orthogonal_(input_tensor)
 
                     if as_variable:
                         input_tensor = input_tensor.data
