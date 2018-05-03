@@ -2992,7 +2992,7 @@ class TestPytorchExportModes(unittest.TestCase):
             super(TestPytorchExportModes.MyModel, self).__init__()
 
         def forward(self, x):
-            return x.t()
+            return x.transpose(0, 1)
 
     def test_protobuf(self):
         torch_model = TestPytorchExportModes.MyModel()
