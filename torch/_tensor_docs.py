@@ -1143,6 +1143,13 @@ the underlying normal distribution, and not of the returned distribution:
     f(x) = \\dfrac{1}{x \\sigma \\sqrt{2\\pi}}\ e^{-\\dfrac{(\\ln x - \\mu)^2}{2\\sigma^2}}
 """)
 
+add_docstr_all('logsumexp',
+               r"""
+logsumexp(dim, keepdim=False) -> Tensor
+
+See :func:`torch.logsumexp`
+""")
+
 add_docstr_all('lt',
                r"""
 lt(other) -> Tensor

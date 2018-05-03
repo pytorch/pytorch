@@ -766,6 +766,17 @@ class TestTorch(TestCase):
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
 
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_logsumexp(self):
+        from scipy.special import logsumexp
+        a = torch.randn(5, 4)
+        a[0, 0] = float('inf')
+        a[1, :] = float('-inf')
+        actual = a.logsumexp(1)
+        expected = logsumexp(a.numpy(), 1)
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertTrue(np.allclose(expected, actual.numpy()))
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_cpu_parallel(self):
         # To use parallel branches we'll need to compare on tensors
