@@ -17,6 +17,8 @@
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/helper.h"
 #include "caffe2/onnx/onnx_exporter.h"
+#include "caffe2/opt/converter.h"
+#include "caffe2/opt/fusion.h"
 #include "caffe2/opt/mobile.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
@@ -1483,10 +1485,23 @@ void addGlobalMethods(py::module& m) {
   // Prefix the transformation with transform_ to avoid clobbering the
   // function namespace.
 
-  m.def("transform_addNNPACK", [](py::bytes def) {
+  m.def("transform_addNNPACK", [](py::bytes def, bool low_memory) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
-    auto new_proto = opt::addNNPACK(proto);
+    auto new_proto = opt::addNNPACK(proto, low_memory);
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
+
+  m.def("transform_fuseConvRelu", [](py::bytes def) {
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+
+    auto nn = caffe2::convertToNNModule(proto);
+    opt::fuseConvRelu(&nn);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn);
+
     std::string out;
     new_proto.SerializeToString(&out);
     return py::bytes(out);
@@ -1496,6 +1511,39 @@ void addGlobalMethods(py::module& m) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
     auto new_proto = opt::fuseNNPACKConvRelu(proto);
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
+
+  m.def("transform_fuseAveragePoolRelu", [](py::bytes def) {
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+    auto nn = caffe2::convertToNNModule(proto);
+    opt::fuseAveragePoolRelu(&nn);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn);
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
+
+  m.def("transform_fuseMaxPoolRelu", [](py::bytes def) {
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+    auto nn = caffe2::convertToNNModule(proto);
+    opt::fuseMaxPoolRelu(&nn);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn);
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
+
+  m.def("transform_fuseSumRelu", [](py::bytes def) {
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+    auto nn = caffe2::convertToNNModule(proto);
+    opt::fuseSumRelu(&nn);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn);
     std::string out;
     new_proto.SerializeToString(&out);
     return py::bytes(out);
