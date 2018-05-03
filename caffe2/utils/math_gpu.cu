@@ -2603,10 +2603,10 @@ void MomentsCUDA(
   }
   if (transpose_axes[pivot] == pivot) {
     RowwiseMomentsCUDAKernel<T>
-      <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(outer_size, inner_size, X, mean, variance);
+        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context->cuda_stream()>>>(outer_size, inner_size, X, mean, variance);
     return;
   }
   DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
