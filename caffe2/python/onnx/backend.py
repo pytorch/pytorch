@@ -332,6 +332,39 @@ class Caffe2Backend(Backend):
         return Bi, Br, W_, R_
 
     @classmethod
+    def _make_rnn_with_converted_outputs(cls, n, direction, make_rnn_fn, sequence_lens, init_net, pred_mh):
+        if direction == 'forward':
+            outputs = make_rnn_fn(0)
+
+            # in the forward case, storage is shared between the
+            # last outputs. We need to decouple them so that the
+            # VariableLengthSequencePadding only mutates
+            # n.outputs[0]
+            for i in range(1, len(outputs)):
+                pred_mh.net.Copy(outputs[i], n.outputs[i])
+
+            pred_mh.net = pred_mh.net.Clone(
+                "dummy-clone-net", blob_remap={ outputs[0]: n.outputs[0] }
+            )
+        elif direction == 'bidirectional':
+            outputs_f = make_rnn_fn(0)
+            outputs_b = make_rnn_fn(1)
+
+            pred_mh.net.Concat([outputs_f[0], outputs_b[0]],
+                               [n.outputs[0], cls.dummy_name()], axis=2)
+            for i in range(1, len(outputs_f)):
+                pred_mh.net.Concat([outputs_f[i], outputs_b[i]],
+                                   [n.outputs[i], cls.dummy_name()], axis=0)
+
+        if sequence_lens is not None:
+            pred_mh.net.VariableLengthSequencePadding(
+                [n.outputs[0], sequence_lens], [n.outputs[0]])
+
+        return Caffe2Ops(list(pred_mh.Proto().op),
+                         list(init_net.Proto().op),
+                         list(pred_mh.Proto().external_input))
+
+    @classmethod
     def _create_rnn(cls, init_model, pred_model, n, opset_version):
         assert init_model is not None, "cannot convert RNNs without access to the full model"
         assert pred_model is not None, "cannot convert RNNs without access to the full model"
@@ -359,13 +392,13 @@ class Caffe2Backend(Backend):
             name = cls.dummy_name()
 
             _, _, _, _ = cls._extract_rnn_weights_and_biases(
-                B, W, R, hidden_size, direction_offset, 1, init_net, name)
+                B, W, R, hidden_size, direction_offset, 1, init_net, name,
+                "/i2h_b", "/gates_t_b", "/i2h_w", "/gates_t_w")
 
             initial_h_sliced = name + '/initial_h'
             init_net.Slice(initial_h, initial_h_sliced,
                            starts=[direction_offset + 0, 0, 0],
                            ends  =[direction_offset + 1,-1,-1])
-
 
             if direction_offset == 1:
                 if sequence_lens is not None:
@@ -403,33 +436,7 @@ class Caffe2Backend(Backend):
 
             return hidden_t_all, hidden_t_last
 
-        if direction == 'forward':
-            hidden_t_all, hidden_t_last = make_rnn(0)
-
-            # in the forward case, storage is shared between the two
-            # outputs. We need to decouple them so that the
-            # VariableLengthSequencePadding only mutates n.outputs[0]
-            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
-
-            pred_mh.net = pred_mh.net.Clone(
-                "dummy-clone-net",
-                blob_remap={ hidden_t_all: n.outputs[0] }
-            )
-        elif direction == 'bidirectional':
-            hidden_t_all_f, hidden_t_last_f = make_rnn(0)
-            hidden_t_all_b, hidden_t_last_b = make_rnn(1)
-            pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
-                               [n.outputs[0], cls.dummy_name()], axis=2)
-            pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], cls.dummy_name()], axis=0)
-
-        if sequence_lens is not None:
-            pred_mh.net.VariableLengthSequencePadding(
-                [n.outputs[0], sequence_lens], [n.outputs[0]])
-
-        return Caffe2Ops(list(pred_mh.Proto().op),
-                         list(init_net.Proto().op),
-                         list(pred_mh.Proto().external_input))
+        return cls._make_rnn_with_converted_outputs(n, direction, make_rnn, sequence_lens, init_net, pred_mh)
 
     @classmethod
     def _create_lstm(cls, init_model, pred_model, n, opset_version):
@@ -461,6 +468,15 @@ class Caffe2Backend(Backend):
                 B, W, R, hidden_size, direction_offset, 4, init_net, name,
                 "/i2h_b", "/gates_t_b", "/i2h_w", "/gates_t_w")
 
+            initial_h_sliced = name + '/initial_h'
+            init_net.Slice(initial_h, initial_h_sliced,
+                           starts=[direction_offset + 0, 0, 0],
+                           ends  =[direction_offset + 1,-1,-1])
+            initial_c_sliced = name + '/initial_c'
+            init_net.Slice(initial_c, initial_c_sliced,
+                           starts=[direction_offset + 0, 0, 0],
+                           ends  =[direction_offset + 1,-1,-1])
+
             # caffe2 has a different order from onnx. We need to rearrange
             #   i o f c -> i f o c
             reforms = ((W_, 'i2h_w',     [(0, -1)]),
@@ -474,15 +490,6 @@ class Caffe2Backend(Backend):
                     starts, ends = zip(dim0, *extra_dims)
                     init_net.Slice(name_from, x, starts=starts, ends=ends)
                 init_net.Concat([xi, xf, xo, xc], ['%s/%s' % (name, name_to), cls.dummy_name()], axis=0)
-
-            initial_h_sliced = name + '/initial_h'
-            init_net.Slice(initial_h, initial_h_sliced,
-                           starts=[direction_offset + 0, 0, 0],
-                           ends  =[direction_offset + 1,-1,-1])
-            initial_c_sliced = name + '/initial_c'
-            init_net.Slice(initial_c, initial_c_sliced,
-                           starts=[direction_offset + 0, 0, 0],
-                           ends  =[direction_offset + 1,-1,-1])
 
             if direction_offset == 1:
                 if sequence_lens is not None:
@@ -520,36 +527,7 @@ class Caffe2Backend(Backend):
 
             return hidden_t_all, hidden_t_last, cell_last
 
-        if direction == 'forward':
-            hidden_t_all, hidden_t_last, cell_last = make_lstm(0)
-
-            # in the forward case, storage is shared between the three
-            # outputs. We need to decouple them so that the
-            # VariableLengthSequencePadding only mutates n.outputs[0]
-            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
-            pred_mh.net.Copy(cell_last, n.outputs[2])
-
-            pred_mh.net = pred_mh.net.Clone(
-                "dummy-clone-net",
-                blob_remap={ hidden_t_all: n.outputs[0] }
-            )
-        elif direction == 'bidirectional':
-            hidden_t_all_f, hidden_t_last_f, cell_last_f = make_lstm(0)
-            hidden_t_all_b, hidden_t_last_b, cell_last_b = make_lstm(1)
-            pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
-                               [n.outputs[0], cls.dummy_name()], axis=2)
-            pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], cls.dummy_name()], axis=0)
-            pred_mh.net.Concat([cell_last_f, cell_last_b],
-                               [n.outputs[2], cls.dummy_name()], axis=0)
-
-        if sequence_lens is not None:
-            pred_mh.net.VariableLengthSequencePadding(
-                [n.outputs[0], sequence_lens], [n.outputs[0]])
-
-        return Caffe2Ops(list(pred_mh.Proto().op),
-                         list(init_net.Proto().op),
-                         list(pred_mh.Proto().external_input))
+        return cls._make_rnn_with_converted_outputs(n, direction, make_lstm, sequence_lens, init_net, pred_mh)
 
     @classmethod
     def _create_gru(cls, init_model, pred_model, n, opset_version):
@@ -582,6 +560,11 @@ class Caffe2Backend(Backend):
                 B, W, R, hidden_size, direction_offset, 3, init_net, name,
                 "_bias_i2h", "_bias_gates", "/i2h_w_pre", "/gates_t_w_pre")
 
+            initial_h_sliced = name + '/initial_h'
+            init_net.Slice(initial_h, initial_h_sliced,
+                           starts=[direction_offset + 0, 0, 0],
+                           ends  =[direction_offset + 1,-1,-1])
+
             # caffe2 has a different order from onnx. We need to rearrange
             #  z r h  -> r z h
             reforms = ((W_, 'i2h_w',    True,  [(0,-1)]),
@@ -596,11 +579,6 @@ class Caffe2Backend(Backend):
                     init_net.Slice(name_from, x, starts=starts, ends=ends)
                 if do_concat:
                     init_net.Concat([xr, xz, xh], ['%s/%s' % (name, name_to), cls.dummy_name()], axis=0)
-
-            initial_h_sliced = name + '/initial_h'
-            init_net.Slice(initial_h, initial_h_sliced,
-                           starts=[direction_offset + 0, 0, 0],
-                           ends  =[direction_offset + 1,-1,-1])
 
             if direction_offset == 1:
                 if sequence_lens is not None:
@@ -638,33 +616,7 @@ class Caffe2Backend(Backend):
 
             return hidden_t_all, hidden_t_last
 
-        if direction == 'forward':
-            hidden_t_all, hidden_t_last = make_gru(0)
-
-            # in the forward case, storage is shared between the two
-            # outputs. We need to decouple them so that the
-            # VariableLengthSequencePadding only mutates n.outputs[0]
-            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
-
-            pred_mh.net = pred_mh.net.Clone(
-                "dummy-clone-net",
-                blob_remap={ hidden_t_all: n.outputs[0] }
-            )
-        elif direction == 'bidirectional':
-            hidden_t_all_f, hidden_t_last_f = make_gru(0)
-            hidden_t_all_b, hidden_t_last_b = make_gru(1)
-            pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
-                               [n.outputs[0], cls.dummy_name()], axis=2)
-            pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], cls.dummy_name()], axis=0)
-
-        if sequence_lens is not None:
-            pred_mh.net.VariableLengthSequencePadding(
-                [n.outputs[0], sequence_lens], [n.outputs[0]])
-
-        return Caffe2Ops(list(pred_mh.Proto().op),
-                         list(init_net.Proto().op),
-                         list(pred_mh.Proto().external_input))
+        return cls._make_rnn_with_converted_outputs(n, direction, make_gru, sequence_lens, init_net, pred_mh)
 
     @classmethod
     def _create_control_op(cls, init_model, pred_model, n, opset_version):
