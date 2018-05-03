@@ -19,7 +19,8 @@ SKIP_PYTHON_BINDINGS = [
     '.*_forward_out', 'sparse_raw_resize_', '_unsafe_view', 'tensor',
     'sparse_coo_tensor', '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
-    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*', 'arange.*',
+    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*',
+    'arange.*', 'range.*',
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')

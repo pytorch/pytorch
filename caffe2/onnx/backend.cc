@@ -872,7 +872,7 @@ Caffe2Ops Caffe2Backend::CreateMatMul(OnnxNode* onnx_node, int opset_version) {
 }
 
 //==============================================
-// Rest of the member funtions for Caffe2Backend
+// Rest of the member functions for Caffe2Backend
 //==============================================
 std::unordered_set<std::string>
 Caffe2Backend::AllNamesInGraph(const GraphProto &graph) {

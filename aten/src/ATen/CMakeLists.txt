@@ -1,4 +1,3 @@
-
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
@@ -15,36 +14,41 @@ ELSE()
   SET(VCOMP_LIB "vcompd")
 ENDIF()
 
+IF(NOT MSVC)
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-ignored-qualifiers")
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-ignored-qualifiers")
+ENDIF(NOT MSVC)
+
 ########################
 # SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
 # so we need to set these commands here rather than in src/TH
 IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
   IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast")
   ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "-O3 -ffast-math")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "-O3 -ffast-math")
   ENDIF(MSVC)
 ENDIF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
 IF(C_AVX_FOUND)
   IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast ${CXX_AVX_FLAGS}")
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast ${CXX_AVX_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
   ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${CXX_AVX_FLAGS}")
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "-O3 ${CXX_AVX_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${CXX_AVX_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "-O3 ${CXX_AVX_FLAGS}")
   ENDIF(MSVC)
 ENDIF(C_AVX_FOUND)
 
 IF(C_AVX2_FOUND)
   IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2 ${CXX_AVX2_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2 ${CXX_AVX2_FLAGS}")
   ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "-O3 ${CXX_AVX2_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "-O3 ${CXX_AVX2_FLAGS}")
   ENDIF(MSVC)
 ENDIF(C_AVX2_FOUND)
 
 IF(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-  SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
+  SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
 ENDIF()
 
 FILE(GLOB cpu_kernel_cpp_in RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cpu/*.cpp")
@@ -244,6 +248,7 @@ if(NOT MSVC)
     -Wno-missing-field-initializers
     -Wno-type-limits
     -Wno-unused-parameter
+    -Wno-unknown-warning-option
     -Wno-unknown-pragmas)
 
   if ($ENV{WERROR})
@@ -251,13 +256,13 @@ if(NOT MSVC)
   endif()
 endif()
 
-set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/../third_party/tbb")
+set(TBB_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/tbb")
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
 set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-add_subdirectory(${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb)
+add_subdirectory(cpu/tbb)
 set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
 target_include_directories(tbb_static PUBLIC ${TBB_ROOT_DIR}/include)
 target_link_libraries(ATen tbb_static)
@@ -344,7 +349,7 @@ set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
 # ---[ Configure cpuinfo
 if (NOT TARGET cpuinfo)
   if (NOT DEFINED CPUINFO_SOURCE_DIR)
-    set(CPUINFO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
+    set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
   endif()
 
   set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
@@ -365,6 +370,13 @@ if (NOT TARGET cpuinfo)
   set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
 endif()
 TARGET_LINK_LIBRARIES(ATen cpuinfo)
+
+# ---[ Configure SLEEF
+IF(NOT TARGET sleef)
+  add_subdirectory("cpu/sleef")
+  include_directories(SYSTEM ${CMAKE_BINARY_DIR}/include)
+ENDIF()
+TARGET_LINK_LIBRARIES(ATen sleef)
 
 IF(CUDA_FOUND)
   IF ($ENV{ATEN_STATIC_CUDA})

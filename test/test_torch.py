@@ -260,6 +260,9 @@ class TestTorch(TestCase):
             input = []
             input.append(list(range(-5, 5)))
             input.append([x + 1e-6 for x in range(-5, 5)])
+            # Some vectorized implementations don't support large ranges
+            input.append([x + 1e10 for x in range(-5, 5)])
+            input.append([x - 1e10 for x in range(-5, 5)])
             input.append(torch.randn(10).tolist())
             input.append((torch.randn(10) + 1e6).tolist())
             input.append([math.pi * (x / 2) for x in range(-5, 5)])
@@ -396,7 +399,9 @@ class TestTorch(TestCase):
             try:
                 return math.cosh(x)
             except OverflowError:
-                return float('inf') if x > 0 else float('-inf')
+                # Return inf on overflow.
+                # See http://en.cppreference.com/w/cpp/numeric/math/cosh
+                return float('inf')
         self._test_math(torch.cosh, cosh)
 
     def test_acos(self):
@@ -1503,6 +1508,8 @@ class TestTorch(TestCase):
         check_sum_dim(make_tensors(50, 50, 50), 0)
         check_sum_dim(make_tensors(50, 50, 50), 1)
         check_sum_dim(make_tensors(50, 50, 50), 2)
+        check_sum_dim(make_tensors(50, 50, 50), (1, 2))
+        check_sum_dim(make_tensors(50, 50, 50), (1, -1))
 
         def make_contiguous_slice(size, dtype):
             contig = make_contiguous((1, size), dtype)
@@ -1521,6 +1528,11 @@ class TestTorch(TestCase):
         res1 = torch.sum(x, 1)
         res2 = torch.Tensor()
         torch.sum(x, 1, out=res2)
+        self.assertEqual(res1, res2)
+        x = torch.rand(100, 100, 100)
+        res1 = x.sum(2).sum(1)
+        res2 = torch.Tensor()
+        torch.sum(x, (2, 1), out=res2)
         self.assertEqual(res1, res2)
 
     # TODO: these tests only check if it's possible to pass a return value
@@ -2326,6 +2338,11 @@ class TestTorch(TestCase):
         self.assertEqual(res1.size(0), 4)
         res1 = torch.range(1, 10, 0.3, out=torch.DoubleTensor())
         self.assertEqual(res1.size(0), 31)
+
+    def test_range_warning(self):
+        with warnings.catch_warnings(record=True) as w:
+            torch.range(0, 10)
+            self.assertEqual(len(w), 1)
 
     def test_arange(self):
         res1 = torch.arange(0, 1)

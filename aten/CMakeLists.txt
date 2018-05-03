@@ -1,12 +1,19 @@
-cmake_minimum_required(VERSION 3.0)
-set(CMAKE_MODULE_PATH
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix
+if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  if (NOT BUILD_ATEN)
+    return()
+  endif()
+else()
+  cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+  project(ATen CXX C)
+endif()
+
+# Find modules
+list(APPEND CMAKE_MODULE_PATH
   /usr/lib/x86_64-linux-gnu/
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
-  ${CMAKE_MODULE_PATH})
-SET(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
-project(ATen)
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
+list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
+
 
 cmake_policy(SET CMP0012 NEW)
 
@@ -120,7 +127,7 @@ if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS)
-  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/select_compute_arch.cmake)
+  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix/FindCUDA/select_compute_arch.cmake)
 ENDIF()
 LIST(APPEND CUDA_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
 CUDA_SELECT_NVCC_ARCH_FLAGS(NVCC_FLAGS_EXTRA $ENV{TORCH_CUDA_ARCH_LIST})
