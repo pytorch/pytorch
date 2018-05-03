@@ -317,7 +317,11 @@ class Tensor(torch._C._TensorBase):
         return -self + other
 
     def __rdiv__(self, other):
-        return self.reciprocal() * other
+        if self.dtype.is_floating_point:
+            return self.reciprocal() * other
+        else:
+            return (self.double().reciprocal() * other).type_as(self)
+
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
 
@@ -333,6 +337,18 @@ class Tensor(torch._C._TensorBase):
 
     def __rpow__(self, other):
         return self.new([other]) ** self
+
+    def __floordiv__(self, other):
+        result = self / other
+        if result.dtype.is_floating_point:
+            result = result.trunc()
+        return result
+
+    def __rfloordiv__(self, other):
+        result = other / self
+        if result.dtype.is_floating_point:
+            result = result.trunc()
+        return result
 
     __neg__ = _C._TensorBase.neg
 
