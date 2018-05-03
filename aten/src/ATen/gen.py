@@ -349,9 +349,10 @@ def declare_outputs():
         file_manager.will_write(f)
     cuda_file_manager.will_write('CUDACopy.cpp')
     for fname in sorted(generators.keys()):
+        fm = file_manager
         if generators[fname]['name'] == 'CUDA':
-            fname = os.path.join('cuda', fname)
-        file_manager.will_write(fname)
+            fm = cuda_file_manager
+        fm.will_write(fname)
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]
         full_backend = "Sparse" + backend if density == "Sparse" else backend
@@ -387,9 +388,10 @@ def generate_outputs():
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
     for fname, env in generators.items():
+        fm = file_manager
         if env['name'] == 'CUDA':
-            fname = os.path.join('cuda', fname)
-        file_manager.write(fname, GENERATOR_DERIVED.substitute(env))
+            fm = cuda_file_manager
+        fm.write(fname, GENERATOR_DERIVED.substitute(env))
 
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends
