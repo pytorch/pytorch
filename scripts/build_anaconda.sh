@@ -316,7 +316,7 @@ if [[ -n $pytorch_too ]]; then
     # Removed until https://github.com/conda/conda/issues/7245 is resolved
     #append_to_section 'features' features:
     #append_to_section 'features' "  - $cuda_feature_name" 
-    append_to_section 'build' "magma-$cuda_feature_name"
+    append_to_section 'build' "- magma-$cuda_feature_name"
     #append_to_section 'features' '  - nccl2'
     #add_package $cuda_feature_name
     conda_channel+=('-c pytorch')
