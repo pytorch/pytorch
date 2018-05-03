@@ -141,19 +141,23 @@ def make_cuda_memory_checked_test(test):
     global _cuda_ctx_rng_initialized
     if TEST_CUDA and not _cuda_ctx_rng_initialized:
         # initialize cuda context and rng for memory tests
-        torch.randn(1, device="cuda")
+        for i in range(torch.cuda.device_count()):
+            torch.randn(1, device="cuda:{}".format(i))
         _cuda_ctx_rng_initialized = True
 
     def cuda_memory_checked_test(*args, **kwargs):
+        num_devices = torch.cuda.device_count()
         torch.cuda.synchronize()
         gc.collect()
-        start = torch.cuda.memory_allocated()
+        starts = tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
         test(*args, **kwargs)
         torch.cuda.synchronize()
         gc.collect()
-        end = torch.cuda.memory_allocated()
-        test.assertEqual(start, end, '{} leaked {} bytes GPU memory'.format(
-                         test, end - start))
+        ends = tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+        for i, (start, end) in enumerate(zip(starts, ends)):
+            test.assertEqual(start, end,
+                             '{} leaked {} bytes CUDA memory on device {}'.format(
+                             test, end - start, i))
 
     return cuda_memory_checked_test
 
