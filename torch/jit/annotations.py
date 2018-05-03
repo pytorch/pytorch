@@ -142,6 +142,7 @@ def default_signature(fn, source, _n_arguments, _n_binders):
 
 _def_end_regex = re.compile(r'.*\)\s*:.*')
 
+
 def get_type_line(source):
     """Tries to find the line containing a comment with the type annotation."""
     lines = source.split('\n')
