@@ -301,7 +301,10 @@ def view(g, self, size):
     return g.op("Reshape", self, shape)
 
 
-def stack(g, *tensors, dim):
+def stack(g, *tensors, **kwargs):
+    dim = kwargs.pop('dim')
+    if kwargs:
+        raise RuntimeError("Unexpected kwargs: " + ','.join(kwargs.keys()))
     if len(tensors) < 2:
         raise RuntimeError("Expected at least two arguments to stack node")
     unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in tensors]
