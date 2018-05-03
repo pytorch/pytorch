@@ -1,3 +1,4 @@
+import re
 import sys
 import ast
 import inspect
@@ -139,6 +140,8 @@ def default_signature(fn, source, _n_arguments, _n_binders):
     return arg_types, ret_type
 
 
+_def_end_regex = re.compile(r'.*\)\s*:.*')
+
 def get_type_line(source):
     """Tries to find the line containing a comment with the type annotation."""
     lines = source.split('\n')
@@ -147,7 +150,7 @@ def get_type_line(source):
         return line[:line.index('#') if '#' in line else None]
 
     i = 0
-    while '):' not in strip_comment(lines[i]):
+    while not _def_end_regex.match(strip_comment(lines[i])):
         i += 1
     i += 1
 
