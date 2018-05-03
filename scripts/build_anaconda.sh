@@ -327,6 +327,8 @@ fi
 
 if [[ -z $slim ]]; then
   add_package 'opencv'
+else
+  caffe2_cmake_args+=("-DUSE_OPENCV=OFF")
 fi
 
 # Flags required for CUDA for Caffe2
