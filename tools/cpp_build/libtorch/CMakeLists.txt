@@ -211,7 +211,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/Exceptions.cpp)
 
 if (NOT NO_API)
-  list(APPEND ${TORCH_SRCS}
+  list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/containers.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp)
