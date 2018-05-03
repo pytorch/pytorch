@@ -152,8 +152,10 @@ scalar_types = [
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
 top_env = {
-    'type_registrations': [],
-    'type_headers': [],
+    'cpu_type_registrations': [],
+    'cpu_type_headers': [],
+    'cuda_type_registrations': [],
+    'cuda_type_headers': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'type_method_inline_definitions': [],
@@ -320,9 +322,15 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     type_register = (('context->type_registry[static_cast<int>(Backend::{})]' +
                       '[static_cast<int>(ScalarType::{})].reset(new {}(context));')
                      .format(env['Backend'], scalar_name, env['Type']))
-    top_env['type_registrations'].append(type_register)
-    top_env['type_headers'].append(
-        '#include "ATen/{}.h"'.format(env['Type']))
+    if env['DenseBackend'] == 'CPU':
+        top_env['cpu_type_registrations'].append(type_register)
+        top_env['cpu_type_headers'].append(
+            '#include "ATen/{}.h"'.format(env['Type']))
+    else:
+        assert env['DenseBackend'] == 'CUDA'
+        top_env['cuda_type_registrations'].append(type_register)
+        top_env['cuda_type_headers'].append(
+            '#include "ATen/{}.h"'.format(env['Type']))
 
     return env
 

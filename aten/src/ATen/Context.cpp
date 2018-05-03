@@ -33,7 +33,7 @@ Context::Context()
 
   generator_registry[static_cast<int>(Backend::CPU)]
     .reset(new CPUGenerator(this));
-  Type::registerAll(this);
+  Type::registerCPU(this);
 }
 
 Context & globalContext() {

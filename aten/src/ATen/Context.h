@@ -92,6 +92,8 @@ public:
   void setDeterministicCuDNN(bool);
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Backend::NumOptions)];
+  // NB: type_registry has nullptr for all CUDA backends until
+  // CUDA initialization has occurred
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
