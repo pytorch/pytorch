@@ -278,11 +278,12 @@ portable_sed "s/name: caffe2.*\$/name: ${package_name}/" $meta_yaml
 # Handle tests
 ###########################################################
 if [[ -n $pytorch_too ]]; then
-  if [[ -n $cuda_ver ]]; then
-    append_to_section 'test' 'requires:'
-    append_to_section 'test' "  - $cuda_feature_name"
-    append_to_section 'test' '  - nccl2'
-  fi
+  # Removed until https://github.com/conda/conda/issues/7245 is resolved
+  #if [[ -n $cuda_ver ]]; then
+  #  append_to_section 'test' 'requires:'
+  #  append_to_section 'test' "  - $cuda_feature_name"
+  #  append_to_section 'test' '  - nccl2'
+  #fi
   append_to_section 'test' 'source_files:'
   append_to_section 'test' '  - test'
   append_to_section 'test' 'commands:'
@@ -312,10 +313,12 @@ if [[ -n $pytorch_too ]]; then
   append_to_section 'build' '- setuptools'
   #caffe2_cmake_args+=("-DBLAS=MKL")
   if [[ -n $cuda_ver ]]; then
-    append_to_section 'features' features:
-    append_to_section 'features' "  - $cuda_feature_name" 
-    append_to_section 'features' '  - nccl2'
-    add_package $cuda_feature_name
+    # Removed until https://github.com/conda/conda/issues/7245 is resolved
+    #append_to_section 'features' features:
+    #append_to_section 'features' "  - $cuda_feature_name" 
+    append_to_section 'build' "magma-$cuda_feature_name"
+    #append_to_section 'features' '  - nccl2'
+    #add_package $cuda_feature_name
     conda_channel+=('-c pytorch')
 
     caffe2_cmake_args+=("-DUSE_ATEN=ON")
