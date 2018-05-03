@@ -133,9 +133,9 @@ bool VariableType::isVariableType(const at::Type& type) {
 }
 
 at::Type* VariableType::getType(const at::Type& baseType) {
-  return context->type_registry[static_cast<int>(at::IsVariable::Variable)]
-                               [static_cast<int>(baseType.backend())]
-                               [static_cast<int>(baseType.scalarType())].get();
+  return globalContext().type_registry[static_cast<int>(at::IsVariable::Variable)]
+                                      [static_cast<int>(baseType.backend())]
+                                      [static_cast<int>(baseType.scalarType())].get();
 }
 
 at::Type* VariableType::getType(const at::Tensor& tensor) {
@@ -147,13 +147,14 @@ at::Type* VariableType::getType(const at::Tensor& tensor) {
 
 std::vector<at::Type*> VariableType::allTypes() {
   // TODO: eliminate this eager initialization of CUDA
-  context->lazyInitCUDA();
+  auto& context = at::globalContext();
+  context.lazyInitCUDA();
   std::vector<Type*> res;
   // NB: This will overreserve for undefined, but that should be harmless enough
   res.reserve(static_cast<int>(Backend::NumOptions) * static_cast<int>(ScalarType::NumOptions));
   for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      res.emplace_back(context->type_registry[static_cast<int>(at::IsVariable::Variable)][p][s].get());
+      res.emplace_back(context.type_registry[static_cast<int>(at::IsVariable::Variable)][p][s].get());
     }
   }
   return res;

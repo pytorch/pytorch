@@ -25,6 +25,8 @@ using at::Type;
 using at::ScalarType;
 using at::optional;
 
+void register_variable_type_for(Context*, at::Backend, at::ScalarType);
+
 struct VariableType final : public at::Type {
   VariableType(Context* context, at::Type* baseType);
   virtual at::ScalarType scalarType() const override;
