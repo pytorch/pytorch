@@ -212,7 +212,9 @@ def sum(g, self, dim=None, keepdim=None):
         return g.op("Sum", self)
     if keepdim is None:
         keepdim = 0
-    return g.op("ReduceSum", self, axes_i=[dim], keepdims_i=keepdim)
+    if isinstance(dim, numbers.Number):
+        dim = [dim]
+    return g.op("ReduceSum", self, axes_i=dim, keepdims_i=keepdim)
 
 
 def cumsum(g, input, dim):
