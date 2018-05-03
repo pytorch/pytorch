@@ -304,6 +304,34 @@ class Caffe2Backend(Backend):
                 return x.type.tensor_type.shape.dim[1].dim_value
 
     @classmethod
+    def _extract_rnn_weights_and_biases(
+            cls, B, W, R,
+            hidden_size, direction_offset, num_gates,
+            init_net, name,
+            Bi, Br, W_, R_):
+        # input and recurrence biases are squashed together in onnx
+        # but not in caffe2
+
+        gates_hidden_size = num_gates * hidden_size
+        bias_offset = 2 * direction_offset * gates_hidden_size
+        weight_offset = direction_offset * gates_hidden_size
+
+        Bi = init_net.Slice(B, name + Bi,
+                            starts=[bias_offset + 0 * gates_hidden_size],
+                            ends  =[bias_offset + 1 * gates_hidden_size])
+        Br = init_net.Slice(B, name + Br,
+                            starts=[bias_offset + 1 * gates_hidden_size],
+                            ends  =[bias_offset + 2 * gates_hidden_size])
+        W_ = init_net.Slice(W, name + W_,
+                            starts=[weight_offset + 0 * gates_hidden_size, 0],
+                            ends  =[weight_offset + 1 * gates_hidden_size,-1])
+        R_ = init_net.Slice(R, name + R_,
+                            starts=[weight_offset + 0 * gates_hidden_size, 0],
+                            ends  =[weight_offset + 1 * gates_hidden_size,-1])
+
+        return Bi, Br, W_, R_
+
+    @classmethod
     def _create_rnn(cls, init_model, pred_model, n, opset_version):
         assert init_model is not None, "cannot convert RNNs without access to the full model"
         assert pred_model is not None, "cannot convert RNNs without access to the full model"
@@ -330,24 +358,8 @@ class Caffe2Backend(Backend):
         def make_rnn(direction_offset):
             name = cls.dummy_name()
 
-            # input and recurrence biases are squashed together in
-            # onnx but not in caffe2
-
-            bias_offset = 2 * direction_offset * hidden_size
-            init_net.Slice(B, name + "/i2h_b",
-                           starts=[bias_offset + 0 * hidden_size],
-                           ends  =[bias_offset + 1 * hidden_size])
-            init_net.Slice(B, name + "/gates_t_b",
-                           starts=[bias_offset + 1 * hidden_size],
-                           ends  =[bias_offset + 2 * hidden_size])
-
-            weight_offset = direction_offset * hidden_size
-            init_net.Slice(W, name + '/i2h_w',
-                           starts=[weight_offset + 0 * hidden_size, 0],
-                           ends  =[weight_offset + 1 * hidden_size,-1])
-            init_net.Slice(R, name + '/gates_t_w',
-                           starts=[weight_offset + 0 * hidden_size, 0],
-                           ends  =[weight_offset + 1 * hidden_size,-1])
+            _, _, _, _ = cls._extract_rnn_weights_and_biases(
+                B, W, R, hidden_size, direction_offset, 1, init_net, name)
 
             initial_h_sliced = name + '/initial_h'
             init_net.Slice(initial_h, initial_h_sliced,
@@ -445,24 +457,9 @@ class Caffe2Backend(Backend):
         def make_lstm(direction_offset):
             name = cls.dummy_name()
 
-            # input and recurrence biases are squashed together in
-            # onnx but not in caffe2
-
-            bias_offset = 8 * direction_offset * hidden_size
-            Bi = init_net.Slice(B, name + "_bias_i2h",
-                                starts=[bias_offset + 0 * hidden_size],
-                                ends  =[bias_offset + 4 * hidden_size])
-            Br = init_net.Slice(B, name + "_bias_gates",
-                                starts=[bias_offset + 4 * hidden_size],
-                                ends  =[bias_offset + 8 * hidden_size])
-
-            weight_offset = 4 * direction_offset * hidden_size
-            W_ = init_net.Slice(W, name + '/i2h_w_pre',
-                                starts=[weight_offset + 0 * hidden_size, 0],
-                                ends  =[weight_offset + 4 * hidden_size,-1])
-            R_ = init_net.Slice(R, name + '/gates_t_w_pre',
-                                starts=[weight_offset + 0 * hidden_size, 0],
-                                ends  =[weight_offset + 4 * hidden_size,-1])
+            Bi, Br, W_, R_ = cls._extract_rnn_weights_and_biases(
+                B, W, R, hidden_size, direction_offset, 4, init_net, name,
+                "/i2h_b", "/gates_t_b", "/i2h_w", "/gates_t_w")
 
             # caffe2 has a different order from onnx. We need to rearrange
             #   i o f c -> i f o c
@@ -581,24 +578,9 @@ class Caffe2Backend(Backend):
         def make_gru(direction_offset):
             name = cls.dummy_name()
 
-            # input and recurrence biases are squashed together in
-            # onnx but not in caffe2
-
-            bias_offset = 6 * direction_offset * hidden_size
-            Bi = init_net.Slice(B, name + "_bias_i2h",
-                                starts=[bias_offset + 0 * hidden_size],
-                                ends  =[bias_offset + 3 * hidden_size])
-            Br = init_net.Slice(B, name + "_bias_gates",
-                                starts=[bias_offset + 3 * hidden_size],
-                                ends  =[bias_offset + 6 * hidden_size])
-
-            weight_offset = 3 * direction_offset * hidden_size
-            W_ = init_net.Slice(W, name + '/i2h_w_pre',
-                                starts=[weight_offset + 0 * hidden_size, 0],
-                                ends  =[weight_offset + 3 * hidden_size,-1])
-            R_ = init_net.Slice(R, name + '/gates_t_w_pre',
-                                starts=[weight_offset + 0 * hidden_size, 0],
-                                ends  =[weight_offset + 3 * hidden_size,-1])
+            Bi, Br, W_, R_ = cls._extract_rnn_weights_and_biases(
+                B, W, R, hidden_size, direction_offset, 3, init_net, name,
+                "_bias_i2h", "_bias_gates", "/i2h_w_pre", "/gates_t_w_pre")
 
             # caffe2 has a different order from onnx. We need to rearrange
             #  z r h  -> r z h
