@@ -391,12 +391,16 @@ class TestSparse(TestCase):
         self.assertEqual(torch.Size([3, 2]), x.size())
         self.assertEqual(0, x._indices().numel())
         self.assertEqual(0, x._values().numel())
+        self.assertEqual(x._dimI(), 2)
+        self.assertEqual(x._dimV(), 0)
 
         x = self.SparseTensor(2, 3)
         y = x.t()
         self.assertEqual(torch.Size([3, 2]), y.size())
         self.assertEqual(0, y._indices().numel())
         self.assertEqual(0, y._values().numel())
+        self.assertEqual(x._dimI(), 2)
+        self.assertEqual(x._dimV(), 0)
 
     @cpu_only
     def test_mm(self):

@@ -468,10 +468,11 @@ static void check_t(const Tensor& self, const char *fn) {
     int64_t nDimI = self._dimI();
     int64_t nDimV = self._dimV();
     if (!(nDimI == 2 && nDimV == 0)) {
-      AT_ERROR(fn, " expects a 2D sparse tensor, but self is ", nDimI, "D indices and ", nDimV, "D values");
+      AT_ERROR(fn, " expects a tensor with 2 sparse and 0 dense dimensions, but got ",
+               nDimI, " sparse and ", nDimV, " dense dimensions");
     }
-  } else if (self.ndimension() != 2) {
-    AT_ERROR(fn, " expects a 2D tensor, but self is ", self.ndimension());
+  } else if (self.dim() != 2) {
+    AT_ERROR(fn, " expects a 2D tensor, but self is ", self.dim(), "D");
   }
 }
 
