@@ -100,43 +100,42 @@ const char * VariableType::typeString() {
   return "VariableType";
 }
 
+// Pre-condition: backend/scalar_type is a valid type in the type_registry
+void register_variable_type_for(at::Context* context, at::Backend backend, at::ScalarType scalar_type) {
+  auto* baseType = context->type_registry[static_cast<int>(at::IsVariable::NotVariable)][static_cast<int>(backend)][static_cast<int>(scalar_type)].get();
+  AT_ASSERT(baseType);
+  context->type_registry[static_cast<int>(at::IsVariable::Variable)][static_cast<int>(backend)][static_cast<int>(scalar_type)].reset(new VariableType(context, baseType));
+}
+
 struct VariableTypeRegistry {
   static constexpr int MaxTypes = static_cast<int>(at::TypeID::NumOptions);
 
-  VariableTypeRegistry();
-
-  std::vector<VariableType> types_vec;
-  at::Type* types[MaxTypes];
-};
-
-VariableTypeRegistry::VariableTypeRegistry() {
-  auto& context = at::globalContext();
-  types_vec.reserve(MaxTypes);
-  memset(types, 0, MaxTypes * sizeof(at::Type*));
-  for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
-    for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto baseType = context.type_registry[p][s].get();
-      if (baseType && baseType->backend() != Backend::Undefined) {
-        auto id = static_cast<int>(baseType->ID());
-        types_vec.emplace_back(&context, baseType);
-        types[id] = &types_vec.back();
+  VariableTypeRegistry() {
+    auto& context = at::globalContext();
+    for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
+      for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
+        auto baseType = context.type_registry[static_cast<int>(at::IsVariable::NotVariable)][p][s].get();
+        if (baseType && baseType->backend() != Backend::Undefined) {
+          register_variable_type_for(&context, static_cast<Backend>(p), static_cast<ScalarType>(s));
+        }
       }
     }
   }
-}
+
+  std::once_flag init_flag;
+};
 
 static VariableTypeRegistry registry;
 
 bool VariableType::isVariableType(const at::Type& type) {
-  // Since all VariableTypes are allocated contiguously in types_vec, we can
-  // just check that the pointer is inside the correct range.
-  ptrdiff_t offset = reinterpret_cast<const char*>(&type) - reinterpret_cast<const char*>(registry.types_vec.data());
-  ptrdiff_t extent = VariableTypeRegistry::MaxTypes * sizeof(VariableType);
-  return offset >= 0 && offset < extent;
+  static const auto* undefined_ty = &globalContext().getType(at::Backend::Undefined, at::ScalarType::Undefined);
+  return type.is_variable_or_undefined() && &type != undefined_ty;
 }
 
 at::Type* VariableType::getType(const at::Type& baseType) {
-  return registry.types[static_cast<int>(baseType.ID())];
+  return context->type_registry[static_cast<int>(at::IsVariable::Variable)]
+                               [static_cast<int>(baseType.backend())]
+                               [static_cast<int>(baseType.scalarType())].get();
 }
 
 at::Type* VariableType::getType(const at::Tensor& tensor) {
@@ -147,10 +146,15 @@ at::Type* VariableType::getType(const at::Tensor& tensor) {
 }
 
 std::vector<at::Type*> VariableType::allTypes() {
+  // TODO: eliminate this eager initialization of CUDA
+  context->lazyInitCUDA();
   std::vector<Type*> res;
-  res.reserve(registry.types_vec.size());
-  for (auto& type : registry.types_vec) {
-    res.push_back(&type);
+  // NB: This will overreserve for undefined, but that should be harmless enough
+  res.reserve(static_cast<int>(Backend::NumOptions) * static_cast<int>(ScalarType::NumOptions));
+  for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
+    for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
+      res.emplace_back(context->type_registry[static_cast<int>(at::IsVariable::Variable)][p][s].get());
+    }
   }
   return res;
 }

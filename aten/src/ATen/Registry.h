@@ -176,7 +176,7 @@ class Registerer {
       key,                                                                    \
       RegistryName(),                                                         \
       Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
-      demangle_type<__VA_ARGS__>());                                           \
+      ::at::demangle_type<__VA_ARGS__>());                                           \
   }
 
 // AT_DECLARE_REGISTRY and AT_DEFINE_REGISTRY are hard-wired to use std::string

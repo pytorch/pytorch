@@ -1,6 +1,7 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/CUDAGenerator.h>
+#include <ATen/RegisterCUDA.h>
 
 #include "THC/THC.h"
 

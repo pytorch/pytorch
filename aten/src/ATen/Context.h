@@ -21,21 +21,32 @@ struct cudaDeviceProp;
 
 namespace at {
 
+enum class IsVariable {
+  NotVariable,
+  Variable,
+  NumOptions
+};
+
 class AT_API Context {
 public:
   Context();
-  Type & getType(Backend p, ScalarType s) {
+  Type * getTypeOpt(Backend p, ScalarType s) {
     initCUDAIfNeeded(p);
-    auto & type = type_registry[static_cast<int>(p)][static_cast<int>(s)];
+    auto & type = type_registry[static_cast<int>(IsVariable::NotVariable)][static_cast<int>(p)][static_cast<int>(s)];
 
     if(!type) {
       // there is only a single Undefined Type.
       if (p == Backend::Undefined || s == ScalarType::Undefined) {
-        auto & undef = type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)];
-        if (undef) return *undef;
+        auto & undef = type_registry[static_cast<int>(IsVariable::NotVariable)][static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)];
+        if (undef) return undef.get();
       }
-      AT_ERROR(toString(p), toString(s), "Type is not enabled.");
+      return nullptr;
     }
+    return type.get();
+  }
+  Type & getType(Backend p, ScalarType s) {
+    auto* type = getTypeOpt(p, s);
+    if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     return *type;
   }
   Generator & defaultGenerator(Backend p) {
@@ -96,6 +107,7 @@ public:
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   std::unique_ptr<Type> type_registry
+    [static_cast<int>(IsVariable::NumOptions)]
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
 private:

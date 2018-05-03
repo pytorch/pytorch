@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Allocator.h"
+#include <ATen/Allocator.h>
 
 namespace at { namespace cuda {
 

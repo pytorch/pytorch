@@ -181,12 +181,13 @@ if (NOT RETURN_VALUE EQUAL 0)
     message(FATAL_ERROR "Failed to get generated_cpp list")
 endif()
 file(READ ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt generated_cpp)
+file(READ ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt-cuda cuda_generated_cpp)
 
 FILE(GLOB_RECURSE all_templates "templates/*")
 
 FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ATen)
 
-ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
+ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp} ${cuda_generated_cpp}
 COMMAND ${GEN_COMMAND}
 DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
@@ -195,6 +196,10 @@ DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 # on building the generated aten files to workaround.
 ADD_CUSTOM_TARGET(aten_files_are_generated
   DEPENDS ${generated_cpp}
+)
+
+ADD_CUSTOM_TARGET(cuda_aten_files_are_generated
+  DEPENDS ${cuda_generated_cpp}
 )
 
 set(all_cpu_cpp ${base_cpp} ${native_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
@@ -210,13 +215,14 @@ IF(NOT NO_CUDA)
   INCLUDE_DIRECTORIES(${ATen_CUDA_INCLUDE})
   INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/cuda")
   set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu})
-  set(all_cuda_cpp ${native_cudnn_cpp} ${cuda_cpp} ${ATen_CUDA_SRCS})
+  set(all_cuda_cpp ${native_cudnn_cpp} ${cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
   IF(CUDNN_FOUND)
     SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
   ENDIF()
 endif()
 
 filter_list(generated_h generated_cpp "\\.h$")
+filter_list(cuda_generated_h cuda_generated_cpp "\\.h$")
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
@@ -236,11 +242,10 @@ ENDIF()
 #     built when NO_CUDA=0 and CUDA is available.
 
 add_library(ATen_cpu ${AT_LINK_STYLE} ${all_cpu_cpp})
-# TODO: make aten_files_are_generated more fine-grained
 add_dependencies(ATen_cpu aten_files_are_generated)
 if(CUDA_FOUND)
   cuda_add_library(ATen_cuda ${AT_LINK_STYLE} ${all_cuda_cpp})
-  # add_dependencies(ATen_cuda)
+  add_dependencies(ATen_cuda cuda_aten_files_are_generated)
 endif()
 add_library(ATen ${AT_LINK_STYLE})
 target_link_libraries(ATen ATen_cpu)
@@ -513,7 +518,7 @@ FOREACH(HEADER ${base_h})
   GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
 ENDFOREACH()
-FOREACH(HEADER ${generated_h})
+FOREACH(HEADER ${generated_h} ${cuda_generated_h})
   # NB: Assumed to be flat
   INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
 ENDFOREACH()

@@ -1,8 +1,7 @@
-#include "PinnedMemoryAllocator.h"
+#include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <ATen/Context.h>
+#include <ATen/Config.h>
 
-#include "Context.h"
-
-#include "ATen/Config.h"
 #include <THC/THC.h>
 
 #include <stdexcept>

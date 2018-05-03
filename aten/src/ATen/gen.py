@@ -111,6 +111,9 @@ TENSOR_SPARSE_CPP = CodeTemplate.from_file(
 TENSOR_DENSE_CPP = CodeTemplate.from_file(
     TEMPLATE_PATH + "/TensorDense.cpp")
 
+REGISTER_CUDA_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.h")
+REGISTER_CUDA_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.cpp")
+
 TENSOR_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorDerived.h")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
@@ -118,6 +121,14 @@ TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
+
+TYPE_REGISTER = CodeTemplate("""\
+context->type_registry[static_cast<int>(IsVariable::NotVariable)]
+                      [static_cast<int>(Backend::${backend})]
+                      [static_cast<int>(ScalarType::${scalar_type})]
+                      .reset(new ${type_name}(context));
+detail::getVariableHooks().registerVariableTypeFor(context, Backend::${backend}, ScalarType::${scalar_type});
+""")
 
 file_manager = FileManager()
 cuda_file_manager = FileManager()
@@ -319,9 +330,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     fm.write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP.substitute(env))
     fm.write(env['Tensor'] + ".h", TENSOR_DERIVED_H.substitute(env))
 
-    type_register = (('context->type_registry[static_cast<int>(Backend::{})]' +
-                      '[static_cast<int>(ScalarType::{})].reset(new {}(context));')
-                     .format(env['Backend'], scalar_name, env['Type']))
+    type_register = TYPE_REGISTER.substitute(backend=env['Backend'], scalar_type=scalar_name, type_name=env['Type'])
     if env['DenseBackend'] == 'CPU':
         top_env['cpu_type_registrations'].append(type_register)
         top_env['cpu_type_headers'].append(
@@ -355,7 +364,9 @@ def declare_outputs():
              'CPUCopy.cpp', 'NativeFunctions.h']
     for f in files:
         file_manager.will_write(f)
-    cuda_file_manager.will_write('CUDACopy.cpp')
+    cuda_files = ['CUDACopy.cpp', 'RegisterCUDA.cpp', 'RegisterCUDA.h']
+    for f in cuda_files:
+        cuda_file_manager.will_write(f)
     for fname in sorted(generators.keys()):
         fm = file_manager
         if generators[fname]['name'] == 'CUDA':

@@ -1,5 +1,6 @@
-#include "ATen/Type.h"
-#include "ATen/Context.h"
+#include <ATen/Type.h>
+#include <ATen/Context.h>
+#include <ATen/detail/VariableHooksInterface.h>
 
 ${cuda_type_headers}
 
