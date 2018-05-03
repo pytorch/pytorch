@@ -10,6 +10,7 @@
 #include "torch/csrc/utils/python_compat.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/tensor_new.h"
+#include "torch/csrc/utils/tensor_conversion_dispatch.h"
 
 #include <ATen/ExpandUtils.h>
 #include <vector>
@@ -101,7 +102,7 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
 
 static Variable sequenceToVariable(const Type& type, PyObject* seq) {
   auto& idx_type = type.toScalarType(kLong);
-  return torch::utils::legacy_new_from_data(idx_type, -1, seq);
+  return torch::utils::legacy_new_from_data(idx_type, at::nullopt, seq);
 }
 
 static Variable valueToTensor(const Type & type, PyObject* value) {
@@ -168,20 +169,33 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
   return result;
 }
 
-static std::vector<Tensor> asTensorList(const variable_list& v) {
-  return std::vector<Tensor>(v.begin(), v.end());
+static std::vector<Tensor> typeConvertIndices(const Variable& self, const variable_list& indices) {
+  std::vector<Tensor> converted_inds(indices.size());
+  int64_t device = self.is_cuda() ? self.get_device() : -1;
+  for (size_t i = 0; i < indices.size(); ++i) {
+    const auto &ind = indices[i];
+    if (ind.defined()) {
+      auto& new_type = ind.type().toBackend(self.type().backend());
+      converted_inds[i] = torch::utils::dispatch_type_conversion(ind, new_type, device, false);
+    } else {
+      converted_inds[i] = indices[i];
+    }
+  }
+  return converted_inds;
 }
 
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
+  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
-  return self.index(asTensorList(indices));
+  return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
+  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
-  return self.index_put_(asTensorList(indices), value);
+  return self.index_put_(converted_indices, value);
 }
 
 static bool treatSequenceAsTuple(PyObject* index) {

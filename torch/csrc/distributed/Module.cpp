@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include <memory>
 #include <unordered_map>
@@ -126,6 +126,7 @@ PyObject* THDPModule_destroyProcessGroup(PyObject *_unused) {
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef WITH_DISTRIBUTED_MW
 PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
@@ -155,6 +156,7 @@ PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
+#endif
 
 #ifdef WITH_CUDA
 PyObject* THDPModule_registerStream(PyObject *_unused, PyObject *_stream)
@@ -980,7 +982,9 @@ static struct PyMethodDef _THDPModule_methods[] = {
   {"_dist_init_process_group", (PyCFunction)THDPModule_initProcessGroup, METH_VARARGS, NULL},
   {"_dist_destroy_process_group", (PyCFunction)THDPModule_destroyProcessGroup, METH_NOARGS, NULL},
   {"_dist_clear_group_cache", (PyCFunction)THDPModule_clearGroupCache, METH_VARARGS, NULL},
+#ifdef WITH_DISTRIBUTED_MW
   {"_dist_init_master_worker", (PyCFunction)THDPModule_initMasterWorker, METH_VARARGS, NULL},
+#endif
 #ifdef WITH_CUDA
   {"_dist_register_stream", (PyCFunction)THDPModule_registerStream, METH_O, NULL},
 #endif

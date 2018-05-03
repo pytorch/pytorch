@@ -3,8 +3,8 @@ import unittest
 import torch
 import torch.utils.cpp_extension
 try:
-    import torch_test_cpp_extension as cpp_extension
-except ModuleNotFoundError:
+    import torch_test_cpp_extension.cpp as cpp_extension
+except ImportError:
     print("\'test_cpp_extensions.py\' cannot be invoked directly. " +
           "Run \'python run_test.py -i cpp_extensions\' for the \'test_cpp_extensions.py\' tests.")
     raise
@@ -70,10 +70,10 @@ class TestCppExtension(common.TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_extension(self):
-        import torch_test_cuda_extension as cuda_extension
+        import torch_test_cpp_extension.cuda as cuda_extension
 
-        x = torch.FloatTensor(100).zero_().cuda()
-        y = torch.FloatTensor(100).zero_().cuda()
+        x = torch.zeros(100, device='cuda', dtype=torch.float32)
+        y = torch.zeros(100, device='cuda', dtype=torch.float32)
 
         z = cuda_extension.sigmoid_add(x, y).cpu()
 
@@ -92,14 +92,125 @@ class TestCppExtension(common.TestCase):
             extra_cuda_cflags=['-O2'],
             verbose=True)
 
-        x = torch.FloatTensor(100).zero_().cuda()
-        y = torch.FloatTensor(100).zero_().cuda()
+        x = torch.zeros(100, device='cuda', dtype=torch.float32)
+        y = torch.zeros(100, device='cuda', dtype=torch.float32)
 
         z = module.sigmoid_add(x, y).cpu()
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
+    def test_optional(self):
+        has_value = cpp_extension.function_taking_optional(torch.ones(5))
+        self.assertTrue(has_value)
+        has_value = cpp_extension.function_taking_optional(None)
+        self.assertFalse(has_value)
 
-if __name__ == '__main__':
-    common.run_tests()
+    def test_inline_jit_compile_extension_with_functions_as_list(self):
+        cpp_source = '''
+        at::Tensor tanh_add(at::Tensor x, at::Tensor y) {
+          return x.tanh() + y.tanh();
+        }
+        '''
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='inline_jit_extension_with_functions_list',
+            cpp_sources=cpp_source,
+            functions='tanh_add',
+            verbose=True)
+
+        self.assertEqual(module.tanh_add.__doc__.split('\n')[2], 'tanh_add')
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        z = module.tanh_add(x, y)
+        self.assertEqual(z, x.tanh() + y.tanh())
+
+    def test_inline_jit_compile_extension_with_functions_as_dict(self):
+        cpp_source = '''
+        at::Tensor tanh_add(at::Tensor x, at::Tensor y) {
+          return x.tanh() + y.tanh();
+        }
+        '''
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='inline_jit_extension_with_functions_dict',
+            cpp_sources=cpp_source,
+            functions={'tanh_add': 'Tanh and then sum :D'},
+            verbose=True)
+
+        self.assertEqual(
+            module.tanh_add.__doc__.split('\n')[2], 'Tanh and then sum :D')
+
+    def test_inline_jit_compile_extension_multiple_sources_and_no_functions(self):
+        cpp_source1 = '''
+        at::Tensor sin_add(at::Tensor x, at::Tensor y) {
+          return x.sin() + y.sin();
+        }
+        '''
+
+        cpp_source2 = '''
+        #include <torch/torch.h>
+        at::Tensor sin_add(at::Tensor x, at::Tensor y);
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+          m.def("sin_add", &sin_add, "sin(x) + sin(y)");
+        }
+        '''
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='inline_jit_extension',
+            cpp_sources=[cpp_source1, cpp_source2],
+            verbose=True)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        z = module.sin_add(x, y)
+        self.assertEqual(z, x.sin() + y.sin())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_inline_jit_compile_extension_cuda(self):
+        cuda_source = '''
+        __global__ void cos_add_kernel(
+            const float* __restrict__ x,
+            const float* __restrict__ y,
+            float* __restrict__ output,
+            const int size) {
+          const auto index = blockIdx.x * blockDim.x + threadIdx.x;
+          if (index < size) {
+            output[index] = __cosf(x[index]) + __cosf(y[index]);
+          }
+        }
+
+        at::Tensor cos_add(at::Tensor x, at::Tensor y) {
+          auto output = at::zeros_like(x);
+          const int threads = 1024;
+          const int blocks = (output.numel() + threads - 1) / threads;
+          cos_add_kernel<<<blocks, threads>>>(x.data<float>(), y.data<float>(), output.data<float>(), output.numel());
+          return output;
+        }
+        '''
+
+        # Here, the C++ source need only declare the function signature.
+        cpp_source = 'at::Tensor cos_add(at::Tensor x, at::Tensor y);'
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='inline_jit_extension_cuda',
+            cpp_sources=cpp_source,
+            cuda_sources=cuda_source,
+            functions=['cos_add'],
+            verbose=True)
+
+        self.assertEqual(module.cos_add.__doc__.split('\n')[2], 'cos_add')
+
+        x = torch.randn(4, 4, device='cuda', dtype=torch.float32)
+        y = torch.randn(4, 4, device='cuda', dtype=torch.float32)
+
+        z = module.cos_add(x, y)
+        self.assertEqual(z, x.cos() + y.cos())
+
+    def test_inline_jit_compile_extension_throws_when_functions_is_bad(self):
+        with self.assertRaises(ValueError):
+            torch.utils.cpp_extension.load_inline(
+                name='invalid_jit_extension', cpp_sources='', functions=5)

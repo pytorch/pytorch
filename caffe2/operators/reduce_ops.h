@@ -12,17 +12,22 @@
 
 namespace caffe2 {
 
-template <typename T, class Context>
-class ReduceOpBase : public Operator<Context> {
+template <typename InputTypes, class Context, class Reducer>
+class ReduceOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  ReduceOpBase(const OperatorDef& operator_def, Workspace* ws)
+  ReduceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         axes_(OperatorBase::GetRepeatedArgument<int>("axes")),
-        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, 1) {}
+        OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
 
   bool RunOnDevice() override {
+    return DispatchHelper<InputTypes>::call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
     const int ndim = X.ndim();
@@ -52,88 +57,222 @@ class ReduceOpBase : public Operator<Context> {
       }
     }
     Y->Resize(Y_dims);
-    return this->Compute(
-        X.size(),
-        Y->size(),
+    return reducer_.template Forward<T>(
         X_dims,
         axes_,
         X.template data<T>(),
-        Y->template mutable_data<T>());
+        Y->template mutable_data<T>(),
+        &context_);
   }
 
- protected:
-  virtual bool Compute(
-      const int X_size,
-      const int Y_size,
-      const std::vector<int>& dims,
-      const std::vector<int>& axes,
-      const T* X_data,
-      T* Y_data) = 0;
-
+ private:
   std::vector<int> axes_;
   const int keep_dims_;
-
-  Tensor<Context> buffer_;
+  Reducer reducer_{};
 };
 
-template <typename T, class Context>
-class ReduceSumOp final : public ReduceOpBase<T, Context> {
+template <typename InputTypes, class Context, class Reducer>
+class ReduceGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  ReduceSumOp(const OperatorDef& operator_def, Workspace* ws)
-      : ReduceOpBase<T, Context>(operator_def, ws) {}
+  ReduceGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        axes_(OperatorBase::GetRepeatedArgument<int>("axes")) {}
 
- protected:
-  bool Compute(
-      const int X_size,
-      const int Y_size,
+  bool RunOnDevice() override {
+    return DispatchHelper<InputTypes>::call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
+    const auto& dY = Input(0);
+    const auto& X = Input(1);
+    const auto& Y = Input(2);
+    auto* dX = Output(0);
+    const int ndim = X.ndim();
+    if (axes_.empty()) {
+      axes_.resize(ndim);
+      std::iota(axes_.begin(), axes_.end(), 0);
+    } else {
+      std::sort(axes_.begin(), axes_.end());
+      CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
+      CAFFE_ENFORCE_LT(
+          axes_.back(),
+          ndim,
+          "Axes ids must be smaller than the dimensions of input.");
+    }
+    const std::vector<int> dX_dims(X.dims().cbegin(), X.dims().cend());
+    std::vector<int> dY_dims = dX_dims;
+    for (const int axis : axes_) {
+      dY_dims[axis] = 1;
+    }
+    dX->ResizeLike(X);
+    return reducer_.template Backward<T>(
+        dY_dims,
+        dX_dims,
+        dY.template data<T>(),
+        X.template data<T>(),
+        Y.template data<T>(),
+        dX->template mutable_data<T>(),
+        &context_);
+  }
+
+ private:
+  std::vector<int> axes_;
+  const Reducer reducer_{};
+};
+
+template <class Context>
+struct MinReducer {
+  template <typename T>
+  bool Forward(
       const std::vector<int>& dims,
       const std::vector<int>& axes,
       const T* X_data,
-      T* Y_data) override {
-    math::ReduceSum<T, Context>(
-        X_size,
-        Y_size,
+      T* Y_data,
+      Context* context) const {
+    math::ReduceMin<T, Context>(
         dims.size(),
         dims.data(),
         axes.size(),
         axes.data(),
         X_data,
         Y_data,
-        &context_,
-        &this->buffer_);
+        context);
+    return true;
+  }
+
+  template <typename T>
+  bool Backward(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* X_data,
+      const T* Y_data,
+      T* dX_data,
+      Context* context) const;
+};
+
+template <class Context>
+struct MaxReducer {
+  template <typename T>
+  bool Forward(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data,
+      Context* context) const {
+    math::ReduceMax<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        X_data,
+        Y_data,
+        context);
+    return true;
+  }
+
+  template <typename T>
+  bool Backward(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* X_data,
+      const T* Y_data,
+      T* dX_data,
+      Context* context) const;
+};
+
+template <class Context>
+struct SumReducer {
+  template <typename T>
+  bool Forward(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data,
+      Context* context) const {
+    math::ReduceSum<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        X_data,
+        Y_data,
+        context);
+    return true;
+  }
+
+  template <typename T>
+  bool Backward(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* /* X_data */,
+      const T* /* Y_data */,
+      T* dX_data,
+      Context* context) const {
+    math::Broadcast(
+        dY_dims.size(),
+        dY_dims.data(),
+        dX_dims.size(),
+        dX_dims.data(),
+        dY_data,
+        dX_data,
+        context);
     return true;
   }
 };
 
-template <typename T, class Context>
-class ReduceMeanOp final : public ReduceOpBase<T, Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-
-  ReduceMeanOp(const OperatorDef& operator_def, Workspace* ws)
-      : ReduceOpBase<T, Context>(operator_def, ws) {}
-
- protected:
-  bool Compute(
-      const int X_size,
-      const int Y_size,
+template <class Context>
+struct MeanReducer {
+  template <typename T>
+  bool Forward(
       const std::vector<int>& dims,
       const std::vector<int>& axes,
       const T* X_data,
-      T* Y_data) override {
+      T* Y_data,
+      Context* context) const {
     math::ReduceMean<T, Context>(
-        X_size,
-        Y_size,
         dims.size(),
         dims.data(),
         axes.size(),
         axes.data(),
         X_data,
         Y_data,
-        &context_,
-        &this->buffer_);
+        context);
+    return true;
+  }
+
+  template <typename T>
+  bool Backward(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* /* X_data */,
+      const T* /* Y_data */,
+      T* dX_data,
+      Context* context) const {
+    math::Broadcast(
+        dY_dims.size(),
+        dY_dims.data(),
+        dX_dims.size(),
+        dX_dims.data(),
+        dY_data,
+        dX_data,
+        context);
+    const int dY_size = std::accumulate(
+        dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+    const int dX_size = std::accumulate(
+        dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+    math::Scale<T, Context>(
+        dX_size,
+        static_cast<float>(dY_size) / static_cast<float>(dX_size),
+        dX_data,
+        dX_data,
+        context);
     return true;
   }
 };

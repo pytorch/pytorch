@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
@@ -40,25 +40,6 @@ void initPythonTracerBindings(PyObject* module_) {
       ASSERT_UNEXPIRED("pop_scope");
       s.pop_scope();
     })
-    .def("export", [](TracingState& s, const std::vector<at::Tensor>& initializers,
-                      int64_t onnx_opset_version, bool defer_weight_export=false) {
-      ASSERT_UNEXPIRED("export");
-      std::string graph;
-      RawDataExportMap export_map;
-      std::tie(graph, export_map) = ExportGraph(
-        s.graph, initializers, onnx_opset_version, defer_weight_export);
-      std::unordered_map<std::string, py::bytes> python_serialized_export_map;
-      for (auto& kv : export_map) {
-        auto t = kv.second;
-        size_t copy_bytes = t.type().elementSizeInBytes() * t.numel();
-        // TODO: this is an unecessary copy. In theory we can directly return
-        // the map from identifier to Tensor, but we need some API in Python
-        // to get raw `bytes` containing the raw tensor data.
-        python_serialized_export_map[kv.first] = py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
-      }
-      return std::make_tuple(
-          py::bytes(graph), python_serialized_export_map);
-    })
     .def("set_graph", [](TracingState& s, std::shared_ptr<Graph> g) {
       s.graph = g;
     })
@@ -73,7 +54,7 @@ void initPythonTracerBindings(PyObject* module_) {
     });
 
   m.def("_tracer_enter", [](variable_list trace_inputs, std::size_t num_backwards) {
-    return tracer::enter(std::move(trace_inputs), num_backwards + 1);
+    return tracer::enter(std::move(trace_inputs), num_backwards + 1, true);
   });
   m.def("_tracer_exit", [](variable_list var_outputs) {
     tracer::exit(var_outputs);

@@ -17,6 +17,8 @@ from caffe2.python.control_ops_grad import \
     gen_do_gradient, gen_if_gradient, gen_while_gradient
 
 import caffe2.python._import_c_extension as C
+
+import copy
 import pickle
 import numpy as np
 import sys
@@ -351,7 +353,8 @@ def CreateOperator(
         operator.arg.extend(arg)
     # Add all other arguments
     for key, value in viewitems(kwargs):
-        operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
+        if value is not None:
+            operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
 
     if workspace.IsImmediate():
         workspace.RunOperatorImmediate(operator)
@@ -1430,7 +1433,7 @@ class Net(object):
         # make sure that this net name hasn't been used before
         self._net.name = Net._get_next_net_name(name)
 
-    def AppendNet(self, net):
+    def AppendNet(self, net, device_option=None):
         assert isinstance(net, Net)
         for i in net.Proto().external_input:
             if (
@@ -1445,7 +1448,12 @@ class Net(object):
                 if o not in self.Proto().external_output
             ]
         )
-        self._ExtendOps(net.Proto().op)
+        ops = net.Proto().op
+        if device_option is not None:
+            ops = [copy.deepcopy(op) for op in ops]
+            map(lambda x: x.device_option.CopyFrom(device_option), ops)
+
+        self._ExtendOps(ops)
         return self
 
     def LogInfo(self, *msg_or_blobs):
@@ -1933,7 +1941,8 @@ class Net(object):
         for blob in record.field_blobs():
             assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
         for blob in record.field_blobs():
-            self.AddExternalOutput(blob)
+            if blob not in self.external_outputs:
+                self.AddExternalOutput(blob)
         self._output_record = record
 
     def recover_output_record_by_prefix(self, prefix):
@@ -1995,6 +2004,12 @@ class Net(object):
         """A convenient function to run everything using MKLDNN."""
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.MKLDNN
+        self._net.device_option.CopyFrom(device_option)
+
+    def RunAllOnIDEEP(self):
+        """A convenient function to run everything using IDEEP."""
+        device_option = caffe2_pb2.DeviceOption()
+        device_option.device_type = caffe2_pb2.IDEEP
         self._net.device_option.CopyFrom(device_option)
 
     def _CreateAndAddToSelf(self, op_type, inputs, outputs=None, **kwargs):
@@ -2187,8 +2202,8 @@ def update_placeholder_op_output(op, blob_to_device):
     '''
     outputs = []
     for output in op.output:
-        blob_dev = blob_to_device[output]
-        if blob_dev.device_type != caffe2_pb2.CPU:
+        if (output in blob_to_device and
+                blob_to_device[output].device_type != caffe2_pb2.CPU):
             output += '_cpu'
         outputs.append(output)
     del op.output[:]

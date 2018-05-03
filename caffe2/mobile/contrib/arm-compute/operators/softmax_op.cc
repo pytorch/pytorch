@@ -22,9 +22,7 @@ template <typename T>
 bool GLSoftmaxOp<T>::RunOnDevice() {
 
   auto *Xblob = OperatorBase::Inputs()[0];
-  if (first_run_) {
-    X_ = GLContext::getGLTensor<T>(Xblob);
-  }
+  X_ = GLContext::getGLTensor<T>(Xblob, X_.release());
 
   GLTensor<T> *Y =
       OperatorBase::Outputs()[0]->template GetMutable<GLTensor<T>>();

@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 
 from .module import Module
 from .utils import _single, _pair, _triple
@@ -257,29 +256,19 @@ class MaxUnpool1d(_MaxUnpoolNd):
 
         >>> pool = nn.MaxPool1d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool1d(2, stride=2)
-        >>> input = torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8]]])
+        >>> input = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices)
-
-        (0 ,.,.) =
-           0   2   0   4   0   6   0   8
-        [torch.FloatTensor of size (1,1,8)]
+        tensor([[[ 0.,  2.,  0.,  4.,  0.,  6.,  0., 8.]]])
 
         >>> # Example showcasing the use of output_size
-        >>> input = torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8, 9]]])
+        >>> input = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8, 9]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices, output_size=input.size())
-
-        (0 ,.,.) =
-           0   2   0   4   0   6   0   8   0
-        [torch.FloatTensor of size (1,1,9)]
+        tensor([[[ 0.,  2.,  0.,  4.,  0.,  6.,  0., 8.,  0.]]])
 
         >>> unpool(output, indices)
-
-        (0 ,.,.) =
-           0   2   0   4   0   6   0   8
-        [torch.FloatTensor of size (1,1,8)]
-
+        tensor([[[ 0.,  2.,  0.,  4.,  0.,  6.,  0., 8.]]])
     """
 
     def __init__(self, kernel_size, stride=None, padding=0):
@@ -334,31 +323,24 @@ class MaxUnpool2d(_MaxUnpoolNd):
 
         >>> pool = nn.MaxPool2d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool2d(2, stride=2)
-        >>> input = Variable(torch.Tensor([[[[ 1,  2,  3,  4],
-                                             [ 5,  6,  7,  8],
-                                             [ 9, 10, 11, 12],
-                                             [13, 14, 15, 16]]]]))
+        >>> input = torch.tensor([[[[ 1.,  2,  3,  4],
+                                    [ 5,  6,  7,  8],
+                                    [ 9, 10, 11, 12],
+                                    [13, 14, 15, 16]]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices)
-
-        (0 ,0 ,.,.) =
-           0   0   0   0
-           0   6   0   8
-           0   0   0   0
-           0  14   0  16
-        [torch.FloatTensor of size (1,1,4,4)]
+        tensor([[[[  0.,   0.,   0.,   0.],
+                  [  0.,   6.,   0.,   8.],
+                  [  0.,   0.,   0.,   0.],
+                  [  0.,  14.,   0.,  16.]]]])
 
         >>> # specify a different output size than input size
         >>> unpool(output, indices, output_size=torch.Size([1, 1, 5, 5]))
-
-        (0 ,0 ,.,.) =
-           0   0   0   0   0
-           6   0   8   0   0
-           0   0   0  14   0
-          16   0   0   0   0
-           0   0   0   0   0
-        [torch.FloatTensor of size (1,1,5,5)]
-
+        tensor([[[[  0.,   0.,   0.,   0.,   0.],
+                  [  6.,   0.,   8.,   0.,   0.],
+                  [  0.,   0.,   0.,  14.,   0.],
+                  [ 16.,   0.,   0.,   0.,   0.],
+                  [  0.,   0.,   0.,   0.,   0.]]]])
     """
 
     def __init__(self, kernel_size, stride=None, padding=0):
@@ -480,11 +462,8 @@ class AvgPool1d(_AvgPoolNd):
 
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
-        >>> m(torch.Tensor([[[1,2,3,4,5,6,7]]]))
-
-        (0 ,.,.) =
-          2  4  6
-        [torch.FloatTensor of size (1,1,3)]
+        >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
+        tensor([[[ 2.,  4.,  6.]]])
     """
 
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
@@ -728,6 +707,9 @@ class LPPool1d(_LPPoolNd):
     - At p = infinity, one gets Max Pooling
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
+    .. note:: If the sum to the power of `p` is zero, the gradient of this function is
+              not defined. This implementation will set the gradient to zero in this case.
+
     Args:
         kernel_size: a single int, the size of the window
         stride: a single int, the stride of the window. Default value is :attr:`kernel_size`
@@ -770,6 +752,9 @@ class LPPool2d(_LPPoolNd):
         - a single ``int`` -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
+
+    .. note:: If the sum to the power of `p` is zero, the gradient of this function is
+              not defined. This implementation will set the gradient to zero in this case.
 
     Args:
         kernel_size: the size of the window

@@ -1,6 +1,5 @@
 import torch
 from torch.distributions.distribution import Distribution
-from torch.autograd import Variable
 from torch.distributions import Categorical
 from numbers import Number
 from torch.distributions import constraints
@@ -25,7 +24,7 @@ class Multinomial(Distribution):
 
     Example::
 
-        >>> m = Multinomial(100, torch.Tensor([ 1, 1, 1, 1]))
+        >>> m = Multinomial(100, torch.tensor([ 1, 1, 1, 1]))
         >>> x = m.sample()  # equal probability of 0, 1, 2, 3
          21
          24
@@ -33,7 +32,7 @@ class Multinomial(Distribution):
          25
         [torch.FloatTensor of size 4]]
 
-        >>> Multinomial(probs=torch.Tensor([1, 1, 1, 1])).log_prob(x)
+        >>> Multinomial(probs=torch.tensor([1, 1, 1, 1])).log_prob(x)
         -4.1338
         [torch.FloatTensor of size 1]
 

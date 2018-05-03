@@ -1,8 +1,8 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 
 #include <stdexcept>
-#include <unordered_map>
 #include <sstream>
+#include <unordered_map>
 
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/python_strings.h"
@@ -24,9 +24,10 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Storage", ParameterType::STORAGE},
   {"PyObject*", ParameterType::PYOBJECT},
   {"ScalarType", ParameterType::SCALARTYPE},
+  {"optional<ScalarType>", ParameterType::SCALARTYPE},
   {"Layout", ParameterType::LAYOUT},
   {"Device", ParameterType::DEVICE},
-  {"String", ParameterType::STRING},
+  {"std::string", ParameterType::STRING},
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
@@ -84,7 +85,8 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::TENSOR: {
       return THPVariable_Check(obj);
     }
-    case ParameterType::SCALAR: {
+    case ParameterType::SCALAR:
+    case ParameterType::DOUBLE: {
       // NOTE: we don't currently accept most NumPy types as Scalars. np.float64
       // is okay because it's a subclass of PyFloat. We may want to change this
       // in the future.
@@ -97,8 +99,16 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       return false;
     }
-    case ParameterType::INT64: return THPUtils_checkLong(obj);
-    case ParameterType::DOUBLE: return THPUtils_checkDouble(obj);
+    case ParameterType::INT64: {
+      if (THPUtils_checkLong(obj)) {
+        return true;
+      }
+      if (THPVariable_Check(obj)) {
+        auto& var = ((THPVariable*)obj)->cdata;
+        return at::isIntegralType(var.type().scalarType()) && !var.requires_grad() && var.dim() == 0;
+      }
+      return false;
+    }
     case ParameterType::TENSOR_LIST: return PyTuple_Check(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -123,7 +133,7 @@ bool FunctionParameter::check(PyObject* obj) {
 std::string FunctionParameter::type_name() const {
   switch (type_) {
     case ParameterType::TENSOR: return "Tensor";
-    case ParameterType::SCALAR: return "float";
+    case ParameterType::SCALAR: return "Number";
     case ParameterType::INT64: return "int";
     case ParameterType::DOUBLE: return "float";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";
@@ -139,6 +149,15 @@ std::string FunctionParameter::type_name() const {
     default: throw std::runtime_error("unknown parameter type");
   }
 }
+
+static inline at::optional<int64_t> parse_as_integer(const std::string& s) {
+  if (s.empty()) return at::nullopt;
+  char *str_end;
+  long ans = strtol(s.c_str(), &str_end, 0);
+  // *str_end == 0 if the entire string was parsed as an integer.
+  return (*str_end == 0) ? at::optional<int64_t>(ans) : at::nullopt;
+}
+
 
 void FunctionParameter::set_default_str(const std::string& str) {
   if (str == "None") {
@@ -160,7 +179,9 @@ void FunctionParameter::set_default_str(const std::string& str) {
       // but allows None.
       default_scalar = Scalar(NAN);
     } else {
-      default_scalar = Scalar(atof(str.c_str()));
+      // we sometimes rely on integer-vs-float values, e.g. with arange.
+      auto as_integer = parse_as_integer(str);
+      default_scalar = Scalar(as_integer.value_or(atof(str.c_str())));
     }
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {
@@ -393,7 +414,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     } else if (param.check(obj)) {
       dst[i++] = obj;
     } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-               THPUtils_checkLong(obj)) {
+               THPUtils_checkIndex(obj)) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;

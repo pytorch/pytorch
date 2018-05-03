@@ -1,5 +1,6 @@
 #include "Functions.h"
 #include <ATen/WrapDimUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
 
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
@@ -36,14 +37,14 @@ struct IndexRangeGenerator {
 };
 
 void copy_range(variable_list& out, IndexRange range, const Tensor & t) {
-  AT_ASSERT(range.second <= out.size(), "range out of bounds");
-  AT_ASSERT(range.second - range.first == 1, "inconsistent range for Tensor output");
+  AT_ASSERT(range.second <= out.size());
+  AT_ASSERTM(range.second - range.first == 1, "inconsistent range for Tensor output");
   out[range.first] = t;
 }
 
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
-  AT_ASSERT(range.second <= out.size(), "range out of bounds");
-  AT_ASSERT(range.second - range.first == t.size(), "inconsistent range for TensorList output");
+  AT_ASSERT(range.second <= out.size());
+  AT_ASSERTM(range.second - range.first == t.size(), "inconsistent range for TensorList output");
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
@@ -86,6 +87,9 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
   } else if (p == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
+  } else if (p == INFINITY) {
+    self_scaled = self.sign() * (self.abs() == norm).toType(self.type());
+    scale_v = grad.clone();
   } else {
     self_scaled = self * self.abs().pow(p - 2);
     scale_v = grad / norm.pow(p - 1);
@@ -129,9 +133,19 @@ Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
   return grad.permute(dims);
 }
 
-Tensor sum_backward(const Tensor & grad, IntList sizes, int64_t dim, bool keepdim) {
+Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
-    return grad.unsqueeze(dim).expand(sizes);
+    if (dims.size()==1) {
+      return grad.unsqueeze(dims[0]).expand(sizes);
+    } else {
+      auto dims_to_unsqueeze = dim_list_to_bitset(dims, sizes.size());
+      Tensor res = grad;
+      for (size_t i = 0; i < sizes.size(); i++){
+	if (dims_to_unsqueeze[i])
+	  res = res.unsqueeze(i);
+      }
+      return res.expand(sizes);
+    }
   } else {
     return grad.expand(sizes);
   }
@@ -717,6 +731,13 @@ Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal)
   return grad_input;
 }
 
+Tensor diagonal_backward(const Tensor & grad, IntList input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros(grad.type(), input_sizes);
+  auto diag = grad_input.diagonal(offset, dim1, dim2);
+  diag.copy_(grad);
+  return grad_input;
+}
+
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, bool size_average, bool reduce) {
   auto grad_input = 2 * grad;
   if (size_average && reduce) {
@@ -859,20 +880,26 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto m = self.size(0);
   auto n = self.size(1);
   auto k = sigma.size(0);
+  auto gsigma = grads[1];
 
-  Tensor u, v;
+  auto u = raw_u;
+  auto v = raw_v;
+  auto gu = grads[0];
+  auto gv = grads[2];
+
   if (!some) {
-    // ignore the free subspace
+    // We ignore the free subspace here because possible base vectors cancel
+    // each other, e.g., both -v and +v are valid base for a dimension.
+    // Don't assume behavior of any particular implementation of svd.
     u = raw_u.narrow(1, 0, k);
     v = raw_v.narrow(1, 0, k);
-  } else {
-    u = raw_u;
-    v = raw_v;
+    if (gu.defined()) {
+      gu = gu.narrow(1, 0, k);
+    }
+    if (gv.defined()) {
+      gv = gv.narrow(1, 0, k);
+    }
   }
-
-  auto gu = grads[0];
-  auto gsigma = grads[1];
-  auto gv = grads[2];
   auto vt = v.t();
 
   Tensor sigma_term;
@@ -956,7 +983,7 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
 Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
-  AT_ASSERT(!grads[0].defined(), "slogdet's sign output should never have gradient");
+  AT_ASSERTM(!grads[0].defined(), "slogdet's sign output should never have gradient");
   auto signdet_val = signdet.toCDouble();
   if (signdet_val != 0 /* det != 0, invertible */) {
     return grads[1] * self.inverse().t();
@@ -1259,13 +1286,26 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
   if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO);
   if (output_mask[1] && !gG.defined()) {
-    AT_ASSERT(affine, "gamma should always be defined when it requires grad");
+    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
     gG = at::zeros_like(gamma);
   }
   if (output_mask[2] && !gI.defined()) gI = at::zeros_like(input);
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 
+}
+
+std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
+						       IntList expand1, IntList expand2, IntList expand3,
+						       IntList sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
+  Tensor grad_i1, grad_i2, grad_i3;
+  if (grad_mask[0])
+    grad_i1 = at::_trilinear(grad_out, i2, i3, sumdim, expand2, expand3, expand1);
+  if (grad_mask[1])
+    grad_i2 = at::_trilinear(i1, grad_out, i3, expand1, sumdim, expand3, expand2);
+  if (grad_mask[2])
+    grad_i3 = at::_trilinear(i1, i2, grad_out, expand1, expand2, sumdim, expand3);
+  return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
 }
 
 } // anonymous namespace

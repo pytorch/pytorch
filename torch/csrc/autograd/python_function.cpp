@@ -1,6 +1,6 @@
 #include "torch/csrc/autograd/python_function.h"
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <structmember.h>
 #include <unordered_map>
 #include <unordered_set>
@@ -395,7 +395,7 @@ static void _wrap_outputs(THPFunction *self,
       }
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
-      var.reset_grad();
+      var.grad().reset();
       var.clear_hooks();
       if (auto grad_acc_fn = var.try_get_grad_accumulator()) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
@@ -610,7 +610,7 @@ static void _trace_post_record(
   // NB: this path is executed only for forward of Python functions, so there's no need to check
   // tracing_state->in_eval_subgraph (it's always false, because they are never part of backward
   // subgraphs AND we don't even materialize the forward function).
-  if (!passes_state_transparently) {
+  if (trace_info.state->creates_handles && !passes_state_transparently) {
     // TODO: sgross and ezyang don't know if this is right
     tracer::nontraceableBackwardSubgraph(input_vars, output_vars);
     Function::set_up_context_edge(trace_info.n, input_vars, output_vars);

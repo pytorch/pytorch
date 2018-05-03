@@ -350,7 +350,7 @@ namespace {
     size_t weight_size;
     CUDNN_CHECK(cudnnGetRNNParamsSize(handle, rnn_desc.desc(), x_desc.desc(), &weight_size, datatype));
     auto elem_size = dataSize(datatype);
-    AT_ASSERT(weight_size % elem_size == 0, "cudnnGetRNNParamsSize returned nonsensical weight_size");
+    AT_ASSERTM(weight_size % elem_size == 0, "cudnnGetRNNParamsSize returned nonsensical weight_size");
     return weight_size / elem_size;
   }
 
@@ -436,11 +436,11 @@ namespace {
                 filter_dim_a.data<int>()
                 ));
 
-          AT_ASSERT(nb_dims <= min_dim, "cudnnGetFilterNdDescriptor failed nb_dims (%d) <= min_dim (%d)", nb_dims, min_dim);
+          AT_ASSERTM(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
           filter_dim_a = filter_dim_a.slice(0, 0, nb_dims);
           auto elem_size = dataSize(rnn.datatype);
           auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
-          AT_ASSERT(offset_bytes % elem_size == 0, "offset_bytes `mod` elem_size != 0 (%d %% %d)", offset_bytes, elem_size);
+          AT_ASSERTM(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
           size_t offset = offset_bytes / elem_size;
 
           // for all the RNN types provided by CUDNN, all the ih weights
@@ -448,7 +448,7 @@ namespace {
           // (same for the hh weights, and the ih and hh biases).
           // Since we're storing all the weights in a single tensor anyway,
           // might as well merge the CUDNN ones into a single tensor as well
-	  int mat_numel = *filter_dim_a.prod().data<int>();
+	  int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data<int>();
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
             std::initializer_list<int64_t> size = {
               mat_numel * num_linear_layers / 2, 1};
@@ -458,7 +458,7 @@ namespace {
             params.emplace_back(std::move(param));
             layer_params_count++;
           } else {
-            AT_ASSERT(cur_offset == offset, "cur_offset == offset");
+            AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, "; offset = ", offset);
           }
           cur_offset = offset + mat_numel;
         }
@@ -466,14 +466,16 @@ namespace {
       if (layer == 0) {
         global_layer_params_count = layer_params_count;
       } else {
-        AT_ASSERT(global_layer_params_count == layer_params_count, "%d (global) != %d", global_layer_params_count, layer_params_count);
+        AT_ASSERTM(global_layer_params_count == layer_params_count,
+                   "global_layer_params_count = ", global_layer_params_count,
+                   "; layer_params_count = ", layer_params_count);
       }
     } // for layer
     return std::make_pair(params, global_layer_params_count);
   }
 
   void _copyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to) {
-    AT_ASSERT(params_from.size(0) == params_to.size(0), "number of layers mismatch");
+    AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
     for (size_t i = 0; i < params_from.size(0); i++) {
       auto layer_params_from = params_from[i];
       auto layer_params_to = params_to[i];
@@ -484,7 +486,7 @@ namespace {
            a != layer_params_from.end() && b != layer_params_to.end();
            ++a, ++b) {
         auto param_from = *a, param_to = *b;
-        AT_ASSERT(param_from.type() == param_to.type(), "parameter types mismatch");
+        AT_ASSERTM(param_from.type() == param_to.type(), "parameter types mismatch");
         param_to.copy_(param_from.view_as(param_to));
       }
     }
@@ -767,7 +769,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto dhy = grad_hy.contiguous().view(hidden_size);
   auto dcy = grad_cy.defined() ? grad_cy.contiguous().view(hidden_size) : Tensor();
   auto dhx = hx.type().tensor(hidden_size);
-  AT_ASSERT(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
+  AT_ASSERTM(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
   auto dcx = cx.defined() ? cx.type().tensor(hidden_size) : Tensor();
 
   if (!fn_train) {

@@ -497,7 +497,7 @@ void THDTensor_(catArray)(THDTensor *result, THDTensor **inputs,
       }
     }
     allEmpty = allEmpty && !dimSize;
-    size->data[i] = dimSize;
+    THLongStorage_set(size, i, dimSize);
   }
 
   if (!allEmpty) {
@@ -866,22 +866,22 @@ void THDTensor_(bhistc)(THDTensor *hist, THDTensor *tensor, int64_t nbins,
 
 #if defined(TH_REAL_IS_BYTE)
 
-int THDTensor_(logicalall)(THDTensor *tensor) {
+int THDTensor_(logicalAnd)(THDTensor *tensor) {
   THArgCheck(tensor->nDimension > 0, 1, "empty Tensor");
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorLogicalall, tensor),
+    packMessage(Functions::tensorLogicalAnd, tensor),
     THDState::s_current_worker
   );
 
   return receiveValueFromWorker<int>(THDState::s_current_worker);
 }
 
-int THDTensor_(logicalany)(THDTensor *tensor) {
+int THDTensor_(logicalAny)(THDTensor *tensor) {
   THArgCheck(tensor->nDimension > 0, 1, "empty Tensor");
 
   masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorLogicalany, tensor),
+    packMessage(Functions::tensorLogicalAny, tensor),
     THDState::s_current_worker
   );
 

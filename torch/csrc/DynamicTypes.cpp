@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include "DynamicTypes.h"
 #include "PythonTypes.h"
@@ -31,7 +31,6 @@ static std::unordered_map<std::string, at::ScalarType> attype_names = {
 static std::unordered_map<at::Type*, PyTypeObject*> attype_to_py_storage_type;
 static std::unordered_map<PyTypeObject*, at::Type*> py_storage_type_to_attype;
 
-static const int NumBoolOptions = 2;
 static THPDtype* dtype_registry
   [static_cast<int>(at::ScalarType::NumOptions)] = {};
 

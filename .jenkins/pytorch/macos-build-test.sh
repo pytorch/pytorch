@@ -11,10 +11,10 @@ export PATH="$PWD/miniconda3/bin:$PATH"
 source $PWD/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
 
-# Build and test PyTorch
 git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=$PWD/miniconda3/
 
+# Build and test PyTorch
 export MACOSX_DEPLOYMENT_TARGET=10.9
 export CXX=clang++
 export CC=clang
@@ -23,4 +23,13 @@ export MAX_JOBS=2
 python setup.py install
 echo "Ninja version: $(ninja --version)"
 python test/run_test.py --verbose
-echo "BUILD PASSED"
+
+# C++ API
+
+# NB: Install outside of source directory (at the same level as the root
+# pytorch folder) so that it doesn't get cleaned away prior to docker push.
+CPP_BUILD="$PWD/../cpp-build"
+WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$CPP_BUILD"
+
+python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+"$CPP_BUILD"/libtorch/bin/test_api

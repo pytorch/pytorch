@@ -9,6 +9,7 @@
 #include "caffe2/operators/filler_op.h"
 #include "caffe2/operators/load_save_op.h"
 #include "caffe2/operators/loss_op.h"
+#include "caffe2/operators/order_switch_ops.h"
 #include "caffe2/operators/reshape_op.h"
 #include "caffe2/operators/softmax_op.h"
 #include "caffe2/operators/utility_ops.h"
@@ -70,5 +71,11 @@ REGISTER_MKL_OPERATOR(
 REGISTER_MKL_OPERATOR(
     ChannelShuffle,
     mkl::MKLFallbackOp<ChannelShuffleOp<CPUContext>>);
+REGISTER_MKL_OPERATOR(
+    NCHW2NHWC,
+    mkl::MKLFallbackOp<NCHW2NHWCOp<float, CPUContext>>);
+REGISTER_MKL_OPERATOR(
+    NHWC2NCHW,
+    mkl::MKLFallbackOp<NHWC2NCHWOp<float, CPUContext>>);
 
 } // namespace caffe2

@@ -11,6 +11,7 @@ import tempfile
 import warnings
 
 import torch
+from .file_baton import FileBaton
 
 from setuptools.command.build_ext import build_ext
 
@@ -30,7 +31,8 @@ def _find_cuda_home():
             # Guess #3
             try:
                 which = 'where' if sys.platform == 'win32' else 'which'
-                nvcc = subprocess.check_output([which, 'nvcc']).decode().rstrip('\r\n')
+                nvcc = subprocess.check_output(
+                    [which, 'nvcc']).decode().rstrip('\r\n')
                 cuda_home = os.path.dirname(os.path.dirname(nvcc))
             except Exception:
                 cuda_home = None
@@ -71,13 +73,14 @@ def check_compiler_abi_compatibility(compiler):
     '''
     try:
         check_cmd = '{}' if sys.platform == 'win32' else '{} --version'
-        info = subprocess.check_output(check_cmd.format(compiler).split(), stderr=subprocess.STDOUT)
+        info = subprocess.check_output(
+            check_cmd.format(compiler).split(), stderr=subprocess.STDOUT)
     except Exception:
         _, error, _ = sys.exc_info()
         warnings.warn('Error checking compiler version: {}'.format(error))
     else:
         info = info.decode().lower()
-        if 'gcc' in info:
+        if 'gcc' in info or 'g++' in info:
             # Sometimes the version is given as "major.x" instead of semver.
             version = re.search(r'(\d+)\.(\d+|x)', info)
             if version is not None:
@@ -93,7 +96,8 @@ def check_compiler_abi_compatibility(compiler):
             version = re.search(r'(\d+)\.(\d+)\.(\d+)', info)
             if version is not None:
                 major, minor, revision = version.groups()
-                if (int(major), int(minor), int(revision)) >= MINIMUM_MSVC_VERSION:
+                if (int(major), int(minor),
+                        int(revision)) >= MINIMUM_MSVC_VERSION:
                     return True
                 else:
                     # Append the detected version for the warning.
@@ -156,9 +160,14 @@ class BuildExtension(build_ext):
                 # Put the original compiler back in place.
                 self.compiler.set_executable('compiler_so', original_compiler)
 
-        def win_wrap_compile(sources, output_dir=None, macros=None,
-                             include_dirs=None, debug=0, extra_preargs=None,
-                             extra_postargs=None, depends=None):
+        def win_wrap_compile(sources,
+                             output_dir=None,
+                             macros=None,
+                             include_dirs=None,
+                             debug=0,
+                             extra_preargs=None,
+                             extra_postargs=None,
+                             depends=None):
 
             self.cflags = copy.deepcopy(extra_postargs)
             extra_postargs = None
@@ -168,16 +177,22 @@ class BuildExtension(build_ext):
                 # Using regex to match src, obj and include files
 
                 src_regex = re.compile('/T(p|c)(.*)')
-                src_list = [m.group(2) for m in (
-                    src_regex.match(elem) for elem in cmd) if m]
+                src_list = [
+                    m.group(2) for m in (src_regex.match(elem) for elem in cmd)
+                    if m
+                ]
 
                 obj_regex = re.compile('/Fo(.*)')
-                obj_list = [m.group(1) for m in (
-                    obj_regex.match(elem) for elem in cmd) if m]
+                obj_list = [
+                    m.group(1) for m in (obj_regex.match(elem) for elem in cmd)
+                    if m
+                ]
 
                 include_regex = re.compile(r'((\-|\/)I.*)')
-                include_list = [m.group(1) for m in (
-                    include_regex.match(elem) for elem in cmd) if m]
+                include_list = [
+                    m.group(1)
+                    for m in (include_regex.match(elem) for elem in cmd) if m
+                ]
 
                 if len(src_list) >= 1 and len(obj_list) >= 1:
                     src = src_list[0]
@@ -190,8 +205,10 @@ class BuildExtension(build_ext):
                             cflags = self.cflags
                         else:
                             cflags = []
-                        cmd = [nvcc, '-c', src, '-o', obj, '-Xcompiler',
-                               '/wd4819', '-Xcompiler', '/MD'] + include_list + cflags
+                        cmd = [
+                            nvcc, '-c', src, '-o', obj, '-Xcompiler',
+                            '/wd4819', '-Xcompiler', '/MD'
+                        ] + include_list + cflags
                     elif isinstance(self.cflags, dict):
                         cflags = self.cflags['cxx']
                         cmd += cflags
@@ -203,9 +220,9 @@ class BuildExtension(build_ext):
 
             try:
                 self.compiler.spawn = spawn
-                return original_compile(sources,
-                                        output_dir, macros, include_dirs, debug,
-                                        extra_preargs, extra_postargs, depends)
+                return original_compile(sources, output_dir, macros,
+                                        include_dirs, debug, extra_preargs,
+                                        extra_postargs, depends)
             finally:
                 self.compiler.spawn = original_spawn
 
@@ -228,7 +245,13 @@ class BuildExtension(build_ext):
         check_compiler_abi_compatibility(compiler)
 
     def _define_torch_extension_name(self, extension):
-        define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
+        # pybind11 doesn't support dots in the names
+        # so in order to support extensions in the packages
+        # like torch._C, we take the last part of the string
+        # as the library name
+        names = extension.name.split('.')
+        name = names[-1]
+        define = '-DTORCH_EXTENSION_NAME={}'.format(name)
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
                 args.append(define)
@@ -444,59 +467,180 @@ def load(name,
                 extra_cflags=['-O2'],
                 verbose=True)
     '''
+    return _jit_compile(
+        name,
+        [sources] if isinstance(sources, str) else sources,
+        extra_cflags,
+        extra_cuda_cflags,
+        extra_ldflags,
+        extra_include_paths,
+        build_directory or _get_build_directory(name, verbose),
+        verbose)
 
-    verify_ninja_availability()
 
-    # Allows sources to be a single path or a list of paths.
-    if isinstance(sources, str):
-        sources = [sources]
+def load_inline(name,
+                cpp_sources,
+                cuda_sources=None,
+                functions=None,
+                extra_cflags=None,
+                extra_cuda_cflags=None,
+                extra_ldflags=None,
+                extra_include_paths=None,
+                build_directory=None,
+                verbose=False):
+    '''
+    Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
-    if build_directory is None:
-        build_directory = _get_build_directory(name, verbose)
+    This function behaves exactly like :func:`load`, but takes its sources as
+    strings rather than filenames. These strings are stored to files in the
+    build directory, after which the behavior of :func:`load_inline` is
+    identical to :func:`load`.
 
-    extra_ldflags = extra_ldflags or []
-    if sys.platform == 'win32':
-        python_path = os.path.dirname(sys.executable)
-        python_lib_path = os.path.join(python_path, 'libs')
+    See `the
+    tests <https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions.py>`_
+    for good examples of using this function.
 
-        here = os.path.abspath(__file__)
-        torch_path = os.path.dirname(os.path.dirname(here))
-        lib_path = os.path.join(torch_path, 'lib')
+    Sources may omit two required parts of a typical non-inline C++ extension:
+    the necessary header includes, as well as the (pybind11) binding code. More
+    precisely, strings passed to ``cpp_sources`` are first concatenated into a
+    single ``.cpp`` file. This file is then prepended with ``#include
+    <torch/torch.h>``.
 
-        extra_ldflags.append('ATen.lib')
-        extra_ldflags.append('_C.lib')
-        extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
-        extra_ldflags.append('/LIBPATH:{}'.format(lib_path))
+    Furthermore, if the ``functions`` argument is supplied, bindings will be
+    automatically generated for each function specified. ``functions`` can
+    either be a list of function names, or a dictionary mapping from function
+    names to docstrings. If a list is given, the name of each function is used
+    as its docstring.
 
-    with_cuda = any(map(_is_cuda_file, sources))
-    if with_cuda:
-        if verbose:
-            print('Detected CUDA files, patching ldflags')
-        if sys.platform == 'win32':
-            extra_ldflags.append('/LIBPATH:{}'.format(_join_cuda_home('lib/x64')))
-            extra_ldflags.append('cudart.lib')
-        else:
-            extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
-            extra_ldflags.append('-lcudart')
+    The sources in ``cuda_sources`` are concatenated into a separate ``.cu``
+    file and  prepended with ``ATen/ATen.h``, ``cuda.h`` and ``cuda_runtime.h``
+    includes. The ``.cpp`` and ``.cu`` files are compiled separately, but
+    ultimately linked into a single library. Note that no bindings are
+    generated for functions in ``cuda_sources`` per  se. To bind to a CUDA
+    kernel, you must create a C++ function that calls it, and either declare or
+    define this C++ function in one of the ``cpp_sources`` (and include its
+    name in ``functions``).
 
-    build_file_path = os.path.join(build_directory, 'build.ninja')
-    if verbose:
-        print('Emitting ninja build file {}...'.format(build_file_path))
-    # NOTE: Emitting a new ninja build file does not cause re-compilation if
-    # the sources did not change, so it's ok to re-emit (and it's fast).
-    _write_ninja_file(
-        path=build_file_path,
-        name=name,
-        sources=sources,
-        extra_cflags=extra_cflags or [],
-        extra_cuda_cflags=extra_cuda_cflags or [],
-        extra_ldflags=extra_ldflags or [],
-        extra_include_paths=extra_include_paths or [],
-        with_cuda=with_cuda)
+    See :func:`load` for a description of arguments omitted below.
 
-    if verbose:
-        print('Building extension module {}...'.format(name))
-    _build_extension_module(name, build_directory)
+    Args:
+        cpp_sources: A string, or list of strings, containing C++ source code.
+        cuda_sources: A string, or list of strings, containing CUDA source code.
+        functions: A list of function names for which to generate function
+            bindings. If a dictionary is given, it should map function names to
+            docstrings (which are otherwise just the function names).
+
+    Example:
+        >>> from torch.utils.cpp_extension import load_inline
+        >>> source = \'\'\'
+        at::Tensor sin_add(at::Tensor x, at::Tensor y) {
+          return x.sin() + y.sin();
+        }
+        \'\'\'
+        >>> module = load_inline(name='inline_extension',
+                                 cpp_sources=[source],
+                                 functions=['sin_add'])
+    '''
+    build_directory = build_directory or _get_build_directory(name, verbose)
+
+    source_files = []
+
+    if isinstance(cpp_sources, str):
+        cpp_sources = [cpp_sources]
+    cuda_sources = cuda_sources or []
+    if isinstance(cuda_sources, str):
+        cuda_sources = [cuda_sources]
+
+    cpp_sources.insert(0, '#include <torch/torch.h>')
+
+    # If `functions` is supplied, we create the pybind11 bindings for the user.
+    # Here, `functions` is (or becomes, after some processing) a map from
+    # function names to function docstrings.
+    if functions is not None:
+        cpp_sources.append('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {')
+        if isinstance(functions, str):
+            functions = [functions]
+        if isinstance(functions, list):
+            # Make the function docstring the same as the function name.
+            functions = dict((f, f) for f in functions)
+        elif not isinstance(functions, dict):
+            raise ValueError(
+                "Expected 'functions' to be a list or dict, but was {}".format(
+                    type(functions)))
+        for function_name, docstring in functions.items():
+            cpp_sources.append('m.def("{0}", &{0}, "{1}");'.format(
+                function_name, docstring))
+        cpp_sources.append('}')
+
+    cpp_source_path = os.path.join(build_directory, 'main.cpp')
+    with open(cpp_source_path, 'w') as cpp_source_file:
+        cpp_source_file.write('\n'.join(cpp_sources))
+
+    sources = [cpp_source_path]
+
+    if cuda_sources:
+        cuda_sources.insert(0, '#include <ATen/ATen.h>')
+        cuda_sources.insert(1, '#include <cuda.h>')
+        cuda_sources.insert(2, '#include <cuda_runtime.h>')
+
+        cuda_source_path = os.path.join(build_directory, 'cuda.cu')
+        with open(cuda_source_path, 'w') as cuda_source_file:
+            cuda_source_file.write('\n'.join(cuda_sources))
+
+        sources.append(cuda_source_path)
+
+    return _jit_compile(
+        name,
+        sources,
+        extra_cflags,
+        extra_cuda_cflags,
+        extra_ldflags,
+        extra_include_paths,
+        build_directory,
+        verbose)
+
+
+def _jit_compile(name,
+                 sources,
+                 extra_cflags,
+                 extra_cuda_cflags,
+                 extra_ldflags,
+                 extra_include_paths,
+                 build_directory,
+                 verbose):
+    baton = FileBaton(os.path.join(build_directory, 'lock'))
+    if baton.try_acquire():
+        try:
+            verify_ninja_availability()
+            check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
+            with_cuda = any(map(_is_cuda_file, sources))
+            extra_ldflags = _prepare_ldflags(
+                extra_ldflags or [],
+                with_cuda,
+                verbose)
+            build_file_path = os.path.join(build_directory, 'build.ninja')
+            if verbose:
+                print(
+                    'Emitting ninja build file {}...'.format(build_file_path))
+            # NOTE: Emitting a new ninja build file does not cause re-compilation if
+            # the sources did not change, so it's ok to re-emit (and it's fast).
+            _write_ninja_file(
+                path=build_file_path,
+                name=name,
+                sources=sources,
+                extra_cflags=extra_cflags or [],
+                extra_cuda_cflags=extra_cuda_cflags or [],
+                extra_ldflags=extra_ldflags or [],
+                extra_include_paths=extra_include_paths or [],
+                with_cuda=with_cuda)
+
+            if verbose:
+                print('Building extension module {}...'.format(name))
+            _build_extension_module(name, build_directory)
+        finally:
+            baton.release()
+    else:
+        baton.wait()
 
     if verbose:
         print('Loading extension module {}...'.format(name))
@@ -513,6 +657,34 @@ def verify_ninja_availability():
             subprocess.check_call('ninja --version'.split(), stdout=devnull)
         except OSError:
             raise RuntimeError("Ninja is required to load C++ extensions")
+
+
+def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
+    if sys.platform == 'win32':
+        python_path = os.path.dirname(sys.executable)
+        python_lib_path = os.path.join(python_path, 'libs')
+
+        here = os.path.abspath(__file__)
+        torch_path = os.path.dirname(os.path.dirname(here))
+        lib_path = os.path.join(torch_path, 'lib')
+
+        extra_ldflags.append('ATen.lib')
+        extra_ldflags.append('_C.lib')
+        extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
+        extra_ldflags.append('/LIBPATH:{}'.format(lib_path))
+
+    if with_cuda:
+        if verbose:
+            print('Detected CUDA files, patching ldflags')
+        if sys.platform == 'win32':
+            extra_ldflags.append('/LIBPATH:{}'.format(
+                _join_cuda_home('lib/x64')))
+            extra_ldflags.append('cudart.lib')
+        else:
+            extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
+            extra_ldflags.append('-lcudart')
+
+    return extra_ldflags
 
 
 def _get_build_directory(name, verbose):
@@ -631,12 +803,15 @@ def _write_ninja_file(path,
 
     link_rule = ['rule link']
     if sys.platform == 'win32':
-        cl_paths = subprocess.check_output(['where', 'cl']).decode().split('\r\n')
+        cl_paths = subprocess.check_output(['where',
+                                            'cl']).decode().split('\r\n')
         if len(cl_paths) >= 1:
             cl_path = os.path.dirname(cl_paths[0]).replace(':', '$:')
         else:
             raise RuntimeError("MSVC is required to load C++ extensions")
-        link_rule.append('  command = "{}/link.exe" $in /nologo $ldflags /out:$out'.format(cl_path))
+        link_rule.append(
+            '  command = "{}/link.exe" $in /nologo $ldflags /out:$out'.format(
+                cl_path))
     else:
         link_rule.append('  command = $cxx $ldflags $in -o $out')
 

@@ -152,7 +152,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
 
     Example:
         >>> # Save to file
-        >>> x = torch.Tensor([0, 1, 2, 3, 4])
+        >>> x = torch.tensor([0, 1, 2, 3, 4])
         >>> torch.save(x, 'tensor.pt')
         >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()

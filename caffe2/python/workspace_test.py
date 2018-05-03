@@ -324,6 +324,15 @@ class TestWorkspaceMKLDNN(test_util.TestCase):
         fetched = workspace.FetchBlob("testblob_mkldnn")
         np.testing.assert_array_equal(arr, fetched)
 
+@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+class TestWorkspaceIDEEP(test_util.TestCase):
+
+    def testFeedFetchBlobIDEEP(self):
+        arr = np.random.randn(2, 3).astype(np.float32)
+        workspace.FeedBlob(
+            "testblob_ideep", arr, core.DeviceOption(caffe2_pb2.IDEEP))
+        fetched = workspace.FetchBlob("testblob_ideep")
+        np.testing.assert_array_equal(arr, fetched)
 
 class TestImmedibate(test_util.TestCase):
     def testImmediateEnterExit(self):

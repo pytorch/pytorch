@@ -1,5 +1,5 @@
 #ifndef NO_PYTHON
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #endif
 #include "ir.h"
 
@@ -23,14 +23,12 @@ namespace py = pybind11;
 
 namespace torch { namespace jit {
 
-std::string getPythonName(const PyObject* obj, bool is_legacy) {
+std::string getPythonName(const PyObject* obj_) {
   AutoGIL gil;
-  if (is_legacy) {
-    return std::string(obj->ob_type->tp_name);
-  } else {
-    auto v = py::getattr(const_cast<PyObject*>(obj), "__name__", py::str("<python_value>"));
-    return py::str(v);
-  }
+  PyObject* obj = const_cast<PyObject*>(obj_);
+  auto v = py::getattr(obj, "__name__", py::str("<python_value>"));
+  // if this was a autograd.Function recover the name of the class
+  return py::str(v);
 }
 
 std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
@@ -72,15 +70,40 @@ std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
   }
 }
 
+at::optional<THPObjectPtr> PythonOp::autogradFunction() const {
+  AutoGIL gil;
+  py::handle obj = const_cast<PyObject*>(pyobj.get());
+
+  auto r = py::getattr(obj, "__self__", py::none());
+  if(r.is_none())
+    return at::nullopt;
+
+  auto apply = py::getattr(r, "apply", py::none());
+  if(apply.is_none())
+    return at::nullopt;
+
+  auto c = PyObject_RichCompareBool(apply.ptr(), obj.ptr(), Py_NE);
+  if(PyErr_Occurred())
+    throw py::error_already_set();
+  if(c)
+    return at::nullopt;
+
+  return THPObjectPtr(r.release().ptr());
+}
+
 std::string PythonOp::name() const {
-  return getPythonName(pyobj.get(),is_legacy);
+  AutoGIL gil;
+  if(auto autograd = autogradFunction()) {
+    return getPythonName(autograd->get());
+  } else {
+    return getPythonName(pyobj.get());
+  }
 }
 
 void PythonOp::cloneFrom(Node * other_) {
   Node::cloneFrom(other_);
   auto other = other_->cast<PythonOp>();
   this->cconv = other->cconv;
-  this->is_legacy = other->is_legacy;
   Py_INCREF(other->pyobj.get());
   this->pyobj = THPObjectPtr(other->pyobj.get());
   this->var_flags = other->var_flags;
@@ -641,6 +664,41 @@ std::shared_ptr<Graph> Graph::copy() {
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
+}
+
+inline Value* Value::setUniqueName(const std::string & name) {
+  if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
+    throw std::runtime_error("names may not be integers: " + name);
+  }
+
+  auto & names = node()->owningGraph()->unique_names_;
+
+  // clear any old name from the map
+  if(hasUniqueName()) {
+    names.erase(unique_name_);
+    unique_name_ = "";
+  }
+
+  // allow "" to clear the uniquename
+  if(name == "")
+    return this;
+
+  // if someone else has this name, then rename the other value
+  auto old_owner_of_name = names.find(name);
+  if(old_owner_of_name != names.end()) {
+    size_t suffix = 1;
+    std::string replacement_name;
+    do {
+      std::stringstream ss;
+      ss << name << "." << suffix++;
+      replacement_name = ss.str();
+    } while(names.count(replacement_name) > 0);
+    old_owner_of_name->second->setUniqueName(replacement_name);
+  }
+
+  names[name] = this;
+  unique_name_ = name;
+  return this;
 }
 
 }} // namespace torch::jit

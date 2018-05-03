@@ -1,5 +1,5 @@
 import warnings
-from torch.autograd import NestedIOFunction, Variable
+from torch.autograd import NestedIOFunction
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
@@ -279,7 +279,7 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
 
         output, hy, cy, reserve, new_weight_buf = torch._cudnn_rnn(
             input, weight_arr, weight_stride0,
-            Variable(flat_weight) if flat_weight is not None else None,
+            flat_weight,
             hx, cx,
             mode, hidden_size, num_layers,
             batch_first, dropout, train, bool(bidirectional),

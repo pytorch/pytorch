@@ -1,4 +1,5 @@
 import torch
+import warnings
 
 
 def detach_variable(inputs):
@@ -14,10 +15,16 @@ def detach_variable(inputs):
             "Only tuple of tensors is supported. Got Unsupported input type: ", type(inputs).__name__)
 
 
+def check_backward_validity(inputs):
+    if not any(inp.requires_grad for inp in inputs):
+        warnings.warn("None of the inputs have requires_grad=True. Gradients will be None")
+
+
 class CheckpointFunction(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, run_function, *args):
+        check_backward_validity(args)
         ctx.run_function = run_function
         ctx.save_for_backward(*args)
         with torch.no_grad():
@@ -66,6 +73,11 @@ def checkpoint(function, *args):
         checkpointed version won't be equivalent, and unfortunately it can't be
         detected.
 
+    .. warning:
+        At least one of the inputs needs to have :code:`requires_grad=True` if
+        grads are needed for model inputs, otherwise the checkpointed part of the
+        model won't have gradients.
+
     Args:
         function: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs
@@ -75,7 +87,7 @@ def checkpoint(function, *args):
         args: tuple containing inputs to the :attr:`function`
 
     Returns:
-        Output of running :attr`function` on *:attr:`args`
+        Output of running :attr:`function` on *:attr:`args`
     """
     return CheckpointFunction.apply(function, *args)
 
@@ -95,6 +107,11 @@ def checkpoint_sequential(functions, segments, *inputs):
     .. warning::
         Checkpointing doesn't work with :func:`torch.autograd.grad`, but only
         with :func:`torch.autograd.backward`.
+
+    .. warning:
+        At least one of the inputs needs to have :code:`requires_grad=True` if
+        grads are needed for model inputs, otherwise the checkpointed part of the
+        model won't have gradients.
 
     Args:
         functions: A :class:`torch.nn.Sequential` or the list of modules or

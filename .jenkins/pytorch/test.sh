@@ -29,6 +29,14 @@ fi
 
 time python test/run_test.py --verbose
 
+# Test ATen
+if [[ "$BUILD_ENVIRONMENT" != *asan* ]]; then
+  echo "Testing ATen"
+  TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
+  ln -s "$TORCH_LIB_PATH"/libATen.so aten/build/src/ATen/libATen.so
+  aten/tools/run_tests.sh aten/build
+fi
+
 rm -rf ninja
 
 echo "Installing torchvision at branch master"
@@ -47,4 +55,6 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
    else
      "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
    fi
+   python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+   "$CPP_BUILD"/libtorch/bin/test_api
 fi

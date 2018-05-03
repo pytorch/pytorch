@@ -2,7 +2,10 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/argument_spec.h"
 #include <ATen/optional.h>
+#include <functional>
 
 // This file contains classes which assist in desugaring Python style
 // modules and their methods into flattened graphs which don't have any
@@ -19,14 +22,18 @@ namespace torch { namespace jit { namespace script {
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
 
+struct SourceRange;
+
 struct Method {
   Method(std::string name, bool optimize,
          std::shared_ptr<Graph> graph,
-         std::vector<at::Tensor*> initial_members)
+         std::vector<at::Tensor*> initial_members,
+         std::function<void(Method&)> method_creator)
   : name_(std::move(name))
   , graph_(std::move(graph))
   , optimize(optimize)
-  , member_inputs(std::move(initial_members)) {
+  , member_inputs(std::move(initial_members))
+  , method_creator(method_creator) {
     JIT_ASSERT(graph_->inputs().size() >= member_inputs.size());
     int i = graph_->inputs().size() - member_inputs.size();
     for(at::Tensor* member : member_inputs) {
@@ -36,7 +43,7 @@ struct Method {
 
   variable_tensor_list run(variable_tensor_list && inputs) {
     std::call_once(executor_init, [&]{
-      executor = GraphExecutor(graph_, optimize);
+      executor = GraphExecutor(graph(), optimize);
     });
     for(auto tp : member_inputs) {
       inputs.push_back(*tp);
@@ -54,10 +61,13 @@ struct Method {
   // adding any extra parameters necessary to do this call
 
   // defined here to keep details of member_input handling confined to this class
-  std::vector<Value*> emit_call_to(Method & callee, ArrayRef<Value*> inputs);
+  std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<Value*> inputs);
+  // if this isn't yet defined, run its method_creator function
+  void ensure_defined();
+
 
   size_t num_inputs() const {
-    return graph_->inputs().size() - member_inputs.size();
+    return graph()->inputs().size() - member_inputs.size();
   }
   Value * get_or_add_parameter(at::Tensor* slot) {
     auto it = member_input_index.find(slot);
@@ -69,6 +79,48 @@ struct Method {
     member_input_index[slot] = graph()->inputs().size();
     return graph()->addInput();
   }
+
+  std::shared_ptr<Graph> propagate_shapes(std::vector<at::Tensor> inputs, bool with_grad=false) {
+    auto retval = graph_->copy();
+    for (auto inp : member_inputs) {
+      inputs.push_back(*inp);
+    }
+    PropagateInputShapes(
+      *retval,
+      ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+    return retval;
+  }
+
+  std::shared_ptr<Graph> propagate_and_assign_input_and_output_shapes(std::vector<at::Tensor> inputs, std::vector<at::Tensor> outputs, bool with_grad=false, bool propagate=true) {
+    auto retval = graph_->copy();
+    for (auto inp : member_inputs) {
+      inputs.push_back(*inp);
+    }
+    if (propagate) {
+      auto inputs_copy = inputs;
+      PropagateInputShapes(*retval, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs_copy))));
+    }
+    JIT_ASSERT(retval->inputs().size() == inputs.size());
+    for (size_t i=0; i < retval->inputs().size(); ++i) {
+      auto scalar_type = inputs[i].type().scalarType();
+      auto sizes = inputs[i].sizes();
+      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      retval->inputs()[i]->setType(type);
+    }
+    JIT_ASSERT(retval->outputs().size() == outputs.size());
+    for (size_t i=0; i < retval->outputs().size(); ++i) {
+      auto scalar_type = outputs[i].type().scalarType();
+      auto sizes = outputs[i].sizes();
+      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      retval->outputs()[i]->setType(type);
+    }
+    return retval;
+  }
+
+  std::vector<at::Tensor*> params() {
+    return member_inputs;
+  }
+
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
@@ -94,6 +146,11 @@ private:
   // std::vector<at::Tensor*> member_outputs;
 
   std::once_flag executor_init;
+
+  // an optional function that actually creates the method when emit_call_to(this,...)
+  // is first called.
+  // this is used by the compiler so that it can construct methods out of order
+  std::function<void(Method&)> method_creator;
 };
 
 struct Module;
@@ -205,11 +262,14 @@ struct Module : public std::enable_shared_from_this<Module> {
     modules.insert(name, {name, std::move(module)});
   }
 
-  Method& create_method(const std::string & name, std::shared_ptr<Graph> graph = nullptr, std::vector<at::Tensor*> member_inputs = {}) {
-    if(!graph)
-      graph = std::make_shared<Graph>();
-    std::unique_ptr<Method> method(new Method(name, optimize, std::move(graph), std::move(member_inputs)));
+  Method& create_method(const std::string & name, std::shared_ptr<Graph> graph, std::vector<at::Tensor*> member_inputs) {
+    JIT_ASSERT(graph);
+    std::unique_ptr<Method> method(new Method(name, optimize, std::move(graph), std::move(member_inputs), nullptr));
+    return *methods.insert(name, std::move(method));
+  }
 
+  Method& create_method(const std::string & name, std::function<void(Method&)> creator) {
+    std::unique_ptr<Method> method(new Method(name, optimize, std::make_shared<Graph>(), {}, creator));
     return *methods.insert(name, std::move(method));
   }
 
@@ -257,6 +317,7 @@ struct Module : public std::enable_shared_from_this<Module> {
       return at::optional<Method&>(**pm);
     return at::nullopt;
   }
+
 
 private:
 

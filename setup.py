@@ -1,6 +1,6 @@
 # Welcome to the PyTorch setup.py.
 #
-# Environment variables you are probably interestd in:
+# Environment variables you are probably interested in:
 #
 #   DEBUG
 #     build with -O0 and -g (debug symbols)
@@ -251,6 +251,9 @@ def build_libs(libs):
     if WITH_GLOO_IBVERBS:
         build_libs_cmd += ['--with-gloo-ibverbs']
 
+    if WITH_DISTRIBUTED_MW:
+        build_libs_cmd += ['--with-distributed-mw']
+
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
@@ -286,9 +289,9 @@ class build_deps(Command):
         check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, "nanopb", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
-        check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'cpuinfo', 'CMakeLists.txt'))
-        check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'tbb', 'tbb_remote', 'Makefile'))
-        check_file(os.path.join('aten', 'src', 'ATen', 'utils', 'catch', 'CMakeLists.txt'))
+        check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
+        check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
+        check_file(os.path.join(third_party_path, 'catch', 'CMakeLists.txt'))
 
         check_pydep('yaml', 'pyyaml')
         check_pydep('typing', 'typing')
@@ -547,6 +550,8 @@ else:
         '-Wno-missing-field-initializers',
         '-Wno-write-strings',
         '-Wno-zero-length-array',
+        # This is required for Python 2 declarations that are deprecated in 3.
+        '-Wno-deprecated-declarations',
         # Python 2.6 requires -fno-strict-aliasing, see
         # http://legacy.python.org/dev/peps/pep-3123/
         # We also depend on it in our code (even Python 3).
@@ -647,6 +652,7 @@ main_sources = [
     "torch/csrc/jit/interned_strings.cpp",
     "torch/csrc/jit/type.cpp",
     "torch/csrc/jit/export.cpp",
+    "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/interpreter_autograd_function.cpp",
     "torch/csrc/jit/python_arg_flatten.cpp",
@@ -663,6 +669,7 @@ main_sources = [
     "torch/csrc/jit/passes/canonicalize.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
+    "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
     "torch/csrc/jit/generated/aten_dispatch.cpp",
     "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/compiler.cpp",
@@ -700,6 +707,7 @@ main_sources = [
     "torch/csrc/tensor/python_tensor.cpp",
     "torch/csrc/onnx/onnx.pb.cpp",
     "torch/csrc/onnx/onnx.cpp",
+    "torch/csrc/onnx/init.cpp",
 ]
 
 try:
@@ -851,7 +859,7 @@ def make_relative_rpath(path):
 ################################################################################
 
 extensions = []
-packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe'))
+packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe2.*', 'caffe', 'caffe.*'))
 C = Extension("torch._C",
               libraries=main_libraries,
               sources=main_sources,
@@ -895,7 +903,7 @@ if WITH_CUDA:
                         )
     extensions.append(THNVRTC)
 
-version = '0.4.0a0'
+version = '0.5.0a0'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))

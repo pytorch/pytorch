@@ -53,8 +53,8 @@ struct AT_API TensorGeometry {
 
   TensorGeometry transpose(int64_t dim0, int64_t dim1) {
     TensorGeometry r = *this; // copy
-    AT_ASSERT(dim0 < dim(), "transpose: dim0=%d out of range (dim=%d)", dim0, dim())
-    AT_ASSERT(dim1 < dim(), "transpose: dim1=%d out of range (dim=%d)", dim1, dim())
+    AT_CHECK(dim0 < dim(), "transpose: dim0=", dim0, " out of range (dim=", dim(), ")")
+    AT_CHECK(dim1 < dim(), "transpose: dim1=", dim1, " out of range (dim=", dim(), ")")
     std::swap(r.sizes_[dim0], r.sizes_[dim1]);
     std::swap(r.strides_[dim0], r.strides_[dim1]);
     return r;

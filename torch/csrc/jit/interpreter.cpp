@@ -1,5 +1,5 @@
 #ifndef NO_PYTHON
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #endif
 #include "interpreter.h"
 
@@ -441,12 +441,7 @@ bool hasHandleOutput(Node * n) {
 
 #ifndef NO_PYTHON
 Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
-  py::function func;
-  if (op->tracing_autograd_python_function) {
-    func = py::function(py::handle(op->pyobj.get()).attr("apply"));
-  } else {
-    func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
-  }
+  py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
   bool tracing_autograd_python_function = op->tracing_autograd_python_function;
   bool has_handle = hasHandleOutput(op);
   size_t num_inputs = 0;
@@ -741,6 +736,35 @@ Operation getOperation(jit::Node* node, bool values_are_variables) {
       return 0;
     };
   IR_ELSE()
+    switch (node->kind()) {
+      case onnx::Reshape: {
+        return [=](Stack& stack) {
+          auto shape = pop(stack).contiguous();
+          auto input = pop(stack);
+          JIT_ASSERT(shape.ndimension() == 1);
+          at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
+          stack.push_back(input.reshape(shape_list));
+          return 0;
+        };
+      } break;
+      case onnx::Shape: {
+        return [=](Stack& stack) {
+          auto t = pop(stack);
+          at::IntList sizes = t.sizes();
+          auto sizes_tensor = at::CPU(at::kLong).tensor(sizes.size());
+          auto accessor = sizes_tensor.accessor<int64_t, 1>();
+          for (size_t i=0; i<sizes.size(); ++i) {
+            accessor[i] = sizes[i];
+          }
+          if (values_are_variables) {
+            sizes_tensor = torch::autograd::make_variable(sizes_tensor);
+          }
+          stack.push_back(sizes_tensor);
+          return 0;
+        };
+      } break;
+      default: ;
+    };
     return getTensorOp(node).op;
   IR_END()
 }

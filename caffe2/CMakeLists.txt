@@ -13,6 +13,7 @@ add_subdirectory(cuda_rtc)
 add_subdirectory(db)
 add_subdirectory(distributed)
 # add_subdirectory(experiments) # note, we may remove this folder at some point
+add_subdirectory(ideep)
 add_subdirectory(image)
 add_subdirectory(video)
 add_subdirectory(mkl)
@@ -141,16 +142,25 @@ if(USE_CUDA)
   # it. We will then manually add the cudart library as interface libs.
   set(__tmp ${CUDA_LIBRARIES})
   set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
-  CUDA_ADD_LIBRARY(caffe2_gpu ${Caffe2_GPU_SRCS})
+  if(CAFFE2_STATIC_LINK_CUDA)
+    CUDA_ADD_LIBRARY(caffe2_gpu STATIC ${Caffe2_GPU_SRCS})
+  else()
+    CUDA_ADD_LIBRARY(caffe2_gpu ${Caffe2_GPU_SRCS})
+  endif()
   set(CUDA_LIBRARIES ${__tmp})
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
 
   target_include_directories(
       caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
   target_link_libraries(
-      caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-  target_link_libraries(
       caffe2_gpu PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
+
+  # These public dependencies must go after the previous dependencies, as the
+  # order of the libraries in the linker call matters here when statically
+  # linking; libculibos and cublas must be last.
+  target_link_libraries(
+      caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
@@ -170,7 +180,7 @@ if (BUILD_TEST)
     # libraries even if they are not part of the public dependency libs. As a
     # result, we will explicitly link the test against the Caffe2 dependency
     # libs.
-    target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
+    target_link_libraries(${test_name} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_MAIN_LIBS} gtest_main)
     if (USE_CUDA)
       target_link_libraries(${test_name} ${Caffe2_CUDA_DEPENDENCY_LIBS})
     endif()

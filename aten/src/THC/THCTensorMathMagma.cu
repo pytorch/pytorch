@@ -2,6 +2,8 @@
 #include "THCTensorMath.h"
 #include "THCTensorCopy.h"
 #include "THCTensorMathMagma.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 #include <algorithm>
 
 #ifdef USE_MAGMA

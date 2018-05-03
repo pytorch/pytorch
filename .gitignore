@@ -13,6 +13,8 @@ dist/
 torch.egg-info/
 */**/__pycache__
 aten/build/
+aten/src/ATen/Config.h
+third_party/build/
 torch/version.py
 torch/csrc/generic/TensorMethods.cpp
 torch/lib/*.so*
@@ -53,6 +55,7 @@ test/.coverage
 test/data/legacy_serialized.pt
 test/data/linear.pt
 .mypy_cache
+test/cpp/api/mnist
 
 # IPython notebook checkpoints
 .ipynb_checkpoints

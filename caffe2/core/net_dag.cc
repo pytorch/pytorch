@@ -79,6 +79,11 @@ DAGNetBase::DAGNetBase(
         "dag_net/stats/" + net_def->name() + "/" +
         caffe2::DeviceTypeName(device_idx));
   }
+
+  tracer_ = tracing::create(this, net_def->name());
+  if (tracer_) {
+    LOG(INFO) << "Tracing net: " << net_def->name();
+  }
 }
 
 DAGNetBase::~DAGNetBase() {
@@ -93,6 +98,8 @@ DAGNetBase::~DAGNetBase() {
 
 bool DAGNetBase::DoRunAsync() {
   StartAllObservers();
+
+  tracing::startIter(tracer_);
 
   // Lock run_in_progress_ to prevent concurrent Run()s.
   std::unique_lock<std::mutex> run_lock(run_in_progress_);
@@ -220,7 +227,6 @@ void DAGNetBase::WorkerFunction() {
         "Can't find chain ",
         idx,
         ".");
-    const auto& chain = execution_chains_[idx];
     bool this_success = false;
     try {
       this_success = RunAt(idx, execution_chains_[idx]);
@@ -242,6 +248,7 @@ void DAGNetBase::WorkerFunction() {
 
     // Do book-keeping
     std::vector<int> chains_to_queue;
+    const auto& chain = execution_chains_[idx];
     for (const auto idx : chain) {
       for (const auto child : operator_nodes_[idx].children_) {
         const int count = --operator_nodes_[child].runtime_parent_count_;
@@ -344,7 +351,11 @@ bool DAGNet::RunAt(int chain_id, const std::vector<int>& chain) {
     const auto& net_name = name_.c_str();
     CAFFE_SDT(operator_start, net_name, op_name, op_type, op_ptr);
 #endif
-    const auto success = operator_nodes_[i].operator_->Run();
+    bool success = false;
+    {
+      TRACE_EVENT(tracing::TRACE_OP, i, tracing::TRACE_TASK, chain_id);
+      success = operator_nodes_[i].operator_->Run();
+    }
 #ifdef CAFFE2_ENABLE_SDT
     CAFFE_SDT(operator_done, net_name, op_name, op_type, op_ptr);
 #endif

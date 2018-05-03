@@ -50,11 +50,11 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
     } else {
       CAFFE_ENFORCE_EQ(X.ndim(), axes_.size());
     }
-    Y_dims_.resize(ndim);
+    std::vector<int> Y_dims(ndim);
     for (int i = 0; i < ndim; ++i) {
-      Y_dims_[i] = X_dims_[axes_[i]];
+      Y_dims[i] = X_dims_[axes_[i]];
     }
-    Y->Resize(Y_dims_);
+    Y->Resize(Y_dims);
     // Do the actual transpose, which is implemented in DoRunWithType().
 #if CUDNN_VERSION_MIN(6, 0, 0)
     return DispatchHelper<TensorTypes<float, int>>::call(this, Input(0));
@@ -84,10 +84,8 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
     if (typedesc == CUDNN_DATA_INT32) {
       // CUDNN Transpose only support float for now
       math::Transpose<int, CUDAContext>(
-          input.size(),
-          axes_.size(),
+          X_dims_.size(),
           X_dims_.data(),
-          Y_dims_.data(),
           axes_.data(),
           input.template data<int>(),
           output->template mutable_data<int>(),
@@ -148,7 +146,6 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
 
   std::vector<int> axes_;
   std::vector<int> X_dims_;
-  std::vector<int> Y_dims_;
 };
 
 REGISTER_CUDNN_OPERATOR(Transpose, CuDNNTransposeOp);

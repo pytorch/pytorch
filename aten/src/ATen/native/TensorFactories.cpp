@@ -104,7 +104,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
 
 Tensor full(const Type& dtype, IntList size, Scalar fill_value) {
   if (dtype.is_sparse()) {
-    AT_ERROR("full(...) is not implemented for sparse types, got: %s", dtype.toString());
+    AT_ERROR("full(...) is not implemented for sparse types, got: ", dtype.toString());
   }
   auto result = dtype.tensor(size);
   return result.fill_(fill_value);
@@ -112,7 +112,7 @@ Tensor full(const Type& dtype, IntList size, Scalar fill_value) {
 
 Tensor& full_out(Tensor& result, IntList size, Scalar fill_value) {
   if (result.is_sparse()) {
-    AT_ERROR("full(...) is not implemented for sparse types, got: %s", result.type().toString());
+    AT_ERROR("full(...) is not implemented for sparse types, got: ", result.type().toString());
   }
   result.resize_(size);
   return result.fill_(fill_value);
@@ -267,9 +267,9 @@ Tensor randperm(const Type& dtype, int64_t n, Generator* generator) {
 }
 
 Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
-  if (n <= 0) {
+  if (n < 0) {
     std::ostringstream oss;
-    oss << "n must be strictly positive, got " << n;
+    oss << "n must be non-negative, got " << n;
     throw std::runtime_error(oss.str());
   }
   if (result.type().backend() != at::kCPU) {

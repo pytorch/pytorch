@@ -1,6 +1,5 @@
 import warnings
 
-from torch.autograd import Variable
 import torch
 from .module import Module
 from .container import Sequential
@@ -8,10 +7,10 @@ from .activation import LogSoftmax
 from .. import functional as F
 
 
-def _assert_no_grad(variable):
-    assert not variable.requires_grad, \
+def _assert_no_grad(tensor):
+    assert not tensor.requires_grad, \
         "nn criterions don't compute the gradient w.r.t. targets - please " \
-        "mark these variables as not requiring gradients"
+        "mark these tensors as not requiring gradients"
 
 
 class _Loss(Module):
@@ -95,7 +94,7 @@ class NLLLoss(_WeightedLoss):
     unbalanced training set.
 
     The input given through a forward call is expected to contain
-    log-probabilities of each class. input has to be a Tensor of size either
+    log-probabilities of each class. `input` has to be a Tensor of size either
     :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)`
     with :math:`K \geq 2` for the `K`-dimensional case (described later).
 
@@ -155,7 +154,7 @@ class NLLLoss(_WeightedLoss):
         - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
             K-dimensional loss.
-        - Output: :math:`(1)`. If reduce is ``False``, then the same size
+        - Output: scalar. If reduce is ``False``, then the same size
             as the target: :math:`(N)`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
             of K-dimensional loss.
@@ -167,7 +166,7 @@ class NLLLoss(_WeightedLoss):
         >>> # input is of size N x C = 3 x 5
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> # each element in target has to have 0 <= value < C
-        >>> target = torch.LongTensor([1, 0, 4])
+        >>> target = torch.tensor([1, 0, 4])
         >>> output = loss(m(input), target)
         >>> output.backward()
         >>>
@@ -179,7 +178,7 @@ class NLLLoss(_WeightedLoss):
         >>> data = torch.randn(N, 16, 10, 10)
         >>> m = nn.Conv2d(16, C, (3, 3))
         >>> # each element in target has to have 0 <= value < C
-        >>> target = torch.LongTensor(N, 8, 8).random_(0, C)
+        >>> target = torch.tensor(N, 8, 8).random_(0, C)
         >>> output = loss(m(data), target)
         >>> output.backward()
     """
@@ -286,10 +285,28 @@ class KLDivLoss(_Loss):
 
     By default, the losses are averaged for each minibatch over observations
     **as well as** over dimensions. However, if the field
-    `size_average` is set to ``False``, the losses are instead summed.
+    :attr:`size_average` is set to ``False``, the losses are instead summed.
 
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
+
+    .. note:: The default averaging means that the loss is actually **not** the
+          KL Divergence because the terms are already probability weighted.
+          A future release of PyTorch may move the default loss closer to the
+          mathematical definition.
+
+          To get the real KL Divergence, use ``size_average=False``, and
+          then divide the output by the batch size.
+
+          Example::
+
+            >>> loss = nn.KLDivLoss(size_average=False)
+            >>> batch_size = 5
+            >>> log_probs1 = F.log_softmax(torch.randn(batch_size, 10), 1)
+            >>> probs2 = F.softmax(torch.randn(batch_size, 10), 1)
+            >>> loss(log_probs1, probs2) / batch_size
+            tensor(0.7142)
+
 
     Args:
         size_average (bool, optional: By default, the losses are averaged
@@ -336,8 +353,7 @@ class MSELoss(_Loss):
 
     The sum operation still operates over all the elements, and divides by `n`.
 
-    The division by `n` can be avoided if one sets the internal variable
-    `size_average` to ``False``.
+    The division by `n` can be avoided if one sets :attr:`size_average` to ``False``.
 
     To get a batch of losses, a loss per batch element, set `reduce` to
     ``False``. These losses are not averaged and are not affected by
@@ -421,7 +437,7 @@ class BCELoss(_WeightedLoss):
         >>> m = nn.Sigmoid()
         >>> loss = nn.BCELoss()
         >>> input = torch.randn(3, requires_grad=True)
-        >>> target = torch.FloatTensor(3).random_(2)
+        >>> target = torch.empty(3).random_(2)
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
@@ -482,7 +498,7 @@ class BCEWithLogitsLoss(_Loss):
 
         >>> loss = nn.BCEWithLogitsLoss()
         >>> input = torch.randn(3, requires_grad=True)
-        >>> target = torch.FloatTensor(3).random_(2)
+        >>> target = torch.empty(3).random_(2)
         >>> output = loss(input, target)
         >>> output.backward()
     """
@@ -492,9 +508,8 @@ class BCEWithLogitsLoss(_Loss):
 
     def forward(self, input, target):
         if self.weight is not None:
-            var = Variable(self.weight) if not isinstance(self.weight, Variable) else self.weight
             return F.binary_cross_entropy_with_logits(input, target,
-                                                      var,
+                                                      self.weight,
                                                       self.size_average,
                                                       reduce=self.reduce)
         else:
@@ -620,8 +635,7 @@ class SmoothL1Loss(_Loss):
     `x` and `y` arbitrary shapes with a total of `n` elements each
     the sum operation still operates over all the elements, and divides by `n`.
 
-    The division by `n` can be avoided if one sets the internal variable
-    `size_average` to ``False``
+    The division by `n` can be avoided if one sets :attr:`size_average` to ``False``
 
     Args:
         size_average (bool, optional): By default, the losses are averaged
@@ -692,7 +706,9 @@ class CrossEntropyLoss(_WeightedLoss):
 
     The `input` is expected to contain scores for each class.
 
-    `input` has to be a 2D `Tensor` of size `(minibatch, C)`.
+    `input` has to be a Tensor of size either :math:`(minibatch, C)` or
+    :math:`(minibatch, C, d_1, d_2, ..., d_K)`
+    with :math:`K \geq 2` for the `K`-dimensional case (described later).
 
     This criterion expects a class index (0 to `C-1`) as the
     `target` for each value of a 1D tensor of size `minibatch`
@@ -710,6 +726,12 @@ class CrossEntropyLoss(_WeightedLoss):
 
     The losses are averaged across observations for each minibatch.
 
+    Can also be used for higher dimension inputs, such as 2D images, by providing
+    an input of size :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`,
+    where :math:`K` is the number of dimensions, and a target of appropriate shape
+    (see below).
+
+
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
            If given, has to be a Tensor of size `C`
@@ -725,15 +747,22 @@ class CrossEntropyLoss(_WeightedLoss):
             size_average. Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`
-        - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`
-        - Output: scalar. If reduce is ``False``, then :math:`(N)` instead.
+        - Input: :math:`(N, C)` where `C = number of classes`, or
+            :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`
+            in the case of `K`-dimensional loss.
+        - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
+            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
+            K-dimensional loss.
+        - Output: scalar. If reduce is ``False``, then the same size
+            as the target: :math:`(N)`, or
+            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
+            of K-dimensional loss.
 
     Examples::
 
         >>> loss = nn.CrossEntropyLoss()
         >>> input = torch.randn(3, 5, requires_grad=True)
-        >>> target = torch.LongTensor(3).random_(5)
+        >>> target = torch.empty(3, dtype=torch.long).random_(5)
         >>> output = loss(input, target)
         >>> output.backward()
     """
@@ -921,7 +950,7 @@ class TripletMarginLoss(_Loss):
     tensors x1, x2, x3 and a margin with a value greater than 0.
     This is used for measuring a relative similarity between samples. A triplet
     is composed by `a`, `p` and `n`: anchor, positive examples and negative
-    example respectively. The shape of all input variables should be
+    example respectively. The shapes of all input tensors should be
     :math:`(N, D)`.
 
     The distance swap is described in detail in the paper `Learning shallow

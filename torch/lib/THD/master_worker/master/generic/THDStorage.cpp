@@ -9,7 +9,7 @@ using namespace master;
 static THDStorage* THDStorage_(_alloc)() {
   THDStorage* new_storage = new THDStorage();
   std::memset(reinterpret_cast<void*>(new_storage), 0, sizeof(new_storage));
-  new_storage->refcount = 1;
+  new (&new_storage->refcount) std::atomic<int>(1);
   new_storage->storage_id = THDState::s_nextId++;
   new_storage->node_id = THDState::s_current_worker;
   new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
@@ -159,7 +159,7 @@ void THDStorage_(clearFlag)(THDStorage *storage, const char flag) {
 
 void THDStorage_(retain)(THDStorage *storage) {
   if (storage && (storage->flag & TH_STORAGE_REFCOUNTED))
-    THAtomicIncrementRef(&storage->refcount);
+    storage->refcount++;
 }
 
 void THDStorage_(swap)(THDStorage *storage1, THDStorage *storage2) {
@@ -171,7 +171,7 @@ void THDStorage_(swap)(THDStorage *storage1, THDStorage *storage2) {
 void THDStorage_(free)(THDStorage *storage) {
   if (!storage || !(storage->flag & TH_STORAGE_REFCOUNTED)) return;
 
-  if (THAtomicDecrementRef(&storage->refcount)) {
+  if (--storage->refcount == 0) {
     masterCommandChannel->sendMessage(
       packMessage(
         Functions::storageFree,

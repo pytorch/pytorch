@@ -109,10 +109,10 @@ __global__ void RoIAlignBackwardFeature(
     T roi_start_h = offset_bottom_rois[2] * spatial_scale;
     T roi_end_w = offset_bottom_rois[3] * spatial_scale;
     T roi_end_h = offset_bottom_rois[4] * spatial_scale;
-    // T roi_start_w = round(offset_bottom_rois[1] * spatial_scale);
-    // T roi_start_h = round(offset_bottom_rois[2] * spatial_scale);
-    // T roi_end_w = round(offset_bottom_rois[3] * spatial_scale);
-    // T roi_end_h = round(offset_bottom_rois[4] * spatial_scale);
+    // T roi_start_w = roundf(offset_bottom_rois[1] * spatial_scale);
+    // T roi_start_h = roundf(offset_bottom_rois[2] * spatial_scale);
+    // T roi_end_w = roundf(offset_bottom_rois[3] * spatial_scale);
+    // T roi_end_h = roundf(offset_bottom_rois[4] * spatial_scale);
 
     // Force malformed ROIs to be 1x1
     T roi_width = max(roi_end_w - roi_start_w, (T)1.);

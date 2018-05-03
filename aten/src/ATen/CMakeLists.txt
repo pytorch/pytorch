@@ -29,41 +29,47 @@ ENDIF()
 
 IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
   SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
+  SET(VCOMP_LIB "vcomp")
 ELSE()
-  SET(MSVC_OPT_FLAG "")
+  SET(MSVC_OPT_FLAG " ")
+  SET(VCOMP_LIB "vcompd")
 ENDIF()
+
+IF(NOT MSVC)
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-ignored-qualifiers")
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-ignored-qualifiers")
+ENDIF(NOT MSVC)
 
 ########################
 # SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
 # so we need to set these commands here rather than in src/TH
 IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
   IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast")
   ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "-O3 -ffast-math")
   ENDIF(MSVC)
 ENDIF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
 IF(C_AVX_FOUND)
   IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast ${C_AVX_FLAGS}")
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX.c PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX ${C_AVX_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast ${CXX_AVX_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
   ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${C_AVX_FLAGS}")
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX.c PROPERTIES COMPILE_FLAGS "-O3 ${C_AVX_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${CXX_AVX_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "-O3 ${CXX_AVX_FLAGS}")
   ENDIF(MSVC)
 ENDIF(C_AVX_FOUND)
 
 IF(C_AVX2_FOUND)
   IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2 ${C_AVX2_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2 ${CXX_AVX2_FLAGS}")
   ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "-O3 ${C_AVX2_FLAGS}")
+    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "-O3 ${CXX_AVX2_FLAGS}")
   ENDIF(MSVC)
 ENDIF(C_AVX2_FOUND)
 
 IF(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-  SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAtomic.c PROPERTIES COMPILE_FLAGS "-fno-openmp")
-  SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAllocator.c PROPERTIES COMPILE_FLAGS "-fno-openmp")
+  SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_SOURCE_DIR}/../TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
 ENDIF()
 
 FILE(GLOB cpu_kernel_cpp_in RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cpu/*.cpp")
@@ -224,7 +230,6 @@ SET(all_cpp ${base_cpp} ${native_cpp} ${native_cudnn_cpp} ${native_mkl_cpp} ${na
 INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
 IF(NOT NO_CUDA OR WITH_ROCM)
   INCLUDE_DIRECTORIES(${ATen_CUDA_INCLUDE})
-  INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
   INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/cuda")
   SET(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${aten_cuda_cu} ${native_cuda_cu})
   SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS})
@@ -257,13 +262,30 @@ ELSE()
 ENDIF()
 ADD_DEPENDENCIES(ATen aten_files_are_generated)
 
-set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb/tbb_remote")
+if(NOT MSVC)
+  target_compile_options(ATen
+    PRIVATE
+    -Wall
+    -Wextra
+    -fexceptions
+    -Wno-missing-field-initializers
+    -Wno-type-limits
+    -Wno-unused-parameter
+    -Wno-unknown-warning-option
+    -Wno-unknown-pragmas)
+
+  if ($ENV{WERROR})
+    target_compile_options(ATen PRIVATE -Werror)
+  endif()
+endif()
+
+set(TBB_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/tbb")
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
 set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-add_subdirectory(${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb)
+add_subdirectory(cpu/tbb)
 set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
 target_include_directories(tbb_static PUBLIC ${TBB_ROOT_DIR}/include)
 target_link_libraries(ATen tbb_static)
@@ -321,9 +343,9 @@ IF(NOT MSVC)
   TARGET_LINK_LIBRARIES(ATen m)
 ELSE(NOT MSVC)
   IF(AT_MKL_MT)
-    set_target_properties(ATen PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:vcomp")
-    set_target_properties(ATen PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:vcomp")
-    set_target_properties(ATen PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:vcomp")
+    set_target_properties(ATen PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(ATen PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(ATen PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
   ENDIF(AT_MKL_MT)
 ENDIF(NOT MSVC)
 
@@ -336,30 +358,99 @@ ENDIF(NOT MSVC)
 IF(NOT C_HAS_THREAD)
   MESSAGE(STATUS "Warning: __thread is not supported, generating thread-unsafe code")
 ELSE(NOT C_HAS_THREAD)
-  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DTH_HAVE_THREAD")
+  add_compile_options(-DTH_HAVE_THREAD)
 ENDIF(NOT C_HAS_THREAD)
 
 if(MKLDNN_FOUND)
   target_link_libraries(ATen ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
 
+# Directory where cpuinfo will download and build all dependencies
+set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
+  CACHE PATH "Confu-style dependencies binary directory")
+
 # ---[ Configure cpuinfo
-IF(NOT TARGET cpuinfo)
-  SET(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
-  SET(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
-  SET(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
-  SET(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  ADD_SUBDIRECTORY("cpu/cpuinfo")
-ENDIF()
+if (NOT TARGET cpuinfo)
+  if (NOT DEFINED CPUINFO_SOURCE_DIR)
+    set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
+  endif()
+
+  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+  if(MSVC)
+    # ATen is built with default MSVC runtime linking, which is /MD (DLL)
+    # so no need to check *_USE_MSVC_STATIC_RUNTIME or some equivalent.
+    set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
+  endif()
+  add_subdirectory(
+    "${CPUINFO_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
+  # We build static version of cpuinfo but link
+  # them into a shared library for Caffe2, so they need PIC.
+  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+endif()
 TARGET_LINK_LIBRARIES(ATen cpuinfo)
 
+# ---[ Configure SLEEF
+IF(NOT TARGET sleef)
+  add_subdirectory("cpu/sleef")
+  include_directories(SYSTEM ${CMAKE_BINARY_DIR}/include)
+ENDIF()
+TARGET_LINK_LIBRARIES(ATen sleef)
+
 IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(ATen
-    ${CUDA_LIBRARIES}
-    ${CUDA_cusparse_LIBRARY}
-    ${CUDA_curand_LIBRARY})
-  CUDA_ADD_CUBLAS_TO_TARGET(ATen)
-  CUDA_ADD_CUFFT_TO_TARGET(ATen)
+  IF ($ENV{ATEN_STATIC_CUDA})
+    # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
+    # we first have to build a fake lib that links with no device callbacks,
+    # and then we link against this object file.
+    # This was recommended by the CuFFT team at NVIDIA
+
+    # build fake CuFFT lib in build dir
+    EXECUTE_PROCESS(COMMAND touch ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc)
+    if(${CUDA_VERSION_MAJOR} EQUAL "8")
+      SET(CUFFT_FAKELINK_OPTIONS
+	--generate-code arch=compute_35,code=sm_35
+	--generate-code arch=compute_50,code=sm_50
+	--generate-code arch=compute_60,code=sm_60)
+    elseif(${CUDA_VERSION_MAJOR} EQUAL "9")
+      SET(CUFFT_FAKELINK_OPTIONS
+	--generate-code arch=compute_35,code=sm_35
+	--generate-code arch=compute_50,code=sm_50
+	--generate-code arch=compute_60,code=sm_60
+	--generate-code arch=compute_70,code=sm_70)
+    else()
+      MESSAGE(FATAL_ERROR "Unhandled major cuda version ${CUDA_VERSION_MAJOR}")
+    endif()
+    ADD_CUSTOM_COMMAND(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a
+      COMMAND "${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc" -o ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a -Xcompiler -fPIC
+      ${CUFFT_FAKELINK_OPTIONS}
+      --device-link ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc -lcufft_static -lculibos
+      )
+    ADD_CUSTOM_TARGET(FAKELINKED_CUFFT_TARGET DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a)
+    add_library(FAKELINKED_CUFFT STATIC IMPORTED GLOBAL)
+    add_dependencies(FAKELINKED_CUFFT FAKELINKED_CUFFT_TARGET)
+    set_target_properties(FAKELINKED_CUFFT PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a)
+
+    TARGET_LINK_LIBRARIES(ATen
+      ${CUDA_LIBRARIES}
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
+      FAKELINKED_CUFFT
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a
+      )
+  ELSE()
+    TARGET_LINK_LIBRARIES(ATen
+      ${CUDA_LIBRARIES}
+      ${CUDA_cusparse_LIBRARY}
+      ${CUDA_curand_LIBRARY})
+    CUDA_ADD_CUBLAS_TO_TARGET(ATen)
+    CUDA_ADD_CUFFT_TO_TARGET(ATen)
+  ENDIF()
 
   if(CUDNN_FOUND)
     target_link_libraries(ATen ${CUDNN_LIBRARIES})

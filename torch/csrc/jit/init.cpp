@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
 #include "torch/csrc/jit/passes/onnx/peephole.h"
+#include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
@@ -81,7 +82,9 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_unflatten", [](autograd::variable_list vars, python::IODescriptor& desc) {
      return py::reinterpret_steal<py::object>(python::unflatten(vars, desc));
-   });
+   })
+   .def("_jit_pass_onnx_block", BlockToONNX)
+   .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops);
 
   py::class_<GraphExecutor>(m, "GraphExecutor")
       .def(
@@ -101,6 +104,9 @@ void initJITBindings(PyObject *module) {
           }),
           py::arg("graph"),
           py::arg("optimize") = true)
+      .def_property_readonly("graph", [](GraphExecutor& ge) {
+        return ge.graph();
+      })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         auto inputs = createVariableTensorList(args);
         auto outputs = ge.run(std::move(inputs));

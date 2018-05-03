@@ -74,7 +74,7 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
   self->coalesced = 0;
   self->nnz = 0;
   // self->flag = TH_TENSOR_REFCOUNTED;
-  self->refcount = 1;
+  new (&self->refcount) std::atomic<int>(1);
 }
 
 THCSTensor* THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, int64_t *size) {
@@ -120,6 +120,16 @@ THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor 
   return THCSTensor_(_move)(state, self, THCIndexTensor_(newClone)(state, indices), THCTensor_(newClone)(state, values));
 }
 
+static inline THCSTensor* THCSTensor_(_newWithDimsAndTensor)(THCState *state, int64_t nDimI, int64_t nDimV, int64_t *sizes, THCIndexTensor *indices, THCTensor *values) {
+  THCSTensor *self = THCSTensor_(new)(state);
+  THCSTensor_(rawResize)(state, self, nDimI, nDimV, sizes);
+
+  // NB: by default, we do NOT clone indices/values into the sparse tensor.
+  // Efficient API by default!
+  THCSTensor_(_move)(state, self, THCIndexTensor_(newWithTensor)(state, indices), THCTensor_(newWithTensor)(state, values));
+  return self;
+}
+
 /*** end helper methods ***/
 
 /* Empty init */
@@ -133,111 +143,125 @@ THCSTensor *THCSTensor_(new)(THCState *state)
 /* Pointer-copy init */
 THCSTensor *THCSTensor_(newWithTensor)(THCState *state, THCIndexTensor *indices, THCTensor *values)
 {
-  return THCSTensor_(newWithTensorAndSize)(state, indices, values, NULL);
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 0, 2, indices, values));
+
+  int64_t nDimI = THCIndexTensor_(size)(state, indices, 0);
+  int64_t nDimV = THCTensor_(nDimension)(state, values) - 1;
+
+  // TODO Make it work with N-dimensional values
+  THArgCheck(nDimV > 0, 3, "size must be provided when nDimV > 0");
+  THLongTensor *computed_sizes;
+  THCudaLongTensor *ignore = THCudaLongTensor_new(state);
+  THCIndexTensor *s = THCIndexTensor_(new)(state);
+  THCIndexTensor_(max)(state, s, ignore, indices, 1, 1);
+  THCIndexTensor_(add)(state, s, s, 1);
+
+  // TODO make sure this doesn't sync the hell out of everything
+  //      Should be fine according to sam's memory manager.
+  THLongStorage *newSize = THCIndexTensor_(newSizeOf)(state, s);
+  computed_sizes = THLongTensor_newWithSize(newSize, NULL);
+  THLongStorage_free(newSize);
+  THLongTensor_copyCudaLong(state, computed_sizes, s);
+
+  THCSTensor *self = THCSTensor_(_newWithDimsAndTensor)(state, nDimI, nDimV, THLongTensor_data(computed_sizes), indices, values);
+  THCIndexTensor_(free)(state, s);
+  THCudaLongTensor_free(state, ignore);
+  THLongTensor_free(computed_sizes);
+  return self;
+}
+
+THCSTensor *THCSTensor_(newWithTensorAndSizeUnsafe)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes)
+{
+  if (sizes == NULL) {
+    return THCSTensor_(newWithTensor)(state, indices, values);
+  }
+  if (THCudaLongTensor_nDimension(state, indices) == 0 && THCTensor_(nDimension)(state, values) == 0) {
+    return THCSTensor_(newWithSize)(state, sizes, NULL);
+  }
+
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 0, 2, indices, values));
+
+  int64_t nDimI = THCIndexTensor_(size)(state, indices, 0);
+  int64_t nDimV = THCTensor_(nDimension)(state, values) - 1;
+
+  return THCSTensor_(_newWithDimsAndTensor)(state, nDimI, nDimV, THLongStorage_data(sizes), indices, values);
 }
 
 THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes)
 {
+  if (sizes == NULL) {
+    return THCSTensor_(newWithTensor)(state, indices, values);
+  }
+  if (THCudaLongTensor_nDimension(state, indices) == 0 && THCTensor_(nDimension)(state, values) == 0) {
+    return THCSTensor_(newWithSize)(state, sizes, NULL);
+  }
+
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 0, 2, indices, values));
 
-  // If sizes are not given, it is inferred as max index of each dim.
-  int64_t nDimI, nDimV;
+  int64_t nDimI = THCIndexTensor_(size)(state, indices, 0);
+  int64_t nDimV = THCTensor_(nDimension)(state, values) - 1;
+  THArgCheck(THLongStorage_size(sizes) == nDimI + nDimV, 3,
+      "number of dimensions must be nDimI + nDimV");
 
-  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
-  THCSTensor_(rawInit)(state, self);
-
-  // TODO: we may need to special case when only one of these are empty.
-  if (THCudaLongTensor_nDimension(state, indices) == 0 && THCTensor_(nDimension)(state, values) == 0
-      && sizes != NULL) {
-    nDimI = THLongStorage_size(sizes);
-    nDimV = 0;
-  } else {
-    nDimI = THCIndexTensor_(size)(state, indices, 0);
-    nDimV = THCTensor_(nDimension)(state, values) - 1;
+  THCudaLongTensor *max_indices = THCudaLongTensor_new(state);
+  THCudaLongTensor *ignore = THCudaLongTensor_new(state);
+  THCudaLongTensor_max(state, max_indices, ignore, indices, 1, 0);
+  THCudaLongTensor_free(state, ignore);
+  for (int d = 0; d < nDimI; d++) {
+    int64_t max_index_in_dim = THCudaLongTensor_get1d(state, max_indices, d);
+    int64_t dim_size = sizes->data[d];
+    THArgCheck(max_index_in_dim < dim_size, 2,
+        "sizes is inconsistent with indices: for dim %d, size is %lld but found index %lld",
+        d, (long long)dim_size, (long long)max_index_in_dim);
   }
-  if (!sizes) {
-    // TODO Make it work with N-dimensional values
-    THArgCheck(nDimV > 0, 3, "size must be provided when nDimV > 0");
-    THLongTensor *computed_sizes;
-    THCudaLongTensor *ignore = THCudaLongTensor_new(state);
-    THCIndexTensor *s = THCIndexTensor_(new)(state);
-    THCIndexTensor_(max)(state, s, ignore, indices, 1, 1);
-    THCIndexTensor_(add)(state, s, s, 1);
-
-    // TODO make sure this doesn't sync the hell out of everything
-    //      Should be fine according to sam's memory manager.
-    THLongStorage *newSize = THCIndexTensor_(newSizeOf)(state, s);
-    computed_sizes = THLongTensor_newWithSize(newSize, NULL);
-    THLongStorage_free(newSize);
-    THLongTensor_copyCudaLong(state, computed_sizes, s);
-    THCSTensor_(rawResize)(state, self, nDimI, nDimV, THLongTensor_data(computed_sizes));
-
-    THCIndexTensor_(free)(state, s);
-    THCudaLongTensor_free(state, ignore);
-    THLongTensor_free(computed_sizes);
+  for (int d = 0; d < nDimV; d++) {
+    int64_t values_size = THCTensor_(size)(state, values, d + 1);
+    int64_t specified_size = sizes->data[nDimI + d];
+    THArgCheck(values_size <= specified_size, 2,
+        "values and sizes are inconsistent: sizes[%d] is %lld but values.size(%d) is %lld",
+        d + nDimI, (long long)specified_size, d + 1, (long long)values_size);
   }
-  else {
-    THArgCheck(THLongStorage_size(sizes) == nDimI + nDimV, 3,
-        "number of dimensions must be nDimI + nDimV");
-    THCSTensor_(rawResize)(state, self, nDimI, nDimV, THLongStorage_data(sizes));
-  }
-  // NB: by default, we do NOT clone indices/values into the sparse tensor.
-  // Efficient API by default!
-  THCSTensor_(_move)(state, self, THCIndexTensor_(newWithTensor)(state, indices), THCTensor_(newWithTensor)(state, values));
+  THCudaLongTensor_free(state, max_indices);
 
-  return self;
+  return THCSTensor_(_newWithDimsAndTensor)(state, nDimI, nDimV, THLongStorage_data(sizes), indices, values);
 }
 
 THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size, THLongStorage *_ignored)
 {
-  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
-  THCSTensor_(rawInit)(state, self);
+  THCSTensor *self = THCSTensor_(new)(state);
   THCSTensor_(rawResize)(state, self, size->size, 0, size->data);
-
   return self;
 }
 
 THCSTensor *THCSTensor_(newWithSize1d)(THCState *state, int64_t size0)
 {
   int64_t size[1] = {size0};
-
-  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
-  THCSTensor_(rawInit)(state, self);
+  THCSTensor *self = THCSTensor_(new)(state);
   THCSTensor_(rawResize)(state, self, 1, 0, size);
-
   return self;
 }
 
 THCSTensor *THCSTensor_(newWithSize2d)(THCState *state, int64_t size0, int64_t size1)
 {
   int64_t size[2] = {size0, size1};
-
-  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
-  THCSTensor_(rawInit)(state, self);
+  THCSTensor *self = THCSTensor_(new)(state);
   THCSTensor_(rawResize)(state, self, 2, 0, size);
-
   return self;
 }
 
 THCSTensor *THCSTensor_(newWithSize3d)(THCState *state, int64_t size0, int64_t size1, int64_t size2)
 {
   int64_t size[3] = {size0, size1, size2};
-
-  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
-  THCSTensor_(rawInit)(state, self);
+  THCSTensor *self = THCSTensor_(new)(state);
   THCSTensor_(rawResize)(state, self, 3, 0, size);
-
   return self;
 }
 
 THCSTensor *THCSTensor_(newWithSize4d)(THCState *state, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
   int64_t size[4] = {size0, size1, size2, size3};
-
-  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
-  THCSTensor_(rawInit)(state, self);
+  THCSTensor *self = THCSTensor_(new)(state);
   THCSTensor_(rawResize)(state, self, 4, 0, size);
-
   return self;
 }
 
@@ -357,18 +381,19 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
 {
   if(!self)
     return;
-  if(THAtomicDecrementRef(&self->refcount))
+  if(--self->refcount == 0)
   {
     THFree(self->size);
     THCIndexTensor_(free)(state, self->indices);
     THCTensor_(free)(state, self->values);
+    self->refcount.~atomic<int>();
     THFree(self);
   }
 }
 
 void THCSTensor_(retain)(THCState *state, THCSTensor *self)
 {
-  THAtomicIncrementRef(&self->refcount);
+  self->refcount++;
 }
 
 int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...)
