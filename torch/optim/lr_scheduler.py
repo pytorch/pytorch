@@ -48,7 +48,7 @@ class _LRScheduler(object):
     def get_lr(self):
         raise NotImplementedError
 
-    def step(self, epoch=None):
+    def step(self, epoch=None， **params):
         if epoch is None:
             epoch = self.last_epoch + 1
         self.last_epoch = epoch
