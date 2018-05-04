@@ -38,7 +38,6 @@ class OptimizerImpl;
 using Variable = tag::Variable;
 using variable_list = tag::variable_list;
 using Tensor = at::Tensor;
-using Container = std::shared_ptr<nn::Module>;
 using Optimizer = std::shared_ptr<OptimizerImpl>;
 
 void backward(Tensor loss, bool keep_graph = false);

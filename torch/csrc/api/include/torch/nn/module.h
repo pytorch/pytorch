@@ -36,7 +36,7 @@ class Module {
 
   at::Type& DefaultTensor(at::ScalarType s);
 
-  std::unordered_map<std::string, Container> children_;
+  std::unordered_map<std::string, std::shared_ptr<nn::Module>> children_;
   std::unordered_map<std::string, Variable> params_;
   bool cuda_ = false;
   bool train_ = true;
@@ -64,7 +64,9 @@ class Module {
   }
 
  protected:
-  Container add(Container, std::string const&);
+  std::shared_ptr<nn::Module> add(
+      std::shared_ptr<nn::Module>,
+      std::string const&);
   // Be careful when registering Tensors that are not variables
   Variable& add(Variable, std::string const&);
 };
@@ -103,4 +105,14 @@ class CloneableModule : public Module {
   // return std::unique_ptr<Module>(new
   // Derived(static_cast<Derived&>(*this)));
 };
+
+template <class Module>
+std::shared_ptr<typename std::decay<Module>::type> make(Module&& module) {
+  auto ptr = std::make_shared<typename std::decay<Module>::type>(
+      std::forward<Module>(module));
+  ptr->initialize_containers();
+  ptr->initialize_parameters();
+  ptr->reset_parameters();
+  return ptr;
+}
 }} // namespace torch::nn

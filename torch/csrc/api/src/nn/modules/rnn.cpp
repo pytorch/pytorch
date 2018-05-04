@@ -1,6 +1,12 @@
-#include "torch/containers.h"
+#include <torch/nn/modules/rnn.h>
 
-namespace torch {
+#include <torch/nn/modules/dropout.h>
+#include <torch/nn/modules/linear.h>
+
+#include <cmath>
+#include <vector>
+
+namespace torch { namespace nn {
 namespace {
 Variable linear(Tensor x, Tensor w, Tensor b) {
   if (x.ndimension() == 2 && b.defined()) {
@@ -15,305 +21,12 @@ Variable linear(Tensor x, Tensor w, Tensor b) {
   }
   return output;
 }
-}
-
-std::map<std::string, Variable> ContainerImpl::parameters() const {
-  std::map<std::string, Variable> ret;
-  for (auto pair : children_) {
-    auto& name = pair.first;
-    auto& child = pair.second;
-    for (auto& p : child->parameters()) {
-      ret[name + "." + p.first] = p.second;
-    }
-  }
-  for (auto pair : params_) {
-    ret[pair.first] = pair.second;
-  }
-  return ret;
-}
-
-Variable& ContainerImpl::param(std::string const& name) {
-  ContainerImpl* container = this;
-  auto begin = 0;
-  while (true) {
-    auto dot_pos = name.find('.', begin);
-    if (dot_pos == std::string::npos) {
-      break;
-    }
-
-    auto child_name = name.substr(begin, dot_pos - begin);
-    auto it = container->children_.find(child_name);
-    if (it == container->children_.end()) {
-      throw std::runtime_error("No such child: " + child_name);
-    }
-
-    container = it->second.get();
-    begin = dot_pos + 1; // Skip the dot
-  }
-
-  auto param_name = name.substr(begin);
-  auto it = container->params_.find(param_name);
-  if (it == params_.end()) {
-    throw std::runtime_error("No such param: " + param_name);
-  }
-  return it->second;
-}
-
-void ContainerImpl::cuda() {
-  for (auto& pair : children_) {
-    pair.second->cuda();
-  }
-  cuda_ = true;
-  auto copied = params_;
-  params_.clear();
-  initialize_parameters();
-  for (auto pair : params_) {
-    pair.second.data().copy_(copied[pair.first].data());
-  }
-}
-
-void ContainerImpl::cpu() {
-  for (auto& pair : children_) {
-    pair.second->cpu();
-  }
-  cuda_ = false;
-  auto copied = params_;
-  params_.clear();
-  initialize_parameters();
-  for (auto pair : params_) {
-    pair.second.data().copy_(copied[pair.first].data());
-  }
-}
-
-void ContainerImpl::train() {
-  for (auto& pair : children_) {
-    pair.second->train();
-  }
-  train_ = true;
-}
-
-void ContainerImpl::eval() {
-  for (auto& pair : children_) {
-    pair.second->eval();
-  }
-  train_ = false;
-}
-
-Container ContainerImpl::add(Container m, std::string const& name) {
-  if (this->children_.find(name) != this->children_.end()) {
-    throw std::runtime_error("Trying to add container that already exists");
-  }
-  if (std::find(name.begin(), name.end(), '.') != name.end()) {
-    // We can't allow containers with dots in their names, as that would make
-    // their parameters not findable with parameters().
-    throw std::runtime_error("Trying to add parameter with a '.' in its name");
-  }
-  this->children_[name] = std::move(m);
-  return this->children_[name];
-}
-
-Variable& ContainerImpl::add(Variable v, std::string const& name) {
-  if (this->params_.find(name) != this->params_.end()) {
-    throw std::runtime_error("Trying to add parameter that already exists");
-  }
-  if (std::find(name.begin(), name.end(), '.') != name.end()) {
-    // We can't allow parameters with dots in their names, as that would make
-    // them not findable with parameters().
-    throw std::runtime_error("Trying to add parameter with a '.' in its name");
-  }
-  this->params_[name] = v;
-  return this->params_[name];
-}
-
-at::Type& ContainerImpl::DefaultTensor(at::ScalarType s) {
-  if (cuda_)
-    return at::CUDA(s);
-  else
-    return at::CPU(s);
-}
-
-
-variable_list Linear::forward(variable_list input) {
-  return variable_list({linear(input[0], weight, bias)});
-}
-
-void Linear::reset_parameters() {
-  auto stdv = 1.0 / std::sqrt(weight.size(1));
-  for (auto& p : parameters()) {
-    p.second.data().uniform_(-stdv, stdv);
-  }
-}
-
-void Linear::initialize_parameters() {
-  weight = this->add(
-      Var(DefaultTensor(at::kFloat).tensor({nout, nin}), true), "weight");
-  if (!no_bias_) {
-    bias =
-        this->add(Var(DefaultTensor(at::kFloat).tensor({nout}), true), "bias");
-  }
-}
-
-variable_list Embedding::forward(variable_list input) {
-  auto x = input[0];
-  return variable_list({at::embedding(weight, x, -1, false, false)});
-}
-
-void Embedding::reset_parameters() {
-  for (auto& p : parameters()) {
-    p.second.data().normal_(0, 1);
-  }
-}
-
-void Embedding::initialize_parameters() {
-  weight = this->add(
-      Var(DefaultTensor(at::kFloat).tensor({num_embeddings, embedding_dim}),
-          true),
-      "weight");
-}
-
-void Conv::initialize_parameters() {
-  if (!transposed_) {
-    for (auto pad : output_padding_) {
-      if (pad != 0) {
-        throw std::runtime_error(
-            "Only transposed convolutions support output padding!");
-      }
-    }
-  }
-
-  IntVec wsize;
-  if (transposed_) {
-    wsize.push_back(in_channels_);
-    wsize.push_back(out_channels_ / groups_);
-  } else {
-    wsize.push_back(out_channels_);
-    wsize.push_back(in_channels_ / groups_);
-  }
-  wsize.insert(wsize.end(), ks_.begin(), ks_.end());
-  weight =
-      this->add(Var(DefaultTensor(at::kFloat).tensor(wsize), true), "weight");
-  if (!no_bias_) {
-    bias = this->add(
-        Var(DefaultTensor(at::kFloat).tensor({out_channels_}), true), "bias");
-  } else {
-    assert(!bias.defined());
-  }
-}
-
-void Conv::reset_parameters() {
-  auto n = in_channels_;
-  for (auto k : ks_)
-    n *= k;
-  auto stdv = 1.0 / std::sqrt(n);
-  for (auto& p : parameters()) {
-    p.second.data().uniform_(-stdv, stdv);
-  }
-}
-
-variable_list Conv::forward(variable_list input) {
-  auto x = input[0];
-  if (Nd_ == 1) {
-    assert(x.ndimension() == 3);
-    x = x.unsqueeze(-1); // TODO: Use conv1d once available
-  } else if (Nd_ == 2) {
-    assert(x.ndimension() == 4);
-  } else if (Nd_ == 3) {
-    assert(x.ndimension() == 5);
-  } else {
-    throw std::runtime_error("Only Conv{1,2,3}d are supported");
-  }
-
-  Variable out;
-  if (Nd_ == 1 || Nd_ == 2) {
-    if (transposed_) {
-      out = at::conv_transpose2d(
-          x,
-          weight,
-          bias,
-          stride_,
-          padding_,
-          output_padding_,
-          groups_,
-          dilation_);
-    } else {
-      out = at::conv2d(x, weight, bias, stride_, padding_, dilation_, groups_);
-    }
-  } else if (Nd_ == 3) {
-    if (transposed_) {
-      out = at::conv_transpose3d(
-          x,
-          weight,
-          bias,
-          stride_,
-          padding_,
-          output_padding_,
-          groups_,
-          dilation_);
-    } else {
-      out = at::conv3d(x, weight, bias, stride_, padding_, dilation_, groups_);
-    }
-  }
-
-  return variable_list({out});
-}
-
-void BatchNorm::initialize_parameters() {
-  if (affine_) {
-    weight = this->add(
-        Var(DefaultTensor(at::kFloat).tensor(num_features_), true), "weight");
-    bias = this->add(
-        Var(DefaultTensor(at::kFloat).tensor(num_features_), true), "bias");
-  }
-
-  if (stateful_) {
-    running_mean = Var(DefaultTensor(at::kFloat).zeros({num_features_}), false);
-    running_var = Var(DefaultTensor(at::kFloat).ones({num_features_}), false);
-  }
-}
-
-void BatchNorm::reset_parameters() {
-  if (affine_) {
-    weight.data().uniform_();
-    bias.data().zero_();
-  }
-
-  if (stateful_) {
-    running_mean.data().zero_();
-    running_var.data().fill_(1);
-  }
-}
-
-variable_list BatchNorm::forward(variable_list inputs) {
-  auto& input = inputs[0];
-  auto& running_mean = (stateful_ ? this->running_mean : inputs[1]);
-  auto& running_var = (stateful_ ? this->running_var : inputs[2]);
-
-  if (train_) {
-    const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
-    if (input.numel() / num_channels <= 1) {
-      throw std::runtime_error(
-          "BatchNorm expected more than 1 value per channel when training!");
-    }
-  }
-
-  auto output = at::batch_norm(
-      input,
-      weight,
-      bias,
-      running_mean,
-      running_var,
-      train_,
-      momentum_,
-      eps_,
-      hasCudnn());
-
-  return variable_list({output});
-}
+} // namespace
 
 template <typename Derived>
 void RNNBase<Derived>::initialize_containers() {
   if (dropout_ > 0)
-    dropout_module = Dropout(dropout_).make();
+    dropout_module = make(Dropout(dropout_));
 }
 
 template <typename Derived>
@@ -332,17 +45,21 @@ void RNNBase<Derived>::initialize_parameters() {
   for (auto i = 0U; i < nlayers_; i++) {
     auto input_size = (i == 0) ? input_size_ : hidden_size_;
     ihw.push_back(this->add(
-          Var(this->DefaultTensor(at::kFloat).tensor({gate_size, input_size})),
-          "weight_ih_l" + std::to_string(i)));
+        Var(this->DefaultTensor(at::kFloat).tensor({gate_size, input_size})),
+        "weight_ih_l" + std::to_string(i)));
     hhw.push_back(this->add(
-          Var(this->DefaultTensor(at::kFloat).tensor({gate_size, hidden_size_})),
-          "weight_hh_l" + std::to_string(i)));
-    ihb.push_back(no_bias_ ? Variable() : this->add(
-          Var(this->DefaultTensor(at::kFloat).tensor({gate_size})),
-          "bias_ih_l" + std::to_string(i)));
-    hhb.push_back(no_bias_ ? Variable() : this->add(
-          Var(this->DefaultTensor(at::kFloat).tensor({gate_size})),
-          "bias_hh_l" + std::to_string(i)));
+        Var(this->DefaultTensor(at::kFloat).tensor({gate_size, hidden_size_})),
+        "weight_hh_l" + std::to_string(i)));
+    ihb.push_back(
+        no_bias_ ? Variable()
+                 : this->add(
+                       Var(this->DefaultTensor(at::kFloat).tensor({gate_size})),
+                       "bias_ih_l" + std::to_string(i)));
+    hhb.push_back(
+        no_bias_ ? Variable()
+                 : this->add(
+                       Var(this->DefaultTensor(at::kFloat).tensor({gate_size})),
+                       "bias_hh_l" + std::to_string(i)));
   }
   this->flatten_parameters();
 }
@@ -630,32 +347,4 @@ void RNNBase<Derived>::cpu() {
 template class RNNBase<LSTM>;
 template class RNNBase<GRU>;
 template class RNNBase<RNN>;
-
-variable_list Dropout::forward(variable_list inputs) {
-  if (p_ == 0 || !this->train_)
-    return inputs;
-  variable_list lst;
-  for (auto x : inputs) {
-    auto noise = x.data().type().tensor(x.sizes());
-    noise = (noise.uniform_(0, 1) > p_)
-                .toType(x.type().scalarType())
-                .mul_(1. / (1 - p_));
-    lst.push_back(x * Var(noise));
-  }
-  return lst;
-}
-
-variable_list Dropout2d::forward(variable_list inputs) {
-  if (p_ == 0 || !this->train_)
-    return inputs;
-  variable_list lst;
-  for (auto x : inputs) {
-    auto noise = x.data().type().tensor({x.size(0), x.size(1), 1, 1});
-    noise = (noise.uniform_(0, 1) > p_)
-                .toType(x.type().scalarType())
-                .mul_(1. / (1 - p_));
-    lst.push_back(x * Var(noise));
-  }
-  return lst;
-}
-} // namespace torch
+}} // namespace torch::nn

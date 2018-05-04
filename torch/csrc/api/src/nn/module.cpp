@@ -89,7 +89,7 @@ void Module::eval() {
   train_ = false;
 }
 
-Container Module::add(Container m, std::string const& name) {
+std::shared_ptr<nn::Module> Module::add(std::shared_ptr<nn::Module> m, std::string const& name) {
   if (this->children_.find(name) != this->children_.end()) {
     throw std::runtime_error("Trying to add container that already exists");
   }

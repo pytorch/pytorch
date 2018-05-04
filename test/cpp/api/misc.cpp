@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 
 using namespace torch;
+using namespace torch::nn;
 
 TEST_CASE("misc") {
   SECTION("no_grad") {

@@ -3,8 +3,9 @@
 #include <torch/torch.h>
 
 using namespace torch;
+using namespace torch::nn;
 
-class TestModel : public torch::nn::CloneableModule<TestModel> {
+class TestModel : public CloneableModule<TestModel> {
  public:
   void initialize_containers() override {
     add(make(Linear(10, 3)), "l1");
@@ -17,7 +18,7 @@ class TestModel : public torch::nn::CloneableModule<TestModel> {
   };
 };
 
-class NestedModel : public torch::nn::CloneableModule<NestedModel> {
+class NestedModel : public CloneableModule<NestedModel> {
  public:
   void initialize_containers() override {
     add(make(Linear(5, 20)), "l1");

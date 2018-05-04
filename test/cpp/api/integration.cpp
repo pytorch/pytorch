@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 
 using namespace torch;
+using namespace torch::nn;
 
 #include <iostream>
 

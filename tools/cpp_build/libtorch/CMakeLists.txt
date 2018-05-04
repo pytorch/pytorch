@@ -212,9 +212,14 @@ set(TORCH_SRCS
 if (NOT NO_API)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/containers.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp)
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/embedding.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp)
 endif()
 
 add_library(torch SHARED ${TORCH_SRCS})

@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 
 using namespace torch;
+using namespace torch::nn;
 
 bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
   float running_loss = 1;

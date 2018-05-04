@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 
 using namespace torch;
+using namespace torch::nn;
 
 template <typename R, typename Func>
 bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
@@ -74,8 +75,8 @@ void check_lstm_sizes(variable_list tup) {
   REQUIRE(out.size(2) == 64);
 
   REQUIRE(hids.ndimension() == 4);
-  REQUIRE(hids.size(0) == 2);  // (hx, cx)
-  REQUIRE(hids.size(1) == 3);  // layers
+  REQUIRE(hids.size(0) == 2); // (hx, cx)
+  REQUIRE(hids.size(1) == 3); // layers
   REQUIRE(hids.size(2) == 16); // Batchsize
   REQUIRE(hids.size(3) == 64); // 64 hidden dims
 
@@ -177,15 +178,13 @@ TEST_CASE("rnn") {
 
     SECTION("rnn") {
       SECTION("relu") {
-        REQUIRE(test_RNN_xor<RNN>([](int s) {
-          return make(RNN(s, s, RNN::Mode::Relu).nlayers(2));
-        }));
+        REQUIRE(test_RNN_xor<RNN>(
+            [](int s) { return make(RNN(s, s, RNN::Mode::Relu).nlayers(2)); }));
       }
 
       SECTION("tanh") {
-        REQUIRE(test_RNN_xor<RNN>([](int s) {
-          return make(RNN(s, s, RNN::Mode::Tanh).nlayers(2));
-        }));
+        REQUIRE(test_RNN_xor<RNN>(
+            [](int s) { return make(RNN(s, s, RNN::Mode::Tanh).nlayers(2)); }));
       }
     }
   }
@@ -193,7 +192,7 @@ TEST_CASE("rnn") {
 
 TEST_CASE("rnn_cuda", "[cuda]") {
   SECTION("sizes") {
-    auto model = LSTM(128, 64).nlayers(3).dropout(0.2).make();
+    auto model = make(LSTM(128, 64).nlayers(3).dropout(0.2));
     model->cuda();
     Variable x = Var(at::CUDA(at::kFloat).randn({10, 16, 128}));
     auto tup = model->forward({x});

@@ -5,6 +5,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 using namespace torch;
+using namespace torch::nn;
 
 TEST_CASE("serialization") {
   SECTION("undefined") {
@@ -225,7 +226,7 @@ TEST_CASE("serialization") {
 
     auto x = Var(at::CPU(at::kFloat).ones({10, 5}), true);
 
-    auto step = [&](Optimizer optim, Container model) {
+    auto step = [&](Optimizer optim, std::shared_ptr<Module> model) {
       optim->zero_grad();
       auto y = model->forward({x})[0].sum();
       backward(y);
