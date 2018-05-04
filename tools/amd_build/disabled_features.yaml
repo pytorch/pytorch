@@ -4,13 +4,13 @@
       {
         "path": "aten/src/THC/THCBlas.cu",
         "functions": {
-          "hipblasSgemmEx": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "hipblasSgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "hipblasDgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "hipblasSgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "hipblasDgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "hipblasSgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "hipblasDgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"
+          "cublasSgemmEx": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasSgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasDgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasSgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasDgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasSgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasDgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"
         },
         "constants": {
             "HIPBLAS_DATA_HALF": "0"
@@ -19,25 +19,32 @@
       {
         "path": "aten/src/THCUNN/SoftMaxCommon.cuh",
         "functions": {
-          "hipOccupancyMaxActiveBlocksPerMultiprocessor": "16"
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
         }
       },
       {
         "path": "aten/src/THC/THCStream.cpp",
         "functions": {
-          "hipStreamCreateWithFlags": "HIPBLAS_STATUS_INTERNAL_ERROR"
+          "cudaStreamCreateWithFlags": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cudaStreamCreateWithPriority": "HIPBLAS_STATUS_INTERNAL_ERROR"
         }
       },
       {
         "path": "aten/src/THC/THCAllocator.c",
         "functions": {
-          "hipMallocManaged": "HIPBLAS_STATUS_INTERNAL_ERROR"
+          "cudaMallocManaged": "HIPBLAS_STATUS_INTERNAL_ERROR"
         }
       },
       {
         "path": "aten/src/TH/generic/THTensorMath.c",
         "constants": {
-          "#ifdef _OPENMP": "#if defined(_OPENMP) && !defined(__HIP_DEVICE_COMPILE__)"
+          "_OPENMP": "_OPENMP_STUB"
+        }
+      },
+      {
+        "path": "aten/src/ATen/Context.cpp",
+        "constants": {
+          "#ifdef USE_SSE3": "#if defined(USE_SSE3) && !defined(__HIP_DEVICE_COMPILE__)"
         }
       }
     ],
