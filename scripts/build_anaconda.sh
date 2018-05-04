@@ -256,19 +256,19 @@ if [[ -n $cuda_ver ]]; then
   # the package name in meta.yaml based off of these values, we let Caffe2
   # take the CUDA and cuDNN versions that it finds in the build environment,
   # and manually set the package name ourself.
-  package_name="${package_name}_cuda${cuda_ver}_cudnn${cudnn_ver}"
-  build_string="${build_string}_cuda${cuda_ver}_cudnn${cudnn_ver}_nccl2"
+  package_name="${package_name}-cuda${cuda_ver}-cudnn${cudnn_ver}"
+  build_string="${build_string}-cuda${cuda_ver}-cudnn${cudnn_ver}-nccl2"
 else
-  build_string="${build_string}_cpu"
+  build_string="${build_string}-cpu"
 fi
 if [[ "$(uname)" != 'Darwin' && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
-  package_name="${package_name}_gcc${gcc_ver:0:3}"
-  build_string="${build_string}_gcc${gcc_ver:0:3}"
+  package_name="${package_name}-gcc${gcc_ver:0:3}"
+  build_string="${build_string}-gcc${gcc_ver:0:3}"
 fi
 if [[ -n $build_full ]]; then
-  package_name="${package_name}_full"
-  build_string="${build_string}_full"
+  package_name="${package_name}-full"
+  build_string="${build_string}-full"
 fi
 portable_sed "s/name: caffe2.*\$/name: ${package_name}/" $meta_yaml
 #portable_sed "s/string:.*\$/string: ${build_string}/" $meta_yaml
