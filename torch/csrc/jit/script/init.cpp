@@ -23,8 +23,29 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self)
   : self(std::move(self)) {}
 
+  std::pair<std::vector<TypePtr>, TypePtr> getFunctionType(size_t n_args, size_t n_binders) {
+    auto annotations = py::module::import("torch.jit.annotations");
+    return py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(annotations.attr("get_signature")(self, n_args, n_binders));
+  }
+
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+    std::vector<TypePtr> arg_types;
+    TypePtr ret_type;
+    std::tie(arg_types, ret_type) = getFunctionType(inputs.size(), n_binders);
+
+    if (arg_types.size() != inputs.size())
+      throw ErrorReport(loc) << "calling a Python function with an incorrect number "
+                             << "of arguments: expected " << arg_types.size() << ", but got "
+                             << inputs.size();
+    for (size_t i = 0; i < arg_types.size(); ++i) {
+      if (!inputs[i]->type()->isSubtypeOf(*arg_types[i]))
+        throw ErrorReport(loc) << "type mismatch at argument " << i << ": expected "
+                               << arg_types[i]->name() << ", but got " << inputs[i]->type()->name();
+    }
+    // We have to do this check here, because implementation of this function is tightly
+    // coupled with the impl for PythonOp in the interpreter. Right now it assumes that
+    // all inputs taken from the stack are Tensors, so that's what we have to do.
     ensureTensors(loc, inputs);
 
     if (attributes.size() > 0)
@@ -47,8 +68,26 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for(auto i : inputs)
       new_node->addInput(i);
+
+    // This is really dumb, but relaxing the constraints on return types would
+    // require us to change the implementation of PythonOps in the interpreter.
+    // Note that this effectively makes the return type of Tuple[Tensor] and Tensor
+    // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
+    // to do it.
+    std::shared_ptr<TupleType> ret_tuple_type;
+    if (ret_type->kind() != TypeKind::TupleType) {
+      ret_tuple_type = std::make_shared<TupleType>(std::vector<TypePtr>{ret_type});
+    } else {
+      ret_tuple_type = std::static_pointer_cast<TupleType>(ret_type);
+    }
+    for (auto & ret_type_elem : ret_tuple_type->elements()) {
+      if (!ret_type_elem->isSubtypeOf(*DynamicType::get())) {
+        throw ErrorReport(loc) << "Python functions can currently only return Tensors";
+      }
+    }
+
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < n_binders; ++i)
+    for(size_t i = 0; i < ret_tuple_type->elements().size(); ++i)
       outputs.push_back(new_node->addOutput());
     return packOutputs(*m.graph(), outputs);
   }

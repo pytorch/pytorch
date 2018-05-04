@@ -291,13 +291,9 @@ void initPythonIRBindings(PyObject * module_) {
     })
     ;
 
-  #define TS(name) \
-    def(#name,&Type :: name)
   py::class_<Type,std::shared_ptr<Type>>(m,"Type")
     .def("__repr__",[](Type & t) {
-      std::stringstream ss;
-      ss << t;
-      return ss.str();
+      return t.name();
     })
     .def("kind",[](Type& t_) {
       Type * t = &t_;
@@ -328,6 +324,11 @@ void initPythonIRBindings(PyObject * module_) {
       return at::toString(t.expect<TensorType>()->scalarType());
     })
     ;
+
+  py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
+    .def(py::init<>());
+  py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
+    .def(py::init<std::vector<TypePtr>>());
 
   py::class_<Use>(m,"Use")
   .def_readonly("user",&Use::user)
