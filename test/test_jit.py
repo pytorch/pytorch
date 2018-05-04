@@ -8,6 +8,8 @@ import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from common import TestCase, run_tests, IS_WINDOWS
+from textwrap import dedent
+import os
 import io
 import sys
 import unittest
@@ -39,6 +41,7 @@ if torch.cuda.is_available():
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY2 = sys.version_info[0] == 2
+PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
 
@@ -1554,9 +1557,9 @@ class TestScript(TestCase):
             os.close(r)
             os.close(w)
 
-    def checkScript(self, script, inputs, optimize, outputs=None, name='func', capture_output=False):
+    def checkScript(self, script, inputs, optimize, outputs=None, name='func', capture_output=False, frames_up=1):
         if isinstance(script, str):
-            cu = torch.jit.CompilationUnit(script, optimize)
+            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
             ge = getattr(cu, name)
         else:
             if capture_output:
@@ -1566,9 +1569,9 @@ class TestScript(TestCase):
                 outputs = script(*inputs)
             # Check the string frontend first
             source = textwrap.dedent(inspect.getsource(script))
-            self.checkScript(source, inputs, optimize, outputs, script.__name__, capture_output)
+            self.checkScript(source, inputs, optimize, outputs, script.__name__, capture_output, frames_up=2)
             # Continue checking the Python frontend
-            ge = torch.jit.script(script)
+            ge = torch.jit.script(script, _frames_up=1)
 
         if capture_output:
             with self.capture_stdout() as captured:
@@ -2625,6 +2628,141 @@ class TestScript(TestCase):
                 a = torch.chunk(1, dim=0, chunks=2)
                 if True:
                     a = 4
+
+    def test_type_annotations(self):
+        def fn(x, y):
+            # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
+            return x, x * 2, x * 3
+
+        with self.assertRaisesRegex(RuntimeError, r"need 4 values .* found only 3"):
+            @torch.jit.script
+            def script_fn(x):
+                x, y, z, w = fn(x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"too many values .* need 2 but found 3"):
+            @torch.jit.script
+            def script_fn2(x):
+                x, y = fn(x, x)
+
+        def fn_unpack(x):
+            y, z, w = fn(x, x)
+            return y
+
+        def fn_index(x):
+            q = fn(x, x)
+            return x
+
+        x = torch.ones(2, 2)
+        self.checkScript(fn_unpack, (x,), optimize=True)
+        self.checkScript(fn_index, (x,), optimize=True)
+
+    def test_type_annotations_varargs(self):
+        def fn_varargs(x, *args):
+            return args[0] if args else x
+
+        def fn1(x, y, z):
+            return fn_varargs(x)
+
+        def fn2(x, y, z):
+            return fn_varargs(x, y)
+
+        def fn3(x, y, z):
+            return fn_varargs(x, y, z)
+
+        x, y, z = [torch.randn(2, 2) for _ in range(3)]
+        self.checkScript(fn1, (x, y, z), optimize=True)
+        self.checkScript(fn2, (x, y, z), optimize=True)
+        self.checkScript(fn3, (x, y, z), optimize=True)
+
+    @unittest.skipIf(not PY35, "Python 3.5 needed")
+    def test_type_annotation_py3(self):
+        import importlib.util
+
+        code = dedent("""
+        import torch
+        from torch import Tensor
+        from typing import Tuple
+
+        def fn(x : torch.Tensor, y : Tensor, z) -> Tuple[Tensor, Tensor, Tensor]:
+            return (x, y + z, z)
+        """)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            script_path = os.path.join(tmp_dir, 'script.py')
+            with open(script_path, 'w') as f:
+                f.write(code)
+            spec = importlib.util.spec_from_file_location('test_type_annotation_py3', script_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            fn = module.fn
+
+            with self.assertRaisesRegex(RuntimeError, r"expected Tensor, but got"):
+                @torch.jit.script
+                def bad_fn(x):
+                    x, y = fn((x, x), x, x)
+                    return y
+
+            with self.assertRaisesRegex(RuntimeError, r"too many values .* need 2 but found 3"):
+                @torch.jit.script
+                def bad_fn2(x):
+                    x, y = fn(x, x, x)
+                    return y
+
+            with self.assertRaisesRegex(RuntimeError, r"need 4 values .* found only 3"):
+                @torch.jit.script
+                def bad_fn3(x):
+                    x, y, z, w = fn(x, x, x)
+                    return y
+
+            def good_fn(x):
+                y, z, w = fn(x, x, x)
+                return y, z, w
+
+            self.checkScript(good_fn, (torch.ones(2, 2),), optimize=True)
+
+    def test_type_annotation_module(self):
+        class BaseModule(torch.jit.ScriptModule):
+            def foo(self, x):
+                # type: (Tensor) -> Tensor
+                return x + 1
+
+            def bar(self, x, y):
+                # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
+                return x + y, y
+
+            def baz(self, x, y):
+                return x
+
+        class ModuleTooMany(BaseModule):
+            @torch.jit.script_method
+            def method(self, x):
+                return self.foo(x, x)
+
+        class ModuleTooFew(BaseModule):
+            @torch.jit.script_method
+            def method(self, x):
+                return self.bar(x)
+
+        class ModuleTooManyAssign(BaseModule):
+            @torch.jit.script_method
+            def method(self, x):
+                y, z, w = self.bar(x, x)
+                return x
+
+        class ModuleDefault(BaseModule):
+            @torch.jit.script_method
+            def method(self, x):
+                y = self.baz(x)
+                return x
+
+        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 1, but got 2"):
+            ModuleTooMany()
+        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 2, but got 1"):
+            ModuleTooFew()
+        with self.assertRaisesRegex(RuntimeError, "need 3 values .* found only 2"):
+            ModuleTooManyAssign()
+        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 2, but got 1"):
+            ModuleDefault()
 
     def test_script_define_order(self):
         class M(torch.jit.ScriptModule):
