@@ -900,6 +900,7 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     WORLD_SIZE = os.environ['WORLD_SIZE']
 
     class TestDistBackend(TestCase, _DistTestBase):
+        doCUDAMemoryCheck = False
 
         MANAGER_PROCESS_RANK = -1
 
@@ -995,7 +996,10 @@ elif BACKEND == 'mpi':
     dist.init_process_group(init_method=INIT_METHOD, backend='mpi')
 
     class TestMPI(TestCase, _DistTestBase):
+        doCUDAMemoryCheck = False
         pass
 
 if __name__ == '__main__':
+    assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
+
     unittest.main()

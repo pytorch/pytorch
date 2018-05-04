@@ -1,3 +1,7 @@
+r"""Importing this file must **not** initialize CUDA context. test_distributed
+relies on this assumption to properly run. Thsi means that when this is imported
+no CUDA calls shall be made, including torch.cuda.device_count(), etc. """
+
 import sys
 import os
 import platform
@@ -60,11 +64,6 @@ except ImportError:
     TEST_SCIPY = False
 
 TEST_MKL = torch.backends.mkl.is_available()
-
-TEST_CUDA = torch.cuda.is_available()
-TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
-TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.cuda.FloatTensor(1))
-TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 
 
 def skipIfNoLapack(fn):
@@ -129,39 +128,6 @@ def set_rng_seed(seed):
     if TEST_NUMPY:
         numpy.random.seed(seed)
 
-# Used below in `make_cuda_memory_checked_test` to test if it has initialized
-# CUDA context and RNG.
-_cuda_ctx_rng_initialized = False
-
-
-# `test` must be a unittest.TestCase. This returns a wrapper function around
-# `test` so that it checks CUDA memory usage stays the same before and after
-# operations in `test`.
-def make_cuda_memory_checked_test(test):
-    global _cuda_ctx_rng_initialized
-    if not TEST_CUDA:
-        return test
-    elif not _cuda_ctx_rng_initialized:
-        # initialize cuda context and rng for memory tests
-        for i in range(torch.cuda.device_count()):
-            torch.randn(1, device="cuda:{}".format(i))
-        _cuda_ctx_rng_initialized = True
-
-    def cuda_memory_checked_test(*args, **kwargs):
-        num_devices = torch.cuda.device_count()
-        torch.cuda.synchronize()
-        gc.collect()
-        starts = tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-        test(*args, **kwargs)
-        torch.cuda.synchronize()
-        gc.collect()
-        ends = tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-        for i, (start, end) in enumerate(zip(starts, ends)):
-            test.assertEqual(start, end, '{} leaked {} bytes CUDA memory on device {}'.format(
-                             test, end - start, i))
-
-    return cuda_memory_checked_test
-
 
 @contextlib.contextmanager
 def freeze_rng_state():
@@ -193,6 +159,7 @@ def is_iterable(obj):
 class TestCase(unittest.TestCase):
     precision = 1e-5
     maxDiff = None
+    doCUDAMemoryCheck = True
 
     def setUp(self):
         set_rng_seed(SEED)
@@ -453,6 +420,33 @@ class TestCase(unittest.TestCase):
                 self.assertMultiLineEqual(expected, s)
             else:
                 self.assertEqual(s, expected)
+
+    # Runs `fn(*args, **kwargs)` with CUDA memory checks. Assumes that CUDA is
+    # available.
+    def run_with_cuda_memory_check(self, fn, *args, **kwargs):
+        num_devices = torch.cuda.device_count()
+        gc.collect()
+        torch.cuda.synchronize()
+        befores = tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+        result = fn(*args, **kwargs)
+        gc.collect()
+        torch.cuda.synchronize()
+        afters = tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+        for i, (before, after) in enumerate(zip(befores, afters)):
+            self.assertEqual(before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                             self, after - before, i))
+        return result
+
+    def run(self, *args, **kwargs):
+        run_fn = super(TestCase, self).run
+        if self.doCUDAMemoryCheck:
+            method_name = self.id().lower()
+            if 'gpu' in method_name or 'cuda' in method_name:
+                from common_cuda import TEST_CUDA, initialize_cuda_context_rng
+                if TEST_CUDA:
+                    initialize_cuda_context_rng()
+                    return self.run_with_cuda_memory_check(run_fn, *args, **kwargs)
+        return run_fn(*args, **kwargs)
 
     if sys.version_info < (3, 2):
         # assertRegexpMatches renamed to assertRegex in 3.2

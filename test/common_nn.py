@@ -6,10 +6,11 @@ from itertools import product
 
 import torch
 import torch.cuda
-from common import TestCase, to_gpu, freeze_rng_state, is_iterable, TEST_CUDA, \
-    TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
+from common import TestCase, to_gpu, freeze_rng_state, is_iterable
+from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 import torch.backends.cudnn
+
 
 # tarfile module tries to obtain a file object name in python 3.3
 if sys.version_info[:2] == (3, 3):

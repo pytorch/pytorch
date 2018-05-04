@@ -31,6 +31,7 @@ from random import shuffle
 
 import torch
 from common import TestCase, run_tests, set_rng_seed
+from common_cuda import TEST_CUDA
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
@@ -62,8 +63,6 @@ try:
     import scipy.special
 except ImportError:
     TEST_NUMPY = False
-
-TEST_CUDA = torch.cuda.is_available()
 
 
 def pairwise(Dist, *params):
