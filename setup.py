@@ -312,8 +312,7 @@ class build_deps(Command):
         self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
         self.copy_tree('third_party/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
-        self.copy_file('torch/csrc/api/include/torch/python.h',
-                       'torch/lib/include/torch/python.h')
+        self.copy_file('torch/csrc/torch.h', 'torch/lib/include/torch/torch.h')
 
 
 build_dep_cmds = {}
@@ -602,7 +601,7 @@ main_sources = [
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/assertions.cpp",
     "torch/csrc/byte_order.cpp",
-    "torch/csrc/api/src/python.cpp",
+    "torch/csrc/torch.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/device.cpp",
@@ -903,6 +902,6 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/jit/*.h',
                 'lib/include/torch/csrc/utils/*.h',
                 'lib/include/torch/csrc/cuda/*.h',
-                'lib/include/torch/python.h',
+                'lib/include/torch/torch.h',
             ]
         })

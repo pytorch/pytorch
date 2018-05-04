@@ -151,7 +151,7 @@ class TestCppExtension(common.TestCase):
         '''
 
         cpp_source2 = '''
-        #include <torch/python.h>
+        #include <torch/torch.h>
         at::Tensor sin_add(at::Tensor x, at::Tensor y);
         PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           m.def("sin_add", &sin_add, "sin(x) + sin(y)");
