@@ -75,9 +75,13 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (THPVariable_Check(arg)) {
     auto& var = ((THPVariable*)arg)->cdata;
-    // NB: Direct access; if aten_type_ is uninitialized, it's impossible
-    // for var to be this type
-    if (&var.type() == self->aten_type_) {
+    // NB: This is a little unfortunate, in that if I do an isinstance check
+    // against torch.cuda.FloatTensor, this will immediately initialize CUDA.
+    // I originally thought that it would not be possible for aten_type_ to
+    // be nullptr if you had a tensor of some type, in which case you can
+    // skip initializign aten_type(), but TestAutograd.test_type_conversions
+    // seems to violate this property (for whatever reason.)
+    if (&var.type() == self->aten_type()) {
       Py_RETURN_TRUE;
     }
   }
