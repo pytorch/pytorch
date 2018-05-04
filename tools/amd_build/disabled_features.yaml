@@ -25,12 +25,12 @@
       {
         "path": "aten/src/THC/THCStream.cpp",
         "functions": {
-          "cudaStreamCreateWithFlags": "HIPBLAS_STATUS_INTERNAL_ERROR",
-          "cudaStreamCreateWithPriority": "HIPBLAS_STATUS_INTERNAL_ERROR"
+          "cudaStreamCreateWithFlags": "hipSuccess",
+          "cudaStreamCreateWithPriority": "hipSuccess"
         }
       },
       {
-        "path": "aten/src/THC/THCAllocator.c",
+        "path": "aten/src/THC/THCAllocator.cpp",
         "functions": {
           "cudaMallocManaged": "HIPBLAS_STATUS_INTERNAL_ERROR"
         }
@@ -43,13 +43,13 @@
       },
       {
         "path": "aten/src/ATen/Context.cpp",
-        "constants": {
+        "s_constants": {
           "#ifdef USE_SSE3": "#if defined(USE_SSE3) && !defined(__HIP_DEVICE_COMPILE__)"
         }
       },
       {
         "path": "aten/src/THC/THCNumerics.cuh",
-        "constants": {
+        "s_constants": {
           "#ifdef __CUDA_ARCH__": "#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)",
           "labs": "fabs",
           "#if CUDA_VERSION < 9000": "#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)"
@@ -57,20 +57,47 @@
       },
       {
         "path": "aten/src/ATen/native/cuda/RoiPooling.cu",
-        "constants": {
+        "s_constants": {
           "RoiPooling2d_forward_kernel<<<": "RoiPooling2d_forward_kernel<float><<<"
         }
       },
       {
         "path": "aten/src/ATen/Error.h",
-        "constants": {
+        "s_constants": {
           "#if !defined(_WIN32)": "#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)"
         }
       },
       {
+        "path": "aten/src/ATen/Error.cpp",
+        "s_constants": {
+          "#if !defined(_WIN32)": "#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)",
+          "#if defined(_MSC_VER)": "#if defined(_MSC_VER) || defined(__HIP_PLATFORM_HCC__)"
+        }
+      },
+      {
         "path": "aten/src/THC/THCTensorRandom.cpp",
-        "constants": {
+        "s_constants": {
           "struct curandStateMtgp32*": "curandStateMtgp32*"
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/cuda/CuFFTUtils.h",
+        "s_constants": {
+          "#include <cufft.h>": "",
+          "#include <cufftXt.h>": ""
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/cuda/SpectralOps.cu",
+        "s_constants": {
+          "#include <cufft.h>": "",
+          "#include <cufftXt.h>": ""
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/cuda/RoiPooling.cu",
+        "s_constants": {
+            "RoiPooling2d_backward_kernel<<<": "RoiPooling2d_backward_kernel<float><<<"
         }
       }
     ],
@@ -78,10 +105,21 @@
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
     "aten/src/ATen/native/cuda/Distributions.cu",
-    "aten/src/THCUNN/ca.cu",
     "aten/src/THCUNN/RReLU.cu"
   ],
   "disabled_functions": [
+    {
+      "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
+      "device_functions": [
+        "maybeOverlappingIndices"
+      ]
+    },
+    {
+      "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
+      "device_functions": [
+        "maybeOverlappingIndices"
+      ]
+    },
     {
       "path": "aten/src/THCUNN/LookupTable.cu",
       "functions": [
