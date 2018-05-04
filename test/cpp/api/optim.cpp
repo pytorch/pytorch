@@ -83,6 +83,8 @@ TEST_CASE("optim") {
     }
   }
 
+  /*
+  // This test appears to be flaky, see https://github.com/pytorch/pytorch/issues/7288
   SECTION("adam") {
     auto model = ContainerList()
                      .append(Linear(2, 8).make())
@@ -92,6 +94,7 @@ TEST_CASE("optim") {
     auto optim = Adam(model, 1.0).weight_decay(1e-6).make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
+  */
 
   SECTION("amsgrad") {
     auto model = ContainerList()
