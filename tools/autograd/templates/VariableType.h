@@ -52,6 +52,7 @@ struct VariableType final : public at::Type {
   static std::vector<at::Type*> allTypes();
 
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
+  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
   ${type_derived_method_declarations}
 
 private:
