@@ -139,7 +139,9 @@ _cuda_ctx_rng_initialized = False
 # operations in `test`.
 def make_cuda_memory_checked_test(test):
     global _cuda_ctx_rng_initialized
-    if TEST_CUDA and not _cuda_ctx_rng_initialized:
+    if not TEST_CUDA:
+        return test
+    elif not _cuda_ctx_rng_initialized:
         # initialize cuda context and rng for memory tests
         for i in range(torch.cuda.device_count()):
             torch.randn(1, device="cuda:{}".format(i))
