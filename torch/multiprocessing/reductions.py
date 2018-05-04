@@ -23,11 +23,105 @@ class StorageRef(object):
         self.cdata = ptr
 
 
-# mapping from handles to StorageRef objects
+# mapping from handles to StorageRef objects. Doesn't include CUDA handles.
 shared_cache = weakref.WeakValueDictionary()
 
-# Cache for cuda storages that originate from this process
-originating_cuda_cache = weakref.WeakValueDictionary()
+
+# CUDA storage caching strategy
+# -----------------------------
+#
+# All CUDA storages are cached into 'cuda_cache'.
+#
+# Call a "CUDA storage that processes wish to share" a "real storage".
+# "real storages" are the storages that other processes want to and
+# eventually will receive.
+#
+# Call a "CUDA storage that points to the base of an allocation block" a
+# "base storage". These are obtained by opening CUDA handles to the
+# base of an allocation block, where multiple "real storages" may live.
+# Those "real storages" can be obtained by adding an offset to "base storage"
+#
+# "base storages" are cached into the "base cache" and "real storages" are
+# cached into the "real cache"
+#
+# When a process shares a cuda storage:
+# - It looks in the "real cache" for the storage.
+# - If the storage is not found, we go into cpp-land to share the storage.
+# - If the storage is found, we return the "real storage"'s metadata
+#   (device, handle, size, offset, view_size) that was previously obtained
+#   when cpp-land shared the storage.
+#
+# When a process receives a cuda storage:
+# - It looks in the "real cache" for the real storage.
+# - If it's not there, look in the "base cache".
+# - If it exists in the "base cache", recreate the real storage, add it to the
+#   "real cache", and return it.
+# - If it doesn't exist in the "base cache", recreate the real and base storages
+#   in cpp-land and add them to their respective caches.
+#
+# "base storages" are uniquely identified by their CUDA handle.
+# "real storages" are uniquely identified by (handle, offset).
+class CUDASharedCache:
+    def __init__(self):
+        # (handle) -> "base storage" ref
+        self.base_cache = weakref.WeakValueDictionary()
+
+        # (handle, offset) -> "real storage" ref
+        self.real_cache = weakref.WeakValueDictionary()
+
+        # dataptr -> "real storage" ref
+        self.data_cache = weakref.WeakValueDictionary()
+
+    @staticmethod
+    def real_key(handle, offset):
+        return '{}_{}'.format(handle, offset)
+
+    def save_base(self, base_storage, handle):
+        storageref = base_storage._weak_ref(StorageRef)
+        self.base_cache[handle] = storageref
+
+    def save_real(self, real_storage, metadata):
+        _, handle, _, offset, _ = metadata
+
+        # Saving metadata so this process does not need to re-get
+        # the IPC handle in cpp-land when re-sharing this storage.
+        storageref = real_storage._weak_ref(StorageRef)
+        storageref.__real_metadata = metadata
+
+        key = self.real_key(handle, offset)
+        dataptr = real_storage.data_ptr()
+
+        self.real_cache[key] = storageref
+        self.data_cache[dataptr] = storageref
+
+    def get_storage(self, cls, metadata):
+        _, handle, _, offset, view_size = metadata
+
+        # Case 1: "real storage" cached
+        key = self.real_key(handle, offset)
+        real_ref = self.real_cache.get(key)
+        if real_ref is not None:
+            return cls._new_with_weak_ptr(real_ref)
+
+        # Case 3: Neither "real storage" nor "base storage" cached
+        base_ref = self.base_cache.get(key)
+        if base_ref is None:
+            return None
+
+        # Case 2: "base storage" cached. Recreate "real storage"
+        base_storage = cls._new_with_weak_ptr(base_ref)
+        real_storage = base_storage._new_view(offset, view_size)
+        self.save_real(real_storage, metadata)
+        return real_storage
+
+    def get_metadata(self, storage):
+        realref = self.data_cache.get(storage.data_ptr())
+        if realref is None:
+            return None
+        return realref.__real_metadata
+
+
+cuda_shared_cache = CUDASharedCache()
 
 
 def rebuild_event(handle):
@@ -66,23 +160,15 @@ def storage_from_cache(cls, key):
     return cls._new_with_weak_ptr(storage_ref)
 
 
-def originating_cuda_cache_key(handle, offset):
-    return '{}_{}'.format(handle, offset)
+def save_real_storage(storage, handle, offset):
+    real_cuda_storage_cache.save(storage, handle, offset)
 
 
-def mark_originating(storage, handle, offset):
-    key = originating_cuda_cache_key(handle, offset)
-    # storage._weak_ref(StorageRef) unwraps all storage views and is
-    # undesireable here because we want to save a ref to storage as-is.
-    originating_cuda_cache[key] = storage._weak_ref_no_unwrap(StorageRef)
-
-
-def maybe_original_cuda_storage(cls, handle, offset):
-    key = originating_cuda_cache_key(handle, offset)
-    storage_ref = originating_cuda_cache.get(key)
-    if storage_ref is None:
+def real_cuda_storage_from_cache(cls, handle, offset):
+    real_storage_ref = real_cuda_storage_cache.get(handle, offset)
+    if real_storage_ref is None:
         return None
-    return cls._new_with_weak_ptr(storage_ref)
+    return cls._new_with_weak_ptr(real_storage_ref)
 
 
 def rebuild_storage_fd(cls, df, size):
@@ -111,55 +197,39 @@ def rebuild_storage_filename(cls, manager, handle, size):
 
 
 def rebuild_storage_cuda(cls, device, handle, size, offset, view_size):
-    '''
-    Let's say a storage "originates" from a process if that process created it
-    (as opposed to opened a handle to the cuda allocation block where
-    the storage lives).
+    metadata = (device, handle, size, offset, view_size)
+    real_storage = cuda_shared_cache.get_storage(cls, metadata)
+    if real_storage is not None:
+        return real_storage
 
-    There are two main cases:
-    1) The storage originated from this process.
-       Return the storage from the cache of originating storages.
-    2) The storage did not originate from this process. Open the handle
-       to retrieve the allocation block; then build the storage by adding
-       "offset" to the base of the allocation block.
-    '''
-    # Check if the storage originated from this process
-    storage = maybe_original_cuda_storage(cls, handle, offset)
-    if storage is not None:
-        return storage
-
-    # Check if a storage pointing to the base of the allocation block is cached
-    storage = storage_from_cache(cls, handle)
-    if storage is not None:
-        return storage._new_view(offset, view_size)
-
-    # Open the handle to get a storage pointing to the base of the allocation
-    # block and cache it.
     torch.cuda._lazy_init()
-    storage = cls._new_shared_cuda(device, handle, size, offset, view_size)
-    shared_cache[handle] = storage._weak_ref(StorageRef)
-    return storage
+    real_storage = cls._new_shared_cuda(device, handle, size, offset, view_size)
+    base_storage, _ = real_storage._root_storage()
+    cuda_shared_cache.save_real(real_storage, metadata)
+    cuda_shared_cache.save_base(base_storage, handle)
+    return real_storage
 
 
 def rebuild_storage_empty(cls):
     return cls()
 
 
+def share_cuda(storage):
+    # If we've already shared this storage, no need to share again.
+    metadata = cuda_shared_cache.get_metadata(storage)
+    if metadata is not None:
+        return metadata
+
+    # The storage hasn't been shared before.
+    metadata = storage._share_cuda_()
+    cuda_shared_cache.save_real(storage, metadata)
+    return metadata
+
+
 def reduce_storage(storage):
     from . import get_sharing_strategy
     if storage.is_cuda:
-        metadata = storage._share_cuda_()
-        _, handle, _, offset, _ = metadata
-
-        # If the storage originated from this process and if this process
-        # receives this storage again, it should NOT attempt to open the
-        # handle to the allocation block (because the handle is already open,
-        # and we only allow one open handle to the same allocation block per
-        # process).
-        # Instead, we cache the storage in a special cache so that if this
-        # process receives it again it is able to return it.
-        if handle not in shared_cache:
-            mark_originating(storage, handle, offset)
+        metadata = share_cuda(storage)
         return (rebuild_storage_cuda, (type(storage),) + metadata)
     elif get_sharing_strategy() == 'file_system':
         metadata = storage._share_filename_()

@@ -165,6 +165,25 @@ class leak_checker(object):
         return False
 
 
+def passing_worker_run(queue, pass_sem, pass_done_sem, die_sem):
+    def check(tensor):
+        reference = torch.ones_like(tensor)
+        if (tensor - reference).norm() <= 0.0001:
+            return
+        raise RuntimeError("Expected: {}\nGot: {}".format(reference, tensor))
+
+    def pass_tensor():
+        pass_sem.acquire()
+        tensor = queue.get()
+        check(tensor)
+        queue.put(tensor)
+        pass_done_sem.release()
+
+    pass_tensor()
+    pass_tensor()
+    die_sem.acquire()
+
+
 class TestMultiprocessing(TestCase):
 
     def _test_sharing(self, ctx=mp, type=torch.FloatTensor, repeat=1):
@@ -300,6 +319,75 @@ class TestMultiprocessing(TestCase):
         p.join(1)
         self.assertEqual(t, torch.ones(5, 5) * 3, 0)
 
+    @staticmethod
+    def _test_passing(self, device):
+        # A Worker will pass a tensor twice and die.
+        # The Master controls when the worker passes a tensor and dies
+        # based on the pass_sem and die_sem semaphores.
+        class Worker:
+            def __init__(self, ctx, queue):
+                self.pass_sem = ctx.Semaphore(0)
+                self.pass_done_sem = ctx.Semaphore(0)
+                self.die_sem = ctx.Semaphore(0)
+                args = (queue, self.pass_sem, self.pass_done_sem, self.die_sem)
+                self.process = ctx.Process(target=passing_worker_run, args=args)
+                self.process.start()
+
+            def pass_to_next(self):
+                self.pass_sem.release()
+                if self.pass_done_sem.acquire(timeout=5):
+                    return
+                self.process.terminate()
+                raise RuntimeError('Test failure: worker timed out. '
+                                   'Please see test output for details.')
+
+            def die(self):
+                self.die_sem.release()
+                self.process.join()
+
+        # The Master puts a tensor into the queue and signals:
+        # - worker1 to pass the tensor
+        # - worker2 to pass the tensor
+        # and then the Master gets the tensor from the queue.
+        def cycle_tensor(tensor):
+            q.put(tensor)
+            worker1.pass_to_next()
+            worker2.pass_to_next()
+            out = q.get()
+            reference = torch.ones_like(tensor)
+            if (tensor - reference).norm() < 0.0001:
+                return
+            raise RuntimeError("Got: {}, Expected: {}".format(tensor, reference))
+
+        # Define "passing" a tensor to be taking a tensor from the queue
+        # and putting it back.
+        # This test does the following:
+        # - Master creates tensor1, tensor2.
+        # - Master spawns Worker1 and Worker2 and waits for them to come alive
+        # - for tensor in (tensor1, tensor2):
+        #   - Master sends tensor1
+        #   - Worker1 gets tensor1 and sends tensor1
+        #   - Worker2 gets tensor1 and sends tensor1
+        #   - Master receives tensor1
+        # - Master terminates the workers.
+        ctx = mp.get_context('spawn')
+        q = ctx.Queue()
+        tensor1 = torch.ones(10, device=device)
+        tensor2 = torch.ones(10, device=device)
+        worker1 = Worker(ctx, q)
+        worker2 = Worker(ctx, q)
+
+        try:
+            cycle_tensor(tensor1)
+            cycle_tensor(tensor2)
+            worker1.die()
+            worker2.die()
+        except Exception as ex:
+            # Shutdown workers if test fails for any reason
+            worker1.process.terminate()
+            worker2.process.terminate()
+            raise ex
+
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_cuda(self):
         torch.cuda.FloatTensor([1])  # initialize CUDA outside of leak checker
@@ -317,6 +405,10 @@ class TestMultiprocessing(TestCase):
 
         out = q.get()
         self.assertEqual(out, tensor)
+
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_cuda_passing(self):
+        self._test_passing(self, 'cuda')
 
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     @unittest.skipIf(not TEST_MULTIGPU, 'found only 1 GPU')
