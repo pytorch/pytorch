@@ -20,7 +20,7 @@ requirements:
   build:
     - cmake
     - future
-    - numpy
+    - numpy {{ numpy }}
     - python
     - six
     # build section here
