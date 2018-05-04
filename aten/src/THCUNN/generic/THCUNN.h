@@ -289,20 +289,6 @@ TH_API void THNN_(LogSigmoid_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *buffer);
 
-TH_API void THNN_(LogSoftMax_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int dim);
-
-TH_API void THNN_(LogSoftMax_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *output,
-                  int dim);
-
 TH_API void THNN_(LookupTable_accGradParameters)(
                   THCState *state,
                   THCIndexTensor *input,
@@ -1147,20 +1133,6 @@ TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
                   THCTensor *gradInput,
                   bool sizeAverage,
                   bool reduce);
-
-TH_API void THNN_(SoftMax_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int dim);
-
-TH_API void THNN_(SoftMax_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *output,
-                  int dim);
 
 TH_API void THNN_(SoftPlus_updateOutput)(
                   THCState *state,

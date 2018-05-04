@@ -605,6 +605,16 @@
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
 
+- func: log_softmax(Tensor self, int64_t dim) -> Tensor
+  dispatch:
+    CPU: log_softmax_cpu
+    CUDA: log_softmax_cuda
+
+- func: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+  dispatch:
+    CPU: log_softmax_backward_cpu
+    CUDA: log_softmax_backward_cuda
+
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
@@ -828,6 +838,16 @@
 - func: slogdet(Tensor self) -> (Tensor, Tensor)
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor
+
+- func: softmax(Tensor self, int64_t dim) -> Tensor
+  dispatch:
+    CPU: softmax_cpu
+    CUDA: softmax_cuda
+
+- func: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+  dispatch:
+    CPU: softmax_backward_cpu
+    CUDA: softmax_backward_cuda
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
 
