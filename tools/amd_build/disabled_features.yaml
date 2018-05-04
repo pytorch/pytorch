@@ -135,7 +135,17 @@
   "disabled_functions": [
     {
       "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
+<<<<<<< HEAD
       "non_device_functions": [
+=======
+      "device_functions": [
+        "maybeOverlappingIndices"
+      ]
+    },
+    {
+      "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
+      "device_functions": [
+>>>>>>> Updating patches
         "maybeOverlappingIndices"
       ]
     },
