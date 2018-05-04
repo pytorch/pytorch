@@ -24,6 +24,12 @@
         }
       },
       {
+        "path": "aten/src/ATen/native/cuda/Distributions.cu",
+        "s_constants": {
+          "#include <nvfunctional>": ""
+        }
+      },
+      {
         "path": "aten/src/THCUNN/SoftMaxCommon.cuh",
         "functions": {
           "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
@@ -135,17 +141,7 @@
   "disabled_functions": [
     {
       "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
-<<<<<<< HEAD
       "non_device_functions": [
-=======
-      "device_functions": [
-        "maybeOverlappingIndices"
-      ]
-    },
-    {
-      "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
-      "device_functions": [
->>>>>>> Updating patches
         "maybeOverlappingIndices"
       ]
     },

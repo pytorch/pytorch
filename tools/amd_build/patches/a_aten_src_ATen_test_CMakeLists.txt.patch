@@ -1,21 +1,20 @@
 diff --git a/aten/src/ATen/test/CMakeLists.txt b/aten/src/ATen/test/CMakeLists.txt
-index 8b69e5cab..ce4c6bd04 100644
+index 8b69e5cab..730e00256 100644
 --- a/aten/src/ATen/test/CMakeLists.txt
 +++ b/aten/src/ATen/test/CMakeLists.txt
-@@ -5,6 +5,12 @@ IF (MSVC)
+@@ -4,6 +4,11 @@ IF (MSVC)
+   ENDIF()
  ENDIF(MSVC)
  
- ADD_EXECUTABLE(scalar_test scalar_test.cpp)
 +if(WITH_ROCM)
-+SET(CMAKE_C_COMPILER ${HIP_HIPCC_EXECUTABLE})
-+SET(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
++  SET(CMAKE_C_COMPILER ${HIP_HIPCC_EXECUTABLE})
++  SET(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
 +endif()
 +
-+ADD_EXECUTABLE(scalar_test scalar_test.cpp)
+ ADD_EXECUTABLE(scalar_test scalar_test.cpp)
  target_link_libraries(scalar_test ATen)
  
- ADD_EXECUTABLE(apply_utils_test apply_utils_test.cpp)
-@@ -43,13 +49,13 @@ target_link_libraries(verify_api_visibility ATen)
+@@ -43,13 +48,13 @@ target_link_libraries(verify_api_visibility ATen)
  add_executable(tbb_init_test tbb_init_test.cpp)
  target_link_libraries(tbb_init_test ATen)
  
