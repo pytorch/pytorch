@@ -2,7 +2,6 @@
 
 #include "intrinsics.h"
 #include "vec256_base.h"
-#include <sleef.h>
 
 namespace at {
 namespace vec256 {
@@ -54,36 +53,6 @@ public:
   Vec256<double> abs() const {
     auto mask = _mm256_set1_pd(-0.f);
     return _mm256_andnot_pd(mask, values);
-  }
-  Vec256<double> acos() const {
-    return Vec256<double>(Sleef_acosd4_u10(values));
-  }
-  Vec256<double> asin() const {
-    return Vec256<double>(Sleef_asind4_u10(values));
-  }
-  Vec256<double> atan() const {
-    return Vec256<double>(Sleef_atand4_u10(values));
-  }
-  Vec256<double> erf() const {
-    return Vec256<double>(Sleef_erfd4_u10(values));
-  }
-  Vec256<double> exp() const {
-    return Vec256<double>(Sleef_expd4_u10(values));
-  }
-  Vec256<double> expm1() const {
-    return Vec256<double>(Sleef_expm1d4_u10(values));
-  }
-  Vec256<double> log() const {
-    return Vec256<double>(Sleef_logd4_u10(values));
-  }
-  Vec256<double> log2() const {
-    return Vec256<double>(Sleef_log2d4_u10(values));
-  }
-  Vec256<double> log10() const {
-    return Vec256<double>(Sleef_log10d4_u10(values));
-  }
-  Vec256<double> log1p() const {
-    return Vec256<double>(Sleef_log1pd4_u10(values));
   }
   Vec256<double> sin() const {
     return map(std::sin);
