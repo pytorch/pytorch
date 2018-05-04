@@ -1193,6 +1193,11 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(LogNormal, (mean, 1.0))
         self._gradcheck_log_prob(LogNormal, (0.0, std))
 
+        # check .log_prob() can broadcast.
+        dist = LogNormal(torch.zeros(4), torch.ones(2, 1, 1))
+        log_prob = dist.log_prob(torch.ones(3, 1))
+        self.assertEqual(log_prob.shape, (2, 3, 4))
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lognormal_logprob(self):
         mean = torch.randn(5, 1, requires_grad=True)
