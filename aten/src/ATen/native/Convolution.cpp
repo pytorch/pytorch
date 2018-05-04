@@ -115,7 +115,7 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
     return false;
   }
   if (is_dilated()) {
-    cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(globalContext().thc_state);
+    cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(globalContext().getTHCState());
     // NOTE: extra parenthesis around numbers disable clang warnings about dead code
     return ((CUDNN_VERSION >= (6021)) || (CUDNN_VERSION >= (6000) && prop->major >= 5)) && !is_output_padding_big();
   }

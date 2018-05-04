@@ -9,7 +9,7 @@ namespace at { namespace native {
 
 inline void setCuDNNStreamToCurrent() {
   // TODO: Should getCurrentStream be a method on Context?
-  CUDNN_CHECK(cudnnSetStream(getCudnnHandle(), THCState_getCurrentStream(globalContext().thc_state)));
+  CUDNN_CHECK(cudnnSetStream(getCudnnHandle(), THCState_getCurrentStream(globalContext().getTHCState())));
 }
 
 // cuDNN has a buggy check for tensor being contiguous (that is, it does
