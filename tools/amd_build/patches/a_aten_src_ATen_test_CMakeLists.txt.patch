@@ -1,12 +1,11 @@
 diff --git a/aten/src/ATen/test/CMakeLists.txt b/aten/src/ATen/test/CMakeLists.txt
-index fe53bec46..3c393e727 100644
+index 8b69e5cab..ce4c6bd04 100644
 --- a/aten/src/ATen/test/CMakeLists.txt
 +++ b/aten/src/ATen/test/CMakeLists.txt
-@@ -4,7 +4,12 @@ IF (MSVC)
-   ENDIF()
+@@ -5,6 +5,12 @@ IF (MSVC)
  ENDIF(MSVC)
  
--ADD_EXECUTABLE(scalar_test scalar_test.cpp)
+ ADD_EXECUTABLE(scalar_test scalar_test.cpp)
 +if(WITH_ROCM)
 +SET(CMAKE_C_COMPILER ${HIP_HIPCC_EXECUTABLE})
 +SET(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
@@ -15,16 +14,22 @@ index fe53bec46..3c393e727 100644
 +ADD_EXECUTABLE(scalar_test scalar_test.cpp)
  target_link_libraries(scalar_test ATen)
  
- ADD_EXECUTABLE(basic basic.cpp)
-@@ -41,7 +46,11 @@ add_executable(tbb_init_test tbb_init_test.cpp)
+ ADD_EXECUTABLE(apply_utils_test apply_utils_test.cpp)
+@@ -43,13 +49,13 @@ target_link_libraries(verify_api_visibility ATen)
+ add_executable(tbb_init_test tbb_init_test.cpp)
  target_link_libraries(tbb_init_test ATen)
  
- if(NOT NO_CUDA)
-+  if(WITH_ROCM)
+-if(NOT NO_CUDA)
+-  cuda_add_executable(integer_divider_test integer_divider_test.cu)
++if(WITH_ROCM)
 +  hip_add_executable(integer_divider_test integer_divider_test.cu)
-+  else()
-   cuda_add_executable(integer_divider_test integer_divider_test.cu)
-+  endif()
    target_link_libraries(integer_divider_test ATen)
+ endif()
+ 
+-if(NOT NO_CUDA)
+-  cuda_add_executable(cuda_rng_test cuda_rng_test.cpp)
++if(WITH_ROCM)
++  hip_add_executable(cuda_rng_test cuda_rng_test.cpp)
+   target_link_libraries(cuda_rng_test ATen)
  endif()
  
