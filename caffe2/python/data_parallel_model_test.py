@@ -9,13 +9,14 @@ import os
 import shutil
 import tempfile
 import unittest
+import time
 from mock import Mock
 from hypothesis import assume, given
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, cnn, data_parallel_model, dyndep, \
-    model_helper, optimizer, rnn_cell, workspace, data_parallel_model_utils
+    model_helper, optimizer, rnn_cell, workspace
 from caffe2.python.test_util import TestCase
 
 
@@ -342,6 +343,62 @@ class DataParallelModelTest(TestCase):
 
             for _ in range(2):
                 data_parallel_model.Synchronize(model)
+
+        with TemporaryDirectory() as tmpdir:
+            self.run_test_locally(
+                run,
+                comm_size=2,
+                device_option=None,
+                tmpdir=tmpdir)
+
+    def test_pre_train_synchronization_barrier(self):
+        def run(comm_rank, comm_size, tmpdir):
+            def add_input_ops(model):
+                pass
+
+            def add_model_ops(model, loss_scale):
+                return []
+
+            def add_optimizer(model):
+                pass
+
+            workspace.ResetWorkspace()
+            store_handler = "store_handler"
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "FileStoreHandlerCreate",
+                    [],
+                    [store_handler],
+                    path=tmpdir))
+            rendezvous = dict(
+                kv_handler=store_handler,
+                shard_id=comm_rank,
+                num_shards=comm_size,
+                engine='GLOO',
+            )
+
+            model = cnn.CNNModelHelper(
+                order="NHWC",
+                name="test",
+            )
+            # Set network timeout to 2 seconds, and add a 3 seconds
+            # sleep for 1 host.  Make sure there is no timeout on the
+            # second RunNet.
+            data_parallel_model._DEFAULT_TIMEOUT_SEC=2
+            data_parallel_model.Parallelize_CPU(
+                model,
+                input_builder_fun=add_input_ops,
+                forward_pass_builder_fun=add_model_ops,
+                optimizer_builder_fun=add_optimizer,
+                devices=[1, 2, 3],
+                rendezvous=rendezvous,
+                barrier_net_timeout_sec=5
+            )
+            data_parallel_model.RunInitNet(model)
+            data_parallel_model.RunNet(model, 2)
+            if comm_rank == 0:
+                time.sleep(data_parallel_model._DEFAULT_TIMEOUT_SEC)
+            data_parallel_model.RunNet(model, 2)
 
         with TemporaryDirectory() as tmpdir:
             self.run_test_locally(
@@ -1069,66 +1126,6 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
 
         if workspace.NumCudaDevices() >= 8:
             self.run_model(V, list(range(8)))
-
-
-@unittest.skipIf(workspace.has_gpu_support, "No GPU support")
-@unittest.skipIf(workspace.NumCudaDevices() < 4, "Test requires at least 4 GPUs")
-class DeviceShiftTest(TestCase):
-    def create_model(self):
-        def input_builder_fun(model):
-            model.param_init_net.UniformFill([], ["data"], shape=[32, 8])
-
-        def model_build_fun(model, loss_scale):
-            fc1 = brew.fc(model, "data", "fc1", dim_in=8, dim_out=8)
-            fc2 = brew.fc(model, fc1, "fc2", dim_in=8, dim_out=8)
-            fc3 = brew.fc(model, fc2, "fc3", dim_in=8, dim_out=8)
-            fc4 = brew.fc(model, fc3, "fc4", dim_in=8, dim_out=8)
-            fc5 = brew.fc(model, fc4, "fc5", dim_in=8, dim_out=8)
-            loss = model.net.SumElements([fc5], ["loss"])
-            return [loss]
-
-        def add_optimizer(model):
-            return optimizer.build_sgd(model, 0.1, policy="fixed")
-
-        model = model_helper.ModelHelper()
-        data_parallel_model.Parallelize(
-            model,
-            input_builder_fun=input_builder_fun,
-            forward_pass_builder_fun=model_build_fun,
-            optimizer_builder_fun=add_optimizer,
-            devices=[0, 1, 2, 3],
-        )
-        return model
-
-    def test_activation_blobs(self):
-        model = self.create_model()
-        activations = data_parallel_model_utils.GetActivationBlobs(model)
-        self.assertEqual(activations, ["fc1", "fc2", "fc3", "fc4", "fc5", "loss"])
-
-    def test_shift_gpu(self):
-        model = self.create_model()
-        data_parallel_model_utils.ShiftActivationDevices(
-            model,
-            activations=["fc4", "fc5"],
-            shifts={0: 4, 1: 4, 2: 5, 3: 5},
-        )
-        for op in model.param_init_net.Proto().op:
-            for outp in op.output:
-                prefix = outp.split("/")[0]
-                if outp.split("/")[-1] in set(['fc4_w', 'fc5_w', 'fc4_b', 'fc5_b']):
-                    if prefix == 'gpu_0' or prefix == 'gpu_1':
-                        self.assertEqual(op.device_option.cuda_gpu_id, 4)
-                    else:
-                        self.assertEqual(op.device_option.cuda_gpu_id, 5)
-                if outp.split("/")[-1] in set(['fc1_w', 'fc2_w', 'fc3_b', 'fc3_w']):
-                    gpu_id = int(prefix.split("_")[-1])
-                    self.assertEqual(gpu_id, op.device_option.cuda_gpu_id)
-
-        # Test that we can run the net
-        if workspace.NumCudaDevices() >= 6:
-            workspace.RunNetOnce(model.param_init_net)
-            workspace.CreateNet(model.net)
-            workspace.RunNet(model.net.Proto().name)
 
 
 if __name__ == "__main__":

@@ -349,6 +349,10 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
         )
         self._test_basic_cases(
+            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1,
+                                               initial_accumulator_value=0.1)
+        )
+        self._test_basic_cases(
             lambda weight, bias: optim.Adagrad(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-1)
@@ -619,6 +623,40 @@ class TestLRScheduler(TestCase):
         scheduler = LambdaLR(self.opt,
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
+
+    def test_step_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: StepLR(self.opt, gamma=0.1, step_size=3),
+            lambda: StepLR(self.opt, gamma=0.01 / 2, step_size=1))
+
+    def test_multi_step_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9]),
+            lambda: MultiStepLR(self.opt, gamma=0.01, milestones=[1, 4, 6]))
+
+    def test_exp_step_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: ExponentialLR(self.opt, gamma=0.1),
+            lambda: ExponentialLR(self.opt, gamma=0.01))
+
+    def test_cosine_lr_state_dict(self):
+        epochs = 10
+        eta_min = 1e-10
+        self._check_scheduler_state_dict(
+            lambda: CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min),
+            lambda: CosineAnnealingLR(self.opt, T_max=epochs // 2, eta_min=eta_min / 2),
+            epochs=epochs)
+
+    def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
+        scheduler = constr()
+        for _ in range(epochs):
+            scheduler.step()
+        scheduler_copy = constr2()
+        scheduler_copy.load_state_dict(scheduler.state_dict())
+        for key in scheduler.__dict__.keys():
+            if key != 'optimizer':
+                self.assertAlmostEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
+        self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
 
     def _test(self, scheduler, targets, epochs=10):
         for epoch in range(epochs):

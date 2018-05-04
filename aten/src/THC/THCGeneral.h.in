@@ -58,7 +58,6 @@ typedef struct _THCDeviceAllocator {
 } THCDeviceAllocator;
 
 typedef struct _THCCudaResourcesPerDevice {
-  THCStream** streams;
   /* Number of materialized cuBLAS handles */
   int numBlasHandles;
   /* Number of materialized cuSparse handles */
@@ -69,9 +68,6 @@ typedef struct _THCCudaResourcesPerDevice {
   cusparseHandle_t* sparseHandles;
   /* Size of scratch space per each stream on this device available */
   size_t scratchSpacePerStream;
-  /* Device-resident scratch space per stream, used for global memory
-     reduction kernels. Lazily initialized. */
-  void** devScratchSpacePerStream;
 } THCCudaResourcesPerDevice;
 
 
@@ -79,16 +75,13 @@ typedef struct _THCCudaResourcesPerDevice {
 struct THCState {
   struct THCRNGState* rngState;
   struct cudaDeviceProp* deviceProperties;
-  /* Set of all allocated resources. resourcePerDevice[dev]->streams[0] is NULL,
-     which specifies the per-device default stream. blasHandles and
-     sparseHandles do not have a default and must be explicitly initialized.
-     We always initialize 1 blasHandle and 1 sparseHandle but we can use more.
+  /* Set of all allocated resources. blasHandles and sparseHandles do not have
+     a default and must be explicitly initialized. We always initialize 1
+     blasHandle and 1 sparseHandle but we can use more.
   */
   THCCudaResourcesPerDevice* resourcesPerDevice;
   /* Captured number of devices upon startup; convenience for bounds checking */
   int numDevices;
-  /* Number of Torch defined resources available, indices 1 ... numStreams */
-  int numUserStreams;
   int numUserBlasHandles;
   int numUserSparseHandles;
 
@@ -160,18 +153,12 @@ THC_API void THCMagma_init(THCState *state);
 
 /* State manipulators and accessors */
 THC_API int THCState_getNumDevices(THCState* state);
-THC_API void THCState_reserveStreams(THCState* state, int numStreams, int nonBlocking);
-THC_API int THCState_getNumStreams(THCState* state);
 
 /* Stream API */
 THC_API cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
 THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
 THC_API struct THCStream* THCState_getStream(THCState *state);
 THC_API void THCState_setStream(THCState *state, struct THCStream* stream);
-/* deprecated stream API */
-THC_API cudaStream_t THCState_getDeviceStream(THCState *state, int device, int stream);
-THC_API int THCState_getCurrentStreamIndex(THCState *state);
-THC_API void THCState_setCurrentStreamIndex(THCState *state, int stream);
 
 THC_API void THCState_reserveBlasHandles(THCState* state, int numHandles);
 THC_API int THCState_getNumBlasHandles(THCState* state);
@@ -190,8 +177,6 @@ THC_API int THCState_getCurrentSparseHandleIndex(THCState *state);
 THC_API void THCState_setCurrentSparseHandleIndex(THCState *state, int handle);
 
 /* For the current device and stream, returns the allocated scratch space */
-THC_API void* THCState_getCurrentDeviceScratchSpace(THCState* state);
-THC_API void* THCState_getDeviceScratchSpace(THCState* state, int device, int stream);
 THC_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);
 THC_API size_t THCState_getDeviceScratchSpaceSize(THCState* state, int device);
 

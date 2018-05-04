@@ -193,6 +193,7 @@ def main():
 
         # spawn the processes
         cmd = ["python",
+               "-u",
                args.training_script,
                "--local_rank={}".format(local_rank)] + args.training_script_args
 

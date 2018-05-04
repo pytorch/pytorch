@@ -556,7 +556,7 @@ static void tensorRand(rpc::RPCMessage& raw_message) {
   at::Generator *_generator = unpackRetrieveGenerator(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  at::ArrayRef<int64_t> sizeRef(size->data, size->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(size), THLongStorage_size(size));
   at::rand_out(r, sizeRef, _generator);
   THLongStorage_free(size);
 }
@@ -566,7 +566,7 @@ static void tensorRandn(rpc::RPCMessage& raw_message) {
   at::Generator *_generator = unpackRetrieveGenerator(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  at::ArrayRef<int64_t> sizeRef(size->data, size->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(size), THLongStorage_size(size));
   at::randn_out(r, sizeRef, _generator);
   THLongStorage_free(size);
 }
@@ -591,7 +591,7 @@ static void tensorHistc(rpc::RPCMessage& raw_message) {
   }
 }
 
-static void tensorLogicalall(rpc::RPCMessage& raw_message) {
+static void tensorLogicalAndAll(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
@@ -599,10 +599,28 @@ static void tensorLogicalall(rpc::RPCMessage& raw_message) {
   sendValueToMaster(response);
 }
 
-static void tensorLogicalany(rpc::RPCMessage& raw_message) {
+static void tensorLogicalAnyAll(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
   int64_t response = tensor.any().toCLong();
   sendValueToMaster(response);
+}
+
+static void tensorLogicalAnd(rpc::RPCMessage& raw_message) {
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
+  finalize(raw_message);
+  at::all_out(tensor, src, dimension, keepdim);
+}
+
+static void tensorLogicalAny(rpc::RPCMessage& raw_message) {
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
+  finalize(raw_message);
+  at::any_out(tensor, src, dimension, keepdim);
 }

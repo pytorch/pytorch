@@ -23,16 +23,22 @@ namespace algorithm {
 
 /// \brief Tarjans algorithm.  Does not modify the graph.
 template <typename T, typename U>
-std::vector<Subgraph<T, U>> tarjans(Graph<T, U> *g);
+std::vector<Subgraph<T, U>> tarjans(Graph<T, U>* g);
 #include "nomnigraph/Graph/TarjansImpl.h"
+
+template <typename T, typename U, typename F>
+std::vector<Subgraph<T, U>> binaryMatch(Graph<T, U>* g, F condition);
+#include "nomnigraph/Graph/BinaryMatchImpl.h"
 
 /// \brief Helper for dominator tree finding.
 template <typename G>
-void reachable(typename G::NodeRef root, typename G::NodeRef ignored,
-               std::unordered_set<typename G::NodeRef> *seen) {
+void reachable(
+    typename G::NodeRef root,
+    typename G::NodeRef ignored,
+    std::unordered_set<typename G::NodeRef>* seen) {
   seen->insert(root);
-  for (const auto &outEdge : root->getOutEdges()) {
-    auto &newNode = outEdge->head();
+  for (const auto& outEdge : root->getOutEdges()) {
+    auto& newNode = outEdge->head();
     if (newNode != ignored && (seen->find(newNode) == seen->end())) {
       reachable<G>(newNode, ignored, seen);
     }
@@ -58,15 +64,18 @@ void reachable(typename G::NodeRef root, typename G::NodeRef ignored,
 ///   if newnode has inedge, delete it
 ///   draw edge from parent to child
 template <typename G>
-Graph<typename G::NodeRef, int>
-dominatorTree(G *g, typename G::NodeRef source = nullptr) {
-  assert(g->getMutableNodes().size() > 0 &&
-         "Cannot find dominator tree of empty graph.");
+Graph<typename G::NodeRef, int> dominatorTree(
+    G* g,
+    typename G::NodeRef source = nullptr) {
+  assert(
+      g->getMutableNodes().size() > 0 &&
+      "Cannot find dominator tree of empty graph.");
   if (!source) {
     auto rootSCC = tarjans(g).back();
-    assert(rootSCC.getNodes().size() == 1 &&
-           "Cannot determine source node topologically, please specify one.");
-    for (auto &node : rootSCC.getNodes()) {
+    assert(
+        rootSCC.getNodes().size() == 1 &&
+        "Cannot determine source node topologically, please specify one.");
+    for (auto& node : rootSCC.getNodes()) {
       source = node;
       break;
     }
@@ -74,11 +83,13 @@ dominatorTree(G *g, typename G::NodeRef source = nullptr) {
 
   std::unordered_set<typename G::NodeRef> allNodes;
   Graph<typename G::NodeRef, int> tree;
-  std::unordered_map<typename G::NodeRef,
-                     typename Graph<typename G::NodeRef, int>::NodeRef>
+  std::unordered_map<
+      typename G::NodeRef,
+      typename Graph<typename G::NodeRef, int>::NodeRef>
       mapToTreeNode;
-  std::unordered_map<typename G::NodeRef,
-                     std::unordered_set<typename G::NodeRef>>
+  std::unordered_map<
+      typename G::NodeRef,
+      std::unordered_set<typename G::NodeRef>>
       dominatorMap;
 
   for (auto node : g->getMutableNodes()) {
@@ -89,7 +100,7 @@ dominatorTree(G *g, typename G::NodeRef source = nullptr) {
     dominatorMap[source].insert(node);
   }
 
-  for (const auto &node : g->getMutableNodes()) {
+  for (const auto& node : g->getMutableNodes()) {
     if (node == source) {
       continue;
     }
@@ -108,7 +119,8 @@ dominatorTree(G *g, typename G::NodeRef source = nullptr) {
   nextPass.insert(source);
 
   while (nextPass.size()) {
-    for (auto parent : nextPass) {
+    for (auto parent_iter = nextPass.begin(); parent_iter != nextPass.end(); ) {
+      auto parent = *parent_iter;
       for (auto child : dominatorMap[parent]) {
         while (mapToTreeNode[child]->getInEdges().size()) {
           tree.deleteEdge(mapToTreeNode[child]->getInEdges().front());
@@ -118,7 +130,7 @@ dominatorTree(G *g, typename G::NodeRef source = nullptr) {
           nextPass.insert(child);
         }
       }
-      nextPass.erase(parent);
+      nextPass.erase(parent_iter++);
     }
   }
 
@@ -128,12 +140,14 @@ dominatorTree(G *g, typename G::NodeRef source = nullptr) {
 /// \brief Map all nodes in the graph to their immediate dominators.
 template <typename G>
 std::unordered_map<typename G::NodeRef, typename G::NodeRef>
-immediateDominatorMap(G *g, typename G::NodeRef source = nullptr) {
+immediateDominatorMap(G* g, typename G::NodeRef source = nullptr) {
   std::unordered_map<typename G::NodeRef, typename G::NodeRef> idomMap;
   auto idomTree = dominatorTree(g, source);
   for (auto node : idomTree.getMutableNodes()) {
     // Sanity check, really should never happen.
-    assert(node->getInEdges().size() <= 1 && "Invalid dominator tree generated from graph, cannot determing idom map.");
+    assert(
+        node->getInEdges().size() <= 1 &&
+        "Invalid dominator tree generated from graph, cannot determing idom map.");
     // In degenerate cases, or for the root node, we self dominate.
     if (node->getInEdges().size() == 0) {
       idomMap[node->data()] = node->data();
@@ -151,11 +165,16 @@ immediateDominatorMap(G *g, typename G::NodeRef source = nullptr) {
 /// location for the insertion of phi nodes in SSA representation.
 template <typename G>
 std::unordered_map<typename G::NodeRef, std::unordered_set<typename G::NodeRef>>
-dominanceFrontierMap(G *g, typename G::NodeRef source = nullptr) {
+dominanceFrontierMap(G* g, typename G::NodeRef source = nullptr) {
   auto idomMap = immediateDominatorMap(g, source);
-  std::unordered_map<typename G::NodeRef, std::unordered_set<typename G::NodeRef>> domFrontierMap;
+  std::unordered_map<
+      typename G::NodeRef,
+      std::unordered_set<typename G::NodeRef>>
+      domFrontierMap;
   for (const auto node : g->getMutableNodes()) {
-    if (node->getInEdges().size() < 2) { continue; }
+    if (node->getInEdges().size() < 2) {
+      continue;
+    }
     for (auto inEdge : node->getInEdges()) {
       auto predecessor = inEdge->tail();
       // This variable will track all the way up the dominator tree.

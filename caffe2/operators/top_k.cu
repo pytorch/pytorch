@@ -68,7 +68,7 @@ void RunRadixSelectionImpl(
     thrust::sort_by_key(
         thrust::cuda::par.on(context->cuda_stream()),
         values + i * k,
-        values + i * k + k,
+        values + i * k + (k <= inner_size ? k : inner_size),
         indices + i * k,
         thrust::greater<T>());
   }
@@ -107,6 +107,9 @@ __global__ void FlattenIndicesCUDAKernel(
     const int k,
     TIndex* dst) {
   CUDA_1D_KERNEL_LOOP(i, size) {
+    if (src[i] < 0) {
+      continue;
+    }
     const TIndex x = i / stride / k;
     const TIndex y = i % stride;
 #if __CUDA_ARCH__ >= 350
@@ -127,6 +130,9 @@ __global__ void SetTopKGradientCUDAKernel(
     const int k,
     T* dst) {
   CUDA_1D_KERNEL_LOOP(i, size) {
+    if (indices[i] < 0) {
+      continue;
+    }
     const TIndex x = i / stride / k;
     const TIndex y = i % stride;
 #if __CUDA_ARCH__ >= 350
@@ -139,19 +145,19 @@ __global__ void SetTopKGradientCUDAKernel(
 
 } // namespace
 
-template <typename T>
-class TopKOp<T, CUDAContext> : public Operator<CUDAContext> {
+template <typename T, typename Context>
+class TopKCudaOp : public Operator<Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
+  USE_OPERATOR_FUNCTIONS(Context);
 
-  TopKOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  TopKCudaOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         OP_SINGLE_ARG(int, "k", k_, -1),
         OP_SINGLE_ARG(int, "axis", axis_, -1) {
     CAFFE_ENFORCE(k_ >= 1, "k argument must be >= 1");
   }
 
-  ~TopKOp(){};
+  ~TopKCudaOp(){};
 
   bool RunOnDevice() override;
 
@@ -160,22 +166,22 @@ class TopKOp<T, CUDAContext> : public Operator<CUDAContext> {
   int axis_;
 
   // Buffers for CUDAContext.
-  TensorCUDA input_transposed_buffer_;
-  TensorCUDA values_transposed_buffer_;
-  TensorCUDA indices_transposed_buffer_;
+  Tensor<Context> input_transposed_buffer_;
+  Tensor<Context> values_transposed_buffer_;
+  Tensor<Context> indices_transposed_buffer_;
 
   // Shape tensors on device for CUDAContext.
-  TensorCUDA input_dims_device_;
-  TensorCUDA input_transposed_dims_device_;
-  TensorCUDA input_axes_device_;
+  Tensor<Context> input_dims_device_;
+  Tensor<Context> input_transposed_dims_device_;
+  Tensor<Context> input_axes_device_;
 
-  TensorCUDA output_dims_device_;
-  TensorCUDA output_transposed_dims_device_;
-  TensorCUDA output_transposed_axes_device_;
+  Tensor<Context> output_dims_device_;
+  Tensor<Context> output_transposed_dims_device_;
+  Tensor<Context> output_transposed_axes_device_;
 };
 
-template <typename T>
-bool TopKOp<T, CUDAContext>::RunOnDevice() {
+template <typename T, typename Context>
+bool TopKCudaOp<T, Context>::RunOnDevice() {
   const auto& input = Input(0);
   auto* values = Output(0);
   auto* indices = Output(1);
@@ -187,10 +193,6 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
   }
   CAFFE_ENFORCE_GE(axis_, 0);
   CAFFE_ENFORCE_LT(axis_, input_dims.size());
-  CAFFE_ENFORCE_LE(
-      k_,
-      input_dims[axis_],
-      "k argument should not be greater than the axis dim.");
 
   const bool need_transpose = axis_ < input_dims.size() - 1;
   std::vector<TIndex> output_dims = input_dims;
@@ -221,30 +223,35 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
       : flatten_indices->template mutable_data<TIndex>();
 
   if (need_transpose) {
-    const std::array<int, 3> X_dims = {static_cast<int>(prev_size),
-                                       static_cast<int>(inner_size),
-                                       static_cast<int>(next_size)};
-    const std::array<int, 3> Y_dims = {static_cast<int>(prev_size),
-                                       static_cast<int>(next_size),
-                                       static_cast<int>(inner_size)};
+    const std::array<int, 3> dims = {static_cast<int>(prev_size),
+                                     static_cast<int>(inner_size),
+                                     static_cast<int>(next_size)};
     const std::array<int, 3> axes = {0, 2, 1};
     input_transposed_buffer_.Resize(
         std::vector<TIndex>{outer_size, inner_size});
     values_transposed_buffer_.Resize(std::vector<TIndex>{outer_size, k_});
     indices_transposed_buffer_.Resize(std::vector<TIndex>{outer_size, k_});
     math::Transpose(
-        input.size(),
         3,
-        X_dims.data(),
-        Y_dims.data(),
+        dims.data(),
         axes.data(),
         input.template data<T>(),
-        input_transposed_buffer_.mutable_data<T>(),
+        input_transposed_buffer_.template mutable_data<T>(),
         &context_);
-    input_data = input_transposed_buffer_.data<T>();
-    values_data = values_transposed_buffer_.mutable_data<T>();
-    indices_data = indices_transposed_buffer_.mutable_data<TIndex>();
+    input_data = input_transposed_buffer_.template data<T>();
+    values_data = values_transposed_buffer_.template mutable_data<T>();
+    indices_data = indices_transposed_buffer_.template mutable_data<TIndex>();
   }
+
+  // init values as the default value
+  math::Set<T, CUDAContext>(values->size(), T(0), values_data, &context_);
+  math::Set<TIndex, CUDAContext>(
+      indices->size(), TIndex(-1), indices_data, &context_);
+  if (flatten_indices_data != nullptr) {
+    math::Set<TIndex, CUDAContext>(
+        flatten_indices->size(), TIndex(-1), flatten_indices_data, &context_);
+  }
+
   RunTopKOnLastDimCUDAImpl<T>(
       input_data,
       outer_size,
@@ -254,27 +261,21 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
       indices_data,
       &context_);
   if (need_transpose) {
-    const std::array<int, 3> X_dims = {
-        static_cast<int>(prev_size), k_, static_cast<int>(next_size)};
-    const std::array<int, 3> Y_dims = {
+    const std::array<int, 3> dims = {
         static_cast<int>(prev_size), static_cast<int>(next_size), k_};
     const std::array<int, 3> axes = {0, 2, 1};
     math::Transpose(
-        values_transposed_buffer_.size(),
         3,
-        Y_dims.data(),
-        X_dims.data(),
+        dims.data(),
         axes.data(),
-        values_transposed_buffer_.data<T>(),
+        values_transposed_buffer_.template data<T>(),
         values->template mutable_data<T>(),
         &context_);
     math::Transpose(
-        indices_transposed_buffer_.size(),
         3,
-        Y_dims.data(),
-        X_dims.data(),
+        dims.data(),
         axes.data(),
-        indices_transposed_buffer_.data<TIndex>(),
+        indices_transposed_buffer_.template data<TIndex>(),
         indices->template mutable_data<TIndex>(),
         &context_);
   }
@@ -296,18 +297,18 @@ bool TopKOp<T, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(TopK, TopKOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(TopK, TopKCudaOp<float, CUDAContext>);
 
-template <typename T>
-class TopKGradientOp<T, CUDAContext> : public Operator<CUDAContext> {
+template <typename T, typename Context>
+class TopKGradientCudaOp : public Operator<Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
+  USE_OPERATOR_FUNCTIONS(Context);
 
-  TopKGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  TopKGradientCudaOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         OP_SINGLE_ARG(int, "axis", axis_, -1) {}
 
-  ~TopKGradientOp(){};
+  ~TopKGradientCudaOp(){};
 
   bool RunOnDevice() override;
 
@@ -315,8 +316,8 @@ class TopKGradientOp<T, CUDAContext> : public Operator<CUDAContext> {
   int axis_;
 };
 
-template <typename T>
-bool TopKGradientOp<T, CUDAContext>::RunOnDevice() {
+template <typename T, typename Context>
+bool TopKGradientCudaOp<T, Context>::RunOnDevice() {
   const auto& values = Input(0);
   const auto& indices = Input(1);
   const auto& original_input = Input(2);
@@ -330,7 +331,7 @@ bool TopKGradientOp<T, CUDAContext>::RunOnDevice() {
     axis_ = values_dims.size() - 1;
   }
   const int k = values_dims[axis_];
-  math::Set<T, CUDAContext>(output->size(), T(0), output_data, &context_);
+  math::Set<T, Context>(output->size(), T(0), output_data, &context_);
   const TIndex stride = std::accumulate(
       values_dims.cbegin() + axis_ + 1,
       values_dims.cend(),
@@ -351,6 +352,6 @@ bool TopKGradientOp<T, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(TopKGradient, TopKGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(TopKGradient, TopKGradientCudaOp<float, CUDAContext>);
 
 } // namespace caffe2

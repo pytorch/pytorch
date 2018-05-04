@@ -65,7 +65,7 @@ THTensor *THSTensor_(newValues)(const THSTensor *self) {
 /*** Helper methods ***/
 static void THSTensor_(rawInit)(THSTensor *self)
 {
-  self->refcount = 1;
+  new (&self->refcount) std::atomic<int>(1);
   self->size = NULL;
   self->indices = THLongTensor_new();
   self->values = THTensor_(new)();
@@ -121,6 +121,15 @@ THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *va
     self, THLongTensor_newClone(indices), THTensor_(newClone)(values));
 }
 
+static inline THSTensor* THSTensor_(_newWithDimsAndTensor)(int64_t nDimI, int64_t nDimV, int64_t *sizes, THLongTensor *indices, THTensor *values) {
+  THSTensor *self = THSTensor_(new)();
+  THSTensor_(rawResize)(self, nDimI, nDimV, sizes);
+
+  // NB: by default, we do NOT clone indices/values into the sparse tensor.
+  // Efficient API by default!
+  THSTensor_(_move)(self, THLongTensor_newWithTensor(indices), THTensor_(newWithTensor)(values));
+  return self;
+}
 
 /*** end helper methods ***/
 
@@ -135,128 +144,121 @@ THSTensor *THSTensor_(new)(void)
 /* Pointer-copy init */
 THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values)
 {
-  return THSTensor_(newWithTensorAndSize)(indices, values, NULL);
+  // If sizes are not given, it is inferred as max index of each dim.
+  int64_t nDimI = THLongTensor_size(indices, 0);
+  int64_t nDimV = THTensor_(nDimension)(values) - 1;
+
+  THLongTensor *ignore = THLongTensor_new();
+  THLongTensor *computed_indices_sizes = THLongTensor_new();
+  THLongTensor *computed_sizes = THLongTensor_newWithSize1d(nDimI + nDimV);
+  THLongTensor_max(computed_indices_sizes, ignore, indices, 1, 1);
+  THLongTensor_add(computed_indices_sizes, computed_indices_sizes, 1);
+  for (int d = 0; d < nDimI; d++) {
+      THTensor_fastSet1d(computed_sizes, d, THTensor_fastGet1d(computed_indices_sizes, d));
+  }
+  for (int d = 0; d < nDimV; d++) {
+      THTensor_fastSet1d(computed_sizes, nDimI + d, THTensor_(size)(values, d + 1));
+  }
+
+  THSTensor *self = THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, THLongTensor_data(computed_sizes), indices, values);
+  THLongTensor_free(computed_indices_sizes);
+  THLongTensor_free(computed_sizes);
+  THLongTensor_free(ignore);
+  return self;
+}
+
+THSTensor *THSTensor_(newWithTensorAndSizeUnsafe)(THLongTensor *indices, THTensor *values, THLongStorage *sizes)
+{
+  if (sizes == NULL)
+  {
+    return THSTensor_(newWithTensor)(indices, values);
+  }
+  if (THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0)
+  {
+    return THSTensor_(newWithSize)(sizes, NULL);
+  }
+
+  int64_t nDimI = THLongTensor_size(indices, 0);
+  int64_t nDimV = THTensor_(nDimension)(values) - 1;
+
+  return THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, THLongStorage_data(sizes), indices, values);
 }
 
 THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongStorage *sizes)
-{  // If sizes are not given, it is inferred as max index of each dim.
-  int64_t nDimI, nDimV;
-  THLongTensor *ignore;
-
-  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
-  THSTensor_(rawInit)(self);
-
-  // TODO: we may need to special case when only one of these are empty.
-  if (THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0 && sizes != NULL) {
-    nDimI = THLongStorage_size(sizes);
-    nDimV = 0;
-  } else {
-    nDimI = THLongTensor_size(indices, 0);
-    nDimV = THTensor_(nDimension)(values) - 1;
+{
+  if (sizes == NULL)
+  {
+    return THSTensor_(newWithTensor)(indices, values);
   }
-  if (!sizes) {
-    ignore = THLongTensor_new();
-    THLongTensor *computed_indices_sizes = THLongTensor_new();
-    THLongTensor *computed_sizes = THLongTensor_newWithSize1d(nDimI + nDimV);
-    THLongTensor_max(computed_indices_sizes, ignore, indices, 1, 1);
-    THLongTensor_add(computed_indices_sizes, computed_indices_sizes, 1);
-    for (int d = 0; d < nDimI; d++) {
-        THTensor_fastSet1d(computed_sizes, d, THTensor_fastGet1d(computed_indices_sizes, d));
-    }
-    for (int d = 0; d < nDimV; d++) {
-        THTensor_fastSet1d(computed_sizes, nDimI + d, THTensor_(size)(values, d + 1));
-    }
-    THSTensor_(rawResize)(self, nDimI, nDimV, THLongTensor_data(computed_sizes));
-    THLongTensor_free(computed_indices_sizes);
-    THLongTensor_free(computed_sizes);
-    THLongTensor_free(ignore);
+  if (THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0)
+  {
+    return THSTensor_(newWithSize)(sizes, NULL);
   }
-  else {
-    THArgCheck(THLongStorage_size(sizes) == nDimI + nDimV, 2,
-        "number of dimensions must be nDimI + nDimV");
 
-    // TODO: we may need to special case when only one of these are empty.
-    if (!(THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0 && sizes != NULL)) {
-      THLongTensor *max_indices = THLongTensor_new();
-      ignore = THLongTensor_new();
-      THLongTensor_max(max_indices, ignore, indices, 1, 0);
-      THLongTensor_free(ignore);
-      for (int d = 0; d < nDimI; d++) {
-        int64_t max_index_in_dim = THTensor_fastGet1d(max_indices, d);
-        int64_t dim_size = sizes->data[d];
-        THArgCheck(max_index_in_dim <= dim_size, 2,
-            "sizes is inconsistent with indices: for dim %d, size is %lld but found index %lld",
-            d, (long long)dim_size, (long long)max_index_in_dim);
-      }
-      for (int d = 0; d < nDimV; d++) {
-        int64_t values_size = THTensor_(size)(values, d + 1);
-        int64_t specified_size = sizes->data[nDimI + d];
-        THArgCheck(values_size <= specified_size, 2,
-            "values and sizes are inconsistent: sizes[%d] is %lld but values.size(%d) is %lld",
-            d + nDimI, (long long)specified_size, d + 1, (long long)values_size);
-      }
-      THLongTensor_free(max_indices);
-    }
+  int64_t nDimI = THLongTensor_size(indices, 0);
+  int64_t nDimV = THTensor_(nDimension)(values) - 1;
+  THArgCheck(THLongStorage_size(sizes) == nDimI + nDimV, 2,
+      "number of dimensions must be nDimI + nDimV");
 
-    THSTensor_(rawResize)(self, nDimI, nDimV, THLongStorage_data(sizes));
+  THLongTensor *max_indices = THLongTensor_new();
+  THLongTensor *ignore = THLongTensor_new();
+  THLongTensor_max(max_indices, ignore, indices, 1, 0);
+  THLongTensor_free(ignore);
+  for (int d = 0; d < nDimI; d++) {
+    int64_t max_index_in_dim = THTensor_fastGet1d(max_indices, d);
+    int64_t dim_size = sizes->data[d];
+    THArgCheck(max_index_in_dim < dim_size, 2,
+        "sizes is inconsistent with indices: for dim %d, size is %lld but found index %lld",
+        d, (long long)dim_size, (long long)max_index_in_dim);
   }
-  // NB: by default, we do NOT clone indices/values into the sparse tensor.
-  // Efficient API by default!
-  THSTensor_(_move)(self, THLongTensor_newWithTensor(indices), THTensor_(newWithTensor)(values));
+  for (int d = 0; d < nDimV; d++) {
+    int64_t values_size = THTensor_(size)(values, d + 1);
+    int64_t specified_size = sizes->data[nDimI + d];
+    THArgCheck(values_size <= specified_size, 2,
+        "values and sizes are inconsistent: sizes[%d] is %lld but values.size(%d) is %lld",
+        d + nDimI, (long long)specified_size, d + 1, (long long)values_size);
+  }
+  THLongTensor_free(max_indices);
 
-  return self;
+  return THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, THLongStorage_data(sizes), indices, values);
 }
 
 THSTensor *THSTensor_(newWithSize)(THLongStorage *size, THLongStorage *_ignored)
 {
-  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
-  THSTensor_(rawInit)(self);
+  THSTensor *self = THSTensor_(new)();
   THSTensor_(rawResize)(self, size->size, 0, size->data);
-
   return self;
 }
 
 THSTensor *THSTensor_(newWithSize1d)(int64_t size0)
 {
   int64_t size[1] = {size0};
-
-  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
-  THSTensor_(rawInit)(self);
+  THSTensor *self = THSTensor_(new)();
   THSTensor_(rawResize)(self, 1, 0, size);
-
   return self;
 }
 
 THSTensor *THSTensor_(newWithSize2d)(int64_t size0, int64_t size1)
 {
   int64_t size[2] = {size0, size1};
-
-  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
-  THSTensor_(rawInit)(self);
+  THSTensor *self = THSTensor_(new)();
   THSTensor_(rawResize)(self, 2, 0, size);
-
   return self;
 }
 
 THSTensor *THSTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2)
 {
   int64_t size[3] = {size0, size1, size2};
-
-  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
-  THSTensor_(rawInit)(self);
+  THSTensor *self = THSTensor_(new)();
   THSTensor_(rawResize)(self, 3, 0, size);
-
   return self;
 }
 
 THSTensor *THSTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
   int64_t size[4] = {size0, size1, size2, size3};
-
-  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
-  THSTensor_(rawInit)(self);
+  THSTensor *self = THSTensor_(new)();
   THSTensor_(rawResize)(self, 4, 0, size);
-
   return self;
 }
 
@@ -545,18 +547,19 @@ void THSTensor_(free)(THSTensor *self)
 {
   if(!self)
     return;
-  if(THAtomicDecrementRef(&self->refcount))
+  if(--self->refcount == 0)
   {
     THFree(self->size);
     THLongTensor_free(self->indices);
     THTensor_(free)(self->values);
+    self->refcount.~atomic<int>();
     THFree(self);
   }
 }
 
 void THSTensor_(retain)(THSTensor *self)
 {
-  THAtomicIncrementRef(&self->refcount);
+  self->refcount++;
 }
 
 #endif

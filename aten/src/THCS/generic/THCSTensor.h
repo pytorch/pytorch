@@ -2,22 +2,7 @@
 #define THCS_GENERIC_FILE "generic/THCSTensor.h"
 #else
 
-typedef struct THCSTensor
-{  // Stored in COO format, indices + values
-    int64_t *size;
-    ptrdiff_t nnz;
-    int nDimensionI; // dimension of indices
-    int nDimensionV; // dimension of values
-
-    // 2-D tensor of nDim x nnz of indices. May have nnz dim bigger than nnz
-    // as buffer, so we keep track of both
-    THCIndexTensor *indices;
-    THCTensor *values;
-    // Some math operations can only be performed on ordered sparse tensors
-    int coalesced;
-    int refcount;
-
-} THCSTensor;
+typedef struct THCSTensor THCSTensor;
 
 /**** access methods ****/
 TH_API int THCSTensor_(nDimension)(THCState *state, const THCSTensor *self);
@@ -32,6 +17,7 @@ TH_API THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self
 /**** creation methods ****/
 TH_API THCSTensor *THCSTensor_(new)(THCState *state);
 TH_API THCSTensor *THCSTensor_(newWithTensor)(THCState *state, THCIndexTensor *indices, THCTensor *values);
+TH_API THCSTensor *THCSTensor_(newWithTensorAndSizeUnsafe)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes);
 TH_API THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes);
 
 TH_API THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size_, THLongStorage *_ignored);

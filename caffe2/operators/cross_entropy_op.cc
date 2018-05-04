@@ -24,6 +24,16 @@ inline float sigmoid_xent_forward_with_log_d_trick(float lgt, float tgt) {
 inline float sigmoid_xent_backward_with_log_d_trick(float lgt, float tgt) {
   return (2 * tgt - 1.) / (1. + exp(lgt));
 }
+
+inline float unjoined_sigmoid_xent_forward(float lgt, float tgt) {
+  return lgt * tgt + (tgt - 1) * lgt * (lgt >= 0) -
+      (1 - tgt) * log(1 + exp(lgt - 2 * lgt * (lgt >= 0)));
+}
+
+inline float unjoined_sigmoid_xent_backward(float lgt, float tgt) {
+  return tgt - (1. - tgt) / (1. + exp(-lgt));
+}
+
 } // namespace
 
 template <>
@@ -83,11 +93,16 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < outer_size; ++i) {
     float value = 0;
     for (int j = 0; j < inner_size; ++j) {
-      value +=
-          (log_D_trick_
-               ? sigmoid_xent_forward_with_log_d_trick(
-                     logits_ptr[in_idx], targets_ptr[in_idx])
-               : sigmoid_xent_forward(logits_ptr[in_idx], targets_ptr[in_idx]));
+      if (unjoined_lr_loss_) {
+        value += unjoined_sigmoid_xent_forward(
+            logits_ptr[in_idx], targets_ptr[in_idx]);
+      } else {
+        value +=
+            (log_D_trick_ ? sigmoid_xent_forward_with_log_d_trick(
+                                logits_ptr[in_idx], targets_ptr[in_idx])
+                          : sigmoid_xent_forward(
+                                logits_ptr[in_idx], targets_ptr[in_idx]));
+      }
       ++in_idx;
     }
     out_ptr[i] = -value / inner_size;
@@ -117,11 +132,17 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < outer_size; ++i) {
     auto g_factor = -g_ptr[i] / inner_size;
     for (int j = 0; j < inner_size; ++j) {
-      out_ptr[in_idx] = g_factor *
-          (log_D_trick_ ? sigmoid_xent_backward_with_log_d_trick(
-                              logits_ptr[in_idx], targets_ptr[in_idx])
-                        : sigmoid_xent_backward(
-                              logits_ptr[in_idx], targets_ptr[in_idx]));
+      if (unjoined_lr_loss_) {
+        out_ptr[in_idx] = g_factor *
+            unjoined_sigmoid_xent_backward(
+                              logits_ptr[in_idx], targets_ptr[in_idx]);
+      } else {
+        out_ptr[in_idx] = g_factor *
+            (log_D_trick_ ? sigmoid_xent_backward_with_log_d_trick(
+                                logits_ptr[in_idx], targets_ptr[in_idx])
+                          : sigmoid_xent_backward(
+                                logits_ptr[in_idx], targets_ptr[in_idx]));
+      }
       ++in_idx;
     }
   }
@@ -437,6 +458,11 @@ OPERATOR_SCHEMA(SigmoidCrossEntropyWithLogits)
 default is false; if enabled, will use the log d trick to avoid the vanishing
 gradients early on; see Goodfellow et. al (2014)
 )DOC")
+    .Arg("unjoined_lr_loss", R"DOC(
+default is false; if enabled, the model will be allowed to train on an unjoined
+dataset, where some examples might be false negative and might appear
+in the dataset later as (true) positive example.
+)DOC")
     .NumInputs(2)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
@@ -489,14 +515,11 @@ REGISTER_GRADIENT(MakeTwoClass, GetMakeTwoClassGradient);
 struct GetSigmoidCrossEntropyWithLogitsGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    ArgumentHelper argsHelper(def_);
-    auto log_D_trick = argsHelper.GetSingleArgument<bool>("log_D_trick", false);
     return SingleGradientDef(
         "SigmoidCrossEntropyWithLogitsGradient",
         "",
         vector<string>{GO(0), I(0), I(1)},
-        vector<string>{GI(0)},
-        vector<Argument>{MakeArgument<bool>("log_D_trick", log_D_trick)});
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(

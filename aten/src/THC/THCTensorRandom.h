@@ -6,14 +6,7 @@
 #include "generic/THCTensorRandom.h"
 #include "THCGenerateAllTypes.h"
 
-/* Generator */
-typedef struct _Generator {
-  struct curandStateMtgp32* gen_states;
-  struct mtgp32_kernel_params *kernel_params;
-  int initf;
-  uint64_t initial_seed;
-  int64_t philox_seed_offset;
-} THCGenerator;
+typedef struct THCGenerator THCGenerator;
 
 typedef struct THCRNGState {
   /* One generator per GPU */

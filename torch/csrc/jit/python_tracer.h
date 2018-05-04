@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <memory>
 #include "torch/csrc/jit/tracer.h"
 

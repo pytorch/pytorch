@@ -71,6 +71,13 @@ OPERATOR_SCHEMA(Print)
         "(bool) if 1, saves contents to the root folder of the current "
         "workspace, appending the tensor contents to a file named after "
         "the blob name. Otherwise, logs to stderr.")
+    .Arg(
+        "limit",
+        "(int, default 0) If set, prints the first `limit` elements of tensor. "
+        "If 0, prints the first `k_limit_default`(1000) elements of tensor")
+    .Arg(
+        "every_n",
+        "(int, default 1) Print tensor every `every_n` runs")
     .Input(0, "tensor", "The tensor to print.");
 
 OPERATOR_SCHEMA(LengthsToShape).NumInputs(1).NumOutputs(1);

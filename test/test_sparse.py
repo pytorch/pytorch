@@ -869,6 +869,19 @@ class TestSparse(TestCase):
                             self.assertEqual(device, sparse_tensor._values().device)
                         self.assertEqual(True, sparse_tensor.requires_grad)
 
+    def test_factory_size_check(self):
+        indices = self.IndexTensor([[1, 2], [0, 2]])
+        values = self.ValueTensor([.5, .5])
+        sizes = torch.Size([2, 3])
+        with self.assertRaisesRegex(RuntimeError, "sizes is inconsistent with indices"):
+            self.SparseTensor(indices, values, sizes)
+
+        indices = self.IndexTensor([[1, 2], [0, 2]])
+        values = self.ValueTensor([[1, 1, 1], [1, 1, 1]])
+        sizes = torch.Size([3, 3, 2])
+        with self.assertRaisesRegex(RuntimeError, "values and sizes are inconsistent"):
+            self.SparseTensor(indices, values, sizes)
+
     @cpu_only
     def test_factory_type_inference(self):
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=torch.float32))
@@ -877,6 +890,19 @@ class TestSparse(TestCase):
         self.assertEqual(torch.float64, t.dtype)
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1]))
         self.assertEqual(torch.int64, t.dtype)
+
+    @cuda_only
+    def test_factory_device_type_inference(self):
+        # both indices/values are CUDA
+        shape = (1, 3)
+        for indices_device in ['cuda', 'cpu']:
+            for values_device in ['cuda', 'cpu']:
+                for sparse_device in ['cuda', 'cpu', None]:
+                    t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
+                                                torch.tensor([1.], device=values_device),
+                                                (1, 3), device=sparse_device)
+                    should_be_cuda = sparse_device == 'cuda' or (sparse_device is None and values_device == 'cuda')
+                    self.assertEqual(should_be_cuda, t.is_cuda)
 
     @cpu_only
     def test_factory_copy(self):

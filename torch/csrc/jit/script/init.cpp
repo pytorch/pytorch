@@ -15,12 +15,6 @@ using ResolutionCallback = std::function<py::function(std::string)>;
 #define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
-static void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what) {
-  if(expected != actual) {
-    throw ErrorReport(loc) << "expected " << expected << " " << what << " but found " << actual;
-  }
-}
-
 static std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
@@ -30,7 +24,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   : self(std::move(self)) {}
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_binders) override {
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+    ensureTensors(loc, inputs);
+
     if (attributes.size() > 0)
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
     Graph& g = *m.graph();
@@ -47,7 +43,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     py::object func = self;
     std::string cconv(inputs.size(), 't');
     Node* new_node = g.insertNode(g.createPythonOp(
-      THPObjectPtr(func.release().ptr()), cconv, false, {}, {}, false));
+      THPObjectPtr(func.release().ptr()), cconv, {}, {}, false));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for(auto i : inputs)
       new_node->addInput(i);
@@ -126,7 +122,7 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     // while ...
     //   f = f + 1
     if(py::isinstance<py::int_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kInt).scalarTensor(py::cast<int32_t>(self)));
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(py::cast<int64_t>(self)));
     } else if(py::isinstance<py::float_>(self)) {
       return createConstant(loc, m, at::CPU(at::kFloat).scalarTensor(py::cast<float>(self)));
     } else if(py::isinstance<py::bool_>(self)) {
@@ -168,13 +164,11 @@ struct MethodValue : public SugaredValue {
   std::string kind() const override {
     return "method";
   }
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_binders) override {
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     if(attributes.size() != 0) {
       throw ErrorReport(loc) << "not yet implemented - calls to script methods using keyword arguments";
     }
-    ensureSizeMatches(loc, method.num_inputs(), inputs.size(), "inputs");
-    auto outputs = caller.emit_call_to(method, inputs);
-    return packOutputs(*caller.graph(), outputs);
+    return packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs));
   }
 private:
   std::shared_ptr<Module> module;
@@ -216,7 +210,7 @@ struct ModuleValue : public SugaredValue {
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
   // call module.forward
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_binders) override {
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 
@@ -298,11 +292,15 @@ void initJitScriptBindings(PyObject* module) {
             auto self = has_self ? std::make_shared<ModuleValue>(m.shared_from_this()) : nullptr;
             return defineMethodsInModule(m, script, pythonResolver(rcb), self);
           })
-      .def("_create_method", [](Module& m, Def def, ResolutionCallback rcb) {
+      .def("_create_methods", [](Module& m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
+        std::vector<Resolver> resolvers;
+        for(auto & callback : rcbs) {
+          resolvers.push_back(pythonResolver(callback));
+        }
         defineMethodsInModule(
           m,
-          { def },
-          pythonResolver(rcb),
+          defs,
+          resolvers,
           std::make_shared<ModuleValue>(m.shared_from_this()));
       })
       .def("_get_method",
@@ -385,7 +383,13 @@ void initJitScriptBindings(PyObject* module) {
       auto inputs = createVariableTensorList(args);
       auto outputs = m.run(std::move(inputs));
       return unpackVariableTensorList(std::move(outputs));
-    });
+    })
+    .def_property_readonly("graph", [](Method& m) {
+      return m.graph();
+    })
+    .def("propagate_shapes", &Method::propagate_shapes)
+    .def("propagate_and_assign_input_and_output_shapes", &Method::propagate_and_assign_input_and_output_shapes)
+    .def("params", &Method::params);
 
   m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
     return compileFunction(def, pythonResolver(rcb));

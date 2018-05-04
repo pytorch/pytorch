@@ -71,6 +71,11 @@ class Tags(object):
     # override schema for predictors.
     PREDICTION_SCHEMA = 'prediction_schema'
 
+    # This is to mark layers in the feature transform process.
+    FEATURE_TRANSFORM = 'feature_transform'
+    # This is to mark the output layers in the feature transform process
+    FEATURE_TRANSFORM_SCHEMA = 'feature_transform_schema'
+
     def __init__(self, tags):
         if not isinstance(tags, list):
             tags = [tags]

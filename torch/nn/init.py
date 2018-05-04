@@ -57,7 +57,7 @@ def uniform_(tensor, a=0, b=1):
         b: the upper bound of the uniform distribution
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
+        >>> w = torch.empty(3, 5)
         >>> nn.init.uniform_(w)
     """
     with torch.no_grad():
@@ -74,7 +74,7 @@ def normal_(tensor, mean=0, std=1):
         std: the standard deviation of the normal distribution
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
+        >>> w = torch.empty(3, 5)
         >>> nn.init.normal_(w)
     """
     with torch.no_grad():
@@ -89,7 +89,7 @@ def constant_(tensor, val):
         val: the value to fill the tensor with
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
+        >>> w = torch.empty(3, 5)
         >>> nn.init.constant_(w, 0.3)
     """
     with torch.no_grad():
@@ -105,7 +105,7 @@ def eye_(tensor):
         tensor: a 2-dimensional `torch.Tensor`
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
+        >>> w = torch.empty(3, 5)
         >>> nn.init.eye_(w)
     """
     if tensor.ndimension() != 2:
@@ -125,7 +125,7 @@ def dirac_(tensor):
         tensor: a {3, 4, 5}-dimensional `torch.Tensor`
 
     Examples:
-        >>> w = torch.Tensor(3, 16, 5, 5)
+        >>> w = torch.empty(3, 16, 5, 5)
         >>> nn.init.dirac_(w)
     """
     dimensions = tensor.ndimension()
@@ -184,7 +184,7 @@ def xavier_uniform_(tensor, gain=1):
         gain: an optional scaling factor
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
+        >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain('relu'))
     """
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
@@ -211,7 +211,7 @@ def xavier_normal_(tensor, gain=1):
         gain: an optional scaling factor
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
+        >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_normal_(w)
     """
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
@@ -230,7 +230,7 @@ def _calculate_correct_fan(tensor, mode):
     return fan_in if mode == 'fan_in' else fan_out
 
 
-def kaiming_uniform_(tensor, a=0, mode='fan_in'):
+def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     r"""Fills the input `Tensor` with values according to the method
     described in "Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification" - He, K. et al. (2015), using a
@@ -250,20 +250,22 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in'):
             preserves the magnitude of the variance of the weights in the
             forward pass. Choosing `fan_out` preserves the magnitudes in the
             backwards pass.
+        nonlinearity: the non-linear function (`nn.functional` name),
+            recommended to use only with 'relu' or 'leaky_relu' (default).
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.kaiming_uniform_(w, mode='fan_in')
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
     """
     fan = _calculate_correct_fan(tensor, mode)
-    gain = calculate_gain('leaky_relu', a)
+    gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
     with torch.no_grad():
         return tensor.uniform_(-bound, bound)
 
 
-def kaiming_normal_(tensor, a=0, mode='fan_in'):
+def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     r"""Fills the input `Tensor` with values according to the method
     described in "Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification" - He, K. et al. (2015), using a
@@ -283,13 +285,15 @@ def kaiming_normal_(tensor, a=0, mode='fan_in'):
             preserves the magnitude of the variance of the weights in the
             forward pass. Choosing `fan_out` preserves the magnitudes in the
             backwards pass.
+        nonlinearity: the non-linear function (`nn.functional` name),
+            recommended to use only with 'relu' or 'leaky_relu' (default).
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.kaiming_normal_(w, mode='fan_out')
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.kaiming_normal_(w, mode='fan_out', nonlinearity='relu')
     """
     fan = _calculate_correct_fan(tensor, mode)
-    gain = calculate_gain('leaky_relu', a)
+    gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     with torch.no_grad():
         return tensor.normal_(0, std)
@@ -307,7 +311,7 @@ def orthogonal_(tensor, gain=1):
         gain: optional scaling factor
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
+        >>> w = torch.empty(3, 5)
         >>> nn.init.orthogonal_(w)
     """
     if tensor.ndimension() < 2:
@@ -349,24 +353,21 @@ def sparse_(tensor, sparsity, std=0.01):
             the non-zero values
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
+        >>> w = torch.empty(3, 5)
         >>> nn.init.sparse_(w, sparsity=0.1)
     """
     if tensor.ndimension() != 2:
         raise ValueError("Only tensors with 2 dimensions are supported")
 
     rows, cols = tensor.shape
-    num_zeros = int(math.ceil(rows * sparsity))
+    num_zeros = int(math.ceil(sparsity * rows))
 
     with torch.no_grad():
         tensor.normal_(0, std)
         for col_idx in range(cols):
-            row_indices = list(range(rows))
-            random.shuffle(row_indices)
+            row_indices = torch.randperm(rows)
             zero_indices = row_indices[:num_zeros]
-            for row_idx in zero_indices:
-                tensor[row_idx, col_idx] = 0
-
+            tensor[zero_indices, col_idx] = 0
     return tensor
 
 

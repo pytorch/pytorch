@@ -373,10 +373,10 @@ VideoInputOp<Context>::VideoInputOp(
   // want to change them if you are running on a different dataset;
 
   // 7 channels: (flow_x, flow_y, flow_magitude, gray, Red, Green, Blue)
-  // const std::vector<float> InputDataMean =
-  //     {0.0046635, 0.0046261, 0.963986, 102.976, 110.201, 100.64, 95.9966};
-  // const std::vector<float> InputDataStd =
-  //     {0.972347, 0.755146, 1.43588, 55.3691, 58.1489, 56.4701, 55.3324};
+  const std::vector<float> InputDataMean = {
+      0.0046635, 0.0046261, 0.963986, 102.976, 110.201, 100.64, 95.9966};
+  const std::vector<float> InputDataStd = {
+      0.972347, 0.755146, 1.43588, 55.3691, 58.1489, 56.4701, 55.3324};
 
   // if we need RGB as an input
   if (get_rgb_) {
@@ -386,19 +386,17 @@ VideoInputOp<Context>::VideoInputOp(
 
     channels_rgb_ = 3;
 
-    CAFFE_ENFORCE_EQ(
-        mean_rgb_.size(),
-        inv_std_rgb_.size(),
-        "The mean and std. vectors for RGB must be of the same size.");
-    if (mean_rgb_.size() == 1) {
-      mean_rgb_.resize(3, mean_rgb_[0]);
-      inv_std_rgb_.resize(3, inv_std_rgb_[0]);
-    }
-    CAFFE_ENFORCE_EQ(mean_rgb_.size(), 3, "RGB should have 3 channels");
-    for (int i = 0; i < 3; ++i) {
-      inv_std_rgb_[i] = 1.f / inv_std_rgb_[i];
+    if (mean_rgb_.size() != channels_rgb_ ||
+        inv_std_rgb_.size() != channels_rgb_) {
+      mean_rgb_.clear();
+      inv_std_rgb_.clear();
+      for (int i = 4; i < 7; i++) {
+        mean_rgb_.push_back(InputDataMean[i]);
+        inv_std_rgb_.push_back(1.f / InputDataStd[i]);
+      }
     }
   }
+
   // if we need optical flow as an input
   if (get_optical_flow_) {
     // how many frames we need for optical flow
@@ -406,41 +404,56 @@ VideoInputOp<Context>::VideoInputOp(
         num_of_required_frame_,
         (length_of_ - 1) * sampling_rate_of_ + frame_gap_of_ + 1);
 
-    CAFFE_ENFORCE_EQ(
-        mean_of_.size(),
-        inv_std_of_.size(),
-        "The mean and std. vectors for Optical Flow must be of the same size.");
-    // set the parameters for different input data types
-    switch (flow_data_type_) {
-      // (flow_x, flow_y)
-      case FlowDataType::Flow2C:
-        channels_of_ = 2;
-        break;
-      // (flow_x, flow_y, flow_magnitude)
-      case FlowDataType::Flow3C:
-        channels_of_ = 3;
-        break;
-      // early fusion with gray
-      // (flow_x, flow_y, gray)
-      case FlowDataType::FlowWithGray:
-        channels_of_ = 3;
-        break;
-      // early fusion with RGB
-      // (flow_x, flow_y, Red, Green, Blue)
-      case FlowDataType::FlowWithRGB:
-        channels_of_ = 5;
-        break;
-      default:
-        LOG(ERROR) << "Unknown optical flow type " << flow_data_type_;
-        break;
-    }
-    LOG(INFO) << "channels_of_: " << channels_of_;
-    if (mean_of_.size() == 1) {
-      mean_of_.resize(channels_of_, mean_of_[0]);
-      inv_std_of_.resize(channels_of_, inv_std_of_[0]);
-    }
-    for (int i = 0; i < channels_of_; ++i) {
-      inv_std_of_[i] = 1.f / inv_std_of_[i];
+    if (mean_of_.size() != channels_of_ || inv_std_of_.size() != channels_of_) {
+      mean_of_.clear();
+      inv_std_of_.clear();
+
+      // set the parameters for different input data types
+      switch (flow_data_type_) {
+        case FlowDataType::Flow2C:
+          channels_of_ = 2;
+          for (int i = 0; i < channels_of_; i++) {
+            mean_of_.push_back(InputDataMean[i]);
+            inv_std_of_.push_back(1.f / InputDataStd[i]);
+          }
+          break;
+
+        case FlowDataType::Flow3C:
+          channels_of_ = 3;
+          for (int i = 0; i < channels_of_; i++) {
+            mean_of_.push_back(InputDataMean[i]);
+            inv_std_of_.push_back(1.f / InputDataStd[i]);
+          }
+          break;
+
+        // early fusion with gray
+        case FlowDataType::FlowWithGray:
+          channels_of_ = 3;
+          for (int i = 0; i < 2; i++) {
+            mean_of_.push_back(InputDataMean[i]);
+            inv_std_of_.push_back(1.f / InputDataStd[i]);
+          }
+          mean_of_.push_back(InputDataMean[3]);
+          inv_std_of_.push_back(1.f / InputDataStd[3]);
+          break;
+
+        // early fusion with RGB
+        case FlowDataType::FlowWithRGB:
+          channels_of_ = 5;
+          for (int i = 0; i < 2; i++) {
+            mean_of_.push_back(InputDataMean[i]);
+            inv_std_of_.push_back(1.f / InputDataStd[i]);
+          }
+          for (int i = 4; i < 7; i++) {
+            mean_of_.push_back(InputDataMean[i]);
+            inv_std_of_.push_back(1.f / InputDataStd[i]);
+          }
+          break;
+
+        default:
+          LOG(ERROR) << "Unknown optical flow type " << flow_data_type_;
+          break;
+      }
     }
   }
 
@@ -498,16 +511,17 @@ bool VideoInputOp<Context>::GetClipsAndLabelsFromDBValue(
   // start_frm is only valid when sampling 1 clip per video without
   // temporal jitterring
   if (decode_type_ == DecodeType::USE_START_FRM) {
-    CAFFE_ENFORCE_LT(
-        curr_proto_idx,
+    CAFFE_ENFORCE_GE(
         protos.protos_size(),
-        "No proto is found for starting frame");
+        curr_proto_idx + 1,
+        "Start frm proto not provided");
     const TensorProto& start_frm_proto = protos.protos(curr_proto_idx++);
     start_frm = start_frm_proto.int32_data(0);
   }
+
   if (get_video_id_) {
-    CAFFE_ENFORCE_LT(
-        curr_proto_idx, protos.protos_size(), "No proto is found for video id");
+    CAFFE_ENFORCE_GE(
+        protos.protos_size(), curr_proto_idx + 1, "Video Id not provided");
     const TensorProto& video_id_proto = protos.protos(curr_proto_idx);
     for (int i = 0; i < clip_per_video_ * multi_crop_count_; i++) {
       video_id_data[i] = video_id_proto.int64_data(0);
@@ -528,6 +542,10 @@ bool VideoInputOp<Context>::GetClipsAndLabelsFromDBValue(
     for (int i = 0; i < clip_per_video_; i++) {
       for (int j = 0; j < multi_crop_count_; ++j) {
         for (int k = 0; k < label_proto.int32_data_size(); k++) {
+          CAFFE_ENFORCE_LT(
+              label_proto.int32_data(k),
+              num_of_class_,
+              "Label should be less than the number of classes.");
           label_data
               [(i * multi_crop_count_ + j) * num_of_class_ +
                label_proto.int32_data(k)] = 1;
@@ -610,6 +628,7 @@ void VideoInputOp<Context>::DecodeAndTransform(
   // Decode the video from memory or read from a local file
   CHECK(GetClipsAndLabelsFromDBValue(
       value, height, width, buffer_rgb, label_data, video_id_data));
+
   int clip_offset_rgb = multi_crop_count_ * channels_rgb_ * length_rgb_ *
       crop_height_ * crop_width_;
   int clip_crop_offset_of =

@@ -88,7 +88,7 @@ class set_grad_enabled(object):
         >>> set_grad_enabled(False)
         >>> y = x * 2
         >>> y.requires_grad
-        True
+        False
 
     """
 

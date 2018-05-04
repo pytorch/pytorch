@@ -1,6 +1,6 @@
 #pragma once
 
-#include <sstream>
+#include "ATen/Parallel.h"
 #include "ATen/TensorUtils.h"
 
 namespace at {
@@ -8,11 +8,11 @@ namespace at {
 /*
  * The basic strategy for apply is as follows:
  *
- * 1. Starting with the outermost index, loop until we reach a dimension where the
- * data is no longer contiguous, i.e. the stride at that dimension is not equal to
- * the size of the tensor defined by the outer dimensions. Let's call this outer
- * (contiguous) tensor A. Note that if the Tensor is contiguous, then A is equal
- * to the entire Tensor. Let's call the inner tensor B.
+ * 1. Starting with the outermost index, loop until we reach a dimension where
+ * the data is no longer contiguous, i.e. the stride at that dimension is not
+ * equal to the size of the tensor defined by the outer dimensions. Let's call
+ * this outer (contiguous) tensor A. Note that if the Tensor is contiguous, then
+ * A is equal to the entire Tensor. Let's call the inner tensor B.
  *
  * 2. We loop through the indices in B, starting at its outermost dimension. For
  * example, if B is a 2x2 matrix, then we do:
@@ -22,289 +22,392 @@ namespace at {
  * B[1][0]
  * B[1][1]
  *
- * We set the offset into the underlying storage as (storageOffset + stride_B * index_B),
- * i.e. basically we compute the offset into the storage as we would normally for a
- * Tensor. But because we are guaranteed the subsequent data is contiguous in memory, we
- * can simply loop for sizeof(A) iterations and perform the operation, without having to
- * follow the order described by the strides of A.
+ * We set the offset into the underlying storage as (storageOffset + stride_B *
+ * index_B), i.e. basically we compute the offset into the storage as we would
+ * normally for a Tensor. But because we are guaranteed the subsequent data is
+ * contiguous in memory, we can simply loop for sizeof(A) iterations and perform
+ * the operation, without having to follow the order described by the strides of
+ * A.
  *
- * 3. As an optimization, we merge dimensions of A that are contiguous in memory. For
- * example, if A is a 3x3x3x3 tensor narrowed from a 3x3x4x3 tensor, then the first two
- * dimensions can be merged for the purposes of APPLY, reducing the number of nested
- * loops.
+ * 3. As an optimization, we merge dimensions of A that are contiguous in
+ * memory. For example, if A is a 3x3x3x3 tensor narrowed from a 3x3x4x3 tensor,
+ * then the first two dimensions can be merged for the purposes of APPLY,
+ * reducing the number of nested loops.
  */
 
-// TODO: turn this macro into a proper template
-#define __ATH_TENSOR_APPLYX_PREAMBLE(TYPE, ATENSOR, DIM, ALLOW_CONTIGUOUS) \
-  TYPE *ATENSOR##_data = NULL; \
-  int64_t *ATENSOR##_counter = NULL, *ATENSOR##_sizes = NULL, *ATENSOR##_strides = NULL, *ATENSOR##_dimOffset = NULL; \
-  int64_t ATENSOR##_stride = 0, ATENSOR##_size = 0, ATENSOR##_dim = 0, ATENSOR##_i; \
-  int ATENSOR##_contiguous = ALLOW_CONTIGUOUS && DIM < 0; \
-\
-  if(ATENSOR.sizes().equals({0})) \
-    TH_TENSOR_APPLY_hasFinished = true; \
-  else \
-  { \
-    ATENSOR##_data = ATENSOR.data<TYPE>(); \
-    ATENSOR##_size = 1; \
-    ATENSOR##_stride = 1; \
-    for(ATENSOR##_i = ATENSOR.dim() - 1; ATENSOR##_i >= 0; ATENSOR##_i--) { \
-      if(ATENSOR.sizes()[ATENSOR##_i] != 1) { \
-        if(ATENSOR.strides()[ATENSOR##_i] == ATENSOR##_size && ATENSOR##_i != DIM) \
-          ATENSOR##_size *= ATENSOR.sizes()[ATENSOR##_i]; \
-        else{ \
-          ATENSOR##_contiguous = 0; \
-          break; \
-        } \
-      } \
-    } \
-    if (!ATENSOR##_contiguous) { \
-      /* Find the dimension of contiguous sections */ \
-      ATENSOR##_dim = 1; \
-      for(ATENSOR##_i = ATENSOR.dim() - 2; ATENSOR##_i >= 0; ATENSOR##_i--) \
-      { \
-        if(ATENSOR.strides()[ATENSOR##_i] != ATENSOR.strides()[ATENSOR##_i+1] * ATENSOR.sizes()[ATENSOR##_i+1] || ATENSOR##_i == DIM || ATENSOR##_i+1 == DIM) \
-          ATENSOR##_dim++; \
-      } \
-      /* Allocate an array of 3*dim elements, where dim is the number of contiguous sections */ \
-      ATENSOR##_counter = new int64_t[3*ATENSOR##_dim]; \
-      ATENSOR##_sizes = ATENSOR##_counter + ATENSOR##_dim; \
-      ATENSOR##_strides = ATENSOR##_counter + 2*ATENSOR##_dim; \
-      TH_TENSOR_dim_index = ATENSOR##_dim-1; \
-      ATENSOR##_dimOffset = (DIM == ATENSOR.dim()-1) ? &ATENSOR##_i : &ATENSOR##_counter[DIM]; \
-      ATENSOR##_sizes[TH_TENSOR_dim_index] = ATENSOR.sizes()[ATENSOR.dim()-1]; \
-      ATENSOR##_strides[TH_TENSOR_dim_index] = ATENSOR.strides()[ATENSOR.dim()-1]; \
-      /* ATENSOR##_counter tracks where we are in the storage. The offset into the */ \
-      /* storage is given by storage_offset + (i * j), where i is the stride */ \
-      /* vector and j is tensor_counter vector. This sets the starting position for the loop. */ \
-      for(ATENSOR##_i = ATENSOR##_dim-1; ATENSOR##_i >= 0; --ATENSOR##_i) { \
-        ATENSOR##_counter[ATENSOR##_i] = 0; \
-      } \
-      for(ATENSOR##_i = ATENSOR.dim()-2; ATENSOR##_i >= 0; --ATENSOR##_i) { \
-        if (ATENSOR.strides()[ATENSOR##_i] == ATENSOR.strides()[ATENSOR##_i+1] * ATENSOR.sizes()[ATENSOR##_i+1] && ATENSOR##_i != DIM && ATENSOR##_i+1 != DIM) { \
-          ATENSOR##_sizes[TH_TENSOR_dim_index] = ATENSOR.sizes()[ATENSOR##_i] * ATENSOR##_sizes[TH_TENSOR_dim_index]; \
-          if (DIM != ATENSOR.dim()-1 && ATENSOR##_i < DIM) \
-            ATENSOR##_dimOffset--; \
-        } else { \
-          --TH_TENSOR_dim_index; \
-          ATENSOR##_sizes[TH_TENSOR_dim_index] = ATENSOR.sizes()[ATENSOR##_i]; \
-          ATENSOR##_strides[TH_TENSOR_dim_index] = ATENSOR.strides()[ATENSOR##_i]; \
-        } \
-      } \
-      /* Size of the inner most section */ \
-      ATENSOR##_size = ATENSOR##_sizes[ATENSOR##_dim-1]; \
-      /* Stride of the inner most section */ \
-      ATENSOR##_stride = ATENSOR##_strides[ATENSOR##_dim-1]; \
-    } \
-  } \
-  ATENSOR##_i = 0;
-
-// TODO: turn this macro into a proper template
-#define  __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(ATENSOR, ALWAYS_UPDATE) \
-  if(ATENSOR##_i == ATENSOR##_size || ALWAYS_UPDATE) \
-  { \
-    if(ATENSOR##_contiguous) \
-      break; \
-\
-    if(ATENSOR##_dim == 1) \
-       break; \
-\
-    /* Reset pointer to beginning of loop */ \
-    ATENSOR##_data -= ATENSOR##_size*ATENSOR##_stride; \
-    for(ATENSOR##_i = ATENSOR##_dim-2; ATENSOR##_i >= 0; ATENSOR##_i--) \
-    { \
-      ATENSOR##_counter[ATENSOR##_i]++; \
-      /* Jump ahread by the stride of this dimension */ \
-      ATENSOR##_data += ATENSOR##_strides[ATENSOR##_i]; \
-\
-      if(ATENSOR##_counter[ATENSOR##_i]  == ATENSOR##_sizes[ATENSOR##_i]) \
-      { \
-        if(ATENSOR##_i == 0) \
-        { \
-          TH_TENSOR_APPLY_hasFinished = true; \
-          break; \
-        } \
-          else \
-        { \
-          /* Reset the pointer to the beginning of the chunk defined by this dimension */ \
-          ATENSOR##_data -= ATENSOR##_counter[ATENSOR##_i]*ATENSOR##_strides[ATENSOR##_i]; \
-          ATENSOR##_counter[ATENSOR##_i] = 0; \
-        } \
-      } \
-      else \
-        break; \
-    } \
-    ATENSOR##_i = 0; \
+inline Tensor sort_strides(Tensor& tensor_) {
+  IntList strides = tensor_.strides();
+  std::vector<int64_t> indices;
+  indices.reserve(tensor_.ndimension());
+  for (int64_t i = 0; i < tensor_.ndimension(); i++) {
+    indices.push_back(i);
   }
+  std::sort(indices.begin(), indices.end(), [&strides](int64_t i1, int64_t i2) {
+    return strides[i1] > strides[i2];
+  });
+  Tensor tensor = tensor_.permute(indices);
+  return tensor;
+}
+
+template <typename Arg>
+inline void _setup_arrays(Tensor& tensor, Arg* iter) {
+  int64_t max_dim = tensor.ndimension();
+  iter->dim_ = 0;
+  for (int64_t i = 0; i < max_dim; i++) {
+    int64_t size = tensor.size(i);
+    int64_t stride = tensor.stride(i);
+    while (i + 1 < max_dim &&
+           (tensor.size(i + 1) == 1 ||
+            tensor.stride(i) == tensor.size(i + 1) * tensor.stride(i + 1))) {
+      size = size * tensor.size(i + 1);
+      if (tensor.size(i + 1) != 1)
+        stride = tensor.stride(i + 1);
+      i++;
+    }
+    iter->sizes_[iter->dim_] = size;
+    iter->strides_[iter->dim_] = stride;
+    iter->dim_++;
+  }
+}
+
+template <typename T, int N>
+struct strided_tensor_iter_fixed {
+ public:
+  T* data_ = NULL;
+  int64_t dim_;
+
+  int64_t counter_[N];
+  int64_t sizes_[N];
+  int64_t strides_[N];
+
+  strided_tensor_iter_fixed(strided_tensor_iter_fixed const&) = delete;
+  void operator=(strided_tensor_iter_fixed const& x) = delete;
+  strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
+  strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
+      : data_(tensor.data<T>()) {
+    memset(counter_, 0, sizeof(int64_t) * N);
+    _setup_arrays(tensor, this);
+  }
+};
+
+template <typename T>
+struct strided_tensor_iter {
+ private:
+ public:
+  T* data_ = NULL;
+  int64_t dim_;
+
+  std::vector<int64_t> counter_;
+  std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
+
+  strided_tensor_iter(strided_tensor_iter const&) = delete;
+  void operator=(strided_tensor_iter const& x) = delete;
+  strided_tensor_iter(strided_tensor_iter&&) = default;
+  strided_tensor_iter(Tensor& tensor)
+      : data_(tensor.data<T>()),
+        dim_(tensor.ndimension()),
+        counter_(dim_, 0),
+        sizes_(tensor.sizes()),
+        strides_(tensor.strides()) {
+    _setup_arrays(tensor, this);
+  }
+};
+
+inline bool _all_equal_numel(at::ArrayRef<Tensor> tensors) {
+  if (tensors.size() == 0)
+    return true;
+  int64_t all_numel = tensors[0].numel();
+  for (size_t i = 1; i < tensors.size(); i++) {
+    if (tensors[i].numel() != all_numel)
+      return false;
+  }
+  return true;
+}
+
+inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
+  std::ostringstream oss;
+  oss << "inconsistent tensor size, expected ";
+  for (size_t i = 0; i < tensors.size() - 1; i++) {
+    oss << tensors[i].sizes() << ", ";
+  }
+  oss << "and " << tensors[tensors.size() - 1]
+      << " to have the same number of elements, but got ";
+  for (size_t i = 0; i < tensors.size() - 1; i++) {
+    oss << tensors[i].numel() << ", ";
+  }
+  oss << "and " << tensors[tensors.size() - 1].numel()
+      << " elements respectively";
+  return oss.str();
+}
+
+inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
+  checkBackend("CPU_tensor_apply", tensors, Backend::CPU);
+  if (!_all_equal_numel(tensors))
+    throw std::runtime_error(_all_equal_numel_error(tensors));
+  // An empty tensor has no elements
+  for (auto& t : tensors)
+    if (t.sizes().equals({0}))
+      return false;
+  internal::init_tbb_num_threads();
+  return true;
+}
+
+inline int64_t _max_dim_tensors(ArrayRef<Tensor> tensors) {
+  int64_t dim = 0;
+  for (auto& t : tensors)
+    dim = std::max(dim, t.ndimension());
+  return dim;
+}
+
+inline void iterate(){};
+
+template <typename Arg, typename... Args>
+inline void iterate(Arg& iter, Args&... iter_tail) {
+  iter.counter_[iter.dim_ - 1]++;
+  iter.data_ += iter.strides_[iter.dim_ - 1];
+  iterate(iter_tail...);
+}
+
+inline bool iterate_continue() {
+  return true;
+};
+
+template <typename Arg, typename... Args>
+inline bool iterate_continue(Arg& iter, Args&... iter_tail) {
+  return iter.counter_[iter.dim_ - 1] < iter.sizes_[iter.dim_ - 1] &&
+      iterate_continue(iter_tail...);
+}
+
+inline void iterate_overflow(){};
+
+template <typename Arg, typename... Args>
+inline void iterate_overflow(Arg& iter, Args&... iter_tail) {
+  if (iter.counter_[iter.dim_ - 1] == iter.sizes_[iter.dim_ - 1]) {
+    for (int64_t i = iter.dim_ - 1; i > 0; i--) {
+      if (iter.counter_[i] == iter.sizes_[i]) {
+        iter.counter_[i] = 0;
+        iter.counter_[i - 1]++;
+        iter.data_ = iter.data_ - (iter.sizes_[i] * iter.strides_[i]) +
+            iter.strides_[i - 1];
+      }
+    }
+  }
+  iterate_overflow(iter_tail...);
+}
+
+inline void forward(int64_t offset){};
+
+template <typename Arg, typename... Args>
+inline void forward(int64_t offset, Arg& iter, Args&... iter_tail) {
+  int64_t multi = offset;
+  for (int64_t i = iter.dim_ - 1; i >= 0; i--) {
+    int64_t inc = multi % iter.sizes_[i];
+    multi = multi / iter.sizes_[i];
+    iter.data_ = iter.data_ + inc * iter.strides_[i];
+    iter.counter_[i] += inc;
+  }
+  forward(offset, iter_tail...);
+}
+
+inline int64_t max_dim() {
+  return 0;
+}
+
+template <typename Arg, typename... Args>
+inline int64_t max_dim(Arg& iter, Args&... iter_tail) {
+  return std::max(iter.dim_, max_dim(iter_tail...));
+}
+
+inline void apply_op(){};
+
+template <typename Op, typename... Args>
+inline void
+apply_op(int64_t numel, int64_t offset, const Op& op, Args... iters) {
+  // For 0-dim tensors
+  if (numel == 1 && max_dim(iters...) == 0) {
+    op(*iters.data_...);
+    return;
+  }
+  if (offset > 0)
+    forward(offset, iters...);
+  // Splitting this into chunks helps the compiler create faster assembly
+  for (int64_t i = 0; i < numel;) {
+    for (; iterate_continue(iters...) && i < numel;) {
+      op(*iters.data_...);
+      iterate(iters...);
+      i++;
+    }
+    iterate_overflow(iters...);
+  }
+}
+
+/*
+  Apply a pointwise operator to sequence of tensors
+
+  The calling convention for op is a function/functor that takes takes the same
+  number of pointers of type scalar as the number of given tensors. For example,
+  to compute a = b * c, op would be of the form:
+  [](scalar* a_val, const scalar* b_val, const scalar* c_val) { a_val[0] =
+  b_val[0] * c_val[0]; };
+*/
+
+template <typename scalar1, typename Op>
+inline void CPU_tensor_apply1(Tensor tensor1, const Op op) {
+  if (!_apply_preamble({tensor1}))
+    return;
+  if (tensor1.ndimension() < 8) {
+    apply_op(
+        tensor1.numel(),
+        0,
+        op,
+        strided_tensor_iter_fixed<scalar1, 8>(tensor1, true));
+  } else {
+    apply_op(tensor1.numel(), 0, op, strided_tensor_iter<scalar1>(tensor1));
+  }
+}
 
 template <typename scalar1, typename scalar2, typename Op>
-void CPU_tensor_apply2_dim(Tensor& tensor1, Tensor& tensor2, int64_t dim, Op op) {
-  checkBackend("CPU_tensor_apply2", {tensor1, tensor2}, Backend::CPU);
-  bool TH_TENSOR_APPLY_hasFinished = false;
-  int64_t TH_TENSOR_dim_index = 0;
-  __ATH_TENSOR_APPLYX_PREAMBLE(scalar1, tensor1, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(scalar2, tensor2, dim, 1)
-  auto t1_numel = tensor1.numel();
-  auto t2_numel = tensor2.numel();
-  if(t1_numel != t2_numel) {
-    std::ostringstream oss;
-    oss << "inconsistent tensor size, expected " << tensor1.sizes() << " and " << tensor2.sizes()
-        << " to have the same number of elements, but got " << t1_numel << " and " << t2_numel << " elements respectively";
-    throw std::runtime_error(oss.str());
+inline void CPU_tensor_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
+  if (!_apply_preamble({tensor1, tensor2}))
+    return;
+  if (_max_dim_tensors({tensor1, tensor2}) <= 8) {
+    apply_op(
+        tensor1.numel(),
+        0,
+        op,
+        strided_tensor_iter_fixed<scalar1, 8>(tensor1),
+        strided_tensor_iter_fixed<scalar2, 8>(tensor2));
+  } else {
+    apply_op(
+        tensor1.numel(),
+        0,
+        op,
+        strided_tensor_iter<scalar1>(tensor1),
+        strided_tensor_iter<scalar2>(tensor2));
   }
-  while(!TH_TENSOR_APPLY_hasFinished)
-  {
-    /* Loop through the inner most region of the Tensor */
-    for(; tensor1_i < tensor1_size && tensor2_i < tensor2_size; tensor1_i++, tensor2_i++, tensor1_data += tensor1_stride, tensor2_data += tensor2_stride)
-    {
-      op(*tensor1_data, *tensor2_data);
-    }
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor1, 0)
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor2, 0)
-  }
-  if(tensor1_counter != NULL)
-    delete [] tensor1_counter;
-  if(tensor2_counter != NULL)
-    delete [] tensor2_counter;
 }
 
-/*
-  Apply a pointwise operator to two tensors.
-
-  The calling convention for op is a function/functor that takes takes two references to
-  type scalar; at least one of these references should be non-const in order to write the output.
-  For example, to compute a = b^2, op would be of the form:
-  [](scalar &a_val, const scalar &b_val) { a_val = b_val * b_val; };
-*/
-template<typename scalar1, typename scalar2, typename Op>
-void CPU_tensor_apply2(Tensor tensor1, Tensor tensor2, Op op) {
-  CPU_tensor_apply2_dim<scalar1, scalar2, Op>(tensor1, tensor2, -1, op);
+template <typename scalar1, typename scalar2, typename scalar3, typename Op>
+inline void
+CPU_tensor_apply3(Tensor tensor1, Tensor tensor2, Tensor tensor3, const Op op) {
+  if (!_apply_preamble({tensor1, tensor2, tensor3}))
+    return;
+  if (_max_dim_tensors({tensor1, tensor2, tensor3}) <= 8) {
+    apply_op(
+        tensor1.numel(),
+        0,
+        op,
+        strided_tensor_iter_fixed<scalar1, 8>(tensor1),
+        strided_tensor_iter_fixed<scalar2, 8>(tensor2),
+        strided_tensor_iter_fixed<scalar3, 8>(tensor3));
+  } else {
+    apply_op(
+        tensor1.numel(),
+        0,
+        op,
+        strided_tensor_iter<scalar1>(tensor1),
+        strided_tensor_iter<scalar2>(tensor2),
+        strided_tensor_iter<scalar3>(tensor3));
+  }
 }
 
-template<typename scalar1, typename scalar2, typename scalar3, typename Op>
-void CPU_tensor_apply3_dim(Tensor &tensor1, Tensor& tensor2, Tensor& tensor3, int64_t dim, Op op) {
-  checkBackend("CPU_tensor_apply3", {tensor1, tensor2, tensor3}, Backend::CPU);
-  bool TH_TENSOR_APPLY_hasFinished = false;
-  int64_t TH_TENSOR_dim_index = 0;
-  __ATH_TENSOR_APPLYX_PREAMBLE(scalar1, tensor1, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(scalar2, tensor2, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(scalar3, tensor3, dim, 1)
-
-  int elements_equal = 1;
-  auto t1_numel = tensor1.numel();
-  auto t2_numel = tensor2.numel();
-  auto t3_numel = tensor3.numel();
-  if(t1_numel!= t2_numel) {
-    elements_equal = 0;
-  } else if(t1_numel != t3_numel) {
-    elements_equal = 0;
+template <
+    typename scalar1,
+    typename scalar2,
+    typename scalar3,
+    typename scalar4,
+    typename Op>
+inline void CPU_tensor_apply4(
+    Tensor tensor1,
+    Tensor tensor2,
+    Tensor tensor3,
+    Tensor tensor4,
+    const Op op) {
+  if (!_apply_preamble({tensor1, tensor2, tensor3, tensor4}))
+    return;
+  if (_max_dim_tensors({tensor1, tensor2, tensor3, tensor4}) <= 8) {
+    apply_op(
+        tensor1.numel(),
+        0,
+        op,
+        strided_tensor_iter_fixed<scalar1, 8>(tensor1),
+        strided_tensor_iter_fixed<scalar2, 8>(tensor2),
+        strided_tensor_iter_fixed<scalar3, 8>(tensor3),
+        strided_tensor_iter_fixed<scalar4, 8>(tensor4));
+  } else {
+    apply_op(
+        tensor1.numel(),
+        0,
+        op,
+        strided_tensor_iter<scalar1>(tensor1),
+        strided_tensor_iter<scalar2>(tensor2),
+        strided_tensor_iter<scalar3>(tensor3),
+        strided_tensor_iter<scalar4>(tensor4));
   }
-  if (elements_equal == 0) {
-    std::ostringstream oss;
-    oss << "inconsistent tensor size, expected " << tensor1.sizes() << ", " << tensor2.sizes() << ", and " << tensor3.sizes()
-        << " to have the same number of elements, but got " << t1_numel << ", " << t2_numel << ", and " << t3_numel << " elements respectively";
-    throw std::runtime_error(oss.str());
-  }
-
-  while(!TH_TENSOR_APPLY_hasFinished)
-  {
-    /* Loop through the inner most region of the Tensor */
-    for(; tensor1_i <  tensor1_size && tensor2_i < tensor2_size && tensor3_i < tensor3_size; tensor1_i++, tensor2_i++, tensor3_i++, tensor1_data += tensor1_stride, tensor2_data += tensor2_stride, tensor3_data += tensor3_stride)
-    {
-      op(*tensor1_data, *tensor2_data, *tensor3_data);
-    }
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor1, 0)
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor2, 0)
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor3, 0)
-  }
-  if(tensor1_counter != NULL)
-    delete [] tensor1_counter;
-  if(tensor2_counter != NULL)
-    delete [] tensor2_counter;
-  if(tensor3_counter != NULL)
-    delete [] tensor3_counter;
 }
 
-/*
-  Apply a pointwise operator to three tensors.
-
-  The calling convention for op is a function/functor that takes takes three references to
-  type scalar; at least one of these references should be non-const in order to write the output.
-  For example, to compute a = b + c, op would be of the form:
-  [](scalar &a_val, const scalar &b_val, const scalar &c_val) { a_val = b_val + c_val; };
-*/
-template<typename scalar1, typename scalar2, typename scalar3, typename Op>
-void CPU_tensor_apply3(Tensor tensor1, Tensor tensor2, Tensor tensor3, Op op) {
-  CPU_tensor_apply3_dim<scalar1, scalar2, scalar3, Op>(tensor1, tensor2, tensor3, -1, op);
-}
-
-template <typename scalar1, typename scalar2, typename scalar3, typename scalar4, typename Op>
-void CPU_tensor_apply4_dim(Tensor &tensor1, Tensor& tensor2, Tensor& tensor3, Tensor& tensor4, int64_t dim, Op op) {
-  checkBackend("CPU_tensor_apply4", {tensor1, tensor2, tensor3, tensor4}, Backend::CPU);
-  bool TH_TENSOR_APPLY_hasFinished = false;
-  int64_t TH_TENSOR_dim_index = 0;
-  __ATH_TENSOR_APPLYX_PREAMBLE(scalar1, tensor1, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(scalar2, tensor2, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(scalar3, tensor3, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(scalar4, tensor4, dim, 1)
-
-  int elements_equal = 1;
-  auto t1_numel = tensor1.numel();
-  auto t2_numel = tensor2.numel();
-  auto t3_numel = tensor3.numel();
-  auto t4_numel = tensor4.numel();
-  if(t1_numel!= t2_numel) {
-    elements_equal = 0;
-  } else if(t1_numel != t3_numel) {
-    elements_equal = 0;
-  } else if(t1_numel != t4_numel) {
-      elements_equal = 0;
+template <typename scalar1, typename Op>
+inline void CPU_tensor_parallel_apply1(Tensor tensor1, const Op op) {
+  if (!_apply_preamble({tensor1}))
+    return;
+  if (tensor1.numel() < internal::TBB_GRAIN_SIZE) {
+    CPU_tensor_apply1<scalar1>(tensor1, op);
+    return;
   }
-  if (elements_equal == 0) {
-    std::ostringstream oss;
-    oss << "inconsistent tensor size, expected " << tensor1.sizes() << ", " << tensor2.sizes() << ", "
-        << tensor3.sizes() << ", and " << tensor4.sizes() << " to have the same number of elements, but got "
-        << t1_numel << ", " << t2_numel << ", " << t3_numel << ", and " << t4_numel << " elements respectively";
-    throw std::runtime_error(oss.str());
+  auto range = tbb::blocked_range<size_t>(0, tensor1.numel());
+  if (tensor1.ndimension() < 8) {
+    tbb::parallel_for(
+        range, [&tensor1, &op](const tbb::blocked_range<size_t> r) {
+          apply_op(
+              r.end() - r.begin(),
+              r.begin(),
+              op,
+              strided_tensor_iter_fixed<scalar1, 8>(tensor1, true));
+        });
+  } else {
+    tbb::parallel_for(
+        range, [&tensor1, &op](const tbb::blocked_range<size_t> r) {
+          apply_op(
+              r.end() - r.begin(),
+              r.begin(),
+              op,
+              strided_tensor_iter<scalar1>(tensor1));
+        });
   }
+}
 
-  while(!TH_TENSOR_APPLY_hasFinished)
-  {
-    /* Loop through the inner most region of the Tensor */
-    for(; tensor1_i <  tensor1_size && tensor2_i < tensor2_size && tensor3_i < tensor3_size && tensor4_i < tensor4_size
-        ; tensor1_i++, tensor2_i++, tensor3_i++, tensor4_i++,
-          tensor1_data += tensor1_stride, tensor2_data += tensor2_stride, tensor3_data += tensor3_stride, tensor4_data += tensor4_stride)
-    {
-      op(*tensor1_data, *tensor2_data, *tensor3_data, *tensor4_data);
-    }
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor1, 0)
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor2, 0)
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor3, 0)
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor4, 0)
+template <typename scalar1, typename scalar2, typename Op>
+inline void
+CPU_tensor_parallel_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
+  if (!_apply_preamble({tensor1, tensor2}))
+    return;
+  if ((tensor1.numel() + tensor2.numel()) < internal::TBB_GRAIN_SIZE) {
+    CPU_tensor_apply2<scalar1, scalar2>(tensor1, tensor2, op);
+    return;
   }
-  if(tensor1_counter != NULL)
-    delete [] tensor1_counter;
-  if(tensor2_counter != NULL)
-    delete [] tensor2_counter;
-  if(tensor3_counter != NULL)
-    delete [] tensor3_counter;
-  if(tensor4_counter != NULL)
-    delete [] tensor4_counter;
+  auto range = tbb::blocked_range<size_t>(0, tensor1.numel());
+  if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
+    tbb::parallel_for(
+        range, [&tensor1, &tensor2, &op](const tbb::blocked_range<size_t> r) {
+          apply_op(
+              r.end() - r.begin(),
+              r.begin(),
+              op,
+              strided_tensor_iter_fixed<scalar1, 8>(tensor1),
+              strided_tensor_iter_fixed<scalar2, 8>(tensor2));
+        });
+  } else {
+    tbb::parallel_for(
+        range, [&tensor1, &tensor2, &op](const tbb::blocked_range<size_t> r) {
+          apply_op(
+              r.end() - r.begin(),
+              r.begin(),
+              op,
+              strided_tensor_iter<scalar1>(tensor1),
+              strided_tensor_iter<scalar2>(tensor2));
+        });
+  }
 }
 
-/*
-  Apply a pointwise operator to four tensors.
-
-  The calling convention for op is a function/functor that takes takes four references to
-  type scalar; at least one of these references should be non-const in order to write the output.
-  For example, to compute a = b + c * d, op would be of the form:
-  [](scalar &a_val, const scalar &b_val, const scalar &c_val, const scalar &d_val) {
-    a_val = b_val + c_val * d_val;
-  };
-*/
-template<typename scalar1, typename scalar2, typename scalar3, typename scalar4, typename Op>
-void CPU_tensor_apply4(Tensor tensor1, Tensor tensor2, Tensor tensor3, Tensor tensor4, Op op) {
-  CPU_tensor_apply4_dim<scalar1, scalar2, scalar3, scalar4, Op>(tensor1, tensor2, tensor3, tensor4, -1, op);
-}
-
-}
+} // namespace at

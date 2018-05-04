@@ -103,6 +103,9 @@ _(onnx, Squeeze) \
 _(onnx, Sub) \
 _(onnx, Transpose) \
 _(onnx, Unsqueeze) \
+_(onnx, Loop) \
+_(onnx, If) \
+_(onnx, Reshape)
 /* end */
 
 // These symbols are attribute keys.  They are shared between both ONNX and ATen
@@ -177,6 +180,8 @@ constexpr size_t unique_tag_bits = 8;
 constexpr size_t unique_bits = sizeof(unique_t) * 8 - unique_tag_bits;
 constexpr unique_t unique_mask = (1ULL << unique_bits) - 1;
 
+static const std::string domain_prefix = "org.pytorch.";
+
 // A Symbol is like an interned string, but with a little extra
 // structure; it is namespaced via SymbolNamespace and the resulting
 // intern pointers support efficient namespace testing.
@@ -187,6 +192,9 @@ struct Symbol {
 
   // Get a Symbol for a qualified string like "attr::bar"
   static Symbol fromQualString(const std::string & s);
+
+  // Get a Symbol from a domain and an unqualified string like "org.pytorch.attr" and "bar"
+  static Symbol fromDomainAndUnqualString(const std::string & d, const std::string & s);
 
   // Constructors for our various namespaced strings.  This will construct
   // the appropriate namespaced string, e.g., "attr::foo" for the
@@ -228,6 +236,10 @@ struct Symbol {
   // the same as toQualString.  This has to be a const char* returned because
   // a lot of printf style macros use it.
   const char * toDisplayString() const;
+
+  // Give a string corresponding to the domain name for the symbol,
+  // e.g., "org.pytorch.aten".
+  std::string domainString() const;
 
 private:
   explicit Symbol(SymbolNamespace ns, const std::string & s);

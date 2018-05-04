@@ -1,7 +1,6 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
@@ -17,7 +16,7 @@ class Bernoulli(ExponentialFamily):
 
     Example::
 
-        >>> m = Bernoulli(torch.Tensor([0.3]))
+        >>> m = Bernoulli(torch.tensor([0.3]))
         >>> m.sample()  # 30% chance 1; 70% chance 0
          0.0
         [torch.FloatTensor of size 1]
@@ -86,7 +85,7 @@ class Bernoulli(ExponentialFamily):
 
     def enumerate_support(self):
         values = self._new((2,))
-        torch.arange(2, out=values.data if isinstance(values, Variable) else values)
+        torch.arange(2, out=values.data)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
         return values

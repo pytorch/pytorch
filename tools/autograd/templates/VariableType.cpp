@@ -38,6 +38,7 @@ static void setattr(jit::Node* n, jit::Symbol name, SparseTensor s)        { n->
 static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
+static void setattr(jit::Node* n, jit::Symbol name, std::string v)         { n->s_(name, v); }
 template<std::size_t N>
 static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
 
@@ -129,7 +130,7 @@ static VariableTypeRegistry registry;
 bool VariableType::isVariableType(const at::Type& type) {
   // Since all VariableTypes are allocated contiguously in types_vec, we can
   // just check that the pointer is inside the correct range.
-  ptrdiff_t offset = (char*)&type - (char*)registry.types_vec.data();
+  ptrdiff_t offset = reinterpret_cast<const char*>(&type) - reinterpret_cast<const char*>(registry.types_vec.data());
   ptrdiff_t extent = VariableTypeRegistry::MaxTypes * sizeof(VariableType);
   return offset >= 0 && offset < extent;
 }
@@ -156,12 +157,10 @@ std::vector<at::Type*> VariableType::allTypes() {
 
 Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
-    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #%d '%s'",
-        pos, name);
+    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   if (!isVariableType(t.type())) {
-    AT_ERROR("Expected object of type Variable but found type %s for argument #%d '%s'",
-        t.type().toString(), pos, name);
+    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(const_cast<Tensor&>(t));
 }
@@ -186,14 +185,12 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
     if (!t.defined()) {
-      AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor at position #%d "
-                    "for iterable argument #%d '%s'",
-                    i, pos, name);
+      AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor at position #", i, " "
+                    "for iterable argument #", pos, " '", name, "'");
     }
     if (!isVariableType(t.type())) {
-      AT_ERROR("Expected object of type Variable but found type %s at position #%d "
-                    "for iterable argument #%d '%s'",
-                    t.type().toString(), i, pos, name);
+      AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
+                    "for iterable argument #", pos, " '", name, "'");
     }
     ret[i] = static_cast<const Variable&>(t).data();
   }
@@ -287,8 +284,8 @@ static void check_inplace(const Tensor& tensor) {
 
 static void throw_error_out_requires_grad(const char* name) {
   AT_ERROR(
-      "%s(): functions with out=... arguments don't support automatic differentiation, "
-      "but one of the arguments requires grad.", name);
+      name, "(): functions with out=... arguments don't support automatic differentiation, "
+      "but one of the arguments requires grad.");
 }
 
 static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {

@@ -35,9 +35,9 @@ static inline const char* deviceTypeString(torch::DeviceType device_type) {
 PyObject *THPDevice_repr(THPDevice *self)
 {
   std::ostringstream oss;
-  oss << "device(device_type=\'" << deviceTypeString(self->device.type) << "\'";
+  oss << "device(type=\'" << deviceTypeString(self->device.type) << "\'";
   if (!self->device.is_default) {
-    oss << ", device_index=" << self->device.index;
+    oss << ", index=" << self->device.index;
   }
   oss << ")";
   return THPUtils_packString(oss.str().c_str());
@@ -59,7 +59,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
     "Device(Device device)",
-    "Device(String device_type, int64_t? device_index=-1)"
+    "Device(std::string type, int64_t? index=-1)"
   });
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -70,7 +70,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     auto as_device = r.device(0);  // this works, because device can take strings
     auto device_type = r.string(0);
     if (!as_device.is_default) {
-      throw std::runtime_error("device_type (string) must not include an index because index "
+      throw std::runtime_error("type (string) must not include an index because index "
                                 "was passed explicitly: " + device_type);
     }
 

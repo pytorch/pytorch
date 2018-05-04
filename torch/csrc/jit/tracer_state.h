@@ -55,6 +55,9 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage
 
+  bool creates_handles; // should python ops ever get handles? Or should
+                        // we just record them as is.
+
   std::unique_lock<std::mutex> lock() {
     return std::unique_lock<std::mutex>(mutex);
   }

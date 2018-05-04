@@ -14,7 +14,7 @@ namespace torch { namespace autograd {
 
 auto Error::apply(const variable_list& grad_outputs) -> variable_list {
   throw std::runtime_error(msg);
-};
+}
 
 auto DelayedError::apply(const variable_list& inputs) -> variable_list {
   tensor_list outputs;
@@ -26,6 +26,6 @@ auto DelayedError::apply(const variable_list& inputs) -> variable_list {
   return wrap_outputs(inputs, std::move(outputs), [&](edge_list&& next_edges) {
     return std::make_shared<Error>(msg, std::move(next_edges));
   });
-};
+}
 
 }} // namespace torch::autograd

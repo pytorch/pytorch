@@ -10,6 +10,7 @@
 #include "gloo/transport/tcp/device.h"
 
 #include <algorithm>
+#include <unistd.h>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -122,7 +123,11 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
 }
 
 
-DataChannelGloo::~DataChannelGloo() {}
+DataChannelGloo::~DataChannelGloo() {
+  if (_listen_socket != -1) {
+    ::close(_listen_socket);
+  }
+}
 
 void DataChannelGloo::destroy() {}
 

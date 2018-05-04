@@ -17,6 +17,7 @@
 #ifndef BATCHPERMUTATION_OP_H_
 #define BATCHPERMUTATION_OP_H_
 
+#include <cstring>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -31,10 +32,7 @@ class BatchPermutationOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice() override {
-    // No CPU implementation for now
-    CAFFE_NOT_IMPLEMENTED;
-  }
+  bool RunOnDevice() override;
 };
 
 template <typename T, class Context>

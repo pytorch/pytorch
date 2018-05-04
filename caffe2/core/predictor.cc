@@ -1,4 +1,7 @@
 #include "caffe2/core/predictor.h"
+#if CAFFE2_MOBILE
+#include "caffe2/core/init.h"
+#endif
 
 #include <unordered_set>
 
@@ -32,6 +35,9 @@ TensorCPU* extractOutputTensor(Workspace* ws, const std::string& name) {
   return blob->template GetMutable<TensorCPU>();
 }
 
+// We don't use the getNet() from predictor_utils.cc here because that file
+// has additional dependencies that we want to avoid bringing in, to keep the
+// binary size as small as possible.
 const NetDef& getNet(const MetaNetDef& def, const std::string& name) {
   for (const auto& n : def.nets()) {
     if (n.key() == name) {
@@ -53,26 +59,39 @@ const ::google::protobuf::RepeatedPtrField<::std::string>& getBlobs(
 }
 } // namespace
 
-Predictor::Predictor(const MetaNetDef& def, Workspace* parent)
+Predictor::Predictor(const MetaNetDef& def, Workspace* parent, bool run_init)
     : Predictor(
           getNet(
               def,
               PredictorConsts::default_instance().global_init_net_type()),
           getNet(def, PredictorConsts::default_instance().predict_net_type()),
-          parent) {
+          parent,
+          run_init) {
   const auto& inputs =
       getBlobs(def, PredictorConsts::default_instance().inputs_blob_type());
   for (const auto& input : inputs) {
     inputNames_.insert(input);
+  }
+
+  const auto& outputs =
+      getBlobs(def, PredictorConsts::default_instance().outputs_blob_type());
+  for (const auto& output : outputs) {
+    outputNames_.emplace_back(output);
   }
 }
 
 Predictor::Predictor(
     const NetDef& init_net,
     const NetDef& run_net,
-    Workspace* parent)
+    Workspace* parent,
+    bool run_init)
     : run_net_(run_net), ws_(parent) {
-  CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
+  if (run_init) {
+    CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
+  }
+#if CAFFE2_MOBILE
+  GlobalInit();
+#endif
 
   // real model inputs can be fed later in run* functions
   const auto& initialized_vec = ws_.Blobs();
@@ -86,8 +105,6 @@ Predictor::Predictor(
   }
   CAFFE_ENFORCE(ws_.CreateNet(run_net));
 }
-
-Predictor::~Predictor() {}
 
 bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
   CAFFE_ENFORCE(inputs.size() <= run_net_.external_input_size());
@@ -106,7 +123,7 @@ bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
   return true;
 }
 
-bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
+bool Predictor::run_map_workspace(const TensorMap& inputs) {
   if (!inputNames_.empty()) {
     CAFFE_ENFORCE_EQ(inputs.size(), inputNames_.size());
   }
@@ -117,7 +134,11 @@ bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
     shareInputTensor(&ws_, input.first, input.second);
   }
 
-  if (!ws_.RunNet(run_net_.name())) {
+  return ws_.RunNet(run_net_.name());
+}
+
+bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
+  if (!run_map_workspace(inputs)) {
     return false;
   }
 
@@ -127,4 +148,17 @@ bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
   }
   return true;
 }
+
+bool Predictor::run_map_outputs(const TensorMap& inputs, TensorMap* outputs) {
+  if (!run_map_workspace(inputs)) {
+    return false;
+  }
+
+  outputs->reserve(outputNames_.size());
+  for (const std::string& outputName : outputNames_) {
+    (*outputs)[outputName] = extractOutputTensor(&ws_, outputName);
+  }
+  return true;
+}
+
 } // namespace caffe2

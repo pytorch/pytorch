@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable, variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import probs_to_logits, logits_to_probs, log_sum_exp, lazy_property, broadcast_all
@@ -28,7 +27,7 @@ class Categorical(Distribution):
 
     Example::
 
-        >>> m = Categorical(torch.Tensor([ 0.25, 0.25, 0.25, 0.25 ]))
+        >>> m = Categorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
          3
         [torch.LongTensor of size 1]
@@ -110,6 +109,4 @@ class Categorical(Distribution):
         values = values.expand((-1,) + self._batch_shape)
         if self._param.is_cuda:
             values = values.cuda(self._param.get_device())
-        if isinstance(self._param, Variable):
-            values = Variable(values)
         return values

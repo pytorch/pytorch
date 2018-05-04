@@ -105,16 +105,37 @@ struct SquareFunctor<ResT, half> {
 template <typename T>
 struct ReduceMin {
   inline __device__ T operator()(T a, T b) const {
-    return THCNumerics<T>::lt(a, b) ? a : b;
+    return (THCNumerics<T>::lt(a, b) ||
+            THCNumerics<T>::isnan(a)) ? a : b;
   }
 };
 
 template <typename T>
 struct ReduceMax {
   inline __device__ T operator()(T a, T b) const {
-    return THCNumerics<T>::gt(a, b) ? a : b;
+    return (THCNumerics<T>::gt(a, b) ||
+            THCNumerics<T>::isnan(a)) ? a : b;
   }
 };
+
+template <typename InT, typename AccT>
+struct ReduceMaxTo {
+  inline __device__ AccT operator()(InT a, InT b) const {
+    return ScalarConvert<InT, AccT>::to(
+      (THCNumerics<InT>::gt(a, b) || THCNumerics<InT>::isnan(a)) ? a : b);
+  }
+};
+
+#ifdef CUDA_HALF_TENSOR
+template <>
+struct ReduceMaxTo<half, float> {
+  inline __device__ float operator()(float a, half b) const {
+    float b_f = __half2float(b);
+    return ((THCNumerics<float>::gt(a, b_f) ||
+             THCNumerics<float>::isnan(a)) ? a : b_f);
+  }
+};
+#endif // CUDA_HALF_TENSOR
 
 struct LogicalAll {
   inline __device__ unsigned char operator()(unsigned char x,
@@ -131,6 +152,11 @@ struct LogicalAny {
 };
 
 template<typename Real>
+ inline __device__ Real THCMax(const Real a, const Real b) {
+    return THCNumerics<Real>::gt(a, b) ? a : b;
+}
+
+template<typename Real>
 __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrdiff_t size, const Real maxnorm)
 {
   __shared__ Real buffer[32];
@@ -140,27 +166,50 @@ __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrd
   Real *row = data + size*bx;
 
   buffer[tx] = ScalarConvert<int, Real>::to(0);
+  Real norm;
 
-  // get norm of axis
-  for (ptrdiff_t i=tx; i<size; i+=step)
-  {
-    buffer[tx] = THCNumerics<Real>::add(
-      buffer[tx],
-      THCNumerics<Real>::pow(
-        THCNumerics<Real>::abs(row[i]),
-        value)
-    );
-  }
-  // add (reduce)
-  for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
-  {
+  if (THCNumerics<Real>::eq(value, ScalarConvert<float, Real>::to(INFINITY))) {
+    // get norm of axis
+    for (ptrdiff_t i=tx; i<size; i+=step)
+    {
+      buffer[tx] = THCMax<Real>(
+        buffer[tx],
+	THCNumerics<Real>::abs(row[i])
+      );
+    }
+    // add (reduce)
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+    {
+      __syncthreads();
+      if (tx < stride)
+        buffer[tx] = THCMax<Real>(buffer[tx], buffer[tx+stride]);
+    }
+    // clip norms
     __syncthreads();
-    if (tx < stride)
-      buffer[tx] = THCNumerics<Real>::add(buffer[tx], buffer[tx+stride]);
+    norm = buffer[0];
+  } else {
+    // get norm of axis
+    for (ptrdiff_t i=tx; i<size; i+=step)
+    {
+      buffer[tx] = THCNumerics<Real>::add(
+        buffer[tx],
+        THCNumerics<Real>::pow(
+          THCNumerics<Real>::abs(row[i]),
+          value)
+      );
+    }
+    // add (reduce)
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+    {
+      __syncthreads();
+      if (tx < stride)
+        buffer[tx] = THCNumerics<Real>::add(buffer[tx], buffer[tx+stride]);
+    }
+    // clip norms
+    __syncthreads();
+    norm = THCNumerics<Real>::pow(buffer[0], THCNumerics<Real>::cinv(value));
   }
-  // clip norms
-  __syncthreads();
-  Real norm = THCNumerics<Real>::pow(buffer[0], THCNumerics<Real>::cinv(value));
+
   if (THCNumerics<Real>::gt(norm, maxnorm))
   {
     norm = THCNumerics<Real>::div(
@@ -744,7 +793,8 @@ struct MaxValuePair {
   __host__ __device__
   thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
                                     const thrust::pair<T, Index>& b) {
-    return THCNumerics<T>::ge(a.first, b.first) ? a : b;
+    return (THCNumerics<T>::ge(a.first, b.first) ||
+            THCNumerics<T>::isnan(a.first)) ? a : b;
   }
 };
 
@@ -753,7 +803,8 @@ struct MinValuePair {
   __host__ __device__
   thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
                                     const thrust::pair<T, Index>& b) {
-    return THCNumerics<T>::le(a.first, b.first) ? a : b;
+    return (THCNumerics<T>::le(a.first, b.first) ||
+            THCNumerics<T>::isnan(a.first)) ? a : b;
   }
 };
 

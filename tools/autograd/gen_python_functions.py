@@ -18,7 +18,9 @@ SKIP_PYTHON_BINDINGS = [
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', 'sparse_raw_resize_', '_unsafe_view', 'tensor',
     'sparse_coo_tensor', '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
-    '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin'
+    '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
+    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*',
+    'arange.*', 'range.*',
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
@@ -72,10 +74,9 @@ PY_VARIABLE_OUT_CHECK_TYPE = CodeTemplate("""\
 if (r.isNone(${out_idx})) {
   ${call_dispatch}
 } else {
-  if (!r.isNone(${type_idx})) {
-    check_out_type_matches(r.tensor(${out_idx}), r.scalartype(${type_idx}), r.layout(${layout_idx}),
-                           r.device(${device_idx}), r.isNone(${device_idx}));
-  }
+  check_out_type_matches(r.tensor(${out_idx}), r.scalartype(${type_idx}), r.isNone(${type_idx}),
+                         r.layout(${layout_idx}), r.isNone(${layout_idx}),
+                         r.device(${device_idx}), r.isNone(${device_idx}));
   ${call_dispatch_out}
 }
 """)
@@ -211,9 +212,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const Type &': 'scalartype',
         'const THPLayout &': 'layout',
         'const Device &': 'device',
+        'optional<ScalarType>': 'scalartypeOptional',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
+        'std::string': 'string',
     }
 
     unpack_with_default_methods = {
@@ -235,17 +238,17 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         return None
 
     def auto_gpu(option, has_device_bind):
-        tensor_arg = first_tensor_arg(option['arguments'])
-        if tensor_arg is not None:
-            if not has_device_bind:
-                return 'AutoGPU auto_gpu({});'.format(tensor_arg)
-            else:  # e.g. for ones_like, the default is the device of the tensor arg
-                device_to_use = '({}.type().is_cuda() ? {}.get_device() : -1)'.format(tensor_arg, tensor_arg)
-                return 'AutoGPU auto_gpu(device == -1 ? {} : device);'.format(device_to_use)
-        elif has_device_bind:
-            return 'AutoGPU auto_gpu(device);'
-        else:
-            return ''
+        if option['auto_gpu']:
+            tensor_arg = first_tensor_arg(option['arguments'])
+            if tensor_arg is not None:
+                if not has_device_bind:
+                    return 'AutoGPU auto_gpu({});'.format(tensor_arg)
+                else:  # e.g. for ones_like, the default is the device of the tensor arg
+                    device_to_use = '({}.type().is_cuda() ? {}.get_device() : -1)'.format(tensor_arg, tensor_arg)
+                    return 'AutoGPU auto_gpu(device == -1 ? {} : device);'.format(device_to_use)
+            elif has_device_bind:
+                return 'AutoGPU auto_gpu(device);'
+        return ''
 
     def emit_single_dispatch(declaration, out_idx, base_env):
         env = {}
@@ -404,7 +407,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_call'] = 'at::{}'.format(declaration['name'])
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
-        env['AutoNoGIL'] = 'AutoNoGIL no_gil;'
+        env['AutoNoGIL'] = 'AutoNoGIL no_gil;' if not declaration['with_gil'] else ''
         env['AutoGPU'] = auto_gpu(declaration, has_device_bind)
 
         env = nested_dict(env, nested_dict(base_env, declaration))
@@ -596,7 +599,48 @@ def group_declarations(declarations):
         if 'base' not in dictionary:
             raise RuntimeError('\'base\' not in dictionary', dictionary)
         result.append(dictionary)
-    return result
+    return sort_declarations(result)
+
+
+# This function declares a partial order on declarations, and sorts them according
+# to its linear extension. This is necessary, because there's some ambiguity in the
+# choice of overload, and we want a different order.
+def sort_declarations(grouped_decls):
+    def is_coord_smaller(arg1, arg2):
+        return arg1['dynamic_type'] == 'real' and arg2['dynamic_type'] == 'Tensor'
+
+    def is_smaller(d1, d2):
+        """Returns True if d1 < d2 in the partial order."""
+        args1, args2 = d1['base']['arguments'], d2['base']['arguments']
+        if len(args1) != len(args2):
+            return False
+        any_smaller = any(is_coord_smaller(arg1, arg2) for arg1, arg2 in zip(args1, args2))
+        all_smaller_or_equal = all(arg1['dynamic_type'] == arg2['dynamic_type'] or is_coord_smaller(arg1, arg2)
+                                   for arg1, arg2 in zip(args1, args2))
+        return any_smaller and all_smaller_or_equal
+
+    # Construct the relation graph
+    larger_than = defaultdict(set)
+    for i1, decl1 in enumerate(grouped_decls):
+        for i2, decl2 in enumerate(grouped_decls):
+            if is_smaller(decl1, decl2):
+                larger_than[i1].add(i2)
+
+    if not larger_than:
+        return grouped_decls
+
+    # Use a topological sort to sort decls according to the partial order.
+    sorted_deps = [(i, decl) for i, decl in enumerate(grouped_decls)
+                   if i not in larger_than]
+    for i, decl in sorted_deps:
+        for i2 in sorted(larger_than.keys()):
+            larger = larger_than[i2]
+            larger.discard(i)
+            if not larger:
+                del larger_than[i2]
+                sorted_deps.append((i2, grouped_decls[i2]))
+
+    return [decl for i, decl in sorted_deps]
 
 
 def get_python_signature(declaration, include_out):
@@ -607,8 +651,12 @@ def get_python_signature(declaration, include_out):
     positional = True
 
     def get_py_formal_arg(arg):
-        typename = arg['simple_type'] if arg['simple_type'] != 'Type' else 'ScalarType'
-        if arg.get('is_nullable'):
+        typename = arg['simple_type']
+        opt_match = re.match(r'optional<(.+)>', typename)
+        if opt_match:
+            typename = opt_match.group(1)
+        typename = typename if typename != 'Type' else 'ScalarType'
+        if arg.get('is_nullable') or opt_match:
             typename = '{}?'.format(typename)
         if arg.get('size') is not None:
             typename = '{}[{}]'.format(typename, arg['size'])
@@ -616,7 +664,7 @@ def get_python_signature(declaration, include_out):
         default = None
         if arg.get('default') is not None:
             default = arg['default']
-            if default == 'nullptr' or default == '{}':
+            if default == 'nullptr' or default == 'nullopt' or default == '{}':
                 default = 'None'
         if arg.get('python_default_init') is not None:
             default = 'None'

@@ -1,22 +1,11 @@
 import torch
-from torch.autograd import Variable
 from collections import Iterable
 import torch.testing
 import sys
 
 
-def iter_variables(x):
-    if isinstance(x, Variable):
-        if x.requires_grad:
-            yield (x.grad.data, x.data) if x.grad is not None else (None, None)
-    elif isinstance(x, Iterable):
-        for elem in x:
-            for result in iter_variables(elem):
-                yield result
-
-
 def zero_gradients(x):
-    if isinstance(x, Variable):
+    if isinstance(x, torch.Tensor):
         if x.grad is not None:
             x.grad.detach_()
             x.grad.data.zero_()
@@ -26,7 +15,7 @@ def zero_gradients(x):
 
 
 def make_jacobian(input, num_out):
-    if isinstance(input, Variable):
+    if isinstance(input, torch.Tensor):
         if not input.is_floating_point():
             return None
         if not input.requires_grad:
@@ -49,6 +38,16 @@ def iter_tensors(x, only_requiring_grad=False):
     elif isinstance(x, Iterable):
         for elem in x:
             for result in iter_tensors(elem, only_requiring_grad):
+                yield result
+
+
+def iter_tensors_with_grad(x):
+    if isinstance(x, torch.Tensor):
+        if x.requires_grad:
+            yield (x.grad.data, x.data) if x.grad is not None else (None, None)
+    elif isinstance(x, Iterable):
+        for elem in x:
+            for result in iter_tensors_with_grad(elem):
                 yield result
 
 
@@ -105,7 +104,7 @@ def get_analytical_jacobian(input, output):
         for jacobian_c in (jacobian, jacobian_reentrant):
             zero_gradients(input)
             output.backward(grad_output, create_graph=True)
-            for jacobian_x, (d_x, x) in zip(jacobian_c, iter_variables(input)):
+            for jacobian_x, (d_x, x) in zip(jacobian_c, iter_tensors_with_grad(input)):
                 if d_x is not None and d_x.size() != x.size():
                     correct_grad_sizes = False
                 elif jacobian_x.numel() != 0:
@@ -147,9 +146,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     is true for all elements of analytical jacobian a and numerical jacobian n.
 
     Args:
-        func: Python function that takes Variable inputs and returns
-            a tuple of Variables
-        inputs: tuple of Variables
+        func: Python function that takes Tensor inputs and returns
+            a Tensor or a tuple of Tensors
+        inputs: tuple of Tensors
         eps: perturbation for finite differences
         atol: absolute tolerance
         rtol: relative tolerance
@@ -159,6 +158,13 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     Returns:
         True if all differences satisfy allclose condition
     """
+    tupled_inputs = _as_tuple(inputs)
+
+    # Make sure that gradients are saved for all inputs
+    for inp in tupled_inputs:
+        if isinstance(inp, torch.Tensor):
+            inp.retain_grad()
+
     output = _differentiable_outputs(func(*inputs))
 
     def fail_test(msg):
@@ -173,7 +179,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         def fn(input):
             return _as_tuple(func(*input))[i].data
 
-        analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(_as_tuple(inputs), o)
+        analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o)
         numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
 
         if not correct_grad_sizes:
@@ -195,9 +201,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     output = _differentiable_outputs(func(*inputs))
     if any([o.requires_grad for o in output]):
         torch.autograd.backward(output, [torch.zeros_like(o) for o in output], create_graph=True)
-        var_inputs = list(filter(lambda i: isinstance(i, Variable), inputs))
+        var_inputs = list(filter(lambda i: isinstance(i, torch.Tensor), inputs))
         if not var_inputs:
-            raise RuntimeError("no Variables found in input")
+            raise RuntimeError("no Tensors found in input")
         for i in var_inputs:
             if i.grad is None:
                 continue
@@ -225,10 +231,10 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
     is true for all elements of analytical gradient a and numerical gradient n.
 
     Args:
-        func (function): Python function that takes Variable inputs and returns
-            a tuple of Variables
-        inputs (tuple of Variable): inputs to the function
-        grad_outputs (tuple of Variable, optional): The gradients with respect to
+        func (function): Python function that takes Tensor inputs and returns
+            a Tensor or a tuple of Tensors
+        inputs (tuple of Tensor): inputs to the function
+        grad_outputs (tuple of Tensor, optional): The gradients with respect to
             the function's outputs.
         eps (float, optional): perturbation for finite differences
         atol (float, optional): absolute tolerance
@@ -245,7 +251,7 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         otherwise.
     """
     if grad_outputs is None:
-        # If grad_outputs is not specified, create random variables of the same
+        # If grad_outputs is not specified, create random Tensors of the same
         # shape, type, and device as the outputs
         def randn_like(x):
             var = torch.testing.randn_like(x if x.is_floating_point() else x.double())
@@ -260,7 +266,7 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
     def new_func(*input_args):
         input_args = input_args[:-len(grad_outputs)]
         outputs = _differentiable_outputs(func(*input_args))
-        input_args = tuple(x for x in input_args if isinstance(x, Variable) and x.requires_grad)
+        input_args = tuple(x for x in input_args if isinstance(x, torch.Tensor) and x.requires_grad)
         grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True)
         return grad_inputs
 

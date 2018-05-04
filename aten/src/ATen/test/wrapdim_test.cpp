@@ -7,7 +7,7 @@
 using namespace at;
 
 TEST_CASE( "wrapdim test", "[]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   Type & T = CPU(kFloat);
 

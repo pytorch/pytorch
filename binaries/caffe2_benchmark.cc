@@ -5,12 +5,15 @@
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+#include "observers/net_observer_reporter_print.h"
 #include "observers/observer_config.h"
+#include "observers/perf_observer.h"
 
 CAFFE2_DEFINE_string(
     backend,
@@ -113,6 +116,13 @@ static void writeTextOutput(
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
+  caffe2::ClearGlobalNetObservers();
+  caffe2::AddGlobalNetObserverCreator([](caffe2::NetBase* subject) {
+    return caffe2::make_unique<caffe2::PerfNetObserver>(subject);
+  });
+  caffe2::ObserverConfig::setReporter(
+      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
+
   caffe2::ShowLogInfoToStderr();
   unique_ptr<caffe2::Workspace> workspace(new caffe2::Workspace());
 
@@ -198,7 +208,9 @@ int main(int argc, char** argv) {
         : caffe2::FLAGS_backend == "eigen" ? "EIGEN"
                                            : caffe2::FLAGS_backend == "mkl"
                 ? "MKLDNN"
-                : caffe2::FLAGS_backend == "default" ? "" : "NONE";
+                : caffe2::FLAGS_backend == "dnnlowp"
+                    ? "DNNLOWP"
+                    : caffe2::FLAGS_backend == "default" ? "" : "NONE";
     CAFFE_ENFORCE(engine != "NONE", "Backend is not supported");
     for (int i = 0; i < net_def.op_size(); i++) {
       caffe2::OperatorDef* op_def = net_def.mutable_op(i);

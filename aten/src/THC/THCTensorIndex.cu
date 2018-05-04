@@ -12,6 +12,8 @@
 #include "THCAtomics.cuh"
 #include "THCThrustAllocator.cuh"
 #include "THCTensorSort.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <algorithm> // for std::min
@@ -369,72 +371,6 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
 
     dst.data[dstOffset] = src.data[srcOffset];
   }
-}
-
-template <typename IndexType, unsigned int Dims>
-struct LinearIndexCalcData {
-  // sizes for the Tensor dims (from the Tensor, for bounds checking)
-  IndexType baseSizes[Dims];
-  // sizes for Tensor dims (either from the Tensor, or the size of the adv indexer at that dim)
-  IndexType sizes[Dims];
-  // strides for the Tensor we are indexing into
-  IndexType strides[Dims];
-  // these are pointers to the buffers containing the index selected at each dimension
-  // for all of the indices we want to generate. If a dimension is not under advanced indexing
-  // then the pointer is NULL
-  int64_t *advIndexTensors[Dims];
-};
-
-template <typename IndexType, unsigned int Dims>
-__device__ __forceinline__ int64_t calculateOffset(
-  IndexType index,
-  LinearIndexCalcData<IndexType, Dims> data
-)
-{
-  IndexType offset = 0;
-
-#pragma unroll
-  for (int dim = Dims - 1; dim >= 0; --dim) {
-    IndexType sizeAtDim, strideAtDim, indexAtDim, nextIndex;
-
-    strideAtDim = data.strides[dim];
-    sizeAtDim = data.sizes[dim];
-
-    if (data.advIndexTensors[dim] != NULL) {
-      indexAtDim = data.advIndexTensors[dim][index % sizeAtDim];
-      // Check if next dimension is also advanced indexing, if so we must keep the index
-      // the same and iterate together
-      if (dim > 0 && data.advIndexTensors[dim - 1] != NULL) {
-        nextIndex = index;
-      } else {
-        nextIndex = index / sizeAtDim;
-      }
-    } else {
-      nextIndex = index / sizeAtDim;
-      indexAtDim = index - nextIndex * sizeAtDim;
-    }
-
-    assert(indexAtDim < data.baseSizes[dim]);
-    offset += indexAtDim * strideAtDim;
-    index = nextIndex;
-  }
-
-  return offset;
-}
-
-template <typename IndexType, unsigned int Dims>
-__global__ void calculateLinearIndices(
-  int64_t *output,               // output Tensor for indices
-  int elements,               // number of elements in output <-> indices to calculate
-  ptrdiff_t baseOffset,       // base offset into the Tensor
-  LinearIndexCalcData<IndexType, Dims> data
-)
-{
-  for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
-         i < elements;
-         i += blockDim.x * gridDim.x) {
-      output[i] = baseOffset + calculateOffset<IndexType, Dims>(i, data);
-   }
 }
 
 template <int Dims, typename T, typename IndexType>

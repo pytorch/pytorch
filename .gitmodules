@@ -1,12 +1,9 @@
-[submodule "aten/src/ATen/cpu/cpuinfo"]
-	path = aten/src/ATen/cpu/cpuinfo
-	url = https://github.com/Maratyszcza/cpuinfo
-[submodule "aten/src/ATen/cpu/tbb/tbb_remote"]
-	path = aten/src/ATen/cpu/tbb/tbb_remote
+[submodule "third_party/tbb"]
+	path = third_party/tbb
 	url = https://github.com/01org/tbb
 	branch = tbb_2018
-[submodule "aten/src/ATen/utils/catch"]
-	path = aten/src/ATen/utils/catch
+[submodule "third_party/catch"]
+	path = third_party/catch
 	url = https://github.com/catchorg/Catch2.git
 [submodule "third_party/nanopb"]
 	path = third_party/nanopb
@@ -14,15 +11,12 @@
 [submodule "third_party/pybind11"]
 	path = third_party/pybind11
 	url = https://github.com/pybind/pybind11.git
-[submodule "third_party/nccl"]
-	path = third_party/nccl
-	url = https://github.com/nvidia/nccl.git
 [submodule "third_party/cub"]
 	path = third_party/cub
 	url = https://github.com/NVlabs/cub.git
 [submodule "third_party/eigen"]
 	path = third_party/eigen
-	url = https://github.com/RLovelett/eigen.git
+	url = https://github.com/eigenteam/eigen-git-mirror.git
 [submodule "third_party/googletest"]
 	path = third_party/googletest
 	url = https://github.com/google/googletest.git
@@ -77,3 +71,15 @@
 [submodule "third_party/onnx"]
 	path = third_party/onnx
 	url = https://github.com/onnx/onnx.git
+[submodule "third_party/ideep"]
+	path = third_party/ideep
+	url = https://github.com/pytorch/ideep.git
+[submodule "third_party/cereal"]
+	path = third_party/cereal
+	url = https://github.com/USCiLab/cereal
+[submodule "third_party/onnx-tensorrt"]
+	path = third_party/onnx-tensorrt
+	url = https://github.com/onnx/onnx-tensorrt
+[submodule "third_party/sleef"]
+	path = third_party/sleef
+	url = https://github.com/shibatch/sleef

@@ -95,14 +95,14 @@ def wrap_function(name, type, arguments):
     return declaration
 
 
-def generate_wrappers():
-    wrap_nn()
-    wrap_cunn()
+def generate_wrappers(nn_root=None):
+    wrap_nn(os.path.join(nn_root, 'THNN', 'generic', 'THNN.h') if nn_root else None)
+    wrap_cunn(os.path.join(nn_root, 'THCUNN', 'generic', 'THCUNN.h') if nn_root else None)
 
 
-def wrap_nn():
+def wrap_nn(thnn_h_path):
     wrapper = '#include <TH/TH.h>\n\n\n'
-    nn_functions = thnn_utils.parse_header(thnn_utils.THNN_H_PATH)
+    nn_functions = thnn_utils.parse_header(thnn_h_path or thnn_utils.THNN_H_PATH)
     for fn in nn_functions:
         for t in ['Float', 'Double']:
             wrapper += wrap_function(fn.name, t, fn.arguments)
@@ -114,10 +114,10 @@ def wrap_nn():
     ])
 
 
-def wrap_cunn():
+def wrap_cunn(thcunn_h_path=None):
     wrapper = '#include <TH/TH.h>\n'
     wrapper += '#include <THC/THC.h>\n\n\n'
-    cunn_functions = thnn_utils.parse_header(thnn_utils.THCUNN_H_PATH)
+    cunn_functions = thnn_utils.parse_header(thcunn_h_path or thnn_utils.THCUNN_H_PATH)
     for fn in cunn_functions:
         for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
             wrapper += wrap_function(fn.name, t, fn.arguments)

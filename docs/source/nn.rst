@@ -40,7 +40,7 @@ Containers
 .. autoclass:: ParameterList
     :members:
 
-Convolution Layers
+Convolution layers
 ----------------------------------
 
 :hidden:`Conv1d`
@@ -81,7 +81,7 @@ Convolution Layers
     :members:
 
 
-Pooling Layers
+Pooling layers
 ----------------------------------
 
 :hidden:`MaxPool1d`
@@ -193,7 +193,7 @@ Pooling Layers
     :members:
 
 
-Padding Layers
+Padding layers
 --------------
 
 :hidden:`ReflectionPad1d`
@@ -251,8 +251,8 @@ Padding Layers
     :members:
 
 
-Non-linear Activations (weighed sum+nonlinearity)
--------------------------------------------------
+Non-linear activations (weighted sum, nonlinearity)
+---------------------------------------------------
 
 :hidden:`ELU`
 ~~~~~~~~~~~~~
@@ -356,7 +356,7 @@ Non-linear Activations (weighed sum+nonlinearity)
 .. autoclass:: Threshold
     :members:
 
-Non-linear Activations (Other)
+Non-linear activations (other)
 ------------------------------
 
 :hidden:`Softmin`
@@ -404,7 +404,13 @@ Normalization layers
 .. autoclass:: BatchNorm3d
     :members:
 
-:hidden:`InstanceNorm1d`
+:hidden:`GroupNorm
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: GroupNorm
+    :members:
+
+    :hidden:`InstanceNorm1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: InstanceNorm1d
@@ -700,10 +706,15 @@ DataParallel layers (multi-GPU, distributed)
 Utilities
 ---------
 
-:hidden:`clip_grad_norm`
-~~~~~~~~~~~~~~~~~~~~~~~~
+:hidden:`clip_grad_norm_`
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: torch.nn.utils.clip_grad_norm
+.. autofunction:: torch.nn.utils.clip_grad_norm_
+
+:hidden:`clip_grad_value_`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.clip_grad_value_
 
 :hidden:`weight_norm`
 ~~~~~~~~~~~~~~~~~~~~~
@@ -714,6 +725,16 @@ Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.remove_weight_norm
+
+:hidden:`spectral_norm`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.spectral_norm
+
+:hidden:`remove_spectral_norm`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.remove_spectral_norm
 
 
 .. currentmodule:: torch.nn.utils.rnn
@@ -1188,6 +1209,14 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: affine_grid
+
+DataParallel functions (multi-GPU, distributed)
+-----------------------------------------------
+
+:hidden:`data_parallel`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.parallel.data_parallel
 
 
 torch.nn.init

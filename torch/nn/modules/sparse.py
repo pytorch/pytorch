@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 
 from .module import Module
@@ -52,32 +51,25 @@ class Embedding(Module):
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
         >>> embedding(input)
+        tensor([[[-0.0251, -1.6902,  0.7172],
+                 [-0.6431,  0.0748,  0.6969],
+                 [ 1.4970,  1.3448, -0.9685],
+                 [-0.3677, -2.7265, -0.1685]],
 
-        (0 ,.,.) =
-         -1.0822  1.2522  0.2434
-          0.8393 -0.6062 -0.3348
-          0.6597  0.0350  0.0837
-          0.5521  0.9447  0.0498
+                [[ 1.4970,  1.3448, -0.9685],
+                 [ 0.4362, -0.4004,  0.9400],
+                 [-0.6431,  0.0748,  0.6969],
+                 [ 0.9124, -2.3616,  1.1151]]])
 
-        (1 ,.,.) =
-          0.6597  0.0350  0.0837
-         -0.1527  0.0877  0.4260
-          0.8393 -0.6062 -0.3348
-         -0.8738 -0.9054  0.4281
-        [torch.FloatTensor of size (2,4,3)]
 
         >>> # example with padding_idx
         >>> embedding = nn.Embedding(10, 3, padding_idx=0)
         >>> input = torch.LongTensor([[0,2,0,5]])
         >>> embedding(input)
-
-        (0 ,.,.) =
-          0.0000  0.0000  0.0000
-          0.3452  0.4937 -0.9361
-          0.0000  0.0000  0.0000
-          0.0706 -2.1962 -0.6276
-        [torch.FloatTensor of size (1,4,3)]
-
+        tensor([[[ 0.0000,  0.0000,  0.0000],
+                 [ 0.1535, -2.0309,  0.9315],
+                 [ 0.0000,  0.0000,  0.0000],
+                 [-0.1655,  0.9897,  0.0635]]])
     """
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
@@ -141,15 +133,13 @@ class Embedding(Module):
 
         Examples::
 
-            >> # FloatTensor containing pretrained weights
-            >> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
-            >> embedding = nn.Embedding.from_pretrained(weight)
-            >> # Get embeddings for index 1
-            >> input = torch.LongTensor([1])
-            >> embedding(input)
-
-             4.0000  5.1000  6.3000
-            [torch.FloatTensor of size (1,3)]
+            >>> # FloatTensor containing pretrained weights
+            >>> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
+            >>> embedding = nn.Embedding.from_pretrained(weight)
+            >>> # Get embeddings for index 1
+            >>> input = torch.LongTensor([1])
+            >>> embedding(input)
+            tensor([[ 4.0000,  5.1000,  6.3000]])
         """
         assert embeddings.dim() == 2, \
             'Embeddings parameter is expected to be 2-dimensional'
@@ -166,6 +156,7 @@ class EmbeddingBag(Module):
     For bags of constant length,
         * nn.EmbeddingBag with `mode=sum` is equivalent to nn.Embedding followed by `torch.sum(dim=1)`
         * with `mode=mean` is equivalent to nn.Embedding followed by `torch.mean(dim=1)`
+        * with `mode=max` is equivalent to nn.Embedding followed by `torch.max(dim=1)`
 
     However, nn.EmbeddingBag is much more time and memory efficient than using a chain of these
     operations.
@@ -176,10 +167,12 @@ class EmbeddingBag(Module):
         max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (bool, optional): if given, this will scale gradients by the frequency of
-                                                the words in the dictionary.
-        mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
+                                                the words in the dictionary. Note: this option is not supported when
+                                                using max mode.
+        mode (string, optional): 'sum' | 'mean' | 'max'. Specifies the way to reduce the bag. Default: 'mean'
         sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
-                                    more details regarding sparse gradients.
+                                    more details regarding sparse gradients. Note: this option is not supported when
+                                    using max mode.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
@@ -216,11 +209,8 @@ class EmbeddingBag(Module):
         >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.LongTensor([0,4])
         >>> embedding_sum(input, offsets)
-
-        -0.7296 -4.6926  0.3295
-        -0.5186 -0.5631 -0.2792
-        [torch.FloatTensor of size (2,3)]
-
+        tensor([[-0.8861, -5.4350, -0.0523],
+                [ 1.1306, -2.5798, -1.0044]])
     """
 
     def __init__(self, num_embeddings, embedding_dim,

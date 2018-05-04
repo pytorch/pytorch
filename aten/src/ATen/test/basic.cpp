@@ -265,16 +265,22 @@ static void test(Type & type) {
         tensor[CPU(kInt).ones({2, 3, 4})].equal(one),
         StartsWith("Can only index with tensors that are scalars (zero-dim)"));
   }
+  SECTION("dispatch") {
+    Tensor tensor = CPU(kFloat).randn({20, 20});
+    Tensor other = CPU(kFloat).randn({20, 20});
+    auto result = tensor.m(relu).m(mse_loss, other, true, true);
+    REQUIRE(result.allclose(mse_loss(relu(tensor), other)));
+  }
 }
 
 TEST_CASE( "basic tests CPU", "[cpu]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   test(CPU(kFloat));
 }
 
 TEST_CASE( "basic tests GPU", "[cuda]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CUDA);
 
   if(at::hasCUDA()) {
     test(CUDA(kFloat));

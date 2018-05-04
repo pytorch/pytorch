@@ -9,7 +9,14 @@ import os
 import logging
 from caffe2.python import core, context
 from caffe2.python.net_builder import ops
-from caffe2.python.task import Node, Task, TaskGroup, TaskOutput, WorkspaceType
+from caffe2.python.task import (
+    final_output,
+    Node,
+    Task,
+    TaskGroup,
+    TaskOutput,
+    WorkspaceType,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -26,7 +33,7 @@ class Job(object):
     and data file lists.
 
     The `epoch_group` will be run in a loop after init_group. The loop will
-    exit when any of the stop signals added with `add_stop_signal` is True
+    exit when any of the stop signals added with `add_stop_condition` is True
     at the end of an epoch.
 
     The download_group will be run only once, after all the executions of
@@ -48,7 +55,7 @@ class Job(object):
         with Job.current().epoch_group:
             limited_reader = ReaderWithLimit(reader, num_iter=10000)
             data_queue = pipe(limited_reader, num_threads=8)
-            Job.current().add_stop_signal(limited_reader.data_finished())
+            Job.current().add_stop_condition(limited_reader.data_finished())
         return data_queue
 
     def build_hogwild_trainer(reader, model):
@@ -67,13 +74,13 @@ class Job(object):
     def __init__(self,
                  init_group=None, epoch_group=None,
                  download_group=None, exit_group=None,
-                 stop_signals=None, nodes_to_checkpoint=None):
+                 stop_conditions=None, nodes_to_checkpoint=None):
         self.init_group = init_group or TaskGroup(
             workspace_type=WorkspaceType.GLOBAL)
         self.epoch_group = epoch_group or TaskGroup()
         self.download_group = download_group or TaskGroup()
         self.exit_group = exit_group or TaskGroup()
-        self.stop_signals = stop_signals or []
+        self.stop_conditions = stop_conditions or []
         self._nodes_to_checkpoint = nodes_to_checkpoint
 
     def nodes_to_checkpoint(self):
@@ -96,12 +103,12 @@ class Job(object):
     def __exit__(self, *args):
         self.epoch_group.__exit__()
 
-    def add_stop_signal(self, output):
+    def add_stop_condition(self, output):
         if isinstance(output, core.BlobReference):
             t = Task(outputs=[output], group=self.epoch_group)
             output = t.outputs()[0]
         assert isinstance(output, TaskOutput)
-        self.stop_signals.append(output)
+        self.stop_conditions.append(output)
 
 
 def get_ckpt_filename(node_name, epoch):
@@ -163,6 +170,8 @@ class CheckpointManager(object):
         self._names_output = None
         self._path_prefix = None
         self._path_type = None
+        self._current_db_name = None
+        self._current_checkpoint_duration = None
 
     """
     Initialize the checkpoint manager. Determines all blobs that need to be saved
@@ -216,23 +225,64 @@ class CheckpointManager(object):
         assert self._names_output
         return self._names_output.fetch().tolist()
 
+    def _timed_task(self, cp_op_name, add_op):
+        """
+        Build a Task that will measure the time span of checkpoint operations,
+        once operation is done, time can be read from _current_checkpoint_duration.
+
+        Args:
+            cp_op_name: A string name of the checkpoint operation.
+            add_op: A functor to add the checkpoint operation.
+
+        Returns:
+            A task with timer.
+        """
+        with Task(name=cp_op_name) as task:
+            with ops.task_init():
+                timer = ops.TimerBegin([], counter_name=self._node_name)
+            add_op()
+            with ops.task_exit():
+                time_span_blob = ops.TimerGetAndEnd(timer)
+            self._current_checkpoint_duration = final_output(time_span_blob)
+        return task
+
+    def collect_checkpoint_stats(self, stats):
+        """
+        Add one checkpoint stats into the stats.
+
+        Args:
+            stats: A dict of checkpoint stats that will be reported.
+        """
+        if self._current_db_name and self._current_checkpoint_duration:
+            stats[self._current_db_name] = self._current_checkpoint_duration.fetch()[0]
+        else:
+            logger.info(
+                "Failed to collect checkpoint stats: {}".format(
+                    self._current_db_name
+                )
+            )
+
     def load(self, epoch, path_prefix=None, path_type=None):
         """
         Build a Task that will be run by JobRunner when the job is to be
         resumed from a given epoch. This task will run a Load op that will
         load and deserialize all relevant blobs from a persistent storage.
         """
-        full_db_name = db_name(epoch, self._node_name, self._db_prefix, path_prefix)
+        self._current_db_name = db_name(
+            epoch, self._node_name, self._db_prefix, path_prefix
+        )
         db_type = path_type or self._db_type
-        logger.info("Loading checkpoints from = %s" % full_db_name)
-        with Task() as task:
+        logger.info("Loading checkpoints from = %s" % self._current_db_name)
+
+        def add_op():
             ops.Load(
                 [],
                 self.blob_list(),
-                db=full_db_name,
+                db=self._current_db_name,
                 db_type=db_type,
                 absolute_path=True)
-        return task
+
+        return self._timed_task('checkpoint_load', add_op)
 
     def load_blobs_from_checkpoint(self, blob_names, epoch):
         """
@@ -249,16 +299,19 @@ class CheckpointManager(object):
             A Task which loads the specified blobs from the checkpoint of the
             given epoch.
         """
-        logger.info('Load from %s' % db_name(epoch, self._node_name, self._db_prefix))
-        with Task() as task:
+        self._current_db_name = db_name(epoch, self._node_name, self._db_prefix)
+        logger.info('Load from %s' % self._current_db_name)
+
+        def add_op():
             ops.Load(
                 [],
                 blob_names,
-                db=db_name(epoch, self._node_name, self._db_prefix),
+                db=self._current_db_name,
                 db_type=self._db_type,
                 absolute_path=True,
                 allow_incomplete=True)
-        return task
+
+        return self._timed_task('checkpoint_partial_load', add_op)
 
     def check_db_exists(self, epoch):
         logger.info('Check existence of %s' %
@@ -274,19 +327,35 @@ class CheckpointManager(object):
             task.add_output(existence)
         return task
 
+    def report_checkpoint_stats(self, action_name):
+        """
+        Report checkpoint operation stats for current node.
+
+        Args:
+            action_name: A string of the name of checkpoint operation.
+        """
+        all_stats = {}
+        self.collect_checkpoint_stats(all_stats)
+        if self._metadata_handler:
+            self._metadata_handler.report(action_name, all_stats)
+
     def save(self, epoch):
         """
         Build a Task that is run once after `init_group` and after each
         epoch is run. This will execute a Save ops to serialize and persist
         blobs present in the global workspace.
         """
-        logger.info('Saving to %s' % db_name(epoch, self._node_name, self._db_prefix))
-        with Task() as task:
+        self._current_db_name = db_name(epoch, self._node_name, self._db_prefix)
+        logger.info('Saving to %s' % self._current_db_name)
+
+        def add_op():
             ops.Save(
                 self.blob_list(), [],
-                db=db_name(epoch, self._node_name, self._db_prefix),
-                db_type=self._db_type, absolute_path=True)
-        return task
+                db=self._current_db_name,
+                db_type=self._db_type,
+                absolute_path=True)
+
+        return self._timed_task('checkpoint_save', add_op)
 
     def write_checkpoint_metadata(self, epoch):
         """
@@ -469,6 +538,22 @@ class MultiNodeCheckpointManager(object):
             if str(node) == node_name:
                 return db_name(epoch, manager._node_name, manager._db_prefix)
 
+    def report_checkpoint_stats(self, action_name):
+        """
+        Report the checkpoint stats for all the nodes, we need to aggregate all
+        the node's stats together so that we know which node's checkpoint
+        operation dominates.
+
+        Args:
+            action_name: A string of the name of checkpoint operation.
+        """
+        all_stats = {}
+        for _, manager in self._node_managers:
+            manager.collect_checkpoint_stats(all_stats)
+        logger.debug("checkpoint stats: {}".format(all_stats))
+        if self._metadata_handler:
+            self._metadata_handler.report(action_name, all_stats)
+
     def save(self, epoch):
         """
         Build a Task that will execute a Save ops to serialize and persist
@@ -628,6 +713,7 @@ class JobRunner(object):
                     self.resume_from_epoch))
                 session.run(
                     self.checkpoint_manager.load(self.resume_from_epoch))
+                self.checkpoint_manager.report_checkpoint_stats('checkpoint_load')
                 logger.info('Checkpoint loaded')
 
         logger.info("Finished initializing")
@@ -638,12 +724,12 @@ class JobRunner(object):
             logger.info('Starting epoch %d' % epoch)
             session.run(self.job.epoch_group)
             logger.info('Finished epoch %d' % epoch)
-            stop_signals = [o.fetch() for o in self.job.stop_signals]
+            stop_conditions = [o.fetch() for o in self.job.stop_conditions]
 
             if self.checkpoint_manager:
                 self.save_checkpoints(epoch, session)
 
-            if any(stop_signals):
+            if any(stop_conditions):
                 logger.info('Stopping')
                 break
             epoch += 1
@@ -687,8 +773,10 @@ class JobRunner(object):
         if not self.checkpoint_manager:
             raise ValueError('Checkpoint manager is None')
         logger.info('Loading checkpoint for epoch {} ...'.format(epoch))
-        return self.checkpoint_manager.load_blobs_locally(
+        result = self.checkpoint_manager.load_blobs_locally(
             self.job.nodes_to_checkpoint(), blob_names, epoch, session)
+        self.checkpoint_manager.report_checkpoint_stats('checkpoint_partial_load')
+        return result
 
     def save_checkpoints(self, epoch, session):
         """Triggers operation to save checkpoints
@@ -712,6 +800,7 @@ class JobRunner(object):
                 session.run(self.checkpoint_manager.save(epoch))
                 self.checkpoint_manager.write_checkpoint_metadata(epoch)
                 logger.info('Checkpoints saved')
+                self.checkpoint_manager.report_checkpoint_stats('checkpoint_save')
             else:
                 logger.warning("Checkpoint files cannot be accessed!")
         except Exception as ex:
@@ -733,4 +822,4 @@ def epoch_limiter(job, num_epochs):
         epoch_net = core.Net('epoch_countdown')
         finished = epoch_net.CountDown(counter)
         output = Task(step=epoch_net, outputs=finished).outputs()[0]
-    job.add_stop_signal(output)
+    job.add_stop_condition(output)
