@@ -1755,7 +1755,7 @@ if __name__ == '__main__':
     #    hide in __name__ == '__main__' because we don't want this to be run
     #    when someone imports test_cuda
     #
-    # 2. wrap all tests in with CUDA memory check
+    # 2. wrap all tests with CUDA memory check
     def load_tests(loader, tests, pattern):
         test_suite = unittest.TestSuite()
         for test_group in tests:

@@ -7377,7 +7377,7 @@ add_test(NewModuleTest(
     check_gradgrad=False,))
 
 if __name__ == '__main__':
-    # wrap all CUDA tests in with CUDA memory check
+    # wrap all CUDA tests with CUDA memory check
     def load_tests(loader, tests, pattern):
         test_suite = unittest.TestSuite()
         for test_group in tests:
