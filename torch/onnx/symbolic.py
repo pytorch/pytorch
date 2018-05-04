@@ -61,6 +61,10 @@ def _broadcast_if_scalar(x):
         return {"broadcast_i": 1}
 
 
+def _is_value(x):
+    return isinstance(x, torch._C.Value)
+
+
 def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
 
@@ -153,6 +157,10 @@ def mul(g, self, other):
 def div(g, self, other):
     # See Note [Pointwise by scalar]
     return g.op("Div", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
+
+
+def reciprocal(g, self):
+    return g.op("Div", _if_scalar_type_as(torch.ones(1), self), self, broadcast_i=1)
 
 
 # This syntax is Python 2 portable
@@ -262,6 +270,13 @@ def embedding_bag(g,
                 sparse_i=sparse)
 
 
+def size(g, self, dim):
+    if _is_value(dim):
+        raise RuntimeError("ONNX export only supports constant dim values in .size()")
+    full_shape = g.op("Shape", self)
+    return select(g, full_shape, dim=0, index=dim)
+
+
 def transpose(g, self, dim0, dim1):
     if dim0 == dim1:  # micro-optimization
         return self
@@ -279,12 +294,25 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
-    if self.isTensor():
-        self_sizes = self.type().sizes()
-        if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
-            return g.op("Flatten", self, axis_i=1)
-    shape = g.op("Constant", value_t=torch.LongTensor(size))
+    if _is_value(size):
+        shape = size
+    else:
+        if self.isTensor():
+            self_sizes = self.type().sizes()
+            if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
+                return g.op("Flatten", self, axis_i=1)
+        shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
+
+
+def stack(g, *tensors, **kwargs):
+    dim = kwargs.pop('dim')
+    if kwargs:
+        raise RuntimeError("Unexpected kwargs: " + ','.join(kwargs.keys()))
+    if len(tensors) < 2:
+        raise RuntimeError("Expected at least two arguments to stack node")
+    unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in tensors]
+    return g.op("Concat", *unsqueezed, axis_i=dim)
 
 
 def split(g, self, split_size, dim):
@@ -576,8 +604,8 @@ def type_as(g, self, other):
         # no-op
         return self
     else:
-        # TODO: This should be pretty easy, just implement it with Cast
-        return _unimplemented("type_as", "non no-op application")
+        other_type_name = self.type().scalarType().lower()
+        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
 
 
 # ignore clone operators that are inserted by PyTorch autograd

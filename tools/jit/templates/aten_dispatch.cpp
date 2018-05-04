@@ -76,6 +76,7 @@ int deviceForInputs(Stack & stack, size_t N) {
 // the number of inputs to choose an overload).
 std::unordered_set<Symbol> tensor_vararg_fns = {
   aten::cat,
+  aten::stack,
 };
 
 template<size_t N>
