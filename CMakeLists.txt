@@ -72,7 +72,9 @@ option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
 option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
 
 # ---[ Special code path for MKL module
-set(USE_MKL_IDEEP_OR_MKLML ON)
+if (NOT USE_ATEN)
+  set(USE_MKL_IDEEP_OR_MKLML ON)
+endif()
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
