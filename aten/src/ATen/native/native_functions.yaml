@@ -618,7 +618,7 @@
 - func: logsumexp(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
 - func: logsumexp_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
->>>>>>> Implement logsumexp (fixes #2591)
+  variants: function
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
