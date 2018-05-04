@@ -451,28 +451,31 @@ def max_pool3d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     return r, None
 
 
-def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
-    if ceil_mode:
-        return _unimplemented("avg_pool2d", "ceil_mode")
-    if not stride:
-        stride = kernel_size
-    # TODO: What about count_include_pad?!
-    return g.op("AveragePool", input,
-                kernel_shape_i=_pair(kernel_size),
-                strides_i=_pair(stride),
-                pads_i=_pair(padding) * 2)
+def _avg_pool(name, tuple_fn):
+    def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
+        if ceil_mode:
+            return _unimplemented("avg_pool2d", "ceil_mode")
+        if not stride:
+            stride = kernel_size
+
+        padding = tuple(tuple_fn(padding))
+        if count_include_pad:
+            input = g.op("Pad", input,
+                         pads_i=((0,) * 2 + padding) * 2,
+                         mode_s='constant',
+                         value_f=0.)
+            padding = (0,) * len(padding)
+
+        return g.op("AveragePool", input,
+                    kernel_shape_i=tuple_fn(kernel_size),
+                    strides_i=tuple_fn(stride),
+                    pads_i=padding * 2)
+    return symbolic_fn
 
 
-def avg_pool3d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
-    if ceil_mode:
-        return _unimplemented("avg_pool3d", "ceil_mode")
-    if not stride:
-        stride = kernel_size
-    # TODO: What about count_include_pad?!
-    return g.op("AveragePool", input,
-                kernel_shape_i=_triple(kernel_size),
-                strides_i=_triple(stride),
-                pads_i=_triple(padding) * 2)
+avg_pool1d = _avg_pool('avg_pool1d', _single)
+avg_pool2d = _avg_pool('avg_pool2d', _pair)
+avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
 def reflection_pad(g, input, padding):
