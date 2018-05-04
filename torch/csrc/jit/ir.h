@@ -952,6 +952,7 @@ public:
     AutoGPU guard(ref.type().is_cuda() ? ref.get_device() : -1);
     auto n = create(prim::Constant);
     n->t_(attr::value, ref.clone());
+    n->output()->inferTypeFrom(ref);
     return n;
   }
   Node * createFusionGroup(int device) {
