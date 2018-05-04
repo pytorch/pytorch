@@ -1,4 +1,4 @@
-#include <torch/torch.h>
+#include <torch/python.h>
 
 // Declare the function from cuda_extension.cu. It will be compiled
 // separately with nvcc and linked with the object file of cuda_extension.cpp
@@ -6,8 +6,8 @@
 void sigmoid_add_cuda(const float* x, const float* y, float* output, int size);
 
 at::Tensor sigmoid_add(at::Tensor x, at::Tensor y) {
-  AT_ASSERT(x.type().is_cuda(), "x must be a CUDA tensor");
-  AT_ASSERT(y.type().is_cuda(), "y must be a CUDA tensor");
+  AT_CHECK(x.type().is_cuda(), "x must be a CUDA tensor");
+  AT_CHECK(y.type().is_cuda(), "y must be a CUDA tensor");
   auto output = at::zeros_like(x);
   sigmoid_add_cuda(
       x.data<float>(), y.data<float>(), output.data<float>(), output.numel());

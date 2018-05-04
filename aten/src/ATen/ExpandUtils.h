@@ -16,7 +16,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > inferExpandGeometry(cons
 inline void check_defined(std::initializer_list<std::reference_wrapper<const Tensor>> tensors, const char *api_name) {
   for (auto& t : tensors) {
     if (!t.get().defined()) {
-      AT_ERROR("%s(...) called with an undefined Tensor", api_name);
+      AT_ERROR(api_name, "(...) called with an undefined Tensor");
     }
   }
 }

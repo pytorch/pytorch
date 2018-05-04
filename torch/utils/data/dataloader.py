@@ -3,7 +3,7 @@ import torch
 import torch.multiprocessing as multiprocessing
 from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
     _remove_worker_pids, _error_if_any_worker_fails
-from .sampler import SequentialSampler, RandomSampler, BatchSampler
+from . import SequentialSampler, RandomSampler, BatchSampler
 import signal
 import functools
 import collections
@@ -246,6 +246,8 @@ class _DataLoaderIter(object):
 
         self.sample_iter = iter(self.batch_sampler)
 
+        base_seed = torch.LongTensor(1).random_()[0]
+
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
             self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
@@ -258,7 +260,6 @@ class _DataLoaderIter(object):
             self.rcvd_idx = 0
             self.reorder_dict = {}
 
-            base_seed = torch.LongTensor(1).random_()[0]
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,

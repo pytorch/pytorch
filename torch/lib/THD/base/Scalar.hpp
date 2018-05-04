@@ -1,7 +1,8 @@
 #pragma once
 
-#include "../master_worker/common/RPCType.hpp"
 #include <cstddef>
+
+#include "RPCType.hpp"
 
 namespace thd {
 

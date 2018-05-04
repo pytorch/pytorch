@@ -1,12 +1,21 @@
-cmake_minimum_required(VERSION 3.0)
-set(CMAKE_MODULE_PATH
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix
+if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  if (NOT BUILD_ATEN)
+    return()
+  endif()
+else()
+  cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+endif()
+
+# Create the project in all cases
+project(ATen CXX C)
+
+# Find modules
+list(APPEND CMAKE_MODULE_PATH
   /usr/lib/x86_64-linux-gnu/
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
-  ${CMAKE_MODULE_PATH})
-SET(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
-project(ATen)
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
+list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
+
 
 cmake_policy(SET CMP0012 NEW)
 
@@ -28,13 +37,9 @@ if("${isSystemDir}" STREQUAL "-1")
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
-IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wextra -Wno-missing-field-initializers -Wno-type-limits -Wno-unused-parameter -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
-  set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
-  if ($ENV{WERROR})
-    set(CMAKE_CXX_FLAGS "-Werror ${CMAKE_CXX_FLAGS}")
-  endif()
-ENDIF(NOT MSVC)
+if(NOT MSVC)
+  set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
+endif()
 
 INCLUDE(CheckCXXSourceCompiles)
 
@@ -124,7 +129,7 @@ if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS)
-  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/select_compute_arch.cmake)
+  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix/FindCUDA/select_compute_arch.cmake)
 ENDIF()
 LIST(APPEND CUDA_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
 CUDA_SELECT_NVCC_ARCH_FLAGS(NVCC_FLAGS_EXTRA $ENV{TORCH_CUDA_ARCH_LIST})
@@ -136,7 +141,7 @@ ENDIF()
 IF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
   MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.CudaHalfTensor")
   LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__")
-  SET(CMAKE_C_FLAGS "-DCUDA_HAS_FP16=1 ${CMAKE_C_FLAGS}")
+  add_compile_options(-DCUDA_HAS_FP16=1)
 ELSE(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
   MESSAGE(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
 ENDIF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
@@ -166,7 +171,7 @@ IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
   IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
     MESSAGE(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
     MESSAGE(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
-    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unknown-pragmas")
+    add_compile_options(-Wno-unknown-pragmas)
     SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
   ENDIF ()
 ENDIF ()
@@ -216,18 +221,18 @@ ENDIF()
 FIND_PACKAGE(ARM)
 IF (ASIMD_FOUND)
   MESSAGE(STATUS "asimd/Neon found with compiler flag : -D__NEON__")
-  SET(CMAKE_C_FLAGS "-D__NEON__ ${CMAKE_C_FLAGS}")
+  add_compile_options(-D__NEON__)
 ELSEIF (NEON_FOUND)
   MESSAGE(STATUS "Neon found with compiler flag : -mfpu=neon -D__NEON__")
-  SET(CMAKE_C_FLAGS "-mfpu=neon -D__NEON__ ${CMAKE_C_FLAGS}")
+  add_compile_options(-mfpu=neon -D__NEON__)
 ENDIF (ASIMD_FOUND)
 IF (CORTEXA8_FOUND)
   MESSAGE(STATUS "Cortex-A8 Found with compiler flag : -mcpu=cortex-a8")
-  SET(CMAKE_C_FLAGS "-mcpu=cortex-a8 -fprefetch-loop-arrays ${CMAKE_C_FLAGS}")
+  add_compile_options(-mcpu=cortex-a8 -fprefetch-loop-arrays)
 ENDIF (CORTEXA8_FOUND)
 IF (CORTEXA9_FOUND)
   MESSAGE(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
-  SET(CMAKE_C_FLAGS "-mcpu=cortex-a9 ${CMAKE_C_FLAGS}")
+  add_compile_options(-mcpu=cortex-a9)
 ENDIF (CORTEXA9_FOUND)
 
 IF(UNIX)
@@ -268,7 +273,7 @@ IF(HAVE_CPUID_H)
         }" HAVE_GCC_GET_CPUID)
 ENDIF()
 IF(HAVE_GCC_GET_CPUID)
-  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DHAVE_GCC_GET_CPUID")
+  add_compile_options(-DHAVE_GCC_GET_CPUID)
 ENDIF(HAVE_GCC_GET_CPUID)
 
 CHECK_C_SOURCE_COMPILES("#include <stdint.h>
@@ -286,21 +291,28 @@ CHECK_C_SOURCE_COMPILES("#include <stdint.h>
     }" NO_GCC_EBX_FPIC_BUG)
 
 IF(NOT NO_GCC_EBX_FPIC_BUG)
-  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_GCC_GET_CPUID")
+  add_compile_options(-DUSE_GCC_GET_CPUID)
 ENDIF(NOT NO_GCC_EBX_FPIC_BUG)
 
 FIND_PACKAGE(SSE) # checks SSE, AVX and AVX2
 IF(C_SSE2_FOUND)
   MESSAGE(STATUS "SSE2 Found")
-  SET(CMAKE_C_FLAGS "${C_SSE2_FLAGS} -DUSE_SSE2 ${CMAKE_C_FLAGS}")
+  # TODO: Work out correct way to do this.  Note that C_SSE2_FLAGS is often
+  # empty, in which case it expands to " " flag which is bad
+  SET(CMAKE_C_FLAGS "${C_SSE2_FLAGS} ${CMAKE_C_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "${C_SSE2_FLAGS} ${CMAKE_CXX_FLAGS}")
+  add_compile_options(-DUSE_SSE2)
 ENDIF(C_SSE2_FOUND)
 IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-  SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} -DUSE_SSE4_1 ${C_SSE4_2_FLAGS} -DUSE_SSE4_2 ${CMAKE_C_FLAGS}")
+  SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_C_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_CXX_FLAGS}")
+  add_compile_options(-DUSE_SSE4_1 -DUSE_SSE4_2)
 ENDIF()
 IF(C_SSE3_FOUND)
   MESSAGE(STATUS "SSE3 Found")
-  SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_C_FLAGS}")
-  SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} ${CMAKE_C_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} ${CMAKE_CXX_FLAGS}")
+  add_compile_options(-DUSE_SSE3)
 ENDIF(C_SSE3_FOUND)
 
 # we don't set -mavx and -mavx2 flags globally, but only for specific files
@@ -308,12 +320,11 @@ ENDIF(C_SSE3_FOUND)
 # add USE_AVX and USE_AVX2 macro defines
 IF(C_AVX_FOUND)
   MESSAGE(STATUS "AVX Found")
-  SET(CMAKE_C_FLAGS "-DUSE_AVX ${CMAKE_C_FLAGS}")
+  add_compile_options(-DUSE_AVX)
 ENDIF(C_AVX_FOUND)
 IF(C_AVX2_FOUND)
   MESSAGE(STATUS "AVX2 Found")
-  SET(CMAKE_C_FLAGS "-DUSE_AVX2 ${CMAKE_C_FLAGS}")
-  SET(CMAKE_CXX_FLAGS "-DUSE_AVX2 ${CMAKE_CXX_FLAGS}")
+  add_compile_options(-DUSE_AVX2)
 ENDIF(C_AVX2_FOUND)
 
 CHECK_C_SOURCE_RUNS("

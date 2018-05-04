@@ -61,7 +61,7 @@ class CollectAndDistributeFpnRpnProposalsOp final : public Operator<Context> {
         rpn_min_level_(
             OperatorBase::GetSingleArgument<int>("rpn_min_level", 2)),
         rpn_post_nms_topN_(
-            OperatorBase::GetSingleArgument<int>("post_nms_topN", 2000)) {
+            OperatorBase::GetSingleArgument<int>("rpn_post_nms_topN", 2000)) {
     CAFFE_ENFORCE_GE(
         roi_max_level_,
         roi_min_level_,

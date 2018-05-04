@@ -35,6 +35,12 @@ if [[ "$1" == "--with-gloo-ibverbs" ]]; then
   shift
 fi
 
+WITH_DISTRIBUTED_MW=0
+if [[ "$1" == "--with-distributed-mw" ]]; then
+  WITH_DISTRIBUTED_MW=1
+  shift
+fi
+
 CMAKE_INSTALL=${CMAKE_INSTALL-make install}
 
 # Save user specified env vars, we will manually propagate them
@@ -92,6 +98,9 @@ fi
 if [[ $WITH_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
     THD_FLAGS="-DWITH_GLOO_IBVERBS=1"
+fi
+if [[ $WITH_DISTRIBUTED_MW -eq 1 ]]; then
+    THD_FLAGS+="-DWITH_DISTRIBUTED_MW=1"
 fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
@@ -282,14 +291,6 @@ cp ../../aten/src/THCUNN/generic/THCUNN.h .
 cp -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
     cp "$INSTALL_DIR/bin/"/* .
-fi
-
-# this is for binary builds
-if [[ $PYTORCH_BINARY_BUILD && $PYTORCH_SO_DEPS ]]
-then
-    echo "Copying over dependency libraries $PYTORCH_SO_DEPS"
-    # copy over dependency libraries into the current dir
-    cp "$PYTORCH_SO_DEPS" .
 fi
 
 popd

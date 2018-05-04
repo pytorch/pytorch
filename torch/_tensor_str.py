@@ -168,7 +168,7 @@ def _vector_str(self, indent, fmt, scale, sz, summarize):
                 [' ...'] +
                 [fmt(val / scale) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
-        data = [fmt(val) for val in self.tolist()]
+        data = [fmt(val / scale) for val in self.tolist()]
 
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
     lines = [', '.join(line) for line in data_lines]

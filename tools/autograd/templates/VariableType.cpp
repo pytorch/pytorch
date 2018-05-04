@@ -11,6 +11,8 @@
 #include "torch/csrc/autograd/functions/tensor.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/variadic.h"
 
 #include <initializer_list>
@@ -41,6 +43,52 @@ static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->
 static void setattr(jit::Node* n, jit::Symbol name, std::string v)         { n->s_(name, v); }
 template<std::size_t N>
 static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
+
+template<typename T>
+static jit::Value* createConstant(jit::Node* n, T value) {
+  return n->owningGraph()->createConstant(jit::as_tensor(value))->insertBefore(n)->output();
+}
+
+template<typename T>
+static void genericInsertInput(jit::Node* n, size_t idx, T value) {
+  n->insertInput(idx, createConstant(n, value));
+}
+
+void failPositionalAttr() {
+  throw std::runtime_error("unsupported type in setposattr. File a bug report!");
+}
+
+static void setposattr(jit::Node* n, size_t idx, const char *name, int64_t v)             { genericInsertInput(n, idx, v); }
+static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Scalar& v)   { genericInsertInput(n, idx, v); }
+static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensor s)        { failPositionalAttr(); }
+static void setposattr(jit::Node* n, size_t idx, const char *name, const at::IntList& v)  {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasIntList(name)) {
+    auto info = ArgumentStash::popIntList(name);
+    for (size_t i = 0; i < info.size(); ++i) {
+      if (info[i] != nullptr) continue;
+      info[i] = createConstant(n, v[i]);
+    }
+    jit::TensorType expected_type {at::kLong, -1, {}};
+    for (jit::Value* v : info) {
+      if (*v->type() != expected_type) {
+        throw std::runtime_error(
+          "Type mismatch in setposattr for IntList. Check that your program "
+          "is valid without tracing, and please file a bug report if it is.");
+      }
+    }
+    jit::WithInsertPoint insert_point{n};
+    auto symbolic_info = fmap<jit::SymbolicVariable>(info);
+    auto size = jit::SymbolicVariable::stack(symbolic_info, 0);
+    n->insertInput(idx, size);
+  } else {
+    return genericInsertInput(n, idx, v);
+  }
+}
+static void setposattr(jit::Node* n, size_t idx, const char *name, bool v)                { genericInsertInput(n, idx, v); }
+static void setposattr(jit::Node* n, size_t idx, const char *name, double v)              { genericInsertInput(n, idx, v); }
+template<std::size_t N>
+static void setposattr(jit::Node* n, size_t idx, const char *name, std::array<bool, N> v) { failPositionalAttr(); }
 
 VariableType::VariableType(Context* context, Type* baseType)
   : Type(context, /*is_variable_or_undefined=*/true)
@@ -130,7 +178,7 @@ static VariableTypeRegistry registry;
 bool VariableType::isVariableType(const at::Type& type) {
   // Since all VariableTypes are allocated contiguously in types_vec, we can
   // just check that the pointer is inside the correct range.
-  ptrdiff_t offset = (char*)&type - (char*)registry.types_vec.data();
+  ptrdiff_t offset = reinterpret_cast<const char*>(&type) - reinterpret_cast<const char*>(registry.types_vec.data());
   ptrdiff_t extent = VariableTypeRegistry::MaxTypes * sizeof(VariableType);
   return offset >= 0 && offset < extent;
 }
@@ -157,12 +205,10 @@ std::vector<at::Type*> VariableType::allTypes() {
 
 Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
-    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #%d '%s'",
-        pos, name);
+    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   if (!isVariableType(t.type())) {
-    AT_ERROR("Expected object of type Variable but found type %s for argument #%d '%s'",
-        t.type().toString(), pos, name);
+    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(const_cast<Tensor&>(t));
 }
@@ -187,14 +233,12 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
     if (!t.defined()) {
-      AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor at position #%d "
-                    "for iterable argument #%d '%s'",
-                    i, pos, name);
+      AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor at position #", i, " "
+                    "for iterable argument #", pos, " '", name, "'");
     }
     if (!isVariableType(t.type())) {
-      AT_ERROR("Expected object of type Variable but found type %s at position #%d "
-                    "for iterable argument #%d '%s'",
-                    t.type().toString(), i, pos, name);
+      AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
+                    "for iterable argument #", pos, " '", name, "'");
     }
     ret[i] = static_cast<const Variable&>(t).data();
   }
@@ -288,8 +332,8 @@ static void check_inplace(const Tensor& tensor) {
 
 static void throw_error_out_requires_grad(const char* name) {
   AT_ERROR(
-      "%s(): functions with out=... arguments don't support automatic differentiation, "
-      "but one of the arguments requires grad.", name);
+      name, "(): functions with out=... arguments don't support automatic differentiation, "
+      "but one of the arguments requires grad.");
 }
 
 static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
@@ -381,6 +425,10 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   increment_version(self);
   rebase_history(self, std::move(grad_fn));
   return self;
+}
+
+Tensor & VariableType::_s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const {
+  AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
 }
 
 Tensor & VariableType::resize_(Tensor & self, IntList size) const {

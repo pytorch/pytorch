@@ -1237,7 +1237,7 @@ class TestNN(NNTestCase):
             self.assertEqual(scale.std(), 0)
             return scale[0]
 
-        grads = torch.arange(1, 101).view(10, 10), torch.ones(10).div(1000)
+        grads = torch.arange(1., 101).view(10, 10), torch.ones(10).div(1000)
         for norm_type in [0.5, 1.5, 2, 4, 'inf']:
             for p, g in zip(l.parameters(), grads):
                 p._grad = Variable(g.clone().view_as(p.data))
@@ -1267,7 +1267,7 @@ class TestNN(NNTestCase):
         l = nn.Linear(10, 10)
         clip_value = 2.5
 
-        grad_w, grad_b = torch.arange(-50, 50).view(10, 10).div_(5), torch.ones(10).mul_(2)
+        grad_w, grad_b = torch.arange(-50., 50).view(10, 10).div_(5), torch.ones(10).mul_(2)
         for grad_list in [[grad_w, grad_b], [grad_w, None]]:
             for p, g in zip(l.parameters(), grad_list):
                 p._grad = g.clone().view_as(p.data) if g is not None else g
@@ -1290,7 +1290,7 @@ class TestNN(NNTestCase):
         fc1 = nn.Linear(10, 20)
         model = nn.Sequential(conv1, fc1)
 
-        vec = Variable(torch.arange(0, 980))
+        vec = Variable(torch.arange(0., 980))
         vector_to_parameters(vec, model.parameters())
 
         sample = next(model.parameters())[0, 0, 0]
@@ -1321,6 +1321,39 @@ class TestNN(NNTestCase):
 
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
+        m = pickle.loads(pickle.dumps(m))
+        self.assertIsInstance(m, nn.Linear)
+
+    def test_spectral_norm(self):
+        input = torch.randn(3, 5)
+        m = nn.Linear(5, 7)
+        m = torch.nn.utils.spectral_norm(m)
+
+        self.assertEqual(m.weight_u.size(), torch.Size([m.weight.size(0)]))
+        self.assertTrue(hasattr(m, 'weight_org'))
+
+        m = torch.nn.utils.remove_spectral_norm(m)
+        self.assertFalse(hasattr(m, 'weight_org'))
+        self.assertFalse(hasattr(m, 'weight_u'))
+
+    def test_spectral_norm_forward(self):
+        input = torch.randn(3, 5)
+        m = nn.Linear(5, 7)
+        m = torch.nn.utils.spectral_norm(m)
+        # naive forward
+        _weight, _bias, _u = m.weight_org, m.bias, m.weight_u
+        _weight_mat = _weight.view(_weight.size(0), -1)
+        _v = torch.mv(_weight_mat.t(), _u)
+        _v = F.normalize(_v, dim=0, eps=1e-12)
+        _u = torch.mv(_weight_mat, _v)
+        _u = F.normalize(_u, dim=0, eps=1e-12)
+        _weight.data /= torch.dot(_u, torch.matmul(_weight_mat, _v))
+        out_hat = torch.nn.functional.linear(input, _weight, _bias)
+        expect_out = m(input)
+        self.assertAlmostEqual(expect_out, out_hat)
+
+    def test_spectral_norm_pickle(self):
+        m = torch.nn.utils.spectral_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
@@ -1492,7 +1525,7 @@ class TestNN(NNTestCase):
                  [0, 0],
                  [1, 2],
                  [3, 4]], device=device, dtype=dtype)
-        else:
+        elif mode == 'mean':
             expected_output = torch.tensor(
                 [[13. / 3, 16. / 3],
                  [13. / 3, 16. / 3]], device=device, dtype=dtype)
@@ -1502,6 +1535,16 @@ class TestNN(NNTestCase):
                  [0., 0.],
                  [1. / 3, 2. / 3],
                  [3. / 3, 4. / 3]], device=device, dtype=dtype)
+        elif mode == 'max':
+            expected_output = torch.tensor(
+                [[7, 8],
+                 [9, 10]], device=device, dtype=dtype)
+            expected_grad_weight = torch.tensor(
+                [[0, 0],
+                 [0, 0],
+                 [0, 0],
+                 [1, 2],
+                 [3, 4]], device=device, dtype=dtype)
 
         output = es(input, offsets)
         output.backward(grad_output)
@@ -1536,8 +1579,10 @@ class TestNN(NNTestCase):
             output = es(input.view(-1), offsets)
             if mode == 'sum':
                 ref_output = e(input).sum(1)
-            else:
+            elif mode == 'mean':
                 ref_output = e(input).mean(1)
+            elif mode == 'max':
+                ref_output = e(input).max(1)[0]
 
             self.assertEqual(output, ref_output, dtype2prec[dtype])
 
@@ -1546,7 +1591,10 @@ class TestNN(NNTestCase):
             es_weight_grad = es.weight.grad.data
             if sparse:
                 es_weight_grad = es.weight.grad.data.to_dense()
-            self.assertEqual(es_weight_grad, e.weight.grad, dtype2prec[dtype])
+
+            # We have more floating point error here because we are dealing with larger numbers
+            needed_prec = dtype2prec[dtype] * 2
+            self.assertEqual(es_weight_grad, e.weight.grad, needed_prec)
 
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
         _test_vs_Embedding(N, D, B, L)
@@ -1614,6 +1662,8 @@ class TestNN(NNTestCase):
     def test_embedding_bag(self):
         self._test_EmbeddingBag(False, 'sum', False)
         self._test_EmbeddingBag(False, 'mean', False)
+        self._test_EmbeddingBag(False, 'max', False)
+
         self._test_EmbeddingBag(False, 'sum', True)
         self._test_EmbeddingBag(False, 'mean', True)
 
@@ -1622,6 +1672,7 @@ class TestNN(NNTestCase):
     def test_embedding_bag_cuda(self, dtype=torch.float):
         self._test_EmbeddingBag(True, 'sum', False, dtype)
         self._test_EmbeddingBag(True, 'mean', False, dtype)
+        self._test_EmbeddingBag(True, 'max', False, dtype)
         if dtype != torch.half:
             # torch.cuda.sparse.HalfTensor is not enabled.
             self._test_EmbeddingBag(True, 'sum', True, dtype)
@@ -2035,6 +2086,13 @@ class TestNN(NNTestCase):
     def test_batchnorm_eval_cuda(self, dtype=torch.float):
         self._test_batchnorm_eval("cuda", dtype)
 
+    def test_batchnorm_simple_average(self):
+        self._test_batchnorm_simple_average()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_batchnorm_simple_average_cuda(self):
+        self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
+
     def test_MaxPool1d_indices(self):
         self._test_maxpool_indices(1)
 
@@ -2200,6 +2258,7 @@ class TestNN(NNTestCase):
         for i, replica in enumerate(replicas):
             self.assertEqual(replica.bn.running_mean.get_device(), i, 'buffer on wrong device')
             self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
+            self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
@@ -2531,7 +2590,7 @@ class TestNN(NNTestCase):
         net.add_module('empty', None)
 
         state_dict = net.state_dict()
-        self.assertEqual(len(state_dict), 9)
+        self.assertEqual(len(state_dict), 10)
         self.assertEqual(len(state_dict._metadata), 6)
         self.assertIn('', state_dict._metadata)
         self.assertIn('linear1', state_dict._metadata)
@@ -2550,6 +2609,7 @@ class TestNN(NNTestCase):
         self.assertIn('bn.bias', state_dict)
         self.assertIn('bn.running_var', state_dict)
         self.assertIn('bn.running_mean', state_dict)
+        self.assertIn('bn.num_batches_tracked', state_dict)
         self.assertFalse(any(map(lambda k: k.startswith('empty'), state_dict.keys())))
         for k, v in state_dict.items():
             param = net
@@ -3182,10 +3242,10 @@ class TestNN(NNTestCase):
         max_length = lengths[0]
         batch_sizes = [sum(map(bool, filter(lambda x: x >= i, lengths))) for i in range(1, max_length + 1)]
         offset = 0
-        padded = torch.cat([pad(i * 100 + torch.arange(1, 5 * l + 1).view(l, 1, 5), max_length)
+        padded = torch.cat([pad(i * 100 + torch.arange(1., 5 * l + 1).view(l, 1, 5), max_length)
                             for i, l in enumerate(lengths, 1)], 1)
         padded = torch.tensor(padded, requires_grad=True)
-        expected_data = [[torch.arange(1, 6) + (i + 1) * 100 + 5 * n for i in range(batch_size)]
+        expected_data = [[torch.arange(1., 6) + (i + 1) * 100 + 5 * n for i in range(batch_size)]
                          for n, batch_size in enumerate(batch_sizes)]
         expected_data = list(itertools.chain.from_iterable(expected_data))
         expected_data = torch.stack(expected_data, dim=0)
@@ -4012,17 +4072,21 @@ class TestNN(NNTestCase):
         # training pass
         old_running_mean = module.running_mean.clone()
         old_running_var = module.running_var.clone()
+        old_num_batches_tracked = module.num_batches_tracked.clone()
         module(data)
         self.assertNotEqual(old_running_mean, module.running_mean)
         self.assertNotEqual(old_running_var, module.running_var)
+        self.assertEqual(old_num_batches_tracked + 1, module.num_batches_tracked)
 
         # eval pass
         module.eval()
         old_running_mean = module.running_mean.clone()
         old_running_var = module.running_var.clone()
+        old_num_batches_tracked = module.num_batches_tracked.clone()
         module(data)
         self.assertEqual(old_running_mean, module.running_mean)
         self.assertEqual(old_running_var, module.running_var)
+        self.assertEqual(old_num_batches_tracked, module.num_batches_tracked)
 
     def test_batchnorm_update_stats(self):
         self._test_batchnorm_update_stats()
@@ -4110,6 +4174,48 @@ class TestNN(NNTestCase):
         grad2 = data.grad.clone()
         self.assertEqual(res1, res2)
         self.assertEqual(grad1, grad2)
+
+    def _test_batchnorm_simple_average(self, test_type=torch.FloatTensor):
+        module = nn.BatchNorm1d(3, momentum=None).type(test_type)
+        zeros = torch.zeros(3).type(test_type)
+        ones = torch.ones(3).type(test_type)
+        self.assertEqual(module.running_mean, zeros)
+        self.assertEqual(module.running_var, ones)
+
+        data1 = torch.rand(4, 3).type(test_type)
+        data2 = torch.rand(4, 3).type(test_type)
+
+        # 1st pass
+        res1 = module(data1)
+        running_mean1 = module.running_mean.clone()
+        running_var1 = module.running_var.clone()
+        self.assertNotEqual(running_mean1, zeros)
+        self.assertNotEqual(running_var1, ones)
+
+        # reset stats
+        module.reset_running_stats()
+        self.assertEqual(module.running_mean, zeros)
+        self.assertEqual(module.running_var, ones)
+
+        # 2nd pass
+        res2 = module(data2)
+        running_mean2 = module.running_mean.clone()
+        running_var2 = module.running_var.clone()
+        self.assertNotEqual(running_mean2, zeros)
+        self.assertNotEqual(running_var2, ones)
+
+        # reset stats
+        module.reset_running_stats()
+        self.assertEqual(module.running_mean, zeros)
+        self.assertEqual(module.running_var, ones)
+
+        # 3rd (combined) pass
+        res3 = module(data1)
+        res4 = module(data2)
+        self.assertEqual(res3, res1)
+        self.assertEqual(res4, res2)
+        self.assertAlmostEqual(module.running_mean, (running_mean1 + running_mean2) / 2)
+        self.assertAlmostEqual(module.running_var, (running_var1 + running_var2) / 2)
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True)
@@ -4265,7 +4371,7 @@ class TestNN(NNTestCase):
         # test known input on CPU
         for padding_mode in ['zeros', 'border']:
 
-            input = Variable(torch.arange(1, 11).view(1, 1, 2, 5))
+            input = Variable(torch.arange(1., 11).view(1, 1, 2, 5))
             grid = Variable(torch.Tensor(
                 [[-0.9, -1.4, 0, 0.2, 1],
                  [-1, -0.333, 0, 0.5, 1],
@@ -4375,7 +4481,7 @@ class TestNN(NNTestCase):
 
     def test_affine_grid(self):
         # test known input on CPU
-        input = Variable(torch.arange(1, 7).view(1, 2, 3))
+        input = Variable(torch.arange(1., 7).view(1, 2, 3))
         output = F.affine_grid(input, torch.Size([1, 1, 2, 2]))
         groundtruth = torch.Tensor(
             [[[0, -3], [2, 5]], [[4, 7], [6, 15]]]).view(1, 2, 2, 2)
@@ -5121,7 +5227,7 @@ class TestNNInit(TestCase):
 
                 for col_idx in range(input_tensor.size(1)):
                     column = input_tensor[:, col_idx]
-                    assert column[column == 0].nelement() >= math.ceil(sparsity * cols)
+                    assert column[column == 0].nelement() >= math.ceil(sparsity * rows)
 
                 assert self._is_normal(input_tensor[input_tensor != 0], 0, std)
 
@@ -5932,6 +6038,14 @@ new_module_tests = [
     ),
     dict(
         module_name='BatchNorm1d',
+        constructor_args=(10, 1e-3, None),
+        input_size=(4, 10),
+        cudnn=True,
+        check_eval=True,
+        desc='affine_simple_average',
+    ),
+    dict(
+        module_name='BatchNorm1d',
         constructor_args=(10, 1e-3, 0.3, False),
         input_size=(4, 10),
         cudnn=True,
@@ -5963,6 +6077,14 @@ new_module_tests = [
     ),
     dict(
         module_name='BatchNorm2d',
+        constructor_args=(3, 1e-3, None),
+        input_size=(2, 3, 6, 6),
+        cudnn=True,
+        check_eval=True,
+        desc='2d_simple_average',
+    ),
+    dict(
+        module_name='BatchNorm2d',
         constructor_args=(3, 1e-3, 0.8),
         input_size=(2, 3, 6, 6),
         cudnn=True,
@@ -5991,6 +6113,14 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
+    ),
+    dict(
+        module_name='BatchNorm3d',
+        constructor_args=(3, 1e-3, None),
+        input_size=(2, 3, 4, 4, 4),
+        cudnn=True,
+        check_eval=True,
+        desc='3d_simple_average',
     ),
     dict(
         module_name='BatchNorm3d',

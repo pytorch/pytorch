@@ -33,7 +33,7 @@ public:
         auto & undef = type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)];
         if (undef) return *undef;
       }
-      AT_ERROR("%s%sType is not enabled.",toString(p),toString(s));
+      AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     }
     return *type;
   }
@@ -41,7 +41,7 @@ public:
     initCUDAIfNeeded(p);
     auto & generator = generator_registry[static_cast<int>(p)];
     if(!generator)
-      AT_ERROR("%s backend type not enabled.",toString(p));
+      AT_ERROR(toString(p), " backend type not enabled.");
     return *generator;
   }
   bool hasMKL() const;

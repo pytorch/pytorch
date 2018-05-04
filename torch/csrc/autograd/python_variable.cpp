@@ -209,13 +209,7 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   if (!THPVariable_Check(data)) {
     throw torch::TypeError("Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
   }
-  Tensor tensor = THPVariable_UnpackData(data);
-  if (self->cdata.data().type() != tensor.type()) {
-    // we change the type of var.data so we must change the type of var
-    auto newType = VariableType::getType(tensor);
-    self->cdata.temporary_hack_set_type(newType);
-  }
-  self->cdata.data() = std::move(tensor);
+  at::detail::set_data(self->cdata, THPVariable_UnpackData(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
@@ -232,7 +226,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
   if (py_grad == Py_None) {
-    var.reset_grad();
+    var.grad().reset();
     return 0;
   }
 
@@ -290,11 +284,16 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
   HANDLE_TH_ERRORS
   THPUtils_assertRet(-1, PyBool_Check(obj), "requires_grad must be a bool");
   auto& var = self->cdata;
+  auto requires_grad = (obj == Py_True);
   if (!var.is_leaf()) {
     THPUtils_setError(autograd::utils::requires_grad_leaf_error(obj == Py_True).c_str());
     return -1;
   }
-  var.set_requires_grad(obj == Py_True);
+  if (requires_grad && !var.is_floating_point()) {
+    THPUtils_setError("only Tensors of floating point dtype can require gradients");
+    return -1;
+  }
+  var.set_requires_grad(requires_grad);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
@@ -347,9 +346,7 @@ PyObject *THPVariable_get_base(THPVariable *self)
 PyObject *THPVariable_get_shape(THPVariable *self)
 {
   HANDLE_TH_ERRORS
-  auto& self_ = self->cdata;
-  auto sizes = self_.sizes();
-  return THPSize_New(sizes.size(), (int64_t *)sizes.data());
+  return THPSize_New(self->cdata);
   END_HANDLE_TH_ERRORS
 }
 

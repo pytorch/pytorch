@@ -46,6 +46,19 @@ factory_like_common_args = parse_kwargs("""
         returned tensor. Default: ``False``.
 """)
 
+factory_data_common_args = parse_kwargs("""
+    data (array_like): Initial data for the tensor. Can be a list, tuple,
+        NumPy ``ndarray``, scalar, and other types.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if None, infers data type from :attr:`data`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+""")
+
 add_docstr(torch.abs,
            r"""
 abs(input, out=None) -> Tensor
@@ -379,14 +392,43 @@ Args:
 
 Example::
 
-    >>> vec1 = torch.arange(1, 4)
-    >>> vec2 = torch.arange(1, 3)
+    >>> vec1 = torch.arange(1., 4.)
+    >>> vec2 = torch.arange(1., 3.)
     >>> M = torch.zeros(3, 2)
     >>> torch.addr(M, vec1, vec2)
     tensor([[ 1.,  2.],
             [ 2.,  4.],
             [ 3.,  6.]])
 """)
+
+add_docstr(torch.as_tensor,
+           r"""
+as_tensor(data, dtype=None, device=None) -> Tensor
+
+Convert the data into a `torch.Tensor`.  If the data is already a `Tensor` of the same `dtype` and `device`, no copy
+will be performed.  Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and the `device` is the cpu,
+no copy will be performed.
+
+Args:
+    {data}
+    {dtype}
+    {device}
+
+Example::
+
+    >>> torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]])
+    tensor([[ 0.1000,  1.2000],
+            [ 2.2000,  3.1000],
+            [ 4.9000,  5.2000]])
+
+    >>> a = numpy.array([1, 2, 3])
+    >>> t = torch.from_numpy(a)
+    >>> t
+    tensor([ 1,  2,  3])
+    >>> t[0] = -1
+    >>> a
+    array([-1,  2,  3])
+""".format(**factory_data_common_args))
 
 add_docstr(torch.asin,
            r"""
@@ -762,9 +804,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 0.0753, -0.4702, -0.4599,  0.1899])
+    tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
     >>> torch.clamp(a, max=0.5)
-    tensor([ 0.0753, -0.4702, -0.4599,  0.1899])
+    tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
 """)
 
 add_docstr(torch.cos,
@@ -1068,15 +1110,11 @@ Examples::
 
     >>> x = torch.randn(2, 5, 4, 2)
     >>> torch.diagonal(x, offset=-1, dim1=1, dim2=2)
+    tensor([[[-1.2631,  0.3755, -1.5977, -1.8172],
+             [-1.1065,  1.0401, -0.2235, -0.7938]],
 
-    (0 ,.,.) =
-     -0.6806 -0.0281 -0.6595 -0.4199
-      0.8741 -0.1793 -0.6997  0.6265
-
-    (1 ,.,.) =
-      0.6182  1.3069  1.6503  1.7627
-     -0.2122 -0.2250  0.0990 -2.6433
-    [torch.FloatTensor of size (2,2,4)]
+            [[-1.7325, -0.3081,  0.6166,  0.2335],
+             [ 1.0500,  0.7336, -0.3836, -1.1015]]])
 """)
 
 add_docstr(torch.dist,
@@ -1664,8 +1702,8 @@ Args:
 
 Example::
 
-    >>> v1 = torch.arange(1, 5)
-    >>> v2 = torch.arange(1, 4)
+    >>> v1 = torch.arange(1., 5.)
+    >>> v2 = torch.arange(1., 4.)
     >>> torch.ger(v1, v2)
     tensor([[  1.,   2.,   3.],
             [  2.,   4.,   6.],
@@ -1888,13 +1926,13 @@ Args:
 
 Example::
 
-    >>> x = torch.arange(1, 6)
+    >>> x = torch.arange(1., 6.)
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.kthvalue(x, 4)
     (tensor(4.), tensor(3))
 
-    >>> x=torch.arange(1,7).resize_(2,3)
+    >>> x=torch.arange(1.,7.).resize_(2,3)
     >>> x
     tensor([[ 1.,  2.,  3.],
             [ 4.,  5.,  6.]])
@@ -1947,7 +1985,7 @@ Args:
 
 Example::
 
-    >>> start = torch.arange(1, 5)
+    >>> start = torch.arange(1., 5.)
     >>> end = torch.empty(4).fill_(10)
     >>> start
     tensor([ 1.,  2.,  3.,  4.])
@@ -2839,7 +2877,7 @@ Args:
 
 Example::
 
-    >>> torch.normal(mean=torch.arange(1, 11), std=torch.arange(1, 0, -0.1))
+    >>> torch.normal(mean=torch.arange(1., 11.), std=torch.arange(1, 0, -0.1))
     tensor([  1.0425,   3.5672,   2.7969,   4.2925,   4.7229,   6.2134,
               8.0505,   8.1408,   9.0563,  10.0566])
 
@@ -2855,7 +2893,7 @@ Args:
 
 Example::
 
-    >>> torch.normal(mean=0.5, std=torch.arange(1, 6))
+    >>> torch.normal(mean=0.5, std=torch.arange(1., 6.))
     tensor([-1.2793, -1.0732, -2.0687,  5.1177, -1.2303])
 
 .. function:: normal(mean, std=1.0, out=None) -> Tensor
@@ -2870,7 +2908,7 @@ Args:
 
 Example::
 
-    >>> torch.normal(mean=torch.arange(1, 6))
+    >>> torch.normal(mean=torch.arange(1., 6.))
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
 """)
 
@@ -3161,9 +3199,9 @@ Example::
     tensor([ 0.4331,  1.2475,  0.6834, -0.2791])
     >>> torch.pow(a, 2)
     tensor([ 0.1875,  1.5561,  0.4670,  0.0779])
-    >>> exp = torch.arange(1, 5)
+    >>> exp = torch.arange(1., 5.)
 
-    >>> a = torch.arange(1, 5)
+    >>> a = torch.arange(1., 5.)
     >>> a
     tensor([ 1.,  2.,  3.,  4.])
     >>> exp
@@ -3188,7 +3226,7 @@ Args:
 
 Example::
 
-    >>> exp = torch.arange(1, 5)
+    >>> exp = torch.arange(1., 5.)
     >>> base = 2
     >>> torch.pow(base, exp)
     tensor([  2.,   4.,   8.,  16.])
@@ -3518,16 +3556,10 @@ Constructs a tensor with :attr:`data`.
     :func:`torch.from_numpy`.
 
 Args:
-    data (array_like): Initial data for the tensor. Can be a list, tuple,
-        NumPy ``ndarray``, scalar, and other types.
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if None, infers data type from :attr:`data`.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
-        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
-        for CPU tensor types and the current CUDA device for CUDA tensor types.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: ``False``.
+    {data}
+    {dtype}
+    {device}
+    {requires_grad}
 
 
 Example::
@@ -3550,7 +3582,7 @@ Example::
 
     >>> torch.tensor([])  # Create an empty tensor (of size (0,))
     tensor([])
-""")
+""".format(**factory_data_common_args))
 
 add_docstr(torch.range,
            r"""
@@ -3600,11 +3632,14 @@ in such cases.
     \text{{out}}_{{i+1}} = \text{{out}}_{{i}} + \text{{step}}
 
 Args:
-    start (float): the starting value for the set of points. Default: ``0``.
-    end (float): the ending value for the set of points
-    step (float): the gap between each pair of adjacent points. Default: ``1``.
+    start (Number): the starting value for the set of points. Default: ``0``.
+    end (Number): the ending value for the set of points
+    step (Number): the gap between each pair of adjacent points. Default: ``1``.
     {out}
-    {dtype}
+    {dtype}  If `dtype` is not given, infer the data type from the other input arguments.
+             If any of `start`, `end`, or `stop` are floating-point,
+             the `dtype` is inferred to be the default dtype, see :meth:`~torch.get_default_dtype`.
+             Otherwise, the `dtype` is inferred to be `torch.int64`.
     {layout}
     {device}
     {requires_grad}
@@ -3612,9 +3647,9 @@ Args:
 Example::
 
     >>> torch.arange(5)
-    tensor([ 0.,  1.,  2.,  3.,  4.])
+    tensor([ 0,  1,  2,  3,  4])
     >>> torch.arange(1, 4)
-    tensor([ 1.,  2.,  3.])
+    tensor([ 1,  2,  3])
     >>> torch.arange(1, 2.5, 0.5)
     tensor([ 1.0000,  1.5000,  2.0000])
 """.format(**factory_common_args))
@@ -3703,7 +3738,7 @@ Args:
 
 Example::
 
-    >>> a = torch.arange(4)
+    >>> a = torch.arange(4.)
     >>> torch.reshape(a, (2, 2))
     tensor([[ 0.,  1.],
             [ 2.,  3.]])
@@ -4059,7 +4094,8 @@ Example::
 .. function:: sum(input, dim, keepdim=False, out=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`.
+dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
+reduce over all of them.
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
@@ -4068,7 +4104,7 @@ the output tensor having 1 fewer dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
+    dim (int or tuple of ints): the dimension or dimensions to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
     out (Tensor, optional): the output tensor
 
@@ -4082,6 +4118,9 @@ Example::
             [ 0.3637, -0.9906, -0.4752, -1.5197]])
     >>> torch.sum(a, 1)
     tensor([-0.4598, -0.1381,  1.3708, -2.6217])
+    >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
+    >>> torch.sum(b, (2, 1))
+    tensor([  435.,  1335.,  2235.,  3135.])
 """)
 
 add_docstr(torch.svd,
@@ -4321,7 +4360,7 @@ Args:
 
 Example::
 
-    >>> x = torch.arange(1, 6)
+    >>> x = torch.arange(1., 6.)
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.topk(x, 3)
@@ -4336,7 +4375,7 @@ Returns the sum of the elements of the diagonal of the input 2-D matrix.
 
 Example::
 
-    >>> x = torch.arange(1, 10).view(3, 3)
+    >>> x = torch.arange(1., 10.).view(3, 3)
     >>> x
     tensor([[ 1.,  2.,  3.],
             [ 4.,  5.,  6.],

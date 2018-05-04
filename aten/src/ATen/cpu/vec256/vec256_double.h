@@ -54,12 +54,6 @@ public:
     auto mask = _mm256_set1_pd(-0.f);
     return _mm256_andnot_pd(mask, values);
   }
-  Vec256<double> exp() const {
-    return map(std::exp);
-  }
-  Vec256<double> log() const {
-    return map(std::log);
-  }
   Vec256<double> sin() const {
     return map(std::sin);
   }
@@ -91,6 +85,11 @@ Vec256<double> inline operator+(const Vec256<double>& a, const Vec256<double>& b
 template <>
 Vec256<double> inline operator*(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_mul_pd(a, b);
+}
+
+template <>
+Vec256<double> inline operator/(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_div_pd(a, b);
 }
 
 #endif

@@ -1,6 +1,6 @@
-#include "mobile.h"
+#include "caffe2/opt/converter.h"
+#include "caffe2/opt/mobile.h"
 #include "caffe2/core/logging.h"
-#include "nomnigraph/Converters/Caffe2.h"
 
 namespace caffe2 {
 namespace opt {
@@ -8,7 +8,7 @@ namespace opt {
 using namespace nom;
 
 caffe2::NetDef addNNPACK(caffe2::NetDef net, bool low_memory) {
-  auto nn = nom::converters::convertFromCaffe2Proto(net);
+  auto nn = convertToNNModule(net);
   for (auto node : nn.dataFlow.getMutableNodes()) {
     auto* nodeData = node->data().get(); // Let graph retain ownership.
 
@@ -64,7 +64,10 @@ caffe2::NetDef addNNPACK(caffe2::NetDef net, bool low_memory) {
 
     // We're good to use our engine.
     auto annotation = conv->getMutableAnnotation();
-    auto* op = static_cast<caffe2::OperatorDef*>(annotation->getSaved());
+    if (!annotation || !isa<Caffe2Annotation>(annotation)) {
+      continue;
+    }
+    auto* op = dyn_cast<Caffe2Annotation>(annotation)->getMutableOperatorDef();
     op->set_engine(engine);
     if (!low_memory) {
       auto* precompute_argument = op->add_arg();
@@ -72,7 +75,7 @@ caffe2::NetDef addNNPACK(caffe2::NetDef net, bool low_memory) {
       precompute_argument->set_s("PRECOMPUTE");
     }
   }
-  return nom::converters::convertToCaffe2Proto(nn);
+  return convertToCaffe2Proto(nn, net);
 }
 
 namespace {
@@ -99,7 +102,7 @@ inline bool isNNPACKConvReluEfficient(std::string algo, repr::Conv* conv) {
 } // namespace
 
 caffe2::NetDef fuseNNPACKConvRelu(caffe2::NetDef net) {
-  auto nn = nom::converters::convertFromCaffe2Proto(net);
+  auto nn = convertToNNModule(net);
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn.dataFlow)) {
     repr::NNGraph::NodeRef conv_node;
     repr::Conv* conv;
@@ -121,10 +124,10 @@ caffe2::NetDef fuseNNPACKConvRelu(caffe2::NetDef net) {
     auto relu_node = consumers.front();
 
     auto annotation = conv->getMutableAnnotation();
-    if (!annotation) {
+    if (!annotation || !isa<Caffe2Annotation>(annotation)) {
       continue;
     }
-    auto* op = static_cast<caffe2::OperatorDef*>(annotation->getSaved());
+    auto* op = dyn_cast<Caffe2Annotation>(annotation)->getMutableOperatorDef();
 
     // We only want to fuse for fast NNPACK convs
     if (op->engine() != "NNPACK") {
@@ -146,14 +149,46 @@ caffe2::NetDef fuseNNPACKConvRelu(caffe2::NetDef net) {
     }
     auto relu_output = relu_outputs.front();
 
-    nn.dataFlow.replaceNode(relu_output, conv_output);
-    nn.dataFlow.deleteNode(relu_node);
-    nn.dataFlow.deleteNode(relu_output);
+    auto output_tensor = repr::nn::get<repr::Tensor>(relu_output);
+    auto output_node = relu_output;
+    auto input_tensor = repr::nn::get<repr::Tensor>(repr::nn::getInputs(conv_node).front());
+
+    // Conv cannot be in-place
+    if (output_tensor->getName() != input_tensor->getName()) {
+      nn.dataFlow.replaceNode(conv_output, relu_output);
+      nn.dataFlow.deleteNode(relu_node);
+      nn.dataFlow.deleteNode(conv_output);
+    } else {
+      nn.dataFlow.replaceNode(relu_output, conv_output);
+      output_tensor = repr::nn::get<repr::Tensor>(conv_output);
+      output_node = conv_output;
+      nn.dataFlow.deleteNode(relu_node);
+      nn.dataFlow.deleteNode(relu_output);
+    }
+
+    // We may have accidentally made the next op in-place
+    // In future iterations of transformations this won't be an issue,
+    // but current caffe2 predictor usage requires things like 
+    // external_input and output to be unchanged.
+    bool rectify_inplace = false;
+    for (auto& consumer : repr::nn::getConsumers(output_node)) {
+      for (auto& consumer_output : repr::nn::getOutputs(consumer)) {
+        auto co_name = repr::nn::get<repr::Tensor>(consumer_output)->getName();
+        if (co_name == output_tensor->getName()) {
+          rectify_inplace = true;
+        }
+      }
+    }
+    if (rectify_inplace) {
+      auto new_output = nn.dataFlow.createNode(make_unique<repr::Tensor>(output_tensor->getName() + "_fusion_fix"));
+      nn.dataFlow.replaceNode(output_node, new_output);
+    }
+
     auto* arg = op->add_arg();
     arg->set_name("activation");
     arg->set_s("Relu");
   }
-  return nom::converters::convertToCaffe2Proto(nn);
+  return convertToCaffe2Proto(nn, net);
 }
 
 } // namespace opt

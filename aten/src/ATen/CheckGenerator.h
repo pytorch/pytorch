@@ -12,7 +12,7 @@ static inline T * check_generator(Generator * expr, Generator * defaultValue) {
     expr = defaultValue;
   if(auto result = dynamic_cast<T*>(expr))
     return result;
-  AT_ERROR("Expected a '%s' but found '%s'", typeid(T).name(), typeid(expr).name());
+  AT_ERROR("Expected a '", typeid(T).name(), "' but found '", typeid(expr).name(), "'");
 }
 
 } // namespace at

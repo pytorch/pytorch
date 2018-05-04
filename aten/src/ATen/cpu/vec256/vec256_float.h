@@ -2,6 +2,7 @@
 
 #include "intrinsics.h"
 #include "vec256_base.h"
+#include <iostream>
 
 namespace at {
 namespace vec256 {
@@ -54,12 +55,6 @@ public:
     auto mask = _mm256_set1_ps(-0.f);
     return _mm256_andnot_ps(mask, values);
   }
-  Vec256<float> exp() const {
-    return map(std::exp);
-  }
-  Vec256<float> log() const {
-    return map(std::log);
-  }
   Vec256<float> sin() const {
     return map(std::sin);
   }
@@ -91,6 +86,11 @@ Vec256<float> inline operator+(const Vec256<float>& a, const Vec256<float>& b) {
 template <>
 Vec256<float> inline operator*(const Vec256<float>& a, const Vec256<float>& b) {
   return _mm256_mul_ps(a, b);
+}
+
+template <>
+Vec256<float> inline operator/(const Vec256<float>& a, const Vec256<float>& b) {
+  return _mm256_div_ps(a, b);
 }
 
 #endif

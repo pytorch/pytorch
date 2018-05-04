@@ -7,6 +7,9 @@ ENDIF(MSVC)
 ADD_EXECUTABLE(scalar_test scalar_test.cpp)
 target_link_libraries(scalar_test ATen)
 
+ADD_EXECUTABLE(apply_utils_test apply_utils_test.cpp)
+target_link_libraries(apply_utils_test ATen)
+
 ADD_EXECUTABLE(basic basic.cpp)
 target_link_libraries(basic ATen)
 

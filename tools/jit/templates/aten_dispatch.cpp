@@ -76,6 +76,7 @@ int deviceForInputs(Stack & stack, size_t N) {
 // the number of inputs to choose an overload).
 std::unordered_set<Symbol> tensor_vararg_fns = {
   aten::cat,
+  aten::stack,
 };
 
 template<size_t N>
@@ -94,7 +95,7 @@ std::unordered_map<std::string, operator_constructor> constructors = {
 
 std::string getDescriptor(jit::Node* n) {
   std::stringstream s;
-  JIT_ASSERT(n->kind().is_aten());
+  JIT_ASSERTM(n->kind().is_aten(), "%s is not an ATen op", n->kind().toDisplayString());
   s << n->kind().toUnqualString();
   if (tensor_vararg_fns.count(n->kind()) == 0)
     s << "-" << n->inputs().size();

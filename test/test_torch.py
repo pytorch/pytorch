@@ -92,6 +92,9 @@ class TestTorch(TestCase):
             for i, j in zip(v1, v2):
                 res2 += i * j
             self.assertEqual(res1, res2)
+            out = torch.randn(()).type(tname)
+            torch.dot(v1, v2, out=out)
+            self.assertEqual(res1, out)
 
         # Test 0-strided
         for tname, _prec in types.items():
@@ -102,6 +105,9 @@ class TestTorch(TestCase):
             for i, j in zip(v1, v2):
                 res2 += i * j
             self.assertEqual(res1, res2)
+            out = torch.randn(()).type(tname)
+            torch.dot(v1, v2, out=out)
+            self.assertEqual(res1, out)
 
     def test_ger(self):
         types = {
@@ -254,13 +260,16 @@ class TestTorch(TestCase):
             input = []
             input.append(list(range(-5, 5)))
             input.append([x + 1e-6 for x in range(-5, 5)])
+            # Some vectorized implementations don't support large ranges
+            input.append([x + 1e10 for x in range(-5, 5)])
+            input.append([x - 1e10 for x in range(-5, 5)])
             input.append(torch.randn(10).tolist())
             input.append((torch.randn(10) + 1e6).tolist())
             input.append([math.pi * (x / 2) for x in range(-5, 5)])
 
         def compare_reference(input, dtype):
             input = torch.tensor(input, dtype=dtype)
-            res1 = torchfn(input)
+            res1 = torchfn(input.clone())
             res2 = input.clone().apply_(lambda x: mathfn(x))
             torch.testing.assert_allclose(res1, res2)
 
@@ -281,6 +290,32 @@ class TestTorch(TestCase):
         check_non_contiguous((5, 7), torch.float)
         check_non_contiguous((1024,), torch.float)
 
+        # If size(dim) == 1, stride(dim) is not defined.
+        # The code needs to be able to handle this
+        def check_contiguous_size1(dtype):
+            contig = torch.randn((5, 100), dtype=dtype)
+            contig = contig[:1, :50]
+            contig2 = torch.empty(contig.size(), dtype=dtype)
+            contig2.copy_(contig)
+            self.assertTrue(contig.is_contiguous())
+            self.assertTrue(contig2.is_contiguous())
+            self.assertEqual(torchfn(contig), torchfn(contig2), 'contiguous size1')
+
+        check_contiguous_size1(torch.double)
+        check_contiguous_size1(torch.float)
+
+        def check_contiguous_size1_largedim(dtype):
+            contig = torch.randn((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), dtype=dtype)
+            contig = contig[:1, :, :, :, :, :, :, :, :, :, :, :]
+            contig2 = torch.empty(contig.size(), dtype=dtype)
+            contig2.copy_(contig)
+            self.assertTrue(contig.is_contiguous())
+            self.assertTrue(contig2.is_contiguous())
+            self.assertEqual(torchfn(contig), torchfn(contig2), 'contiguous size1')
+
+        check_contiguous_size1_largedim(torch.double)
+        check_contiguous_size1_largedim(torch.float)
+
         def check_large(dtype):
             input = torch.randn(1024, 512, dtype=dtype)
             actual = torchfn(input)
@@ -292,10 +327,19 @@ class TestTorch(TestCase):
         check_large(torch.double)
         check_large(torch.float)
 
-    def _test_math_by_name(self, function_name):
-        torchfn = getattr(torch, function_name)
-        mathfn = getattr(math, function_name)
+    def __test_math_by_name(self, function_name, mathfn, selffn):
+        mathfn = getattr(math, mathfn)
+        if selffn:
+            def torchfn(x):
+                return getattr(x, function_name)()
+        else:
+            torchfn = getattr(torch, function_name)
         self._test_math(torchfn, mathfn)
+
+    def _test_math_by_name(self, function_name, test_self=True):
+        if test_self:
+            self.__test_math_by_name(function_name + "_", function_name, True)
+        self.__test_math_by_name(function_name, function_name, False)
 
     def test_sin(self):
         self._test_math_by_name('sin')
@@ -355,7 +399,9 @@ class TestTorch(TestCase):
             try:
                 return math.cosh(x)
             except OverflowError:
-                return float('inf') if x > 0 else float('-inf')
+                # Return inf on overflow.
+                # See http://en.cppreference.com/w/cpp/numeric/math/cosh
+                return float('inf')
         self._test_math(torch.cosh, cosh)
 
     def test_acos(self):
@@ -957,6 +1003,28 @@ class TestTorch(TestCase):
             res2[i, 3] = res2[i, 3] / 2
         self.assertEqual(res1, res2)
 
+    def test_floordiv(self):
+        for dtype in torch.testing.get_all_dtypes():
+            if dtype is torch.float16:
+                continue
+            x = torch.randn(100).mul(10).to(dtype)
+            y = x // 3
+            self.assertEqual(y.dtype, x.dtype)
+            z = torch.tensor([math.trunc(v.item() / 3.) for v in x], dtype=y.dtype)
+            self.assertEqual(y, z)
+
+    def test_rdiv(self):
+        for dtype in torch.testing.get_all_dtypes():
+            if dtype is torch.float16:
+                continue
+            x = torch.rand(100).add(1).mul(4).to(dtype)
+            y = 30 / x
+            if dtype.is_floating_point:
+                z = torch.tensor([30 / v.item() for v in x], dtype=dtype)
+            else:
+                z = torch.tensor([math.trunc(30. / v.item()) for v in x], dtype=dtype)
+            self.assertEqual(y, z)
+
     def test_fmod(self):
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.)
         res1 = m1.clone()
@@ -992,7 +1060,7 @@ class TestTorch(TestCase):
             long_m1 = torch.LongTensor(10, 10).random_(-10, 10)
             long_res1 = long_m1.clone()
             long_res2 = long_m1.clone()
-            long_qs = torch.arange(-5, 5).long()
+            long_qs = torch.arange(-5, 5)
             long_qs[5] = 5  # Can't handle the divisor=0 case
             for col_idx, long_q in enumerate(long_qs):
                 # Reference
@@ -1462,6 +1530,8 @@ class TestTorch(TestCase):
         check_sum_dim(make_tensors(50, 50, 50), 0)
         check_sum_dim(make_tensors(50, 50, 50), 1)
         check_sum_dim(make_tensors(50, 50, 50), 2)
+        check_sum_dim(make_tensors(50, 50, 50), (1, 2))
+        check_sum_dim(make_tensors(50, 50, 50), (1, -1))
 
         def make_contiguous_slice(size, dtype):
             contig = make_contiguous((1, size), dtype)
@@ -1480,6 +1550,11 @@ class TestTorch(TestCase):
         res1 = torch.sum(x, 1)
         res2 = torch.Tensor()
         torch.sum(x, 1, out=res2)
+        self.assertEqual(res1, res2)
+        x = torch.rand(100, 100, 100)
+        res1 = x.sum(2).sum(1)
+        res2 = torch.Tensor()
+        torch.sum(x, (2, 1), out=res2)
         self.assertEqual(res1, res2)
 
     # TODO: these tests only check if it's possible to pass a return value
@@ -1704,6 +1779,10 @@ class TestTorch(TestCase):
         # NOTE: 'cpu' is the canonical representation of 'cpu:0', but 'cuda:X' is the canonical
         # representation of cuda devices.
         assertEqual('cpu', lambda: torch.ones((2, 3), dtype=torch.float32, device='cpu:0'))
+        assertEqual('cpu', lambda: torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='cpu:0'))
+        if TEST_NUMPY:
+            assertEqual('cpu', lambda: torch.tensor(np.random.randn(2, 3), device='cpu'))
+
         if torch.cuda.is_available():
             assertEqual('cuda:0', lambda: torch.tensor(5).cuda(0))
             assertEqual('cuda:0', lambda: torch.tensor(5).cuda('cuda:0'))
@@ -1713,12 +1792,18 @@ class TestTorch(TestCase):
             assertEqual('cuda:0', lambda: torch.tensor(5, dtype=torch.int64, device='cuda:0'))
             assertEqual('cuda:' + str(torch.cuda.current_device()),
                         lambda: torch.tensor(5, dtype=torch.int64, device='cuda'))
+            assertEqual('cuda:0', lambda: torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='cuda:0'))
+            if TEST_NUMPY:
+                assertEqual('cuda:0', lambda: torch.tensor(np.random.randn(2, 3), device='cuda:0'))
 
             if torch.cuda.device_count() > 1:
                 assertEqual('cuda:1', lambda: torch.tensor(5).cuda(1))
                 assertEqual('cuda:1', lambda: torch.tensor(5).cuda('cuda:1'))
                 assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.int64, device=1))
                 assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.int64, device='cuda:1'))
+                assertEqual('cuda:1', lambda: torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='cuda:1'))
+                if TEST_NUMPY:
+                    assertEqual('cuda:1', lambda: torch.tensor(np.random.randn(2, 3), device='cuda:1'))
 
     def test_to(self):
         a = torch.tensor(5)
@@ -1775,7 +1860,7 @@ class TestTorch(TestCase):
         check_value(torch.empty(shape), default_dtype, torch.strided, -1, None, False)
         check_value(torch.full(shape, -5), default_dtype, torch.strided, -1, None, False)
         for dtype in dtypes:
-            for rg in [True, False]:
+            for rg in {dtype.is_floating_point, False}:
                 int64_dtype = get_int64_dtype(dtype)
                 v = torch.empty(shape, dtype=dtype, device=device, layout=layout, requires_grad=rg)
                 check_value(v, dtype, layout, device, None, rg)
@@ -1786,8 +1871,8 @@ class TestTorch(TestCase):
                 check_value(v.new_empty(shape, dtype=int64_dtype, device=device, requires_grad=rg),
                             int64_dtype, layout, device, None, rg)
                 check_value(torch.empty_like(v), dtype, layout, device, None, False)
-                check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=rg),
-                            int64_dtype, layout, device, None, rg)
+                check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
+                            int64_dtype, layout, device, None, False)
 
                 if dtype is not torch.float16 and layout != torch.sparse_coo:
                     fv = 3
@@ -1801,8 +1886,8 @@ class TestTorch(TestCase):
                                 int64_dtype, layout, device, fv + 3, rg)
                     check_value(torch.full_like(v, fv + 4), dtype, layout, device, fv + 4, False)
                     check_value(torch.full_like(v, fv + 5,
-                                                dtype=int64_dtype, layout=layout, device=device, requires_grad=rg),
-                                int64_dtype, layout, device, fv + 5, rg)
+                                                dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
+                                int64_dtype, layout, device, fv + 5, False)
 
     def test_empty_full(self):
         self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
@@ -1991,6 +2076,45 @@ class TestTorch(TestCase):
             res1 = expected.new_tensor(1, dtype=torch.int)
             self.assertIs(torch.int, res1.dtype)
             self.assertEqual(res1.get_device(), expected.get_device())
+
+    def test_as_tensor(self):
+        # from python data
+        x = [[0, 1], [2, 3]]
+        self.assertEqual(torch.tensor(x), torch.as_tensor(x))
+        self.assertEqual(torch.tensor(x, dtype=torch.float32), torch.as_tensor(x, dtype=torch.float32))
+
+        # from tensor (doesn't copy unless type is different)
+        y = torch.tensor(x)
+        self.assertIs(y, torch.as_tensor(y))
+        self.assertIsNot(y, torch.as_tensor(y, dtype=torch.float32))
+        if torch.cuda.is_available():
+            self.assertIsNot(y, torch.as_tensor(y, device='cuda'))
+            y_cuda = y.to('cuda')
+            self.assertIs(y_cuda, torch.as_tensor(y_cuda))
+            self.assertIs(y_cuda, torch.as_tensor(y_cuda, device='cuda'))
+
+        if TEST_NUMPY:
+            # doesn't copy
+            n = np.random.rand(5, 6)
+            n_astensor = torch.as_tensor(n)
+            self.assertEqual(torch.tensor(n), n_astensor)
+            n_astensor[0][0] = 250.7
+            self.assertEqual(torch.tensor(n), n_astensor)
+
+            # changing dtype causes copy
+            n = np.random.rand(5, 6).astype(np.float32)
+            n_astensor = torch.as_tensor(n, dtype=torch.float64)
+            self.assertEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
+            n_astensor[0][1] = 250.8
+            self.assertNotEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
+
+            # changing device causes copy
+            if torch.cuda.is_available():
+                n = np.random.randn(5, 6)
+                n_astensor = torch.as_tensor(n, device='cuda')
+                self.assertEqual(torch.tensor(n, device='cuda'), n_astensor)
+                n_astensor[0][2] = 250.9
+                self.assertNotEqual(torch.tensor(n, device='cuda'), n_astensor)
 
     def test_diag(self):
         x = torch.rand(100, 100)
@@ -2237,6 +2361,11 @@ class TestTorch(TestCase):
         res1 = torch.range(1, 10, 0.3, out=torch.DoubleTensor())
         self.assertEqual(res1.size(0), 31)
 
+    def test_range_warning(self):
+        with warnings.catch_warnings(record=True) as w:
+            torch.range(0, 10)
+            self.assertEqual(len(w), 1)
+
     def test_arange(self):
         res1 = torch.arange(0, 1)
         res2 = torch.Tensor()
@@ -2306,6 +2435,39 @@ class TestTorch(TestCase):
         r3 = torch.arange(10, -1 - 1e-6, -1)
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
+
+    def test_arange_inference(self):
+        saved_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.float32)
+        # end only
+        self.assertIs(torch.float32, torch.arange(1.).dtype)
+        self.assertIs(torch.float32, torch.arange(torch.tensor(1.)).dtype)
+        self.assertIs(torch.float32, torch.arange(torch.tensor(1., dtype=torch.float64)).dtype)
+
+        self.assertIs(torch.int64, torch.arange(1).dtype)
+        self.assertIs(torch.int64, torch.arange(torch.tensor(1)).dtype)
+        self.assertIs(torch.int64, torch.arange(torch.tensor(1, dtype=torch.int16)).dtype)
+
+        # start, end, [step]
+        self.assertIs(torch.float32, torch.arange(1., 3).dtype)
+        self.assertIs(torch.float32, torch.arange(torch.tensor(1., dtype=torch.float64), 3).dtype)
+        self.assertIs(torch.float32, torch.arange(1, 3.).dtype)
+        self.assertIs(torch.float32, torch.arange(torch.tensor(1, dtype=torch.int16), torch.tensor(3.)).dtype)
+        self.assertIs(torch.float32, torch.arange(1, 3, 1.).dtype)
+        self.assertIs(torch.float32,
+                      torch.arange(torch.tensor(1),
+                                   torch.tensor(3, dtype=torch.int16),
+                                   torch.tensor(1., dtype=torch.float64)).dtype)
+
+        self.assertIs(torch.int64, torch.arange(1, 3).dtype)
+        self.assertIs(torch.int64, torch.arange(torch.tensor(1), 3).dtype)
+        self.assertIs(torch.int64, torch.arange(torch.tensor(1), torch.tensor(3, dtype=torch.int16)).dtype)
+        self.assertIs(torch.int64, torch.arange(1, 3, 1).dtype)
+        self.assertIs(torch.int64,
+                      torch.arange(torch.tensor(1),
+                                   torch.tensor(3),
+                                   torch.tensor(1, dtype=torch.int16)).dtype)
+        torch.set_default_dtype(saved_dtype)
 
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
@@ -2604,6 +2766,10 @@ class TestTorch(TestCase):
                             # test torch.matmul function as well
                             torch_result = maybe_squeeze_result(l, r, torch.matmul(l, r))
                             self.assertEqual(truth, torch_result)
+                            # test torch.matmul with out
+                            out = torch.zeros_like(torch_result)
+                            torch.matmul(l, r, out=out)
+                            self.assertEqual(truth, maybe_squeeze_result(l, r, out))
 
                 # compare to bmm
                 bmm_result = (torch.bmm(lhs_expanded.contiguous().view(-1, *lhs_mat_dims),
@@ -2873,7 +3039,7 @@ class TestTorch(TestCase):
             self.assertEqual(x, x0, 0)
 
     def test_mode(self):
-        x = torch.arange(1, SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
+        x = torch.arange(1., SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
         x[:2] = 1
         x[:, :2] = 1
         x0 = x.clone()
@@ -3109,7 +3275,7 @@ class TestTorch(TestCase):
 
     def test_slice(self):
         empty = torch.Tensor()
-        x = torch.arange(0, 16).view(4, 4)
+        x = torch.arange(0., 16).view(4, 4)
         self.assertEqual(x.slice(), x)
         self.assertEqual(x.slice(0, 0, 4), x)
         # start and stop are clamped to the size of dim
@@ -3904,7 +4070,7 @@ class TestTorch(TestCase):
                     return_size = fft_size
                 result = x.new(batch, int((length - frame_length) / float(hop)) + 1, return_size, 2)
                 for w in range(return_size):  # freq
-                    radians = torch.arange(frame_length) * w * 2 * math.pi / fft_size
+                    radians = torch.arange(float(frame_length)) * w * 2 * math.pi / fft_size
                     radians = radians.type_as(x)
                     re_kernel = radians.cos().mul_(window)
                     im_kernel = -radians.sin().mul_(window)
@@ -4566,7 +4732,7 @@ class TestTorch(TestCase):
         # strided is [[1 3 5 7],
         #             [9 11 13 15]]
 
-        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        reference = conv_fn(torch.arange(0., 24).view(3, 8))
         strided = conv_fn(torch.Tensor())
         strided.set_(reference.storage(), 1, size=torch.Size([2, 4]),
                      stride=[8, 2])
@@ -4604,7 +4770,7 @@ class TestTorch(TestCase):
         # strided is [[10, 11],
         #             [17, 18]]
 
-        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        reference = conv_fn(torch.arange(0., 24).view(3, 8))
         strided = conv_fn(torch.Tensor())
         strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
                      stride=[7, 1])
@@ -4612,7 +4778,7 @@ class TestTorch(TestCase):
         strided[ri([0]), ri([1])] = -1
         self.assertEqual(strided[ri([0]), ri([1])], torch.Tensor([-1]))
 
-        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        reference = conv_fn(torch.arange(0., 24).view(3, 8))
         strided = conv_fn(torch.Tensor())
         strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
                      stride=[7, 1])
@@ -4622,7 +4788,7 @@ class TestTorch(TestCase):
         self.assertEqual(strided[ri([0, 1]), ri([1, 0])], torch.Tensor([-1,
                          2]))
 
-        reference = conv_fn(torch.arange(0, 24).view(3, 8))
+        reference = conv_fn(torch.arange(0., 24).view(3, 8))
         strided = conv_fn(torch.Tensor())
         strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
                      stride=[7, 1])
@@ -4717,7 +4883,7 @@ class TestTorch(TestCase):
             #            5  6  7  8  9
             #           10 11 12 13 14
             #           15 16 17 18 19
-            reference = conv_fn(torch.arange(0, 20).view(4, 5))
+            reference = conv_fn(torch.arange(0., 20).view(4, 5))
 
             indices_to_test = [
                 # grab the second, fourth columns
@@ -4743,7 +4909,7 @@ class TestTorch(TestCase):
                               indexer,
                               get_set_tensor(reference, indexer))
 
-            reference = conv_fn(torch.arange(0, 160).view(4, 8, 5))
+            reference = conv_fn(torch.arange(0., 160).view(4, 8, 5))
 
             indices_to_test = [
                 [slice(None), slice(None), [0, 3, 4]],
@@ -4794,7 +4960,7 @@ class TestTorch(TestCase):
                               indexer,
                               get_set_tensor(reference, indexer))
 
-            reference = conv_fn(torch.arange(0, 1296).view(3, 9, 8, 6))
+            reference = conv_fn(torch.arange(0., 1296).view(3, 9, 8, 6))
 
             indices_to_test = [
                 [slice(None), slice(None), slice(None), [0, 3, 4]],
@@ -5837,6 +6003,31 @@ class TestTorch(TestCase):
                           lambda: torch.isclose(x, x, torch.tensor(1, requires_grad=True), torch.tensor(1)).all())
         self.assertRaises(TypeError,
                           lambda: torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1., requires_grad=True)).all())
+
+    def test_parsing_intlist(self):
+        #  parse with integer variables
+        self.assertEqual(torch.Size([3, 4]), torch.ones((torch.tensor(3), torch.tensor(4))).shape)
+        self.assertEqual(torch.Size([3, 4]), torch.ones(torch.tensor(3), torch.tensor(4)).shape)
+        # parse with numpy integers
+        if TEST_NUMPY:
+            self.assertEqual(torch.Size([3, 4]), torch.ones((np.array(3), np.int64(4))).shape)
+            self.assertEqual(torch.Size([3, 4]), torch.ones(np.array(3), np.int64(4)).shape)
+            self.assertEqual(torch.Size([3, 4]), torch.ones((np.int64(3), np.array(4))).shape)
+            self.assertEqual(torch.Size([3, 4]), torch.ones(np.int64(3), np.array(4)).shape)
+
+        # fail parse with float variables
+        self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3.), torch.tensor(4))))
+        # fail parse with numpy floats
+        if TEST_NUMPY:
+            self.assertRaises(TypeError, lambda: torch.ones((np.float(3.), torch.tensor(4))))
+            self.assertRaises(TypeError, lambda: torch.ones((np.array(3.), torch.tensor(4))))
+
+        # fail parse with > 1 element variables
+        self.assertRaises(TypeError, lambda: torch.ones(torch.tensor(3, 3)))
+        self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3, 3))))
+        if TEST_NUMPY:
+            self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
+            self.assertRaises(TypeError, lambda: torch.ones((np.array(3, 3))))
 
     def _test_serialization(self, filecontext_lambda, test_use_filename=True):
         a = [torch.randn(5, 5).float() for i in range(2)]

@@ -1,7 +1,7 @@
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/AccumulateType.cuh"
+#include "ATen/AccumulateType.h"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include <THC/THCNumerics.cuh>
@@ -16,11 +16,9 @@
 
 #include "ATen/native/Distributions.h"
 
-#include <TH/THAtomic.h>
-
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>
-#include <THC/THCGenerator.h>
+#include <THC/THCGenerator.hpp>
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
 
@@ -32,7 +30,7 @@ THCGenerator* THCRandom_getGenerator(THCState* state);
 namespace {
 std::pair<uint64_t, uint64_t> next_philox_seed(at::Generator* gen, uint64_t increment) {
   auto gen_ = THCRandom_getGenerator(at::globalContext().thc_state);
-  uint64_t offset = THAtomicAddLong(&gen_->state.philox_seed_offset, increment);
+  uint64_t offset = gen_->state.philox_seed_offset.fetch_add(increment);
   return std::make_pair(gen_->state.initial_seed, offset);
 }
 
@@ -61,7 +59,7 @@ void gamma_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& alpha,
     std::pair<uint64_t, uint64_t> seeds) {
-  using accscalar_t = at::cuda::acc_type<scalar_t>;
+  using accscalar_t = at::acc_type<scalar_t, true>;
   at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
       ret,
       alpha,
@@ -89,7 +87,7 @@ void gamma_grad_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& self,
     const at::Tensor& output) {
-  using accscalar_t = at::cuda::acc_type<scalar_t>;
+  using accscalar_t = at::acc_type<scalar_t, true>;
   at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(
       ret, self, output,
       [] __device__ (scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {

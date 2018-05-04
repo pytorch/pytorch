@@ -3,16 +3,16 @@
 #include "generic/simd/simd.h"
 
 #ifdef __NEON__
-#include "vector/NEON.c"
+#include "vector/NEON.cpp"
 #endif
 
 #ifdef __PPC64__
-#include "vector/VSX.c"
+#include "vector/VSX.cpp"
 #endif
 
 #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
         || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-#include "vector/SSE.c"
+#include "vector/SSE.cpp"
 #endif
 
 #if defined(USE_AVX)

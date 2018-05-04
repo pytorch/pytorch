@@ -1,6 +1,8 @@
 #include "TH.h"
 #include "THNN.h"
 
+#include "THTensor.hpp"
+
 #define torch_(NAME) TH_CONCAT_3(torch_, Real, NAME)
 #define nn_(NAME) TH_CONCAT_3(nn_, Real, NAME)
 
@@ -110,9 +112,6 @@
 #include "generic/LogSigmoid.c"
 #include "THGenerateFloatTypes.h"
 
-#include "generic/LogSoftMax.c"
-#include "THGenerateFloatTypes.h"
-
 #include "generic/LookupTable.c"
 #include "THGenerateFloatTypes.h"
 
@@ -144,9 +143,6 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/SmoothL1Criterion.c"
-#include "THGenerateFloatTypes.h"
-
-#include "generic/SoftMax.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/SoftPlus.c"

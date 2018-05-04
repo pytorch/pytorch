@@ -43,10 +43,6 @@
 #   WITH_GLOO_IBVERBS
 #     toggle features related to distributed support
 #
-#   PYTORCH_BINARY_BUILD
-#     toggle static linking against libstdc++, used when we're building
-#     binaries for distribution
-#
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER
 #     specify the version of PyTorch, rather than the hard-coded version
@@ -237,6 +233,9 @@ def build_libs(libs):
     if WITH_GLOO_IBVERBS:
         build_libs_cmd += ['--with-gloo-ibverbs']
 
+    if WITH_DISTRIBUTED_MW:
+        build_libs_cmd += ['--with-distributed-mw']
+
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
@@ -313,7 +312,8 @@ class build_deps(Command):
         self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
         self.copy_tree('third_party/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
-        self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
+        self.copy_file('torch/csrc/api/include/torch/python.h',
+                       'torch/lib/include/torch/python.h')
 
 
 build_dep_cmds = {}
@@ -533,6 +533,8 @@ else:
         '-Wno-missing-field-initializers',
         '-Wno-write-strings',
         '-Wno-zero-length-array',
+        # This is required for Python 2 declarations that are deprecated in 3.
+        '-Wno-deprecated-declarations',
         # Python 2.6 requires -fno-strict-aliasing, see
         # http://legacy.python.org/dev/peps/pep-3123/
         # We also depend on it in our code (even Python 3).
@@ -599,7 +601,7 @@ main_sources = [
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/assertions.cpp",
     "torch/csrc/byte_order.cpp",
-    "torch/csrc/torch.cpp",
+    "torch/csrc/api/src/python.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/device.cpp",
@@ -633,6 +635,7 @@ main_sources = [
     "torch/csrc/jit/interned_strings.cpp",
     "torch/csrc/jit/type.cpp",
     "torch/csrc/jit/export.cpp",
+    "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/interpreter_autograd_function.cpp",
     "torch/csrc/jit/python_arg_flatten.cpp",
@@ -649,6 +652,7 @@ main_sources = [
     "torch/csrc/jit/passes/canonicalize.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
+    "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
     "torch/csrc/jit/generated/aten_dispatch.cpp",
     "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/compiler.cpp",
@@ -780,19 +784,6 @@ if DEBUG:
         extra_compile_args += ['-O0', '-g']
         extra_link_args += ['-O0', '-g']
 
-if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
-    print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
-    # get path of libstdc++ and link manually.
-    # for reasons unknown, -static-libstdc++ doesn't fully link some symbols
-    CXXNAME = os.getenv('CXX', 'g++')
-    STDCPP_LIB = subprocess.check_output([CXXNAME, '-print-file-name=libstdc++.a'])
-    STDCPP_LIB = STDCPP_LIB[:-1]
-    if type(STDCPP_LIB) != str:  # python 3
-        STDCPP_LIB = STDCPP_LIB.decode(sys.stdout.encoding)
-    main_link_args += [STDCPP_LIB]
-    version_script = os.path.abspath("tools/pytorch.version")
-    extra_link_args += ['-Wl,--version-script=' + version_script]
-
 
 def make_relative_rpath(path):
     if IS_DARWIN:
@@ -911,6 +902,6 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/jit/*.h',
                 'lib/include/torch/csrc/utils/*.h',
                 'lib/include/torch/csrc/cuda/*.h',
-                'lib/include/torch/torch.h',
+                'lib/include/torch/python.h',
             ]
         })

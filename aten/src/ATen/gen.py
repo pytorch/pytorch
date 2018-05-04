@@ -241,10 +241,12 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     if backend == 'CUDA':
         env['th_headers'] = [
             '#include <THC/THC.h>',
+            '#include <THC/THCTensor.hpp>',
             '#include <THCUNN/THCUNN.h>',
             '#undef THNN_',
             '#undef THCIndexTensor_',
             '#include <THCS/THCS.h>',
+            '#include <THCS/THCSTensor.hpp>',
             '#undef THCIndexTensor_',
         ]
         env['extra_cuda_headers'] = ['#include <ATen/cuda/CUDAHalf.cuh>']
@@ -263,9 +265,11 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     else:
         env['th_headers'] = [
             '#include <TH/TH.h>',
+            '#include <TH/THTensor.hpp>',
             '#include <THNN/THNN.h>',
             '#undef THNN_',
             '#include <THS/THS.h>',
+            '#include <THS/THSTensor.hpp>',
         ]
         env['extra_cuda_headers'] = []
         env['THType'] = scalar_name
@@ -343,9 +347,11 @@ def iterate_types():
 def declare_outputs():
     files = ['Declarations.yaml', 'Type.h', 'Type.cpp', 'Tensor.h',
              'TensorMethods.h', 'Functions.h',
-             'Copy.cpp', 'NativeFunctions.h']
+             'CPUCopy.cpp', 'NativeFunctions.h']
     for f in files:
         file_manager.will_write(f)
+    if not options.no_cuda:
+        file_manager.will_write('CUDACopy.cpp')
     for fname in sorted(generators.keys()):
         if generators[fname]['name'] in backends:
             file_manager.will_write(fname)
@@ -405,7 +411,9 @@ def generate_outputs():
     file_manager.write('TensorMethods.h', TENSOR_METHODS_H.substitute(top_env))
     file_manager.write('Functions.h', FUNCTIONS_H.substitute(top_env))
 
-    file_manager.write('Copy.cpp', copy_wrapper.create(all_types))
+    file_manager.write('CPUCopy.cpp', copy_wrapper.create(all_types, 'CPU'))
+    if not options.no_cuda:
+        file_manager.write('CUDACopy.cpp', copy_wrapper.create(all_types, 'CUDA'))
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H.substitute(top_env))
 
     file_manager.check_all_files_written()

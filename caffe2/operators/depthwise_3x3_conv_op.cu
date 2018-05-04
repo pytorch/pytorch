@@ -77,7 +77,11 @@ __global__ void DepthwiseConv2dGPUKernelNCHW(
 
           const int input_offset =
               (input_offset_temp) + (in_r * in_cols) + in_c;
+#if __CUDA_ARCH__ >= 350
           sum += __ldg(input + input_offset) * __ldg(filter_offset + f_c);
+#else
+          sum += input[input_offset] * filter_offset[f_c];
+#endif
         }
       }
     } else {
@@ -93,7 +97,11 @@ __global__ void DepthwiseConv2dGPUKernelNCHW(
             const int in_c = input_col_start + f_c;
             const int input_offset =
                 (input_offset_temp) + (in_r * in_cols) + in_c;
+#if __CUDA_ARCH__ >= 350
             sum += __ldg(input + input_offset) * __ldg(filter_offset + f_c);
+#else
+            sum += input[input_offset] * filter_offset[f_c];
+#endif
           }
         }
       }
@@ -143,7 +151,11 @@ __global__ void DepthwiseConv2dBackpropFilterGPUKernelNCHW(
     const int out_backprop_offset = (OB * out_depth * out_rows * out_cols) +
         (OC * out_rows * out_cols) + (OH * out_cols) + (OW);
 
+#if __CUDA_ARCH__ >= 350
     const T out_bp = __ldg(out_backprop + out_backprop_offset);
+#else
+    const T out_bp = out_backprop[out_backprop_offset];
+#endif
     if (in_r_start >= 0 && in_c_start >= 0 && in_r_end < in_rows &&
         in_c_end < in_cols) {
 #pragma unroll
@@ -157,7 +169,11 @@ __global__ void DepthwiseConv2dBackpropFilterGPUKernelNCHW(
         for (int f_c = 0; f_c < filter_cols; ++f_c) {
           const int in_c = in_c_start + f_c;
           const int input_offset = input_offset_temp + in_c;
+#if __CUDA_ARCH__ >= 350
           T partial_sum = __ldg(input + input_offset) * out_bp;
+#else
+          T partial_sum = input[input_offset] * out_bp;
+#endif
           T* addr = filter_backprop + (in_d * filter_rows * filter_cols) +
               (f_c + filter_cols * f_r);
           atomicAdd(addr, partial_sum);
@@ -176,7 +192,11 @@ __global__ void DepthwiseConv2dBackpropFilterGPUKernelNCHW(
 
           if (in_r >= 0 && in_r < in_rows && in_c >= 0 && in_c < in_cols) {
             const int input_offset = input_offset_temp + in_c;
+#if __CUDA_ARCH__ >= 350
             T partial_sum = __ldg(input + input_offset) * out_bp;
+#else
+            T partial_sum = input[input_offset] * out_bp;
+#endif
             T* addr = filter_backprop + (in_d * filter_rows * filter_cols) +
                 (f_c + filter_cols * f_r);
             atomicAdd(addr, partial_sum);
@@ -233,8 +253,12 @@ __global__ void DepthwiseConv2dBackpropInputGPUKernelNCHW(
         const int out_backprop_offset = (IB * out_depth * out_rows * out_cols) +
             (IC * out_rows * out_cols) + (out_r * out_cols) + (out_c);
 
+#if __CUDA_ARCH__ >= 350
         sum += __ldg(out_backprop + out_backprop_offset) *
             __ldg(filter + filter_offset);
+#else
+        sum += out_backprop[out_backprop_offset] * filter[filter_offset];
+#endif
       }
     }
     const int in_backprop_offset = (IB * in_rows * in_cols * in_depth) +

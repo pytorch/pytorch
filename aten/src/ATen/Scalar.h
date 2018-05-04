@@ -23,8 +23,8 @@ public:
 
   explicit Scalar(const detail::TensorBase & t)
   : tag(Tag::HAS_t), t(t) {
-    AT_ASSERT(t.defined(), "Attempting to create a Scalar from an undefined tensor");
-    AT_ASSERT(t.dim() == 0, "Attempting to create a Scalar from a %d dim tensor", t.dim());
+    AT_CHECK(t.defined(), "Attempting to create a Scalar from an undefined tensor");
+    AT_CHECK(t.dim() == 0, "Attempting to create a Scalar from a ", t.dim(), " dim tensor");
   }
 
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \

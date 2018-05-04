@@ -891,6 +891,19 @@ class TestSparse(TestCase):
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1]))
         self.assertEqual(torch.int64, t.dtype)
 
+    @cuda_only
+    def test_factory_device_type_inference(self):
+        # both indices/values are CUDA
+        shape = (1, 3)
+        for indices_device in ['cuda', 'cpu']:
+            for values_device in ['cuda', 'cpu']:
+                for sparse_device in ['cuda', 'cpu', None]:
+                    t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
+                                                torch.tensor([1.], device=values_device),
+                                                (1, 3), device=sparse_device)
+                    should_be_cuda = sparse_device == 'cuda' or (sparse_device is None and values_device == 'cuda')
+                    self.assertEqual(should_be_cuda, t.is_cuda)
+
     @cpu_only
     def test_factory_copy(self):
         # both correct

@@ -8,6 +8,8 @@ import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from common import TestCase, run_tests, IS_WINDOWS
+from textwrap import dedent
+import os
 import io
 import sys
 import unittest
@@ -39,6 +41,7 @@ if torch.cuda.is_available():
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY2 = sys.version_info[0] == 2
+PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
 
@@ -81,6 +84,21 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         self.assertExpected(str(trace), *args, **kwargs)
 
+    def assertExportImport(self, trace, inputs):
+        initializers = []
+        graph1 = trace.graph()
+
+        ge1 = torch._C.GraphExecutor(graph1, False)
+        out1 = ge1(*inputs)
+        proto, _ = trace.graph().export(initializers, onnx_opset_version=0,
+                                        defer_weight_export=False, export_raw_ir=True)
+
+        graph2, initializers = torch._C._jit_import_graph(proto)
+        ge2 = torch._C.GraphExecutor(graph2, False)
+        out2 = ge2(*inputs)
+
+        self.assertEqual(out1, out2)
+
     def test_simple(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
@@ -90,6 +108,7 @@ class TestJit(TestCase):
 
         trace, z = torch.jit.get_trace_graph(f, (x, y), nderivs=0)
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, y))
 
     # matmul is currently implemented as a native function, which
     # exercises different codepaths in the JIT.  The following two
@@ -104,6 +123,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, y))
 
     def test_matmul_native_run(self):
         x = Variable(torch.Tensor([[0.4]]), requires_grad=True)
@@ -171,6 +191,7 @@ class TestJit(TestCase):
 
         trace, z = torch.jit.get_trace_graph(f, (x, y), nderivs=0)
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, y))
 
     def test_scopes_intermediate_node(self):
 
@@ -181,6 +202,7 @@ class TestJit(TestCase):
         net = Net()
         t = Variable(torch.ones(2), requires_grad=True)
         trace, _ = torch.jit.get_trace_graph(net, (t, ))
+        self.assertExportImport(trace, (t, ))
         torch.onnx._optimize_trace(trace, False)
 
         self.assertExpectedTrace(trace)
@@ -208,6 +230,8 @@ class TestJit(TestCase):
         with torch.onnx.set_training(model, False):
             trace, _ = torch.jit.get_trace_graph(model, (t, ))
 
+        self.assertExportImport(trace, (t, ) + tuple(model.parameters()))
+
         torch.onnx._optimize_trace(trace, False)
 
         self.assertExpectedTrace(trace)
@@ -224,6 +248,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_dce(trace.graph())
         torch._C._jit_pass_lint(trace.graph())
+        self.assertExportImport(trace, (input, hx, cx) + tuple(module.parameters()))
         torch._C._jit_pass_fuse(trace.graph())
         self.assertExpectedTrace(trace)
 
@@ -283,6 +308,7 @@ class TestJit(TestCase):
             return torch.cat((hx + cx, hx * cx))
 
         trace, _ = torch.jit.get_trace_graph(Foo, (hx, cx))
+        self.assertExportImport(trace, (hx, cx))
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_fuse(trace.graph())
         self.assertExpectedTrace(trace)
@@ -299,6 +325,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace, 'raw')
+        self.assertExportImport(trace, (x, y))
         torch._C._jit_pass_fuse(trace.graph())
         self.assertExpectedTrace(trace)
 
@@ -362,6 +389,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_cse(trace.graph())
 
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, y))
 
     def test_compile_run_twice(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
@@ -544,6 +572,7 @@ class TestJit(TestCase):
         y = m(inputs[0])
         torch._C._tracer_exit((y,))
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, inputs)
 
     def test_legacy_fail(self):
 
@@ -571,6 +600,7 @@ class TestJit(TestCase):
         y = fn(*inputs)
         torch._C._tracer_exit((y,))
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, inputs)
 
     def test_inplace_flags(self):
         class InplaceFn(Function):
@@ -742,6 +772,22 @@ class TestJit(TestCase):
         check(False, True)
         del z
         check(False, True)
+
+    def test_trace_size(self):
+        def fn(x):
+            return x.view(x.shape[1] * 2, x.size(0), 2)
+
+        x = torch.randn(5, 2, 4)
+        y = torch.randn(4, 8, 4)
+
+        # Check that it behaves as expected
+        traced_fn = torch.jit.trace(x)(fn)
+        self.assertEqual(traced_fn(y), fn(y))
+        self.assertEqual(traced_fn(x), fn(x))
+
+        # Check that the trace looks ok
+        trace, _ = torch.jit.get_trace_graph(fn, (x,))
+        self.assertExpectedTrace(trace)
 
     def test_multiuse_fn(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
@@ -1113,6 +1159,7 @@ class TestJit(TestCase):
         x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.get_trace_graph(torchvision.models.AlexNet(), x)
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, ))
         # NB: Purposely NOT testing protobuf export here
 
     def test_debug_info(self):
@@ -1153,6 +1200,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace.graph())
         torch._C._jit_pass_dce(trace.graph())
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, ))
 
     def test_index_trace(self):
         x = Variable(torch.randn(4, 4), requires_grad=True)
@@ -1191,6 +1239,7 @@ class TestJit(TestCase):
         x = Variable(torch.randn(2, 2))
         trace, _ = torch.jit.get_trace_graph(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
         self.assertExpectedTrace(trace)
+        self.assertExportImport(trace, (x, ))
 
     def checkGraphExecutor(self, func, reference_tensors, input_tensors=None,
                            optimize=True, drop=None, allow_unused=False):
@@ -1524,9 +1573,9 @@ class TestScript(TestCase):
             os.close(r)
             os.close(w)
 
-    def checkScript(self, script, inputs, optimize, outputs=None, name='func', capture_output=False):
+    def checkScript(self, script, inputs, optimize, outputs=None, name='func', capture_output=False, frames_up=1):
         if isinstance(script, str):
-            cu = torch.jit.CompilationUnit(script, optimize)
+            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
             ge = getattr(cu, name)
         else:
             if capture_output:
@@ -1536,9 +1585,9 @@ class TestScript(TestCase):
                 outputs = script(*inputs)
             # Check the string frontend first
             source = textwrap.dedent(inspect.getsource(script))
-            self.checkScript(source, inputs, optimize, outputs, script.__name__, capture_output)
+            self.checkScript(source, inputs, optimize, outputs, script.__name__, capture_output, frames_up=2)
             # Continue checking the Python frontend
-            ge = torch.jit.script(script)
+            ge = torch.jit.script(script, _frames_up=1)
 
         if capture_output:
             with self.capture_stdout() as captured:
@@ -1656,7 +1705,7 @@ class TestScript(TestCase):
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "at most 2 inputs"):
+        with self.assertRaisesRegex(RuntimeError, "expected 1 input"):
             @torch.jit.script
             def func(x):
                 return torch.cat((x, x), x, dim=0)
@@ -1890,8 +1939,8 @@ class TestScript(TestCase):
             w = -q
             return w * w
 
-        x = torch.arange(4, requires_grad=True)
-        y = torch.arange(0, 8, 2, requires_grad=True)
+        x = torch.arange(4., requires_grad=True)
+        y = torch.arange(0., 8, 2, requires_grad=True)
         self.checkScript(func, [x, y], optimize=True, capture_output=True)
 
     def test_multiple_assignment(self):
@@ -2041,7 +2090,7 @@ class TestScript(TestCase):
             c = F.prelu(x, slope)
             return a, b, c
 
-        x = torch.arange(-3, 4)
+        x = torch.arange(-3., 4)
         slope = torch.tensor([0.5])
         self.checkScript(fn, [x, slope], optimize=True)
 
@@ -2309,6 +2358,20 @@ class TestScript(TestCase):
                 return v
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
+
+    def test_constant_as_attr(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['dim']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.dim = 1
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return torch.cat([v, v, v], dim=self.dim)
+        v = torch.zeros(1, 1)
+        self.assertEqual(torch.cat([v, v, v], dim=1), M()(v))
 
     class StarTestSumStarred(torch.nn.Module):
         def __init__(self):
@@ -2582,6 +2645,141 @@ class TestScript(TestCase):
                 if True:
                     a = 4
 
+    def test_type_annotations(self):
+        def fn(x, y):
+            # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
+            return x, x * 2, x * 3
+
+        with self.assertRaisesRegex(RuntimeError, r"need 4 values .* found only 3"):
+            @torch.jit.script
+            def script_fn(x):
+                x, y, z, w = fn(x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"too many values .* need 2 but found 3"):
+            @torch.jit.script
+            def script_fn2(x):
+                x, y = fn(x, x)
+
+        def fn_unpack(x):
+            y, z, w = fn(x, x)
+            return y
+
+        def fn_index(x):
+            q = fn(x, x)
+            return x
+
+        x = torch.ones(2, 2)
+        self.checkScript(fn_unpack, (x,), optimize=True)
+        self.checkScript(fn_index, (x,), optimize=True)
+
+    def test_type_annotations_varargs(self):
+        def fn_varargs(x, *args):
+            return args[0] if args else x
+
+        def fn1(x, y, z):
+            return fn_varargs(x)
+
+        def fn2(x, y, z):
+            return fn_varargs(x, y)
+
+        def fn3(x, y, z):
+            return fn_varargs(x, y, z)
+
+        x, y, z = [torch.randn(2, 2) for _ in range(3)]
+        self.checkScript(fn1, (x, y, z), optimize=True)
+        self.checkScript(fn2, (x, y, z), optimize=True)
+        self.checkScript(fn3, (x, y, z), optimize=True)
+
+    @unittest.skipIf(not PY35, "Python 3.5 needed")
+    def test_type_annotation_py3(self):
+        import importlib.util
+
+        code = dedent("""
+        import torch
+        from torch import Tensor
+        from typing import Tuple
+
+        def fn(x : torch.Tensor, y : Tensor, z) -> Tuple[Tensor, Tensor, Tensor]:
+            return (x, y + z, z)
+        """)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            script_path = os.path.join(tmp_dir, 'script.py')
+            with open(script_path, 'w') as f:
+                f.write(code)
+            spec = importlib.util.spec_from_file_location('test_type_annotation_py3', script_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            fn = module.fn
+
+            with self.assertRaisesRegex(RuntimeError, r"expected Tensor, but got"):
+                @torch.jit.script
+                def bad_fn(x):
+                    x, y = fn((x, x), x, x)
+                    return y
+
+            with self.assertRaisesRegex(RuntimeError, r"too many values .* need 2 but found 3"):
+                @torch.jit.script
+                def bad_fn2(x):
+                    x, y = fn(x, x, x)
+                    return y
+
+            with self.assertRaisesRegex(RuntimeError, r"need 4 values .* found only 3"):
+                @torch.jit.script
+                def bad_fn3(x):
+                    x, y, z, w = fn(x, x, x)
+                    return y
+
+            def good_fn(x):
+                y, z, w = fn(x, x, x)
+                return y, z, w
+
+            self.checkScript(good_fn, (torch.ones(2, 2),), optimize=True)
+
+    def test_type_annotation_module(self):
+        class BaseModule(torch.jit.ScriptModule):
+            def foo(self, x):
+                # type: (Tensor) -> Tensor
+                return x + 1
+
+            def bar(self, x, y):
+                # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
+                return x + y, y
+
+            def baz(self, x, y):
+                return x
+
+        class ModuleTooMany(BaseModule):
+            @torch.jit.script_method
+            def method(self, x):
+                return self.foo(x, x)
+
+        class ModuleTooFew(BaseModule):
+            @torch.jit.script_method
+            def method(self, x):
+                return self.bar(x)
+
+        class ModuleTooManyAssign(BaseModule):
+            @torch.jit.script_method
+            def method(self, x):
+                y, z, w = self.bar(x, x)
+                return x
+
+        class ModuleDefault(BaseModule):
+            @torch.jit.script_method
+            def method(self, x):
+                y = self.baz(x)
+                return x
+
+        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 1, but got 2"):
+            ModuleTooMany()
+        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 2, but got 1"):
+            ModuleTooFew()
+        with self.assertRaisesRegex(RuntimeError, "need 3 values .* found only 2"):
+            ModuleTooManyAssign()
+        with self.assertRaisesRegex(RuntimeError, "incorrect number of arguments: expected 2, but got 1"):
+            ModuleDefault()
+
     def test_script_define_order(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -2681,8 +2879,10 @@ class TestScript(TestCase):
                 return x + x
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_python_fail(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2703,9 +2903,11 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         f = io.BytesIO()
         with self.assertRaisesRegex(RuntimeError, "Couldn't export Python operator"):
-            torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False)
+            torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False,
+                               example_outputs=outputs)
 
     def test_onnx_export_script_inline_trace(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2726,8 +2928,10 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2749,8 +2953,10 @@ class TestScript(TestCase):
                 return y + y
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_module_loop(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -2764,9 +2970,10 @@ class TestScript(TestCase):
                 return x
 
         mte = ModuleToExport()
-        f = io.BytesIO()
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -2780,8 +2987,10 @@ class TestScript(TestCase):
                 return x
 
         mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3, dtype=torch.long))
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False))
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -2810,7 +3019,8 @@ class TestScript(TestCase):
         reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
         self.assertEqual(result, reference)
         self.assertExpected(torch.onnx._export_to_pretty_string(
-            mte, (torch.ones(2, 3),), None, verbose=False))
+            mte, (torch.ones(2, 3),), None, verbose=False,
+            example_outputs=result, propagate=True))
 
     def test_trace_with_size(self):
         @torch.jit.trace(torch.zeros(1, 1))
@@ -2835,7 +3045,7 @@ class TestScript(TestCase):
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         foo.graph.propagate_shapes((a, b), False)
-        self.assertExpected(str(foo.graph))
+        self.assertExpected(str(torch._C._jit_pass_canonicalize(foo.graph)))
 
     def test_onnx_export_speculate(self):
 
@@ -2863,18 +3073,70 @@ class TestScript(TestCase):
             return x.t()
 
         f1 = Foo(transpose)
+        outputs_f1 = f1(torch.ones(1, 10, dtype=torch.float))
         f2 = Foo(linear)
+        outputs_f2 = f2(torch.ones(1, 10, dtype=torch.float))
 
         onnx_ish = torch.onnx._export_to_pretty_string(
             f1,
             (torch.ones(1, 10, dtype=torch.float), ),
-            None, verbose=False)
+            None, verbose=False, example_outputs=outputs_f1)
         self.assertExpected(onnx_ish, subname='f1')
         onnx_ish = torch.onnx._export_to_pretty_string(
             f2,
             (torch.ones(1, 10, dtype=torch.float), ),
-            None, verbose=False)
+            None, verbose=False, example_outputs=outputs_f2)
         self.assertExpected(onnx_ish, subname='f2')
+
+    def test_onnx_export_shape_reshape(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                import torch.onnx.operators
+                x = x.repeat(5, 1, 1)
+                shape = torch.onnx.operators.shape_as_tensor(x)
+                reshaped = torch.onnx.operators.reshape_from_tensor_shape(x, shape)
+                return reshaped
+
+        foo = torch.jit.trace(torch.zeros(1, 2, 3))(Foo())
+        outputs = foo(torch.zeros(1, 2, 3))
+        f = io.BytesIO()
+        s = torch.onnx._export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
+                                                example_outputs=outputs)
+        self.assertExpected(s)
+
+    def test_shape_analysis_loop(self):
+        def foo(a, b, x):
+            c = a
+            # on the first iteration of the loop it appears that
+            # c should have a expand to the size of b
+            # but on the second+ iterations, there is no broadcast and the
+            # sizes are different.
+            # previously this would cause the compiler to (1) enter an infinite
+            # loop trying to compute the shape, and (2) insert invalid
+            # broadcasts.
+            # this test ensure we don't regress on these issues
+            for _ in range(2):
+                a = c + b
+                c = x
+                b = x
+            return a
+
+        self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), False)
+
+    def test_intlist_args(self):
+        def func_1(x):
+            return torch.nn.functional.adaptive_avg_pool1d(x, 1)
+
+        def func_2(x):
+            return torch.nn.functional.adaptive_avg_pool1d(x, output_size=1)
+
+        def func_3(x):
+            return torch.nn.functional.adaptive_avg_pool1d(x, output_size=[1])
+
+        x = torch.randn(8, 8, 8)
+        self.checkScript(func_1, [x], optimize=True)
+        self.checkScript(func_2, [x], optimize=True)
+        self.checkScript(func_3, [x], optimize=True)
 
 
 # Smoke tests for export methods

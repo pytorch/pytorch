@@ -66,7 +66,7 @@ void VideoDecoder::decodeLoop(
     int ret = 0;
 
     // Determining the input format:
-    int probeSz = 32 * 1024 + AVPROBE_PADDING_SIZE;
+    int probeSz = 1 * 1024 + AVPROBE_PADDING_SIZE;
     DecodedFrame::AvDataPtr probe((uint8_t*)av_malloc(probeSz));
 
     memset(probe.get(), 0, probeSz);
@@ -241,7 +241,7 @@ void VideoDecoder::decodeLoop(
 
     /* identify the starting point from where we must start decoding */
     std::mt19937 meta_randgen(time(nullptr));
-    int start_ts = -1;
+    long int start_ts = -1;
     bool mustDecodeAll = false;
     if (videoStream_->duration > 0 && videoStream_->nb_frames > 0) {
       /* we have a valid duration and nb_frames. We can safely
@@ -249,7 +249,7 @@ void VideoDecoder::decodeLoop(
 
       // leave a margin of 10 frames to take in to account the error
       // from av_seek_frame
-      int margin =
+      long int margin =
           int(ceil((10 * videoStream_->duration) / (videoStream_->nb_frames)));
       // if we need to do temporal jittering
       if (params.decode_type_ == DecodeType::DO_TMP_JITTER) {
@@ -267,7 +267,7 @@ void VideoDecoder::decodeLoop(
         ret = av_seek_frame(
             inputContext,
             videoStreamIndex_,
-            std::max(0, start_ts - margin),
+            0 > (start_ts - margin) ? 0 : (start_ts - margin),
             AVSEEK_FLAG_BACKWARD);
 
         // if we need to decode from the start_frm
@@ -278,7 +278,7 @@ void VideoDecoder::decodeLoop(
         ret = av_seek_frame(
             inputContext,
             videoStreamIndex_,
-            std::max(0, start_ts - margin),
+            0 > (start_ts - margin) ? 0 : (start_ts - margin),
             AVSEEK_FLAG_BACKWARD);
       } else {
         mustDecodeAll = true;
@@ -309,25 +309,34 @@ void VideoDecoder::decodeLoop(
     // transport and getting decoded frames back.
     // Therefore, after EOF, continue going while
     // the decoder is still giving us frames.
+    int ipacket = 0;
     while ((!eof || gotPicture) &&
            /* either you must decode all frames or decode upto maxFrames
             * based on status of the mustDecodeAll flag */
            (mustDecodeAll ||
-            ((!mustDecodeAll) && (selectiveDecodedFrames < maxFrames)))) {
+            ((!mustDecodeAll) && (selectiveDecodedFrames < maxFrames))) &&
+           /* If on the last interval and not autodecoding keyframes and a
+            * SpecialFps indicates no more frames are needed, stop decoding */
+           !((itvlIter == params.intervals_.end() &&
+              (currFps == SpecialFps::SAMPLE_TIMESTAMP_ONLY ||
+               currFps == SpecialFps::SAMPLE_NO_FRAME)) &&
+             !params.keyFrames_)) {
       try {
         if (!eof) {
           ret = av_read_frame(inputContext, &packet);
-
-          if (ret == AVERROR(EAGAIN)) {
-            av_free_packet(&packet);
-            continue;
-          }
-          // Interpret any other error as EOF
-          if (ret < 0) {
+          if (ret == AVERROR_EOF) {
             eof = 1;
             av_free_packet(&packet);
+            packet.data = nullptr;
+            packet.size = 0;
+            // stay in the while loop to flush frames
+          } else if (ret == AVERROR(EAGAIN)) {
+            av_free_packet(&packet);
             continue;
+          } else if (ret < 0) {
+            LOG(ERROR) << "Error reading packet : " << ffmpegErrorStr(ret);
           }
+          ipacket++;
 
           // Ignore packets from other streams
           if (packet.stream_index != videoStreamIndex_) {
@@ -350,7 +359,7 @@ void VideoDecoder::decodeLoop(
           }
           frameIndex++;
 
-          double frame_ts =
+          long int frame_ts =
               av_frame_get_best_effort_timestamp(videoStreamFrame_);
           double timestamp = frame_ts * av_q2d(videoStream_->time_base);
 
