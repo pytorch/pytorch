@@ -24,10 +24,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 if(NOT NO_CUDA)
   set(CMAKE_MODULE_PATH
-    ${TORCH_SRC_DIR}/../aten/cmake
-    ${TORCH_SRC_DIR}/../aten/cmake/FindCUDA
     /usr/lib/x86_64-linux-gnu/
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules_CUDA_fix
     ${CMAKE_MODULE_PATH})
   set(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 
