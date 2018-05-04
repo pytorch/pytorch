@@ -303,11 +303,9 @@ caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 
 # Add packages required for pytorch
 if [[ -n $pytorch_too ]]; then
-  remove_lines_with 'numpy'
   add_package 'cffi'
   add_package 'mkl' '>=2018'
   add_package 'mkl-include'
-  add_package 'numpy' '>=1.11'
   add_package 'typing'
   append_to_section 'build' '- pyyaml'
   append_to_section 'build' '- setuptools'
@@ -358,10 +356,7 @@ if [[ "$(uname)" != 'Darwin' && "$GCC_USE_C11" -eq 0 ]]; then
   # requires numpy 1.12
   remove_lines_with 'opencv'
   add_package 'opencv' '==3.1.0'
-  if [[ "$PYTHON_VERSION" == 3.* ]]; then
-    remove_lines_with 'numpy'
-    add_package 'numpy' '>1.11'
-  fi
+
   # Default conda channels use gcc 7.2, conda-forge uses gcc 4.8.5
   caffe2_cmake_args+=("-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=0")
   conda_channel+=('-c conda-forge')
