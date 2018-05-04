@@ -296,17 +296,20 @@ class Module(object):
 
         This can be called as
 
-        .. function:: to(device)
-
         .. function:: to(dtype)
 
-        .. function:: to(device, dtype)
+        .. function:: to(device, dtype=None, non_blocking=True)
 
         It has similar signature as :meth:`torch.Tensor.to`, but does not take
-        a Tensor and only takes in floating point :attr:`dtype` s. In
+        a Tensor and only takes in optional floating point :attr:`dtype` s. In
         particular, this method will only cast the floating point parameters and
-        buffers to :attr:`dtype`. It will still move the integral parameters and
-        buffers to :attr:`device`, if that is given. See below for examples.
+        buffers to :attr:`dtype` (if given). It will still move the integral
+        parameters and buffers to :attr:`device`, if that is given. When
+        :attr:`non_blocking`, it tries to convert asynchronously with respect to
+        the host if possible, e.g., converting CPU Tensors with pinned memory to
+        CUDA Tensors.
+
+        See below for examples.
 
         .. note::
             This method modifies the module in-place.
@@ -334,7 +337,7 @@ class Module(object):
             tensor([[ 0.1913, -0.3420],
                     [-0.5113, -0.2325]], dtype=torch.float64)
             >>> gpu1 = torch.device("cuda:1")
-            >>> linear.to(gpu1, dtype=torch.half)
+            >>> linear.to(gpu1, dtype=torch.half, non_blocking=True)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
             Parameter containing:
@@ -353,44 +356,81 @@ class Module(object):
             arg_reprs = list(repr(arg) for arg in args)
             for key, val in kwargs.items():
                 arg_reprs.append("{}={}".format(key, val))
-            return ValueError('module.to expects .to(device), .to(dtype) or '
-                              '.to(device, dtype), where dtype is a floating '
-                              'point type, but got .to({})'
+            return ValueError('module.to expects .to(device, non_blocking=False), '
+                              '.to(dtype) or .to(device, dtype=None, non_blocking=False), '
+                              'where dtype is a floating point type, but got .to({})'
                               .format(", ".join(arg_reprs)))
 
         nargs = len(args) + len(kwargs)
-        device = dtype = None
-        if nargs < 1 or nargs > 2:
+        if nargs < 1 or nargs > 3:
             raise arg_error()
+
+        # detect modes by checking first arg
+        if len(args) > 0:
+            arg0 = args[0]
         else:
-            for key, val in kwargs.items():
-                if key == 'dtype':
-                    dtype = kwargs['dtype']
-                elif 'device' in kwargs:
-                    device = kwargs['device']
-                else:
-                    raise arg_error()
-            for arg in args:
-                if isinstance(arg, torch.dtype):
-                    if dtype is not None:
-                        raise arg_error()
-                    dtype = arg
-                else:
-                    if device is not None:
-                        raise arg_error()
-                    device = arg
+            # 'device' has priority because of .to(device, dtype=None, non_blocking=False)
+            if 'device' in kwargs:
+                arg0 = kwargs['device']
+            elif 'dtype' in kwargs:
+                arg0 = kwargs['dtype']
+            else:
+                raise arg_error()
+
+        if isinstance(arg0, torch.dtype):
+            # to(dtype)
+            if nargs > 1:
+                raise arg_error()
+            dtype = arg0
+            if not dtype.is_floating_point:
+                raise arg_error()
+            return self._apply(lambda t: t.to(dtype) if t.is_floating_point() else t)
+
+        # to(device, dtype=None, non_blocking=True)
+        device = arg0
+        dtype = non_blocking = None
+
+        for key, val in kwargs.items():
+            if key == 'dtype':
+                dtype = val
+            elif key == 'non_blocking':
+                non_blocking = val
+            elif key != 'device':
+                raise arg_error()
+
+        # check if the other arguments are passed in as positional
+        if len(args) == 2:
+            if isinstance(args[1], torch.dtype) and dtype is None:
+                # to(device, dtype, *)
+                dtype = args[1]
+            else:
+                raise arg_error()
+        elif len(args) == 3:
+            # to(device, dtype, non_blocking)
+            if (dtype == non_blocking == None and \
+                    isinstance(args[1], torch.dtype) and \
+                    isinstance(args[2], bool)):
+                dtype = args[1]
+                non_blocking = args[2]
+            else:
+                raise arg_error()
+
+        non_blocking = non_blocking or False  # None -> False
 
         if dtype is not None:
             if not dtype.is_floating_point:
                 raise arg_error()
 
-            if device is None:
-                return self._apply(lambda t: t.to(dtype) if t.is_floating_point() else t)
-            else:
-                return self._apply(lambda t: t.to(device, dtype) if t.is_floating_point() else t.to(device))
+            def convert(t):
+                if t.is_floating_point():
+                    return t.to(device, dtype, non_blocking)
+                else:
+                    return t.to(device, non_blocking=non_blocking)
+
+            return self._apply(convert)
 
         else:
-            return self._apply(lambda t: t.to(device))
+            return self._apply(lambda t: t.to(device, non_blocking=non_blocking))
 
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.

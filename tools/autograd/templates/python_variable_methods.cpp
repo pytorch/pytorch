@@ -559,12 +559,12 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "to(Device device, ScalarType dtype=None)",
+    "to(Device device, ScalarType dtype=None, bool non_blocking=False)",
     "to(ScalarType dtype)",
-    "to(Tensor other)",
+    "to(Tensor other, bool non_blocking=False)",
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     auto device = r.device(0);
@@ -572,7 +572,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
     auto scalarType = r.scalartypeWithDefault(1, self_.type().scalarType());
     auto& layout = *torch::getLayout(self_.type().backend());
     auto& type = torch::getType(scalarType, layout, device.type);
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, false));
+    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, r.toBool(2)));
   } else if (r.idx == 1) {
     auto scalarType = r.scalartype(0);
     auto& type = self_.type().toScalarType(scalarType);
@@ -582,7 +582,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
     auto& type = other.type();
     auto deviceType = torch::getDeviceType(type);
     auto deviceAutoGPU = (deviceType == DeviceType::CPU) ? -1 : other.get_device();
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, false));
+    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, r.toBool(1)));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
