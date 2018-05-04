@@ -133,9 +133,9 @@ cmake_dependent_option(
 cmake_dependent_option(
     WITH_GLOO_IBVERBS "Legacy Gloo IB verbs for distributed support" ON
     "USE_GLOO_IBVERBS" OFF)
-cmake_dependent_option(
-    USE_ATEN "Legacy ATen" ON
-    "BUILD_ATEN" OFF)
+if (DEFINED USE_ATEN)
+    set(BUILD_ATEN ${USE_ATEN})
+endif()
 
 # ---[ Special code path for MKL module
 if (NOT BUILD_ATEN)
