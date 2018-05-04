@@ -10,7 +10,7 @@ namespace detail {
 
 // CUDA kernel argument that defines tensor layout
 template <typename T, typename IndexType>
-struct AT_API TensorInfo {
+struct TensorInfo {
   TensorInfo(T* p,
              int dim,
              IndexType sz[MAX_TENSORINFO_DIMS],
@@ -54,7 +54,7 @@ TensorInfo<T, IndexType>::TensorInfo(T* p,
                                      IndexType st[MAX_TENSORINFO_DIMS]) {
   data = p;
   dims = dim;
-  assert(dims < MAX_TENSORINFO_DIMS);
+  AT_ASSERT(dims < MAX_TENSORINFO_DIMS);
 
   for (int i = 0; i < dim; ++i) {
     sizes[i] = sz[i];
@@ -65,7 +65,7 @@ TensorInfo<T, IndexType>::TensorInfo(T* p,
 template <typename T, typename IndexType>
 void
 TensorInfo<T, IndexType>::reduceDim(int dim) {
-  assert(dim < dims && dim >= 0);
+  AT_CHECK(dim < dims && dim >= 0, "expected dim between 0 and dims - 1");
   sizes[dim] = 1;
 }
 
@@ -73,7 +73,8 @@ template <typename T, typename IndexType>
 int
 TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
 
-  assert(excludeDim >= -1 && excludeDim < dims);
+  AT_CHECK(excludeDim >= -1 && excludeDim < dims, 
+    "expected excluded dim between -1 and dims - 1");
 
   int stopDim = (excludeDim == -1) ? dims : excludeDim;
   int newIndex = -1;
