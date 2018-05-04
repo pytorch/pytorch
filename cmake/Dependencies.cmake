@@ -441,9 +441,9 @@ endif()
 
 # ---[ AMD Thrust
 if(USE_HIP)
-  caffe2_include_directories($ENV{THRUST_ROOT})
+  include_directories($ENV{THRUST_ROOT})
   #For cub-hip
-  caffe2_include_directories($ENV{THRUST_ROOT}/thrust/system/cuda/detail/cub-hip)
+  include_directories($ENV{THRUST_ROOT}/thrust/system/cuda/detail/cub-hip)
   message(STATUS "Found Thrust: $ENV{THRUST_ROOT}")
   message(STATUS "Found cub-hip: $ENV{THRUST_ROOT}/thrust/system/cuda/detail/cub-hip")
 endif()
