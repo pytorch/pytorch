@@ -9,6 +9,7 @@
 /*
 Tests related to tensor indexing and applying operations. 
 */
+#ifndef _WIN32
 
 TEST_CASE("2D Contiguous", "Collapses a 2D contiguous tensor to 1D contiguous") {
     int sizes[] = {4, 4};
@@ -109,3 +110,12 @@ TEST_CASE("Roving Exclusion", "Collapses a 4D tensor to a 3D tensor") {
     REQUIRE(ti.sizes[2] == 2);
     REQUIRE(ti.strides[2] == 2);
 }
+
+-TEST_CASE("Invalid Exclusion", "Attempts to exclude a nonexisting dimension") {
+-    int sizes[] = {1, 1, 1};
+-    int strides[] = {17, 12, 3};
+-    ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 3, sizes, strides};
+-    REQUIRE_THROWS(ti.collapseDims(5));
+ } 
+
+#endif

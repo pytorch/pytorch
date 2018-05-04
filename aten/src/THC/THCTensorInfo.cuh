@@ -81,7 +81,7 @@ template <typename T, typename IndexType>
 int
 TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
 
-  assert(excludeDim >= -1 && excludeDim < dims);
+  AT_CHECK(excludeDim >= -1 && excludeDim < dims, "Excluded dim is invalid.");
 
   int stopDim = (excludeDim == -1) ? dims : excludeDim;
   int newIndex = -1;
