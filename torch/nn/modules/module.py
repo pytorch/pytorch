@@ -395,7 +395,9 @@ class Module(object):
                 dtype = val
             elif key == 'non_blocking':
                 non_blocking = val
-            elif key != 'device':
+            elif key != 'device' or len(args) > 0:
+                # also error if sees device when already have first positional
+                # arg as the device
                 raise arg_error()
 
         # check if the other arguments are passed in as positional
@@ -407,9 +409,9 @@ class Module(object):
                 raise arg_error()
         elif len(args) == 3:
             # to(device, dtype, non_blocking)
-            if (dtype == non_blocking == None and \
+            if dtype is None and non_blocking is None and \
                     isinstance(args[1], torch.dtype) and \
-                    isinstance(args[2], bool)):
+                    isinstance(args[2], bool):
                 dtype = args[1]
                 non_blocking = args[2]
             else:
