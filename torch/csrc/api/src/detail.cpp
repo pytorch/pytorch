@@ -13,7 +13,7 @@
 
 #include "torch/detail.h"
 
-namespace autograd {
+namespace torch {
 namespace detail {
 tag::Engine engine;
 }
@@ -68,4 +68,4 @@ bool hasCudnn() {
   return hasCuda() && AT_CUDNN_ENABLED();
 }
 
-} // namespace autograd
+} // namespace torch

@@ -1,8 +1,8 @@
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-using namespace autograd;
+using namespace torch;
 
 AUTOGRAD_CONTAINER_CLASS(TestModel) {
  public:

@@ -1,8 +1,8 @@
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-using namespace autograd;
+using namespace torch;
 
 bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
   float running_loss = 1;

@@ -1,6 +1,6 @@
 #include "torch/containers.h"
 
-namespace autograd {
+namespace torch {
 std::map<std::string, Variable> ContainerImpl::parameters() const {
   std::map<std::string, Variable> ret;
   for (auto pair : children_) {
@@ -634,4 +634,4 @@ variable_list Dropout2d::forward(variable_list inputs) {
   return lst;
 }
 
-} // namespace autograd
+} // namespace torch

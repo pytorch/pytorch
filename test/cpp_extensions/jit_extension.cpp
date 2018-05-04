@@ -1,4 +1,4 @@
-#include <torch/torch.h>
+#include <torch/python.h>
 
 #include "doubler.h"
 

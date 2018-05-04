@@ -1,10 +1,10 @@
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
 #include "cereal/archives/portable_binary.hpp"
 
-using namespace autograd;
+using namespace torch;
 
 TEST_CASE("serialization") {
   SECTION("undefined") {

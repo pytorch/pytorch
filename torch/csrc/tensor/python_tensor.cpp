@@ -2,9 +2,8 @@
 
 #include <structmember.h>
 #include <pybind11/pybind11.h>
-#include <sstream>
 
-#include "torch/torch.h"
+#include "torch/csrc/api/include/torch/python.h"
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
@@ -19,6 +18,9 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_types.h"
+
+#include <sstream>
+#include <vector>
 
 namespace torch { namespace tensor {
 

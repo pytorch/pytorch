@@ -1,7 +1,7 @@
 #define CATCH_CONFIG_RUNNER
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
 #include <iostream>
 
@@ -16,7 +16,7 @@ int main(int argc, char* argv[]) {
     return return_code;
   }
 
-  if (!autograd::hasCuda()) {
+  if (!torch::hasCuda()) {
     std::cerr << "CUDA not available. Disabling CUDA tests" << std::endl;
     // ~ disables the [cuda] tag.
     session.configData().testsOrTags.push_back("~[cuda]");

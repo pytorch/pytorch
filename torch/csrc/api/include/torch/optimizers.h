@@ -6,7 +6,7 @@
 #include "cereal/access.hpp"
 #include "cereal/cereal.hpp"
 
-namespace autograd {
+namespace torch {
 class OptimizerImpl {
  public:
   OptimizerImpl(Container model) : model_(model) {}
@@ -137,4 +137,4 @@ AUTOGRAD_OPTIMIZER_CLASS(Adam) {
   std::unordered_map<std::string, at::Tensor> max_exp_avg_sq_buffer_;
 };
 
-} // namespace autograd
+} // namespace torch

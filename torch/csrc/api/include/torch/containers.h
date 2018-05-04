@@ -5,9 +5,9 @@
 #include "torch/csrc/autograd/variable.h"
 
 #define AUTOGRAD_CONTAINER_CLASS(Type) \
-  class Type : public autograd::Container_CRTP<Type>
+  class Type : public torch::Container_CRTP<Type>
 
-namespace autograd {
+namespace torch {
 class ContainerImpl {
  public:
   virtual ~ContainerImpl() = default;
@@ -438,4 +438,4 @@ class RNN : public RNNBase<RNN> {
   }
 };
 
-} // namespace autograd
+} // namespace torch

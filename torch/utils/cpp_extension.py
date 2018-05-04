@@ -504,7 +504,7 @@ def load_inline(name,
     the necessary header includes, as well as the (pybind11) binding code. More
     precisely, strings passed to ``cpp_sources`` are first concatenated into a
     single ``.cpp`` file. This file is then prepended with ``#include
-    <torch/torch.h>``.
+    <torch/python.h>``.
 
     Furthermore, if the ``functions`` argument is supplied, bindings will be
     automatically generated for each function specified. ``functions`` can
@@ -551,7 +551,7 @@ def load_inline(name,
     if isinstance(cuda_sources, str):
         cuda_sources = [cuda_sources]
 
-    cpp_sources.insert(0, '#include <torch/torch.h>')
+    cpp_sources.insert(0, '#include <torch/python.h>')
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
@@ -747,7 +747,7 @@ def _write_ninja_file(path,
     sources = [os.path.abspath(file) for file in sources]
     includes = [os.path.abspath(file) for file in extra_include_paths]
 
-    # include_paths() gives us the location of torch/torch.h
+    # include_paths() gives us the location of torch/python.h
     includes += include_paths(with_cuda)
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     includes.append(sysconfig.get_paths()['include'])
