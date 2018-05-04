@@ -87,6 +87,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
 
   THCTensor_(free)(state, input);
   THCIndexTensor_(free)(state, target);
+  THCTensor_(free)(state, istarget);
 }
 
 void THNN_(MultiLabelMarginCriterion_updateGradInput)(
