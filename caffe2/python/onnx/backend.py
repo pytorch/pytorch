@@ -14,6 +14,7 @@ import os
 import collections
 from subprocess import Popen, PIPE
 import zipfile
+import itertools
 
 # When onnx is built against a version of protobuf that is older than
 # that which is vendored with caffe2, onnx will crash if caffe2's
@@ -33,6 +34,7 @@ from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto
 import onnx.numpy_helper
 import onnx.defs
 import onnx.optimizer
+import onnx.shape_inference
 from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
 
 from caffe2.python.onnx.workspace import Workspace
@@ -294,41 +296,12 @@ class Caffe2Backend(Backend):
 
     @classmethod
     def _rnn_shape_inference(cls, init_model, pred_model, n, input_blob, W):
-        # ad-hoc, informally-specified, bug-ridden, slow
-        # implementation of shape inference
-
-        # if the weight matrices are directly provided as
-        # initializers, their dimensions should be available in the
-        # init net model.
-        for x in init_model.graph.input:
+        for x in itertools.chain(init_model.graph.input,
+                                 init_model.graph.value_info,
+                                 pred_model.graph.input,
+                                 pred_model.graph.value_info):
             if x.name == W:
                 return x.type.tensor_type.shape.dim[1].dim_value
-
-        # otherwise, assume that the input_blob is either a direct
-        # graph input, or another rnn op of the same type. This
-        # matches the pattern produced by exporting from pytorch
-        # (where the weight matrices are unusable for this purpose due
-        # to reshaping operations that lose shape information).
-        for x in pred_model.graph.input:
-            if x.name == input_blob:
-                return x.type.tensor_type.shape.dim[2].dim_value
-
-        curr = n
-        while True:
-            for x in pred_model.graph.input:
-                if x.name == curr.inputs[0] and curr.op_type == 'Gather':
-                    return x.type.tensor_type.shape.dim[1].dim_value
-            prev = [x for x in map(OnnxNode, pred_model.graph.node) if x.outputs[0] == curr.inputs[0]]
-            if len(prev) != 1:
-                return
-            prev = prev[0]
-            if prev.op_type == n.op_type:
-                return prev.attrs['hidden_size']
-            if prev.op_type == 'Transpose':
-                for x in pred_model.graph.input:
-                    if x.name == prev.inputs[0]:
-                        return x.type.tensor_type.shape.dim[2].dim_value
-            curr = prev
 
     @classmethod
     def _create_rnn(cls, init_model, pred_model, n, opset_version):
@@ -904,6 +877,8 @@ class Caffe2Backend(Backend):
                 raise RuntimeError("Model with IR version >= 3 did not specify ONNX operator set version (onnx-caffe2 requires it)")
             else:
                 opset_version = 1
+
+        model = onnx.shape_inference.infer_shapes(model)
 
         # Check whether we have RNN related ops
         pred_model = cls.optimize_onnx(model, predict=True)
