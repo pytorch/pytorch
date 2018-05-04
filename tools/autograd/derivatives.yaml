@@ -763,8 +763,8 @@
 - name: log_sigmoid_forward(Tensor self)
   self: log_sigmoid_backward(grad, self, buffer)
 
-- name: log_softmax_forward(Tensor self, int64_t dim)
-  self: log_softmax_backward(grad, self, dim, output)
+- name: log_softmax(Tensor self, int64_t dim)
+  self: log_softmax_backward_data(grad, result, dim, self)
 
 - name: prelu_forward(Tensor self, Tensor weight)
   self, weight: prelu_backward(grad, self, weight, grad_input_mask)
@@ -775,8 +775,8 @@
 - name: rrelu_with_noise_forward_(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_with_noise_backward(grad, output, noise, lower, upper, training)
 
-- name: softmax_forward(Tensor self, int64_t dim)
-  self: softmax_backward(grad, self, dim, output)
+- name: softmax(Tensor self, int64_t dim)
+  self: softmax_backward_data(grad, result, dim, self)
 
 - name: softplus_forward(Tensor self, Scalar beta, Scalar threshold)
   self: softplus_backward(grad, self, beta, threshold, output)
@@ -965,7 +965,7 @@
   grad_output: log_sigmoid_backward(grad, self, buffer)
   self: log_sigmoid_double_backward(grad * grad_output, self)
 
-- name: log_softmax_backward(Tensor grad_output, Tensor self, int64_t dim, Tensor output)
+- name: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
   grad_output: grad - (grad * output.exp()).sum(dim, true)
   self: log_softmax_double_backward(grad, grad_output, dim, output)
 
@@ -1032,8 +1032,8 @@
   grad_output: softplus_backward(grad, self, beta, threshold, output)
   self: softplus_double_backward(grad * grad_output, self, beta, threshold)
 
-- name: softmax_backward(Tensor grad_output, Tensor self, int64_t dim, Tensor output)
-  grad_output: softmax_backward(grad, self, dim, output)
+- name: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
+  grad_output: softmax_backward_data(grad, output, dim, self)
   self: softmax_double_backward(grad, grad_output, dim, output)
 
 - name: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce)
