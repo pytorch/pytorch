@@ -155,8 +155,7 @@ def make_cuda_memory_checked_test(test):
         gc.collect()
         ends = tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
         for i, (start, end) in enumerate(zip(starts, ends)):
-            test.assertEqual(start, end,
-                             '{} leaked {} bytes CUDA memory on device {}'.format(
+            test.assertEqual(start, end, '{} leaked {} bytes CUDA memory on device {}'.format(
                              test, end - start, i))
 
     return cuda_memory_checked_test

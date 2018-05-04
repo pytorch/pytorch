@@ -1658,6 +1658,32 @@ class TestCuda(TestCase):
         b = a.half()
         self.assertGreater(b.norm().item(), 0)
 
+    # Test that make_cuda_memory_checked_test successfully detects leak
+    def test_cuda_memory_leak_detection_in_tests(self):
+        l = []
+
+        class LeakCase(TestCase):
+            def no_leak(self):
+                pass
+
+            def leak_gpu0(self):
+                l.append(torch.tensor(10, device=torch.device("cuda:0")))
+
+            def leak_gpu1(self):
+                l.append(torch.tensor(10, device=torch.device("cuda:1")))
+
+        wrapped = make_cuda_memory_checked_test(LeakCase('no_leak'))
+        wrapped()
+
+        wrapped = make_cuda_memory_checked_test(LeakCase('leak_gpu0'))
+        with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 0"):
+            wrapped()
+
+        if torch.cuda.device_count() > 1:
+            wrapped = make_cuda_memory_checked_test(LeakCase('leak_gpu1'))
+            with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 1"):
+                wrapped()
+
 
 def load_ignore_file():
     from os.path import join, dirname
