@@ -61,33 +61,44 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   return true;
 };
 
+void check_lstm_sizes(variable_list tup) {
+  // Expect the LSTM to have 64 outputs and 3 layers, with an input of batch
+  // 10 and 16 time steps (10 x 16 x n)
+
+  auto out = tup[0];
+  auto hids = tup[1];
+
+  REQUIRE(out.ndimension() == 3);
+  REQUIRE(out.size(0) == 10);
+  REQUIRE(out.size(1) == 16);
+  REQUIRE(out.size(2) == 64);
+
+  REQUIRE(hids.ndimension() == 4);
+  REQUIRE(hids.size(0) == 2);  // (hx, cx)
+  REQUIRE(hids.size(1) == 3);  // layers
+  REQUIRE(hids.size(2) == 16); // Batchsize
+  REQUIRE(hids.size(3) == 64); // 64 hidden dims
+
+  // Something is in the hiddens
+  REQUIRE(hids.norm().toCFloat() > 0);
+}
+
 TEST_CASE("rnn") {
   SECTION("lstm") {
     SECTION("sizes") {
-      auto model = LSTM(128, 64).nlayers(2).dropout(0.2).make();
+      auto model = LSTM(128, 64).nlayers(3).dropout(0.2).make();
       Variable x = Var(at::CPU(at::kFloat).randn({10, 16, 128}));
       auto tup = model->forward({x});
       auto y = x.mean();
 
-      auto out = tup[0];
-      auto hids = tup[1];
-
       backward(y);
-      REQUIRE(out.ndimension() == 3);
-      REQUIRE(out.size(0) == 10);
-      REQUIRE(out.size(1) == 16);
-      REQUIRE(out.size(2) == 64);
+      check_lstm_sizes(tup);
 
-      REQUIRE(hids.ndimension() == 4);
-      REQUIRE(hids.size(0) == 2); // 2 layers
-      REQUIRE(hids.size(1) == 2); // c and h
-      REQUIRE(hids.size(2) == 16); // Batch size of 16
-      REQUIRE(hids.size(3) == 64); // 64 hidden dims
+      auto next = model->forward({x, tup[1]});
 
-      // Something is in the hiddens
-      REQUIRE(hids.norm().toCFloat() > 0);
+      check_lstm_sizes(next);
 
-      Variable diff = model->forward({x, hids})[1] - hids;
+      Variable diff = next[1] - tup[1];
 
       // Hiddens changed
       REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);
@@ -126,9 +137,9 @@ TEST_CASE("rnn") {
         REQUIRE(std::abs(flat[i].toCFloat() - c_out[i]) < 1e-3);
       }
 
-      REQUIRE(out[1].ndimension() == 4); // T x (hx, cx) x B x 2
-      REQUIRE(out[1].size(0) == 1);
-      REQUIRE(out[1].size(1) == 2);
+      REQUIRE(out[1].ndimension() == 4); // (hx, cx) x layers x B x 2
+      REQUIRE(out[1].size(0) == 2);
+      REQUIRE(out[1].size(1) == 1);
       REQUIRE(out[1].size(2) == 4);
       REQUIRE(out[1].size(3) == 2);
       flat = out[1].data().view(16);
@@ -181,6 +192,26 @@ TEST_CASE("rnn") {
 }
 
 TEST_CASE("rnn_cuda", "[cuda]") {
+  SECTION("sizes") {
+    auto model = LSTM(128, 64).nlayers(3).dropout(0.2).make();
+    model->cuda();
+    Variable x = Var(at::CUDA(at::kFloat).randn({10, 16, 128}));
+    auto tup = model->forward({x});
+    auto y = x.mean();
+
+    backward(y);
+    check_lstm_sizes(tup);
+
+    auto next = model->forward({x, tup[1]});
+
+    check_lstm_sizes(next);
+
+    Variable diff = next[1] - tup[1];
+
+    // Hiddens changed
+    REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);
+  };
+
   SECTION("lstm") {
     REQUIRE(test_RNN_xor<LSTM>(
         [](int s) { return LSTM(s, s).nlayers(2).make(); }, true));

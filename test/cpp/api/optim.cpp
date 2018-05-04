@@ -91,7 +91,7 @@ TEST_CASE("optim") {
                      .append(Linear(8, 1).make())
                      .make();
 
-    auto optim = Adam(model, 1.0).weight_decay(1e-6).make();
+    auto optim = Adam(model, 1e-1).weight_decay(1e-6).make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
   */

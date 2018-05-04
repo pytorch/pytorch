@@ -1,6 +1,22 @@
 #include "torch/containers.h"
 
 namespace torch {
+namespace {
+Variable linear(Tensor x, Tensor w, Tensor b) {
+  if (x.ndimension() == 2 && b.defined()) {
+    // Fused op is marginally faster
+    assert(x.size(1) == w.size(1));
+    return at::addmm(b, x, w.t());
+  }
+
+  auto output = x.matmul(w.t());
+  if (b.defined()) {
+    output += b;
+  }
+  return output;
+}
+}
+
 std::map<std::string, Variable> ContainerImpl::parameters() const {
   std::map<std::string, Variable> ret;
   for (auto pair : children_) {
@@ -117,18 +133,7 @@ at::Type& ContainerImpl::DefaultTensor(at::ScalarType s) {
 }
 
 variable_list Linear::forward(variable_list input) {
-  auto x = input[0];
-  if (x.ndimension() == 2 && !no_bias_) {
-    // Fused op is marginally faster
-    assert(x.size(1) == weight.size(1));
-    return variable_list({at::addmm(bias, x, weight.t())});
-  }
-
-  auto output = x.matmul(weight.t());
-  if (!no_bias_) {
-    output += bias;
-  }
-  return variable_list({output});
+  return variable_list({linear(input[0], weight, bias)});
 }
 
 void Linear::reset_parameters() {
@@ -306,6 +311,12 @@ variable_list BatchNorm::forward(variable_list inputs) {
 
 template <typename Derived>
 void RNNBase<Derived>::initialize_containers() {
+  if (dropout_ > 0)
+    dropout_module = Dropout(dropout_).make();
+}
+
+template <typename Derived>
+void RNNBase<Derived>::initialize_parameters() {
   auto gate_size = hidden_size_;
   if (mode_ == RNNMode::LSTM) {
     gate_size *= 4;
@@ -313,17 +324,25 @@ void RNNBase<Derived>::initialize_containers() {
     gate_size *= 3;
   }
 
+  ihw.clear();
+  hhw.clear();
+  ihb.clear();
+  hhb.clear();
   for (auto i = 0U; i < nlayers_; i++) {
     auto input_size = (i == 0) ? input_size_ : hidden_size_;
-    i2h.push_back(this->add(
-        Linear(input_size, gate_size).no_bias(no_bias_).make(),
-        "i2h_" + std::to_string(i)));
-    h2h.push_back(this->add(
-        Linear(hidden_size_, gate_size).no_bias(no_bias_).make(),
-        "h2h_" + std::to_string(i)));
+    ihw.push_back(this->add(
+          Var(this->DefaultTensor(at::kFloat).tensor({gate_size, input_size})),
+          "weight_ih_l" + std::to_string(i)));
+    hhw.push_back(this->add(
+          Var(this->DefaultTensor(at::kFloat).tensor({gate_size, hidden_size_})),
+          "weight_hh_l" + std::to_string(i)));
+    ihb.push_back(no_bias_ ? Variable() : this->add(
+          Var(this->DefaultTensor(at::kFloat).tensor({gate_size})),
+          "bias_ih_l" + std::to_string(i)));
+    hhb.push_back(no_bias_ ? Variable() : this->add(
+          Var(this->DefaultTensor(at::kFloat).tensor({gate_size})),
+          "bias_hh_l" + std::to_string(i)));
   }
-  if (dropout_ > 0)
-    dropout_module = Dropout(dropout_).make();
   this->flatten_parameters();
 }
 
@@ -342,8 +361,8 @@ variable_list RNNBase<Derived>::GRU_cell_forward(variable_list inputs, int i) {
       ? inputs[1]
       : Var(this->DefaultTensor(at::kFloat).zeros({x.size(0), hidden_size_}));
 
-  auto gi = i2h[i]->forward({x})[0];
-  auto gh = h2h[i]->forward({hx})[0];
+  auto gi = linear(x, ihw[i], ihb[i]);
+  auto gh = linear(x, hhw[i], hhb[i]);
   auto gic = gi.chunk(3, 1);
   auto ghc = gh.chunk(3, 1);
 
@@ -364,7 +383,7 @@ variable_list RNNBase<Derived>::RNN_TANH_cell_forward(
       ? inputs[1]
       : Var(this->DefaultTensor(at::kFloat).zeros({x.size(0), hidden_size_}));
 
-  auto h = (i2h[i]->forward({x})[0] + h2h[i]->forward({hx})[0]).tanh();
+  auto h = (linear(x, ihw[i], ihb[i]) + linear(hx, hhw[i], hhb[i])).tanh();
   return variable_list({h});
 }
 
@@ -377,7 +396,7 @@ variable_list RNNBase<Derived>::RNN_RELU_cell_forward(
       ? inputs[1]
       : Var(this->DefaultTensor(at::kFloat).zeros({x.size(0), hidden_size_}));
 
-  auto h = (i2h[i]->forward({x})[0] + h2h[i]->forward({hx})[0]).clamp_min(0);
+  auto h = at::relu(linear(x, ihw[i], ihb[i]) + linear(hx, hhw[i], hhb[i]));
   return variable_list({h});
 }
 
@@ -391,7 +410,7 @@ variable_list RNNBase<Derived>::LSTM_cell_forward(variable_list inputs, int i) {
   auto hx = hid[0];
   auto cx = hid[1];
 
-  auto gates = i2h[i]->forward({x})[0] + h2h[i]->forward({hx})[0];
+  auto gates = linear(x, ihw[i], ihb[i]) + linear(hx, hhw[i], hhb[i]);
 
   auto chunked = gates.chunk(4, 1);
   auto in_gate = chunked[0].sigmoid();
@@ -424,8 +443,10 @@ variable_list RNNBase<Derived>::autograd_forward(variable_list inputs) {
   auto inp = inputs[0];
 
   std::vector<Tensor> hidden;
+  auto hasHidden = inputs[1].defined();
+  auto layerDim = hasHidden ? inputs[1].ndimension() - 3 : -1;
   for (size_t i = 0; i < nlayers_; i++) {
-    hidden.push_back(inputs[1].defined() ? inputs[1][i] : tag::Variable());
+    hidden.push_back(hasHidden ? inputs[1].select(layerDim, i) : Variable());
   }
 
   auto output =
@@ -451,13 +472,16 @@ variable_list RNNBase<Derived>::autograd_forward(variable_list inputs) {
   }
 
   auto hidout = at::stack(hidden, 0);
+  if (mode_ == RNNMode::LSTM) {
+    hidout.transpose_(0, 1);
+  }
   return variable_list({output, hidout});
 }
 
 template <typename Derived>
 bool RNNBase<Derived>::flatten_parameters() {
   data_ptrs_.clear();
-  auto anyParam = i2h[0]->params_.begin()->second;
+  auto anyParam = ihw[0];
   if (!anyParam.is_cuda() || !at::cudnn_is_acceptable(anyParam)) {
     return false;
   }
@@ -480,11 +504,11 @@ bool RNNBase<Derived>::flatten_parameters() {
 
   std::vector<Tensor> weight_list;
   for (size_t i = 0; i < nlayers_; i++) {
-    weight_list.push_back(i2h[i]->param("weight"));
-    weight_list.push_back(h2h[i]->param("weight"));
+    weight_list.push_back(ihw[i]);
+    weight_list.push_back(hhw[i]);
     if (!no_bias_) {
-      weight_list.push_back(i2h[i]->param("bias"));
-      weight_list.push_back(h2h[i]->param("bias"));
+      weight_list.push_back(ihb[i]);
+      weight_list.push_back(hhb[i]);
     }
   }
   auto weight_stride0 = no_bias_ ? 2 : 4;
@@ -511,11 +535,11 @@ template <typename Derived>
 variable_list RNNBase<Derived>::CUDNN_forward(variable_list inputs) {
   std::vector<Tensor> weight_list;
   for (size_t i = 0; i < nlayers_; i++) {
-    weight_list.push_back(i2h[i]->param("weight"));
-    weight_list.push_back(h2h[i]->param("weight"));
+    weight_list.push_back(ihw[i]);
+    weight_list.push_back(hhw[i]);
     if (!no_bias_) {
-      weight_list.push_back(i2h[i]->param("bias"));
-      weight_list.push_back(h2h[i]->param("bias"));
+      weight_list.push_back(ihb[i]);
+      weight_list.push_back(hhb[i]);
     }
   }
   auto weight_stride0 = no_bias_ ? 2 : 4;
@@ -558,7 +582,7 @@ variable_list RNNBase<Derived>::CUDNN_forward(variable_list inputs) {
       hidden_size_,
       nlayers_,
       false, // batch first
-      0, // TODO waiting on dropout state descriptor in C++ pytorch
+      0, // TODO Use C++ dropout descriptors
       this->train_,
       false, // bidirectional
       {}, // packing not supported
@@ -582,7 +606,7 @@ variable_list RNNBase<Derived>::forward(variable_list inputs) {
     inp.push_back(Variable());
   }
 
-  // Dropout descriptors aren't in C++ in PyTorch yet...
+  // TODO implement with dropout descriptors
   auto output = at::cudnn_is_acceptable(inp[0]) && dropout_ == 0
       ? CUDNN_forward(inp)
       : autograd_forward(inp);

@@ -375,13 +375,16 @@ class RNNBase : public Container_CRTP<Derived> {
 
   variable_list forward(variable_list) override;
   void initialize_containers() override;
+  void initialize_parameters() override;
   void reset_parameters() override;
 
   void cpu() override;
   void cuda() override;
 
-  std::vector<Container> i2h;
-  std::vector<Container> h2h;
+  std::vector<Variable> ihw;
+  std::vector<Variable> ihb;
+  std::vector<Variable> hhw;
+  std::vector<Variable> hhb;
 
  protected:
   uint32_t input_size_;
