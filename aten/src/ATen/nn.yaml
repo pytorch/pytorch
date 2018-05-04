@@ -96,13 +96,6 @@
     output: self_->isScalar()
     buffer: self_->isScalar()
 
-- name: log_softmax(Tensor self, int64_t dim)
-  cname: LogSoftMax
-  wrap_dim:
-    dim: self
-  scalar_check:
-    output: self_->isScalar()
-
 - name: prelu(Tensor self, Tensor weight)
   cname: PReLU
   scalar_check:
@@ -113,13 +106,6 @@
 - name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr)
   cname: RReLU
   has_inplace: True
-  scalar_check:
-    output: self_->isScalar()
-
-- name: softmax(Tensor self, int64_t dim)
-  cname: SoftMax
-  wrap_dim:
-    dim: self
   scalar_check:
     output: self_->isScalar()
 
