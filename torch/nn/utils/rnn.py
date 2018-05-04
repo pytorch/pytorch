@@ -248,7 +248,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     r"""Pad a list of variable length Tensors with zero
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
-    and padds them to equal length. For example, if the input is list of
+    and pads them to equal length. For example, if the input is list of
     sequences with size ``L x *`` and if batch_first is False, and ``T x B x *``
     otherwise. The list of sequences should be sorted in the order of
     decreasing length.
@@ -298,7 +298,8 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
         length = tensor.size(0)
         # temporary sort check, can be removed when we handle sorting internally
         if prev_l < length:
-            raise ValueError("lengths array has to be sorted in decreasing order")
+            raise ValueError(
+                "sequences must be sorted in the order of decreasing length")
         prev_l = length
         # use index notation to prevent duplicate references to the tensor
         if batch_first:
