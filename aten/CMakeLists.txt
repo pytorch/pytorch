@@ -17,10 +17,10 @@ else()
       NO_CUDA "Legacy no CUDA" OFF
       "USE_CUDA" ON)
   cmake_dependent_option(
-      WITH_CUDNN, "Legacy cuDNN" ON
+      WITH_CUDNN "Legacy cuDNN" ON
       "USE_CUDNN" OFF)
   cmake_dependent_option(
-      NO_MKLDNN, "Legacy no MKLDNN" OFF
+      NO_MKLDNN "Legacy no MKLDNN" OFF
       "USE_MKLDNN" ON)
 endif()
 
