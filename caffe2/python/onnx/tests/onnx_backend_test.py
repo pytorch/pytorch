@@ -30,6 +30,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_reduce_mean_cuda.*'  # Does not support ReduceMean CUDA.
                      '|test_reduce_prod.*'  # Does not support ReduceProd.
                      '|test_reduce_sum.*'  # Does not support ReduceSum and ReduceSumSquare
+                     '|test_reduce_log_sum.*'  # Does not support ReduceLogSum
                      '|test_tile.*'  # Tile's Caffe2 implementation needs some tweak
                      '|test_lstm.*'  # Seems LSTM case has some problem
                      '|test_simple_rnn.*'  # Seems simple RNN case has some problem
