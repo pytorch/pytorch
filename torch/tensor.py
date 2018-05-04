@@ -298,9 +298,6 @@ class Tensor(torch._C._TensorBase):
     def masked_fill(self, mask, value):
         return self.clone().masked_fill_(mask, value)
 
-    def expand_as(self, tensor):
-        return self.expand(tensor.size())
-
     def unique(self, sorted=False, return_inverse=False):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 

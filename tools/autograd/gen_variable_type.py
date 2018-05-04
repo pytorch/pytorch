@@ -120,7 +120,12 @@ PRE_RECORD_TRACE = CodeTemplate("""\
 jit::tracer::PreTraceInfo trace_info;
 if (jit::tracer::isTracing( ${tensor_args} )) {
   trace_info = jit::tracer::preRecordTrace( jit::aten::${trace_name}, ${trace_inputs} );
-  ${record_attributes}
+  if (!jit::tracer::ArgumentStash::empty()) {
+    ${record_positional_attributes}
+    TORCH_ASSERT(jit::tracer::ArgumentStash::empty());
+  } else {
+    ${record_attributes}
+  }
 }
 """)
 
@@ -131,7 +136,34 @@ if (trace_info.state != nullptr) {
 """)
 
 RECORD_ATTRIBUTE = CodeTemplate("""\
-        setattr(trace_info.n, jit::attr::${name}, ${name});""")
+setattr(trace_info.n, jit::attr::${name}, ${name});""")
+
+RECORD_POSITIONAL_ATTRIBUTE = CodeTemplate("""\
+setposattr(trace_info.n, ${i}, "${name}", ${name});""")
+
+POSITIONAL_ATTR_NYI = """\
+throw std::runtime_error("Can't have size-dependent arguments to functions that "
+                         "take variable number of tensor arguments");
+"""
+
+
+def should_trace(declaration):
+    # Operations involving Generator, Storage, Type are not traceable
+    # at the moment
+    if any(arg['simple_type'] in {'Generator', 'Storage', 'ScalarType', 'Type', 'optional<ScalarType>'}
+            for arg in declaration['arguments']):
+        return False
+    # We can't trace functions which don't have any Tensor or TensorList returns
+    if 'Tensor' not in declaration['return_type']:
+        return False
+    tensor_args = [arg for arg in declaration['arguments'] if arg['simple_type'] in {'Tensor', 'TensorList'}]
+    if len(tensor_args) == 0:
+        return False
+    name = declaration['name']
+    base_name = name[:-1] if declaration['inplace'] else name[:-4] if name.endswith('_out') else name
+    if base_name in DONT_RECORD_TRACE:
+        return False
+    return True
 
 
 def gen_variable_type(out, aten_declarations):
@@ -316,18 +348,7 @@ def emit_body(declaration):
             return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
 
     def emit_record_trace(env):
-        # Operations involving Generator, Storage, Type are not traceable
-        # at the moment
-        if any(arg['simple_type'] in {'Generator', 'Storage', 'ScalarType', 'Type', 'optional<ScalarType>'}
-               for arg in declaration['arguments']):
-            return ('', '')
-        # We can't trace functions which don't have any Tensor or TensorList returns
-        if 'Tensor' not in declaration['return_type']:
-            return ('', '')
-        tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
-        if len(tensor_args) == 0:
-            return ('', '')
-        if base_name in DONT_RECORD_TRACE:
+        if not should_trace(declaration):
             return ('', '')
 
         # Note [clang-802.0.42 tuple overload bug]
@@ -355,6 +376,7 @@ def emit_body(declaration):
 
         local = {}
 
+        tensor_args = [arg for arg in declaration['arguments'] if arg['simple_type'] in {'Tensor', 'TensorList'}]
         local['tensor_args'] = [arg['name'] for arg in tensor_args]
         if any(arg['simple_type'] == 'TensorList' for arg in tensor_args):
             # Allocate a temporary vector with flatten and pass it in
@@ -367,6 +389,16 @@ def emit_body(declaration):
             if arg['simple_type'] in {'Tensor', 'TensorList'}:
                 continue
             local['record_attributes'].append(RECORD_ATTRIBUTE.substitute(name=arg['name']))
+
+        local['record_positional_attributes'] = []
+        for i, arg in enumerate(declaration['arguments']):
+            if arg['simple_type'] == 'Tensor':
+                continue
+            if arg['simple_type'] == 'TensorList':
+                local['record_positional_attributes'] = POSITIONAL_ATTR_NYI
+                break
+            local['record_positional_attributes'].append(
+                RECORD_POSITIONAL_ATTRIBUTE.substitute(name=arg['name'], i=i))
 
         # Record inplace operations as out-of-place operations (e.g.,
         # not add_ but add)

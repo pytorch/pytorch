@@ -82,8 +82,7 @@ inline at::Tensor as_tensor(at::IntList l) {
                                            {static_cast<int64_t>(l.size())}).clone();
 }
 
-
-inline at::Tensor as_tensor(at::Scalar&& s) {
+inline at::Tensor as_tensor(const at::Scalar& s) {
   return s.toTensor();
 }
 
