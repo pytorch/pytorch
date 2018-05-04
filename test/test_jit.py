@@ -2984,6 +2984,16 @@ class TestScript(TestCase):
         self.checkScript(func_2, [x], optimize=True)
         self.checkScript(func_3, [x], optimize=True)
 
+    def test_wrong_implicit_expand(self):
+
+        @torch.jit.trace(torch.zeros(3), torch.zeros(1))
+        def foo(a, b):
+            return a + b
+
+        a = torch.rand(4)
+        b = torch.rand(4)
+        self.assertEqual(a + b, foo(a, b))
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):

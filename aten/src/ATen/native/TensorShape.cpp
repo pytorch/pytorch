@@ -85,7 +85,13 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   return self.as_strided(sizes, strides, storage_offset);
 }
 
-Tensor expand(const Tensor& self, IntList size) {
+Tensor expand(const Tensor& self, IntList size, bool implicit) {
+  // [expand implicit]
+  // The implicit flag is set to true for any expand calls inserted by broadcast
+  // operators in ExpandUtils.h This flag is recorded by the tracer to
+  // distinguish between expands inserted by broadcasts and those explicitly
+  // requested by the user, because it is legal to remove implicit expands
+  // from the graph, but not legal to remove the explicit ones.
   if (size.size() < (size_t)self.dim()) {
     std::ostringstream ss;
     ss << "expand(" << self.type() << "{" << self.sizes() << "}, size=" << size

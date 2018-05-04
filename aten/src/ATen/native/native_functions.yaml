@@ -440,7 +440,7 @@
     CPU: _expm1_out_cpu
     CUDA: _expm1_out_cuda
 
-- func: expand(Tensor self, IntList size) -> Tensor
+- func: expand(Tensor self, IntList size, *, bool implicit=false) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
@@ -690,13 +690,13 @@
   variants: function
 
 - func: randint_out(Tensor result, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
-  variants: function  
+  variants: function
 
 - func: randint_like(Tensor self, int64_t high) -> Tensor
   variants: function
 
 - func: randint_like(Tensor self, int64_t low, int64_t high) -> Tensor
-  variants: function  
+  variants: function
 
 - func: randint_like(Tensor self, int64_t high, *, Type dtype) -> Tensor
   variants: function
