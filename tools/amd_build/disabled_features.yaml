@@ -17,6 +17,12 @@
         }
       },
       {
+        "path": "aten/src/ATen/native/cuda/Distributions.cu",
+        "s_constants": {
+          "#include <nvfunctional>": ""
+        }
+      },
+      {
         "path": "aten/src/THCUNN/SoftMaxCommon.cuh",
         "functions": {
           "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
@@ -32,11 +38,11 @@
       {
         "path": "aten/src/THC/THCAllocator.cpp",
         "functions": {
-          "cudaMallocManaged": "HIPBLAS_STATUS_INTERNAL_ERROR"
+          "cudaMallocManaged": "hipSuccess"
         }
       },
       {
-        "path": "aten/src/TH/generic/THTensorMath.c",
+        "path": "aten/src/TH/generic/THTensorMath.cpp",
         "constants": {
           "_OPENMP": "_OPENMP_STUB"
         }
@@ -45,6 +51,12 @@
         "path": "aten/src/ATen/Context.cpp",
         "s_constants": {
           "#ifdef USE_SSE3": "#if defined(USE_SSE3) && !defined(__HIP_DEVICE_COMPILE__)"
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/Distributions.h",
+        "s_constants": {
+          "scalar_cast": "static_cast"
         }
       },
       {
@@ -108,12 +120,6 @@
     "aten/src/THCUNN/RReLU.cu"
   ],
   "disabled_functions": [
-    {
-      "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
-      "device_functions": [
-        "maybeOverlappingIndices"
-      ]
-    },
     {
       "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
       "device_functions": [
