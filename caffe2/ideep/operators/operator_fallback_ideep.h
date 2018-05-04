@@ -63,8 +63,8 @@ class IDEEPFallbackOp final : public IDEEPOperator {
 
   bool RunOnDevice() override {
     for (int i = 0; i < InputSize(); ++i) {
-      auto& input = Input(i);
-      if (InputIsType<itensor>(i) && input.get_data_type() == itensor::data_type::f32) {
+      if (InputIsType<itensor>(i) && Input(i).get_data_type() == itensor::data_type::f32) {
+        auto& input = Input(i);
         auto dtensor = local_input_blobs_[i]->template GetMutable<TensorCPU>();
         dtensor->Resize(input.get_dims());
         if (input.is_public_format()) {
