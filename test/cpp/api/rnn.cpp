@@ -1,8 +1,8 @@
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-using namespace autograd;
+using namespace torch;
 
 template <typename R, typename Func>
 bool test_RNN_xor(Func&& model_maker, bool cuda = false) {

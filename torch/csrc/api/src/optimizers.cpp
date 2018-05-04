@@ -1,6 +1,6 @@
 #include "torch/optimizers.h"
 
-namespace autograd {
+namespace torch {
 
 void OptimizerImpl::zero_grad() {
   for (auto p : model_->parameters()) {
@@ -196,4 +196,4 @@ void Adam::init_state() {
   exp_avg_sq_buffer_.clear();
 }
 
-} // namespace autograd
+} // namespace torch
