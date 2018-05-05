@@ -183,7 +183,8 @@ conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9
 On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
+conda install numpy pyyaml mkl setuptools cmake cffi typing
+conda install -c anaconda mkl-include
 ```
 
 On Windows
