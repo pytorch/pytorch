@@ -3,7 +3,7 @@
 #include <structmember.h>
 #include <pybind11/pybind11.h>
 
-#include "torch/csrc/api/include/torch/python.h"
+#include "torch/csrc/torch.h"
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"

@@ -1,4 +1,4 @@
-#include <torch/python.h>
+#include <torch/torch.h>
 
 // Declare the function from cuda_extension.cu. It will be compiled
 // separately with nvcc and linked with the object file of cuda_extension.cpp
