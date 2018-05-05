@@ -7,14 +7,20 @@
 #  NCCL_FOUND
 #  NCCL_INCLUDE_DIRS
 #  NCCL_LIBRARIES
+#
+# The path hints include CUDA_TOOLKIT_ROOT_DIR seeing as some folks
+# install NCCL in the same location as the CUDA toolkit.
+# See https://github.com/caffe2/caffe2/issues/1601
 
 set (NCCL_ROOT_DIR $ENV{NCCL_ROOT_DIR})
 
 find_path (NCCL_INCLUDE_DIR
   NAMES nccl.h
   HINTS
+  ${NCCL_INCLUDE_DIR}
   ${NCCL_ROOT_DIR}
-  ${NCCL_ROOT_DIR}/include)
+  ${NCCL_ROOT_DIR}/include
+  ${CUDA_TOOLKIT_ROOT_DIR}/include)
 
 IF ($ENV{USE_STATIC_NCCL})
   MESSAGE(STATUS "USE_STATIC_NCCL detected. Linking against static NCCL library")
@@ -26,10 +32,12 @@ ENDIF()
 find_library (NCCL_LIBRARY
   NAMES ${NCCL_LIBNAME}
   HINTS
+  ${NCCL_LIB_DIR}
   ${NCCL_ROOT_DIR}
   ${NCCL_ROOT_DIR}/lib
   ${NCCL_ROOT_DIR}/lib/x86_64-linux-gnu
-  ${NCCL_ROOT_DIR}/lib64)
+  ${NCCL_ROOT_DIR}/lib64
+  ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
 
 include (FindPackageHandleStandardArgs)
 find_package_handle_standard_args (NCCL DEFAULT_MSG NCCL_INCLUDE_DIR NCCL_LIBRARY)
