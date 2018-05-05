@@ -1,4 +1,4 @@
-#include <torch/python.h>
+#include <torch/torch.h>
 
 at::Tensor sigmoid_add(at::Tensor x, at::Tensor y) {
   return x.sigmoid() + y.sigmoid();
