@@ -26,7 +26,7 @@ class SpectralNorm(object):
                 v = normalize(torch.matmul(weight_mat.t(), u), dim=0, eps=self.eps)
                 u = normalize(torch.matmul(weight_mat, v), dim=0, eps=self.eps)
 
-                sigma = torch.dot(u, torch.matmul(weight_mat, v))
+            sigma = torch.dot(u, torch.matmul(weight_mat, v))
         weight = weight / sigma
         return weight, u
 
