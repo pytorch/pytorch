@@ -87,8 +87,11 @@ class PackedSequence(PackedSequence_):
 
     def to(self, *args, **kwargs):
         r"""Performs dtype and/or device conversion on `self.data`"""
-        return type(self)(self.data.to(*args, **kwargs),
-                          self.batch_sizes)
+        data = self.data.to(*args, **kwargs)
+        if data is self.data:
+            return self
+        else:
+            return type(self)(data, self.batch_sizes)
 
     @property
     def is_cuda(self):
