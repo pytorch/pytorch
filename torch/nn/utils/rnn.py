@@ -85,6 +85,11 @@ class PackedSequence(PackedSequence_):
         r"""Returns copy with `self.data` cast to byte type"""
         return type(self)(self.data.byte(), self.batch_sizes)
 
+    def to(self, *args, **kwargs):
+        r"""Performs dtype and/or device conversion on `self.data`"""
+        return type(self)(self.data.to(*args, **kwargs),
+                          self.batch_sizes)
+
     @property
     def is_cuda(self):
         r"""Returns true if `self.data` stored on a gpu"""
