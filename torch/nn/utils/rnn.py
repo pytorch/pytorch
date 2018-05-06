@@ -86,7 +86,16 @@ class PackedSequence(PackedSequence_):
         return type(self)(self.data.byte(), self.batch_sizes)
 
     def to(self, *args, **kwargs):
-        r"""Performs dtype and/or device conversion on `self.data`"""
+        r"""Performs dtype and/or device conversion on `self.data`.
+
+        It has similar signature as :meth:`torch.Tensor.to`.
+
+        .. note::
+
+            If the ``self.data`` Tensor already
+            has the correct :class:`torch.dtype` and :class:`torch.device`, then ``self`` is returned.
+            Otherwise, returns a copy with the desired configuration.
+        """
         data = self.data.to(*args, **kwargs)
         if data is self.data:
             return self
