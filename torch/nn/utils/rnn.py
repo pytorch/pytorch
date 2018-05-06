@@ -92,8 +92,8 @@ class PackedSequence(PackedSequence_):
 
         .. note::
 
-            If the ``self.data`` Tensor already
-            has the correct :class:`torch.dtype` and :class:`torch.device`, then ``self`` is returned.
+            If the ``self.data`` Tensor already has the correct :class:`torch.dtype`
+            and :class:`torch.device`, then ``self`` is returned.
             Otherwise, returns a copy with the desired configuration.
         """
         data = self.data.to(*args, **kwargs)
