@@ -170,7 +170,7 @@ class PackedSequenceTest(TestCase):
         self.assertEqual(a.long(), a.to(torch.int64))
 
         if torch.cuda.is_available():
-            for cuda in ['cuda', 'cuda:0' if torch.cuda.data.device_count() == 1 else 'cuda:1']:
+            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
                 b = a.cuda(device=cuda)
                 self.assertIs(b, b.to(cuda))
                 self.assertEqual(a, b.to('cpu'))
