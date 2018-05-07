@@ -50,9 +50,8 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
       PyObject *item = PyTuple_GET_ITEM(self.get(), i);
-      if (!THPUtils_checkLong(item) && !isTracedVar(item)) {
-        return PyErr_Format(PyExc_TypeError, "torch.Size() takes an iterable of 'int' (item %zd is '%s')",
-            i, Py_TYPE(item)->tp_name);
+      if (isTracedVar(item)) {
+        continue;
       }
       if (THPUtils_checkLong(item)) {
         continue;
