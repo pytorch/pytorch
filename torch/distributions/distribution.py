@@ -122,6 +122,16 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    def prob(self, value):
+        """
+        Returns the probability density/mass function evaluated at
+        `value`.
+
+        Args:
+            value (Tensor):
+        """
+        return torch.exp(self.log_prob(value))
+
     def cdf(self, value):
         """
         Returns the cumulative density/mass function evaluated at
