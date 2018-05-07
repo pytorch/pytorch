@@ -1,7 +1,7 @@
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/AccumulateType.cuh"
+#include "ATen/AccumulateType.h"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include <THC/THCNumerics.cuh>
@@ -59,7 +59,7 @@ void gamma_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& alpha,
     std::pair<uint64_t, uint64_t> seeds) {
-  using accscalar_t = at::cuda::acc_type<scalar_t>;
+  using accscalar_t = at::acc_type<scalar_t, true>;
   at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
       ret,
       alpha,
@@ -87,7 +87,7 @@ void gamma_grad_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& self,
     const at::Tensor& output) {
-  using accscalar_t = at::cuda::acc_type<scalar_t>;
+  using accscalar_t = at::acc_type<scalar_t, true>;
   at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(
       ret, self, output,
       [] __device__ (scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {

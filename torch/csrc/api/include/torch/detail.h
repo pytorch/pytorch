@@ -12,7 +12,7 @@
 #include "torch/csrc/utils/auto_gpu.h"
 
 #define AUTOGRAD_OPTIMIZER_CLASS(Type) \
-  class Type : public autograd::Optimizer_CRTP<Type>
+  class Type : public torch::Optimizer_CRTP<Type>
 #define AUTOGRAD_KWARG(CLS, TYP, NAME, DEFAULT, OPTION) \
   TYP NAME##_ = DEFAULT;                                \
   CLS& NAME(TYP x = OPTION) {                           \
@@ -25,7 +25,7 @@ namespace tag = torch::autograd;
 using IntVec = decltype(std::declval<at::IntList>().vec());
 } // namespace
 
-namespace autograd {
+namespace torch {
 namespace detail {
 extern tag::Engine engine;
 }
@@ -67,4 +67,4 @@ int getNumGPUs();
 bool hasCuda();
 bool hasCudnn();
 
-} // namespace autograd
+} // namespace torch

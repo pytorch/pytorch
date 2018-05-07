@@ -8,6 +8,7 @@ import re
 from .nested_dict import nested_dict
 from tools.shared.module_loader import import_module
 from .gen_autograd import template_path
+from .gen_variable_type import should_trace
 from .utils import write
 
 CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
@@ -37,7 +38,7 @@ static PyObject * ${pycname}(PyObject* self, PyObject* args, PyObject* kwargs)
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     ${signatures}
-  });
+  }, /*traceable=*/${traceable});
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -547,6 +548,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch'].append(emit_dispatch(i, dictionary, env))
 
         env['dispatch'].append('}')
+
+        env['traceable'] = 'true' if all(should_trace(d) for d in declarations) else 'false'
 
         if len(declarations) == 1 and len(declarations[0]['args']) == 1 and has_self:
             tmpl = PY_VARIABLE_METHOD_NOARGS

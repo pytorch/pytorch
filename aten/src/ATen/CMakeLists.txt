@@ -38,6 +38,8 @@ ENDIF()
 IF(NOT MSVC)
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-ignored-qualifiers")
   SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-ignored-qualifiers")
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-absolute-value")
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-absolute-value")
 ENDIF(NOT MSVC)
 
 ########################
@@ -148,11 +150,6 @@ function(filter_list output input)
     set(${output} ${result} PARENT_SCOPE)
 endfunction()
 
-
-IF ($ENV{TH_BINARY_BUILD})
-  MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
-  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
-ENDIF()
 
 # Can be compiled standalone
 IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DIR OR NOT AT_INSTALL_SHARE_DIR)
@@ -393,13 +390,6 @@ if (NOT TARGET cpuinfo)
   set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
 endif()
 TARGET_LINK_LIBRARIES(ATen cpuinfo)
-
-# ---[ Configure SLEEF
-IF(NOT TARGET sleef)
-  add_subdirectory("cpu/sleef")
-  include_directories(SYSTEM ${CMAKE_BINARY_DIR}/include)
-ENDIF()
-TARGET_LINK_LIBRARIES(ATen sleef)
 
 IF(CUDA_FOUND)
   IF ($ENV{ATEN_STATIC_CUDA})

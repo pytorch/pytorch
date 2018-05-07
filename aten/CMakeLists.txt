@@ -4,12 +4,14 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
 else()
   cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
-  project(ATen CXX C)
 endif()
 
 IF(WITH_ROCM)
   INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/LoadHIP.cmake)
 ENDIF()
+
+# Create the project in all cases
+project(ATen CXX C)
 
 # Find modules
 list(APPEND CMAKE_MODULE_PATH

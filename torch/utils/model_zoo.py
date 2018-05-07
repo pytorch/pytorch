@@ -9,7 +9,7 @@ import tempfile
 
 try:
     from requests.utils import urlparse
-    import requests.get as urlopen
+    from requests import get as urlopen
     requests_available = True
 except ImportError:
     requests_available = False
@@ -67,11 +67,12 @@ def load_url(url, model_dir=None, map_location=None, progress=True):
 
 
 def _download_url_to_file(url, dst, hash_prefix, progress):
-    u = urlopen(url)
     if requests_available:
+        u = urlopen(url, stream=True)
         file_size = int(u.headers["Content-Length"])
         u = u.raw
     else:
+        u = urlopen(url)
         meta = u.info()
         if hasattr(meta, 'getheaders'):
             file_size = int(meta.getheaders("Content-Length")[0])

@@ -1,8 +1,8 @@
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-using namespace autograd;
+using namespace torch;
 
 AUTOGRAD_CONTAINER_CLASS(TestModel) {
  public:
@@ -214,8 +214,10 @@ TEST_CASE("containers") {
     backward(y);
     REQUIRE(y.ndimension() == 1);
     REQUIRE(y.size(0) == 100);
-    REQUIRE(y.sum().toCFloat() < 130); // Probably
-    REQUIRE(y.sum().toCFloat() > 70); // Probably
+    // TODO: These two tests are flaky
+    // https://github.com/pytorch/pytorch/issues/7286
+    // REQUIRE(y.sum().toCFloat() < 130); // Probably
+    // REQUIRE(y.sum().toCFloat() > 70); // Probably
 
     dropout->eval();
     y = dropout->forward({x})[0];

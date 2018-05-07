@@ -6,7 +6,6 @@
 
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/Parallel.h"
-#include "ATen/native/cpu/UnaryOpsKernel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -66,36 +65,6 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
     return result;                                                        \
   }
 
-#define IMPLEMENT_UNARY_OP_VEC(op, opfn)                                    \
-  Tensor& _##op##__cpu(Tensor& self_) {                                     \
-    if (self_.numel() > 0) {                                                \
-      Tensor self = sort_strides(self_);                                    \
-      if (self.is_contiguous()) {                                           \
-        op##Impl(self, self);                                               \
-      } else {                                                              \
-        AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {                   \
-          CPU_tensor_parallel_apply1<scalar_t>(                             \
-              self, [](scalar_t& y) { y = opfn(y); });                      \
-        });                                                                 \
-      }                                                                     \
-    }                                                                       \
-    return self_;                                                           \
-  }                                                                         \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) {             \
-    result.resize_(self.sizes());                                           \
-    if (result.numel() > 0) {                                               \
-      if (result.is_contiguous() && self.is_contiguous()) {                 \
-        op##Impl(result, self);                                             \
-      } else {                                                              \
-        AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {                   \
-          CPU_tensor_parallel_apply2<scalar_t, scalar_t>(                   \
-              result, self, [](scalar_t& y, scalar_t& x) { y = opfn(x); }); \
-        });                                                                 \
-      }                                                                     \
-    }                                                                       \
-    return result;                                                          \
-  }
-
 IMPLEMENT_UNARY_OP_PREQUEL(abs)
 IMPLEMENT_UNARY_OP_PREQUEL(acos)
 IMPLEMENT_UNARY_OP_PREQUEL(asin)
@@ -130,28 +99,48 @@ Tensor& _tanh_out_cuda(Tensor& result, const Tensor& self) {
   return at::_th_tanh_out(result, self);
 }
 
-IMPLEMENT_UNARY_OP_VEC(abs, std::abs)
-IMPLEMENT_UNARY_OP_VEC(acos, std::acos)
-IMPLEMENT_UNARY_OP_VEC(asin, std::asin)
-IMPLEMENT_UNARY_OP_VEC(atan, std::atan)
-IMPLEMENT_UNARY_OP_VEC(ceil, std::ceil)
+Tensor& _abs__cpu(Tensor& self_) {
+  if (self_.numel() > 0) {
+    Tensor self = sort_strides(self_);
+    AT_DISPATCH_ALL_TYPES(self.type(), abs, [&] {
+      CPU_tensor_parallel_apply1<scalar_t>(
+          self, [](scalar_t& y) { y = std::abs(y); });
+    });
+  }
+  return self_;
+}
+Tensor& _abs_out_cpu(Tensor& result, const Tensor& self) {
+  result.resize_(self.sizes());
+  if (result.numel() > 0) {
+    AT_DISPATCH_ALL_TYPES(self.type(), abs, [&] {
+      CPU_tensor_parallel_apply2<scalar_t, scalar_t>(
+          result, self, [](scalar_t& y, scalar_t& x) { y = std::abs(x); });
+    });
+  }
+  return result;
+}
+
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(acos, std::acos)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(asin, std::asin)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(atan, std::atan)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(ceil, std::ceil)
 IMPLEMENT_UNARY_OP_FLOAT_CMATH(cos, std::cos)
 IMPLEMENT_UNARY_OP_FLOAT_CMATH(cosh, std::cosh)
-IMPLEMENT_UNARY_OP_VEC(erf, std::erf)
-IMPLEMENT_UNARY_OP_VEC(exp, std::exp)
-IMPLEMENT_UNARY_OP_VEC(expm1, std::expm1)
-IMPLEMENT_UNARY_OP_VEC(floor, std::floor)
-IMPLEMENT_UNARY_OP_VEC(log, std::log)
-IMPLEMENT_UNARY_OP_VEC(log10, std::log10)
-IMPLEMENT_UNARY_OP_VEC(log1p, std::log1p)
-IMPLEMENT_UNARY_OP_VEC(log2, std::log2)
-IMPLEMENT_UNARY_OP_VEC(round, std::round)
-IMPLEMENT_UNARY_OP_VEC(rsqrt, 1 / std::sqrt)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(erf, std::erf)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(exp, std::exp)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(expm1, std::expm1)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(floor, std::floor)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(log, std::log)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(log10, std::log10)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(log1p, std::log1p)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(log2, std::log2)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(round, std::round)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(rsqrt, 1 / std::sqrt)
 IMPLEMENT_UNARY_OP_FLOAT_CMATH(sin, std::sin)
 IMPLEMENT_UNARY_OP_FLOAT_CMATH(sinh, std::sinh)
-IMPLEMENT_UNARY_OP_VEC(sqrt, std::sqrt)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(sqrt, std::sqrt)
 IMPLEMENT_UNARY_OP_FLOAT_CMATH(tan, std::tan)
 IMPLEMENT_UNARY_OP_FLOAT_CMATH(tanh, std::tanh)
-IMPLEMENT_UNARY_OP_VEC(trunc, std::trunc)
+IMPLEMENT_UNARY_OP_FLOAT_CMATH(trunc, std::trunc)
 }
 } // namespace at

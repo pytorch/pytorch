@@ -13,21 +13,17 @@ class LogSoftMax(Module):
         return getattr(self, 'dim', 0 if input.dim() == 1 or input.dim() == 3 else 1)
 
     def updateOutput(self, input):
-        self._backend.LogSoftMax_updateOutput(
-            self._backend.library_state,
+        self.output = torch.log_softmax(
             input,
-            self.output,
             self._get_dim(input)
         )
         return self.output
 
     def updateGradInput(self, input, gradOutput):
-        self._backend.LogSoftMax_updateGradInput(
-            self._backend.library_state,
-            input,
+        self.gradInput = torch.log_softmax_backward_data(
             gradOutput,
-            self.gradInput,
             self.output,
-            self._get_dim(input)
+            self._get_dim(input),
+            input
         )
         return self.gradInput

@@ -300,12 +300,4 @@ if [ -d "$INSTALL_DIR/bin/" ]; then
     cp "$INSTALL_DIR/bin/"/* .
 fi
 
-# this is for binary builds
-if [[ $PYTORCH_BINARY_BUILD && $PYTORCH_SO_DEPS ]]
-then
-    echo "Copying over dependency libraries $PYTORCH_SO_DEPS"
-    # copy over dependency libraries into the current dir
-    cp "$PYTORCH_SO_DEPS" .
-fi
-
 popd

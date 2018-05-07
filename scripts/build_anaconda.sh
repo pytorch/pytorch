@@ -256,19 +256,19 @@ if [[ -n $cuda_ver ]]; then
   # the package name in meta.yaml based off of these values, we let Caffe2
   # take the CUDA and cuDNN versions that it finds in the build environment,
   # and manually set the package name ourself.
-  package_name="${package_name}_cuda${cuda_ver}_cudnn${cudnn_ver}"
-  build_string="${build_string}_cuda${cuda_ver}_cudnn${cudnn_ver}_nccl2"
+  package_name="${package_name}-cuda${cuda_ver}-cudnn${cudnn_ver}"
+  build_string="${build_string}-cuda${cuda_ver}-cudnn${cudnn_ver}-nccl2"
 else
-  build_string="${build_string}_cpu"
+  build_string="${build_string}-cpu"
 fi
 if [[ "$(uname)" != 'Darwin' && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
-  package_name="${package_name}_gcc${gcc_ver:0:3}"
-  build_string="${build_string}_gcc${gcc_ver:0:3}"
+  package_name="${package_name}-gcc${gcc_ver:0:3}"
+  build_string="${build_string}-gcc${gcc_ver:0:3}"
 fi
 if [[ -n $build_full ]]; then
-  package_name="${package_name}_full"
-  build_string="${build_string}_full"
+  package_name="${package_name}-full"
+  build_string="${build_string}-full"
 fi
 portable_sed "s/name: caffe2.*\$/name: ${package_name}/" $meta_yaml
 #portable_sed "s/string:.*\$/string: ${build_string}/" $meta_yaml
@@ -303,11 +303,9 @@ caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 
 # Add packages required for pytorch
 if [[ -n $pytorch_too ]]; then
-  remove_lines_with 'numpy'
   add_package 'cffi'
   add_package 'mkl' '>=2018'
   add_package 'mkl-include'
-  add_package 'numpy' '>=1.11'
   add_package 'typing'
   append_to_section 'build' '- pyyaml'
   append_to_section 'build' '- setuptools'
@@ -358,10 +356,7 @@ if [[ "$(uname)" != 'Darwin' && "$GCC_USE_C11" -eq 0 ]]; then
   # requires numpy 1.12
   remove_lines_with 'opencv'
   add_package 'opencv' '==3.1.0'
-  if [[ "$PYTHON_VERSION" == 3.* ]]; then
-    remove_lines_with 'numpy'
-    add_package 'numpy' '>1.11'
-  fi
+
   # Default conda channels use gcc 7.2, conda-forge uses gcc 4.8.5
   caffe2_cmake_args+=("-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=0")
   conda_channel+=('-c conda-forge')
