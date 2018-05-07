@@ -3374,7 +3374,8 @@ class TestTorch(TestCase):
         # Test non-contiguous inputs.
         if not TEST_NUMPY:
             return
-
+        import numpy
+        from numpy.linalg import solve
         A = cast(torch.randn(2, 2, 2)).permute(1, 0, 2)
         b = cast(torch.randn(2, 2, 2)).permute(2, 1, 0)
         x, _ = torch.gesv(b, A)
