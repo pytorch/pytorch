@@ -25,8 +25,8 @@ unary_kernel(scalar_t* arr_out, const scalar_t* arr_in, int64_t size, F func) {
   auto leftover = size - k;
   if (leftover > 0) {
     Vec a;
-    a.load_partial(arr_in + k, leftover);
-    func(a).store_partial(arr_out + k, leftover);
+    a.load(arr_in + k, leftover);
+    func(a).store(arr_out + k, leftover);
   }
 }
 

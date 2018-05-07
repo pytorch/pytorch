@@ -3,6 +3,8 @@
 #include "intrinsics.h"
 #include "vec256_base.h"
 
+//TODO: Add tests for partial loads
+
 namespace at {
 namespace vec256 {
 namespace {
@@ -15,12 +17,6 @@ struct Vec256i {
   Vec256i(__m256i v) : values(v) {}
   operator __m256i() const {
     return values;
-  }
-  void load(const void *ptr) {
-    values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
-  }
-  void store(void *ptr) const {
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
   }
 };
 
@@ -35,15 +31,39 @@ struct Vec256<int64_t> : public Vec256i {
     vec.load(ptr);
     return vec;
   }
-  void load_partial(const void *ptr, int count) {
-    int64_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
-    load(tmp_values);
-  }
-  void store_partial(void* ptr, int count) const {
+  template <int64_t count>
+  void load(const void* ptr) {
     __at_align32__ int64_t tmp_values[size];
-    store(tmp_values);
-    std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
+    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
+    for (int64_t i = count; i < size; i++)
+      tmp_values[i] = _mm256_extract_epi64(values, i);
+    values = _mm256_load_si256(reinterpret_cast<const __m256i*>(tmp_values));
+  }
+  void load(const void* ptr, int count = size) {
+    switch (count) {
+      case 0:
+        break;
+      case 1:
+        load<1>(ptr);
+        break;
+      case 2:
+        load<2>(ptr);
+        break;
+      case 3:
+        load<3>(ptr);
+        break;
+      case 4:
+        values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+    }
+  }
+  void store(void* ptr, int count = size) const {
+    if (count == size) {
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
+    } else {
+      __at_align32__ int64_t tmp_values[size];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
+    }
   }
   Vec256<int64_t> abs() const {
     auto zero = _mm256_set1_epi64x(0);
@@ -64,15 +84,51 @@ struct Vec256<int32_t> : public Vec256i {
     vec.load(ptr);
     return vec;
   }
-  void load_partial(const void *ptr, int count) {
-    int32_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
-    load(tmp_values);
-  }
-  void store_partial(void* ptr, int count) const {
+  template <int64_t count>
+  void load(const void* ptr) {
     __at_align32__ int32_t tmp_values[size];
-    store(tmp_values);
-    std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
+    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
+    __m256i tmp_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(tmp_values));
+    values = _mm256_blend_epi32(values, tmp_vec, (1 << count) - 1);
+  }
+  void load(const void* ptr, int64_t count = size) {
+    // TODO: Add bounds checking (error on switch default)?
+    switch (count) {
+      case 0:
+        break;
+      case 1:
+        load<1>(ptr);
+        break;
+      case 2:
+        load<2>(ptr);
+        break;
+      case 3:
+        load<3>(ptr);
+        break;
+      case 4:
+        load<4>(ptr);
+        break;
+      case 5:
+        load<5>(ptr);
+        break;
+      case 6:
+        load<6>(ptr);
+        break;
+      case 7:
+        load<7>(ptr);
+        break;
+      case 8:
+      values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+    }
+  }
+  void store(void* ptr, int count = size) const {
+    if (count == size) {
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
+    } else {
+      __at_align32__ int32_t tmp_values[size];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
+    }
   }
   Vec256<int32_t> abs() const {
     return _mm256_abs_epi32(values);
@@ -90,15 +146,76 @@ struct Vec256<int16_t> : public Vec256i {
     vec.load(ptr);
     return vec;
   }
-  void load_partial(const void *ptr, int count) {
-    int16_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
-    load(tmp_values);
-  }
-  void store_partial(void* ptr, int count) const {
+  template <int64_t count>
+  void load(const void* ptr) {
     __at_align32__ int16_t tmp_values[size];
-    store(tmp_values);
-    std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    for (int64_t i = count; i < size; i++)
+      tmp_values[i] = _mm256_extract_epi16(values, i);
+    values = _mm256_load_si256(reinterpret_cast<const __m256i*>(tmp_values));
+  }
+  void load(const void* ptr, int64_t count = size) {
+    // TODO: Add bounds checking (error on switch default)?
+    switch (count) {
+      case 0:
+        break;
+      case 1:
+        load<1>(ptr);
+        break;
+      case 2:
+        load<2>(ptr);
+        break;
+      case 3:
+        load<3>(ptr);
+        break;
+      case 4:
+        load<4>(ptr);
+        break;
+      case 5:
+        load<5>(ptr);
+        break;
+      case 6:
+        load<6>(ptr);
+        break;
+      case 7:
+        load<7>(ptr);
+        break;
+      case 8:
+        load<8>(ptr);
+        break;
+      case 9:
+        load<9>(ptr);
+        break;
+      case 10:
+        load<10>(ptr);
+        break;
+      case 11:
+        load<11>(ptr);
+        break;
+      case 12:
+        load<12>(ptr);
+        break;
+      case 13:
+        load<13>(ptr);
+        break;
+      case 14:
+        load<14>(ptr);
+        break;
+      case 15:
+        load<15>(ptr);
+        break;
+      case 16:
+        values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+    }
+  }
+  void store(void* ptr, int count = size) const {
+    if (count == size) {
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
+    } else {
+      __at_align32__ int16_t tmp_values[size];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+    }
   }
   Vec256<int16_t> abs() const {
     return _mm256_abs_epi16(values);

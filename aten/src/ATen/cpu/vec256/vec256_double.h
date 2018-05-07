@@ -22,26 +22,44 @@ public:
   operator __m256d() const {
     return values;
   }
+  template <int64_t count>
   void load(const void* ptr) {
-    values = _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
-  }
-  void load_partial(const void *ptr, int count) {
-    double tmp_values[size];
+    __at_align32__ double tmp_values[size];
     std::memcpy(tmp_values, ptr, count * sizeof(double));
-    load(tmp_values);
+    __m256d tmp_vec = _mm256_load_pd(reinterpret_cast<const double*>(tmp_values));
+    values = _mm256_blend_pd(values, tmp_vec, (1 << count) - 1);
+  }
+  void load(const void* ptr, int64_t count = size) {
+    // TODO: Add bounds checking (error on switch default)?
+    switch (count) {
+      case 0:
+        break;
+      case 1:
+        load<1>(ptr);
+        break;
+      case 2:
+        load<2>(ptr);
+        break;
+      case 3:
+        load<3>(ptr);
+        break;
+      case 4:
+        values = _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
+    }
   }
   static Vec256<double> s_load(const void* ptr) {
     Vec256<double> vec;
     vec.load(ptr);
     return vec;
   }
-  void store(void* ptr) const {
-    _mm256_storeu_pd(reinterpret_cast<double*>(ptr), values);
-  }
-  void store_partial(void* ptr, int count) const {
-    double tmp_values[size];
-    store(tmp_values);
-    std::memcpy(ptr, tmp_values, count * sizeof(double));
+  void store(void* ptr, int count = size) const {
+    if (count == size) {
+      _mm256_storeu_pd(reinterpret_cast<double*>(ptr), values);
+    } else {
+      double tmp_values[size];
+      _mm256_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(double));
+    }
   }
   Vec256<double> map(double (*f)(double)) const {
     __at_align32__ double tmp[4];
@@ -117,6 +135,11 @@ Vec256<double> inline operator+(const Vec256<double>& a, const Vec256<double>& b
 }
 
 template <>
+Vec256<double> inline operator-(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_sub_pd(a, b);
+}
+
+template <>
 Vec256<double> inline operator*(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_mul_pd(a, b);
 }
@@ -124,6 +147,11 @@ Vec256<double> inline operator*(const Vec256<double>& a, const Vec256<double>& b
 template <>
 Vec256<double> inline operator/(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_div_pd(a, b);
+}
+
+template <>
+Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_max_pd(a, b);
 }
 
 #endif

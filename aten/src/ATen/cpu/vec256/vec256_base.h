@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <functional>
+#include <cmath>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -28,21 +29,15 @@ struct Vec256 {
       values[i] = val;
     }
   }
-  void load(const void* ptr) {
-    std::memcpy(values, ptr, 32);
-  };
-  void load_partial(const void* ptr, int count) {
+  void load(const void* ptr, int count = size) {
     std::memcpy(values, ptr, count * sizeof(T));
-  }
+  };
   static Vec256 s_load(const T* ptr) {
     Vec256 vec;
     vec.load(ptr);
     return vec;
   }
-  void store(T *ptr) const {
-    std::memcpy(ptr, values, 32);
-  }
-  void store_partial(void* ptr, int count) const {
+  void store(void* ptr, int count = size) const {
     std::memcpy(ptr, values, count * sizeof(T));
   }
   Vec256<T> map(T (*f)(T)) const {
@@ -123,6 +118,14 @@ template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
+template <class T> Vec256<T> operator-(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != c.size; i++) {
+    c.values[i] = a.values[i] - b.values[i];
+  }
+  return c;
+}
+
 template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != c.size; i++) {
@@ -135,6 +138,14 @@ template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != c.size; i++) {
     c.values[i] = a.values[i] / b.values[i];
+  }
+  return c;
+}
+
+template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != c.size; i++) {
+    c.values[i] = std::max(a.values[i], b.values[i]);
   }
   return c;
 }
