@@ -140,7 +140,7 @@ caffe2::NetDef fuseNNPACKConvRelu(caffe2::NetDef net) {
     arg->set_s("Relu");
   };
 
-  FuseConvRelu(&nn, should_fuse, postprocess);
+  fuseConvRelu(&nn, should_fuse, postprocess);
 
   return convertToCaffe2Proto(nn, net);
 }

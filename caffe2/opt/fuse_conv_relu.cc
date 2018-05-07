@@ -5,7 +5,7 @@ namespace opt {
 
 using namespace nom;
 
-void FuseConvRelu(
+void fuseConvRelu(
     repr::NNModule* nn,
     std::function<bool(const repr::Conv& conv)> should_fuse,
     std::function<void(repr::Conv* conv)> postprocess) {

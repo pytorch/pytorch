@@ -10,7 +10,12 @@ namespace caffe2 {
 namespace opt {
 
 // Fuse convuluation with relu if applicable
-void FuseConvRelu(
+// \param nn Neural network module to be modified in place
+// \param should_fuse Given a conv op, check whether we want to fuse it with
+// subsequent relu or not 
+// \param postprocess Functor to postprocess the conv op,
+// attaching additional attributes if necessary
+void fuseConvRelu(
     nom::repr::NNModule* nn,
     std::function<bool(const nom::repr::Conv& conv)> should_fuse,
     std::function<void(nom::repr::Conv* conv)> postprocess);
