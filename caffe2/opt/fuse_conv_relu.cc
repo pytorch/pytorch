@@ -1,9 +1,12 @@
 #include "caffe2/opt/fuse_conv_relu.h"
 
-namespace caffe2 { namespace opt {
+namespace caffe2 {
+namespace opt {
+
+using namespace nom;
 
 void FuseConvRelu(
-    nom::repr::NNModule* nn,
+    repr::NNModule* nn,
     std::function<bool(const repr::Conv& conv)> should_fuse,
     std::function<void(repr::Conv* conv)> postprocess) {
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
@@ -34,26 +37,27 @@ void FuseConvRelu(
 
     // Check feasibility with application specific logic
     if (!should_fuse(*conv)) {
-     continue;
+      continue;
     }
 
     // Ready to fuse
     auto relu_output = relu_outputs.front();
     auto output_tensor = repr::nn::get<repr::Tensor>(relu_output);
     auto output_node = relu_output;
-    auto input_tensor = repr::nn::get<repr::Tensor>(repr::nn::getInputs(conv_node).front());
+    auto input_tensor =
+        repr::nn::get<repr::Tensor>(repr::nn::getInputs(conv_node).front());
 
     // Conv cannot be in-place
     if (output_tensor->getName() != input_tensor->getName()) {
-      nn.dataFlow.replaceNode(conv_output, relu_output);
-      nn.dataFlow.deleteNode(relu_node);
-      nn.dataFlow.deleteNode(conv_output);
+      nn->dataFlow.replaceNode(conv_output, relu_output);
+      nn->dataFlow.deleteNode(relu_node);
+      nn->dataFlow.deleteNode(conv_output);
     } else {
-      nn.dataFlow.replaceNode(relu_output, conv_output);
+      nn->dataFlow.replaceNode(relu_output, conv_output);
       output_tensor = repr::nn::get<repr::Tensor>(conv_output);
       output_node = conv_output;
-      nn.dataFlow.deleteNode(relu_node);
-      nn.dataFlow.deleteNode(relu_output);
+      nn->dataFlow.deleteNode(relu_node);
+      nn->dataFlow.deleteNode(relu_output);
     }
 
     // We may have accidentally made the next op in-place
@@ -70,13 +74,15 @@ void FuseConvRelu(
       }
     }
     if (rectify_inplace) {
-      auto new_output = nn.dataFlow.createNode(make_unique<repr::Tensor>(output_tensor->getName() + "_fusion_fix"));
-      nn.dataFlow.replaceNode(output_node, new_output);
+      auto new_output = nn->dataFlow.createNode(
+          make_unique<repr::Tensor>(output_tensor->getName() + "_fusion_fix"));
+      nn->dataFlow.replaceNode(output_node, new_output);
     }
 
     // Application specific logic for postprocessing the conv node
-    postprocess(conv)
+    postprocess(conv);
   }
 }
 
-}}
+} // namespace opt
+} // namespace caffe2
