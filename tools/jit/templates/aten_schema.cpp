@@ -3,12 +3,12 @@
 
 namespace torch { namespace jit {
 
-using SchemaMap = std::unordered_map<std::string, std::vector<OperatorSchema>>;
+using SchemaMap = std::unordered_map<std::string, std::vector<FunctionSchema>>;
 
 
-std::vector<OperatorSchema> createOperatorSchemas() {
+std::vector<FunctionSchema> createOperatorSchemas() {
   using namespace at; // for tensor initialization
-  std::vector<OperatorSchema> schemas;
+  std::vector<FunctionSchema> schemas;
 
   // [aten_schema encoding]
   // This format tries to minimize the actual amount of code produced here to keep
@@ -22,6 +22,11 @@ std::vector<OperatorSchema> createOperatorSchemas() {
   // string literals
   const char* names[] = {
     ${names}
+  };
+
+  // Types
+  TypePtr types[] = {
+    ${types}
   };
 
   // default argument values for all ops, represented as using tensors via tensor_as
@@ -42,7 +47,7 @@ std::vector<OperatorSchema> createOperatorSchemas() {
     ${arguments}
   };
 
-  // OperatorSchema(string name, vector<Argument> args, vector<Argument> returns)
+  // FunctionSchema(string name, vector<Argument> args, vector<Argument> returns)
   // the integer for args and returns is the _number_ of argument objects
   // which are read sequentially off of the arguments array above
   using OperatorCtor = uint32_t[3];
@@ -57,7 +62,7 @@ std::vector<OperatorSchema> createOperatorSchemas() {
     std::vector<Argument> result;
     for(size_t i = 0; i < N; ++i) {
       auto & a = arguments[next_argument++];
-      result.push_back({ names[a[0]], tensors[a[1]], attributes[a[2]], a[3] != 0 });
+      result.push_back({ names[a[0]], types[a[1]], tensors[a[2]], attributes[a[3]] });
     }
     return result;
   };
@@ -69,8 +74,8 @@ std::vector<OperatorSchema> createOperatorSchemas() {
   return schemas;
 }
 
-std::vector<OperatorSchema> & getOperatorSchemas() {
-  static std::vector<OperatorSchema> schema = createOperatorSchemas();
+std::vector<FunctionSchema> & getOperatorSchemas() {
+  static std::vector<FunctionSchema> schema = createOperatorSchemas();
   return schema;
 }
 
@@ -87,9 +92,9 @@ static SchemaMap createSchemaMap() {
   return result;
 }
 
-const std::vector<OperatorSchema>& getOperatorSchema(const std::string& name) {
+const std::vector<FunctionSchema>& getOperatorSchema(const std::string& name) {
   static SchemaMap map = createSchemaMap();
-  static std::vector<OperatorSchema> empty;
+  static std::vector<FunctionSchema> empty;
   auto it = map.find(name);
   if(it != map.end())
     return it->second;

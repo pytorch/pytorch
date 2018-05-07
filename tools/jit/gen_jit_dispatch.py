@@ -275,6 +275,7 @@ def emit_schema(jit_decls, out):
     # see [aten_schema encoding] for how this gets translated to C++ object
 
     names = OrderedDict()
+    types = OrderedDict()
     tensors = OrderedDict()
     attributes = OrderedDict()
 
@@ -296,6 +297,10 @@ def emit_schema(jit_decls, out):
 
     def emit_arg(arg, is_return):
         n = get_name(arg['name'])
+        if arg.get('type') == 'TensorList':
+            typ = 'ListType::ofTensors()'
+        else:
+            typ = 'DynamicType::get()'
         tensor = 'at::nullopt'
         attribute = 'at::nullopt'
         if not is_return:
@@ -312,9 +317,9 @@ def emit_schema(jit_decls, out):
                     tensor = 'as_tensor({}({}))'.format(arg['simple_type'], value)
         d = interned(tensors, tensor)
         a = interned(attributes, attribute)
-        is_list = '1' if arg.get('type') == 'TensorList' else '0'
-        comment = '// Argument("{}", {}, {}, {})'.format(arg['name'], tensor, attribute, is_list)
-        env['arguments'].append("{{ {}, {}, {}, {} }}, {} ".format(n, d, a, is_list, comment))
+        t = interned(types, typ)
+        comment = '// Argument("{}", {}, {}, {})'.format(arg['name'], tensor, attribute, typ)
+        env['arguments'].append("{{ {}, {}, {}, {} }}, {} ".format(n, t, d, a, comment))
 
     def emit(decl):
         n = get_name(decl['name'])
@@ -324,7 +329,7 @@ def emit_schema(jit_decls, out):
             emit_arg(a, True)
         n_args = len(decl['arguments'])
         n_returns = len(decl['returns'])
-        env['operators'].append('{{ {}, {}, {} }}, // OperatorSchema("{}", <{} arguments>, <{} returns>) '.format(
+        env['operators'].append('{{ {}, {}, {} }}, // FunctionSchema("{}", <{} arguments>, <{} returns>) '.format(
             n, n_args, n_returns, decl['name'], n_args, n_returns))
 
     for decl in jit_decls:
@@ -333,6 +338,7 @@ def emit_schema(jit_decls, out):
     env['names'] = names.keys()
     env['tensors'] = tensors.keys()
     env['attributes'] = attributes.keys()
+    env['types'] = types.keys()
 
     write(out, 'aten_schema.cpp', ATEN_SCHEMA_CPP, env)
 
