@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/containers.h"
+#include <torch/nn/module.h>
 #include "torch/detail.h"
 
 #include "cereal/access.hpp"
@@ -9,23 +9,23 @@
 namespace torch {
 class OptimizerImpl {
  public:
-  OptimizerImpl(Container model) : model_(model) {}
+  OptimizerImpl(std::shared_ptr<nn::Module> model) : model_(model) {}
   virtual ~OptimizerImpl() = default;
   virtual void init_state() {}
   virtual void step() = 0;
   void zero_grad();
 
-  void set_model(Container model);
+  void set_model(std::shared_ptr<nn::Module> model);
 
  protected:
   OptimizerImpl() {}
-  Container model_;
+  std::shared_ptr<nn::Module> model_;
 };
 
 template <class Derived>
 class Optimizer_CRTP : public OptimizerImpl {
  public:
-  Optimizer_CRTP(Container model) : OptimizerImpl(model) {}
+  Optimizer_CRTP(std::shared_ptr<nn::Module> model) : OptimizerImpl(model) {}
   std::shared_ptr<Derived> make() const {
     auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
     ptr->init_state();
@@ -38,7 +38,8 @@ class Optimizer_CRTP : public OptimizerImpl {
 
 AUTOGRAD_OPTIMIZER_CLASS(SGD) {
  public:
-  SGD(Container model, double lr) : Optimizer_CRTP(model), lr_(lr) {}
+  SGD(std::shared_ptr<nn::Module> model, double lr)
+      : Optimizer_CRTP(model), lr_(lr) {}
   AUTOGRAD_KWARG(SGD, double, momentum, 0, 0);
   AUTOGRAD_KWARG(SGD, double, dampening, 0, 0);
   AUTOGRAD_KWARG(SGD, double, weight_decay, 0, 0);
@@ -60,7 +61,8 @@ AUTOGRAD_OPTIMIZER_CLASS(SGD) {
 
 AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
  public:
-  Adagrad(Container model, double lr) : Optimizer_CRTP(model), lr_(lr) {}
+  Adagrad(std::shared_ptr<nn::Module> model, double lr)
+      : Optimizer_CRTP(model), lr_(lr) {}
   AUTOGRAD_KWARG(Adagrad, double, lr_decay, 0, 0);
   AUTOGRAD_KWARG(Adagrad, double, weight_decay, 0, 0);
   double lr_;
@@ -82,7 +84,8 @@ AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
 
 AUTOGRAD_OPTIMIZER_CLASS(RMSprop) {
  public:
-  RMSprop(Container model, double lr) : Optimizer_CRTP(model), lr_(lr) {}
+  RMSprop(std::shared_ptr<nn::Module> model, double lr)
+      : Optimizer_CRTP(model), lr_(lr) {}
   AUTOGRAD_KWARG(RMSprop, double, alpha, 0.99, 0.99);
   AUTOGRAD_KWARG(RMSprop, double, eps, 1e-8, 1e-8);
   AUTOGRAD_KWARG(RMSprop, double, weight_decay, 0, 0);
@@ -110,7 +113,8 @@ AUTOGRAD_OPTIMIZER_CLASS(RMSprop) {
 
 AUTOGRAD_OPTIMIZER_CLASS(Adam) {
  public:
-  Adam(Container model, double lr) : Optimizer_CRTP(model), lr_(lr) {}
+  Adam(std::shared_ptr<nn::Module> model, double lr)
+      : Optimizer_CRTP(model), lr_(lr) {}
   AUTOGRAD_KWARG(Adam, double, beta1, 0.9, 0.9);
   AUTOGRAD_KWARG(Adam, double, beta2, 0.999, 0.999);
   AUTOGRAD_KWARG(Adam, double, weight_decay, 0, 0);

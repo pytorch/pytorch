@@ -30,12 +30,14 @@ namespace detail {
 extern tag::Engine engine;
 }
 
-class ContainerImpl;
+namespace nn {
+class Module;
+} // namespace nn
+
 class OptimizerImpl;
 using Variable = tag::Variable;
 using variable_list = tag::variable_list;
 using Tensor = at::Tensor;
-using Container = std::shared_ptr<ContainerImpl>;
 using Optimizer = std::shared_ptr<OptimizerImpl>;
 
 void backward(Tensor loss, bool keep_graph = false);
