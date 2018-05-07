@@ -8,7 +8,7 @@ using namespace nom;
 void fuseConvRelu(
     repr::NNModule* nn,
     std::function<bool(const repr::Conv& conv)> should_fuse,
-    std::function<void(repr::Conv* conv)> postprocess) {
+    std::function<void(repr::NNGraph::NodeRef conv_node)> postprocess) {
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
     repr::NNGraph::NodeRef conv_node;
     repr::Conv* conv;
@@ -80,7 +80,7 @@ void fuseConvRelu(
     }
 
     // Application specific logic for postprocessing the conv node
-    postprocess(conv);
+    postprocess(conv_node);
   }
 }
 

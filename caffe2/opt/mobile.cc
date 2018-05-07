@@ -129,7 +129,8 @@ caffe2::NetDef fuseNNPACKConvRelu(caffe2::NetDef net) {
     return true;
   };
 
-  auto postprocess = [](repr::Conv* conv) {
+  auto postprocess = [](repr::NNGraph::NodeRef conv_node) {
+    auto conv = repr::nn::get<repr::Conv>(conv_node);
     auto annotation = conv->getMutableAnnotation();
     if (!annotation || !isa<Caffe2Annotation>(annotation)) {
       return;
