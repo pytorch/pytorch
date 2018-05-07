@@ -346,9 +346,7 @@ PyObject *THPVariable_get_base(THPVariable *self)
 PyObject *THPVariable_get_shape(THPVariable *self)
 {
   HANDLE_TH_ERRORS
-  auto& self_ = self->cdata;
-  auto sizes = self_.sizes();
-  return THPSize_New(sizes.size(), (int64_t *)sizes.data());
+  return THPSize_New(self->cdata);
   END_HANDLE_TH_ERRORS
 }
 

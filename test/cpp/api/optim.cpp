@@ -1,8 +1,8 @@
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-using namespace autograd;
+using namespace torch;
 
 bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
   float running_loss = 1;
@@ -83,15 +83,18 @@ TEST_CASE("optim") {
     }
   }
 
+  /*
+  // This test appears to be flaky, see https://github.com/pytorch/pytorch/issues/7288
   SECTION("adam") {
     auto model = ContainerList()
                      .append(Linear(2, 8).make())
                      .append(Linear(8, 1).make())
                      .make();
 
-    auto optim = Adam(model, 1.0).weight_decay(1e-6).make();
+    auto optim = Adam(model, 1e-1).weight_decay(1e-6).make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
+  */
 
   SECTION("amsgrad") {
     auto model = ContainerList()

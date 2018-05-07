@@ -84,6 +84,7 @@ struct AT_API Type {
   Tensor copy(const Tensor & src, bool non_blocking=false) const;
   Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const;
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
+  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const = 0;
 
   Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const;
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const;

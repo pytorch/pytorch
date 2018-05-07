@@ -5,9 +5,9 @@
 #include "torch/csrc/autograd/variable.h"
 
 #define AUTOGRAD_CONTAINER_CLASS(Type) \
-  class Type : public autograd::Container_CRTP<Type>
+  class Type : public torch::Container_CRTP<Type>
 
-namespace autograd {
+namespace torch {
 class ContainerImpl {
  public:
   virtual ~ContainerImpl() = default;
@@ -375,13 +375,16 @@ class RNNBase : public Container_CRTP<Derived> {
 
   variable_list forward(variable_list) override;
   void initialize_containers() override;
+  void initialize_parameters() override;
   void reset_parameters() override;
 
   void cpu() override;
   void cuda() override;
 
-  std::vector<Container> i2h;
-  std::vector<Container> h2h;
+  std::vector<Variable> ihw;
+  std::vector<Variable> ihb;
+  std::vector<Variable> hhw;
+  std::vector<Variable> hhb;
 
  protected:
   uint32_t input_size_;
@@ -438,4 +441,4 @@ class RNN : public RNNBase<RNN> {
   }
 };
 
-} // namespace autograd
+} // namespace torch

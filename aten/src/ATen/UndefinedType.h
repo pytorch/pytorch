@@ -34,6 +34,7 @@ struct UndefinedType final : public Type {
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
+  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
 };
 
 } // namespace at

@@ -655,7 +655,7 @@ class Softmin(Module):
         - Output: same as input
 
     Arguments:
-        dim (int): A dimension along which Softmax will be computed (so every slice
+        dim (int): A dimension along which Softmin will be computed (so every slice
             along dim will sum to 1).
 
     Returns:
