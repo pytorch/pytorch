@@ -3,11 +3,12 @@
 #include <torch/torch.h>
 
 using namespace torch;
+using namespace torch::nn;
 
 TEST_CASE("misc") {
   SECTION("no_grad") {
     no_grad_guard guard;
-    auto model = Linear(5, 2).make();
+    auto model = make(Linear(5, 2));
     auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);
     auto y = model->forward({x})[0];
     Variable s = y.sum();

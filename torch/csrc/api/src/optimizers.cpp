@@ -1,5 +1,7 @@
 #include "torch/optimizers.h"
 
+#include <torch/nn/module.h>
+
 namespace torch {
 
 void OptimizerImpl::zero_grad() {
@@ -12,7 +14,7 @@ void OptimizerImpl::zero_grad() {
   }
 }
 
-void OptimizerImpl::set_model(Container model) {
+void OptimizerImpl::set_model(std::shared_ptr<nn::Module> model) {
   model_ = model;
 }
 
