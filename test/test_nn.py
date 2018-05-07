@@ -161,6 +161,24 @@ class PackedSequenceTest(TestCase):
                     ref_output = torch.cat([no_extra_pad, extra_pad], 0)
                 self.assertEqual(unpacked, ref_output)
 
+    def test_to(self):
+        padded, lengths = self._padded_sequence(torch.IntTensor)
+        a = rnn_utils.pack_padded_sequence(padded, lengths).cpu()
+
+        self.assertIs(a, a.to('cpu'))
+        self.assertIs(a, a.to('cpu', dtype=torch.int32))
+        self.assertEqual(a.long(), a.to(torch.int64))
+
+        if torch.cuda.is_available():
+            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                b = a.cuda(device=cuda)
+                self.assertIs(b, b.to(cuda))
+                self.assertEqual(a, b.to('cpu'))
+                self.assertEqual(b, a.to(cuda))
+                self.assertEqual(a, b.to('cpu', dtype=torch.int32))
+                self.assertIs(b, b.to(dtype=torch.int32))
+                self.assertEqual(b.long(), b.to(dtype=torch.int64))
+
 
 def default_tensor_type(type):
     type_str = torch.typename(type)
