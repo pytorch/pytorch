@@ -290,18 +290,6 @@ static bool isTensorSubtype(Value* v) {
   return v->type()->isSubtypeOf(*DynamicType::get());
 }
 
-static bool isTensorTuple(Value* v) {
-  if(auto tt = v->type()->cast<TupleType>()) {
-    for(auto & t : tt->elements()) {
-      if(!t->isSubtypeOf(*DynamicType::get()))
-        return false;
-    }
-    return true;
-  }
-  return false;
-}
-
-
 // if a value is a constant then try to turn into type T using the
 // same rules as the interpreter
 template<typename T>
@@ -317,7 +305,7 @@ at::optional<T> constant_as(Value* v) {
 }
 
 // try to turn constant inputs into attributes
-void liftConstantAttributes(const OperatorSchema& schema, Node* node) {
+void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
   // we shouldn't start with attributes, just inputs
   JIT_ASSERT(!node->hasAttributes());
   std::vector<Value*> new_inputs;
@@ -372,7 +360,7 @@ void liftConstantAttributes(const OperatorSchema& schema, Node* node) {
 
 
 static std::shared_ptr<SugaredValue> tryEmitSchema(
-  const OperatorSchema& schema,
+  const FunctionSchema& schema,
   std::stringstream& failure_messages,
   const SourceRange& loc,
   Method& method,
@@ -422,51 +410,43 @@ static std::shared_ptr<SugaredValue> tryEmitSchema(
     }
     positional_inputs[i] = NamedValue(loc, i, createConstant(*method.graph(), loc, *default_value));
   }
+
   // check input types
   std::vector<Value*> flat_inputs;
   for(size_t i = 0; i < schema.arguments.size(); ++i) {
     NamedValue v = *positional_inputs[i];
     const auto& arg = schema.arguments[i];
-    if(arg.is_list) {
-      if (!isTensorTuple(v.value)) {
-        err() << "expected a tuple of tensors for '" << arg.name
-              << "' but found " << v.value->type()->name() << "\n"
-              << v.loc;
-        return nullptr;
-      }
+
+    // implicit conversion from List[Tensor] -> Tensor for when the argument
+    // is an IntList in aten, for things like x.expand(sizes=[3,4,5])
+    if(arg.attribute_kind == AttributeKind::is &&
+       v.value->type()->isSubtypeOf(*ListType::ofTensors())) {
+      auto unpacked = graph->insertNode(graph->createTupleUnpack(v.value));
+      v.value = createStack(*graph, loc, unpacked->outputs());
+    }
+
+    if(!v.value->type()->isSubtypeOf(*arg.type)) {
+      err() << "expected a value of type " << arg.type->name() << " for argument '" << arg.name << "' but found "
+            << v.value->type()->name() << "\n"
+            << v.loc;
+      return nullptr;
+    }
+
+    // we only support lists for builtins, where they must be flattened
+    if(arg.type->kind() == TypeKind::ListType) {
       auto unpacked = graph->insertNode(graph->createTupleUnpack(v.value));
       const auto & outputs = unpacked->outputs();
       flat_inputs.insert(flat_inputs.end(), outputs.begin(), outputs.end());
     } else {
-      auto attribute_kind = arg.attribute_kind;
-      // is this an IntList argument? if so, convert any tuple arguments to it
-      if(attribute_kind &&
-         AttributeKind::is == *attribute_kind &&
-         v.value->type()->kind() == TypeKind::TupleType) {
-          if(!isTensorTuple(v.value)) {
-            err() << "expected a list of integers for '" << arg.name
-                  << "' but found " << v.value->type()->name() << "\n"
-                  << v.loc;
-            return nullptr;
-          }
-          auto unpacked = graph->insertNode(graph->createTupleUnpack(v.value));
-         v.value = createStack(*graph, loc, unpacked->outputs());
-        // if it is a tuple, then collapse to tensor
-      }
-      if(!isTensorSubtype(v.value)) {
-        err() << "expected a tensor for '" << arg.name << "' but found "
-              << v.value->type()->name() << "\n"
-              << v.loc;
-        return nullptr;
-      }
       flat_inputs.push_back(v.value);
     }
+
   }
 
   // we successfully matched this schema, construct the node
 
   // note: we always construct a purely positional nodes here
-  // the pass LiftConstantAttributes replaces the node with with one that
+  // the pass liftConstantAttributes replaces the node with with one that
   // uses attributes if all the attributes ended up as constants
 
   NodeKind kind(Symbol::aten(name));
@@ -522,7 +502,7 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
 
   auto variants = getOperatorSchema(name);
   std::stringstream failure_messages;
-  for (const OperatorSchema& schema : variants) {
+  for (const FunctionSchema& schema : variants) {
     if (auto result = tryEmitSchema(
             schema, failure_messages, loc, method, name, inputs, attributes)) {
       return result;

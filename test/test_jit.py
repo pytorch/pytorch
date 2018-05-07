@@ -3160,22 +3160,22 @@ class TestScript(TestCase):
             def f3(a):
                 torch.sum(dim=4)
 
-        with self.assertRaisesRegex(RuntimeError, 'expected a tuple of tensors for'):
+        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but found Tensor'):
             @torch.jit.script
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, 'expected a tuple of tensors for'):
+        with self.assertRaisesRegex(RuntimeError, 'argument \'tensors\' but found \\(\\(Tensor\\)\\)'):
             @torch.jit.script
             def f5(a):
                 torch.cat([[a]])
 
-        with self.assertRaisesRegex(RuntimeError, 'expected a list of integers'):
+        with self.assertRaisesRegex(RuntimeError, 'a value of type Tensor for argument \'size\' but found'):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
 
-        with self.assertRaisesRegex(RuntimeError, 'expected a tensor for'):
+        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type Tensor for argument \'self\''):
             @torch.jit.script
             def f7(a):
                 torch.sum([4])
