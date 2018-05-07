@@ -1742,6 +1742,7 @@ Args:
     is zero or more batch dimensions.
     A (Tensor): input square matrix of size :math:`(*, m, m)`, where
     `*` is zero or more batch dimensions.
+    out ((Tensor, Tensor), optional): optional output tuple.
 
 Example::
 

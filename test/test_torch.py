@@ -3371,6 +3371,16 @@ class TestTorch(TestCase):
         x, LU = torch.gesv(b, A)
         self.assertEqual(torch.matmul(A, x), b)
 
+        # Test non-contiguous inputs.
+        if not TEST_NUMPY:
+            return
+
+        A = cast(torch.randn(2, 2, 2)).permute(1, 0, 2)
+        b = cast(torch.randn(2, 2, 2)).permute(2, 1, 0)
+        x, _ = torch.gesv(b, A)
+        x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+        self.assertEqual(x.data, cast(x_exp))
+
     @skipIfNoLapack
     def test_gesv_batched(self):
         self._test_gesv_batched(self, lambda t: t)
