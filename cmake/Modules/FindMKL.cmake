@@ -139,7 +139,7 @@ if(USE_MKL_IDEEP_OR_MKLML)
          list(APPEND __mklml_libs sequential)
       endif()
 
-      list(APPEND __mklml_libs core cdft_core)
+      list(APPEND __mklml_libs core)
     endif()
 
     foreach (__lib ${__mklml_libs})
