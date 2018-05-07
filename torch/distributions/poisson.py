@@ -11,7 +11,9 @@ class Poisson(ExponentialFamily):
     Creates a Poisson distribution parameterized by `rate`, the rate parameter.
 
     Samples are nonnegative integers, with a pmf given by
-    $rate^k e^{-rate}/k!$
+
+    .. math::
+      \mathrm{rate}^k \frac{e^{-\mathrm{rate}}}{k!}
 
     Example::
 
