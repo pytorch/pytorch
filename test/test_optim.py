@@ -655,7 +655,7 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(scheduler.state_dict())
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer', 'is_better'}:
-                self.assertAlmostEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
