@@ -6265,13 +6265,31 @@ class TestTorch(TestCase):
             return data
 
         fileobject_lambdas = [lambda: test_file_path, load_bytes]
-        map_locations = [map_location, {'cuda:0': 'cpu'}, 'cpu']
+        map_locations = [map_location, {'cuda:0': 'cpu'}, 'cpu', torch.device('cpu')]
 
         for fileobject_lambda in fileobject_lambdas:
             for map_location in map_locations:
                 tensor = torch.load(fileobject_lambda(), map_location=map_location)
                 self.assertIsInstance(tensor, torch.FloatTensor)
                 self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_serialization_map_location_cuda(self):
+        test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
+
+        def load_bytes():
+            with open(test_file_path, 'rb') as f:
+                data = io.BytesIO(f.read())
+            return data
+
+        fileobject_lambdas = [lambda: test_file_path, load_bytes]
+        map_locations = [{'cuda:0': 'cuda:0'}, 'cuda:0', torch.device('cuda'), torch.device('cuda', 0)]
+
+        for fileobject_lambda in fileobject_lambdas:
+            for map_location in map_locations:
+                tensor = torch.load(fileobject_lambda(), map_location=map_location)
+                self.assertIsInstance(tensor, torch.cuda.FloatTensor)
+                self.assertEqual(tensor, torch.cuda.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
 
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)

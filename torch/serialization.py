@@ -273,7 +273,7 @@ def load(f, map_location=None, pickle_module=pickle):
     Args:
         f: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
-        map_location: a function, string or a dict specifying how to remap storage
+        map_location: a function, torch.device, string or a dict specifying how to remap storage
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the pickle_module used to serialize file)
@@ -281,7 +281,7 @@ def load(f, map_location=None, pickle_module=pickle):
     Example:
         >>> torch.load('tensors.pt')
         # Load all tensors onto the CPU
-        >>> torch.load('tensors.pt', map_location='cpu')
+        >>> torch.load('tensors.pt', map_location=torch.device('cpu'))
         # Load all tensors onto the CPU, using a function
         >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage)
         # Load all tensors onto GPU 1
@@ -318,6 +318,16 @@ def _load(f, map_location, pickle_module):
     elif isinstance(map_location, _string_classes):
         def restore_location(storage, location):
             return default_restore_location(storage, map_location)
+    elif isinstance(map_location, torch.device):
+        if map_location.type == 'cpu':
+            map_str = 'cpu'
+        elif map_location.type == 'cuda':
+            map_str = 'cuda:{}'.format(map_location.index or 0)
+        else:
+            raise ValueError("The given map_location device is not a cpu or cuda")
+
+        def restore_location(storage, location):
+            return default_restore_location(storage, map_str)
     else:
         def restore_location(storage, location):
             result = map_location(storage, location)
