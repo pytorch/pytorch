@@ -117,6 +117,14 @@ class Node : public StorageType<T>, public Notifier<Node<T, U>> {
     return inEdges;
   }
 
+  void setInEdges(std::vector<EdgeRef> es) {
+    inEdges = es;
+  }
+
+  void setOutEdges(std::vector<EdgeRef> es) {
+    outEdges = es;
+  }
+
  protected:
   std::vector<EdgeRef> inEdges;
   std::vector<EdgeRef> outEdges;
@@ -214,7 +222,7 @@ class Graph {
     return &Nodes.back();
   }
 
-  void swapNode(NodeRef node, Graph<T, U>& otherGraph) {
+  void importNode(NodeRef node, Graph<T, U>& otherGraph) {
     std::list<Node<T, U>>& otherNodes = otherGraph.Nodes;
     for (auto it = Nodes.begin(); it != Nodes.end(); ++it) {
       if (&(*it) == node) {
@@ -224,7 +232,7 @@ class Graph {
     }
   }
 
-  void swapEdge(EdgeRef edge, Graph<T, U>& otherGraph) {
+  void importEdge(EdgeRef edge, Graph<T, U>& otherGraph) {
     std::list<Edge<T, U>>& otherEdges = otherGraph.Edges;
     for (auto it = Edges.begin(); it != Edges.end(); ++it) {
       if (&(*it) == edge) {
@@ -232,6 +240,32 @@ class Graph {
         break;
       }
     }
+  }
+
+  void swapNodes(NodeRef n1, NodeRef n2) {
+    // First rectify the edges
+    for (auto& inEdge : n1->getInEdges()) {
+      inEdge->setHead(n2);
+    }
+    for (auto& outEdge : n1->getOutEdges()) {
+      outEdge->setTail(n2);
+    }
+    for (auto& inEdge : n2->getInEdges()) {
+      inEdge->setHead(n1);
+    }
+    for (auto& outEdge : n2->getOutEdges()) {
+      outEdge->setTail(n1);
+    }
+    // Then simply copy the edge vectors around
+    auto n1InEdges = n1->getInEdges();
+    auto n1OutEdges = n1->getOutEdges();
+    auto n2InEdges = n2->getInEdges();
+    auto n2OutEdges = n2->getOutEdges();
+
+    n1->setOutEdges(n2OutEdges);
+    n1->setInEdges(n2InEdges);
+    n2->setOutEdges(n1OutEdges);
+    n2->setInEdges(n1InEdges);
   }
 
   NodeRef createNode() {

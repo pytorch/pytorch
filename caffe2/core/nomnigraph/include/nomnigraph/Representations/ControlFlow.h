@@ -60,6 +60,17 @@ class BasicBlock {
     trackNode(newInstr);
   }
 
+  void moveInstructionBefore(NodeRef instr1, NodeRef instr2) {
+    assert(hasInstruction(instr1) && "Instruction not in basic block.");
+    assert(hasInstruction(instr2) && "Instruction not in basic block.");
+    auto it1 =
+        std::find(std::begin(Instructions), std::end(Instructions), instr1);
+    auto it2 =
+        std::find(std::begin(Instructions), std::end(Instructions), instr2);
+    Instructions.erase(it1);
+    Instructions.insert(it2, instr1);
+  }
+
   void deleteInstruction(NodeRef instr) {
     assert(hasInstruction(instr) && "Instruction not in basic block.");
     Instructions.erase(
