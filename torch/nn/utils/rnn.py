@@ -85,6 +85,23 @@ class PackedSequence(PackedSequence_):
         r"""Returns copy with `self.data` cast to byte type"""
         return type(self)(self.data.byte(), self.batch_sizes)
 
+    def to(self, *args, **kwargs):
+        r"""Performs dtype and/or device conversion on `self.data`.
+
+        It has similar signature as :meth:`torch.Tensor.to`.
+
+        .. note::
+
+            If the ``self.data`` Tensor already has the correct :class:`torch.dtype`
+            and :class:`torch.device`, then ``self`` is returned.
+            Otherwise, returns a copy with the desired configuration.
+        """
+        data = self.data.to(*args, **kwargs)
+        if data is self.data:
+            return self
+        else:
+            return type(self)(data, self.batch_sizes)
+
     @property
     def is_cuda(self):
         r"""Returns true if `self.data` stored on a gpu"""
