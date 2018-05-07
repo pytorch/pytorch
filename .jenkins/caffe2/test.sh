@@ -67,9 +67,9 @@ for test in $INSTALL_PREFIX/test/*; do
       continue
       ;;
     # TODO investigate conv_op_test failures when using MKL
-    conv_op_test)
-      continue
-      ;;
+    #conv_op_test)
+    #  continue
+    #  ;;
   esac
 
   "$test" --gtest_output=xml:"$TEST_DIR"/cpp/$(basename "$test").xml
@@ -90,10 +90,11 @@ if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
   EXTRA_TESTS+=("$CAFFE2_PYPATH/contrib/nccl")
 fi
 
-# TODO find out why this breaks for conda builds
+conda_ignore_test=()
 if [[ $BUILD_ENVIRONMENT == conda* ]]; then
-  conda_ignore_test="--ignore $CAFFE2_PYPATH/python/tt_core_test.py"
-  conda_ignore_test="--ignore $CAFFE2_PYPATH/python/dataio_test.py"
+  # These tests both assume Caffe2 was built with leveldb, which is not the case
+  conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/dataio_test.py")
+  conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/checkpoint_test.py")
 fi
 
 # Python tests
@@ -107,7 +108,7 @@ echo "Running Python tests.."
   --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
   --ignore "$CAFFE2_PYPATH/python/operator_test/pack_ops_test.py" \
   --ignore "$CAFFE2_PYPATH/python/mkl/mkl_sbn_speed_test.py" \
-  $conda_ignore_test \
+  ${conda_ignore_test[@]} \
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
 
