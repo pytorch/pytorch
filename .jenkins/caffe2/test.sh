@@ -66,10 +66,6 @@ for test in $INSTALL_PREFIX/test/*; do
     mkl_utils_test)
       continue
       ;;
-    # TODO investigate conv_op_test failures when using MKL
-    #conv_op_test)
-    #  continue
-    #  ;;
   esac
 
   "$test" --gtest_output=xml:"$TEST_DIR"/cpp/$(basename "$test").xml
