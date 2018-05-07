@@ -117,12 +117,14 @@
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
     "aten/src/ATen/native/cuda/Distributions.cu",
-    "aten/src/THCUNN/RReLU.cu"
+    "aten/src/THCUNN/RReLU.cu",
+    "aten/src/TH/generic/simd/convolve5x5_avx.cpp",
+    "aten/src/TH/generic/simd/convolve5x5_sse.cpp"
   ],
   "disabled_functions": [
     {
       "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
-      "device_functions": [
+      "non_device_functions": [
         "maybeOverlappingIndices"
       ]
     },

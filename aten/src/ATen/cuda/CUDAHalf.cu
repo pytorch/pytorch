@@ -6,7 +6,7 @@
 #include <cuda_fp16.h>
 
 namespace at {
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
 template <> AT_API
 half convert(Half aten_half) {
   return half{aten_half.x};

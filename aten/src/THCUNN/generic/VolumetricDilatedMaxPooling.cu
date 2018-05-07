@@ -3,8 +3,8 @@
 #else
 
 #define UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:                         \
-  cuda_VolumetricDilatedMaxPooling_updateOutput<KW><<<grid, block,             \
-    0, THCState_getCurrentStream(state)>>>(                             \
+  cuda_VolumetricDilatedMaxPooling_updateOutput<KW>                     \
+  <<<grid, block, 0, THCState_getCurrentStream(state)>>>(               \
     inputData, inputTime, inputHeight, inputWidth, \
     cudaIndices, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW,\
     dilationT, dilationH, dilationW, offsetZ); \
@@ -234,7 +234,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   } else {
     THCTensor_(retain)(state, output);
   }
-  
+
   real* inputData = THCTensor_(data)(state, input);
 
   THCDeviceTensor<real, 4> cudaOutput;

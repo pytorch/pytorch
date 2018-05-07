@@ -168,7 +168,7 @@ struct ScalarNegate<half> {
 template <>
 struct ScalarInv<half> {
   static __host__ __device__ half to(const half v) {
-#ifdef __CUDA_ARCH__
+#if defined (__CUDA_ARCH_) || defined(__HIP_PLATFORM_HCC__)
     return __float2half(1.0f / __half2float(v));
 #else
     float fv = THC_half2float(v);
