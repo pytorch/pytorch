@@ -40,8 +40,9 @@ set LIB=%cd%\\mkl\\lib;%LIB
 aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet && 7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma
 set MAGMA_HOME=%cd%\\magma
 
-:: Install clcache
-aws s3 cp s3://ossci-windows/clcache.7z clcache.7z --quiet && 7z x -aoa clcache.7z -oclcache
+:: Install sccache
+mkdir %CD%\\tmp_bin
+aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe --quiet
 
 :: Install Miniconda3
 IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 )
@@ -57,7 +58,7 @@ call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Aux
 
 git submodule update --init --recursive
 
-set PATH=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\libnvvp;%PATH%
+set PATH=%CD%\\tmp_bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\libnvvp;%PATH%
 set CUDA_PATH=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set CUDA_PATH_V9_0=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set NVTOOLSEXT_PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt
@@ -67,10 +68,11 @@ set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 
 set TORCH_CUDA_ARCH_LIST=5.2
 
-set USE_CLCACHE=1
-set CLCACHE_DIR=%cd%\\clcache_tmp
-set CC=%cd%\\clcache\\clcache_main.exe
-set CXX=%cd%\\clcache\\clcache_main.exe
+sccache --stop-server || set ERRORLEVEL=0
+sccache --start-server
+sccache --zero-stats
+set CC=sccache cl
+set CXX=sccache cl
 
 set DISTUTILS_USE_SDK=1
 
@@ -82,11 +84,18 @@ python setup.py install
 
 if %errorlevel% neq 0 exit /b %errorlevel%
 
+sccache --show-stats
+
+sccache --zero-stats
+
 rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
+
+copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
 
 set NO_CUDA=
 
-python setup.py install && 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+python setup.py install && sccache --show-stats && 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
 
 EOL
 
