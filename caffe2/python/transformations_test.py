@@ -20,7 +20,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, workspace, test_util
 
-from caffe2.python.transformations import addNNPACK, fuseNNPACKConvRelu
+from caffe2.python.transformations import addNNPACK, fuseNNPACKConvRelu, sinkMaxPool
 
 def str_compare(a, b, encoding="utf8"):
     if isinstance(a, bytes):
@@ -177,3 +177,14 @@ class TestTransformations(test_util.TestCase):
         assert has_activation_arg
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
         assert net.Proto().op[1].output[0] != net.Proto().op[1].input[0]
+
+    def test_sinkMaxPool(self):
+        net = core.Net("net")
+        net.Conv(
+            ["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW"
+        )
+        net.MaxPool(["Y"], ["Y1"], kernel=3)
+        net.Relu(["Y1"], ["Y1"])
+        sinkMaxPool(net)
+        assert str_compare(net.Proto().op[1].type, "Relu")
+        assert str_compare(net.Proto().op[2].type, "MaxPool")
