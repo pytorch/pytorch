@@ -18,6 +18,7 @@
 #include "caffe2/onnx/helper.h"
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/opt/mobile.h"
+#include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/sink.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
@@ -1483,6 +1484,14 @@ void addGlobalMethods(py::module& m) {
   // into a python interface in transformations.py
   // Prefix the transformation with transform_ to avoid clobbering the
   // function namespace.
+  m.def("transform_optimizeForIDEEP", [](py::bytes def) {
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+    auto new_proto = opt::OptimizeForIdeep(proto);
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
 
   m.def("transform_addNNPACK", [](py::bytes def) {
     caffe2::NetDef proto;
