@@ -17,7 +17,7 @@ bool isDifferentiable(Node * n) {
   static std::unordered_set<Symbol> differentiable_kinds = {
     aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
-    aten::unsqueeze
+    aten::unsqueeze, aten::expand,
   };
   return differentiable_kinds.count(n->kind()) > 0;
 }
