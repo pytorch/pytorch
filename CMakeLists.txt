@@ -133,7 +133,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     WITH_GLOO_IBVERBS "Legacy Gloo IB verbs for distributed support" ON
     "USE_GLOO_IBVERBS" OFF)
-if (DEFINED USE_ATEN)
+if (USE_ATEN)
     set(BUILD_ATEN ${USE_ATEN})
 endif()
 
