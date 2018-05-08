@@ -140,7 +140,11 @@ if (USE_ATEN)
 endif()
 
 # ---[ Special code path for MKL module
-if (NOT BUILD_ATEN)
+if (NOT DEFINED BLAS OR NOT BLAS STREQUAL "MKL")
+  set(USE_IDEEP OFF)
+  set(USE_MKLML OFF)
+endif()
+if (NOT BUILD_ATEN AND (USE_IDEEP OR USE_MKLML))
   set(USE_MKL_IDEEP_OR_MKLML ON)
 endif()
 

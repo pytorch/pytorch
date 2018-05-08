@@ -23,8 +23,13 @@ else()
       NO_MKLDNN "Legacy no MKLDNN" OFF
       "USE_MKLDNN" ON)
 endif()
-if (NOT USE_CUDA)
+
+# Propogate options from top-level CMakeLists correctly
+if (DEFINED NOT USE_CUDA)
   set(NO_CUDA ON)
+endif()
+if (DEFINED BLAS AND NOT BLAS STREQUAL "MKL")
+  set(USE_MKLDNN OFF)
 endif()
 
 # Create the project in all cases
