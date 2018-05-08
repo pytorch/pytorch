@@ -5,8 +5,9 @@
 #include "THCTensorRandom.h"
 #include <stdexcept>
 
-#define const_generator_cast(generator) \
-  dynamic_cast<const CUDAGenerator&>(generator)
+// There is only one CUDAGenerator instance. Calls to seed(), manualSeed(),
+// initialSeed(), and unsafeGetTH() refer to the THCGenerator on the current
+// device.
 
 THCGenerator* THCRandom_getGenerator(THCState* state);
 
@@ -15,9 +16,6 @@ namespace at {
 CUDAGenerator::CUDAGenerator(Context * context_)
   : context(context_)
 {
-  // there's no reason to call THCRandom_init, because it is called
-  // during THCudaInit, which is called before this initializer
-  generator = THCRandom_getGenerator(context->getTHCState());
 }
 
 CUDAGenerator::~CUDAGenerator() {
@@ -52,7 +50,7 @@ CUDAGenerator& CUDAGenerator::manualSeedAll(uint64_t seed) {
 }
 
 void * CUDAGenerator::unsafeGetTH() {
-  return (void *) generator;
+  return (void*)THCRandom_getGenerator(context->thc_state);
 }
 
 } // namespace at
