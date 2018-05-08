@@ -241,12 +241,13 @@ struct IndexToOffset {
   }
 };
 
-// For contiguous tensors, the offset = index
+// For 1D tensors the offset equals linear index * stride
+// Note: this specialization for readability only
 template <typename T, typename IndexType>
-struct IndexToOffset<T, IndexType, -2> {
+struct IndexToOffset<T, IndexType, 1> {
   static inline __host__ __device__ IndexType
     get(IndexType linearId, const TensorInfo<T, IndexType>& info) {
-    return linearId;
+    return linearId * info.strides[0];
   }
 };
 

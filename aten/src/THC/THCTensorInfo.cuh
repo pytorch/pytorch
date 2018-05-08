@@ -246,15 +246,6 @@ struct IndexToOffset {
   }
 };
 
-// For contiguous tensors, the offset = index
-template <typename T, typename IndexType>
-struct IndexToOffset<T, IndexType, -2> {
-  static inline __host__ __device__ IndexType
-    get(IndexType linearId, const TensorInfo<T, IndexType>& info) {
-    return linearId;
-  }
-};
-
 template <typename T, typename IndexType>
 struct IndexToOffset<T, IndexType, -1> {
   static inline __host__ __device__ IndexType get(
@@ -310,19 +301,19 @@ struct OffsetInfo {
   IndexType strides[Dims];
 };
 
-// For contiguous tensors (Dims=-2), offset equals linear index.
+// For 1D tensors the offset equals linear index * stride.
+// Note: this specialization for readability only
 template <typename T, typename IndexType>
-struct OffsetInfo<T, IndexType, -2> {
+struct OffsetInfo<T, IndexType, 1> {
   explicit OffsetInfo(const TensorInfo<T, IndexType>& tinfo)
-    : data(tinfo.data) {
-    assert(tinfo.isContiguous());
-  }
+    : data{tinfo.data}, stride{tinfo.strides[0]} {}
 
   __host__ __device__ T* get(IndexType linearIndex) const {
-    return &data[linearIndex];
+    return &data[linearIndex * stride];
   }
 
   T* data;
+  const IndexType stride;
 };
 
 // Dims=-1 is used when the dimension is unknown at compile time.
