@@ -37,3 +37,8 @@ def sinkMaxPool(net):
     net.Proto().ParseFromString(
         C.transform_sinkMaxPool(net.Proto().SerializeToString())
     )
+
+def optimizeForIDEEP(net):
+    net.Proto().ParseFromString(
+        C.transform_optimizeForIDEEP(net.Proto().SerializeToString())
+    )
