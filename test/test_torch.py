@@ -3319,6 +3319,7 @@ class TestTorch(TestCase):
 
         res1 = torch.gesv(b, a)[0]
         self.assertLessEqual(b.dist(torch.mm(a, res1)), 1e-12)
+
         ta = torch.Tensor()
         tb = torch.Tensor()
         res2 = torch.gesv(b, a, out=(tb, ta))[0]
@@ -3336,6 +3337,103 @@ class TestTorch(TestCase):
         self.assertEqual(res1, tb)
         torch.gesv(b, a, out=(tb, ta))[0]
         self.assertEqual(res1, tb)
+
+    @staticmethod
+    def _test_gesv_batched(self, cast):
+        # test against gesv: one batch
+        A = cast(torch.randn(1, 5, 5))
+        b = cast(torch.randn(1, 5, 10))
+        x_exp, LU_exp = torch.gesv(b.squeeze(0), A.squeeze(0))
+        x, LU = torch.gesv(b, A)
+        self.assertEqual(x, x_exp.unsqueeze(0))
+        self.assertEqual(LU, LU_exp.unsqueeze(0))
+
+        # test against gesv in a loop: four batches
+        A = cast(torch.randn(4, 5, 5))
+        b = cast(torch.randn(4, 5, 10))
+
+        x_exp_list = list()
+        LU_exp_list = list()
+        for i in range(4):
+            x_exp, LU_exp = torch.gesv(b[i], A[i])
+            x_exp_list.append(x_exp)
+            LU_exp_list.append(LU_exp)
+        x_exp = torch.stack(x_exp_list)
+        LU_exp = torch.stack(LU_exp_list)
+
+        x, LU = torch.gesv(b, A)
+        self.assertEqual(x, x_exp)
+        self.assertEqual(LU, LU_exp)
+
+        # basic correctness test
+        A = cast(torch.randn(3, 5, 5))
+        b = cast(torch.randn(3, 5, 10))
+        x, LU = torch.gesv(b, A)
+        self.assertEqual(torch.matmul(A, x), b)
+
+        # Test non-contiguous inputs.
+        if not TEST_NUMPY:
+            return
+        import numpy
+        from numpy.linalg import solve
+        A = cast(torch.randn(2, 2, 2)).permute(1, 0, 2)
+        b = cast(torch.randn(2, 2, 2)).permute(2, 1, 0)
+        x, _ = torch.gesv(b, A)
+        x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+        self.assertEqual(x.data, cast(x_exp))
+
+    @skipIfNoLapack
+    def test_gesv_batched(self):
+        self._test_gesv_batched(self, lambda t: t)
+
+    @staticmethod
+    def _test_gesv_batched_dims(self, cast):
+        if not TEST_NUMPY:
+            return
+
+        import numpy
+        from numpy.linalg import solve
+
+        # test against numpy.linalg.solve
+        A = cast(torch.randn(2, 1, 3, 4, 4))
+        b = cast(torch.randn(2, 1, 3, 4, 6))
+        x, _ = torch.gesv(b, A)
+        x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+        self.assertEqual(x.data, cast(x_exp))
+
+        # test column major format
+        A = cast(torch.randn(2, 1, 3, 4, 4)).transpose(-2, -1)
+        b = cast(torch.randn(2, 1, 3, 6, 4)).transpose(-2, -1)
+        assert not A.is_contiguous()
+        assert not b.is_contiguous()
+        x, _ = torch.gesv(b, A)
+        x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+        self.assertEqual(x.data, cast(x_exp))
+
+        # broadcasting b
+        A = cast(torch.randn(2, 1, 3, 4, 4))
+        b = cast(torch.randn(4, 6))
+        x, _ = torch.gesv(b, A)
+        x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+        self.assertEqual(x.data, cast(x_exp))
+
+        # broadcasting A
+        A = cast(torch.randn(4, 4))
+        b = cast(torch.randn(2, 1, 3, 4, 2))
+        x, _ = torch.gesv(b, A)
+        x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+        self.assertEqual(x.data, cast(x_exp))
+
+        # broadcasting both A & b
+        A = cast(torch.randn(1, 3, 1, 4, 4))
+        b = cast(torch.randn(2, 1, 3, 4, 5))
+        x, _ = torch.gesv(b, A)
+        x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+        self.assertEqual(x.data, cast(x_exp))
+
+    @skipIfNoLapack
+    def test_gesv_batched_dims(self):
+        self._test_gesv_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
     def test_qr(self):

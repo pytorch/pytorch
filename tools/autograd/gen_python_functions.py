@@ -21,7 +21,7 @@ SKIP_PYTHON_BINDINGS = [
     'sparse_coo_tensor', '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*',
-    'arange.*', 'range.*',
+    'arange.*', 'range.*', '_gesv.*',
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
