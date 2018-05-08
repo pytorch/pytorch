@@ -129,6 +129,9 @@ else
     CMAKE_BINARY=cmake
 fi
 
+# Use a speciallized onnx namespace in CI to catch hardcoded onnx namespace
+CMAKE_ARGS+=("-DONNX_NAMESPACE=ONNX_NAMESPACE_FOR_C2_CI")
+
 # Configure
 ${CMAKE_BINARY} "${ROOT_DIR}" ${CMAKE_ARGS[*]} "$@"
 
