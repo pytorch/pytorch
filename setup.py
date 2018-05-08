@@ -519,6 +519,12 @@ if IS_WINDOWS:
                           # /DNOMINMAX removes builtin min/max functions
                           # /wdXXXX disables warning no. XXXX
                           ]
+    extra_link_args = ['/LTCG:INCREMENTAL'
+                       # /LTCG:INCREMENTAL specifies that the linker only applies
+                       # whole program optimization or link-time code generation
+                       # (LTCG) to the set of files affected by an edit,
+                       # instead of the entire project.
+                       ]
     if sys.version_info[0] == 2:
         # /bigobj increases number of sections in .obj file, which is needed to link
         # against libaries in Python 2.7 under Windows
