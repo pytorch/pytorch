@@ -25,7 +25,7 @@ else()
 endif()
 
 # Propogate options from top-level CMakeLists correctly
-if (DEFINED NOT USE_CUDA)
+if (DEFINED USE_CUDA AND NOT USE_CUDA)
   set(NO_CUDA ON)
 endif()
 if (DEFINED BLAS AND NOT BLAS STREQUAL "MKL")
@@ -476,22 +476,23 @@ add_definitions(-DTH_INDEX_BASE=0)
 set(TH_LINK_STYLE STATIC)
 add_subdirectory(src/TH)
 include_directories(
-  # dense
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/TH
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THC
-  ${CMAKE_CURRENT_BINARY_DIR}/src/TH
-  ${CMAKE_CURRENT_BINARY_DIR}/src/THC
-  # sparse
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THS
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THCS
-  ${CMAKE_CURRENT_BINARY_DIR}/src/THS
-  ${CMAKE_CURRENT_BINARY_DIR}/src/THCS
+    # dense
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/TH
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/THC
+    ${CMAKE_CURRENT_BINARY_DIR}/src/TH
+    ${CMAKE_CURRENT_BINARY_DIR}/src/THC
+    # sparse
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/THS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/THCS
+    ${CMAKE_CURRENT_BINARY_DIR}/src/THS
+    ${CMAKE_CURRENT_BINARY_DIR}/src/THCS
 
-  ${CMAKE_CURRENT_SOURCE_DIR}/src
-  ${CMAKE_CURRENT_BINARY_DIR}/src)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_BINARY_DIR}/src)
 add_subdirectory(src/THNN)
 add_subdirectory(src/THS)
 
+# CUDA and CuDNN
 if(NO_CUDA)
   message("disabling CUDA because NO_CUDA is set")
   SET(CUDA_FLAG -n)
@@ -503,18 +504,18 @@ else()
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
   add_subdirectory(src/THCS)
-endif()
 
-IF (NOT NO_CUDA)
-  find_package(CuDNN)
-ENDIF()
-IF(NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
-  MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
-  set(AT_CUDNN_ENABLED 0)
-ELSE()
-  INCLUDE_DIRECTORIES(BEFORE ${CUDNN_INCLUDE_DIRS})
-  set(AT_CUDNN_ENABLED 1)
-ENDIF()
+  if (USE_CUDNN)
+    find_package(CuDNN)
+  endif()
+  if(CUDNN_FOUND)
+    set(AT_CUDNN_ENABLED 1)
+    INCLUDE_DIRECTORIES(BEFORE ${CUDNN_INCLUDE_DIRS})
+  else()
+    set(AT_CUDNN_ENABLED 0)
+    message(STATUS "CuDNN not found. Compiling without CuDNN support")
+  endif()
+endif()
 
 if(NO_MKLDNN)
   message("disabling MKLDNN because NO_MKLDNN is set")
@@ -531,22 +532,25 @@ else()
 endif()
 
 set(cwrap_files
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/Declarations.cwrap
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THNN/generic/THNN.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN/generic/THCUNN.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/nn.yaml
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/native/native_functions.yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/Declarations.cwrap
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/THNN/generic/THNN.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/nn.yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/native/native_functions.yaml
 )
+if (AT_CUDA_ENABLED)
+  list(APPEND cwrap_files ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN/generic/THCUNN.h)
+endif()
 
-include_directories(
-${CMAKE_CURRENT_SOURCE_DIR}/src/THNN
-${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/THNN)
+if (AT_CUDA_ENABLED)
+  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN)
+endif()
 
 add_subdirectory(src/ATen)
 include_directories(
-${CMAKE_CURRENT_SOURCE_DIR}/src
-${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include
-${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include
+    ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 if(NOT NO_CUDA)
   include_directories(${CUDA_INCLUDE_DIRS})
 endif()
