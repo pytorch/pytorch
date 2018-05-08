@@ -10,7 +10,7 @@ struct absupdateOutput_functor
   {
     *output = THCNumerics<T>::abs(*input);
   }
-};ca
+};
 
 template <typename T>
 struct absupdateGradInput_functor
