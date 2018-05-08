@@ -355,11 +355,11 @@ class Module(object):
         def arg_error():
             arg_reprs = list(repr(arg) for arg in args)
             for key, val in kwargs.items():
-                arg_reprs.append("{}={}".format(key, val))
-            return ValueError('module.to expects .to(device, non_blocking=False), '
-                              '.to(dtype) or .to(device, dtype=None, non_blocking=False), '
-                              'where dtype is a floating point type, but got .to({})'
-                              .format(", ".join(arg_reprs)))
+                arg_reprs.append("{}={}".format(key, repr(val)))
+            return TypeError('module.to expects .to(device, non_blocking=False), '
+                             '.to(dtype) or .to(device, dtype=None, non_blocking=False), '
+                             'where dtype is a floating point type, but got .to({})'
+                             .format(", ".join(arg_reprs)))
 
         nargs = len(args) + len(kwargs)
         if nargs < 1 or nargs > 3:
