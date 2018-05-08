@@ -358,8 +358,91 @@ void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
   node->copyAttributes(attributes);
 }
 
+at::optional<std::vector<Value*>> tryMatchSchema(
+  const FunctionSchema& schema,
+  const SourceRange& loc,
+  Graph& graph,
+  at::ArrayRef<NamedValue> inputs,
+  at::ArrayRef<NamedValue> attributes,
+  std::ostream& failure_messages) {
+    auto err = [&]() -> std::ostream& {
+      failure_messages << "\nfor operator " << schema << ":\n";
+      return failure_messages;
+    };
 
-static std::shared_ptr<SugaredValue> tryEmitSchema(
+    std::vector<at::optional<NamedValue>> positional_inputs(schema.arguments.size(), at::nullopt);
+
+    size_t total_inputs = attributes.size() + inputs.size();
+    if(total_inputs > schema.arguments.size()) {
+      err() << "expected at most " << schema.arguments.size() << " arguments "
+      << " but found " << total_inputs << "\n" << loc << "\n";
+      return at::nullopt;
+    }
+    // fill in position arguments
+    for(size_t i = 0; i < inputs.size(); ++i) {
+      positional_inputs[i] = inputs[i];
+    }
+    // fill in named arguments
+    for(const NamedValue& nv : attributes) {
+      auto idx = schema.argumentIndexWithName(nv.name);
+      if(!idx) {
+        err() << "unknown keyword argument '" << nv.name << "'\n" << nv.loc;
+        return at::nullopt;
+      }
+      if(positional_inputs[*idx]) {
+        err() << "argument '" <<  nv.name << "' previously set \n" << nv.loc;
+        return at::nullopt;
+      }
+      positional_inputs[*idx] = nv;
+    }
+    // fill in default values
+    for(size_t i = 0; i < positional_inputs.size(); ++i) {
+      if(positional_inputs[i])
+        continue;
+      auto default_value = schema.arguments[i].default_value;
+      if(!default_value) {
+        err() << "argument '" << schema.arguments[i].name << "' not provided.\n" << loc;
+        return at::nullopt;
+      }
+      positional_inputs[i] = NamedValue(loc, i, createConstant(graph, loc, *default_value));
+    }
+
+    // check input types
+    std::vector<Value*> flat_inputs;
+    for(size_t i = 0; i < schema.arguments.size(); ++i) {
+      NamedValue v = *positional_inputs[i];
+      const auto& arg = schema.arguments[i];
+
+      // implicit conversion from List[Tensor] -> Tensor for when the argument
+      // is an IntList in aten, for things like x.expand(sizes=[3,4,5])
+      if(arg.attribute_kind == AttributeKind::is &&
+         v.value->type()->isSubtypeOf(*ListType::ofTensors())) {
+        auto unpacked = graph.insertNode(graph.createTupleUnpack(v.value));
+        v.value = createStack(graph, loc, unpacked->outputs());
+      }
+
+      if(!v.value->type()->isSubtypeOf(*arg.type)) {
+        err() << "expected a value of type " << arg.type->name() << " for argument '" << arg.name << "' but found "
+              << v.value->type()->name() << "\n"
+              << v.loc;
+        return at::nullopt;
+      }
+
+      // we only support lists for builtins, where they must be flattened
+      if(arg.type->kind() == TypeKind::ListType) {
+        auto unpacked = graph.insertNode(graph.createTupleUnpack(v.value));
+        const auto & outputs = unpacked->outputs();
+        flat_inputs.insert(flat_inputs.end(), outputs.begin(), outputs.end());
+      } else {
+        flat_inputs.push_back(v.value);
+      }
+    }
+
+    return flat_inputs;
+}
+
+
+static std::shared_ptr<SugaredValue> tryEmitBuiltin(
   const FunctionSchema& schema,
   std::stringstream& failure_messages,
   const SourceRange& loc,
@@ -368,81 +451,10 @@ static std::shared_ptr<SugaredValue> tryEmitSchema(
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes) {
 
-  auto err = [&]() -> std::ostream& {
-    failure_messages << "\nfor operator " << schema << ":\n";
-    return failure_messages;
-  };
-
   auto graph = method.graph();
-  std::vector<at::optional<NamedValue>> positional_inputs(schema.arguments.size(), at::nullopt);
-
-  size_t total_inputs = attributes.size() + inputs.size();
-  if(total_inputs > schema.arguments.size()) {
-    err() << "expected at most " << schema.arguments.size() << " arguments "
-    << " but found " << total_inputs << "\n" << loc << "\n";
+  auto flat_inputs = tryMatchSchema(schema, loc, *graph, inputs, attributes, failure_messages);
+  if(!flat_inputs)
     return nullptr;
-  }
-  // fill in position arguments
-  for(size_t i = 0; i < inputs.size(); ++i) {
-    positional_inputs[i] = inputs[i];
-  }
-  // fill in named arguments
-  for(const NamedValue& nv : attributes) {
-    auto idx = schema.argumentIndexWithName(nv.name);
-    if(!idx) {
-      err() << "unknown keyword argument '" << nv.name << "'\n" << nv.loc;
-      return nullptr;
-    }
-    if(positional_inputs[*idx]) {
-      err() << "argument '" <<  nv.name << "' previously set \n" << nv.loc;
-      return nullptr;
-    }
-    positional_inputs[*idx] = nv;
-  }
-  // fill in default values
-  for(size_t i = 0; i < positional_inputs.size(); ++i) {
-    if(positional_inputs[i])
-      continue;
-    auto default_value = schema.arguments[i].default_value;
-    if(!default_value) {
-      err() << "argument '" << schema.arguments[i].name << "' not provided.\n" << loc;
-      return nullptr;
-    }
-    positional_inputs[i] = NamedValue(loc, i, createConstant(*method.graph(), loc, *default_value));
-  }
-
-  // check input types
-  std::vector<Value*> flat_inputs;
-  for(size_t i = 0; i < schema.arguments.size(); ++i) {
-    NamedValue v = *positional_inputs[i];
-    const auto& arg = schema.arguments[i];
-
-    // implicit conversion from List[Tensor] -> Tensor for when the argument
-    // is an IntList in aten, for things like x.expand(sizes=[3,4,5])
-    if(arg.attribute_kind == AttributeKind::is &&
-       v.value->type()->isSubtypeOf(*ListType::ofTensors())) {
-      auto unpacked = graph->insertNode(graph->createTupleUnpack(v.value));
-      v.value = createStack(*graph, loc, unpacked->outputs());
-    }
-
-    if(!v.value->type()->isSubtypeOf(*arg.type)) {
-      err() << "expected a value of type " << arg.type->name() << " for argument '" << arg.name << "' but found "
-            << v.value->type()->name() << "\n"
-            << v.loc;
-      return nullptr;
-    }
-
-    // we only support lists for builtins, where they must be flattened
-    if(arg.type->kind() == TypeKind::ListType) {
-      auto unpacked = graph->insertNode(graph->createTupleUnpack(v.value));
-      const auto & outputs = unpacked->outputs();
-      flat_inputs.insert(flat_inputs.end(), outputs.begin(), outputs.end());
-    } else {
-      flat_inputs.push_back(v.value);
-    }
-
-  }
-
   // we successfully matched this schema, construct the node
 
   // note: we always construct a purely positional nodes here
@@ -450,7 +462,7 @@ static std::shared_ptr<SugaredValue> tryEmitSchema(
   // uses attributes if all the attributes ended up as constants
 
   NodeKind kind(Symbol::aten(name));
-  auto n = graph->insertNode(graph->create(kind, flat_inputs, 0))
+  auto n = graph->insertNode(graph->create(kind, *flat_inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   size_t num_outputs = schema.returns.size();
@@ -459,9 +471,9 @@ static std::shared_ptr<SugaredValue> tryEmitSchema(
   // DO NOT ADD MORE SPECIAL CASES HERE, REFACTOR INTO A FUNCTION IF
   // NEEDED
   if(n->kind() == aten::chunk) {
-    auto value = constant_as<int64_t>(flat_inputs[1]);
+    auto value = constant_as<int64_t>((*flat_inputs)[1]);
     if(!value) {
-      throw ErrorReport(positional_inputs[1]->loc) << "argument 'chunks' must be a constant";
+      throw ErrorReport(loc) << "argument 'chunks' must be a constant";
     }
     num_outputs = *value;
   }
@@ -503,7 +515,7 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
   auto variants = getOperatorSchema(name);
   std::stringstream failure_messages;
   for (const FunctionSchema& schema : variants) {
-    if (auto result = tryEmitSchema(
+    if (auto result = tryEmitBuiltin(
             schema, failure_messages, loc, method, name, inputs, attributes)) {
       return result;
     }
@@ -572,6 +584,9 @@ struct to_ir {
       , resolver(resolver)
       , environment_stack(nullptr) {
     pushFrame(graph->block());
+
+    std::vector<Argument> arguments, returns; // for schema
+
     // inputs
     auto it = def.params().begin();
     auto end = def.params().end();
@@ -583,6 +598,7 @@ struct to_ir {
     }
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
+      arguments.push_back({name, DynamicType::get(), at::nullopt, at::nullopt});
       environment_stack->setVar((*it).ident().range(), name, graph->addInput(name));
     }
     // body
@@ -602,9 +618,11 @@ struct to_ir {
       auto results = getValues(Return(*stmts_end).values(), true);
       for(auto r : results) {
         graph->registerOutput(r);
+        returns.push_back({"", DynamicType::get(), at::nullopt, at::nullopt});
       }
     }
 
+    method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
     // remove any uses of tuples that we inserted
     LowerTuples(graph);
   }
@@ -1109,7 +1127,7 @@ private:
   std::shared_ptr<SugaredValue> emitApplyIdent(Ident ident, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
     auto it = function_table.find(ident.name());
     if (it != function_table.end()) {
-      return packOutputs(*graph, method.emit_call_to(ident.range(), it->second, toValues(inputs)));
+      return packOutputs(*graph, method.emit_call_to(ident.range(), it->second, inputs, attributes));
     } else if (ident.name() == "print") {
       if (!attributes.empty())
         throw ErrorReport(ident) << "print doesn't accept any keyword arguments";

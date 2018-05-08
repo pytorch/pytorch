@@ -205,10 +205,7 @@ struct MethodValue : public SugaredValue {
     return "method";
   }
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    if(attributes.size() != 0) {
-      throw ErrorReport(loc) << "not yet implemented - calls to script methods using keyword arguments";
-    }
-    return packOutputs(*caller.graph(), caller.emit_call_to(loc, method, toValues(inputs)));
+    return packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes));
   }
 private:
   std::shared_ptr<Module> module;
