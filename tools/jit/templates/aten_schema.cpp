@@ -29,7 +29,7 @@ std::vector<FunctionSchema> createOperatorSchemas() {
     ${types}
   };
 
-  // default argument values for all ops, represented as using tensors via tensor_as
+  // default argument values for all ops, represented as using tensors via as_tensor
   at::optional<at::Tensor> tensors[] = {
     ${tensors}
   };
@@ -80,7 +80,7 @@ std::vector<FunctionSchema> & getOperatorSchemas() {
 }
 
 static SchemaMap createSchemaMap() {
-  auto schemas = getOperatorSchemas();
+  auto& schemas = getOperatorSchemas();
   SchemaMap result;
   for(auto & schema : schemas) {
     auto it = result.find(schema.name);

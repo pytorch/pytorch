@@ -105,6 +105,8 @@ struct BuiltinFunction : public SugaredValue {
   BuiltinFunction(const std::string& name, at::optional<NamedValue> value)
     : name(name), value(std::move(value)) {}
   std::string name;
+
+  // if this is method, then this is the self argument.
   at::optional<NamedValue> value;
 
   virtual std::string kind() const override {
