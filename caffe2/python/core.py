@@ -434,7 +434,7 @@ class IR(object):
         # a) ssa: a list of [op, in_versions, out_versions] recording the
         #    input and the output version of each operator, similar
         #    to a normal SSA form.
-        # b) input_count: a dictionary specifying for each blob and
+        # b) input_usages: a dictionary specifying for each blob and
         #    each of its version, how many times it is used as input for another
         #    op.
         # c) frontier: maintaining the current versions of the blobs
