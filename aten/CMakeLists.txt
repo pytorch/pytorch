@@ -478,14 +478,10 @@ add_subdirectory(src/TH)
 include_directories(
     # dense
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TH
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/THC
     ${CMAKE_CURRENT_BINARY_DIR}/src/TH
-    ${CMAKE_CURRENT_BINARY_DIR}/src/THC
     # sparse
     ${CMAKE_CURRENT_SOURCE_DIR}/src/THS
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/THCS
     ${CMAKE_CURRENT_BINARY_DIR}/src/THS
-    ${CMAKE_CURRENT_BINARY_DIR}/src/THCS
 
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_BINARY_DIR}/src)
@@ -504,6 +500,11 @@ else()
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
   add_subdirectory(src/THCS)
+  include_directories(
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/THC
+      ${CMAKE_CURRENT_BINARY_DIR}/src/THC
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/THCS
+      ${CMAKE_CURRENT_BINARY_DIR}/src/THCS)
 
   if (USE_CUDNN)
     find_package(CuDNN)
