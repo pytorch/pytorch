@@ -23,6 +23,9 @@ else()
       NO_MKLDNN "Legacy no MKLDNN" OFF
       "USE_MKLDNN" ON)
 endif()
+if (NOT USE_CUDA)
+  set(NO_CUDA ON)
+endif()
 
 # Create the project in all cases
 project(ATen CXX C)
