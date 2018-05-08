@@ -65,7 +65,7 @@ if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   # headers are those in conda as well
   # This path comes from install_anaconda.sh which installs Anaconda into the
   # docker image
-  PROTOBUF_INCDIR=/opt/conda/include pip install "${ROOT_DIR}/third_party/onnx"
+  PROTOBUF_INCDIR=/opt/conda/include CMAKE_ARGS="${CMAKE_ARGS} -DONNX_NO_WERROR=ON" pip install "${ROOT_DIR}/third_party/onnx"
   exit 0
 fi
 
@@ -142,7 +142,7 @@ fi
 
 # Install ONNX into a local directory
 ONNX_INSTALL_PATH="/usr/local/onnx"
-pip install "${ROOT_DIR}/third_party/onnx" -t "${ONNX_INSTALL_PATH}"
+CMAKE_ARGS="${CMAKE_ARGS} -DONNX_NO_WERROR=ON" pip install "${ROOT_DIR}/third_party/onnx" -t "${ONNX_INSTALL_PATH}"
 
 # Symlink the caffe2 base python path into the system python path,
 # so that we can import caffe2 without having to change $PYTHONPATH.
