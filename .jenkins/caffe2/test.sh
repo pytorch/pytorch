@@ -55,9 +55,6 @@ mkdir -p $TEST_DIR/{cpp,python}
 
 cd ${INSTALL_PREFIX}
 
-# Commands below may exit with non-zero status
-set +e
-
 # C++ tests
 echo "Running C++ tests.."
 for test in $INSTALL_PREFIX/test/*; do
@@ -69,10 +66,6 @@ for test in $INSTALL_PREFIX/test/*; do
   esac
 
   "$test" --gtest_output=xml:"$TEST_DIR"/cpp/$(basename "$test").xml
-  exit_code="$?"
-  if [ "$exit_code" -ne 0 ]; then
-    exit "$exit_code"
-  fi
 done
 
 # Get the relative path to where the caffe2 python module was installed
@@ -107,8 +100,3 @@ echo "Running Python tests.."
   ${conda_ignore_test[@]} \
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
-
-exit_code="$?"
-
-# Exit with the first non-zero status we got
-exit "$exit_code"
