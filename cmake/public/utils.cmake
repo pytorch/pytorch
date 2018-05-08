@@ -1,5 +1,14 @@
+##############################################################################
+# Macro to update cached options.
+macro (caffe2_update_option variable value)
+  get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
+  set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+endmacro()
+
+
+##############################################################################
+# Add an interface library definition that is dependent on the source.
 macro(caffe2_interface_library SRC DST)
-  # Add an interface library definition that is dependent on the source.
   add_library(${DST} INTERFACE)
   add_dependencies(${DST} ${SRC})
   # Depending on the nature of the source library as well as the compiler,
