@@ -8,7 +8,9 @@ import hypothesis.strategies as st
 from hypothesis import given, settings, unlimited
 import copy
 import numpy as np
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
+from caffe2.python.transformations import optimizeForIDEEP
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
 
@@ -45,6 +47,8 @@ class ConvFusionTest(hu.HypothesisTestCase):
             ["Y0"],
             device_option=dc[0]
         )
+
+        # Manual fusion
         conv_fusion = core.CreateOperator(
             "ConvFusion",
             ["X1", "w1", "b1"] if use_bias else ["X1", "w1"],
@@ -56,6 +60,22 @@ class ConvFusionTest(hu.HypothesisTestCase):
             fusion_type = 1,
             device_option=dc[1]
         )
+
+        # Auto fusion
+        old_net = caffe2_pb2.NetDef()
+        conv_old = caffe2_pb2.OperatorDef()
+        conv_old.CopyFrom(conv)
+        conv_old.device_option.CopyFrom(dc[1])
+        relu_old = caffe2_pb2.OperatorDef()
+        relu_old.CopyFrom(relu)
+        relu_old.device_option.CopyFrom(dc[1])
+        old_net.op.extend([conv_old, relu_old])
+        net = core.Net("net")
+        net.Proto().CopyFrom(old_net)
+        optimizeForIDEEP(net)
+        self.assertTrue(len(net.Proto().op) == 1)
+        self.assertTrue(net.Proto().op[0].type == "ConvFusion")
+
         X = np.random.rand(
             batch_size, input_channels * group, size, size).astype(np.float32) - 0.5
         w = np.random.rand(
@@ -78,12 +98,24 @@ class ConvFusionTest(hu.HypothesisTestCase):
         workspace.FeedBlob('b1', b, dc[1])
         workspace.RunOperatorOnce(conv_fusion)
         Y1 = workspace.FetchBlob('Y1')
-
         if not np.allclose(Y0, Y1, atol=0.01, rtol=0.01):
             print(Y1.flatten())
             print(Y0.flatten())
             print(np.max(np.abs(Y1 - Y0)))
             self.assertTrue(False)
+
+        workspace.ResetWorkspace()
+        workspace.FeedBlob('X0', X, dc[1])
+        workspace.FeedBlob('w0', w, dc[1])
+        workspace.FeedBlob('b0', b, dc[1])
+        workspace.RunOperatorOnce(net.Proto().op[0])
+        Y2 = workspace.FetchBlob('Y0')
+        if not np.allclose(Y0, Y2, atol=0.01, rtol=0.01):
+            print(Y2.flatten())
+            print(Y0.flatten())
+            print(np.max(np.abs(Y2 - Y0)))
+            self.assertTrue(False)
+
         workspace.SwitchWorkspace(old_ws_name)
 
     @given(stride=st.integers(1, 3),
