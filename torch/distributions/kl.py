@@ -97,7 +97,7 @@ def _dispatch_kl(type_p, type_q):
     matches = [(super_p, super_q) for super_p, super_q in _KL_REGISTRY
                if issubclass(type_p, super_p) and issubclass(type_q, super_q)]
     if not matches:
-        return NotImplementedError
+        return NotImplemented
     # Check that the left- and right- lexicographic orders agree.
     left_p, left_q = min(_Match(*m) for m in matches).types
     right_q, right_p = min(_Match(*reversed(m)) for m in matches).types
