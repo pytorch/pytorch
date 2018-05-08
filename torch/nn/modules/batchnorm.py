@@ -45,7 +45,7 @@ class _BatchNorm(Module):
             self.bias.data.zero_()
 
     def _check_input_dim(self, input):
-        return NotImplemented
+        raise NotImplementedError
 
     def forward(self, input):
         self._check_input_dim(input)
