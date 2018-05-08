@@ -17,6 +17,8 @@
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/helper.h"
 #include "caffe2/onnx/onnx_exporter.h"
+#include "caffe2/opt/converter.h"
+#include "caffe2/opt/fusion.h"
 #include "caffe2/opt/mobile.h"
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/sink.h"
@@ -1497,6 +1499,20 @@ void addGlobalMethods(py::module& m) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
     auto new_proto = opt::addNNPACK(proto);
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
+
+  m.def("transform_fuseConvBN", [](py::bytes def) {
+    CAFFE_ENFORCE(gWorkspace);
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+
+    auto nn = caffe2::convertToNNModule(proto);
+    opt::fuseConvBN(&nn, gWorkspace);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn);
+
     std::string out;
     new_proto.SerializeToString(&out);
     return py::bytes(out);

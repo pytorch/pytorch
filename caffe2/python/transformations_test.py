@@ -18,9 +18,18 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from hypothesis import given
+import hypothesis.strategies as st
+import numpy as np
+
+from caffe2.python.transformations import (
+    addNNPACK,
+    fuseNNPACKConvRelu,
+    fuseConvBN,
+    sinkMaxPool,
+)
 from caffe2.python import core, workspace, test_util
 
-from caffe2.python.transformations import addNNPACK, fuseNNPACKConvRelu, sinkMaxPool
 
 def str_compare(a, b, encoding="utf8"):
     if isinstance(a, bytes):
@@ -28,6 +37,7 @@ def str_compare(a, b, encoding="utf8"):
     if isinstance(b, bytes):
         b = b.decode(encoding)
     return a == b
+
 
 class TestTransformations(test_util.TestCase):
     def test_addNNPACK(self):
@@ -188,3 +198,59 @@ class TestTransformations(test_util.TestCase):
         sinkMaxPool(net)
         assert str_compare(net.Proto().op[1].type, "Relu")
         assert str_compare(net.Proto().op[2].type, "MaxPool")
+
+    @given(
+        size=st.integers(7, 10),
+        input_channels=st.integers(1, 10),
+        seed=st.integers(0, 65535),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        epsilon=st.floats(min_value=1e-5, max_value=1e-2)
+    )
+    def test_fuseConvBN(self, size, input_channels, seed, order, epsilon):
+        net = core.Net("net")
+        c = input_channels
+        h = size
+        w = size
+        k = 3
+        net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=k, order=order)
+        net.SpatialBN(
+            ["Y", "scale", "bias", "mean", "var"], ["Y2"],
+            is_test=True,
+            order=order,
+            epsilon=epsilon
+        )
+
+        np.random.seed(seed)
+        if order == "NCHW":
+            workspace.FeedBlob(
+                "X",
+                np.random.rand(1, c, h, w).astype(np.float32)
+            )
+            workspace.FeedBlob(
+                "w",
+                np.random.rand(c, c, k, k).astype(np.float32)
+            )
+        else:
+            workspace.FeedBlob(
+                "X",
+                np.random.rand(1, h, w, c).astype(np.float32)
+            )
+            workspace.FeedBlob(
+                "w",
+                np.random.rand(c, k, k, c).astype(np.float32)
+            )
+        workspace.FeedBlob("b", np.random.rand(c).astype(np.float32))
+        workspace.FeedBlob("scale", np.random.rand(c).astype(np.float32))
+        workspace.FeedBlob("bias", np.random.rand(c).astype(np.float32))
+        workspace.FeedBlob("mean", np.random.rand(c).astype(np.float32))
+        workspace.FeedBlob("var", np.random.rand(c).astype(np.float32))
+        workspace.RunNetOnce(net)
+        preTransformOutput = workspace.FetchBlob("Y2")
+        fuseConvBN(net)
+
+        # Ensure fusion
+        assert (len(net.Proto().op) == 1)
+        workspace.RunNetOnce(net)
+        postTransformOutput = workspace.FetchBlob("Y2")
+        # Check that there is no numerical difference
+        assert (np.allclose(preTransformOutput, postTransformOutput, rtol=1e-05, atol=1e-08))
