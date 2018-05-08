@@ -31,13 +31,19 @@ class Module {
 
   virtual void cuda();
   virtual void cpu();
+
+  virtual void to(at::Type& type);
+  virtual void to(at::ScalarType scalar_type);
+  virtual void to(at::Backend backend);
+
   void train();
   void eval();
 
   at::Type& DefaultTensor(at::ScalarType s);
 
   std::unordered_map<std::string, std::shared_ptr<nn::Module>> children_;
-  std::unordered_map<std::string, Variable> params_;
+  std::unordered_map<std::string, Variable> parameters_;
+
   bool cuda_ = false;
   bool train_ = true;
 
@@ -87,7 +93,7 @@ class CloneableModule : public Module {
     auto ptr = std::unique_ptr<Module>(
         new Derived(*static_cast<const Derived*>(this)));
     ptr->children_.clear();
-    ptr->params_.clear();
+    ptr->parameters_.clear();
     ptr->initialize_containers();
     ptr->initialize_parameters();
     auto newParams = ptr->parameters();

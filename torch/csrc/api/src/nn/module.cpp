@@ -1,6 +1,7 @@
 #include <torch/nn/module.h>
 
 #include <algorithm>
+#include <cassert>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -16,7 +17,7 @@ std::map<std::string, Variable> Module::parameters() const {
       ret[name + "." + p.first] = p.second;
     }
   }
-  for (auto pair : params_) {
+  for (auto pair : parameters_) {
     ret[pair.first] = pair.second;
   }
   return ret;
@@ -42,36 +43,56 @@ Variable& Module::param(std::string const& name) {
   }
 
   auto param_name = name.substr(begin);
-  auto it = container->params_.find(param_name);
-  if (it == params_.end()) {
+  auto it = container->parameters_.find(param_name);
+  if (it == parameters_.end()) {
     throw std::runtime_error("No such param: " + param_name);
   }
   return it->second;
 }
 
 void Module::cuda() {
-  for (auto& pair : children_) {
-    pair.second->cuda();
-  }
-  cuda_ = true;
-  auto copied = params_;
-  params_.clear();
-  initialize_parameters();
-  for (auto pair : params_) {
-    pair.second.data().copy_(copied[pair.first].data());
-  }
+  toBackend(at::kCUDA);
 }
 
 void Module::cpu() {
-  for (auto& pair : children_) {
-    pair.second->cpu();
+  toBackend(at::kCPU);
+}
+
+void Module::to(at::Type& type) {
+  for (auto& child : children_) {
+    child.second->to(type);
   }
-  cuda_ = false;
-  auto copied = params_;
-  params_.clear();
-  initialize_parameters();
-  for (auto pair : params_) {
-    pair.second.data().copy_(copied[pair.first].data());
+  for (auto& pair : parameters_) {
+    auto& parameter = pair.second;
+    at::detail::set_data(parameter, parameter.data().toType(type));
+    assert(parameter.data().type() == type);
+    assert(parameter.type() == type);
+  }
+}
+
+void Module::to(at::ScalarType scalar_type) {
+  for (auto& child : children_) {
+    child.second->to(new_type);
+  }
+  for (auto& pair : parameters_) {
+    auto& parameter = pair.second;
+    auto& new_type = parameter.data().type().toScalarType(scalar_type);
+    at::detail::set_data(parameter, parameter.data().toType(new_type));
+    assert(parameter.data().type().scalarType() == scalar_type);
+    assert(parameter.type().scalarType() == scalar_type);
+  }
+}
+
+void Module::to(at::Backend backend) {
+  for (auto& child : children_) {
+    child.second->to(new_type);
+  }
+  for (auto& pair : parameters_) {
+    auto& parameter = pair.second;
+    auto& new_type = parameter.data().type().toBackend(backend);
+    at::detail::set_data(parameter, parameter.data().toType(new_type));
+    assert(parameter.data().type().backend() == backend);
+    assert(parameter.type().backend() == backend);
   }
 }
 
@@ -89,7 +110,9 @@ void Module::eval() {
   train_ = false;
 }
 
-std::shared_ptr<nn::Module> Module::add(std::shared_ptr<nn::Module> m, std::string const& name) {
+std::shared_ptr<nn::Module> Module::add(
+    std::shared_ptr<nn::Module> m,
+    std::string const& name) {
   if (this->children_.find(name) != this->children_.end()) {
     throw std::runtime_error("Trying to add container that already exists");
   }
@@ -103,7 +126,7 @@ std::shared_ptr<nn::Module> Module::add(std::shared_ptr<nn::Module> m, std::stri
 }
 
 Variable& Module::add(Variable v, std::string const& name) {
-  if (this->params_.find(name) != this->params_.end()) {
+  if (this->parameters_.find(name) != this->parameters_.end()) {
     throw std::runtime_error("Trying to add parameter that already exists");
   }
   if (std::find(name.begin(), name.end(), '.') != name.end()) {
@@ -111,8 +134,8 @@ Variable& Module::add(Variable v, std::string const& name) {
     // them not findable with parameters().
     throw std::runtime_error("Trying to add parameter with a '.' in its name");
   }
-  this->params_[name] = v;
-  return this->params_[name];
+  this->parameters_[name] = v;
+  return this->parameters_[name];
 }
 
 at::Type& Module::DefaultTensor(at::ScalarType s) {
