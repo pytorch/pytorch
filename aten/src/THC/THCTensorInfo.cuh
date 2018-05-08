@@ -231,18 +231,18 @@ struct IndexToOffset {
   static __host__ __device__ IndexType get(
     IndexType linearId,
     const TensorInfo<T, IndexType>& info) {
+    
     IndexType offset = 0;
 
-    // Use static dims
+    // Uses static dims
     for (int i = Dims - 1; i > 0; --i) {
       IndexType curDimIndex = linearId % info.sizes[i];
       IndexType curDimOffset = curDimIndex * info.strides[i];
       offset += curDimOffset;
       linearId /= info.sizes[i];
     }
-    offset += linearId * info.strides[0];
-
-    return offset;
+    
+    return offset + linearId * info.strides[0];
   }
 };
 
@@ -254,17 +254,15 @@ struct IndexToOffset<T, IndexType, -1> {
 
     IndexType offset = 0;
 
-    // Use dynamic dims
+    // Uses dynamic dims
     for (int i = info.dims - 1; i > 0; --i) {
       IndexType curDimIndex = linearId % info.sizes[i];
       IndexType curDimOffset = curDimIndex * info.strides[i];
       offset += curDimOffset;
-
       linearId /= info.sizes[i];
     }
-    offset += linearId * info.strides[0];
 
-    return offset;
+    return offset + linearId * info.strides[0];
   }
 };
 
@@ -292,8 +290,7 @@ struct OffsetInfo {
       offset += divmod.mod * strides[i];
     }
 
-    offset += linearIndex * strides[0];
-    return &data[offset];
+    return &data[offset + linearIndex * strides[0]];
   }
 
   T* data;
@@ -302,7 +299,6 @@ struct OffsetInfo {
 };
 
 // For 1D tensors the offset equals linear index * stride.
-// Note: this specialization for readability only
 template <typename T, typename IndexType>
 struct OffsetInfo<T, IndexType, 1> {
   explicit OffsetInfo(const TensorInfo<T, IndexType>& tinfo)

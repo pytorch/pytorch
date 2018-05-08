@@ -380,9 +380,10 @@ bool CUDA_tensor_apply2(at::Tensor a,
     aInfo.collapseDims();
     bInfo.collapseDims();
 
-    // For large tensors, we only compile the completely contiguous
-    // version and the completely generic version, to reduce
-    // compilation time.
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
+    */
     if (aInfo.dims == 1 && bInfo.dims == 1) {
       kernelPointwiseApply2<Op,
                             scalar1,
@@ -582,9 +583,10 @@ bool CUDA_tensor_apply3(at::Tensor a,
     bInfo.collapseDims();
     cInfo.collapseDims();
 
-    // For large tensors, we only compile the completely contiguous
-    // version and the completely generic version, to reduce
-    // compilation time.
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
+    */
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
       kernelPointwiseApply3<Op,
                             scalar1,
@@ -830,9 +832,10 @@ bool CUDA_tensor_apply4(at::Tensor a,
     cInfo.collapseDims();
     dInfo.collapseDims();
 
-    // For large tensors, we only compile the completely contiguous
-    // version and the completely generic version, to reduce
-    // compilation time.
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
+    */
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1 && dInfo.dims == 1) {
       kernelPointwiseApply4<Op,
                             scalar1,

@@ -275,8 +275,8 @@ bool THC_pointwiseApply1(THCState* state,
     aInfo.collapseDims();
 
     /*
-    Only compiles the 1D and nD cases for large tensors to avoid excessive
-    build times.
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1) {
       OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, 1>
@@ -444,8 +444,8 @@ bool THC_pointwiseApply2(THCState* state,
     bInfo.collapseDims();
 
     /*
-    Only compiles the 1D and nD cases for large tensors to avoid excessive
-    build times.
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1 && bInfo.dims == 1) {
       OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, 1>
@@ -659,8 +659,8 @@ bool THC_pointwiseApply3(THCState* state,
     cInfo.collapseDims();
 
     /*
-    Only compiles the 1D and nD cases for large tensors to avoid excessive
-    build times.
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
       OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, 1>
