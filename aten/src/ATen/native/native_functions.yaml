@@ -494,6 +494,17 @@
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
   variants: function
 
+- func: gesv(Tensor self, Tensor A) -> (Tensor, Tensor)
+
+- func: gesv_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor, Tensor)
+  variants: function
+
+# gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
+- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor) 
+  dispatch:
+    CPU: _gesv_helper_cpu
+    CUDA: _gesv_helper_cuda
+
 - func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enabled=True) -> Tensor
   variants: function
 
