@@ -8,9 +8,9 @@ struct absupdateOutput_functor
 {
   __device__ void operator()(T* output, const T* input) const
   {
-    *output = abs(*input);
+    *output = THCNumerics<T>::abs(*input);
   }
-};
+};ca
 
 template <typename T>
 struct absupdateGradInput_functor
