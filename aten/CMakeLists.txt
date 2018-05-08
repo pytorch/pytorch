@@ -4,6 +4,24 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
 else()
   cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+  include(CMakeDependentOption)
+  option(USE_CUDA "Use CUDA" ON)
+  option(USE_CUDNN "Use cuDNN" ON)
+  option(USE_MKLDNN "Use MKLDNN" ON)
+  cmake_dependent_option(
+      USE_CUDNN "Use cuDNN" ON
+      "USE_CUDA" OFF)
+
+  # Legacy options, which we will eventually remove
+  cmake_dependent_option(
+      NO_CUDA "Legacy no CUDA" OFF
+      "USE_CUDA" ON)
+  cmake_dependent_option(
+      WITH_CUDNN "Legacy cuDNN" ON
+      "USE_CUDNN" OFF)
+  cmake_dependent_option(
+      NO_MKLDNN "Legacy no MKLDNN" OFF
+      "USE_MKLDNN" ON)
 endif()
 
 # Create the project in all cases
