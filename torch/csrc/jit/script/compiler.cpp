@@ -272,8 +272,25 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
 
   NodeKind kind(Symbol::aten(name)); // TODO: this is a guess; could it be jit?
   auto graph = method.graph();
-  auto n = graph->insertNode(graph->create(kind, inputs, 0))
-                ->setSourceLocation(std::make_shared<SourceRange>(loc));
+
+  auto source_location = std::make_shared<SourceRange>(loc);
+  std::vector<Value*> real_inputs;
+
+  // Special handling for view: since it's varargs, if we see an invocation
+  // with more than one Value* input, we emit a cat node to combine them
+  // into one input and pass that in.
+  if (kind == aten::view && inputs.size() > 2) {
+    auto *inp = graph->insertNode(graph->create(aten::cat, inputs, 1))
+                    ->setSourceLocation(source_location)
+                    ->output();
+    // inputs[0] is self
+    real_inputs = {inputs[0], inp};
+  } else {
+    real_inputs = inputs;
+  }
+
+  auto n = graph->insertNode(graph->create(kind, real_inputs, 0))
+                ->setSourceLocation(source_location);
 
   for (const auto& attr : attributes) {
     const auto& name = Symbol::attr(attr.name);
