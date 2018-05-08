@@ -238,7 +238,7 @@ def gen_jit_dispatch(declarations, out):
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t'}],
     } for name in ['sizes', 'strides', 'dim']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
-    jit_decls = tuple(d for d in aten_decls if is_jit_op(d))
+    jit_decls = [d for d in aten_decls if is_jit_op(d)]
 
     for decl in jit_decls:
         emit_decl(decl)

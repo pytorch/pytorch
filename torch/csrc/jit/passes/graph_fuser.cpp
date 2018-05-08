@@ -323,7 +323,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
-    auto group = block->owningGraph()->createFusionGroup(*getDevice(n));
+    auto group = block->owningGraph()->createFusionGroup(getDevice(n).value());
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];

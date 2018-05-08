@@ -3165,7 +3165,7 @@ class TestScript(TestCase):
             def f1(a):
                 torch.sum(foo=4)
 
-        with self.assertRaisesRegex(RuntimeError, 'previously set'):
+        with self.assertRaisesRegex(RuntimeError, 'specified twice'):
             @torch.jit.script
             def f2(a):
                 torch.sum(a, self=a)

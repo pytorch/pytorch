@@ -1,6 +1,6 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/generated/aten_dispatch.h"
+#include "torch/csrc/jit/aten_dispatch.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/parser.h"
@@ -378,7 +378,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       << " but found " << total_inputs << "\n" << loc << "\n";
       return at::nullopt;
     }
-    // fill in position arguments
+    // fill in positional arguments
     for(size_t i = 0; i < inputs.size(); ++i) {
       positional_inputs[i] = inputs[i];
     }
@@ -390,7 +390,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         return at::nullopt;
       }
       if(positional_inputs[*idx]) {
-        err() << "argument '" <<  nv.name << "' previously set \n" << nv.loc;
+        err() << "argument '" <<  nv.name << "' specified twice \n" << nv.loc;
         return at::nullopt;
       }
       positional_inputs[*idx] = nv;
@@ -457,7 +457,7 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
     return nullptr;
   // we successfully matched this schema, construct the node
 
-  // note: we always construct a purely positional nodes here
+  // note: we always construct purely positional nodes here
   // the pass liftConstantAttributes replaces the node with with one that
   // uses attributes if all the attributes ended up as constants
 
