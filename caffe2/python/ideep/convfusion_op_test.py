@@ -73,6 +73,8 @@ class ConvFusionTest(hu.HypothesisTestCase):
         net = core.Net("net")
         net.Proto().CopyFrom(old_net)
         optimizeForIDEEP(net)
+        self.assertTrue(len(net.Proto().op) == 1)
+        self.assertTrue(net.Proto().op[0].type == "ConvFusion")
 
         X = np.random.rand(
             batch_size, input_channels * group, size, size).astype(np.float32) - 0.5

@@ -17,7 +17,7 @@ caffe2::NetDef OptimizeForIdeep(caffe2::NetDef net) {
     }
     const auto* op = dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
 
-    // We only want to fuse for fast NNPACK convs
+    // We only want to fuse for IDEEP convs
     if (op->device_option().device_type() != DeviceType::IDEEP) {
       return false;
     }
