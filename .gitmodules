@@ -80,3 +80,6 @@
 [submodule "third_party/sleef"]
 	path = third_party/sleef
 	url = https://github.com/shibatch/sleef
+[submodule "third_party/ideep"]
+	path = third_party/ideep
+	url = https://github.com/intel/ideep
