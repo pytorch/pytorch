@@ -2834,6 +2834,21 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
             M()
 
+    def test_script_kwargs_fn_call(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                pass
+
+            @torch.jit.script_method
+            def call_foo(self, input):
+                return self.foo(input=input, bar=1)
+
+            @torch.jit.script_method
+            def foo(self, bar, input):
+                return input + bar
+        m = M()
+        self.assertEqual(2, m.call_foo(torch.ones((), dtype=torch.int64)))
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_trace_of_script(self):
         @torch.jit.script

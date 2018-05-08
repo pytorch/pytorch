@@ -17,17 +17,6 @@ struct CallsiteDescriptor {
   bool allow_varargs;
 };
 
-struct NamedValue {
-  NamedValue(const SourceRange& loc, const std::string& name, Value* value)
-  : loc(loc), name(name), value(value) {}
-  NamedValue(const SourceRange& loc, int i, Value* value)
-  : loc(loc), name("argument " + std::to_string(i)), value(value) {}
-
-  SourceRange loc;
-  std::string name;
-  Value* value;
-};
-
 static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
   return fmap(nvs, [](const NamedValue& v) {
     return v.value;
@@ -147,6 +136,18 @@ std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values)
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
 void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
+
+// try to match a list if inputs and keyword 'attributes' to this schema,
+// if it works return the flat list of positional inputs to the call
+// if it returns nullopt, then failure_messages contains a good error report
+at::optional<std::vector<Value*>> tryMatchSchema(
+  const FunctionSchema& schema,
+  const SourceRange& loc,
+  Graph& graph,
+  at::ArrayRef<NamedValue> inputs,
+  at::ArrayRef<NamedValue> attributes,
+  std::ostream& failure_messages);
+
 
 } // namespace script
 } // namespace jit
