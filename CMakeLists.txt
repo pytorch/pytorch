@@ -55,7 +55,9 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOG "Use GLOG" ON
     "BUILD_CAFFE2" OFF)
-option(USE_GLOO "Use Gloo" ON)
+cmake_dependent_option(
+    USE_GLOO "Use Gloo" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)  # New option
 cmake_dependent_option(
     USE_LEVELDB "Use LEVELDB" ON
