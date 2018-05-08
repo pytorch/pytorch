@@ -900,8 +900,6 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     WORLD_SIZE = os.environ['WORLD_SIZE']
 
     class TestDistBackend(TestCase, _DistTestBase):
-        doCUDAMemoryCheck = False
-
         MANAGER_PROCESS_RANK = -1
 
         @staticmethod
@@ -996,7 +994,6 @@ elif BACKEND == 'mpi':
     dist.init_process_group(init_method=INIT_METHOD, backend='mpi')
 
     class TestMPI(TestCase, _DistTestBase):
-        doCUDAMemoryCheck = False
         pass
 
 if __name__ == '__main__':

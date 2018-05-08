@@ -568,6 +568,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
 
 
 class TestCuda(TestCase):
+    doCUDAMemoryCheck = True
 
     @staticmethod
     def _test_memory_stats_generator(self, device=None, N=35):

@@ -463,6 +463,8 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
 
 class TestNN(NNTestCase):
+    doCUDAMemoryCheck = True
+
     def _forward(self, module, input):
         with freeze_rng_state():
             return module(input)

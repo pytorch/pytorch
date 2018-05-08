@@ -577,6 +577,8 @@ def unwrap(value):
 
 
 class TestDistributions(TestCase):
+    doCUDAMemoryCheck = True
+
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)

@@ -652,6 +652,7 @@ def require_grad(input):
 
 
 class TestNN(NNTestCase):
+    doCUDAMemoryCheck = True
 
     def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         def fw(input):

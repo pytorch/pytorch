@@ -159,7 +159,7 @@ def is_iterable(obj):
 class TestCase(unittest.TestCase):
     precision = 1e-5
     maxDiff = None
-    doCUDAMemoryCheck = True
+    doCUDAMemoryCheck = False
 
     def setUp(self):
         set_rng_seed(SEED)
