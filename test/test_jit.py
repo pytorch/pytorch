@@ -1697,6 +1697,21 @@ class TestScript(TestCase):
         self.checkScript(func3, (a, b), optimize=True)
         self.checkScript(func4, (a, b), optimize=True)
 
+    def test_expand(self):
+        @torch.jit.script
+        def func(x, y):
+            return x + y
+
+        x = torch.rand(2, 3, dtype=torch.float, requires_grad=True)
+        y = torch.rand(3, dtype=torch.float, requires_grad=True)
+        out = func(x, y)
+        self.assertEqual(func(x, y), x + y)
+
+        grad = torch.randn(2, 3)
+        out.backward(grad)
+        self.assertEqual(x.grad, grad)
+        self.assertEqual(y.grad, grad.sum(dim=0))
+
     def test_cat(self):
         @torch.jit.script
         def func(x):

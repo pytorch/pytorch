@@ -1,19 +1,15 @@
-# ---[ Macro to update cached options.
-macro (caffe2_update_option variable value)
-  get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
-  set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
-endmacro()
-
 # ---[ Custom Protobuf
 include("cmake/ProtoBuf.cmake")
 
 # ---[ Threads
-include(cmake/public/threads.cmake)
-if (TARGET Threads::Threads)
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
-else()
-  message(FATAL_ERROR
-      "Cannot find threading library. Caffe2 requires Threads to compile.")
+if(BUILD_CAFFE2)
+  include(cmake/public/threads.cmake)
+  if (TARGET Threads::Threads)
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
+  else()
+    message(FATAL_ERROR
+        "Cannot find threading library. Caffe2 requires Threads to compile.")
+  endif()
 endif()
 
 # ---[ protobuf
@@ -46,7 +42,7 @@ message(STATUS "The BLAS backend of choice:" ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
   # Eigen is header-only and we do not have any dependent libraries
-  set(CAFFE2_USE_EIGEN_FOR_BLAS 1)
+  set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
   include_directories(${ATLAS_INCLUDE_DIRS})
@@ -573,16 +569,6 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if (USE_ATEN)
-  list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen ATen)
-  if (USE_CUDA)
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen ATen)
-  endif()
-  include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten/aten/src/ATen)
-  include_directories(${PROJECT_SOURCE_DIR}/aten/src)
-  include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
-endif()
-
 if (USE_ZSTD)
   list(APPEND Caffe2_DEPENDENCY_LIBS libzstd_static)
   include_directories(${PROJECT_SOURCE_DIR}/third_party/zstd/lib)
@@ -591,7 +577,9 @@ if (USE_ZSTD)
 endif()
 
 # ---[ Onnx
-SET(ONNX_NAMESPACE "onnx_c2")
+if (NOT DEFINED ONNX_NAMESPACE)
+  SET(ONNX_NAMESPACE "onnx_c2")
+endif()
 if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
   set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
 endif()
@@ -599,7 +587,13 @@ set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 # We will build onnx as static libs and embed it directly into the binary.
 set(BUILD_SHARED_LIBS OFF)
 set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-set(ONNX_NO_WERROR ON)
+
+
+# See https://stackoverflow.com/questions/3766740/overriding-a-default-option-value-in-cmake-from-a-parent-cmakelists-txt
+set(ONNX_NO_WERROR ON CACHE BOOL "Disable use of Werror")
+
+
+
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/onnx)
 include_directories(${ONNX_INCLUDE_DIRS})
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DONNX_NAMESPACE=${ONNX_NAMESPACE}")
