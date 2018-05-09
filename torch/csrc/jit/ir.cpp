@@ -212,7 +212,7 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
   auto names = n->attributeNames();
   int i = 0;
   for(auto name : names) {
-    if (name == attr::Subgraph)
+    if (ignore_subgraph && name == attr::Subgraph)
       continue;
     if(i++ > 0)
       out << ", ";
