@@ -107,6 +107,9 @@ void initJITBindings(PyObject *module) {
       .def_property_readonly("graph", [](GraphExecutor& ge) {
         return ge.graph();
       })
+      .def("graph_for", [](GraphExecutor& ge, py::args args) {
+        return ge.graphFor(createVariableTensorList(args));
+      })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         auto inputs = createVariableTensorList(args);
         auto outputs = ge.run(std::move(inputs));
