@@ -19,16 +19,6 @@ yaml_file = os.path.join(amd_build_dir, "disabled_features.yaml")
 # Create the pytorch_amd directory
 shutil.copytree(proj_dir, out_dir)
 
-# Extract (.hip) files.
-for root, _directories, files in os.walk(os.path.join(amd_build_dir, "hip_files")):
-    for filename in files:
-        if filename.endswith(".hip"):
-            source = os.path.join(root, filename)
-            destination = os.path.join(out_dir, source[source.find("hip_files/") + 10:][:-4])
-
-            # Extract the .hip file.
-            shutil.copy(source, destination)
-
 # Apply patch files.
 patch_folder = os.path.join(amd_build_dir, "patches")
 for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
