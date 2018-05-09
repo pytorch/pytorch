@@ -23,11 +23,9 @@ void Conv::initialize_parameters() {
     wsize.push_back(in_channels_ / groups_);
   }
   wsize.insert(wsize.end(), ks_.begin(), ks_.end());
-  weight =
-      this->add(Var(DefaultTensor(at::kFloat).tensor(wsize), true), "weight");
+  weight = this->add(Var(at::CPU(at::kFloat).empty(wsize)), "weight");
   if (!no_bias_) {
-    bias = this->add(
-        Var(DefaultTensor(at::kFloat).tensor({out_channels_}), true), "bias");
+    bias = this->add(Var(at::CPU(at::kFloat).empty(out_channels_)), "bias");
   } else {
     assert(!bias.defined());
   }

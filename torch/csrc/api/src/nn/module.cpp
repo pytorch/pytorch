@@ -1,5 +1,7 @@
 #include <torch/nn/module.h>
 
+#include <torch/csrc/autograd/generated/VariableType.h>
+
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -8,6 +10,9 @@
 #include <unordered_map>
 
 namespace torch { namespace nn {
+
+Module::Module() : is_training_(true) {}
+
 std::map<std::string, Variable> Module::parameters() const {
   std::map<std::string, Variable> ret;
   for (auto pair : children_) {
@@ -50,12 +55,26 @@ Variable& Module::param(std::string const& name) {
   return it->second;
 }
 
+void Module::train() {
+  for (auto& pair : children_) {
+    pair.second->train();
+  }
+  is_training_ = true;
+}
+
+void Module::eval() {
+  for (auto& pair : children_) {
+    pair.second->eval();
+  }
+  is_training_ = false;
+}
+
 void Module::cuda() {
-  toBackend(at::kCUDA);
+  to(at::kCUDA);
 }
 
 void Module::cpu() {
-  toBackend(at::kCPU);
+  to(at::kCPU);
 }
 
 void Module::to(at::Type& type) {
@@ -66,13 +85,13 @@ void Module::to(at::Type& type) {
     auto& parameter = pair.second;
     at::detail::set_data(parameter, parameter.data().toType(type));
     assert(parameter.data().type() == type);
-    assert(parameter.type() == type);
+    assert(&parameter.type() == autograd::VariableType::getType(type));
   }
 }
 
 void Module::to(at::ScalarType scalar_type) {
   for (auto& child : children_) {
-    child.second->to(new_type);
+    child.second->to(scalar_type);
   }
   for (auto& pair : parameters_) {
     auto& parameter = pair.second;
@@ -85,7 +104,7 @@ void Module::to(at::ScalarType scalar_type) {
 
 void Module::to(at::Backend backend) {
   for (auto& child : children_) {
-    child.second->to(new_type);
+    child.second->to(backend);
   }
   for (auto& pair : parameters_) {
     auto& parameter = pair.second;
@@ -96,18 +115,17 @@ void Module::to(at::Backend backend) {
   }
 }
 
-void Module::train() {
-  for (auto& pair : children_) {
-    pair.second->train();
-  }
-  train_ = true;
+bool Module::is_training() const noexcept {
+  return is_training_;
 }
 
-void Module::eval() {
-  for (auto& pair : children_) {
-    pair.second->eval();
+void Module::zero_grad() {
+  for (auto& child : children_) {
+    child.second->zero_grad();
   }
-  train_ = false;
+  for (auto& pair : parameters_) {
+    pair.second.grad().zero_();
+  }
 }
 
 std::shared_ptr<nn::Module> Module::add(
@@ -137,12 +155,4 @@ Variable& Module::add(Variable v, std::string const& name) {
   this->parameters_[name] = v;
   return this->parameters_[name];
 }
-
-at::Type& Module::DefaultTensor(at::ScalarType s) {
-  if (cuda_)
-    return at::CUDA(s);
-  else
-    return at::CPU(s);
-}
-
 }} // namespace torch::nn

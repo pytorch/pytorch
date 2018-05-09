@@ -13,6 +13,8 @@ namespace torch { namespace nn {
 
 class Module {
  public:
+  Module();
+
   virtual ~Module() = default;
 
   // Only construct parameters in initialize_parameters, and
@@ -29,23 +31,35 @@ class Module {
   std::map<std::string, Variable> parameters() const;
   Variable& param(std::string const&);
 
-  virtual void cuda();
+  /// Enables training mode.
+  virtual void train();
+
+  /// Disables training mode.
+  virtual void eval();
+
+  /// True if the module is in training mode.
+  virtual bool is_training() const noexcept;
+
+  /// Recursively moves all parameters to CPU memory (in place).
   virtual void cpu();
 
+  /// Recursively moves all parameters to CUDA memory (in place).
+  virtual void cuda();
+
+  /// Recursively casts all parameters to the given type.
   virtual void to(at::Type& type);
+
+  /// Recursively casts all parameters to the given scalar type.
   virtual void to(at::ScalarType scalar_type);
+
+  /// Recursively moves all parameters to the given backend.
   virtual void to(at::Backend backend);
 
-  void train();
-  void eval();
-
-  at::Type& DefaultTensor(at::ScalarType s);
+  /// Recursively zeros out the `grad` values of all parameters.
+  virtual void zero_grad();
 
   std::unordered_map<std::string, std::shared_ptr<nn::Module>> children_;
   std::unordered_map<std::string, Variable> parameters_;
-
-  bool cuda_ = false;
-  bool train_ = true;
 
   template <class Archive>
   void save(Archive& ar) const {
@@ -75,6 +89,10 @@ class Module {
       std::string const&);
   // Be careful when registering Tensors that are not variables
   Variable& add(Variable, std::string const&);
+
+ private:
+  /// Whether the module is in training mode.
+  bool is_training_;
 };
 
 /// The `clone()` method in the base `Module` class does not have knowledge of
@@ -99,11 +117,6 @@ class CloneableModule : public Module {
     auto newParams = ptr->parameters();
     for (auto& param : parameters()) {
       newParams[param.first].data().copy_(param.second.data());
-    }
-    if (cuda_) {
-      ptr->cuda();
-    } else {
-      ptr->cpu();
     }
     return ptr;
   }

@@ -26,7 +26,7 @@ class NestedModel : public CloneableModule<NestedModel> {
   }
 
   void initialize_parameters() override {
-    add(Var(DefaultTensor(at::kFloat).tensor({3, 2, 21}), false), "param");
+    add(Var(at::CPU(at::kFloat).tensor({3, 2, 21}), false), "param");
   }
 
   variable_list forward(variable_list input) override {

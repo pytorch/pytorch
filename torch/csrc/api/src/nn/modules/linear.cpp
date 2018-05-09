@@ -24,11 +24,10 @@ void Linear::reset_parameters() {
 }
 
 void Linear::initialize_parameters() {
-  weight = this->add(
-      Var(DefaultTensor(at::kFloat).tensor({nout, nin}), true), "weight");
+  weight =
+      this->add(Var(at::CPU(at::kFloat).empty({nout, nin}), true), "weight");
   if (!no_bias_) {
-    bias =
-        this->add(Var(DefaultTensor(at::kFloat).tensor({nout}), true), "bias");
+    bias = this->add(Var(at::CPU(at::kFloat).empty(nout), true), "bias");
   }
 }
 }} // namespace torch::nn
