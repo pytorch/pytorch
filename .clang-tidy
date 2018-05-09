@@ -1,0 +1,40 @@
+---
+# NOTE: there must be no spaces before the '-', so put the comma first.
+Checks: '
+  *
+  ,modernize-*
+  ,clang-analyzer-*
+  ,-clang-diagnostic-*
+  ,-hicpp-no-array-decay
+  ,-fuchsia-*
+  ,-google-readability-namespace-comments
+  ,-llvm-namespace-comment
+  ,-google-readability-todo
+  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
+  ,-cert-err60-cpp
+  ,-llvm-header-guard
+  ,-cppcoreguidelines-special-member-functions
+  ,-misc-unused-parameters
+  ,-hicpp-braces-around-statements
+  ,-hicpp-special-member-functions
+  ,-readability-braces-around-statements
+  ,-modernize-use-default-member-init
+  ,-google-runtime-references
+  ,-cppcoreguidelines-pro-type-vararg
+  ,-google-readability-braces-around-statements
+  ,-google-build-using-namespace
+  ,-hicpp-vararg
+  ,-hicpp-explicit-conversions
+  ,-performance-unnecessary-value-param
+  ,-google-runtime-references
+  ,-cppcoreguidelines-pro-type-static-cast-downcast
+  ,-cppcoreguidelines-pro-bounds-constant-array-index
+  ,-cert-err58-cpp
+  ,-modernize-make-unique
+  ,-cppcoreguidelines-owning-memory
+  '
+WarningsAsErrors: ''
+HeaderFilterRegex: 'torch/csrc/'
+AnalyzeTemporaryDtors: false
+CheckOptions:
+...
