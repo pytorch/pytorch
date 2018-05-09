@@ -169,8 +169,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
 
     graph = _optimize_graph(graph, aten, export_raw_ir)
 
-    _
-    _and_output_names(graph, input_names, output_names)
+    _set_input_and_output_names(graph, input_names, output_names)
     if verbose:
         print(graph)
 
