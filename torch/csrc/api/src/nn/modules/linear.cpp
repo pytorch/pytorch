@@ -2,8 +2,7 @@
 
 namespace torch { namespace nn {
 
-Linear::Linear(uint32_t nin, uint32_t nout)
-    : CloneableModule<Linear>("Linear"), nin(nin), nout(nout) {}
+Linear::Linear(uint32_t nin, uint32_t nout) : nin(nin), nout(nout) {}
 
 variable_list Linear::forward(variable_list input) {
   auto x = input[0];

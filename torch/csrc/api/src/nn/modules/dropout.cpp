@@ -2,7 +2,7 @@
 
 namespace torch { namespace nn {
 
-Dropout::Dropout(double p) : CloneableModule<Dropout>("Dropout"), p_(p) {
+Dropout::Dropout(double p) : p_(p) {
   assert(p < 1 && p >= 0);
 }
 
@@ -20,8 +20,7 @@ variable_list Dropout::forward(variable_list inputs) {
   return lst;
 }
 
-Dropout2d::Dropout2d(double p)
-    : CloneableModule<Dropout2d>("Dropout2d"), p_(p) {
+Dropout2d::Dropout2d(double p) : p_(p) {
   assert(p < 1 && p >= 0);
 }
 

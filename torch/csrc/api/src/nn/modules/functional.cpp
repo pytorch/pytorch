@@ -2,10 +2,9 @@
 
 namespace torch { namespace nn {
 Functional::Functional(std::function<variable_list(variable_list)> fun)
-    : CloneableModule<Functional>("Functional"), fun_(fun) {}
+    : fun_(fun) {}
 Functional::Functional(std::function<Variable(Variable)> fun)
-    : CloneableModule<Functional>("Functional"),
-      fun_([fun](variable_list input) {
+    : fun_([fun](variable_list input) {
         return variable_list({fun(input[0])});
       }){};
 

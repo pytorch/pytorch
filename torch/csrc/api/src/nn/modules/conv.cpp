@@ -6,8 +6,7 @@
 namespace torch { namespace nn {
 
 Conv::Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan)
-    : CloneableModule<Conv>("Conv"),
-      Nd_(Nd),
+    : Nd_(Nd),
       in_channels_(in_chan),
       out_channels_(out_chan),
       stride_(makeTup(1, 1)),

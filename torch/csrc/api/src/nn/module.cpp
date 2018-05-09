@@ -2,6 +2,8 @@
 
 #include <torch/csrc/autograd/generated/VariableType.h>
 
+#include <ATen/Error.h>
+
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -11,9 +13,11 @@
 
 namespace torch { namespace nn {
 
-Module::Module(const char* name) : name_(name), is_training_(true) {}
+Module::Module() : Module(at::demangle(typeid(*this).name())) {}
 
-const char* Module::name() const noexcept {
+Module::Module(std::string name) : name_(std::move(name)), is_training_(true) {}
+
+const std::string& Module::name() const noexcept {
   return name_;
 }
 

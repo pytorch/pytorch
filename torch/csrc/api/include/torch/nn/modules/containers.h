@@ -12,9 +12,6 @@ class ContainerListImpl : public CloneableModule<Derived> {
   // Lets you use a container like a vector without making a new class,
   // just for simple implementations
  public:
-  explicit ContainerListImpl(const char* name)
-      : CloneableModule<Derived>(name) {}
-
   virtual variable_list forward(variable_list) override {
     throw std::runtime_error(
         "ContainerList has no forward, maybe you"
@@ -50,16 +47,11 @@ class ContainerListImpl : public CloneableModule<Derived> {
   std::vector<std::shared_ptr<Module>> children_;
 };
 
-class ContainerList : public ContainerListImpl<ContainerList> {
- public:
-  ContainerList() : ContainerListImpl<ContainerList>("ContainerList") {}
-};
+class ContainerList : public ContainerListImpl<ContainerList> {};
 
 class Sequential : public ContainerListImpl<Sequential> {
   // Mimics nn.Sequential from pytorch.
  public:
-  Sequential() : ContainerListImpl<Sequential>("Sequential") {}
-
   variable_list forward(variable_list input) override {
     for (auto& container : children_) {
       input = container->forward(input);
@@ -87,8 +79,6 @@ class SimpleContainer : public CloneableModule<SimpleContainer> {
   // Lets you use a container without making a new class,
   // for experimental implementations
  public:
-  SimpleContainer() : CloneableModule<SimpleContainer>("SimpleContainer") {}
-
   virtual variable_list forward(variable_list) override {
     throw std::runtime_error(
         "SimpleContainer has no forward, maybe you"

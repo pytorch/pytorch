@@ -16,10 +16,8 @@ class RNNBase : public CloneableModule<Derived> {
   // These must line up with the CUDNN mode codes
   enum RNNMode : int64_t { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
-  RNNBase(const char* name, uint32_t input_size, uint32_t hidden_size)
-      : CloneableModule<Derived>(name),
-        input_size_(input_size),
-        hidden_size_(hidden_size) {}
+  RNNBase(uint32_t input_size, uint32_t hidden_size)
+      : input_size_(input_size), hidden_size_(hidden_size) {}
 
   TORCH_AUTOGRAD_KWARG(RNNBase, RNNMode, mode, RNNMode::LSTM, RNNMode::LSTM)
   TORCH_AUTOGRAD_KWARG(RNNBase, uint32_t, nlayers, 1, 1);
@@ -69,16 +67,14 @@ class RNNBase : public CloneableModule<Derived> {
 // We must instantiate these templates so we can put implementations in the .cpp
 class LSTM : public RNNBase<LSTM> {
  public:
-  LSTM(uint32_t inp_size, uint32_t hid_size)
-      : RNNBase("LSTM", inp_size, hid_size) {
+  LSTM(uint32_t inp_size, uint32_t hid_size) : RNNBase(inp_size, hid_size) {
     mode_ = RNNBase::RNNMode::LSTM;
   }
 };
 
 class GRU : public RNNBase<GRU> {
  public:
-  GRU(uint32_t inp_size, uint32_t hid_size)
-      : RNNBase("GRU", inp_size, hid_size) {
+  GRU(uint32_t inp_size, uint32_t hid_size) : RNNBase(inp_size, hid_size) {
     mode_ = RNNBase::RNNMode::GRU;
   }
 };
@@ -87,7 +83,7 @@ class RNN : public RNNBase<RNN> {
  public:
   enum Mode { Tanh, Relu };
   RNN(uint32_t inp_size, uint32_t hid_size, Mode mode = Mode::Tanh)
-      : RNNBase("RNN", inp_size, hid_size) {
+      : RNNBase(inp_size, hid_size) {
     if (mode == Mode::Tanh) {
       mode_ = RNNBase::RNNMode::RNN_TANH;
     } else if (mode == Mode::Relu) {

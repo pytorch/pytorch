@@ -2,8 +2,7 @@
 
 namespace torch { namespace nn {
 
-BatchNorm::BatchNorm(uint32_t num_features)
-    : CloneableModule<BatchNorm>("BatchNorm"), num_features_(num_features) {}
+BatchNorm::BatchNorm(uint32_t num_features) : num_features_(num_features) {}
 
 void BatchNorm::initialize_parameters() {
   if (affine_) {

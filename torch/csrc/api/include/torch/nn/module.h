@@ -13,13 +13,17 @@ namespace torch { namespace nn {
 
 class Module {
  public:
+
+  /// Uses RTTI to determine the (qualified) name of the submodule.
   Module();
-  explicit Module(const char* name);
+
+  /// Tells the base `Module` about the name of the submodule.
+  explicit Module(std::string name);
 
   virtual ~Module() = default;
 
   /// Returns the name of the `Module`.
-  const char* name() const noexcept;
+  const std::string& name() const noexcept;
 
   // Only construct parameters in initialize_parameters, and
   // containers in initialize_containers. Most of the time, the containers are
@@ -99,7 +103,7 @@ class Module {
   bool is_training_;
 
   /// The module's name (e.g. "LSTM").
-  const char* name_;
+  std::string name_;
 };
 
 /// The `clone()` method in the base `Module` class does not have knowledge of
@@ -112,9 +116,7 @@ class Module {
 template <typename Derived>
 class CloneableModule : public Module {
  public:
-  explicit CloneableModule(const char* name) : Module(name) {}
-
-  // explicit CloneableModule(const char* name) : Module(name) {}
+  using Module::Module;
 
   std::unique_ptr<Module> clone() const override {
     auto ptr = std::unique_ptr<Module>(

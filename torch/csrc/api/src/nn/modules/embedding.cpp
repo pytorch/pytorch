@@ -3,9 +3,7 @@
 namespace torch { namespace nn {
 
 Embedding::Embedding(uint32_t num_embeddings, uint32_t embedding_dim)
-    : CloneableModule<Embedding>("Embedding"),
-      num_embeddings(num_embeddings),
-      embedding_dim(embedding_dim) {}
+    : num_embeddings(num_embeddings), embedding_dim(embedding_dim) {}
 
 variable_list Embedding::forward(variable_list input) {
   auto x = input[0];
