@@ -4,6 +4,8 @@
 
 #include "torch/detail.h"
 
+#include <ATen/optional.h>
+
 #include <map>
 #include <memory>
 #include <string>
@@ -13,12 +15,10 @@ namespace torch { namespace nn {
 
 class Module {
  public:
-
-  /// Uses RTTI to determine the (qualified) name of the submodule.
-  Module();
-
   /// Tells the base `Module` about the name of the submodule.
-  explicit Module(std::string name);
+  /// If no value is supplied, the name of the submodule is inferred via RTTI
+  /// the first time `.name()` is invoked.
+  explicit Module(at::optional<std::string> name = at::nullopt);
 
   virtual ~Module() = default;
 
@@ -103,7 +103,7 @@ class Module {
   bool is_training_;
 
   /// The module's name (e.g. "LSTM").
-  std::string name_;
+  mutable at::optional<std::string> name_;
 };
 
 /// The `clone()` method in the base `Module` class does not have knowledge of
