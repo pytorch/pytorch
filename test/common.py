@@ -1,5 +1,6 @@
 import sys
 import os
+import platform
 import re
 import inspect
 import argparse
@@ -43,6 +44,7 @@ PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
+IS_PPC = platform.machine() == "ppc64le"
 
 TEST_NUMPY = True
 try:
