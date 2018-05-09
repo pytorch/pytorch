@@ -5,6 +5,26 @@
 using namespace torch;
 using namespace torch::nn;
 
+struct AGIUnit : CloneableModule<AGIUnit> {
+  variable_list forward(variable_list) {
+    return {};
+  }
+};
+
+namespace test {
+struct AGIUnit : CloneableModule<AGIUnit> {
+  variable_list forward(variable_list) {
+    return {};
+  }
+};
+struct AGIUnit2 : CloneableModule<AGIUnit2> {
+  AGIUnit2() : CloneableModule<AGIUnit2>("Foo") {}
+  variable_list forward(variable_list) {
+    return {};
+  }
+};
+} // namespace test
+
 TEST_CASE("module/training-mode") {
   auto model = make(Linear(3, 4));
   REQUIRE(model->is_training());
@@ -33,6 +53,18 @@ TEST_CASE("module/zero-grad") {
     Variable grad = parameter.second.grad();
     REQUIRE(grad.defined());
     REQUIRE(grad.sum().toCFloat() == 0);
+  }
+}
+
+TEST_CASE("module/name") {
+  AGIUnit agi;
+  // Call it twice just to make sure there are no bugs in the lazy
+  // initialization semantics.
+  REQUIRE(agi.name() == "AGIUnit");
+  REQUIRE(agi.name() == "AGIUnit");
+  SECTION("correctly demangled") {
+    REQUIRE(test::AGIUnit().name() == "test::AGIUnit");
+    REQUIRE(test::AGIUnit2().name() == "Foo");
   }
 }
 

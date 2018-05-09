@@ -16,9 +16,12 @@ namespace torch { namespace nn {
 class Module {
  public:
   /// Tells the base `Module` about the name of the submodule.
-  /// If no value is supplied, the name of the submodule is inferred via RTTI
-  /// the first time `.name()` is invoked.
-  explicit Module(at::optional<std::string> name = at::nullopt);
+  explicit Module(std::string name);
+
+  /// Constructs the base module without immediate knowledge of the submodule's
+  /// name. The name of the submodule is inferred via RTTI the first time
+  /// `.name()` is invoked.
+  Module() = default;
 
   virtual ~Module() = default;
 
@@ -99,11 +102,11 @@ class Module {
   Variable& add(Variable, std::string const&);
 
  private:
-  /// Whether the module is in training mode.
-  bool is_training_;
-
   /// The module's name (e.g. "LSTM").
   mutable at::optional<std::string> name_;
+
+  /// Whether the module is in training mode.
+  bool is_training_{true};
 };
 
 /// The `clone()` method in the base `Module` class does not have knowledge of

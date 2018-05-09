@@ -14,8 +14,7 @@
 
 namespace torch { namespace nn {
 
-Module::Module(at::optional<std::string> name)
-    : name_(std::move(name)), is_training_(true) {}
+Module::Module(std::string name) : name_(std::move(name)) {}
 
 const std::string& Module::name() const noexcept {
   // If the name optional is empty at this point, we grab the name of the
