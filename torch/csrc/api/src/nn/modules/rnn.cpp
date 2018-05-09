@@ -45,20 +45,20 @@ void RNNBase<Derived>::initialize_parameters() {
   for (auto i = 0U; i < nlayers_; i++) {
     auto input_size = (i == 0) ? input_size_ : hidden_size_;
     ihw.push_back(this->add(
-        Var(this->DefaultTensor(at::kFloat).tensor({gate_size, input_size})),
+        Var(at::CPU(at::kFloat).empty({gate_size, input_size})),
         "weight_ih_l" + std::to_string(i)));
     hhw.push_back(this->add(
-        Var(this->DefaultTensor(at::kFloat).tensor({gate_size, hidden_size_})),
+        Var(at::CPU(at::kFloat).empty({gate_size, hidden_size_})),
         "weight_hh_l" + std::to_string(i)));
     ihb.push_back(
         no_bias_ ? Variable()
                  : this->add(
-                       Var(this->DefaultTensor(at::kFloat).tensor({gate_size})),
+                       Var(at::CPU(at::kFloat).empty({gate_size})),
                        "bias_ih_l" + std::to_string(i)));
     hhb.push_back(
         no_bias_ ? Variable()
                  : this->add(
-                       Var(this->DefaultTensor(at::kFloat).tensor({gate_size})),
+                       Var(at::CPU(at::kFloat).empty({gate_size})),
                        "bias_hh_l" + std::to_string(i)));
   }
   this->flatten_parameters();
@@ -75,9 +75,8 @@ void RNNBase<Derived>::reset_parameters() {
 template <typename Derived>
 variable_list RNNBase<Derived>::GRU_cell_forward(variable_list inputs, int i) {
   auto x = inputs[0];
-  auto hx = inputs[1].defined()
-      ? inputs[1]
-      : Var(this->DefaultTensor(at::kFloat).zeros({x.size(0), hidden_size_}));
+  auto hx = inputs[1].defined() ? inputs[1]
+                                : x.type().zeros({x.size(0), hidden_size_});
 
   auto gi = linear(x, ihw[i], ihb[i]);
   auto gh = linear(x, hhw[i], hhb[i]);
@@ -97,9 +96,8 @@ variable_list RNNBase<Derived>::RNN_TANH_cell_forward(
     variable_list inputs,
     int i) {
   auto x = inputs[0];
-  auto hx = inputs[1].defined()
-      ? inputs[1]
-      : Var(this->DefaultTensor(at::kFloat).zeros({x.size(0), hidden_size_}));
+  auto hx = inputs[1].defined() ? inputs[1]
+                                : x.type().zeros({x.size(0), hidden_size_});
 
   auto h = (linear(x, ihw[i], ihb[i]) + linear(hx, hhw[i], hhb[i])).tanh();
   return variable_list({h});
@@ -110,9 +108,8 @@ variable_list RNNBase<Derived>::RNN_RELU_cell_forward(
     variable_list inputs,
     int i) {
   auto x = inputs[0];
-  auto hx = inputs[1].defined()
-      ? inputs[1]
-      : Var(this->DefaultTensor(at::kFloat).zeros({x.size(0), hidden_size_}));
+  auto hx = inputs[1].defined() ? inputs[1]
+                                : x.type().zeros({x.size(0), hidden_size_});
 
   auto h = at::relu(linear(x, ihw[i], ihb[i]) + linear(hx, hhw[i], hhb[i]));
   return variable_list({h});
@@ -121,10 +118,8 @@ variable_list RNNBase<Derived>::RNN_RELU_cell_forward(
 template <typename Derived>
 variable_list RNNBase<Derived>::LSTM_cell_forward(variable_list inputs, int i) {
   auto x = inputs[0];
-  auto hid = inputs[1].defined()
-      ? inputs[1]
-      : Var(this->DefaultTensor(at::kFloat)
-                .zeros({2, x.size(0), hidden_size_}));
+  auto hid = inputs[1].defined() ? inputs[1]
+                                 : x.type().zeros({2, x.size(0), hidden_size_});
   auto hx = hid[0];
   auto cx = hid[1];
 
@@ -168,9 +163,8 @@ variable_list RNNBase<Derived>::autograd_forward(variable_list inputs) {
   }
 
   auto output =
-      Var(this->DefaultTensor(at::kFloat)
-              .zeros({inp.size(0), inp.size(1), hidden_size_}),
-          false);
+      Variable(inp.type().zeros({inp.size(0), inp.size(1), hidden_size_}));
+  output.set_requires_grad(false);
   for (auto t = 0U; t < inp.size(0); t++) {
     auto x = inp.select(0, t);
     for (size_t i = 0; i < nlayers_; i++) {
@@ -301,7 +295,7 @@ variable_list RNNBase<Derived>::CUDNN_forward(variable_list inputs) {
       nlayers_,
       false, // batch first
       0, // TODO Use C++ dropout descriptors
-      this->train_,
+      this->is_training(),
       false, // bidirectional
       {}, // packing not supported
       dropout_state // TODO waiting on dropout state descriptor in C++ pytorch

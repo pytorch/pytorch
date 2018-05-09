@@ -14,8 +14,7 @@ void Embedding::reset_parameters() {
 
 void Embedding::initialize_parameters() {
   weight = this->add(
-      Var(DefaultTensor(at::kFloat).tensor({num_embeddings, embedding_dim}),
-          true),
+      Var(at::CPU(at::kFloat).empty({num_embeddings, embedding_dim})),
       "weight");
 }
 

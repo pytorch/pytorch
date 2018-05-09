@@ -2,7 +2,7 @@
 
 namespace torch { namespace nn {
 variable_list Dropout::forward(variable_list inputs) {
-  if (p_ == 0 || !this->train_)
+  if (p_ == 0 || !is_training())
     return inputs;
   variable_list lst;
   for (auto x : inputs) {
@@ -16,7 +16,7 @@ variable_list Dropout::forward(variable_list inputs) {
 }
 
 variable_list Dropout2d::forward(variable_list inputs) {
-  if (p_ == 0 || !this->train_)
+  if (p_ == 0 || !is_training())
     return inputs;
   variable_list lst;
   for (auto x : inputs) {
