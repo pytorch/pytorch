@@ -12,7 +12,7 @@ struct VariableHooks : public at::VariableHooksInterface {
 using at::RegistererVariableHooksRegistry;
 using at::VariableHooksRegistry;
 
-REGISTER_VARIABLE_HOOKS(VariableHooks);
+REGISTER_VARIABLE_HOOKS(VariableHooks)
 
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
 void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
