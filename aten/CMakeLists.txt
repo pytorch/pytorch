@@ -33,6 +33,9 @@ if (NOT USE_CUDA)
   set(NO_CUDA ON)
 endif()
 
+# Load the CMake Utilities.
+INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/utils.cmake)
+
 # Create the project in all cases
 project(ATen CXX C)
 
