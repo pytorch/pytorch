@@ -48,8 +48,10 @@ target_link_libraries(verify_api_visibility ATen)
 add_executable(tbb_init_test tbb_init_test.cpp)
 target_link_libraries(tbb_init_test ATen)
 
-torch_cuda_based_add_executable(integer_divider_test integer_divider_test.cu)
-target_link_libraries(integer_divider_test ATen)
+if(WITH_CUDA OR WITH_ROCM)
+  torch_cuda_based_add_executable(integer_divider_test integer_divider_test.cu)
+  target_link_libraries(integer_divider_test ATen)
+endif()
 
 torch_cuda_based_add_executable(cuda_rng_test cuda_rng_test.cpp)
 target_link_libraries(cuda_rng_test ATen)
