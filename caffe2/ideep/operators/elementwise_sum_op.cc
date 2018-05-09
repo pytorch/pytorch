@@ -11,34 +11,24 @@ class IDEEPSumOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws) {}
   virtual ~IDEEPSumOp() {}
 
-  bool RunDirectCopy() {
+  bool RunOnDevice() override {
     const auto &X = Input(INPUT0);
     auto* Y = Output(OUTPUT);
 
-    ideep::direct_copy::compute(X, *Y);
+    if (InputSize() == 1) {
+      ideep::direct_copy::compute(X, *Y);
 
-    return true;
-  }
+    } else {
+      vector<itensor> inputs;
+      vector<float> scales (InputSize(), 1.0);
+      for (int i = 0; i < InputSize(); ++i) {
+        inputs.emplace_back(Input(i));
+      }
 
-  bool RunSumUp() {
-    auto* Y = Output(OUTPUT);
-    vector<itensor> inputs;
-    vector<float> scales (InputSize(), 1.0);
-
-    for (int i = 0; i < InputSize(); ++i) {
-      inputs.emplace_back(Input(i));
+      ideep::sum::compute(scales, inputs, *Y);
     }
 
-    ideep::sum::compute(scales, inputs, *Y);
-
     return true;
-  }
-
-  bool RunOnDevice() override {
-    if (InputSize() == 1)
-      return RunDirectCopy();
-    else
-      return RunSumUp();
   }
 
  private:
