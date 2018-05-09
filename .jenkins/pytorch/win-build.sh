@@ -34,27 +34,27 @@ cat >ci_scripts/build_pytorch.bat <<EOL
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install MKL
-if "%REBUILD"=="" aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl
+if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl )
 set CMAKE_INCLUDE_PATH=%cd%\\mkl\\include
 set LIB=%cd%\\mkl\\lib;%LIB
 
 :: Install MAGMA
-if "%REBUILD"=="" aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet && 7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma
+if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet && 7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma )
 set MAGMA_HOME=%cd%\\magma
 
 :: Install sccache
 mkdir %CD%\\tmp_bin
-if "%REBUILD"=="" aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe --quiet
+if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe --quiet )
 
 :: Install Miniconda3
-if "%REBUILD"=="" ( IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 ) )
-if "%REBUILD"=="" curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
-if "%REBUILD"=="" .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
+if "%REBUILD%"=="" ( IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 ) )
+if "%REBUILD%"=="" ( curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O )
+if "%REBUILD%"=="" ( .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3 )
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
-if "%REBUILD"=="" call conda install -y -q numpy cffi pyyaml boto3
+if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 )
 
 :: Install ninja
-if "%REBUILD"=="" pip install ninja
+if "%REBUILD%"=="" ( pip install ninja )
 
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
 
@@ -80,24 +80,30 @@ set DISTUTILS_USE_SDK=1
 
 set CMAKE_GENERATOR=Ninja
 
-if "%REBUILD"=="" set NO_CUDA=1
+if "%REBUILD%"=="" ( set NO_CUDA=1 )
 
-if "%REBUILD"=="" python setup.py install
+if "%REBUILD%"=="" ( python setup.py install )
 
-if "%REBUILD"=="" ( if %errorlevel% neq 0 exit /b %errorlevel% )
+if "%REBUILD%"=="" ( if %errorlevel% neq 0 exit /b %errorlevel% )
 
-if "%REBUILD"=="" sccache --show-stats
+if "%REBUILD%"=="" ( sccache --show-stats )
 
-if "%REBUILD"=="" sccache --zero-stats
+if "%REBUILD%"=="" ( sccache --zero-stats )
 
-if "%REBUILD"=="" rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
+if "%REBUILD%"=="" ( rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch )
 
-if "%REBUILD"=="" copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+if "%REBUILD%"=="" ( copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe )
 set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
 
-if "%REBUILD"=="" set NO_CUDA=
+if "%REBUILD%"=="" set NO_CUDA=
 
-python setup.py install && sccache --show-stats && 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+python setup.py install
+
+if %errorlevel% neq 0 exit /b %errorlevel
+
+sccache --show-stats
+
+if "%IMAGE_COMMIT_TAG%"!="" ( 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z )
 
 EOL
 
