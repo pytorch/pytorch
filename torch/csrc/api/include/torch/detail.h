@@ -11,9 +11,9 @@
 // While this object is in scope, all of your GPU tensors will go to GPU 1
 #include "torch/csrc/utils/auto_gpu.h"
 
-#define AUTOGRAD_OPTIMIZER_CLASS(Type) \
+#define TORCH_AUTOGRAD_OPTIMIZER_CLASS(Type) \
   class Type : public torch::Optimizer_CRTP<Type>
-#define AUTOGRAD_KWARG(CLS, TYP, NAME, DEFAULT, OPTION) \
+#define TORCH_AUTOGRAD_KWARG(CLS, TYP, NAME, DEFAULT, OPTION) \
   TYP NAME##_ = DEFAULT;                                \
   CLS& NAME(TYP x = OPTION) {                           \
     NAME##_ = x;                                        \
