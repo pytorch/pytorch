@@ -72,6 +72,9 @@ class DistributedDataParallel(Module):
         device_ids: CUDA devices (default: all devices)
         output_device: device location of output (default: device_ids[0])
 
+    Attributes:
+        module (Module): the module to be parallelized
+
     Example::
 
         >>> torch.distributed.init_process_group(world_size=4, init_method='...')
