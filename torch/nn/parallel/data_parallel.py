@@ -74,6 +74,9 @@ class DataParallel(Module):
         device_ids: CUDA devices (default: all devices)
         output_device: device location of output (default: device_ids[0])
 
+    Attributes:
+        module (Module): the module to be parallelized
+
     Example::
 
         >>> net = torch.nn.DataParallel(model, device_ids=[0, 1, 2])
