@@ -49,26 +49,35 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     // Copy to allow random_seed to be correctly propagated.
     base_def_.mutable_device_option()->CopyFrom(def.device_option());
     base_def_.mutable_device_option()->set_device_type(CPU);
+    // Create output blobs in parent workspace,
+    // then forward output blobs to local workspace.
+    std::unordered_map<string, string> forwarded_output_blobs;
+    for (const string& name : base_def_.output()) {
+      string parent_name(name + "_cpu_output_blob_" + base_def_.type());
+      local_output_blobs_.push_back(ws->CreateBlob(parent_name));
+      CHECK_NOTNULL(local_output_blobs_.back());
+      forwarded_output_blobs[name] = parent_name;
+    }
+    local_ws_.reset(new Workspace(ws, forwarded_output_blobs));
     // Set up the symbols for the local workspace.
-    for (const string& name : def.input()) {
-      local_input_blobs_.push_back(local_ws_.CreateBlob(name));
+    for (const string& name : base_def_.input()) {
+      local_input_blobs_.push_back(local_ws_->CreateBlob(name));
       CHECK_NOTNULL(local_input_blobs_.back());
     }
-    base_op_.reset(new CPUOp(base_def_, &local_ws_));
-    for (const string& name : def.output()) {
-      local_output_blobs_.push_back(local_ws_.GetBlob(name));
-      CHECK_NOTNULL(local_output_blobs_.back());
-    }
+    base_op_.reset(new CPUOp(base_def_, local_ws_.get()));
   }
 
   bool RunOnDevice() override {
     for (int i = 0; i < InputSize(); ++i) {
       if (InputIsType<itensor>(i) && Input(i).get_data_type() == itensor::data_type::f32) {
-        itensor::dims src_dims = Input(i).get_dims();
-        vector<TIndex> dst_dims (src_dims.begin(), src_dims.end());
+        auto& input = Input(i);
         auto dtensor = local_input_blobs_[i]->template GetMutable<TensorCPU>();
-        dtensor->Resize(dst_dims);
-        Input(i).reorder_to(dtensor->template mutable_data<float>());
+        dtensor->Resize(input.get_dims());
+        if (input.is_public_format()) {
+          dtensor->ShareExternalPointer(static_cast<float*>(input.get_data_handle()));
+        } else {
+          input.reorder_to(dtensor->template mutable_data<float>());
+        }
       } else {
         VLOG(1) << "Input " << i << " is not ideep::tensor. Skipping copy.";
         // Note(jiayq): This removes a const but conceptually
@@ -109,9 +118,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         if (dtensor->get_dims() != dst_dims) {
           dtensor->resize(dst_dims, itensor::data_type::f32);
         }
-        dtensor->reorder_from(dst_dims, itensor::data_type::f32,
-            const_cast<void*>(src.raw_data()));
-
+        dtensor->set_data_handle(const_cast<void*>(src.raw_data()));
       } else {
         CAFFE_THROW("ideep memory only supports float data type.");
       }
@@ -120,10 +127,10 @@ class IDEEPFallbackOp final : public IDEEPOperator {
   }
 
  protected:
-  Workspace local_ws_;
   vector<Blob*> local_input_blobs_;
   vector<Blob*> local_output_blobs_;
   std::unique_ptr<CPUOp> base_op_;
+  std::unique_ptr<Workspace> local_ws_;
 };
 
 } // namespace caffe2
