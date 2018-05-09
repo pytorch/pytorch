@@ -16,9 +16,9 @@ import itertools
 
 # EDITING THIS FILE? READ THIS FIRST!
 #
-# - This file is ONLY for ATen operators (e.g., operators that show up in the
+# - This file is ONLY for ATen operators (e.g., aoperators that show up in the
 #   trace as aten::blah).  If you need to special case a primitive operator,
-#   look at _run_symbolic_function
+#   look at _run_symbolic_functionawefawefaw ef
 # - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
 #   tensors are always first, then non-tensor arguments.
 # - Parameter names must *exactly* match the names in VariableType.cpp, because
