@@ -51,13 +51,12 @@ fi
 ###########################################################
 # Build Caffe2
 ###########################################################
-python_args="$(python ./scripts/get_python_cmake_flags.py)"
 cmake_args=()
 cmake_args+=("-DCMAKE_INSTALL_PREFIX=$PREFIX")
 
 # Build Caffe2
 mkdir -p caffe2_build && pushd caffe2_build
-cmake "${cmake_args[@]}" "$python_args" $CAFFE2_CMAKE_ARGS ..
+cmake "${cmake_args[@]}" $CAFFE2_CMAKE_ARGS ..
 if [ "$(uname)" == 'Darwin' ]; then
   make "-j$(sysctl -n hw.ncpu)"
 else
