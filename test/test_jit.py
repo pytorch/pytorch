@@ -274,7 +274,7 @@ class TestJit(TestCase):
         self.assertExpectedGraph(ge.graph_for(x, y))
 
     # TODO: adapt this test to check that GraphExecutor treats them differently
-    @unittest.skip
+    @unittest.skip("Need to be adjusted to Graph Executor")
     def test_arg_configurations(self):
         """Different arg configurations should trigger different traces"""
         x = Variable(torch.FloatTensor(4, 4).uniform_())
@@ -379,7 +379,7 @@ class TestJit(TestCase):
         self.assertExpectedGraph(trace)
 
     # TODO: update verify to work with GraphExecutors
-    @unittest.skip
+    @unittest.skip("verify needs to be updated to work with GraphExecutors")
     def test_verify(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0.7], requires_grad=True)
@@ -528,7 +528,7 @@ class TestJit(TestCase):
         self.checkTrace(fn, inputs)
 
     # TODO: adapt to a GraphExecutor test
-    @unittest.skip
+    @unittest.skip("Need to instrument GraphExecutors a bit more")
     def test_flags(self):
         x, y = torch.randn(2, 2)
         y = Variable(torch.randn(2, 2))
