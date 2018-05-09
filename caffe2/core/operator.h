@@ -332,7 +332,7 @@ class OperatorBase : public Observable<OperatorBase> {
 
 // If your operator does not need any specialized contructor or destructor,
 // you can simply use this to save two lines of code.
-#define USE_SIMPLE_BASE_CTOR_DTOR(name)                                        \
+#define USE_SIMPLE_CTOR_DTOR(name)                                        \
   name(const OperatorDef& operator_def, Workspace* ws)                         \
       : OperatorBase(operator_def, ws) {}                                      \
   virtual ~name() noexcept {}
@@ -532,10 +532,6 @@ class Operator : public OperatorBase {
 
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
-#define USE_SIMPLE_CTOR_DTOR(name)                                             \
-  name(const OperatorDef& operator_def, Workspace* ws)                         \
-      : Operator<Context>(operator_def, ws) {}                                 \
-  virtual ~name() noexcept {}
 
 // Helpers to implement runtime op polymorphism. Often it's convenient to make
 // an op work on different input types (e.g. i32 vs i64 indices) or special-case
