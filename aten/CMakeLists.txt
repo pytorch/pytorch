@@ -238,7 +238,7 @@ if (CUDA_FOUND)
   ELSE()
     MESSAGE(STATUS "MAGMA not found. Compiling without MAGMA support")
   ENDIF()
-endif(AT_CUDA_ENABLED)
+endif(CUDA_FOUND)
 
 # ARM specific flags
 FIND_PACKAGE(ARM)
