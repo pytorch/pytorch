@@ -78,7 +78,7 @@ class TestGroupNormOp(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, inputs, [0, 1, 2])
         for i in range(len(inputs)):
-            self.assertGradientChecks(gc, op, inputs, i, [0])
+            self.assertGradientChecks(gc, op, inputs, i, [0], stepsize=1e-4)
 
     @given(N=st.integers(1, 5), G=st.integers(1, 3), D=st.integers(1, 3),
            T=st.integers(1, 3), H=st.integers(2, 5), W=st.integers(2, 5),
@@ -118,4 +118,4 @@ class TestGroupNormOp(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, inputs, [0, 1, 2])
         for i in range(len(inputs)):
-            self.assertGradientChecks(gc, op, inputs, i, [0])
+            self.assertGradientChecks(gc, op, inputs, i, [0], stepsize=1e-4)
