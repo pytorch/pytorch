@@ -53,9 +53,9 @@ class Conv : public torch::nn::CloneableModule<Conv> {
     return *this;
   }
 
-  AUTOGRAD_KWARG(Conv, bool, transposed, false, true)
-  AUTOGRAD_KWARG(Conv, bool, no_bias, false, true)
-  AUTOGRAD_KWARG(Conv, int, groups, 1, 1)
+  TORCH_AUTOGRAD_KWARG(Conv, bool, transposed, false, true)
+  TORCH_AUTOGRAD_KWARG(Conv, bool, no_bias, false, true)
+  TORCH_AUTOGRAD_KWARG(Conv, int, groups, 1, 1)
 
   Variable weight, bias;
   uint32_t Nd_;

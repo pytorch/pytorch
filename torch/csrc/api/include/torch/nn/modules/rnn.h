@@ -18,10 +18,10 @@ class RNNBase : public nn::CloneableModule<Derived> {
   RNNBase(uint32_t input_size, uint32_t hidden_size)
       : input_size_(input_size), hidden_size_(hidden_size) {}
 
-  AUTOGRAD_KWARG(RNNBase, RNNMode, mode, RNNMode::LSTM, RNNMode::LSTM)
-  AUTOGRAD_KWARG(RNNBase, uint32_t, nlayers, 1, 1);
-  AUTOGRAD_KWARG(RNNBase, bool, no_bias, false, true)
-  AUTOGRAD_KWARG(RNNBase, float, dropout, 0, 0)
+  TORCH_AUTOGRAD_KWARG(RNNBase, RNNMode, mode, RNNMode::LSTM, RNNMode::LSTM)
+  TORCH_AUTOGRAD_KWARG(RNNBase, uint32_t, nlayers, 1, 1);
+  TORCH_AUTOGRAD_KWARG(RNNBase, bool, no_bias, false, true)
+  TORCH_AUTOGRAD_KWARG(RNNBase, float, dropout, 0, 0)
 
   bool flatten_parameters(); // Flatten for cudnn
 
