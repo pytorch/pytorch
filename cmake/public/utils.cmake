@@ -96,3 +96,29 @@ function(caffe2_binary_target target_name_or_src)
   endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
+
+##############################################################################
+# Multiplex between loading executables for CUDA versus HIP (AMD Software Stack).
+# Usage:
+#   torch_cuda_based_add_executable(cuda_target)
+#
+macro(torch_cuda_based_add_executable cuda_target)
+  IF (WITH_ROCM)
+    hip_add_executable(cuda_target)
+  ELSE()
+    cuda_add_executable(cuda_target)
+  ENDIF(WITH_ROCM)
+endmacro()
+
+##############################################################################
+# Multiplex between adding libraries for CUDA versus HIP (AMD Software Stack).
+# Usage:
+#   torch_cuda_based_add_library(cuda_target)
+#
+macro(torch_cuda_based_add_library cuda_target)
+  IF (WITH_ROCM)
+    hip_add_library(cuda_target)
+  ELSE()
+    cuda_add_library(cuda_target)
+  ENDIF(WITH_ROCM)
+endmacro()

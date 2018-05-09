@@ -7,8 +7,11 @@ else()
 endif()
 
 IF(WITH_ROCM)
-  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/LoadHIP.cmake)
+  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/LoadHIP.cmake)
 ENDIF()
+
+# Load the CMake Utilities.
+INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/utils.cmake)
 
 # Create the project in all cases
 project(ATen CXX C)

@@ -34,6 +34,24 @@ patch_folder = os.path.join(amd_build_dir, "patches")
 for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
     subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=out_dir)
 
+# HIPCC Compiler doesn't provide host defines - Automatically include them.
+for root, _, files in os.walk(os.path.join(out_dir, "aten/src/ATen")):
+    for filename in files:
+        if filename.endswith(".cu") or filename.endswith(".cuh"):
+            filepath = os.path.join(root, filename)
+
+            # Add the include header!
+            with open(filepath, "r+") as f:
+                txt = f.read()
+                result = '#include "hip/hip_runtime.h"\n%s' % txt
+                f.seek(0)
+                f.write(result)
+                f.truncate()
+                f.flush()
+
+                # Flush to disk
+                os.fsync(f)
+
 # Make various replacements inside AMD_BUILD/torch directory
 ignore_files = ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp",
                 "csrc/cuda/cuda_check.h", "csrc/jit/fusion_compiler.cpp"]
