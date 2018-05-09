@@ -1705,7 +1705,7 @@ class TestScript(TestCase):
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.assertEqual(func(x), torch.cat((x, x), dim=0))
 
-        with self.assertRaisesRegex(RuntimeError, "expected at most"):
+        with self.assertRaisesRegex(RuntimeError, "specified twice"):
             @torch.jit.script
             def func(x):
                 return torch.cat((x, x), x, dim=0)
@@ -3218,6 +3218,32 @@ class TestScript(TestCase):
             return torch.sum(a, dim=b, keepdim=False)
 
         self.checkScript(t2, (torch.zeros(1, 1, 2)))
+
+        def t3(a):
+            # use a var arg expand
+            return a.expand(3, 4)
+
+        self.checkScript(t3, (torch.zeros(1, 4)))
+
+        def t4(a):
+            if True:
+                c = [3, 4]
+            else:
+                c = [3, 5]
+            # use bad list expand
+            return a.expand(c)
+
+        self.checkScript(t4, (torch.zeros(1, 4)))
+
+        def t5(a):
+            if True:
+                c = 3
+            else:
+                c = 3
+            # use a var arg expand, single value
+            return a.expand(c)
+
+        self.checkScript(t5, (torch.zeros(1),))
 
 
 # Smoke tests for export methods

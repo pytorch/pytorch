@@ -23,6 +23,7 @@ void PeepholeOptimize(Block * block) {
     switch (n->kind()) {
       case aten::expand:
         // Eliminate redundant expand
+        if(!n->hasAttribute(attr::size)) break;
         if (!n->input()->isTensor()) break;
         if (n->is(attr::size) == n->input()->type()->expect<TensorType>()->sizes()) {
           n->output()->replaceAllUsesWith(n->input());

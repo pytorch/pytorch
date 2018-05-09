@@ -58,12 +58,17 @@ struct tensor_as_impl<std::array<bool, N>> {
 template<>
 struct tensor_as_impl<at::IntList> {
   at::IntList operator()(at::Tensor&& t) {
+    t = t.toBackend(at::kCPU).contiguous();
     if (t.type().scalarType() != at::ScalarType::Long)
       throw tensor_conversion_error("Expected a LongTensor");
-    if (t.dim() != 1)
-      throw tensor_conversion_error("Expected a 1D LongTensor");
-    if (!t.is_contiguous())
-      throw tensor_conversion_error("Expected a contiguous LongTensor");
+    // certain ops like view and expand allow varargs behavior:
+    //    t.expand(3,4) --> t.expand([3, 4])
+    // In the case where we have `t.expand(s)` in @script,  we don't
+    // know whether s is a 1D list or a scalar. In this case we leave it
+    // as is in the IR and allow zero-dim tensors to turn into a list here:
+    // t.expand(3) --> t.expand([3])
+    if (t.dim() > 1)
+      throw tensor_conversion_error("Expected a scalar or 1D LongTensor");
     return at::IntList{t.data<int64_t>(), static_cast<size_t>(t.numel())};
   }
 };

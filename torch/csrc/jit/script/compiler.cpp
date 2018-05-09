@@ -358,6 +358,26 @@ void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
   node->copyAttributes(attributes);
 }
 
+static bool isVarargs(const FunctionSchema& schema) {
+  size_t n_args = schema.arguments.size();
+  // we allow varargs to turn into IntList arguments in the following cases
+  // foo(Tensor self, IntList r)
+  // foo(IntList r)
+  // e.g.:
+  // expand(TensorSelf, IntList sizes)
+  return (n_args == 1 || (n_args == 2 && schema.arguments[0].name == "self")) &&
+      schema.arguments.back().attribute_kind == AttributeKind::is;
+}
+
+at::ArrayRef<Value*> createTupleUnpack(Value* v) {
+  // small peephole optimization to ensure IntList attributes can still turn
+  // into constants e.g. in x.expand([3, 4])
+  if(v->node()->kind() == prim::TupleConstruct)
+    return v->node()->inputs();
+  auto & g = *v->owningGraph();
+  return g.insertNode(g.createTupleUnpack(v))->outputs();
+}
+
 at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
@@ -372,16 +392,26 @@ at::optional<std::vector<Value*>> tryMatchSchema(
 
     std::vector<at::optional<NamedValue>> positional_inputs(schema.arguments.size(), at::nullopt);
 
-    size_t total_inputs = attributes.size() + inputs.size();
-    if(total_inputs > schema.arguments.size()) {
-      err() << "expected at most " << schema.arguments.size() << " arguments "
-      << " but found " << total_inputs << "\n" << loc << "\n";
-      return at::nullopt;
-    }
     // fill in positional arguments
-    for(size_t i = 0; i < inputs.size(); ++i) {
+    size_t non_vararg = std::min(inputs.size(), schema.arguments.size());
+    for(size_t i = 0; i < non_vararg; ++i) {
       positional_inputs[i] = inputs[i];
     }
+    // if we have extra vararg arguments pack them all up into a tuple as the last argument
+    // s.expand(3, 4) --> expand(s, (3, 4))
+    // s.expand(x) --> expand(s, x) # note: no tuple here it is possible that x is already a list
+    if(inputs.size() > schema.arguments.size()) {
+      if(!isVarargs(schema)) {
+        err() << "expected at most " << schema.arguments.size() << " positional arguments "
+        << " but found " << inputs.size() << "\n" << loc << "\n";
+        return at::nullopt;
+      }
+      auto last = inputs.back();
+      auto values = toValues(inputs.slice(schema.arguments.size() - 1));
+      auto tup = graph.insertNode(graph.createTuple(values))->output();
+      positional_inputs.back() = NamedValue(last.loc, last.name, tup);
+    }
+
     // fill in named arguments
     for(const NamedValue& nv : attributes) {
       auto idx = schema.argumentIndexWithName(nv.name);
@@ -417,8 +447,8 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       // is an IntList in aten, for things like x.expand(sizes=[3,4,5])
       if(arg.attribute_kind == AttributeKind::is &&
          v.value->type()->isSubtypeOf(*ListType::ofTensors())) {
-        auto unpacked = graph.insertNode(graph.createTupleUnpack(v.value));
-        v.value = createStack(graph, loc, unpacked->outputs());
+        auto unpacked = createTupleUnpack(v.value);
+        v.value = createStack(graph, loc, unpacked);
       }
 
       if(!v.value->type()->isSubtypeOf(*arg.type)) {
@@ -430,9 +460,8 @@ at::optional<std::vector<Value*>> tryMatchSchema(
 
       // we only support lists for builtins, where they must be flattened
       if(arg.type->kind() == TypeKind::ListType) {
-        auto unpacked = graph.insertNode(graph.createTupleUnpack(v.value));
-        const auto & outputs = unpacked->outputs();
-        flat_inputs.insert(flat_inputs.end(), outputs.begin(), outputs.end());
+        auto unpacked = createTupleUnpack(v.value);
+        flat_inputs.insert(flat_inputs.end(), unpacked.begin(), unpacked.end());
       } else {
         flat_inputs.push_back(v.value);
       }
@@ -1414,10 +1443,9 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {
-  auto & graph = *m.graph();
   if(value->type()->kind() == TypeKind::TupleType) {
-    auto n = graph.insertNode(graph.createTupleUnpack(value));
-    return fmap(n->outputs(), [](Value* v) -> std::shared_ptr<SugaredValue> {
+    auto outputs = createTupleUnpack(value);
+    return fmap(outputs, [](Value* v) -> std::shared_ptr<SugaredValue> {
       return std::make_shared<SimpleValue>(v);
     });
   }
