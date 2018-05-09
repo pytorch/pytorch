@@ -310,12 +310,13 @@ if (NOT NO_API)
   set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
 
   add_executable(test_api
-    ${TORCH_API_TEST_DIR}/main.cpp
     ${TORCH_API_TEST_DIR}/container.cpp
-    ${TORCH_API_TEST_DIR}/misc.cpp
-    ${TORCH_API_TEST_DIR}/rnn.cpp
     ${TORCH_API_TEST_DIR}/integration.cpp
+    ${TORCH_API_TEST_DIR}/main.cpp
+    ${TORCH_API_TEST_DIR}/misc.cpp
+    ${TORCH_API_TEST_DIR}/module.cpp
     ${TORCH_API_TEST_DIR}/optim.cpp
+    ${TORCH_API_TEST_DIR}/rnn.cpp
     ${TORCH_API_TEST_DIR}/serialization.cpp)
 
   target_include_directories(test_api

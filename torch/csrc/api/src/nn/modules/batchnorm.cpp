@@ -3,15 +3,16 @@
 namespace torch { namespace nn {
 void BatchNorm::initialize_parameters() {
   if (affine_) {
-    weight = this->add(
-        Var(DefaultTensor(at::kFloat).tensor(num_features_), true), "weight");
-    bias = this->add(
-        Var(DefaultTensor(at::kFloat).tensor(num_features_), true), "bias");
+    weight = this->add(Var(at::CPU(at::kFloat).empty(num_features_)), "weight");
+    bias = this->add(Var(at::CPU(at::kFloat).empty(num_features_)), "bias");
   }
 
   if (stateful_) {
-    running_mean = Var(DefaultTensor(at::kFloat).zeros({num_features_}), false);
-    running_var = Var(DefaultTensor(at::kFloat).ones({num_features_}), false);
+    // TODO: Make into buffers instead of parameters
+    running_mean = this->add(
+        Var(at::CPU(at::kFloat).zeros({num_features_}), false), "running_mean");
+    running_var = this->add(
+        Var(at::CPU(at::kFloat).ones({num_features_}), false), "running_var");
   }
 }
 
@@ -32,7 +33,7 @@ variable_list BatchNorm::forward(variable_list inputs) {
   auto& running_mean = (stateful_ ? this->running_mean : inputs[1]);
   auto& running_var = (stateful_ ? this->running_var : inputs[2]);
 
-  if (train_) {
+  if (is_training()) {
     const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
     if (input.numel() / num_channels <= 1) {
       throw std::runtime_error(
@@ -46,7 +47,7 @@ variable_list BatchNorm::forward(variable_list inputs) {
       bias,
       running_mean,
       running_var,
-      train_,
+      is_training(),
       momentum_,
       eps_,
       hasCudnn());
