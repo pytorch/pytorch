@@ -30,8 +30,7 @@ class ObserverBase {
 
   virtual std::unique_ptr<ObserverBase<T>> rnnCopy(T* subject, int rnn_order)
       const {
-    LOG(WARNING)
-        << "rnnCopy() is not implemented and nullptr will be returned.";
+    VLOG(1) << "rnnCopy() is not implemented and nullptr will be returned.";
     return nullptr;
   };
 
