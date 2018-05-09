@@ -4,6 +4,8 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
 
+#include <google/protobuf/text_format.h>
+
 CAFFE2_DECLARE_bool(caffe2_disable_chaining);
 
 namespace caffe2 {
@@ -85,7 +87,7 @@ unique_ptr<NetBase> CreateNetTestHelper(
   return CreateNet(net_def, ws);
 }
 
-}  // namespace
+} // namespace
 
 TEST(NetTest, ConstructionNoDeclaredInputOutput) {
   Workspace ws;
@@ -115,8 +117,7 @@ TEST(NetTest, DeclaredInputInsufficient) {
   Workspace ws;
   ws.CreateBlob("in");
   ASSERT_THROW(
-      CreateNetTestHelper(&ws, vector<string>{"unuseful_in"},
-                          vector<string>()),
+      CreateNetTestHelper(&ws, vector<string>{"unuseful_in"}, vector<string>()),
       EnforceNotMet);
 }
 
@@ -124,8 +125,8 @@ TEST(NetDeathTest, DeclaredOutputNotMet) {
   Workspace ws;
   ws.CreateBlob("in");
   ASSERT_THROW(
-      CreateNetTestHelper(&ws, vector<string>(),
-                          vector<string>{"unproduced_out"}),
+      CreateNetTestHelper(
+          &ws, vector<string>(), vector<string>{"unproduced_out"}),
       EnforceNotMet);
 }
 
@@ -144,7 +145,8 @@ void checkChainingAndRun(
   Workspace ws;
   ws.CreateBlob("in");
   NetDef net_def;
-  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(
+      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
     auto old = FLAGS_caffe2_disable_chaining;
@@ -164,7 +166,8 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   Workspace ws;
 
   NetDef net_def;
-  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(
+      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
   net_def.set_num_workers(4);
 
   // Create all external inputs
@@ -563,7 +566,8 @@ TEST(NetTest, FailingOperator) {
   ws.CreateBlob("in");
 
   NetDef net_def;
-  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(
+      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
 
   {
     net_def.set_num_workers(4);
@@ -574,7 +578,7 @@ TEST(NetTest, FailingOperator) {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     for (int i = 0; i < 10; i++) {
       counter.exchange(0);
-      ASSERT_FALSE(net.get()->Run());
+      ASSERT_FALSE(net->Run());
       ASSERT_EQ(1, counter.load());
     }
   }
@@ -612,12 +616,50 @@ TEST(NetTest, OperatorWithExecutorHelper) {
 )DOC";
 
   NetDef net_def;
-  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(
+      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   net_def.set_num_workers(kTestPoolSize);
   std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
   ASSERT_TRUE(net->Run());
+}
+
+TEST(NetTest, OperatorWithDisabledEvent) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "async_scheduling"
+        external_input: "in"
+        op {
+          input: "in"
+          output: "out"
+          type: "NetTestDummy"
+          arg {
+            name: "fail"
+            i: 1
+          }
+        }
+)DOC";
+
+  Workspace ws;
+  ws.CreateBlob("in");
+
+  NetDef net_def;
+  CAFFE_ENFORCE(
+      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+
+  {
+    std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+    net->GetOperators()[0]->DisableEvent();
+    // async_scheduling propagates exception
+    bool caught_exception = false;
+    try {
+      net->Run();
+    } catch (const std::exception& e) {
+      caught_exception = true;
+    }
+    ASSERT_TRUE(caught_exception);
+  }
 }
 
 } // namespace caffe2
