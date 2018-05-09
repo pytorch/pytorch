@@ -8,6 +8,15 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(FloatToFused8BitRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& /* def */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape X = in[0];
+      X.set_dims(1, X.dims(1) + 8);
+      out.push_back(std::move(X));
+      out[0].set_data_type(TensorProto_DataType_UINT8);
+      return out;
+    })
     .SetDoc(R"DOC(
 Applies 8-bit row-wise quantization by determining the range
 (maximum - minimum) and offset (minimum value) of each row in the input
@@ -28,6 +37,15 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedToFloat)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& /* def */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape X = in[0];
+      X.set_dims(1, X.dims(1) - 8);
+      out.push_back(std::move(X));
+      out[0].set_data_type(TensorProto_DataType_FLOAT);
+      return out;
+    })
     .SetDoc(R"DOC(
 De-quantizes the result of the
 FloatToFused8BitRowwiseQuantized operator. The input is expected to
