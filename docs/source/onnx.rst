@@ -16,8 +16,15 @@ saves the resulting traced model to ``alexnet.proto``::
     dummy_input = Variable(torch.randn(10, 3, 224, 224)).cuda()
     model = torchvision.models.alexnet(pretrained=True).cuda()
 
-    # providing these is optional, but makes working with the
-    # converted model nicer.
+    # Providing input and output names sets the display names for values
+    # within the model's graph. Setting these does not change the semantics
+    # of the graph; it is only for readability.
+    #
+    # The inputs to the network consist of the flat list of inputs (i.e.
+    # the values you would pass to the forward() method) followed by the
+    # flat list of parameters. You can partially specify names, i.e. provide
+    # a list here shorter than the number of inputs to the model, and we will
+    # only set that subset of names, starting from the beginning.
     input_names = [ "actual_input_1" ] + [ "learned_%d" % i for i in range(16) ]
     output_names = [ "output1" ]
 
@@ -28,9 +35,8 @@ the network structure and parameters of the model you exported
 (in this case, AlexNet).  The keyword argument ``verbose=True`` causes the
 exporter to print out a human-readable representation of the network::
 
-    # All parameters are encoded explicitly as inputs. By convention,
-    # the actual inputs are first, and the learned parameters (ala
-    # nn.Module.state_dict) appear last.
+    # These are the inputs and parameters to the network, which have taken on
+    # the names we specified earlier.
     graph(%actual_input_1 : Float(10, 3, 224, 224)
           %learned_0 : Float(64, 3, 11, 11)
           %learned_1 : Float(64)
@@ -39,6 +45,9 @@ exporter to print out a human-readable representation of the network::
           # ---- omitted for brevity ----
           %learned_14 : Float(1000, 4096)
           %learned_15 : Float(1000)) {
+      # Every statement consists of some output tensors (and their types),
+      # the operator to be run (with its attributes, e.g., kernels, strides,
+      # etc.), its input tensors (%actual_input_1, %learned_0, %learned_1)
       %17 : Float(10, 64, 55, 55) = onnx::Conv[dilations=[1, 1], group=1, kernel_shape=[11, 11], pads=[2, 2, 2, 2], strides=[4, 4]](%actual_input_1, %learned_0, %learned_1), scope: AlexNet/Sequential[features]/Conv2d[0]
       %18 : Float(10, 64, 55, 55) = onnx::Relu(%17), scope: AlexNet/Sequential[features]/ReLU[1]
       %19 : Float(10, 64, 27, 27) = onnx::MaxPool[kernel_shape=[3, 3], pads=[0, 0, 0, 0], strides=[2, 2]](%18), scope: AlexNet/Sequential[features]/MaxPool2d[2]
