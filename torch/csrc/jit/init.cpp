@@ -5,7 +5,6 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/python_compiled_function.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
@@ -130,7 +129,6 @@ void initJITBindings(PyObject *module) {
       });
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
-  python::initCompilerMixin(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
 }
