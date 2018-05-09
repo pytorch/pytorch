@@ -6,9 +6,8 @@ namespace caffe2 {
 namespace opt {
 
 using namespace nom;
-caffe2::NetDef OptimizeForIdeep(caffe2::NetDef net) {
-  auto nn = convertToNNModule(net);
 
+void OptimizeForIdeep(repr::NNModule* nn) {
   // Conv+Relu fusion
   auto should_fuse = [](const repr::Conv& conv) {
     const auto annotation = conv.getAnnotation();
@@ -37,10 +36,8 @@ caffe2::NetDef OptimizeForIdeep(caffe2::NetDef net) {
     // 1 means FUSION_CONV_RELU
     arg->set_i(1);
   };
-  fuseConvRelu(&nn, should_fuse, postprocess);
-
-  // Currently no more other optimization passes
-  return convertToCaffe2Proto(nn, net);
+  fuseConvRelu(nn, should_fuse, postprocess);
 }
+
 } // namespace opt
 } // namespace caffe2
