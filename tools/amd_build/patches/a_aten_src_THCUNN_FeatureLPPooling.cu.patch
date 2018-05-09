@@ -7,7 +7,7 @@ index 4ad190fbe..615ab4ec6 100644
      if (Stride < Width) {
        // Shift registers for calculating the next point
 -      RegisterUtils<T, Width>::shiftLeft<Stride>(in);
-+      abort();
++      RegisterUtils<T, Width>::template shiftLeft<Stride>(in);
      }
    }
  }
@@ -16,7 +16,7 @@ index 4ad190fbe..615ab4ec6 100644
      if (Stride < Width) {
        // Shift registers for calculating the next point
 -      RegisterUtils<T, Width>::shiftLeft<Stride>(in);
-+      abort();
++      RegisterUtils<T, Width>::template shiftLeft<Stride>(in);
      }
    }
  }
