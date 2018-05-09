@@ -57,7 +57,6 @@ static magma_queue_t createMagmaQueue(const Tensor& tensor) {
       &magma_queue);
   return magma_queue;
 }
-#endif
 
 static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
   auto result = static_cast<magma_int_t>(value);
@@ -67,6 +66,7 @@ static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
   }
   return result;
 }
+#endif
 
 // Creates an array of size elements of type T, backed by pinned memory
 // wrapped in a Storage
