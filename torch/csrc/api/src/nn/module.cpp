@@ -11,7 +11,11 @@
 
 namespace torch { namespace nn {
 
-Module::Module() : is_training_(true) {}
+Module::Module(const char* name) : name_(name), is_training_(true) {}
+
+const char* Module::name() const noexcept {
+  return name_;
+}
 
 std::map<std::string, Variable> Module::parameters() const {
   std::map<std::string, Variable> ret;

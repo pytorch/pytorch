@@ -4,6 +4,18 @@
 #include <stdexcept>
 
 namespace torch { namespace nn {
+
+Conv::Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan)
+    : CloneableModule<Conv>("Conv"),
+      Nd_(Nd),
+      in_channels_(in_chan),
+      out_channels_(out_chan),
+      stride_(makeTup(1, 1)),
+      padding_(makeTup(0)),
+      dilation_(makeTup(1, 1)),
+      dilated_(false),
+      output_padding_(makeTup(0)) {}
+
 void Conv::initialize_parameters() {
   if (!transposed_) {
     for (auto pad : output_padding_) {

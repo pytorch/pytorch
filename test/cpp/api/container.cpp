@@ -7,6 +7,8 @@ using namespace torch::nn;
 
 class TestModel : public CloneableModule<TestModel> {
  public:
+  TestModel() : CloneableModule<TestModel>("TestModel") {}
+
   void initialize_containers() override {
     add(make(Linear(10, 3)), "l1");
     add(make(Linear(3, 5)), "l2");
@@ -20,6 +22,8 @@ class TestModel : public CloneableModule<TestModel> {
 
 class NestedModel : public CloneableModule<NestedModel> {
  public:
+  NestedModel() : CloneableModule<NestedModel>("NestedModel") {}
+
   void initialize_containers() override {
     add(make(Linear(5, 20)), "l1");
     add(make(TestModel()), "test");
