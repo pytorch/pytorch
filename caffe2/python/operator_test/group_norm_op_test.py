@@ -57,9 +57,9 @@ class TestGroupNormOp(hu.HypothesisTestCase):
 
         C = G * D
         if order == "NCHW":
-            X = np.random.randn(N, C, H, W).astype(np.float32) + 1.0
+            X = 2.0 * np.random.randn(N, C, H, W).astype(np.float32) + 2.0
         else:
-            X = np.random.randn(N, H, W, C).astype(np.float32) + 1.0
+            X = 2.0 * np.random.randn(N, H, W, C).astype(np.float32) + 2.0
         gamma = np.random.rand(C).astype(np.float32) - 0.5
         beta = np.random.rand(C).astype(np.float32) - 0.5
         inputs = [X, gamma, beta]
@@ -78,7 +78,7 @@ class TestGroupNormOp(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, inputs, [0, 1, 2])
         for i in range(len(inputs)):
-            self.assertGradientChecks(gc, op, inputs, i, [0], stepsize=1e-4)
+            self.assertGradientChecks(gc, op, inputs, i, [0], stepsize=1e-5)
 
     @given(N=st.integers(1, 5), G=st.integers(1, 3), D=st.integers(1, 3),
            T=st.integers(1, 3), H=st.integers(2, 5), W=st.integers(2, 5),
@@ -97,9 +97,9 @@ class TestGroupNormOp(hu.HypothesisTestCase):
 
         C = G * D
         if order == "NCHW":
-            X = np.random.randn(N, C, T, H, W).astype(np.float32) + 1.0
+            X = 2.0 * np.random.randn(N, C, T, H, W).astype(np.float32) + 2.0
         else:
-            X = np.random.randn(N, T, H, W, C).astype(np.float32) + 1.0
+            X = 2.0 * np.random.randn(N, T, H, W, C).astype(np.float32) + 2.0
         gamma = np.random.rand(C).astype(np.float32) - 0.5
         beta = np.random.rand(C).astype(np.float32) - 0.5
         inputs = [X, gamma, beta]
@@ -118,4 +118,4 @@ class TestGroupNormOp(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, inputs, [0, 1, 2])
         for i in range(len(inputs)):
-            self.assertGradientChecks(gc, op, inputs, i, [0], stepsize=1e-4)
+            self.assertGradientChecks(gc, op, inputs, i, [0], stepsize=1e-5)
