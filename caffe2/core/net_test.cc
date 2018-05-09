@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "caffe2/core/net.h"
+#include "caffe2/core/net_async_scheduling.h"
 #include "caffe2/core/net_dag.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
@@ -659,6 +660,40 @@ TEST(NetTest, OperatorWithDisabledEvent) {
       caught_exception = true;
     }
     ASSERT_TRUE(caught_exception);
+  }
+}
+
+TEST(NetTest, ExecutorOverride) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "dag"
+  )DOC";
+
+  NetDef net_def;
+  CAFFE_ENFORCE(
+      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+
+  {
+    Workspace ws;
+    auto old = FLAGS_caffe2_override_executor;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_override_executor = old; });
+    FLAGS_caffe2_override_executor = "";
+
+    std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+    auto dag_net = caffe2::dynamic_cast_if_rtti<DAGNet*>(net.get());
+    ASSERT_TRUE(dag_net != nullptr);
+  }
+
+  {
+    Workspace ws;
+    auto old = FLAGS_caffe2_override_executor;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_override_executor = old; });
+    FLAGS_caffe2_override_executor = "dag,async_scheduling";
+
+    std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+    auto async_net =
+        caffe2::dynamic_cast_if_rtti<AsyncSchedulingNet*>(net.get());
+    ASSERT_TRUE(async_net != nullptr);
   }
 }
 

@@ -21,6 +21,8 @@
 #include "caffe2/utils/simple_queue.h"
 #include "caffe2/utils/thread_pool.h"
 
+CAFFE2_DECLARE_string(caffe2_override_executor);
+
 namespace caffe2 {
 
 class NetBase;
