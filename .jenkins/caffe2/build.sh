@@ -45,7 +45,6 @@ CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
 CMAKE_ARGS+=("-DUSE_ZSTD=ON")
 
 if [[ $BUILD_ENVIRONMENT == *-aten-* ]]; then
-  pip install pyyaml || echo 0
   CMAKE_ARGS+=("-DUSE_ATEN=ON")
 fi
 
