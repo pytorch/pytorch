@@ -1,6 +1,5 @@
 #include <ATen/detail/VariableHooksInterface.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/tensor/python_tensor.h>
 
 namespace torch { namespace autograd {
 

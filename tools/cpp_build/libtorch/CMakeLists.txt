@@ -163,6 +163,7 @@ add_custom_command(
   WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
 
 set(TORCH_SRCS
+  ${TORCH_SRC_DIR}/csrc/autograd/aten_variable_hooks.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
@@ -256,7 +257,11 @@ target_link_libraries(torch
   ${NANOPB_LIBRARY}
 )
 if(NOT NO_CUDA)
-  target_link_libraries(torch ${ATEN_CUDA_LIBRARY})
+  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
+    target_link_libraries(torch -Wl,--no-as-needed ${ATEN_CUDA_LIBRARY} -Wl,--as-needed)
+  else()
+    target_link_libraries(torch ${ATEN_CUDA_LIBRARY})
+  endif()
 endif()
 
 target_include_directories(torch
