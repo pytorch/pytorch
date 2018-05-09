@@ -587,13 +587,6 @@ set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 # We will build onnx as static libs and embed it directly into the binary.
 set(BUILD_SHARED_LIBS OFF)
 set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-
-
-# See https://stackoverflow.com/questions/3766740/overriding-a-default-option-value-in-cmake-from-a-parent-cmakelists-txt
-set(ONNX_NO_WERROR ON CACHE BOOL "Disable use of Werror")
-
-
-
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/onnx)
 include_directories(${ONNX_INCLUDE_DIRS})
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DONNX_NAMESPACE=${ONNX_NAMESPACE}")
