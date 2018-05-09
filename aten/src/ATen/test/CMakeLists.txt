@@ -53,8 +53,10 @@ if(WITH_CUDA OR WITH_ROCM)
   target_link_libraries(integer_divider_test ATen)
 endif()
 
-torch_cuda_based_add_executable(cuda_rng_test cuda_rng_test.cpp)
-target_link_libraries(cuda_rng_test ATen)
+if(WITH_CUDA OR WITH_ROCM)
+  torch_cuda_based_add_executable(cuda_rng_test cuda_rng_test.cpp)
+  target_link_libraries(cuda_rng_test ATen)
+endif()
 
 if (CUDNN_FOUND)
   add_executable(cudnn_test cudnn_test.cpp)
