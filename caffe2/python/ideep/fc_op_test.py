@@ -29,6 +29,9 @@ class FcTest(hu.HypothesisTestCase):
 
         self.assertDeviceChecks(dc, op, [X, W, b], [0])
 
+        for i in range(3):
+            self.assertGradientChecks(gc, op, [X, W, b], i, [0])
+
 
 if __name__ == "__main__":
     unittest.main()
