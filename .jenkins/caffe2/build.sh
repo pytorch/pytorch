@@ -44,6 +44,11 @@ CMAKE_ARGS=("-DBUILD_BINARY=ON")
 CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
 CMAKE_ARGS+=("-DUSE_ZSTD=ON")
 
+if [[ $BUILD_ENVIRONMENT == *-aten-* ]]; then
+  pip install pyyaml || echo 0
+  CMAKE_ARGS+=("-DUSE_ATEN=ON")
+fi
+
 # Run build script from scripts if applicable
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
