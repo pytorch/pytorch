@@ -74,6 +74,16 @@ AsyncNetBase::AsyncNetBase(
   }
 }
 
+void AsyncNetBase::handleRunError() {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
+  if (caught_exception_) {
+    std::rethrow_exception(caught_exception_);
+  }
+#endif // CAFFE2_USE_EXCEPTION_PTR
+  NetBase::handleRunError();
+}
+
 bool AsyncNetBase::RunAsync() {
   tracing::startIter(tracer_);
   for (auto& op : GetOperators()) {
@@ -216,6 +226,15 @@ void AsyncNetBase::asyncWait(
   first_op->WaitEvents(events, stream_id);
 }
 
+void AsyncNetBase::storeExceptionPtr() {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
+  if (!caught_exception_) {
+    caught_exception_ = std::current_exception();
+  }
+#endif // CAFFE2_USE_EXCEPTION_PTR
+}
+
 void AsyncNetBase::run(int task_id, int stream_id) {
   std::string err_msg;
   for (auto& op_id : chains_[task_id]) {
@@ -230,6 +249,9 @@ void AsyncNetBase::run(int task_id, int stream_id) {
           stream_id);
       CAFFE_ENFORCE(op->RunAsync(stream_id), "Failed to execute an op");
     } catch (const std::exception& e) {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+      storeExceptionPtr();
+#endif // CAFFE2_USE_EXCEPTION_PTR
       auto err_msg = std::string(e.what()) + ",  op " +
           (op->has_debug_def() ? op->type() : " unknown");
       if (query(task_id) == EventStatus::EVENT_INITIALIZED) {
@@ -237,14 +259,19 @@ void AsyncNetBase::run(int task_id, int stream_id) {
         // not throwing because event is in initialized state
         event(task_id).SetFinished(err_msg.c_str());
       }
-      CAFFE_THROW(err_msg);
+      LOG(ERROR) << err_msg;
+      throw;
     } catch (...) {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+      storeExceptionPtr();
+#endif // CAFFE2_USE_EXCEPTION_PTR
       auto err_msg = "Failed to execute task: unknown error,  op " +
           (op->has_debug_def() ? op->type() : " unknown");
       if (query(task_id) == EventStatus::EVENT_INITIALIZED) {
         event(task_id).SetFinished(err_msg.c_str());
       }
-      CAFFE_THROW(err_msg);
+      LOG(ERROR) << err_msg;
+      throw;
     }
   }
 

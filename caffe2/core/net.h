@@ -56,12 +56,16 @@ class NetBase : public Observable<NetBase> {
       return false;
     }
     Wait();
+    handleRunError();
+    return true;
+  }
+
+  virtual void handleRunError() {
     for (const Event* event : events_) {
       if (event->Query() != EventStatus::EVENT_SUCCESS) {
         CAFFE_THROW(event->ErrorMessage());
       }
     }
-    return true;
   }
 
   virtual bool RunAsync();
