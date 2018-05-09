@@ -15,7 +15,6 @@ class IDEEPSumOp final : public IDEEPOperator {
     const auto &X = Input(INPUT0);
     auto* Y = Output(OUTPUT);
 
-    Y->reinit_like(X);
     if (InputSize() == 1) {
       ideep::direct_copy::compute(X, *Y);
 
