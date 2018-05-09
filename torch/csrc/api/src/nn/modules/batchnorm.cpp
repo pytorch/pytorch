@@ -8,8 +8,11 @@ void BatchNorm::initialize_parameters() {
   }
 
   if (stateful_) {
-    running_mean = Var(at::CPU(at::kFloat).zeros({num_features_}), false);
-    running_var = Var(at::CPU(at::kFloat).ones({num_features_}), false);
+    // TODO: Make into buffers instead of parameters
+    running_mean = this->add(
+        Var(at::CPU(at::kFloat).zeros({num_features_}), false), "running_mean");
+    running_var = this->add(
+        Var(at::CPU(at::kFloat).ones({num_features_}), false), "running_var");
   }
 }
 
