@@ -66,7 +66,10 @@ def _cpu_deserialize(obj, location):
 
 def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
-        device = max(int(location[5:]), 0)
+        if location[5:] == '':
+            device = 0
+        else:
+            device = max(int(location[5:]), 0)
         return obj.cuda(device)
 
 
