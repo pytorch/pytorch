@@ -18,7 +18,7 @@
 
 #include "binaries/benchmark_helper.h"
 #include "caffe2/core/blob_serialization.h"
-#if !CAFFE2_MOBILE
+#ifdef __CUDA_ARCH__
 #include "caffe2/core/context_gpu.h"
 #endif
 #include "caffe2/core/init.h"
@@ -47,14 +47,14 @@ void observerConfig() {
 bool backendCudaSet(const string& backend) {
   bool run_on_gpu = false;
   if (backend == "cuda") {
-#if !CAFFE2_MOBILE
+#ifdef __CUDA_ARCH__
     if (caffe2::HasCudaGPU()) {
       run_on_gpu = true;
     } else {
       CAFFE_THROW("NO GPU support on this host machine");
     }
 #else
-    CAFFE_THROW("NO GPU support on mobile");
+    CAFFE_THROW("NO GPU support");
 #endif
   }
   return run_on_gpu;
@@ -136,7 +136,7 @@ void loadInput(
         }
         if (run_on_gpu) {
           LOG(INFO) << "Running on GPU.";
-#if !CAFFE2_MOBILE
+#ifdef __CUDA_ARCH__
           caffe2::TensorCUDA* tensor = blob->GetMutable<caffe2::TensorCUDA>();
           CHECK_NOTNULL(tensor);
           tensor->Resize(input_dims);
@@ -226,13 +226,13 @@ void writeOutput(
           name);
       if (text_output) {
         if (run_on_gpu) {
-#if !CAFFE2_MOBILE
+#ifdef __CUDA_ARCH__
           writeTextOutput<caffe2::CUDAContext, caffe2::TensorCUDA>(
               workspace->GetBlob(name)->GetMutable<caffe2::TensorCUDA>(),
               output_prefix,
               name);
 #else
-          CAFFE_THROW("Not support GPU on mobile.");
+          CAFFE_THROW("Not support GPU.");
 #endif
         } else {
           writeTextOutput<caffe2::CPUContext, caffe2::TensorCPU>(
