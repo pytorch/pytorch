@@ -13,6 +13,7 @@
 #include "torch/csrc/jit/passes/inplace_check.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/remove_expands.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
@@ -295,12 +296,23 @@ private:
       FuseGraph(graph);
     }
   }
+  // we need to run some passes to ensure the graph will run correctly
+  // in the executor. These passes go here and are always run,
+  // regardless of the 'optimize' flag
+  void runRequiredPasses(const std::shared_ptr<Graph>& g)  {
+    // implicit inserted expand nodes are not necessarily always valid
+    // when used inside script methods that might have unstable shapes
+    // we remove the implicitly created ones, and have shape analysis
+    // add valid expand nodes when the shapes are stable
+    RemoveExpands(g);
+  }
   const Code & getOrCreateAutogradFallback() {
     std::lock_guard<std::mutex> lock(compile_mutex);
     if(autograd_fallback) {
       return autograd_fallback;
     }
     auto graph_ = graph->copy();
+    runRequiredPasses(graph_);
     if(optimize) {
       CreateAutodiffSubgraphs(*graph_);
       runOptimization(graph_, /*graphMustSupportVariables=*/true);
@@ -385,6 +397,8 @@ private:
   }
   ExecutionPlan compileSpec(const ArgumentSpec & spec) {
     auto graph_ = graph->copy();
+    runRequiredPasses(graph_);
+    
     specializeToSpec(graph_, spec);
     if(!needsGradient(spec)) {
       runOptimization(graph_, /*graphMustSupportVariables=*/false);
