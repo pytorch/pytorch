@@ -33,6 +33,10 @@ template<> AT_API int64_t convert(Half f) {
 }
 
 template<> bool overflows<Half, double>(double f) {
+  using limit = std::numeric_limits<double>;
+  if (limit::has_infinity && std::isinf(f)) {
+    return false;
+  }
   return f > 65504 || f < -65504;
 }
 template<> bool overflows<Half, int64_t>(int64_t f) {

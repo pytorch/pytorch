@@ -44,6 +44,10 @@ CMAKE_ARGS=("-DBUILD_BINARY=ON")
 CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
 CMAKE_ARGS+=("-DUSE_ZSTD=ON")
 
+if [[ $BUILD_ENVIRONMENT == *-aten-* ]]; then
+  CMAKE_ARGS+=("-DUSE_ATEN=ON")
+fi
+
 # Run build script from scripts if applicable
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
@@ -128,6 +132,9 @@ if [[ -x "$(command -v cmake3)" ]]; then
 else
     CMAKE_BINARY=cmake
 fi
+
+# Use a speciallized onnx namespace in CI to catch hardcoded onnx namespace
+CMAKE_ARGS+=("-DONNX_NAMESPACE=ONNX_NAMESPACE_FOR_C2_CI")
 
 # Configure
 ${CMAKE_BINARY} "${ROOT_DIR}" ${CMAKE_ARGS[*]} "$@"

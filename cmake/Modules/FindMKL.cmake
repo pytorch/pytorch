@@ -73,8 +73,6 @@ if(USE_MKL_IDEEP_OR_MKLML)
           set(MKLDNN_LIB "${CMAKE_SHARED_LIBRARY_PREFIX}mkldnn${CMAKE_SHARED_LIBRARY_SUFFIX}")
           list(APPEND IDEEP_LIBRARIES "${PROJECT_BINARY_DIR}/lib/${MKLDNN_LIB}")
           set(CAFFE2_USE_IDEEP 1)
-          # Do NOT use MPI if IDEEP is enabled
-          set(USE_MPI OFF)
           message(STATUS "Found IDEEP (include: ${IDEEP_INCLUDE_DIR}, lib: ${IDEEP_LIBRARIES})")
         endif()
 
@@ -139,7 +137,7 @@ if(USE_MKL_IDEEP_OR_MKLML)
          list(APPEND __mklml_libs sequential)
       endif()
 
-      list(APPEND __mklml_libs core cdft_core)
+      list(APPEND __mklml_libs core)
     endif()
 
     foreach (__lib ${__mklml_libs})

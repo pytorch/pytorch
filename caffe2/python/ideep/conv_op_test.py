@@ -17,9 +17,9 @@ class ConvTest(hu.HypothesisTestCase):
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(3, 5),
-           size=st.integers(8, 20),
-           input_channels=st.integers(1, 16),
-           output_channels=st.integers(1, 16),
+           size=st.integers(8, 10),
+           input_channels=st.integers(1, 3),
+           output_channels=st.integers(1, 5),
            batch_size=st.integers(1, 3),
            use_bias=st.booleans(),
            group=st.integers(1, 2),
@@ -46,6 +46,9 @@ class ConvTest(hu.HypothesisTestCase):
 
         inputs = [X, w, b] if use_bias else [X, w]
         self.assertDeviceChecks(dc, op, inputs, [0])
+
+        for i in range(len(inputs)):
+            self.assertGradientChecks(gc, op, inputs, i, [0], threshold=0.01)
 
 
 if __name__ == "__main__":

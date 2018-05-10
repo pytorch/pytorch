@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/containers.h"
+#include <torch/nn/module.h>
 #include "torch/detail.h"
 
 #include "cereal/access.hpp"
@@ -9,23 +9,23 @@
 namespace torch {
 class OptimizerImpl {
  public:
-  OptimizerImpl(Container model) : model_(model) {}
+  OptimizerImpl(std::shared_ptr<nn::Module> model) : model_(model) {}
   virtual ~OptimizerImpl() = default;
   virtual void init_state() {}
   virtual void step() = 0;
   void zero_grad();
 
-  void set_model(Container model);
+  void set_model(std::shared_ptr<nn::Module> model);
 
  protected:
   OptimizerImpl() {}
-  Container model_;
+  std::shared_ptr<nn::Module> model_;
 };
 
 template <class Derived>
 class Optimizer_CRTP : public OptimizerImpl {
  public:
-  Optimizer_CRTP(Container model) : OptimizerImpl(model) {}
+  Optimizer_CRTP(std::shared_ptr<nn::Module> model) : OptimizerImpl(model) {}
   std::shared_ptr<Derived> make() const {
     auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
     ptr->init_state();
@@ -36,13 +36,14 @@ class Optimizer_CRTP : public OptimizerImpl {
   Optimizer_CRTP() {}
 };
 
-AUTOGRAD_OPTIMIZER_CLASS(SGD) {
+TORCH_AUTOGRAD_OPTIMIZER_CLASS(SGD) {
  public:
-  SGD(Container model, double lr) : Optimizer_CRTP(model), lr_(lr) {}
-  AUTOGRAD_KWARG(SGD, double, momentum, 0, 0);
-  AUTOGRAD_KWARG(SGD, double, dampening, 0, 0);
-  AUTOGRAD_KWARG(SGD, double, weight_decay, 0, 0);
-  AUTOGRAD_KWARG(SGD, bool, nesterov, false, true);
+  SGD(std::shared_ptr<nn::Module> model, double lr)
+      : Optimizer_CRTP(model), lr_(lr) {}
+  TORCH_AUTOGRAD_KWARG(SGD, double, momentum, 0, 0);
+  TORCH_AUTOGRAD_KWARG(SGD, double, dampening, 0, 0);
+  TORCH_AUTOGRAD_KWARG(SGD, double, weight_decay, 0, 0);
+  TORCH_AUTOGRAD_KWARG(SGD, bool, nesterov, false, true);
   double lr_;
   void step() override;
   void init_state() override;
@@ -58,11 +59,12 @@ AUTOGRAD_OPTIMIZER_CLASS(SGD) {
   std::unordered_map<std::string, at::Tensor> momentum_buffers_;
 };
 
-AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
+TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
  public:
-  Adagrad(Container model, double lr) : Optimizer_CRTP(model), lr_(lr) {}
-  AUTOGRAD_KWARG(Adagrad, double, lr_decay, 0, 0);
-  AUTOGRAD_KWARG(Adagrad, double, weight_decay, 0, 0);
+  Adagrad(std::shared_ptr<nn::Module> model, double lr)
+      : Optimizer_CRTP(model), lr_(lr) {}
+  TORCH_AUTOGRAD_KWARG(Adagrad, double, lr_decay, 0, 0);
+  TORCH_AUTOGRAD_KWARG(Adagrad, double, weight_decay, 0, 0);
   double lr_;
   void step() override;
   void init_state() override;
@@ -80,14 +82,15 @@ AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
   std::unordered_map<std::string, double> step_;
 };
 
-AUTOGRAD_OPTIMIZER_CLASS(RMSprop) {
+TORCH_AUTOGRAD_OPTIMIZER_CLASS(RMSprop) {
  public:
-  RMSprop(Container model, double lr) : Optimizer_CRTP(model), lr_(lr) {}
-  AUTOGRAD_KWARG(RMSprop, double, alpha, 0.99, 0.99);
-  AUTOGRAD_KWARG(RMSprop, double, eps, 1e-8, 1e-8);
-  AUTOGRAD_KWARG(RMSprop, double, weight_decay, 0, 0);
-  AUTOGRAD_KWARG(RMSprop, double, momentum, 0, 0);
-  AUTOGRAD_KWARG(RMSprop, bool, centered, false, true);
+  RMSprop(std::shared_ptr<nn::Module> model, double lr)
+      : Optimizer_CRTP(model), lr_(lr) {}
+  TORCH_AUTOGRAD_KWARG(RMSprop, double, alpha, 0.99, 0.99);
+  TORCH_AUTOGRAD_KWARG(RMSprop, double, eps, 1e-8, 1e-8);
+  TORCH_AUTOGRAD_KWARG(RMSprop, double, weight_decay, 0, 0);
+  TORCH_AUTOGRAD_KWARG(RMSprop, double, momentum, 0, 0);
+  TORCH_AUTOGRAD_KWARG(RMSprop, bool, centered, false, true);
 
   double lr_;
   void step() override;
@@ -108,14 +111,15 @@ AUTOGRAD_OPTIMIZER_CLASS(RMSprop) {
   std::unordered_map<std::string, at::Tensor> grad_avg_buffer_;
 };
 
-AUTOGRAD_OPTIMIZER_CLASS(Adam) {
+TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adam) {
  public:
-  Adam(Container model, double lr) : Optimizer_CRTP(model), lr_(lr) {}
-  AUTOGRAD_KWARG(Adam, double, beta1, 0.9, 0.9);
-  AUTOGRAD_KWARG(Adam, double, beta2, 0.999, 0.999);
-  AUTOGRAD_KWARG(Adam, double, weight_decay, 0, 0);
-  AUTOGRAD_KWARG(Adam, double, eps, 1e-8, 1e-8);
-  AUTOGRAD_KWARG(Adam, bool, amsgrad, false, true);
+  Adam(std::shared_ptr<nn::Module> model, double lr)
+      : Optimizer_CRTP(model), lr_(lr) {}
+  TORCH_AUTOGRAD_KWARG(Adam, double, beta1, 0.9, 0.9);
+  TORCH_AUTOGRAD_KWARG(Adam, double, beta2, 0.999, 0.999);
+  TORCH_AUTOGRAD_KWARG(Adam, double, weight_decay, 0, 0);
+  TORCH_AUTOGRAD_KWARG(Adam, double, eps, 1e-8, 1e-8);
+  TORCH_AUTOGRAD_KWARG(Adam, bool, amsgrad, false, true);
   double lr_;
   void step() override;
   void init_state() override;

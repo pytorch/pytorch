@@ -122,10 +122,6 @@ Tensor _prod_cpu(const Tensor &self) {
   return self._prodall();
 }
 
-Tensor _sum_cuda(const Tensor &self_) { return self_._sumall(); }
-
-Tensor _prod_cuda(const Tensor &self_) { return self_._prodall(); }
-
 // \ALL REDUCE ################################################################
 
 // DIM REDUCE #################################################################
@@ -224,16 +220,6 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
   return at::_th_prod_out(result, self, dim, keepdim);
 }
 
-Tensor &_sum_out_cuda(Tensor &result, const Tensor &self, int64_t dim,
-                      bool keepdim) {
-  return at::_th_sum_out(result, self, dim, keepdim);
-}
-
-Tensor &_prod_out_cuda(Tensor &result, const Tensor &self, int64_t dim,
-                       bool keepdim) {
-  return at::_th_prod_out(result, self, dim, keepdim);
-}
-
 static inline Tensor sum(const Tensor &self, IntList dim_, bool keepdim, optional<ScalarType> dtype) {
   return at::_sum(integer_upcast(self, dtype), dim_, keepdim);
 }
@@ -327,7 +313,7 @@ inline Tensor& reduce_multi_associative_out(Tensor &result, const Tensor &self, 
 
 Tensor& _sum_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   if (self.is_cuda()) {
-    return _sum_out_cuda(result, self, dim, keepdim);
+    return at::_sum_cuda_out(result, self, dim, keepdim);
   }
   else {
     return _sum_out_cpu(result, self, dim, keepdim);

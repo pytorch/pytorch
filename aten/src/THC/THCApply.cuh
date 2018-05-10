@@ -239,24 +239,19 @@ bool THC_pointwiseApply1(THCState* state,
           (aInfo),                                                      \
       (TYPE) totalElements, op);
 
-#define HANDLE_A_CASE(TYPE, A)                  \
-  {                                             \
-    if (aInfo.isContiguous()) {                 \
-      HANDLE_CASE(TYPE, -2);                    \
-    } else {                                    \
-      switch (A) {                              \
-        case 1:                                 \
-        HANDLE_CASE(TYPE, 1);                   \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_CASE(TYPE, 2);                   \
-        break;                                  \
-        default:                                \
-        HANDLE_CASE(TYPE, -1);                  \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_A_CASE(TYPE, A) {            \
+  switch (A) {                              \
+    case 1:                                 \
+      HANDLE_CASE(TYPE, 1);                 \
+      break;                                \
+    case 2:                                 \
+      HANDLE_CASE(TYPE, 2);                 \
+      break;                                \
+    default:                                \
+      HANDLE_CASE(TYPE, -1);                \
+      break;                                \
+  }                                         \
+}
 
   // Can we use 32-bit integer math in the kernel (the linear ID for the copy
   // and the resulting non-linear offset is all computable using 32-bit math?)
@@ -268,8 +263,9 @@ bool THC_pointwiseApply1(THCState* state,
     rearrangeDims(&aInfo);
     aInfo.collapseDims();
 #if CUDA_VERSION < 9000
-    if (!aInfo.isContiguous())
+    if (!aInfo.isContiguous()) {
         grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+    }
 #endif
     HANDLE_A_CASE(unsigned int, aInfo.dims);
   } else {
@@ -278,15 +274,16 @@ bool THC_pointwiseApply1(THCState* state,
     rearrangeDims(&aInfo);
     aInfo.collapseDims();
 
-    // For large tensors, we only compile the completely contiguous
-    // version and the completely generic version, to reduce
-    // compilation time.
-    if (aInfo.isContiguous()) {
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -2>
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
+    */
+    if (aInfo.dims == 1) {
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, 1>
         aOffset(aInfo);
       kernelPointwiseApply1<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
-                            uint64_t, -2>
+                            uint64_t, 1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aOffset, (uint64_t) totalElements, op);
     } else {
@@ -390,43 +387,33 @@ bool THC_pointwiseApply2(THCState* state,
           (bInfo),                                                      \
       (TYPE) totalElements, op);
 
-#define HANDLE_B_CASE(TYPE, A, B)               \
-  {                                             \
-    if (bInfo.isContiguous()) {                 \
-      HANDLE_CASE(TYPE, A, -2);                 \
-    } else {                                    \
-      switch (B) {                              \
-        case 1:                                 \
-        HANDLE_CASE(TYPE, A, 1);                \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_CASE(TYPE, A, 2);                \
-        break;                                  \
-        default:                                \
-        HANDLE_CASE(TYPE, A, -1);               \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_B_CASE(TYPE, A, B) {         \
+  switch (B) {                              \
+    case 1:                                 \
+      HANDLE_CASE(TYPE, A, 1);              \
+      break;                                \
+    case 2:                                 \
+      HANDLE_CASE(TYPE, A, 2);              \
+      break;                                \
+    default:                                \
+      HANDLE_CASE(TYPE, A, -1);             \
+      break;                                \
+  }                                         \
+}                                           
 
-#define HANDLE_A_CASE(TYPE, A, B)               \
-  {                                             \
-    if (aInfo.isContiguous()) {                 \
-      HANDLE_B_CASE(TYPE, -2, B);               \
-    } else {                                    \
-      switch (A) {                              \
-        case 1:                                 \
-        HANDLE_B_CASE(TYPE, 1, B);              \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_B_CASE(TYPE, 2, B);              \
-        break;                                  \
-        default:                                \
-        HANDLE_B_CASE(TYPE, -1, B);             \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_A_CASE(TYPE, A, B) {         \
+  switch (A) {                              \
+    case 1:                                 \
+      HANDLE_B_CASE(TYPE, 1, B);            \
+      break;                                \
+    case 2:                                 \
+      HANDLE_B_CASE(TYPE, 2, B);            \
+      break;                                \
+    default:                                \
+      HANDLE_B_CASE(TYPE, -1, B);           \
+      break;                                \
+  }                                         \
+}
 
   if (TensorUtils<TensorTypeA>::canUse32BitIndexMath(state, a) &&
       TensorUtils<TensorTypeB>::canUse32BitIndexMath(state, b)) {
@@ -456,18 +443,19 @@ bool THC_pointwiseApply2(THCState* state,
     aInfo.collapseDims();
     bInfo.collapseDims();
 
-    // For large tensors, we only compile the completely contiguous
-    // version and the completely generic version, to reduce
-    // compilation time.
-    if (aInfo.isContiguous() && bInfo.isContiguous()) {
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -2>
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
+    */
+    if (aInfo.dims == 1 && bInfo.dims == 1) {
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, 1>
         aOffset(aInfo);
-      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, -2>
+      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, 1>
         bOffset(bInfo);
       kernelPointwiseApply2<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
-                            uint64_t, -2, -2>
+                            uint64_t, 1, 1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aOffset, bOffset, (uint64_t) totalElements, op);
     } else {
@@ -591,62 +579,47 @@ bool THC_pointwiseApply3(THCState* state,
           (cInfo),                                                      \
       (TYPE) totalElements, op);
 
-#define HANDLE_C_CASE(TYPE, A, B, C)            \
-  {                                             \
-    if (cInfo.isContiguous()) {                 \
-      HANDLE_CASE(TYPE, A, B, -2);              \
-    } else {                                    \
-      switch (C) {                              \
-        case 1:                                 \
-        HANDLE_CASE(TYPE, A, B, 1);             \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_CASE(TYPE, A, B, 2);             \
-        break;                                  \
-        default:                                \
-        HANDLE_CASE(TYPE, A, B, -1);            \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_C_CASE(TYPE, A, B, C) {      \
+  switch (C) {                              \
+    case 1:                                 \
+      HANDLE_CASE(TYPE, A, B, 1);           \
+      break;                                \
+    case 2:                                 \
+      HANDLE_CASE(TYPE, A, B, 2);           \
+      break;                                \
+    default:                                \
+      HANDLE_CASE(TYPE, A, B, -1);          \
+      break;                                \
+  }                                         \
+}
 
-#define HANDLE_B_CASE(TYPE, A, B, C)            \
-  {                                             \
-    if (bInfo.isContiguous()) {                 \
-      HANDLE_C_CASE(TYPE, A, -2, C);            \
-    } else {                                    \
-      switch (B) {                              \
-        case 1:                                 \
-        HANDLE_C_CASE(TYPE, A, 1, C);           \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_C_CASE(TYPE, A, 2, C);           \
-        break;                                  \
-        default:                                \
-        HANDLE_C_CASE(TYPE, A, -1, C);          \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_B_CASE(TYPE, A, B, C) {      \
+  switch (B) {                              \
+    case 1:                                 \
+      HANDLE_C_CASE(TYPE, A, 1, C);         \
+      break;                                \
+    case 2:                                 \
+      HANDLE_C_CASE(TYPE, A, 2, C);         \
+      break;                                \
+    default:                                \
+      HANDLE_C_CASE(TYPE, A, -1, C);        \
+      break;                                \
+  }                                         \
+}
 
-#define HANDLE_A_CASE(TYPE, A, B, C)            \
-  {                                             \
-    if (aInfo.isContiguous()) {                 \
-      HANDLE_B_CASE(TYPE, -2, B, C);            \
-    } else {                                    \
-      switch (A) {                              \
-        case 1:                                 \
-        HANDLE_B_CASE(TYPE, 1, B, C);           \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_B_CASE(TYPE, 2, B, C);           \
-        break;                                  \
-        default:                                \
-        HANDLE_B_CASE(TYPE, -1, B, C);          \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_A_CASE(TYPE, A, B, C) {      \
+  switch (A) {                              \
+    case 1:                                 \
+      HANDLE_B_CASE(TYPE, 1, B, C);         \
+      break;                                \
+    case 2:                                 \
+      HANDLE_B_CASE(TYPE, 2, B, C);         \
+      break;                                \
+    default:                                \
+      HANDLE_B_CASE(TYPE, -1, B, C);        \
+      break;                                \
+  }                                         \
+}
 
   if (TensorUtils<TensorTypeA>::canUse32BitIndexMath(state, a) &&
       TensorUtils<TensorTypeB>::canUse32BitIndexMath(state, b) &&
@@ -685,21 +658,22 @@ bool THC_pointwiseApply3(THCState* state,
     bInfo.collapseDims();
     cInfo.collapseDims();
 
-    // For large tensors, we only compile the completely contiguous
-    // version and the completely generic version, to reduce
-    // compilation time.
-    if (aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()) {
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -2>
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
+    */
+    if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, 1>
         aOffset(aInfo);
-      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, -2>
+      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, 1>
         bOffset(bInfo);
-      OffsetInfo<typename TensorUtils<TensorTypeC>::DataType, uint64_t, -2>
+      OffsetInfo<typename TensorUtils<TensorTypeC>::DataType, uint64_t, 1>
         cOffset(cInfo);
       kernelPointwiseApply3<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
                             typename TensorUtils<TensorTypeC>::DataType,
-                            uint64_t, -2, -2, -2>
+                            uint64_t, 1, 1, 1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
     } else {

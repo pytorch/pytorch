@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 
 using namespace torch;
+using namespace torch::nn;
 
 bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
   float running_loss = 1;
@@ -40,68 +41,41 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
 }
 
 TEST_CASE("optim") {
-  SECTION("sgd") {
-    auto model = ContainerList()
-                     .append(Linear(2, 8).make())
-                     .append(Linear(8, 1).make())
-                     .make();
+  ContainerList list;
+  list.append(make(Linear(2, 8)));
+  list.append(make(Linear(8, 1)));
+  auto model = make(list);
 
+  SECTION("sgd") {
     auto optim =
         SGD(model, 1e-1).momentum(0.9).nesterov().weight_decay(1e-6).make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
 
   SECTION("adagrad") {
-    auto model = ContainerList()
-                     .append(Linear(2, 8).make())
-                     .append(Linear(8, 1).make())
-                     .make();
-
     auto optim = Adagrad(model, 1.0).weight_decay(1e-6).lr_decay(1e-3).make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
 
+  SECTION("rmsprop_simple") {
+    auto optim = RMSprop(model, 1e-1).centered().make();
+    REQUIRE(test_optimizer_xor(optim, model));
+  }
+
   SECTION("rmsprop") {
-    {
-      auto model = ContainerList()
-                       .append(Linear(2, 8).make())
-                       .append(Linear(8, 1).make())
-                       .make();
-
-      auto optim = RMSprop(model, 1e-1).momentum(0.9).weight_decay(1e-6).make();
-      REQUIRE(test_optimizer_xor(optim, model));
-    }
-
-    {
-      auto model = ContainerList()
-                       .append(Linear(2, 8).make())
-                       .append(Linear(8, 1).make())
-                       .make();
-
-      auto optim = RMSprop(model, 1e-1).centered().make();
-      REQUIRE(test_optimizer_xor(optim, model));
-    }
+    auto optim = RMSprop(model, 1e-1).momentum(0.9).weight_decay(1e-6).make();
+    REQUIRE(test_optimizer_xor(optim, model));
   }
 
   /*
   // This test appears to be flaky, see https://github.com/pytorch/pytorch/issues/7288
   SECTION("adam") {
-    auto model = ContainerList()
-                     .append(Linear(2, 8).make())
-                     .append(Linear(8, 1).make())
-                     .make();
-
-    auto optim = Adam(model, 1e-1).weight_decay(1e-6).make();
+    auto optim = Adam(model, 1.0).weight_decay(1e-6).make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
   */
 
   SECTION("amsgrad") {
-    auto model = ContainerList()
-                     .append(Linear(2, 8).make())
-                     .append(Linear(8, 1).make())
-                     .make();
-
     auto optim = Adam(model, 0.1).weight_decay(1e-6).amsgrad().make();
     REQUIRE(test_optimizer_xor(optim, model));
   }

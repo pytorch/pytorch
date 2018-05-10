@@ -244,7 +244,7 @@ def t(g, self):
 
 
 # There is no translation for it, but we don't want to raise an error yet
-def expand(g, self, size):
+def expand(g, self, size, implicit):
     return None
 
 
@@ -795,16 +795,35 @@ def Elman_RNN_symbolic_builder(
             if unidirectional:
                 weight_ih, weight_hh, bias_ih, bias_hh = all_weights[i]
                 bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
+                # Unidirectional weights in PyTorch omit the
+                # directionality dimension (dim=0), whereas in ONNX it
+                # is required even for unidirectional RNN; thus,
+                # insert a dimension of size at dim=0.
+                weight_ih = g.op('Unsqueeze', weight_ih, axes_i=[0])
+                weight_hh = g.op('Unsqueeze', weight_hh, axes_i=[0])
+                bias_concat = g.op('Unsqueeze', bias_concat, axes_i=[0])
 
                 h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
             else:
-                weight_ih = g.op('Concat', all_weights[2 * i][0], all_weights[2 * i + 1][0], axis_i=0)
-                weight_hh = g.op('Concat', all_weights[2 * i][1], all_weights[2 * i + 1][1], axis_i=0)
+                weight_ih = g.op('Concat',
+                                 g.op('Unsqueeze', all_weights[2 * i][0], axes_i=[0]),
+                                 g.op('Unsqueeze', all_weights[2 * i + 1][0], axes_i=[0]),
+                                 axis_i=0)
+                weight_hh = g.op('Concat',
+                                 g.op('Unsqueeze', all_weights[2 * i][1], axes_i=[0]),
+                                 g.op('Unsqueeze', all_weights[2 * i + 1][1], axes_i=[0]),
+                                 axis_i=0)
+                bias_f = g.op('Concat',
+                              all_weights[2 * i][2],
+                              all_weights[2 * i][3],
+                              axis_i=0)
+                bias_b = g.op('Concat',
+                              all_weights[2 * i + 1][2],
+                              all_weights[2 * i + 1][3],
+                              axis_i=0)
                 bias_concat = g.op('Concat',
-                                   all_weights[2 * i][2],
-                                   all_weights[2 * i][3],
-                                   all_weights[2 * i + 1][2],
-                                   all_weights[2 * i + 1][3],
+                                   g.op('Unsqueeze', bias_f, axes_i=[0]),
+                                   g.op('Unsqueeze', bias_b, axes_i=[0]),
                                    axis_i=0)
 
                 h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
@@ -845,8 +864,14 @@ def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, drop
                 # onnx is    input, output, forget, cell.
                 weight_ih, weight_hh, bias_ih, bias_hh = \
                     [reform_weights(g, w, hidden_size, [(0, 1), (3, 4), (1, 3)]) for w in all_weights[i]]
-
                 bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
+                # Unidirectional weights in PyTorch omit the
+                # directionality dimension (dim=0), whereas in ONNX it
+                # is required even for unidirectional RNN; thus,
+                # insert a dimension of size at dim=0.
+                weight_ih = g.op('Unsqueeze', weight_ih, axes_i=[0])
+                weight_hh = g.op('Unsqueeze', weight_hh, axes_i=[0])
+                bias_concat = g.op('Unsqueeze', bias_concat, axes_i=[0])
 
                 h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
                 c_in = c0 if num_layers == 1 else g.op('Slice', c0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
@@ -858,9 +883,20 @@ def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, drop
                 weight_ih_b, weight_hh_b, bias_ih_b, bias_hh_b = \
                     [reform_weights(g, w, hidden_size, [(0, 1), (3, 4), (1, 3)]) for w in all_weights[2 * i + 1]]
 
-                weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
-                weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
-                bias_concat = g.op('Concat', bias_ih_f, bias_hh_f, bias_ih_b, bias_hh_b, axis_i=0)
+                weight_ih = g.op('Concat',
+                                 g.op('Unsqueeze', weight_ih_f, axes_i=[0]),
+                                 g.op('Unsqueeze', weight_ih_b, axes_i=[0]),
+                                 axis_i=0)
+                weight_hh = g.op('Concat',
+                                 g.op('Unsqueeze', weight_hh_f, axes_i=[0]),
+                                 g.op('Unsqueeze', weight_hh_b, axes_i=[0]),
+                                 axis_i=0)
+                bias_f = g.op('Concat', bias_ih_f, bias_hh_f, axis_i=0)
+                bias_b = g.op('Concat', bias_ih_b, bias_hh_b, axis_i=0)
+                bias_concat = g.op('Concat',
+                                   g.op('Unsqueeze', bias_f, axes_i=[0]),
+                                   g.op('Unsqueeze', bias_b, axes_i=[0]),
+                                   axis_i=0)
 
                 h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
                 c_in = c0 if num_layers == 1 else g.op('Slice', c0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
@@ -899,8 +935,14 @@ def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropo
                 # onnx is    input, reset, hidden
                 weight_ih, weight_hh, bias_ih, bias_hh = \
                     [reform_weights(g, w, hidden_size, [(1, 2), (0, 1), (2, 3)]) for w in all_weights[i]]
-
                 bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
+                # Unidirectional weights in PyTorch omit the
+                # directionality dimension (dim=0), whereas in ONNX it
+                # is required even for unidirectional RNN; thus,
+                # insert a dimension of size at dim=0.
+                weight_ih = g.op('Unsqueeze', weight_ih, axes_i=[0])
+                weight_hh = g.op('Unsqueeze', weight_hh, axes_i=[0])
+                bias_concat = g.op('Unsqueeze', bias_concat, axes_i=[0])
 
                 h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
             else:
@@ -911,9 +953,20 @@ def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropo
                 weight_ih_b, weight_hh_b, bias_ih_b, bias_hh_b = \
                     [reform_weights(g, w, hidden_size, [(1, 2), (0, 1), (2, 3)]) for w in all_weights[2 * i + 1]]
 
-                weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
-                weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
-                bias_concat = g.op('Concat', bias_ih_f, bias_hh_f, bias_ih_b, bias_hh_b, axis_i=0)
+                weight_ih = g.op('Concat',
+                                 g.op('Unsqueeze', weight_ih_f, axes_i=[0]),
+                                 g.op('Unsqueeze', weight_ih_b, axes_i=[0]),
+                                 axis_i=0)
+                weight_hh = g.op('Concat',
+                                 g.op('Unsqueeze', weight_hh_f, axes_i=[0]),
+                                 g.op('Unsqueeze', weight_hh_b, axes_i=[0]),
+                                 axis_i=0)
+                bias_f = g.op('Concat', bias_ih_f, bias_hh_f, axis_i=0)
+                bias_b = g.op('Concat', bias_ih_b, bias_hh_b, axis_i=0)
+                bias_concat = g.op('Concat',
+                                   g.op('Unsqueeze', bias_f, axes_i=[0]),
+                                   g.op('Unsqueeze', bias_b, axes_i=[0]),
+                                   axis_i=0)
 
                 h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
 

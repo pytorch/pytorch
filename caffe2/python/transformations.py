@@ -31,3 +31,21 @@ def fuseNNPACKConvRelu(net):
     net.Proto().ParseFromString(
         C.transform_fuseNNPACKConvRelu(net.Proto().SerializeToString())
     )
+
+
+def sinkMaxPool(net):
+    net.Proto().ParseFromString(
+        C.transform_sinkMaxPool(net.Proto().SerializeToString())
+    )
+
+
+def optimizeForIDEEP(net):
+    net.Proto().ParseFromString(
+        C.transform_optimizeForIDEEP(net.Proto().SerializeToString())
+    )
+
+
+def fuseConvBN(net):
+    net.Proto().ParseFromString(
+        C.transform_fuseConvBN(net.Proto().SerializeToString())
+    )
