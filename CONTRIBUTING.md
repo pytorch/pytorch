@@ -246,7 +246,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
    `__declspec(dllimport)`.  We have codified this pattern into a set of macros
    which follow the convention `*_API`, e.g., `AT_API` inside ATen. (Every separate
    shared library needs a unique macro name, because symbol visibility is on a per
-   shraed library basis.)
+   shared library basis.)
    
    The upshot is if you see an "unresolved external" error in your Windows build, this
    is probably because you forgot to mark a function with `*_API`.  However, there is
