@@ -322,15 +322,8 @@ def _load(f, map_location, pickle_module):
         def restore_location(storage, location):
             return default_restore_location(storage, map_location)
     elif isinstance(map_location, torch.device):
-        if map_location.type == 'cpu':
-            map_str = 'cpu'
-        elif map_location.type == 'cuda':
-            map_str = 'cuda:{}'.format(map_location.index or 0)
-        else:
-            raise ValueError("The given map_location device is not a cpu or cuda")
-
         def restore_location(storage, location):
-            return default_restore_location(storage, map_str)
+            return default_restore_location(storage, str(map_location))
     else:
         def restore_location(storage, location):
             result = map_location(storage, location)
