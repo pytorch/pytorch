@@ -23,6 +23,7 @@ void PeepholeOptimize(Block * block) {
     switch (n->kind()) {
       case aten::expand:
         // Eliminate redundant expand
+        if(!n->hasAttribute(attr::size)) break;
         if (!n->input()->isTensor()) break;
         // the sizes are dynamic
         if(n->inputs().size() != 1) break;

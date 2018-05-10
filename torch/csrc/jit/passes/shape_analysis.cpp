@@ -2,7 +2,7 @@
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/generated/aten_dispatch.h"
+#include "torch/csrc/jit/aten_dispatch.h"
 
 #include <ATen/ExpandUtils.h>
 
