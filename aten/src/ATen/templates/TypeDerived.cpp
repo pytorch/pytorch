@@ -24,9 +24,7 @@
 #include <sstream>
 
 #include "ATen/Config.h"
-#if AT_CUDA_ENABLED()
 $extra_cuda_headers
-#endif
 
 namespace at {
 

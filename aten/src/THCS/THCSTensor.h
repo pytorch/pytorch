@@ -1,10 +1,6 @@
 #ifndef THCS_TENSOR_INC
 #define THCS_TENSOR_INC
 
-#ifdef THCS_EXPORTS
-#define TH_EXPORTS
-#endif
-
 #include <THC/THC.h>
 #include <THS/THSTensor.h>
 

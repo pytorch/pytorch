@@ -33,7 +33,7 @@ static inline void THNN_(VolumetricGridSamplerBilinear_shapeCheck)(
   }
 }
 
-TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
+THC_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
     THCState *state,
     THCTensor *input,
     THCTensor *grid,
@@ -65,7 +65,7 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
   THCudaCheck(cudaGetLastError());
 }
 
-TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
+THC_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
     THCState *state,
     THCTensor *input, THCTensor *gradInput,
     THCTensor *grid, THCTensor *gradGrid,
