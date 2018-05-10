@@ -3,6 +3,10 @@
 #include <torch/expanding_array.h>
 #include <torch/torch.h>
 
+#include <torch/csrc/utils/memory.h>
+
+#include <ATen/optional.h>
+
 using namespace torch;
 using namespace torch::nn;
 
@@ -90,5 +94,38 @@ TEST_CASE("expanding-array") {
           ExpandingArray<5>(std::vector<int64_t>({1, 2, 3, 4, 5, 6, 7})),
           StartsWith("Expected 5 values, but instead got 7"));
     }
+  }
+}
+
+TEST_CASE("make_unique") {
+  struct Test {
+    explicit Test(const int& x) : lvalue_(x) {}
+    explicit Test(int&& x) : rvalue_(x) {}
+
+    at::optional<int> lvalue_;
+    at::optional<int> rvalue_;
+  };
+
+  SECTION("forwards rvalues correctly") {
+    auto ptr = torch::make_unique<Test>(123);
+    REQUIRE(!ptr->lvalue_.has_value());
+    REQUIRE(ptr->rvalue_.has_value());
+    REQUIRE(*ptr->rvalue_ == 123);
+  }
+
+  SECTION("forwards lvalues correctly") {
+    int x = 5;
+    auto ptr = torch::make_unique<Test>(x);
+    REQUIRE(ptr->lvalue_.has_value());
+    REQUIRE(*ptr->lvalue_ == 5);
+    REQUIRE(!ptr->rvalue_.has_value());
+  }
+
+  SECTION("Can construct unique_ptr of array") {
+    auto ptr = torch::make_unique<int[]>(3);
+    // Value initialization is required by the standard.
+    REQUIRE(ptr[0] == 0);
+    REQUIRE(ptr[1] == 0);
+    REQUIRE(ptr[2] == 0);
   }
 }

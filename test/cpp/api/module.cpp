@@ -4,6 +4,7 @@
 
 using namespace torch;
 using namespace torch::nn;
+
 using Catch::StartsWith;
 
 struct AGIUnit : nn::Module {
@@ -34,10 +35,6 @@ struct TestModule : public CloneableModule<TestModule> {
   void reset() override {
     weight =
         register_parameter("weight", at::ones(at::CPU(at::kFloat), {4, 4}));
-  }
-
-  variable_list forward(variable_list input) override {
-    return input;
   }
 
   Variable weight;
@@ -133,7 +130,7 @@ TEST_CASE("module/clone") {
   SECTION(
       "a module that does not override clone() throws when clone() is called") {
     struct UnCloneable : Module {
-      variable_list forward(variable_list) override {
+      variable_list forward(variable_list) {
         return {};
       }
     };
@@ -145,7 +142,7 @@ TEST_CASE("module/clone") {
   SECTION(
       "a module that overrides clone() does not throw when clone() is called ") {
     struct Cloneable : Module {
-      variable_list forward(variable_list) override {
+      variable_list forward(variable_list) {
         return {};
       }
       std::shared_ptr<Module> clone() const override {
@@ -162,10 +159,6 @@ TEST_CASE("module/clone") {
         l1 = register_module("l1", Linear(10, 3).build());
         l2 = register_module("l2", Linear(3, 5).build());
         l3 = register_module("l3", Linear(5, 100).build());
-      }
-
-      variable_list forward(variable_list input) override {
-        return input;
       }
 
       std::shared_ptr<Linear> l1, l2, l3;

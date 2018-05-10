@@ -13,7 +13,7 @@ class BatchNorm : public torch::nn::CloneableModule<BatchNorm> {
 
   void reset() override;
 
-  variable_list forward(variable_list) override;
+  variable_list forward(variable_list);
 
   TORCH_ATTR(int64_t, features);
   TORCH_ATTR(bool, affine) = true;

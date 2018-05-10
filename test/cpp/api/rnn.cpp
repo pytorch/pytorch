@@ -2,6 +2,8 @@
 
 #include <torch/torch.h>
 
+#include <test/cpp/api/util.h>
+
 using namespace torch;
 using namespace torch::nn;
 
