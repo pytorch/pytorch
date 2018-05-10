@@ -26,7 +26,7 @@ class Module {
   virtual void reset_parameters(){};
 
   virtual variable_list forward(variable_list) = 0;
-  virtual std::unique_ptr<Module> clone() const = 0;
+  virtual std::unique_ptr<Module> clone() const;
 
   std::map<std::string, Variable> parameters() const;
   Variable& param(std::string const&);
