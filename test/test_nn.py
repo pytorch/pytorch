@@ -1530,33 +1530,52 @@ class TestNN(NNTestCase):
         es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse).to(device, dtype)
         es.weight.data.copy_(torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
         input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
-        offsets = torch.tensor([0, 3], device=device, dtype=torch.long)
-        grad_output = torch.arange(1, 5, device=device, dtype=dtype).view(2, 2)
 
-        if mode == 'sum':
+        # Empty list is only handled in CPU for now
+        offsets = torch.tensor([0, 3], device=device, dtype=torch.long) if cuda \
+            else torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
+
+        grad_output = torch.tensor(
+            [1, 2,
+             3, 4], device=device, dtype=dtype).view(2, 2)
+        grad_output_with_empty = torch.tensor(
+            [99, 99,
+             1, 2,
+             99, 99,
+             3, 4,
+             99, 99], device=device, dtype=dtype).view(5, 2)
+
+        if mode == "sum" or mode == "mean":
+            denominator = 1 if mode == "sum" else 3
             expected_output = torch.tensor(
                 [[13, 16],
-                 [13, 16]], device=device, dtype=dtype)
+                 [13, 16]], device=device, dtype=dtype) / denominator
+
+            expected_output_with_empty = torch.tensor(
+                [[0, 0],
+                 [13, 16],
+                 [0, 0],
+                 [13, 16],
+                 [0, 0]], device=device, dtype=dtype) / denominator
+
             expected_grad_weight = torch.tensor(
                 [[3, 4],
                  [5, 8],
                  [0, 0],
                  [1, 2],
-                 [3, 4]], device=device, dtype=dtype)
-        elif mode == 'mean':
-            expected_output = torch.tensor(
-                [[13. / 3, 16. / 3],
-                 [13. / 3, 16. / 3]], device=device, dtype=dtype)
-            expected_grad_weight = torch.tensor(
-                [[3. / 3, 4. / 3],
-                 [1. / 3 + 1. / 3 + 3. / 3, 2. / 3 + 2. / 3 + 4. / 3],
-                 [0., 0.],
-                 [1. / 3, 2. / 3],
-                 [3. / 3, 4. / 3]], device=device, dtype=dtype)
-        elif mode == 'max':
+                 [3, 4]], device=device, dtype=dtype) / denominator
+        elif mode == "max":
             expected_output = torch.tensor(
                 [[7, 8],
                  [9, 10]], device=device, dtype=dtype)
+
+            expected_output_with_empty = torch.tensor(
+                [[0, 0],
+                 [7, 8],
+                 [0, 0],
+                 [9, 10],
+                 [0, 0]], device=device, dtype=dtype)
+
             expected_grad_weight = torch.tensor(
                 [[0, 0],
                  [0, 0],
@@ -1565,12 +1584,14 @@ class TestNN(NNTestCase):
                  [3, 4]], device=device, dtype=dtype)
 
         output = es(input, offsets)
-        output.backward(grad_output)
+        output.backward(grad_output if cuda else grad_output_with_empty)
 
         es_weight_grad = es.weight.grad.data
         if sparse:
             es_weight_grad = es.weight.grad.data.to_dense()
-        self.assertEqual(output.data, expected_output)
+        self.assertEqual(
+            output.data,
+            expected_output if cuda else expected_output_with_empty)
         self.assertEqual(es_weight_grad, expected_grad_weight, dtype2prec[dtype])
 
         # check same example except as 2D (2 x 3)
