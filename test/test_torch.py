@@ -1973,6 +1973,11 @@ class TestTorch(TestCase):
             a[0] = 7.
             self.assertEqual(5., res1[0].item())
 
+            # test ill-sized strides raise exception
+            b = np.array([3., 5., 8.])
+            b.strides = (3,)
+            self.assertRaises(ValueError, lambda: torch.tensor(b))
+
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):
             saved_dtype = torch.get_default_dtype()
