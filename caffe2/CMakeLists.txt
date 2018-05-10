@@ -9,14 +9,15 @@ add_subdirectory(proto)
 
 # ---[ ATen build
 if(BUILD_ATEN)
-  set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
-  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-  set(AT_LINK_STYLE STATIC)
-  add_subdirectory(../aten aten)
-  set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
-
-  include_directories(${PROJECT_BINARY_DIR}/aten/src/ATen)
-  include_directories(${PROJECT_SOURCE_DIR}/aten/src)
+  # Unfortunately we need to have this built in contrib/aten/ in the
+  # case of BUILD_CAFFE2, so gate it here. We should combine these.
+  if(NOT BUILD_CAFFE2)
+    set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    set(AT_LINK_STYLE STATIC)
+    add_subdirectory(../aten aten)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
+  endif()
 endif()
 
 # ---[ Caffe2 build
