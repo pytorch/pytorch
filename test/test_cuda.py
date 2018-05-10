@@ -1634,6 +1634,13 @@ class TestCuda(TestCase):
         a += 5
         self.assertEqual(a, b)
 
+    def test_tiny_half_norm_(self):
+        a = torch.arange(25).cuda().float()
+        a /= 100000000
+        b = a.half()
+        self.assertGreater(b.norm().item(), 0)
+        
+
 
 def load_ignore_file():
     from os.path import join, dirname
