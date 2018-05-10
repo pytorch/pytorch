@@ -476,7 +476,7 @@ cunn_SoftMaxBackward(scalar_t *gradInput, scalar_t *output, scalar_t *gradOutput
 template<template<typename, typename> class Epilogue>
 Tensor host_softmax(const Tensor & input_, const int64_t dim_){
   auto input = input_.contiguous();
-  Tensor output = at::native::empty_like(input);
+  Tensor output = at::empty_like(input);
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
   AT_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
@@ -529,7 +529,7 @@ template<template<typename, typename> class Epilogue>
 Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t dim_){
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
   auto grad = grad_.contiguous();
-  Tensor gI = at::native::empty_like(grad);
+  Tensor gI = at::empty_like(grad);
   if (grad.dim() == 0) grad = grad.view(1);
   AT_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
   auto output = output_.contiguous();

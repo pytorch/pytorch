@@ -15,7 +15,8 @@ set(ATEN_INCLUDE_DIR "${ATEN_PATH}/src/")
 set(ATEN_BUILD_INCLUDE_DIR "${ATEN_BUILD_PATH}/src/ATen")
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch")
 
-find_library(ATEN_LIBRARY ATen PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
+find_library(ATEN_CPU_LIBRARY ATen_cpu PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
+find_library(ATEN_CUDA_LIBRARY ATen_cuda PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
 find_library(NANOPB_LIBRARY protobuf-nanopb PATHS "${NANOPB_BUILD_PATH}" NO_DEFAULT_PATH)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -163,6 +164,7 @@ add_custom_command(
   WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
 
 set(TORCH_SRCS
+  ${TORCH_SRC_DIR}/csrc/autograd/aten_variable_hooks.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
@@ -253,9 +255,16 @@ endif()
 
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
-  ${ATEN_LIBRARY}
+  ${ATEN_CPU_LIBRARY}
   ${NANOPB_LIBRARY}
 )
+if(NOT NO_CUDA)
+  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
+    target_link_libraries(torch -Wl,--no-as-needed ${ATEN_CUDA_LIBRARY} -Wl,--as-needed)
+  else()
+    target_link_libraries(torch ${ATEN_CUDA_LIBRARY})
+  endif()
+endif()
 
 target_include_directories(torch
   PUBLIC
