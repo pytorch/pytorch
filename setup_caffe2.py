@@ -97,7 +97,7 @@ class create_version(Caffe2Command):
 
 class cmake_build(Caffe2Command):
     """
-    Compiles everything when `python setup.py build` is run using cmake.
+    Compile everything when `python setup.py build` is run using cmake.
 
     Custom args can be passed to cmake by specifying the `CMAKE_ARGS`
     environment variable. E.g. to build without cuda support run:
