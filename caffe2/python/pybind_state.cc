@@ -45,12 +45,12 @@ static std::string gCurrentWorkspaceName;
 BlobFetcherBase::~BlobFetcherBase() {}
 BlobFeederBase::~BlobFeederBase() {}
 
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY_NOARG(
     BlobFetcherRegistry,
     CaffeTypeId,
     BlobFetcherBase,
     std::unique_ptr);
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY_NOARG(
     BlobFeederRegistry,
     int,
     BlobFeederBase,

@@ -1,0 +1,4 @@
+#pragma once
+
+#cmakedefine C10_HAS_EXECINFO
+#cmakedefine C10_HAS_CXXABI

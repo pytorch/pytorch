@@ -287,21 +287,21 @@ std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry() {
   return &g_device_type_registry;
 }
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CPUOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CPU, CPUOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CUDA, CUDAOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     GradientRegistry,
     GradientMakerBase,
     const OperatorDef&, const vector<GradientWrapper>&);

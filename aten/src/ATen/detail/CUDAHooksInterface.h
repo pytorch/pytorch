@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Registry.h>
+#include <c10/Registry.h>
 #include <ATen/Generator.h>
 #include <ATen/Error.h>
 #include <ATen/Allocator.h>
@@ -104,8 +104,8 @@ struct AT_API CUDAHooksInterface {
 // for the "..." in a variadic macro"
 struct AT_API CUDAHooksArgs {};
 
-AT_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
-#define REGISTER_CUDA_HOOKS(clsname) AT_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
+C10_DECLARE_REGISTRY(AT_API, CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
+#define REGISTER_CUDA_HOOKS(clsname) C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
 namespace detail {
   AT_API const CUDAHooksInterface& getCUDAHooks();

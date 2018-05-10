@@ -138,15 +138,16 @@ class ExecutorHelper {
   virtual ~ExecutorHelper() {}
 };
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
+    CAFFE2_API,
     NetRegistry,
     NetBase,
     const std::shared_ptr<const NetDef>&,
     Workspace*);
 #define REGISTER_NET_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
 #define REGISTER_NET(name, ...) \
-  CAFFE_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
 
 /**
  * @brief Creates a network, accessing / creating blobs in the given workspace.

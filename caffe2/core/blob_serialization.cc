@@ -90,13 +90,13 @@ void TensorSerializer<CPUContext>::StoreDeviceDetail(
     TensorProto* /*proto*/) {}
 
 // The actual serialization registry objects.
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY_NOARG(
     BlobSerializerRegistry,
     CaffeTypeId,
     BlobSerializerBase,
     std::unique_ptr);
 
-CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
+C10_DEFINE_REGISTRY_NOARG(BlobDeserializerRegistry, BlobDeserializerBase);
 
 void Blob::Deserialize(const string& content) {
   BlobProto blob_proto;

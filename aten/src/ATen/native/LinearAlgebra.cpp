@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include <ATen/optional.h>
 #include <functional>
 #include <numeric>
 #include <vector>

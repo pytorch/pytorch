@@ -109,7 +109,7 @@ class Caffe2FlagParser {
   bool success_;
 };
 
-CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
+C10_DECLARE_REGISTRY(CAFFE2_API, Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 
 }  // namespace caffe2
 

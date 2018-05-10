@@ -1,3 +1,7 @@
+# ---[ C10
+add_subdirectory(c10)
+include_directories(${C10_INCLUDE})
+
 # ---[ Custom Protobuf
 include("cmake/ProtoBuf.cmake")
 

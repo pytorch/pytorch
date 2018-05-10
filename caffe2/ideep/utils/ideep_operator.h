@@ -6,21 +6,22 @@
 
 namespace caffe2 {
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
+    CAFFE2_API,
     IDEEPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 
 #define REGISTER_IDEEP_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(IDEEPOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(IDEEPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR(name, ...) \
-  CAFFE_REGISTER_CLASS(IDEEPOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(IDEEPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(IDEEPOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(IDEEPOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_IDEEP_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(IDEEPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(IDEEPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 // IDEEPOperator is the base scaffolding of the operators that uses IDEEP. It
 // provides a few operators that are useful to IDEEP specific implementations.

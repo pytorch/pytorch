@@ -131,7 +131,7 @@ target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
 target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
 
 # Compile exposed libraries.
-add_library(caffe2 ${Caffe2_CPU_SRCS})
+add_library(caffe2 ${Caffe2_CPU_SRCS} ${C10_SRCS})
 caffe2_interface_library(caffe2_protos caffe2_protos_whole)
 target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
 if (${CAFFE2_LINK_LOCAL_PROTOBUF})

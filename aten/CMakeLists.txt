@@ -22,6 +22,7 @@ else()
   cmake_dependent_option(
       NO_MKLDNN "Legacy no MKLDNN" OFF
       "USE_MKLDNN" ON)
+  add_subdirectory(../c10 c10)
 endif()
 if (NOT USE_CUDA)
   set(NO_CUDA ON)
@@ -483,7 +484,9 @@ include_directories(
   ${CMAKE_CURRENT_BINARY_DIR}/src/THCS
 
   ${CMAKE_CURRENT_SOURCE_DIR}/src
-  ${CMAKE_CURRENT_BINARY_DIR}/src)
+  ${CMAKE_CURRENT_BINARY_DIR}/src
+
+  ${C10_INCLUDE})
 add_subdirectory(src/THNN)
 add_subdirectory(src/THS)
 

@@ -1,6 +1,7 @@
 #pragma once
 
-#include <ATen/Registry.h>
+#include <c10/Registry.h>
+
 #include <ATen/Error.h>
 #include <ATen/ScalarType.h>
 
@@ -32,8 +33,8 @@ struct AT_API VariableHooksInterface {
 // for the "..." in a variadic macro"
 struct AT_API VariableHooksArgs {};
 
-AT_DECLARE_REGISTRY(VariableHooksRegistry, VariableHooksInterface, VariableHooksArgs)
-#define REGISTER_VARIABLE_HOOKS(clsname) AT_REGISTER_CLASS(VariableHooksRegistry, clsname, clsname)
+C10_DECLARE_REGISTRY(AT_API, VariableHooksRegistry, VariableHooksInterface, VariableHooksArgs)
+#define REGISTER_VARIABLE_HOOKS(clsname) C10_REGISTER_CLASS(VariableHooksRegistry, clsname, clsname)
 
 namespace detail {
   AT_API const VariableHooksInterface& getVariableHooks();

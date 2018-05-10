@@ -299,9 +299,9 @@ void AsyncNetBase::finalizeEvents() {
 
 AsyncNetBase::~AsyncNetBase() {}
 
-CAFFE_DEFINE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int);
+C10_DEFINE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int);
 
-CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
+C10_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
 
 /* static */
 std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool(

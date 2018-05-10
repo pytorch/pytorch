@@ -892,6 +892,7 @@ if __name__ == '__main__':
                 'lib/*.lib',
                 'lib/torch_shm_manager',
                 'lib/*.h',
+                'lib/include/c10/*.h',
                 'lib/include/ATen/*.h',
                 'lib/include/ATen/detail/*.h',
                 'lib/include/ATen/cuda/*.h',

@@ -1,8 +1,16 @@
-#include <ATen/Error.h>
+#include <c10/Error.h>
 
-namespace at {
+#ifdef C10_HAS_CXXABI
+#include <cxxabi.h>
+#endif
 
-#if defined(_MSC_VER)
+#ifdef C10_HAS_EXECINFO
+#include <execinfo.h>
+#endif
+
+namespace c10 {
+
+#ifndef C10_HAS_CXXABI
 // Windows does not have cxxabi.h, so we will simply return the original.
 std::string demangle(const char* name) {
   return std::string(name);
@@ -59,7 +67,7 @@ struct FrameInformation {
 
 namespace {
 
-at::optional<FrameInformation> parse_frame_information(
+c10::optional<FrameInformation> parse_frame_information(
     const std::string &frame_string) {
   FrameInformation frame;
 
@@ -75,19 +83,19 @@ at::optional<FrameInformation> parse_frame_information(
 
   auto function_name_start = frame_string.find("(");
   if (function_name_start == std::string::npos) {
-    return at::nullopt;
+    return c10::nullopt;
   }
   function_name_start += 1;
 
   auto offset_start = frame_string.find('+', function_name_start);
   if (offset_start == std::string::npos) {
-    return at::nullopt;
+    return c10::nullopt;
   }
   offset_start += 1;
 
   const auto offset_end = frame_string.find(')', offset_start);
   if (offset_end == std::string::npos) {
-    return at::nullopt;
+    return c10::nullopt;
   }
 
   frame.object_file = frame_string.substr(0, function_name_start - 1);
@@ -111,7 +119,7 @@ at::optional<FrameInformation> parse_frame_information(
                skip >> frame.offset_into_function;
 #else
   #warning Unknown standard library, backtraces may have incomplete debug information
-  return at::nullopt;
+  return c10::nullopt;
 #endif // defined(__GLIBCXX__)
 
   // Some system-level functions don't have sufficient debug information, so
@@ -133,7 +141,7 @@ at::optional<FrameInformation> parse_frame_information(
 
 std::string get_backtrace(size_t frames_to_skip = 0, size_t maximum_number_of_frames = 64) {
 
-#if !defined(_WIN32)
+#ifdef C10_HAS_EXECINFO
 
   // We always skip this frame (backtrace).
   frames_to_skip += 1;
@@ -209,4 +217,4 @@ Error::Error(SourceLocation source_location, std::string err)
   , what_(str(err, " (", source_location, ")\n", get_backtrace(/*frames_to_skip=*/2)))
   {}
 
-} // namespace at
+} // namespace c10
