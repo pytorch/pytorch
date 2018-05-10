@@ -25,19 +25,19 @@
 # Environment variables for feature toggles:
 #
 #   NO_CUDNN
-#     disables the cuDNN build
+#     disable the cuDNN build
 #
 #   NO_MKLDNN
-#     disables the MKLDNN build
+#     disable the MKLDNN build
 #
 #   NO_NNPACK
-#     disables NNPACK build
+#     disable NNPACK build
 #
 #   NO_DISTRIBUTED
-#     disables THD (distributed) build
+#     disable THD (distributed) build
 #
 #   NO_SYSTEM_NCCL
-#     disables use of system-wide nccl (we will use our submoduled
+#     disable the use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
 #   WITH_GLOO_IBVERBS
@@ -46,7 +46,7 @@
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER
 #     specify the version of PyTorch, rather than the hard-coded version
-#     in this file; used when we're building binaries for distribution
+#     in this file; it is used when we're building binaries for distribution
 #
 #   TORCH_CUDA_ARCH_LIST
 #     specify which CUDA architectures to build for.
@@ -388,7 +388,7 @@ class develop(setuptools.command.develop.develop):
 
 def monkey_patch_THD_link_flags():
     '''
-    THD's dynamic link deps are not determined until after build_deps is run
+    THD's dynamic link deps are not determined until after build_deps is run.
     So, we need to monkey-patch them in later
     '''
     # read tmp_install_path/THD_deps.txt for THD's dynamic linkage deps
@@ -533,7 +533,7 @@ else:
         '-Wno-write-strings',
         '-Wno-zero-length-array',
         '-Wno-unknown-pragmas',
-        # This is required for Python 2 declarations that are deprecated in 3.
+        # This is required for Python 2.x declarations that are deprecated in Python 3.x.
         '-Wno-deprecated-declarations',
         # Python 2.6 requires -fno-strict-aliasing, see
         # http://legacy.python.org/dev/peps/pep-3123/
