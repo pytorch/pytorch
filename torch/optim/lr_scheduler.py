@@ -378,3 +378,10 @@ class ReduceLROnPlateau(object):
             self.mode_worse = (-float('inf'))
 
         self.is_better = partial(self._cmp, mode, threshold_mode, threshold)
+
+    def state_dict(self):
+        return {key: value for key, value in self.__dict__.items() if key not in {'optimizer', 'is_better'}}
+
+    def load_state_dict(self, state_dict):
+        self.__dict__.update(state_dict)
+        self._init_is_better(mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode)
