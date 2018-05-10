@@ -39,6 +39,15 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
         dilation_h() == 1 && dilation_w() == 1,
         "The cudnn convolution does not support dilation yet.");
 #endif
+    // dilated grouped convolution supported in cuDNN v7.1
+#if !(CUDNN_VERSION_MIN(7,1,0))
+    if (group_ != 1) {
+      for (int dim = 0; dim < kernel_.size(); ++dim) {
+        OPERATOR_NEEDS_FEATURE(dilation_[dim] == 1,
+        "When group is used, dilation should not be set at the same time.");
+      }
+    }
+#endif
 
 #if CUDNN_VERSION_MIN(7, 0, 0)
     // verify TensorCore math is supported

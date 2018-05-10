@@ -170,15 +170,6 @@ class ConvPoolOpBase : public Operator<Context> {
       CAFFE_ENFORCE_GE(dilation_[dim], 0);
       CAFFE_ENFORCE_GE(stride_[dim], 0);
     }
-
-    if (group_ != 1) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
-        CAFFE_ENFORCE_EQ(
-            dilation_[dim],
-            1,
-            "When group is used, dilation should not be set at the same time.");
-      }
-    }
   }
 
   // Returns the input image dimensions for the current storage order type.
