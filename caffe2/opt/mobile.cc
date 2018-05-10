@@ -1,7 +1,7 @@
 #include "caffe2/opt/mobile.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/opt/converter.h"
-#include "caffe2/opt/fuse_conv_relu.h"
+#include "caffe2/opt/fusion.h"
 
 namespace caffe2 {
 namespace opt {
@@ -138,7 +138,7 @@ void fuseNNPACKConvRelu(repr::NNModule* nn) {
     arg->set_s("Relu");
   };
 
-  fuseConvRelu(nn, should_fuse, postprocess);
+  fuseActivation<repr::Conv, repr::Relu>(nn, should_fuse, postprocess);
 }
 
 } // namespace opt
