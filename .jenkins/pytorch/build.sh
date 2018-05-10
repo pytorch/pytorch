@@ -27,6 +27,11 @@ if ! which conda; then
   pip install mkl mkl-devel
 fi
 
+# sccache will fail for CUDA builds if all cores are used for compiling
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && which sccache > /dev/null; then
+  export MAX_JOBS=`expr $(nproc) - 1`
+fi
+
 WERROR=1 python setup.py install
 
 # Add the ATen test binaries so that they won't be git clean'ed away
