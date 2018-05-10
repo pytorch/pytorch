@@ -4,6 +4,8 @@
 
 #include "torch/detail.h"
 
+#include <ATen/optional.h>
+
 #include <map>
 #include <memory>
 #include <string>
@@ -13,9 +15,18 @@ namespace torch { namespace nn {
 
 class Module {
  public:
-  Module();
+  /// Tells the base `Module` about the name of the submodule.
+  explicit Module(std::string name);
+
+  /// Constructs the base module without immediate knowledge of the submodule's
+  /// name. The name of the submodule is inferred via RTTI the first time
+  /// `.name()` is invoked.
+  Module() = default;
 
   virtual ~Module() = default;
+
+  /// Returns the name of the `Module`.
+  const std::string& name() const noexcept;
 
   // Only construct parameters in initialize_parameters, and
   // containers in initialize_containers. Most of the time, the containers are
@@ -91,8 +102,11 @@ class Module {
   Variable& add(Variable, std::string const&);
 
  private:
+  /// The module's name (e.g. "LSTM").
+  mutable at::optional<std::string> name_;
+
   /// Whether the module is in training mode.
-  bool is_training_;
+  bool is_training_{true};
 };
 
 /// The `clone()` method in the base `Module` class does not have knowledge of
@@ -105,7 +119,7 @@ class Module {
 template <typename Derived>
 class CloneableModule : public Module {
  public:
-  // explicit CloneableModule(const char* name) : Module(name) {}
+  using Module::Module;
 
   std::unique_ptr<Module> clone() const override {
     auto ptr = std::unique_ptr<Module>(

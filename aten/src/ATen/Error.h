@@ -45,7 +45,7 @@ _str(std::ostream& ss, const T& t, const Args&... args) {
 
 } // namespace detail
 
-/// Utility to demangle a function name
+/// Utility to demangle a C++ symbol name.
 std::string demangle(const char* name);
 
 /// Returns the printable name of the type.

@@ -7,15 +7,7 @@
 namespace torch { namespace nn {
 class Conv : public torch::nn::CloneableModule<Conv> {
  private:
-  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan)
-      : Nd_(Nd),
-        in_channels_(in_chan),
-        out_channels_(out_chan),
-        stride_(makeTup(1, 1)),
-        padding_(makeTup(0)),
-        dilation_(makeTup(1, 1)),
-        dilated_(false),
-        output_padding_(makeTup(0)) {}
+  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan);
 
  public:
   Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan, int ks)

@@ -9,7 +9,7 @@
 namespace torch { namespace nn {
 class BatchNorm : public torch::nn::CloneableModule<BatchNorm> {
  public:
-  BatchNorm(uint32_t num_features) : num_features_(num_features) {}
+  explicit BatchNorm(uint32_t num_features);
 
   TORCH_AUTOGRAD_KWARG(BatchNorm, double, eps, 1e-5, 1e-5)
   TORCH_AUTOGRAD_KWARG(BatchNorm, double, momentum, 0.1, 0.1)
