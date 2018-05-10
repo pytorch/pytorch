@@ -96,13 +96,7 @@ set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
 
 if "%REBUILD%"=="" set NO_CUDA=
 
-python setup.py install
-
-if %errorlevel% neq 0 exit /b %errorlevel
-
-sccache --show-stats
-
-if NOT "%IMAGE_COMMIT_TAG%"=="" ( 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z )
+python setup.py install && sccache --show-stats && 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
 
 EOL
 
