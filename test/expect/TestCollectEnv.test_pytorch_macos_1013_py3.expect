@@ -4,7 +4,7 @@ CUDA used to build PyTorch: None
 
 OS: Mac OSX 10.13.X
 GCC version: Could not collect
-CMake version: version 3.9.X
+CMake version: version 3.11.X
 
 Python version: 3.6
 Is CUDA available: No
