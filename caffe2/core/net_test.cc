@@ -697,4 +697,27 @@ TEST(NetTest, ExecutorOverride) {
   }
 }
 
+TEST(NetTest, AsyncEmptyNet) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "async_scheduling"
+  )DOC";
+
+  Workspace ws;
+  NetDef net_def;
+  CAFFE_ENFORCE(
+      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+
+  {
+    std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+    bool caught_exception = false;
+    try {
+      ASSERT_TRUE(net->Run());
+    } catch (const std::exception& e) {
+      caught_exception = true;
+    }
+    ASSERT_FALSE(caught_exception);
+  }
+}
+
 } // namespace caffe2

@@ -148,6 +148,10 @@ bool AsyncSchedulingNet::DoRunAsync() {
     }
   }
 
+  if (tasksNum() == 0) {
+    finishRun();
+  }
+
   return true;
 }
 
