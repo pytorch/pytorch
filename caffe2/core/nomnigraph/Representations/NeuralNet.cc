@@ -148,15 +148,35 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
     }
   }
 
-  auto bbNode = m->controlFlow.createNode(
+  auto newBbNode = m->controlFlow.createNode(
       util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
   auto sccs = algorithm::tarjans(&m->dataFlow);
   for (auto iter = sccs.rbegin(); iter != sccs.rend(); ++iter) {
     for (auto node : iter->getNodes()) {
       if (dfNodes.count(node)) {
-        auto currentBasicBlock = bbNode->mutableData()->get();
+        auto currentBasicBlock = newBbNode->mutableData()->get();
         currentBasicBlock->pushInstructionNode(node);
       }
+    }
+  }
+
+  // Finally we reconcile any data dependency issues (if we can).
+  for (auto& bbNode : m->controlFlow.getMutableNodes()) {
+    auto bb = bbNode->mutableData()->get();
+    std::unordered_set<repr::NNGraph::NodeRef> seen;
+    for (auto instr_iter = bb->getInstructions().begin();
+         instr_iter != bb->getInstructions().end();
+         ++instr_iter) {
+      // This cannot be auto&, TODO figure out why
+      auto instr = *instr_iter;
+      for (auto& output : getOutputs(instr)) {
+        for (auto& consumer : getConsumers(output)) {
+          if (seen.count(consumer)) {
+            bb->moveInstructionBefore(instr, consumer);
+          }
+        }
+      }
+      seen.insert(instr);
     }
   }
 }

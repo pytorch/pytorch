@@ -24,6 +24,8 @@ void PeepholeOptimize(Block * block) {
       case aten::expand:
         // Eliminate redundant expand
         if (!n->input()->isTensor()) break;
+        // the sizes are dynamic
+        if(n->inputs().size() != 1) break;
         if (n->is(attr::size) == n->input()->type()->expect<TensorType>()->sizes()) {
           n->output()->replaceAllUsesWith(n->input());
           it.destroyCurrent();

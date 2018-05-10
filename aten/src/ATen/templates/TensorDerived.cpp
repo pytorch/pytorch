@@ -9,9 +9,7 @@
 #include "ATen/Scalar.h"
 #include "ATen/Half.h"
 
-#if AT_CUDA_ENABLED()
 $extra_cuda_headers
-#endif
 
 namespace at {
 

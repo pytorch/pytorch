@@ -63,7 +63,7 @@ struct AT_API Type {
   virtual bool is_sparse() const = 0;
   virtual bool is_distributed() const = 0;
   bool is_variable_or_undefined() const noexcept { return is_variable_or_undefined_; }
-  static void registerAll(Context * context);
+  static void registerCPU(Context * context);
   virtual std::unique_ptr<Storage> storage() const = 0;
   virtual std::unique_ptr<Storage> storage(size_t size) const = 0;
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;

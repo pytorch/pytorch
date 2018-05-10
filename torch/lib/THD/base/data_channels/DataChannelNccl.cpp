@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <unordered_set>
 #include <sstream>
+#include <algorithm>
 
 namespace thd {
 
@@ -180,20 +181,23 @@ void DataChannelNccl::destroy() {
 // Helper function that destroys the CUDA event and NCCL communicator
 void DataChannelNccl::_destroyNcclResources(THDGroup groupId) {
   if (_groupNcclResources.find(groupId) != _groupNcclResources.end()) {
-    // Devices used for this group ID
-    auto devices = getDevicesList(_groupDevices[groupId]);
-    // Guard GPU device
-    AutoGPU gpuGuard;
-    // Destroy the CUDA events
-    size_t idx = 0;
-    for (auto& event : *(_groupNcclResources[groupId].ncclCudaEvents())) {
-      gpuGuard.setDevice(devices[idx++]);
-      THCudaCheck(cudaEventSynchronize(event));
-      THCudaCheck(cudaEventDestroy(event));
-    }
-    // Destroy the communicators
-    for (auto& comm : *(_groupNcclResources[groupId].ncclComms())) {
-      NCCL_CHECK(ncclCommDestroy(comm));
+    for (int i=0; i < _groupDevices[groupId].size(); i++) {
+
+      // Devices used for this group ID
+      auto devices = getDevicesList(_groupDevices[groupId][i]);
+      // Guard GPU device
+      AutoGPU gpuGuard;
+      // Destroy the CUDA events
+      size_t idx = 0;
+      for (auto& event : *(_groupNcclResources[groupId][i].ncclCudaEvents())) {
+        gpuGuard.setDevice(devices[idx++]);
+        THCudaCheck(cudaEventSynchronize(event));
+        THCudaCheck(cudaEventDestroy(event));
+      }
+      // Destroy the communicators
+      for (auto& comm : *(_groupNcclResources[groupId][i].ncclComms())) {
+        NCCL_CHECK(ncclCommDestroy(comm));
+      }
     }
   }
 }
@@ -262,27 +266,20 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
     }
   }
 
-  if (_groupDevices.find(groupId) != _groupDevices.end() &&
-      deviceList != _groupDevices[groupId]) {
-    /**
-     * If a new device list from a different call is detected, we will clear
-     * the old NCCL communicator cache (that is associated with the current
-     * device list cached) first and remove the old NCCL resource and
-     * the old device list from the hashmap. The following call will detect the
-     * cache miss and rebuild the cache
-     */
-    _destroyNcclResources(groupId);
-    _groupNcclResources.erase(groupId);
-    _groupDevices.erase(groupId);
+  int index = -1;
+
+  if (_groupDevices.find(groupId) != _groupDevices.end()) {
+    auto pos = std::find(_groupDevices[groupId].begin(), _groupDevices[groupId].end(), deviceList);
+    if (pos != _groupDevices[groupId].end()) index = pos - _groupDevices[groupId].begin();
   }
 
-  if (_groupNcclResources.find(groupId) != _groupNcclResources.end()) {
-    return std::make_pair(_groupNcclResources[groupId].ncclComms(),
-                          _groupNcclResources[groupId].ncclCudaEvents());
+  if (index >= 0) {
+    return std::make_pair(_groupNcclResources[groupId][index].ncclComms(),
+                          _groupNcclResources[groupId][index].ncclCudaEvents());
   }
 
   // Add in the device list of the group
-  _groupDevices[groupId] = deviceList;
+  _groupDevices[groupId].push_back(deviceList);
 
   // NCCL communicator
   auto comms =
@@ -324,12 +321,13 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
   NCCL_CHECK(ncclGroupEnd());
 
   // Move into the hash table
-  _groupNcclResources.emplace(
-      std::make_pair(groupId, NcclResources(std::move(comms),
-                                            std::move(events))));
+  if (_groupNcclResources.find(groupId) == _groupNcclResources.end())
+      _groupNcclResources.emplace(std::make_pair(groupId, std::vector<NcclResources>()));
 
-  return std::make_pair(_groupNcclResources[groupId].ncclComms(),
-                        _groupNcclResources[groupId].ncclCudaEvents());
+  _groupNcclResources[groupId].push_back(NcclResources(std::move(comms), std::move(events)));
+
+  return std::make_pair(_groupNcclResources[groupId].back().ncclComms(),
+                        _groupNcclResources[groupId].back().ncclCudaEvents());
 }
 
 

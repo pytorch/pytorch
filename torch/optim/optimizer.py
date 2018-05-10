@@ -189,8 +189,6 @@ class Optimizer(object):
             if not isinstance(param, torch.Tensor):
                 raise TypeError("optimizer can only optimize Tensors, "
                                 "but one of the params is " + torch.typename(param))
-            if not param.requires_grad:
-                raise ValueError("optimizing a parameter that doesn't require gradients")
             if not param.is_leaf:
                 raise ValueError("can't optimize a non-leaf Tensor")
 

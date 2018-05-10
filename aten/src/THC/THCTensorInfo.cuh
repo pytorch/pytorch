@@ -231,27 +231,18 @@ struct IndexToOffset {
   static __host__ __device__ IndexType get(
     IndexType linearId,
     const TensorInfo<T, IndexType>& info) {
+    
     IndexType offset = 0;
 
-    // Use static dims
+    // Uses static dims
     for (int i = Dims - 1; i > 0; --i) {
       IndexType curDimIndex = linearId % info.sizes[i];
       IndexType curDimOffset = curDimIndex * info.strides[i];
       offset += curDimOffset;
       linearId /= info.sizes[i];
     }
-    offset += linearId * info.strides[0];
-
-    return offset;
-  }
-};
-
-// For contiguous tensors, the offset = index
-template <typename T, typename IndexType>
-struct IndexToOffset<T, IndexType, -2> {
-  static inline __host__ __device__ IndexType
-    get(IndexType linearId, const TensorInfo<T, IndexType>& info) {
-    return linearId;
+    
+    return offset + linearId * info.strides[0];
   }
 };
 
@@ -263,17 +254,15 @@ struct IndexToOffset<T, IndexType, -1> {
 
     IndexType offset = 0;
 
-    // Use dynamic dims
+    // Uses dynamic dims
     for (int i = info.dims - 1; i > 0; --i) {
       IndexType curDimIndex = linearId % info.sizes[i];
       IndexType curDimOffset = curDimIndex * info.strides[i];
       offset += curDimOffset;
-
       linearId /= info.sizes[i];
     }
-    offset += linearId * info.strides[0];
 
-    return offset;
+    return offset + linearId * info.strides[0];
   }
 };
 
@@ -301,8 +290,7 @@ struct OffsetInfo {
       offset += divmod.mod * strides[i];
     }
 
-    offset += linearIndex * strides[0];
-    return &data[offset];
+    return &data[offset + linearIndex * strides[0]];
   }
 
   T* data;
@@ -310,19 +298,18 @@ struct OffsetInfo {
   IndexType strides[Dims];
 };
 
-// For contiguous tensors (Dims=-2), offset equals linear index.
+// For 1D tensors the offset equals linear index * stride.
 template <typename T, typename IndexType>
-struct OffsetInfo<T, IndexType, -2> {
+struct OffsetInfo<T, IndexType, 1> {
   explicit OffsetInfo(const TensorInfo<T, IndexType>& tinfo)
-    : data(tinfo.data) {
-    assert(tinfo.isContiguous());
-  }
+    : data{tinfo.data}, stride{tinfo.strides[0]} {}
 
   __host__ __device__ T* get(IndexType linearIndex) const {
-    return &data[linearIndex];
+    return &data[linearIndex * stride];
   }
 
   T* data;
+  const IndexType stride;
 };
 
 // Dims=-1 is used when the dimension is unknown at compile time.

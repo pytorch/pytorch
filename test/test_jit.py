@@ -1697,6 +1697,21 @@ class TestScript(TestCase):
         self.checkScript(func3, (a, b), optimize=True)
         self.checkScript(func4, (a, b), optimize=True)
 
+    def test_expand(self):
+        @torch.jit.script
+        def func(x, y):
+            return x + y
+
+        x = torch.rand(2, 3, dtype=torch.float, requires_grad=True)
+        y = torch.rand(3, dtype=torch.float, requires_grad=True)
+        out = func(x, y)
+        self.assertEqual(func(x, y), x + y)
+
+        grad = torch.randn(2, 3)
+        out.backward(grad)
+        self.assertEqual(x.grad, grad)
+        self.assertEqual(y.grad, grad.sum(dim=0))
+
     def test_cat(self):
         @torch.jit.script
         def func(x):
@@ -3137,6 +3152,16 @@ class TestScript(TestCase):
         self.checkScript(func_1, [x], optimize=True)
         self.checkScript(func_2, [x], optimize=True)
         self.checkScript(func_3, [x], optimize=True)
+
+    def test_wrong_implicit_expand(self):
+
+        @torch.jit.trace(torch.zeros(3), torch.zeros(1))
+        def foo(a, b):
+            return a + b
+
+        a = torch.rand(4)
+        b = torch.rand(4)
+        self.assertEqual(a + b, foo(a, b))
 
 
 # Smoke tests for export methods

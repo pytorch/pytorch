@@ -11,9 +11,9 @@
 // While this object is in scope, all of your GPU tensors will go to GPU 1
 #include "torch/csrc/utils/auto_gpu.h"
 
-#define AUTOGRAD_OPTIMIZER_CLASS(Type) \
+#define TORCH_AUTOGRAD_OPTIMIZER_CLASS(Type) \
   class Type : public torch::Optimizer_CRTP<Type>
-#define AUTOGRAD_KWARG(CLS, TYP, NAME, DEFAULT, OPTION) \
+#define TORCH_AUTOGRAD_KWARG(CLS, TYP, NAME, DEFAULT, OPTION) \
   TYP NAME##_ = DEFAULT;                                \
   CLS& NAME(TYP x = OPTION) {                           \
     NAME##_ = x;                                        \
@@ -30,12 +30,14 @@ namespace detail {
 extern tag::Engine engine;
 }
 
-class ContainerImpl;
+namespace nn {
+class Module;
+} // namespace nn
+
 class OptimizerImpl;
 using Variable = tag::Variable;
 using variable_list = tag::variable_list;
 using Tensor = at::Tensor;
-using Container = std::shared_ptr<ContainerImpl>;
 using Optimizer = std::shared_ptr<OptimizerImpl>;
 
 void backward(Tensor loss, bool keep_graph = false);

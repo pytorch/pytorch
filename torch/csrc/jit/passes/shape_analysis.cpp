@@ -73,6 +73,7 @@ void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
     auto graph = node->owningGraph();
     Node *expand = graph->create(aten::expand, {node->inputs().at(input_idx)})
                         ->is_(attr::size, expected_size)
+                        ->i_(attr::implicit, 0)
                         ->insertBefore(node);
     PropagateShapeOnNode(expand);
     node->replaceInput(input_idx, expand->output());

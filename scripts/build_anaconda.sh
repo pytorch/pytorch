@@ -339,6 +339,10 @@ if [[ -n $cuda_ver ]]; then
   #caffe2_cmake_args+=("-DUSE_NCCL=OFF")
   #caffe2_cmake_args+=("-DUSE_GLOO=OFF")
   #caffe2_cmake_args+=("-DCAFFE2_STATIC_LINK_CUDA=ON")
+
+  if [[ $upload_to_conda ]]; then
+    caffe2_cmake_args+=("-DCUDA_ARCH_NAME=All")
+  fi
 else
   # Flags required for CPU for Caffe2
   caffe2_cmake_args+=("-DUSE_CUDA=OFF")

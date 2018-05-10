@@ -8,6 +8,11 @@
 #include <caffe2/operators/utility_ops.h>
 #include <caffe2/operators/dropout_op.h>
 #include <caffe2/operators/given_tensor_fill_op.h>
+#include <caffe2/operators/conv_transpose_op.h>
+#include <caffe2/operators/flatten_op.h>
+#include <caffe2/operators/utility_ops.h>
+#include <caffe2/operators/transpose_op.h>
+#include <caffe2/operators/reshape_op.h>
 
 // can add more non-IDEEP operators if needed
 namespace caffe2 {
@@ -21,6 +26,21 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     AveragedLoss,
     IDEEPFallbackOp<AveragedLoss<float, CPUContext>, SkipIndices<0>>);
+REGISTER_IDEEP_OPERATOR(
+    ConvTranspose,
+    IDEEPFallbackOp<ConvTransposeOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Flatten,
+    IDEEPFallbackOp<FlattenOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    ResizeLike,
+    IDEEPFallbackOp<ResizeLikeOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Transpose,
+    IDEEPFallbackOp<TransposeOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Reshape,
+		IDEEPFallbackOp<ReshapeOp<float, CPUContext>, SkipIndices<1>>);
 
 // filter operators
 REGISTER_IDEEP_OPERATOR(
