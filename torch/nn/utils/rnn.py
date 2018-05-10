@@ -339,7 +339,7 @@ def pack_sequence(sequences):
         >>> a = torch.tensor([1,2,3])
         >>> b = torch.tensor([4,5])
         >>> c = torch.tensor([6])
-        >>> pack_sequence([a, b, c]])
+        >>> pack_sequence([a, b, c])
         PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
 
 
