@@ -4,6 +4,7 @@
 
 using namespace torch;
 using namespace torch::nn;
+using Catch::StartsWith;
 
 TEST_CASE("module/training-mode") {
   auto model = make(Linear(3, 4));
@@ -74,5 +75,33 @@ TEST_CASE("module/conversions", "[cuda]") {
       REQUIRE(parameter.second.type().backend() == at::kCUDA);
       REQUIRE(parameter.second.type().scalarType() == at::kFloat);
     }
+  }
+}
+
+TEST_CASE("module/clone") {
+  SECTION(
+      "a module that does not override clone() throws when clone() is called") {
+    struct UnCloneable : Module {
+      variable_list forward(variable_list) override {
+        return {};
+      }
+    };
+    UnCloneable module;
+    REQUIRE_THROWS_WITH(
+        module.clone(), StartsWith("clone() has not been implemented"));
+  }
+
+  SECTION(
+      "a module that overrides clone() does not throw when clone() is called ") {
+    struct Cloneable : Module {
+      variable_list forward(variable_list) override {
+        return {};
+      }
+      std::unique_ptr<Module> clone() const override {
+        return nullptr;
+      }
+    };
+    Cloneable module;
+    REQUIRE_NOTHROW(module.clone());
   }
 }
