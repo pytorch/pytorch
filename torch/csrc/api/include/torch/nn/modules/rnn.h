@@ -11,10 +11,11 @@
 
 namespace torch { namespace nn {
 template <typename Derived>
-class RNNBase : public nn::CloneableModule<Derived> {
+class RNNBase : public CloneableModule<Derived> {
  public:
   // These must line up with the CUDNN mode codes
   enum RNNMode : int64_t { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
+
   RNNBase(uint32_t input_size, uint32_t hidden_size)
       : input_size_(input_size), hidden_size_(hidden_size) {}
 

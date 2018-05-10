@@ -1,6 +1,9 @@
 #include <torch/nn/modules/batchnorm.h>
 
 namespace torch { namespace nn {
+
+BatchNorm::BatchNorm(uint32_t num_features) : num_features_(num_features) {}
+
 void BatchNorm::initialize_parameters() {
   if (affine_) {
     weight = this->add(Var(at::CPU(at::kFloat).empty(num_features_)), "weight");

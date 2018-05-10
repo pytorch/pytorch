@@ -9,8 +9,7 @@
 namespace torch { namespace nn {
 class Embedding : public torch::nn::CloneableModule<Embedding> {
  public:
-  Embedding(uint32_t num_embeddings, uint32_t embedding_dim)
-      : num_embeddings(num_embeddings), embedding_dim(embedding_dim) {}
+  Embedding(uint32_t num_embeddings, uint32_t embedding_dim);
 
   variable_list forward(variable_list) override;
   void reset_parameters() override;
