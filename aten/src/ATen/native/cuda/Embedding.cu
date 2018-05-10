@@ -173,7 +173,7 @@ __global__ void renorm_kernel(
     }
   }
 
-  using Op = ReduceAdd<accscalar_t, accscalar_t>;
+  using Op = ReduceAdd<accscalar_t>;
   v = reduceBlock<accscalar_t>(sdata, blockDim.x, v, Op(), 0);
 
   if (tid == 0) {

@@ -17,16 +17,16 @@
 #endif
 
 // Reduction operators that support `half`, unlike Thrust
-template <typename InT, typename AccT>
+template <typename T>
 struct ReduceAdd {
-  inline __device__ AccT operator()(AccT a, InT b) const {
-    return a + (AccT) b;
+  inline __device__ T operator()(T a, T b) const {
+    return a + b;
   }
 };
 
 #ifdef CUDA_HALF_TENSOR
 template <>
-struct ReduceAdd<half, half> {
+struct ReduceAdd<half> {
   inline __device__ half operator()(half a, half b) const {
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hadd(a, b);
@@ -37,25 +37,18 @@ struct ReduceAdd<half, half> {
 #endif
   }
 };
-
-template <>
-struct ReduceAdd<half, float> {
-  inline __device__ float operator()(float a, half b) const {
-    return a + __half2float(b);
-  }
-};
 #endif // CUDA_HALF_TENSOR
 
-template <typename InT, typename AccT>
+template <typename T>
 struct ReduceMultiply {
-  inline __device__ AccT operator()(AccT a, InT b) const {
-    return a * (AccT) b;
+  inline __device__ T operator()(T a, T b) const {
+    return a * (T) b;
   }
 };
 
 #ifdef CUDA_HALF_TENSOR
 template <>
-struct ReduceMultiply<half, half> {
+struct ReduceMultiply<half> {
   inline __device__ half operator()(half a, half b) const {
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hmul(a, b);
@@ -66,39 +59,32 @@ struct ReduceMultiply<half, half> {
 #endif
   }
 };
-
-template <>
-struct ReduceMultiply<half, float> {
-  inline __device__ float operator()(float a, half b) const {
-    return a * __half2float(b);
-  }
-};
 #endif // CUDA_HALF_TENSOR
 
-template <typename ResT, typename ArgT>
+template <typename T>
 struct SquareFunctor {
-    SquareFunctor(ResT mean): mean_(mean) {}
+    SquareFunctor(T _mean): mean{_mean} {}
 
-    inline __device__ ResT operator()(ArgT x) const {
-      return (((ResT) x) - mean_) * (((ResT) x) - mean_);
+    inline __device__ T operator()(T x) const {
+      return (x - mean) * (x - mean);
     }
 
-    const ResT mean_;
+    const T mean;
 };
 
 #ifdef CUDA_HALF_TENSOR
-template <typename ResT>
-struct SquareFunctor<ResT, half> {
-    SquareFunctor(ResT mean): mean_(mean) {}
+template <>
+struct SquareFunctor<half> {
+    SquareFunctor(half _mean): mean{_mean} {}
 
-    inline __device__ ResT operator()(half x) const {
-      return THCNumerics<ResT>::mul(
-        THCNumerics<ResT>::sub(mean_, ScalarConvert<half, ResT>::to(x)),
-        THCNumerics<ResT>::sub(mean_, ScalarConvert<half, ResT>::to(x))
+    inline __device__ half operator()(half x) const {
+      return THCNumerics<half>::mul(
+        THCNumerics<half>::sub(mean, x),
+        THCNumerics<half>::sub(mean, x)
       );
     }
 
-    const ResT mean_;
+    const half mean;
 };
 #endif // CUDA_HALF_TENSOR
 
@@ -117,25 +103,6 @@ struct ReduceMax {
             THCNumerics<T>::isnan(a)) ? a : b;
   }
 };
-
-template <typename InT, typename AccT>
-struct ReduceMaxTo {
-  inline __device__ AccT operator()(InT a, InT b) const {
-    return ScalarConvert<InT, AccT>::to(
-      (THCNumerics<InT>::gt(a, b) || THCNumerics<InT>::isnan(a)) ? a : b);
-  }
-};
-
-#ifdef CUDA_HALF_TENSOR
-template <>
-struct ReduceMaxTo<half, float> {
-  inline __device__ float operator()(float a, half b) const {
-    float b_f = __half2float(b);
-    return ((THCNumerics<float>::gt(a, b_f) ||
-             THCNumerics<float>::isnan(a)) ? a : b_f);
-  }
-};
-#endif // CUDA_HALF_TENSOR
 
 struct LogicalAll {
   inline __device__ unsigned char operator()(unsigned char x,
@@ -156,46 +123,44 @@ template<typename Real>
     return THCNumerics<Real>::gt(a, b) ? a : b;
 }
 
-template<typename Real>
-__global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrdiff_t size, const Real maxnorm)
-{
-  __shared__ Real buffer[32];
+template<typename Real, typename AccReal>
+__global__ void THCTensor_kernel_renorm(Real *data, 
+                                        const Real _value, 
+                                        const ptrdiff_t size, 
+                                        const Real _maxnorm) {
+  __shared__ AccReal buffer[32];
   int64_t tx = threadIdx.x;
   int64_t bx = blockIdx.x;
   int64_t step = blockDim.x;
-  Real *row = data + size*bx;
+  Real *row = data + size * bx;
 
-  buffer[tx] = ScalarConvert<int, Real>::to(0);
-  Real norm;
+  buffer[tx] = ScalarConvert<int, AccReal>::to(0);
+  AccReal norm;
+  const AccReal value = ScalarConvert<Real, AccReal>::to(_value);
+  const AccReal maxnorm = ScalarConvert<Real, AccReal>::to(_maxnorm);
 
-  if (THCNumerics<Real>::eq(value, ScalarConvert<float, Real>::to(INFINITY))) {
+  if (THCNumerics<AccReal>::eq(value, ScalarConvert<float, AccReal>::to(INFINITY))) {
     // get norm of axis
-    for (ptrdiff_t i=tx; i<size; i+=step)
-    {
-      buffer[tx] = THCMax<Real>(
-        buffer[tx],
-	THCNumerics<Real>::abs(row[i])
-      );
+    for (ptrdiff_t i = tx; i < size; i += step) {
+      const AccReal val = ScalarConvert<Real, AccReal>::to(row[i]);
+      buffer[tx] = THCMax<AccReal>(buffer[tx], THCNumerics<AccReal>::abs(val));
     }
     // add (reduce)
-    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
-    {
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
       __syncthreads();
       if (tx < stride)
-        buffer[tx] = THCMax<Real>(buffer[tx], buffer[tx+stride]);
+        buffer[tx] = THCMax<AccReal>(buffer[tx], buffer[tx+stride]);
     }
     // clip norms
     __syncthreads();
     norm = buffer[0];
   } else {
     // get norm of axis
-    for (ptrdiff_t i=tx; i<size; i+=step)
-    {
-      buffer[tx] = THCNumerics<Real>::add(
+    for (ptrdiff_t i=tx; i<size; i+=step) {
+      const AccReal val = ScalarConvert<Real, AccReal>::to(row[i]);
+      buffer[tx] = THCNumerics<AccReal>::add( 
         buffer[tx],
-        THCNumerics<Real>::pow(
-          THCNumerics<Real>::abs(row[i]),
-          value)
+        THCNumerics<AccReal>::pow(THCNumerics<AccReal>::abs(val), value)
       );
     }
     // add (reduce)
@@ -203,26 +168,25 @@ __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrd
     {
       __syncthreads();
       if (tx < stride)
-        buffer[tx] = THCNumerics<Real>::add(buffer[tx], buffer[tx+stride]);
+        buffer[tx] = THCNumerics<AccReal>::add(buffer[tx], buffer[tx+stride]);
     }
     // clip norms
     __syncthreads();
-    norm = THCNumerics<Real>::pow(buffer[0], THCNumerics<Real>::cinv(value));
+    norm = THCNumerics<AccReal>::pow(buffer[0], THCNumerics<AccReal>::cinv(value));
   }
 
-  if (THCNumerics<Real>::gt(norm, maxnorm))
-  {
-    norm = THCNumerics<Real>::div(
+  if (THCNumerics<AccReal>::gt(norm, maxnorm)) {
+    norm = THCNumerics<AccReal>::div(
       maxnorm,
-      THCNumerics<Real>::add(
+      THCNumerics<AccReal>::add(
         norm,
-        ScalarConvert<float, Real>::to(1e-7)
+        ScalarConvert<float, AccReal>::to(1e-7)
       )
     );
     // renormalize
-    for (ptrdiff_t i=tx; i<size; i+=step)
-    {
-      row[i] = THCNumerics<Real>::mul(row[i], norm);
+    for (ptrdiff_t i = tx; i < size; i += step) {
+      const AccReal val = ScalarConvert<Real, AccReal>::to(row[i]);
+      row[i] = ScalarConvert<AccReal, Real>::to(THCNumerics<AccReal>::mul(val, norm));
     }
   }
 }
@@ -296,21 +260,37 @@ struct TensorNormOp<half, StaticExp>
 };
 #endif
 
-template <typename Tacc, typename T>
+template <typename T>
 struct TensorDistOp
 {
-  TensorDistOp(Tacc exp) : exponent(exp) {}
+  TensorDistOp(T exp) : exponent{exp} {}
 
-  __host__ __device__ Tacc operator()(T x, T y) const {
-    Tacc xr = ScalarConvert<T, Tacc>::to(x);
-    Tacc yr = ScalarConvert<T, Tacc>::to(y);
-    return THCNumerics<Tacc>::pow(
-      THCNumerics<Tacc>::abs(THCNumerics<Tacc>::sub(xr, yr)),
-      exponent
-    );
+  __host__ __device__ T operator()(T x, T y) const {
+    return THCNumerics<T>::pow(
+      THCNumerics<T>::abs(THCNumerics<T>::sub(x, y)), 
+      exponent);
   }
 
-  const Tacc exponent;
+  const T exponent;
+};
+
+/*
+  Fuses conversions and TensorDistOp. Needed for Thrust.
+*/
+template <typename T, typename AccT>
+struct ThrustTensorDistOp
+{
+  ThrustTensorDistOp(AccT exp) : exponent{exp} {}
+
+  __host__ __device__ AccT operator()(T _x, T _y) const {
+    const AccT x = ScalarConvert<T, AccT>::to(_x);
+    const AccT y = ScalarConvert<T, AccT>::to(_y);
+    return THCNumerics<AccT>::pow(
+      THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y)), 
+      exponent);
+  }
+
+  const AccT exponent;
 };
 
 #include <thrust/functional.h>

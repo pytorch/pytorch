@@ -8,7 +8,6 @@ THCudaByteTensor_logicalAndAll(THCState *state, THCudaByteTensor *self) {
   if (!THC_reduceAll(state, self,
                      thrust::identity<unsigned char>(),
                      LogicalAll(),
-                     LogicalAll(),
                      (unsigned char) 1, &result, 0)) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
@@ -23,7 +22,6 @@ THCudaByteTensor_logicalAnyAll(THCState *state, THCudaByteTensor *self) {
   if (!THC_reduceAll(state, self,
                      thrust::identity<unsigned char>(),
                      LogicalAny(),
-                     LogicalAny(),
                      (unsigned char) 0, &result, 0)) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
@@ -36,7 +34,6 @@ THCudaByteTensor_logicalAnd(THCState* state, THCudaByteTensor *self, THCudaByteT
   THCAssertSameGPU(THCudaByteTensor_checkGPU(state, 2, self, src));
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<unsigned char>(),
-                     LogicalAll(),
                      LogicalAll(),
                      (unsigned char) 1,
                      dimension,
@@ -52,7 +49,6 @@ THCudaByteTensor_logicalAny(THCState* state, THCudaByteTensor *self, THCudaByteT
   THCAssertSameGPU(THCudaByteTensor_checkGPU(state, 2, self, src));
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<unsigned char>(),
-                     LogicalAny(),
                      LogicalAny(),
                      (unsigned char) 0,
                      dimension,

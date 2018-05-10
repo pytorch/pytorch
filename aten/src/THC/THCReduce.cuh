@@ -22,12 +22,11 @@ __device__ __forceinline__ IndexType getReduceNoncontigDimSliceIndex() {
 }
 
 // Kernel that handles an entire reduction of a slice of a tensor per each thread
-template <typename ModifyOp,
-          typename ReduceOp,
-          typename ReduceAccOp,
-          typename T,
-          typename AccT,
+template <typename T,
           typename IndexType,
+          typename AccT,
+          typename ModifyOp,
+          typename ReduceOp,
           int ADims, int BDims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
@@ -40,18 +39,17 @@ kernelReduceNoncontigDim_shared(TensorInfo<T, IndexType> out,
                          IndexType totalSlices,
                          AccT init,
                          ModifyOp modifyOp,
-                         ReduceOp reduceOp,
-                         ReduceAccOp reduceAccOp) {
+                         ReduceOp reduceOp) {
 
   IndexType sliceIndex  = blockIdx.x * blockDim.x + threadIdx.x;
   IndexType sliceStride = gridDim.x * blockDim.x;
 
   __shared__ AccT local_reduce[THC_NONCONTIG_REDUCE_BLOCK_SIZE];
   AccT* shmem = &local_reduce[threadIdx.x + threadIdx.y * blockDim.x];
-  T load_reg[4];
+  AccT load_reg[4];
   AccT local_reg;
 
-  for(;sliceIndex<totalSlices; sliceIndex+=sliceStride){
+  for(;sliceIndex<totalSlices; sliceIndex+=sliceStride) {
     local_reg = init;
 
     const IndexType outOffset =
@@ -63,58 +61,67 @@ kernelReduceNoncontigDim_shared(TensorInfo<T, IndexType> out,
     //for(IndexType i=threadIdx.y; i<reductionSize; i+=blockDim.y){
     //  local_reg += in[inOffset + i * reductionStride];
     //}
-    for(IndexType i=threadIdx.y; i<reductionSize; i+=blockDim.y*4){
-      if(i + blockDim.y * 3 < reductionSize){
-        load_reg[0] = modifyOp(in.data[inOffset + (i + blockDim.y * 0) * reductionStride]);
-        load_reg[1] = modifyOp(in.data[inOffset + (i + blockDim.y * 1) * reductionStride]);
-        load_reg[2] = modifyOp(in.data[inOffset + (i + blockDim.y * 2) * reductionStride]);
-        load_reg[3] = modifyOp(in.data[inOffset + (i + blockDim.y * 3) * reductionStride]);
+    for(IndexType i=threadIdx.y; i<reductionSize; i+=blockDim.y*4) {
+      if (i + blockDim.y * 3 < reductionSize) {
+        const AccT val0 = ScalarConvert<T, AccT>::to(in.data[inOffset + i * reductionStride]);
+        load_reg[0] = modifyOp(val0);
+        const AccT val1 = ScalarConvert<T, AccT>::to(in.data[inOffset + (i + blockDim.y * 1) * reductionStride]);
+        load_reg[1] = modifyOp(val1);
+        const AccT val2 = ScalarConvert<T, AccT>::to(in.data[inOffset + (i + blockDim.y * 2) * reductionStride]);
+        load_reg[2] = modifyOp(val2);
+        const AccT val3 = ScalarConvert<T, AccT>::to(in.data[inOffset + (i + blockDim.y * 3) * reductionStride]);
+        load_reg[3] = modifyOp(val3);
         local_reg = reduceOp(local_reg, load_reg[0]);
         local_reg = reduceOp(local_reg, load_reg[1]);
         local_reg = reduceOp(local_reg, load_reg[2]);
         local_reg = reduceOp(local_reg, load_reg[3]);
-      }else if(i + blockDim.y * 2 < reductionSize){
-        load_reg[0] = modifyOp(in.data[inOffset + (i + blockDim.y * 0) * reductionStride]);
-        load_reg[1] = modifyOp(in.data[inOffset + (i + blockDim.y * 1) * reductionStride]);
-        load_reg[2] = modifyOp(in.data[inOffset + (i + blockDim.y * 2) * reductionStride]);
+      } else if (i + blockDim.y * 2 < reductionSize) {
+        const AccT val0 = ScalarConvert<T, AccT>::to(in.data[inOffset + i * reductionStride]);
+        load_reg[0] = modifyOp(val0);
+        const AccT val1 = ScalarConvert<T, AccT>::to(in.data[inOffset + (i + blockDim.y * 1) * reductionStride]);
+        load_reg[1] = modifyOp(val1);
+        const AccT val2 = ScalarConvert<T, AccT>::to(in.data[inOffset + (i + blockDim.y * 2) * reductionStride]);
+        load_reg[2] = modifyOp(val2);
         local_reg = reduceOp(local_reg, load_reg[0]);
         local_reg = reduceOp(local_reg, load_reg[1]);
         local_reg = reduceOp(local_reg, load_reg[2]);
-      }else if( (i + blockDim.y) < reductionSize){
-        load_reg[0] = modifyOp(in.data[inOffset + (i + blockDim.y * 0) * reductionStride]);
-        load_reg[1] = modifyOp(in.data[inOffset + (i + blockDim.y * 1) * reductionStride]);
+      } else if (i + blockDim.y < reductionSize) {
+        const AccT val0 = ScalarConvert<T, AccT>::to(in.data[inOffset + i * reductionStride]);
+        load_reg[0] = modifyOp(val0);
+        const AccT val1 = ScalarConvert<T, AccT>::to(in.data[inOffset + (i + blockDim.y * 1) * reductionStride]);
+        load_reg[1] = modifyOp(val1);
         local_reg = reduceOp(local_reg, load_reg[0]);
         local_reg = reduceOp(local_reg, load_reg[1]);
-      }else if(i + blockDim.y * 0 < reductionSize){
-        local_reg = reduceOp(local_reg, modifyOp(in.data[inOffset + i * reductionStride]));
+      } else if (i < reductionSize) {
+        const AccT val0 = ScalarConvert<T, AccT>::to(in.data[inOffset + i * reductionStride]);
+        local_reg = reduceOp(local_reg, modifyOp(val0));
       }
     }
 
     *shmem = local_reg;
     int dimy = blockDim.y;
-    while(dimy > 1){
+    while (dimy > 1) {
       __syncthreads();
-      if( threadIdx.y == 0 && (dimy%2 != 0) ){
-        *shmem = reduceAccOp(*shmem, *(shmem + (dimy-1) * blockDim.x) );
+      if (threadIdx.y == 0 && (dimy % 2 != 0) ) {
+        *shmem = reduceOp(*shmem, *(shmem + (dimy - 1) * blockDim.x));
       }
-      if(threadIdx.y < dimy/2){
-        *shmem = reduceAccOp(*shmem, *(shmem + (dimy/2)*blockDim.x) );
+      if (threadIdx.y < dimy / 2) {
+        *shmem = reduceOp(*shmem, *(shmem + (dimy / 2) * blockDim.x));
       }
       dimy /= 2;
     }
-    if(threadIdx.y == 0)
+    if (threadIdx.y == 0)
       out.data[outOffset] = ScalarConvert<AccT, T>::to(*shmem);
   }
 }
 
 
 // Kernel that handles an entire reduction of a slice of a tensor per each thread
-template <typename ModifyOp,
-          typename ReduceOp,
-          typename ReduceAccOp,
-          typename T,
-          typename AccT,
+template <typename T,
           typename IndexType,
+          typename AccT,
+          typename ModifyOp,
+          typename ReduceOp,
           int ADims, int BDims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
@@ -127,8 +134,7 @@ kernelReduceNoncontigDim(TensorInfo<T, IndexType> out,
                          IndexType totalSlices,
                          AccT init,
                          ModifyOp modifyOp,
-                         ReduceOp reduceOp,
-                         ReduceAccOp reduceAccOp) {
+                         ReduceOp reduceOp) {
   const IndexType sliceIndex = getReduceNoncontigDimSliceIndex<IndexType>();
 
   if (sliceIndex >= totalSlices) {
@@ -147,7 +153,8 @@ kernelReduceNoncontigDim(TensorInfo<T, IndexType> out,
   AccT r = init;
 
   for (IndexType i = 0; i < reductionSize; ++i) {
-    r = reduceOp(r, modifyOp(in.data[inOffset]));
+    const AccT val = ScalarConvert<T, AccT>::to(in.data[inOffset]);
+    r = reduceOp(r, modifyOp(val));
     inOffset += reductionStride;
   }
 
@@ -163,12 +170,11 @@ __device__ __forceinline__ IndexType getReduceContigDimSliceIndex() {
 
 // Kernel that handles an entire reduction of a slice of a tensor per
 // each block
-template <typename ModifyOp,
-          typename ReduceOp,
-          typename ReduceAccOp,
-          typename T,
-          typename AccT,
+template <typename T,
           typename IndexType,
+          typename AccT,
+          typename ModifyOp,
+          typename ReduceOp,
           int ADims, int BDims>
 __global__ void
 kernelReduceContigDim(TensorInfo<T, IndexType> out,
@@ -177,8 +183,7 @@ kernelReduceContigDim(TensorInfo<T, IndexType> out,
                       IndexType totalSlices,
                       AccT init,
                       ModifyOp modifyOp,
-                      ReduceOp reduceOp,
-                      ReduceAccOp reduceAccOp) {
+                      ReduceOp reduceOp) {
   const IndexType sliceIndex = getReduceContigDimSliceIndex<IndexType>();
 
   if (sliceIndex >= totalSlices) {
@@ -198,14 +203,15 @@ kernelReduceContigDim(TensorInfo<T, IndexType> out,
   // `inBaseOffset`.
   AccT r = init;
   for (IndexType i = threadIdx.x; i < reductionSize; i += blockDim.x) {
-    r = reduceOp(r, modifyOp(in.data[inBaseOffset + i]));
+    const AccT val = ScalarConvert<T, AccT>::to(in.data[inBaseOffset + i]);
+    r = reduceOp(r, modifyOp(val));
   }
 
   // Reduce within the block
   // FIXME: extern name
   extern __shared__ char smemChar[];
   AccT* smem = (AccT*) smemChar;
-  r = reduceBlock<AccT, ReduceAccOp>(smem, blockDim.x, r, reduceAccOp, init);
+  r = reduceBlock<AccT, ReduceOp>(smem, blockDim.x, r, reduceOp, init);
 
   if (threadIdx.x == 0) {
     // Write out reduced value
@@ -257,15 +263,13 @@ inline bool getContigReduceGrid(ptrdiff_t elements, dim3& grid) {
 // all in where i and the out's 0 are indexed at dimension `dim`
 template <typename TensorType, 
 typename ModifyOp, 
-typename ReduceOp, 
-typename ReduceAccOp, 
+typename ReduceOp,
 typename AccT>
 bool THC_reduceDim(THCState* state,
                    TensorType* out,
                    TensorType* in,
                    const ModifyOp& modifyOp,
                    const ReduceOp& reduceOp,
-                   const ReduceAccOp& reduceAccOp,
                    AccT init,
                    int dim,
                    int keepdim) {
@@ -348,70 +352,60 @@ bool THC_reduceDim(THCState* state,
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, OUT, IN)                                      \
   if (contigReduction) {                                                \
-    kernelReduceContigDim<ModifyOp, ReduceOp, ReduceAccOp,              \
-                          typename TensorUtils<TensorType>::DataType,   \
-                          AccT,                                         \
-                          TYPE, OUT, IN>                                \
+    kernelReduceContigDim<typename TensorUtils<TensorType>::DataType,   \
+                          TYPE, AccT, ModifyOp, ReduceOp,               \
+                          OUT, IN>                                      \
       <<<grid, block, smemSize, THCState_getCurrentStream(state)>>>(    \
         outInfo, inInfo, reductionSize,                                 \
-        (TYPE) outElements, init, modifyOp, reduceOp, reduceAccOp);     \
+        (TYPE) outElements, init, modifyOp, reduceOp);                  \
   } else {                                                              \
     if(block.y == 1){                                                   \
-        kernelReduceNoncontigDim<ModifyOp, ReduceOp, ReduceAccOp,       \
-                           typename TensorUtils<TensorType>::DataType,  \
-                           AccT,                                        \
-                           TYPE, OUT, IN>                               \
+        kernelReduceNoncontigDim<                                       \
+                          typename TensorUtils<TensorType>::DataType,   \
+                          TYPE, AccT, ModifyOp, ReduceOp,               \
+                          OUT, IN>                                      \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
                        outInfo, inInfo, reductionStride, reductionSize, \
-        (TYPE) outElements, init, modifyOp, reduceOp, reduceAccOp);     \
+        (TYPE) outElements, init, modifyOp, reduceOp);                  \
     }else{                                                              \
-        kernelReduceNoncontigDim_shared<ModifyOp, ReduceOp,ReduceAccOp, \
-                           typename TensorUtils<TensorType>::DataType,  \
-                           AccT,                                        \
-                           TYPE, OUT, IN>                               \
+        kernelReduceNoncontigDim_shared<                                \
+                          typename TensorUtils<TensorType>::DataType,   \
+                          TYPE, AccT, ModifyOp, ReduceOp,               \
+                          OUT, IN>                                      \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
                        outInfo, inInfo, reductionStride, reductionSize, \
-                       (TYPE) outElements, init, modifyOp, reduceOp,    \
-                       reduceAccOp);                                    \
+                       (TYPE) outElements, init, modifyOp, reduceOp);   \
     }                                                                   \
   }                                                                     \
 
 #define HANDLE_IN_CASE(TYPE, OUT, IN)                     \
   {                                                       \
-    if (inInfo.isContiguous()) {                          \
-      HANDLE_CASE(TYPE, OUT, -2);                         \
-    } else {                                              \
-      switch (IN) {                                       \
-        case 1:                                           \
-          HANDLE_CASE(TYPE, OUT, 1);                      \
-          break;                                          \
-        case 2:                                           \
-          HANDLE_CASE(TYPE, OUT, 2);                      \
-          break;                                          \
-        default:                                          \
-          HANDLE_CASE(TYPE, OUT, -1);                     \
-          break;                                          \
-      }                                                   \
-    }                                                     \
+    switch (IN) {                                       \
+      case 1:                                           \
+        HANDLE_CASE(TYPE, OUT, 1);                      \
+        break;                                          \
+      case 2:                                           \
+        HANDLE_CASE(TYPE, OUT, 2);                      \
+        break;                                          \
+      default:                                          \
+        HANDLE_CASE(TYPE, OUT, -1);                     \
+        break;                                          \
+    }                                                   \
   }
 
 #define HANDLE_OUT_CASE(TYPE, OUT, IN)                 \
   {                                                    \
-    if (outInfo.isContiguous()) {                      \
-      HANDLE_IN_CASE(TYPE, -2, IN);                    \
-    } else {                                           \
-      switch (OUT) {                                   \
-        case 1:                                        \
-          HANDLE_IN_CASE(TYPE, 1, IN);                 \
-          break;                                       \
-        case 2:                                        \
-          HANDLE_IN_CASE(TYPE, 2, IN);                 \
-          break;                                       \
-        default:                                       \
-          HANDLE_IN_CASE(TYPE, -1, IN);                \
-          break;                                       \
-      }                                                \
-    }                                                  \
+    switch (OUT) {                                   \
+      case 1:                                        \
+        HANDLE_IN_CASE(TYPE, 1, IN);                 \
+        break;                                       \
+      case 2:                                        \
+        HANDLE_IN_CASE(TYPE, 2, IN);                 \
+        break;                                       \
+      default:                                       \
+        HANDLE_IN_CASE(TYPE, -1, IN);                \
+        break;                                       \
+    }                                                \
   }
 
   if (TensorUtils<TensorType>::canUse32BitIndexMath(state, out) &&
@@ -439,11 +433,12 @@ bool THC_reduceDim(THCState* state,
     inInfo.reduceDim(dim);
     inInfo.collapseDims();
 
-    // For large tensors, we only compile the completely contiguous
-    // version and the completely generic version, to reduce
-    // compilation time.
-    if (outInfo.isContiguous() && inInfo.isContiguous()) {
-      HANDLE_CASE(uint64_t, -2, -2);
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
+    */
+    if (outInfo.dims == 1 && inInfo.dims == 1) {
+      HANDLE_CASE(uint64_t, 1, 1);
     } else {
       HANDLE_CASE(uint64_t, -1, -1);
     }
