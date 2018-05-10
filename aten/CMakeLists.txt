@@ -33,7 +33,7 @@ if (NOT USE_CUDA)
   set(NO_CUDA ON)
 endif()
 
-# Load the CMake Utilities.
+# Load the CMake Utilities (For multiplexing between CUDA and HIP).
 INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/utils.cmake)
 
 # Create the project in all cases
@@ -557,7 +557,6 @@ ENDIF(MSVC)
 
 if(USE_ROCM)
   SET(AT_CUDA_ENABLED 1)
-  message("ROCm is enabled.")
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
   add_subdirectory(src/THCS)
