@@ -1639,7 +1639,6 @@ class TestCuda(TestCase):
         a /= 100000000
         b = a.half()
         self.assertGreater(b.norm().item(), 0)
-        
 
 
 def load_ignore_file():
