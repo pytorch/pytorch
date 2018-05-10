@@ -19,12 +19,13 @@ from debug_embed_params import run_embed_params
 import io
 
 # Import various models for testing
-from model_defs.vgg import make_vgg16, make_vgg19, make_vgg16_bn, make_vgg19_bn
-from model_defs.alexnet import AlexNet
-from model_defs.resnet import Bottleneck, ResNet
-from model_defs.inception import Inception3
+from torchvision.models.alexnet import alexnet
+from torchvision.models.inception import inception_v3
+from torchvision.models.densenet import densenet121
+from torchvision.models.resnet import resnet50
+from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
+
 from model_defs.squeezenet import SqueezeNet
-from model_defs.densenet import DenseNet
 from model_defs.super_resolution import SuperResolutionNet
 from model_defs.srresnet import SRResNet
 import model_defs.dcgan as dcgan
@@ -333,9 +334,8 @@ class TestCaffe2Backend(unittest.TestCase):
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
     def test_alexnet(self):
-        alexnet = AlexNet()
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
-        self.run_model_test(alexnet, train=False, batch_size=BATCH_SIZE,
+        self.run_model_test(alexnet(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict, atol=1e-3)
 
     @skipIfNoCuda
@@ -364,10 +364,8 @@ class TestCaffe2Backend(unittest.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(),
                      "model on net has cuda in it, awaiting fix")
     def test_densenet(self):
-        densenet121 = DenseNet(num_init_features=64, growth_rate=32,
-                               block_config=(6, 12, 24, 16))
         state_dict = model_zoo.load_url(model_urls['densenet121'], progress=False)
-        self.run_model_test(densenet121, train=False, batch_size=BATCH_SIZE,
+        self.run_model_test(densenet121(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict, atol=1e-7)
 
     @skip("doesn't match exactly...")
@@ -375,16 +373,14 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_inception(self):
         x = Variable(
             torch.randn(BATCH_SIZE, 3, 299, 299), requires_grad=True)
-        inception = Inception3(aux_logits=True)
         # state_dict = model_zoo.load_url(model_urls['inception_v3_google'], progress=False)
         state_dict = None
-        self.run_model_test(inception, train=False, batch_size=BATCH_SIZE,
+        self.run_model_test(inception_v3(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict, input=x)
 
     def test_resnet(self):
-        resnet50 = ResNet(Bottleneck, [3, 4, 6, 3])
         state_dict = model_zoo.load_url(model_urls['resnet50'], progress=False)
-        self.run_model_test(resnet50, train=False, batch_size=BATCH_SIZE,
+        self.run_model_test(resnet50(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict, atol=1e-6)
 
     def test_squeezenet(self):
@@ -419,28 +415,24 @@ class TestCaffe2Backend(unittest.TestCase):
 
     @unittest.skip("This model takes too much memory")
     def test_vgg16(self):
-        vgg16 = make_vgg16()
         state_dict = model_zoo.load_url(model_urls['vgg16'], progress=False)
-        self.run_model_test(vgg16, train=False, batch_size=BATCH_SIZE,
+        self.run_model_test(vgg16(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict)
 
     @skip("disable to run tests faster...")
     def test_vgg16_bn(self):
-        underlying_model = make_vgg16_bn()
-        self.run_model_test(underlying_model, train=False,
+        self.run_model_test(vgg16_bn(), train=False,
                             batch_size=BATCH_SIZE)
 
     @skip("disable to run tests faster...")
     def test_vgg19(self):
-        vgg19 = make_vgg19()
         state_dict = model_zoo.load_url(model_urls['vgg19'], progress=False)
-        self.run_model_test(vgg19, train=False, batch_size=BATCH_SIZE,
+        self.run_model_test(vgg19(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict)
 
     @skip("disable to run tests faster...")
     def test_vgg19_bn(self):
-        underlying_model = make_vgg19_bn()
-        self.run_model_test(underlying_model, train=False,
+        self.run_model_test(vgg19_bn(), train=False,
                             batch_size=BATCH_SIZE)
 
     def run_word_language_model(self, model_name):
