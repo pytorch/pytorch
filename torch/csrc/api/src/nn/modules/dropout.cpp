@@ -1,6 +1,11 @@
 #include <torch/nn/modules/dropout.h>
 
 namespace torch { namespace nn {
+
+Dropout::Dropout(double p) : p_(p) {
+  assert(p < 1 && p >= 0);
+}
+
 variable_list Dropout::forward(variable_list inputs) {
   if (p_ == 0 || !is_training())
     return inputs;
@@ -13,6 +18,10 @@ variable_list Dropout::forward(variable_list inputs) {
     lst.push_back(x * Var(noise));
   }
   return lst;
+}
+
+Dropout2d::Dropout2d(double p) : p_(p) {
+  assert(p < 1 && p >= 0);
 }
 
 variable_list Dropout2d::forward(variable_list inputs) {

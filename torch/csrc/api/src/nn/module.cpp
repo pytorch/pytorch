@@ -9,11 +9,29 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <typeinfo>
 #include <unordered_map>
 
 namespace torch { namespace nn {
 
-Module::Module() : is_training_(true) {}
+Module::Module(std::string name) : name_(std::move(name)) {}
+
+const std::string& Module::name() const noexcept {
+  // If the name optional is empty at this point, we grab the name of the
+  // dynamic type via RTTI. Note that we cannot do this in the constructor,
+  // because in the constructor of a base class `this` always refers to the base
+  // type. Inheritance effectively does not work in constructors. Also this note
+  // from http://en.cppreference.com/w/cpp/language/typeid:
+  // If typeid is used on an object under construction or destruction (in a
+  // destructor or in a constructor, including constructor's initializer list
+  // or default member initializers), then the std::type_info object referred
+  // to by this typeid represents the class that is being constructed or
+  // destroyed even if it is not the most-derived class.
+  if (!name_.has_value()) {
+    name_ = at::demangle(typeid(*this).name());
+  }
+  return *name_;
+}
 
 std::unique_ptr<Module> Module::clone() const {
   AT_ERROR(

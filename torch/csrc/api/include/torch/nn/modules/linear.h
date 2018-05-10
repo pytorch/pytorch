@@ -10,7 +10,7 @@ namespace torch { namespace nn {
 
 class Linear : public torch::nn::CloneableModule<Linear> {
  public:
-  Linear(uint32_t nin, uint32_t nout) : nin(nin), nout(nout) {}
+  Linear(uint32_t nin, uint32_t nout);
 
   variable_list forward(variable_list) override;
   void reset_parameters() override;

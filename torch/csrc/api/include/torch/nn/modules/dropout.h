@@ -10,9 +10,7 @@ namespace torch { namespace nn {
 
 class Dropout : public torch::nn::CloneableModule<Dropout> {
  public:
-  Dropout(double p = 0.5) : p_(p) {
-    assert(p < 1 && p >= 0);
-  }
+  explicit Dropout(double p = 0.5);
   variable_list forward(variable_list) override;
 
  protected:
@@ -21,9 +19,7 @@ class Dropout : public torch::nn::CloneableModule<Dropout> {
 
 class Dropout2d : public torch::nn::CloneableModule<Dropout2d> {
  public:
-  Dropout2d(double p = 0.5) : p_(p) {
-    assert(p < 1 && p >= 0);
-  }
+  explicit Dropout2d(double p = 0.5);
   variable_list forward(variable_list) override;
 
  protected:

@@ -121,24 +121,28 @@ def parse_options():
         "-c",
         "--clang-tidy-exe",
         default="clang-tidy",
-        help="{ath to clang-tidy executable",
+        help="Path to clang-tidy executable",
     )
     parser.add_argument(
         "-e",
         "--extra-args",
         nargs="+",
         default=[],
-        help="Extra arguments to forward to clang-tidy",
+        help="Extra arguments to forward to clang-tidy, without the hypen (e.g. -e 'header-filter=\"path\"')",
     )
     parser.add_argument(
         "-g",
         "--glob",
         nargs="+",
         default=[],
-        help="File patterns as UNIX globs (no **)",
+        help="File patterns as UNIX globs (support * and ?, not recursive **)",
     )
     parser.add_argument(
-        "-x", "--regex", nargs="+", default=[], help="File patterns as regexes"
+        "-x",
+        "--regex",
+        nargs="+",
+        default=[],
+        help="File patterns as regular expressions",
     )
     parser.add_argument(
         "-d",
