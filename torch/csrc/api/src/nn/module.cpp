@@ -2,6 +2,8 @@
 
 #include <torch/csrc/autograd/generated/VariableType.h>
 
+#include <ATen/Error.h>
+
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -12,6 +14,16 @@
 namespace torch { namespace nn {
 
 Module::Module() : is_training_(true) {}
+
+std::unique_ptr<Module> Module::clone() const {
+  AT_ERROR(
+      "clone() has not been implemented for ",
+      "_____________name_______________",
+      ". Use the copy constructor if you don't require polymorphic cloning. "
+      "Otherwise, subclass torch::nn::CloneableModule<",
+      "_____________name_______________",
+      "> instead of torch::nn::Module to inherit the ability to clone.");
+}
 
 std::map<std::string, Variable> Module::parameters() const {
   std::map<std::string, Variable> ret;
