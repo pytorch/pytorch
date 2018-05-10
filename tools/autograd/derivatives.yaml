@@ -243,7 +243,7 @@
 - name: expm1(Tensor self)
   self: grad * (result + 1)
 
-- name: expand(Tensor self, IntList size)
+- name: expand(Tensor self, IntList size, *, bool implicit)
   self: reduce_to(grad, self.sizes())
 
 - name: exponential_(Tensor self, double lambd, Generator generator)
