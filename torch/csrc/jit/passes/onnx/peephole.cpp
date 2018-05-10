@@ -92,6 +92,7 @@ void fuseBroadcast(Block *b) {
 
     // The expanded_rhs input isn't actually an expand, so no fusion available
     if (expanded_rhs->kind() != aten::expand) continue;
+    if (expanded_rhs->inputs().size() != 1) continue;
 
     auto* unexpanded_rhs = expanded_rhs->input();
 
