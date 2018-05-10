@@ -4,13 +4,34 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
 else()
   cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+  include(CMakeDependentOption)
+  option(USE_CUDA "Use CUDA" ON)
+  option(USE_CUDNN "Use cuDNN" ON)
+  option(USE_MKLDNN "Use MKLDNN" ON)
+  cmake_dependent_option(
+      USE_CUDNN "Use cuDNN" ON
+      "USE_CUDA" OFF)
+
+  # Legacy options, which we will eventually remove
+  cmake_dependent_option(
+      NO_CUDA "Legacy no CUDA" OFF
+      "USE_CUDA" ON)
+  cmake_dependent_option(
+      WITH_CUDNN "Legacy cuDNN" ON
+      "USE_CUDNN" OFF)
+  cmake_dependent_option(
+      NO_MKLDNN "Legacy no MKLDNN" OFF
+      "USE_MKLDNN" ON)
+endif()
+if (NOT USE_CUDA)
+  set(NO_CUDA ON)
 endif()
 
 IF(WITH_ROCM)
   INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/LoadHIP.cmake)
 ENDIF()
 
-# Load the CMake Utilities.
+# Load the CMake Utilities (For multiplexing between CUDA and HIP).
 INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/utils.cmake)
 
 # Create the project in all cases
@@ -20,11 +41,15 @@ project(ATen CXX C)
 list(APPEND CMAKE_MODULE_PATH
   /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
 list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
 
 
 cmake_policy(SET CMP0012 NEW)
+
+# For caffe2_interface_library
+include(utils)
 
 # Polyfill for upstream FindCUDA
 include(CMakeInitializeConfigs)
@@ -105,10 +130,6 @@ IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
   LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
-  ADD_DEFINITIONS(-DTH_EXPORTS)
-  IF (NOT NO_CUDA OR WITH_ROCM)
-    ADD_DEFINITIONS(-DTHC_EXPORTS)
-  ENDIF()
 ENDIF(MSVC)
 
 IF (NOT MSVC)
@@ -202,7 +223,7 @@ ENDIF(OPENMP_FOUND)
 SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
 FIND_PACKAGE(MAGMA)
-IF(CUDA_FOUND AND MAGMA_FOUND)
+IF(NOT NO_CUDA AND MAGMA_FOUND)
   INCLUDE_DIRECTORIES("${MAGMA_INCLUDE_DIR}")
   SET(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
   INCLUDE(CheckPrototypeDefinition)
@@ -473,13 +494,13 @@ include_directories(
 add_subdirectory(src/THNN)
 add_subdirectory(src/THS)
 
-if (WITH_ROCM)
+if(WITH_ROCM)
   SET(AT_CUDA_ENABLED 1)
-  message("ROCm is enabled.")
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
   add_subdirectory(src/THCS)
-elseif(NOT NO_CUDA)
+  message("ROCm is enabled.")
+else if(NOT NO_CUDA)
   SET(AT_CUDA_ENABLED 1)
   INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
   find_package(CUDA 5.5 REQUIRED)
@@ -488,7 +509,6 @@ elseif(NOT NO_CUDA)
   add_subdirectory(src/THCS)
 else()
   message("disabling CUDA because NO_CUDA is set")
-  SET(CUDA_FLAG -n)
   SET(AT_CUDA_ENABLED 0)
 endif()
 
@@ -537,7 +557,6 @@ ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 if(NOT NO_CUDA AND NOT WITH_ROCM)
   include_directories(${CUDA_INCLUDE_DIRS})
 endif()
-
 add_subdirectory(src/ATen/test)
 
 if(ATEN_NO_CONTRIB)
