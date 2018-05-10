@@ -47,9 +47,11 @@ mkdir %CD%\\tmp_bin
 if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe --quiet )
 
 :: Install Miniconda3
-if "%REBUILD%"=="" ( IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 ) )
-if "%REBUILD%"=="" ( curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O )
-if "%REBUILD%"=="" ( .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3 )
+if "%REBUILD%"=="" (
+  IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 )
+  curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
+  .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
+)
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
 if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 )
 
@@ -80,19 +82,16 @@ set DISTUTILS_USE_SDK=1
 
 set CMAKE_GENERATOR=Ninja
 
-if "%REBUILD%"=="" ( set NO_CUDA=1 )
+if "%REBUILD%"=="" (
+  set NO_CUDA=1
+  python setup.py install
+  if %errorlevel% neq 0 exit /b %errorlevel%
+  sccache --show-stats
+  sccache --zero-stats
+  rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
+  copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+)
 
-if "%REBUILD%"=="" ( python setup.py install )
-
-if "%REBUILD%"=="" ( if %errorlevel% neq 0 exit /b %errorlevel% )
-
-if "%REBUILD%"=="" ( sccache --show-stats )
-
-if "%REBUILD%"=="" ( sccache --zero-stats )
-
-if "%REBUILD%"=="" ( rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch )
-
-if "%REBUILD%"=="" ( copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe )
 set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
 
 if "%REBUILD%"=="" set NO_CUDA=
@@ -103,7 +102,7 @@ if %errorlevel% neq 0 exit /b %errorlevel
 
 sccache --show-stats
 
-if "%IMAGE_COMMIT_TAG%"!="" ( 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z )
+if NOT "%IMAGE_COMMIT_TAG%"=="" ( 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z )
 
 EOL
 
