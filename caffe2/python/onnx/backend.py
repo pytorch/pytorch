@@ -407,13 +407,20 @@ class Caffe2Backend(Backend):
                                  pred_model.graph.input,
                                  pred_model.graph.value_info):
             if x.name == W:
-                input_size = x.type.tensor_type.shape.dim[1].dim_value
+                input_size = x.type.tensor_type.shape.dim[2].dim_value
                 break
         else:
             raise RuntimeError("best-effort shape inference for RNN/GRU/LSTM failed")
 
         init_net = core.Net("init-net")
         pred_mh = ModelHelper()
+
+        init_net.Reshape(W, [W, cls.dummy_name()], shape=[1,-1,0])
+        init_net.Squeeze(W, W, dims=[0])
+        init_net.Reshape(R, [R, cls.dummy_name()], shape=[1,-1,0])
+        init_net.Squeeze(R, R, dims=[0])
+        init_net.Reshape(B, [B, cls.dummy_name()], shape=[1,-1])
+        init_net.Squeeze(B, B, dims=[0])
 
         if n.op_type == 'RNN':
             def reform(*args):
