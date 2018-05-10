@@ -817,6 +817,8 @@ class TestCuda(TestCase):
     def test_type_conversions_same_gpu(self):
         x = torch.randn(5, 5).cuda(1)
         self.assertEqual(x.int().get_device(), 1)
+        self.assertEqual(x.type(torch.int).get_device(), 1)
+        self.assertEqual(x.to(torch.int).get_device(), 1)
 
     def test_neg(self):
         TestTorch._test_neg(self, lambda t: t.cuda())
