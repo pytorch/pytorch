@@ -385,6 +385,17 @@ class TestSparse(TestCase):
         self.assertTrue(x_coalesced.is_coalesced())
         self.assertFalse(y_uncoalesced.is_coalesced())
 
+    def test_add_zeros(self):
+        def test_shape(sparse_dims, sizes):
+            x, _, _ = self._gen_sparse(sparse_dims, 20, sizes)
+            zeros = torch.zeros(sizes, layout=torch.sparse_coo).to(x.device)
+            self.assertEqual(zeros + x, x)
+            self.assertEqual(x + zeros, x)
+
+        test_shape(1, [1])
+        test_shape(4, [3, 17, 19, 5])
+        test_shape(2, [3, 17, 19, 5])
+
     @cpu_only
     def test_mm(self):
         def test_shape(di, dj, dk):
