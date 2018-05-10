@@ -8,6 +8,8 @@ future.
 from .adadelta import Adadelta
 from .adagrad import Adagrad
 from .adam import Adam
+from .amsaggmo import AMSAggMo
+from .aggmo import AggMo
 from .sparse_adam import SparseAdam
 from .adamax import Adamax
 from .asgd import ASGD
