@@ -816,9 +816,9 @@ class TracedModule(ScriptModule):
                 self._parameters[name] = param
                 check_unique(param)
         for name, buf in orig._buffers.items():
-            if param is not None:
+            if buf is not None:
                 self._buffers[name] = buf
-                check_unique(param)
+                check_unique(buf)
         self._orig_class = type(orig)
 
         if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:
