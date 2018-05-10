@@ -5017,6 +5017,26 @@ class TestNNInit(TestCase):
 
                 self.assertEqual(input_tensor, input_tensor.clone().fill_(val))
 
+    def test_ones(self):
+        for as_variable in [True, False]:
+            for dims in [1, 2, 4]:
+                input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
+                init.ones_(input_tensor)
+                if as_variable:
+                    input_tensor = input_tensor.data
+
+                self.assertEqual(input_tensor, input_tensor.clone().fill_(1))
+
+    def test_zeros(self):
+        for as_variable in [True, False]:
+            for dims in [1, 2, 4]:
+                input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
+                init.zeros_(input_tensor)
+                if as_variable:
+                    input_tensor = input_tensor.data
+
+                self.assertEqual(input_tensor, input_tensor.clone().fill_(0))
+
     def test_eye(self):
         for as_variable in [True, False]:
             input_tensor = self._create_random_nd_tensor(2, size_min=1, size_max=5, as_variable=as_variable)
