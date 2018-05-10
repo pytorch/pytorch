@@ -50,7 +50,7 @@ CUDAGenerator& CUDAGenerator::manualSeedAll(uint64_t seed) {
 }
 
 void * CUDAGenerator::unsafeGetTH() {
-  return (void*)THCRandom_getGenerator(context->thc_state);
+  return (void*)THCRandom_getGenerator(context->getTHCState());
 }
 
 } // namespace at
