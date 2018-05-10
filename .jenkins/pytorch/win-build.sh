@@ -85,7 +85,9 @@ set CMAKE_GENERATOR=Ninja
 if "%REBUILD%"=="" (
   set NO_CUDA=1
   python setup.py install
-  if %errorlevel% neq 0 exit /b %errorlevel%
+)
+if %errorlevel% neq 0 exit /b %errorlevel%
+if "%REBUILD%"=="" (
   sccache --show-stats
   sccache --zero-stats
   rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
