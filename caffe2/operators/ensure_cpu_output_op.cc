@@ -11,6 +11,14 @@ OPERATOR_SCHEMA(EnsureCPUOutput)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
     .InputsCanCrossDevices()
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      auto op_device =
+          def.has_device_option() ? def.device_option() : DeviceOption();
+      auto cpu_option = DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), op_device);
+      vector<DeviceOption> out_dev(def.output_size(), cpu_option);
+      return std::make_pair(in_dev, out_dev);
+    })
     .SetDoc(R"DOC(
 This Op always create TensorCPU output, and may involves cross-device MemCpy.
 Under CPU Context, this Op takes TensorCPU as input. Under the CUDA Context,
