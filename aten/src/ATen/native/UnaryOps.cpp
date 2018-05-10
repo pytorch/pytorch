@@ -32,16 +32,12 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   return self._fill_(value);
 }
 
+// NB: If you use this macro, you may also need to add a CUDA forwarding
+// stub in CUDAUnaryOps
 #define IMPLEMENT_UNARY_OP_PREQUEL(op)                           \
   Tensor op(const Tensor& self) {                                \
     Tensor result = self.type().tensor();                        \
     return at::op##_out(result, self);                           \
-  }                                                              \
-  Tensor& _##op##__cuda(Tensor& self) {                          \
-    return at::_##op##_out(self, self);                          \
-  }                                                              \
-  Tensor& _##op##_out_cuda(Tensor& result, const Tensor& self) { \
-    return at::_##op##_out(result, self);                        \
   }
 
 #define IMPLEMENT_UNARY_OP_FLOAT_CMATH(op, opfn)                          \
@@ -122,12 +118,6 @@ IMPLEMENT_UNARY_OP_PREQUEL(trunc)
 Tensor tanh(const Tensor& self) {
   Tensor result = self.type().tensor();
   return at::tanh_out(result, self);
-}
-Tensor& _tanh__cuda(Tensor& self) {
-  return at::_th_tanh_out(self, self);
-}
-Tensor& _tanh_out_cuda(Tensor& result, const Tensor& self) {
-  return at::_th_tanh_out(result, self);
 }
 
 IMPLEMENT_UNARY_OP_VEC(abs, std::abs)

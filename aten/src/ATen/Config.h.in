@@ -1,14 +1,10 @@
 #pragma once
 
-// Test these using #if AT_CUDA_ENABLED(), not #ifdef, so that it's
+// Test these using #if AT_MKL_ENABLED(), not #ifdef, so that it's
 // obvious if you forgot to include Config.h
 //    c.f. https://stackoverflow.com/questions/33759787/generating-an-error-if-checked-boolean-macro-is-not-defined
+//
+// DO NOT put the macros for CUDA libraries in this file; they belong in cuda/CUDAConfig.h
 
-#define AT_CUDA_ENABLED() @AT_CUDA_ENABLED@
-#define AT_CUDNN_ENABLED() @AT_CUDNN_ENABLED@
 #define AT_MKLDNN_ENABLED() @AT_MKLDNN_ENABLED@
 #define AT_MKL_ENABLED() @AT_MKL_ENABLED@
-
-#if !AT_CUDA_ENABLED() && AT_CUDNN_ENABLED()
-#error "Cannot enable CuDNN without CUDA"
-#endif

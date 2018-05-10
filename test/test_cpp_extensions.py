@@ -214,3 +214,7 @@ class TestCppExtension(common.TestCase):
         with self.assertRaises(ValueError):
             torch.utils.cpp_extension.load_inline(
                 name='invalid_jit_extension', cpp_sources='', functions=5)
+
+
+if __name__ == '__main__':
+    common.run_tests()

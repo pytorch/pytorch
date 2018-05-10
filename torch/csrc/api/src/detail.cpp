@@ -5,12 +5,6 @@
 #include <functional>
 #include <stdexcept>
 
-#if AT_CUDA_ENABLED()
-#include <THC/THCTensorRandom.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#endif
-
 #include "torch/detail.h"
 
 namespace torch {
@@ -33,39 +27,26 @@ void backward(Tensor loss, bool keep_graph) {
 }
 
 void setSeed(uint64_t seed) {
+  // TODO: Move this to at::Context
   at::globalContext().defaultGenerator(at::Backend::CPU).manualSeed(seed);
-#if AT_CUDA_ENABLED()
-  if (getNumGPUs() > 0) {
-    THCRandom_manualSeedAll(at::globalContext().lazyInitCUDA(), seed);
+  if (at::globalContext().hasCUDA()) {
+    at::globalContext().defaultGenerator(at::Backend::CUDA).manualSeedAll(seed);
   }
-#endif
 }
 
 int getNumGPUs() {
-#if AT_CUDA_ENABLED()
-  int count;
-  auto err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorNoDevice) {
-    return 0;
-  } else if (err != cudaSuccess) {
-    std::string msg = "CUDA error (";
-    msg += std::to_string(static_cast<int>(err));
-    msg += "): ";
-    msg += cudaGetErrorString(err);
-    throw std::runtime_error(msg);
-  }
-  return count;
-#else
-  return 0;
-#endif
+  return at::globalContext().getNumGPUs();
 }
 
 bool hasCuda() {
+  // NB: the semantics of this are different from at::globalContext().hasCUDA();
+  // ATen's function tells you if you have a working driver and CUDA build,
+  // whereas this function also tells you if you actually have any GPUs.
   return getNumGPUs() > 0;
 }
 
 bool hasCudnn() {
-  return hasCuda() && AT_CUDNN_ENABLED();
+  return hasCuda() && at::globalContext().hasCuDNN();
 }
 
 } // namespace torch

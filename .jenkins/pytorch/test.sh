@@ -33,7 +33,10 @@ time python test/run_test.py --verbose
 if [[ "$BUILD_ENVIRONMENT" != *asan* ]]; then
   echo "Testing ATen"
   TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
-  ln -s "$TORCH_LIB_PATH"/libATen.so aten/build/src/ATen/libATen.so
+  # NB: the ATen test binaries don't have RPATH set, so it's necessary to
+  # put the dynamic libraries somewhere were the dynamic linker can find them.
+  # This is a bit of a hack.
+  ln -s "$TORCH_LIB_PATH"/libATen*.so aten/build/src/ATen
   aten/tools/run_tests.sh aten/build
 fi
 

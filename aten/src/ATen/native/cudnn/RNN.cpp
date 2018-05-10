@@ -3,6 +3,7 @@
 #include <ATen/Error.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_CUDNN_ENABLED()
 
