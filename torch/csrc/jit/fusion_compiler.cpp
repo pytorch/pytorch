@@ -4,6 +4,8 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/torch_api.h"
+
 #include "ATen/ATen.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/cuda_check.h"
@@ -473,7 +475,7 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector
   outputs.clear();
   outputs.reserve(outputDescriptors().size());
   for(auto & od : outputDescriptors()) {
-    outputs.push_back(at::getType(backend(),od.scalar_type).tensor());
+    outputs.push_back(torch::getType(backend(),od.scalar_type).tensor());
   }
   launch_with_tensors(inputs, outputs);
 }

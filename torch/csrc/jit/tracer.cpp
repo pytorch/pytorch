@@ -9,6 +9,7 @@
 #include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
+#include "torch/csrc/torch_api.h"
 
 #include <string>
 #include <sstream>
@@ -256,7 +257,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto tracing_state = getTracingState({var});
   auto & graph = tracing_state->graph;
 
-  auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
+  auto size_var = torch::toTensor(at::Scalar(var.size(dim)));
   auto* value = getValueTrace(tracing_state, var);
   auto* node = graph->create(aten::size, {value})
                     ->i_(attr::dim, dim);

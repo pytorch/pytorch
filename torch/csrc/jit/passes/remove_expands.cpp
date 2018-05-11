@@ -7,7 +7,7 @@ static void RemoveExpands(Block* block) {
        ++it) {
     for (auto sub : it->blocks())
       RemoveExpands(sub);
-    if (it->kind() == aten::expand && it->i(attr::implicit)) {
+    if (it->kind() == aten::expand && it->hasAttribute(attr::implicit) && it->i(attr::implicit)) {
       it->output()->replaceAllUsesWith(it->input());
       it.destroyCurrent();
     }
