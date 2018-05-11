@@ -544,7 +544,12 @@ ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 if(NOT NO_CUDA)
   include_directories(${CUDA_INCLUDE_DIRS})
 endif()
-add_subdirectory(src/ATen/test)
+
+if(ATEN_NO_TEST)
+  message("disable test because ATEN_NO_TEST is set")
+else()
+  add_subdirectory(src/ATen/test)
+endif()
 
 if(ATEN_NO_CONTRIB)
   message("disable contrib because ATEN_NO_CONTRIB is set")

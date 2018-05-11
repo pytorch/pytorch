@@ -3,17 +3,18 @@ if(BUILD_ATEN)
   # Unfortunately the custom command below requires this to be here
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  set(ATEN_NO_TEST ON)
   set(AT_LINK_STYLE STATIC)
-  add_subdirectory(${PROJECT_SOURCE_DIR}/aten aten)
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../aten aten)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
   add_custom_command(OUTPUT aten_op.h
   COMMAND
   python ${CMAKE_CURRENT_SOURCE_DIR}/gen_op.py
-  --aten_root=${PROJECT_SOURCE_DIR}/aten
-  --template_dir=${PROJECT_SOURCE_DIR}/caffe2/contrib/aten
+  --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../../../aten
+  --template_dir=${CMAKE_CURRENT_SOURCE_DIR}
   DEPENDS
-  ATen
+  ATen_cpu
   ${CMAKE_CURRENT_SOURCE_DIR}/gen_op.py
   ${CMAKE_CURRENT_SOURCE_DIR}/aten_op_template.h)
 
