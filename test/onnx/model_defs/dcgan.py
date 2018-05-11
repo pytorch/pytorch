@@ -49,7 +49,7 @@ class _netG(nn.Module):
         )
 
     def forward(self, input):
-        if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
+        if self.ngpu > 1 and isinstance(input.data, torch.cuda.FloatTensor):
             output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
         else:
             output = self.main(input)
@@ -82,7 +82,7 @@ class _netD(nn.Module):
         )
 
     def forward(self, input):
-        if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
+        if self.ngpu > 1 and isinstance(input.data, torch.cuda.FloatTensor):
             output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
         else:
             output = self.main(input)
