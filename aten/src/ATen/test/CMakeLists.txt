@@ -4,11 +4,6 @@ IF (MSVC)
   ENDIF()
 ENDIF(MSVC)
 
-if(WITH_ROCM)
- SET(CMAKE_C_COMPILER ${HIP_HIPCC_EXECUTABLE})
- SET(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-endif()
-
 ADD_EXECUTABLE(scalar_test scalar_test.cpp)
 target_link_libraries(scalar_test ATen_cpu)
 

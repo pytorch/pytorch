@@ -111,7 +111,7 @@ endfunction()
 # Usage:
 #   torch_cuda_based_add_executable(cuda_target)
 #
-function(torch_cuda_based_add_executable cuda_target)
+macro(torch_cuda_based_add_executable cuda_target)
   IF (WITH_ROCM)
     hip_add_executable(${cuda_target} ${ARGN})
   ELSEIF(NOT NO_CUDA)
@@ -119,14 +119,14 @@ function(torch_cuda_based_add_executable cuda_target)
   ELSE()
 
   ENDIF()
-endfunction()
+endmacro()
 
 ##############################################################################
 # Multiplex between adding libraries for CUDA versus HIP (AMD Software Stack).
 # Usage:
 #   torch_cuda_based_add_library(cuda_target)
 #
-function(torch_cuda_based_add_library cuda_target)
+macro(torch_cuda_based_add_library cuda_target)
   IF (WITH_ROCM)
     hip_add_library(${cuda_target} ${ARGN})
   ELSEIF(NOT NO_CUDA)
@@ -134,4 +134,4 @@ function(torch_cuda_based_add_library cuda_target)
   ELSE()
 
   ENDIF()
-endfunction()
+endmacro()

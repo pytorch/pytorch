@@ -27,10 +27,6 @@ if (NOT USE_CUDA)
   set(NO_CUDA ON)
 endif()
 
-IF(WITH_ROCM)
-  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/LoadHIP.cmake)
-ENDIF()
-
 # Create the project in all cases
 project(ATen CXX C)
 
@@ -42,8 +38,12 @@ list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
 list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
 
-
 cmake_policy(SET CMP0012 NEW)
+
+# Load HIP specific paths.
+IF(WITH_ROCM)
+  include(LoadHIP)
+ENDIF()
 
 # For caffe2_interface_library
 include(utils)

@@ -12,9 +12,8 @@ IF(WITH_ROCM)
  EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig -P OUTPUT_VARIABLE PLATFORM)
  EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig --cpp_config OUTPUT_VARIABLE HIP_CXX_FLAGS)
 
- # Set C+Flags
- # SET(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
- # SET(CMAKE_CXX_FLAGS  "-std=c++11 ${CMAKE_CXX_FLAGS} ${HIP_CXX_FLAGS}")
+ # Link with HIPCC https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_porting_guide.md#linking-with-hipcc
+ SET(CMAKE_CXX_LINK_EXECUTABLE ${HIP_HIPCC_EXECUTABLE})
 
  # Show message that we're using ROCm.
  MESSAGE(STATUS "ROCM TRUE:")
