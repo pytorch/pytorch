@@ -118,7 +118,9 @@ class Optimizer(object):
             lr = net.GetBlobRef(learning_rate_blob)
 
         if self._lr_multiplier is not None:
-            lr_multiplier = self._lr_multiplier
+            lr_multiplier = net.CopyFromCPUInput(
+                self._lr_multiplier, self.make_unique_blob_name('lr_multiplier')
+            )
 
             lr = net.Mul(
                 [lr, lr_multiplier],
