@@ -74,7 +74,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
     try {
       return RunOnDeviceWithOrderNCHW();
     } catch (ideep::error& e) {
-      VLOG(1) << "IDEEP error:" << e.message; 
+      LOG(ERROR) << "IDEEP error:" << e.message;
       throw;
     }
   }
