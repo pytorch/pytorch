@@ -230,8 +230,6 @@ def build_libs(libs):
         build_libs_cmd += ['--with-cuda']
     if WITH_ROCM:
         build_libs_cmd += ['--with-rocm']
-        os.environ["CC"] = 'hipcc'
-        os.environ["CXX"] = 'hipcc'
     if WITH_NNPACK:
         build_libs_cmd += ['--with-nnpack']
     if WITH_CUDNN:
@@ -867,7 +865,7 @@ if not IS_WINDOWS:
     DL = Extension("torch._dl",
                    sources=["torch/csrc/dl.c"],
                    language='c',
-                   extra_link_args=['-shared'] if WITH_ROCM else []
+                   extra_link_args=[]
                    )
     extensions.append(DL)
 
