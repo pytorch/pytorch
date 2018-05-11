@@ -6771,6 +6771,11 @@ class TestTorch(TestCase):
         x = np.zeros((0, 2))
         self.assertEqual(torch.from_numpy(x).shape, (0,))
 
+        # check ill-sized strides raise exception
+        x = np.array([3., 5., 8.])
+        x.strides = (3,)
+        self.assertRaises(ValueError, lambda: torch.from_numpy(x))
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self):
         dtypes = [
