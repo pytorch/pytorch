@@ -24,7 +24,7 @@
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/torch_api.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/assertions.h"
 
@@ -873,7 +873,7 @@ void testControlFlow() {
     return stack;
   };
 
-  auto L = [](int64_t l) { return torch::toTensor(at::Scalar(l)); };
+  auto L = [](int64_t l) { return autograd::make_variable(at::Scalar(l).toTensor()); };
   auto V = [](at::Tensor t) { return at::Scalar(t).toLong(); };
   auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);

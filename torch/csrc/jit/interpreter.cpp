@@ -13,7 +13,7 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tensor_conversions.h"
-#include "torch/csrc/torch_api.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include <typeinfo>
 

@@ -347,7 +347,7 @@ private:
     }
   }
 
-  bool needsSymbolicGradient(const ArgumentSpec & spec) {
+  bool argumentSpecRequiresGradient(const ArgumentSpec & spec) {
     for(size_t i = 0; i < spec.size(); ++i) {
       if(spec.tensorInfo(i).requires_grad())
         return true;
@@ -413,7 +413,7 @@ private:
     runRequiredPasses(graph_);
 
     specializeToSpec(graph_, spec);
-    if(!needsSymbolicGradient(spec)) {
+    if(!argumentSpecRequiresGradient(spec)) {
       runOptimization(graph_, /*graphMustSupportVariables=*/false);
       return ExecutionPlan(graph_);
     }

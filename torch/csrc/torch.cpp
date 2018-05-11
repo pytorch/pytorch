@@ -1,4 +1,4 @@
-#include <torch/csrc/torch_api.h>
+#include <torch/csrc/variable_tensor_functions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/variable.h>
 

@@ -4,7 +4,7 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/utils/disallow_copy.h"
-#include "torch/csrc/torch_api.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include "ATen/ATen.h"
 #ifdef WITH_CUDA

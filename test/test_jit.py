@@ -773,12 +773,12 @@ class TestJit(TestCase):
         del z
         check(False, True)
 
-    def test_trace_size(self):
+    def do_trace_size(self, requires_grad):
         def fn(x):
             return x.view(x.shape[1] * 2, x.size(0), 2)
 
-        x = torch.randn(5, 2, 4)
-        y = torch.randn(4, 8, 4)
+        x = torch.randn(5, 2, 4, requires_grad=requires_grad)
+        y = torch.randn(4, 8, 4, requires_grad=requires_grad)
 
         # Check that it behaves as expected
         traced_fn = torch.jit.trace(x)(fn)
@@ -788,6 +788,14 @@ class TestJit(TestCase):
         # Check that the trace looks ok
         trace, _ = torch.jit.get_trace_graph(fn, (x,))
         self.assertExpectedTrace(trace)
+
+    def test_trace_size(self):
+        self.do_trace_size(False)
+
+    # test the different graph_executor path that happens when
+    # gradients are required and sizes are involved
+    def test_trace_size_with_grad(self):
+        self.do_trace_size(True)
 
     def test_multiuse_fn(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
