@@ -130,7 +130,7 @@ class Embedding(Module):
                 First dimension is being passed to Embedding as 'num_embeddings', second as 'embedding_dim'.
             freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
-            sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. 
+            sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor.
                 See Notes for more details regarding sparse gradients.
 
         Examples::
