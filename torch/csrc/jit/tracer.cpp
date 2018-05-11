@@ -9,6 +9,7 @@
 #include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include <string>
 #include <sstream>
