@@ -116,7 +116,10 @@ def benchmark(args):
             workspace.FeedBlob(name, blob, device_option)
         workspace.CreateNet(pred_net)
         start = time.time()
-        res = workspace.BenchmarkNet(pred_net.name, args.warmup_iterations, args.iterations, args.layer_wise_benchmark)
+        res = workspace.BenchmarkNet(pred_net.name,
+                                     args.warmup_iterations,
+                                     args.iterations,
+                                     args.layer_wise_benchmark)
         print("FPS: {:.2f}".format(1/res[0]*1000*args.batch_size))
 
 if __name__ == '__main__':
