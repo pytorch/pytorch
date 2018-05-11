@@ -479,10 +479,15 @@ inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
 inline std::pair<std::vector<DeviceOption>, std::vector<DeviceOption>>
 InferOpInputOutputDevice(const OperatorDef& op) {
   auto op_schema = OpSchemaRegistry::Schema(op.type());
-  CAFFE_ENFORCE(
-      op_schema, "Device inference failed. No schema for: ", op.type());
-  // TODO(wyiming) : add try catch here.
-  return op_schema->InferDevice(op);
+  if (op_schema) {
+    // op_schema found
+    return op_schema->InferDevice(op);
+
+  } else {
+    // No schema for op.type registered
+    auto temp_schema = OpSchema();
+    return temp_schema.InferDevice(op);
+  }
 }
 
 template <uint64_t OpsPerPoint>

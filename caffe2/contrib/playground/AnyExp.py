@@ -68,67 +68,13 @@ def createTrainerClass(opts):
     return ModuleRegister.constructTrainerClass(AnyExpTrainer, opts)
 
 
-def runShardedTrainLoop(opts, myTrainFun):
-    start_epoch = 0
-    pretrained_model = opts['model_param']['pretrained_model']
-    if pretrained_model != '' and os.path.exists(pretrained_model):
-        # Only want to get start_epoch.
-        start_epoch, prev_checkpointed_lr, best_metric = \
-            checkpoint.initialize_params_from_file(
-                model=None,
-                weights_file=pretrained_model,
-                num_xpus=1,
-                opts=opts,
-                broadcast_computed_param=True,
-                reset_epoch=opts['model_param']['reset_epoch'],
-            )
-    log.info('start epoch: {}'.format(start_epoch))
-    pretrained_model = None if pretrained_model == '' else pretrained_model
-    ret = None
-
-    pretrained_model = ""
-    shard_results = []
-
-    for epoch in range(start_epoch,
-                       opts['epoch_iter']['num_epochs'],
-                       opts['epoch_iter']['num_epochs_per_flow_schedule']):
-        # must support checkpoint or the multiple schedule will always
-        # start from initial state
-        checkpoint_model = None if epoch == start_epoch else ret['model']
-        pretrained_model = None if epoch > start_epoch else pretrained_model
-        shard_results = []
-        # with LexicalContext('epoch{}_gang'.format(epoch),gang_schedule=False):
-        for shard_id in range(opts['distributed']['num_shards']):
-            opts['temp_var']['shard_id'] = shard_id
-            opts['temp_var']['pretrained_model'] = pretrained_model
-            opts['temp_var']['checkpoint_model'] = checkpoint_model
-            opts['temp_var']['epoch'] = epoch
-            opts['temp_var']['start_epoch'] = start_epoch
-            shard_ret = myTrainFun(opts)
-            shard_results.append(shard_ret)
-
-        ret = None
-        # always only take shard_0 return
-        for shard_ret in shard_results:
-            if shard_ret is not None:
-                ret = shard_ret
-                opts['temp_var']['metrics_output'] = ret['metrics']
-                break
-        log.info('ret is: {}'.format(str(ret)))
-
-    return ret
-
-
-def trainFun():
-    def simpleTrainFun(opts):
-        trainerClass = createTrainerClass(opts)
-        trainer = trainerClass(opts)
-        return trainer.buildModelAndTrain(opts)
-    return simpleTrainFun
+def overrideAdditionalMethods(myTrainerClass, opts):
+    return ModuleRegister.overrideAdditionalMethods(myTrainerClass, opts)
 
 
 def initialize_params_from_file(*args, **kwargs):
     return checkpoint.initialize_params_from_file(*args, **kwargs)
+
 
 class AnyExpTrainer(object):
 
@@ -321,6 +267,18 @@ class AnyExpTrainer(object):
     def gen_rendezvous_ctx(self, model, dataset, is_train):
         pass
 
+    @abstractmethod
+    def run_training_net(self):
+        pass
+
+    @abstractmethod
+    def run_testing_net(self):
+        if self.test_model is None:
+            return
+        timeout = 2000.0
+        with timeout_guard.CompleteInTimeOrDie(timeout):
+            workspace.RunNet(self.test_model.net.Proto().name)
+
     # @abstractmethod
     def planning_output(self):
         self.init_metrics()
@@ -335,7 +293,7 @@ class AnyExpTrainer(object):
 
     def prep_a_data_parallel_model(self, model, dataset, is_train):
         if model is None:
-            pass
+            return
 
         log.info('in prep_a_data_parallel_model')
 
@@ -376,7 +334,17 @@ class AnyExpTrainer(object):
         workspace.RunNetOnce(model.param_init_net)
         log.info('in prep_a_data_parallel_model RunNetOnce done ')
 
+        # for op in model.net.Proto().op:
+        #     log.info('op type engine {} {}'.format(op.type, op.engine))
+
+        log.info('model.net.Proto() {}'.format(model.net.Proto()))
+
         workspace.CreateNet(model.net)
+
+        # for op in model.net.Proto().op:
+        #     log.info('after CreateNet op type engine {} {}'.
+        #         format(op.type, op.engine))
+
         log.info('in prep_a_data_parallel_model CreateNet done ')
 
     def loadCheckpoint(self):
@@ -416,6 +384,7 @@ class AnyExpTrainer(object):
         log.info('in buildModelAndTrain, trainer_input: {}'.format(str(opts)))
         log.info("check type self: {}".format(type(self)))
         log.info("check self dir: {}".format(dir(self)))
+        log.info("check self source: {}".format(self.__dict__))
         log.info("check self get_input_dataset methods: {}".
                  format(inspect.getsource(self.get_input_dataset)))
         log.info("check self gen_input_builder_fun method: {}".
@@ -430,6 +399,8 @@ class AnyExpTrainer(object):
                      format(inspect.getsource(self.gen_optimizer_fun)))
         log.info("check self assembleAllOutputs method: {}".
                  format(inspect.getsource(self.assembleAllOutputs)))
+        log.info("check self prep_data_parallel_models method: {}".
+                 format(inspect.getsource(self.prep_data_parallel_models)))
 
         self.get_model_input_fun()
 
@@ -452,7 +423,10 @@ class AnyExpTrainer(object):
                 self.iter_start_time = time.time()
 
                 self.fun_per_iter_b4RunNet(epoch, epoch_iter)
-                self.run_training_net()
+
+                if self.train_model is not None:
+                    self.run_training_net()
+
                 self.fun_per_iter_aftRunNetB4Test(epoch, epoch_iter)
 
                 self.iter_end_time = time.time()
@@ -479,9 +453,7 @@ class AnyExpTrainer(object):
 
                     self.test_loop_start_time = time.time()
                     for _test_iter in range(0, opts['epoch_iter']['num_test_iter']):
-                        timeout = 2000.0
-                        with timeout_guard.CompleteInTimeOrDie(timeout):
-                            workspace.RunNet(self.test_model.net.Proto().name)
+                        self.run_testing_net()
                         for key in self.metrics:
                             metric = self.metrics[key]
                             if metric['is_train']:
