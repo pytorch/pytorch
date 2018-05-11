@@ -58,14 +58,15 @@ TEST_CASE("module/zero-grad") {
 }
 
 TEST_CASE("module/name") {
+  // CHECK instead of REQUIRE because demangling may fail.
   AGIUnit agi;
   // Call it twice just to make sure there are no bugs in the lazy
   // initialization semantics.
-  REQUIRE(agi.name() == "AGIUnit");
-  REQUIRE(agi.name() == "AGIUnit");
+  CHECK(agi.name() == "AGIUnit");
+  CHECK(agi.name() == "AGIUnit");
   SECTION("correctly demangled") {
-    REQUIRE(test::AGIUnit().name() == "test::AGIUnit");
-    REQUIRE(test::AGIUnit2().name() == "Foo");
+    CHECK(test::AGIUnit().name() == "test::AGIUnit");
+    CHECK(test::AGIUnit2().name() == "Foo");
   }
 }
 
