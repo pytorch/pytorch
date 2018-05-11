@@ -9,8 +9,8 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
 
   IDEEPConvOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPConvPoolOpBase(operator_def, ws),
-        constant_weight_(
-            OperatorBase::GetSingleArgument<int>("constant_weight", 1)) {
+        training_mode_(
+            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
@@ -36,8 +36,8 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
         "*",
         group_);
 
-    bool weight_changed = (cached_weights_descriptor_ != filter.get_descriptor());
-    if ( weight_changed || !constant_weight_) {
+    bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
+    if (weights_changed && !training_mode_) {
       cached_weights_descriptor_ = filter.get_descriptor();
       filter_ = filter;
       auto expected_descriptor =
@@ -48,19 +48,23 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
             expected_descriptor);
         ideep::reorder::compute(filter, filter_);
       }
-      //ideep::convolution_forward::reorder_weights(
-      //    filter_, filter, expected_descriptor);
-      LOG(INFO) << "!!!! Converted weights";
     }
 
     if (InputSize() > BIAS) {
       ideep::convolution_forward::compute(
-          X, filter_, Input(BIAS), Y_dims, *Y,
+          X, training_mode_ ? filter : filter_, Input(BIAS), Y_dims, *Y,
           stride_, dilation_, pad_tl(), pad_br(), group_);
     } else {
       ideep::convolution_forward::compute(
-          X, filter_, Y_dims, *Y,
-          stride_, dilation_, pad_tl(), pad_br(), group_);
+          X,
+          training_mode_ ? filter : filter_,
+          Y_dims,
+          *Y,
+          stride_,
+          dilation_,
+          pad_tl(),
+          pad_br(),
+          group_);
     }
 
     return true;
@@ -70,7 +74,7 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
   INPUT_TAGS(INPUT, FILTER, BIAS);
   OUTPUT_TAGS(OUTPUT);
 
-  bool constant_weight_;
+  bool training_mode_;
   ideep::tensor filter_;
   ideep::tensor::descriptor cached_weights_descriptor_;
 };
@@ -89,6 +93,10 @@ class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
+    CAFFE_ENFORCE(
+        OperatorBase::GetSingleArgument<int>("training_mode", 0),
+        "In order to backward propagate weights correctly, "
+        "please set training_mode=1");
   }
   virtual ~IDEEPConvGradientOp() {}
 

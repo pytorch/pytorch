@@ -139,7 +139,17 @@ vector<float> SimpleNet::TEST_Benchmark(
           if (schema && schema->HasCostInferenceFunction()) {
             vector<TensorShape> shapes = op->InputTensorShapes();
 
-            OpSchema::Cost cost ;//= schema->InferCost(op->debug_def(), shapes);
+            auto all_good_shapes = std::accumulate(
+                shapes.begin(),
+                shapes.end(),
+                true,
+                [](bool acc, const TensorShape& shape) {
+                  return acc && !shape.unknown_shape();
+                });
+            OpSchema::Cost cost;
+            if (all_good_shapes) {
+              cost = schema->InferCost(op->debug_def(), shapes);
+            }
 
             flops_per_op.emplace_back(cost.flops);
             memory_bytes_per_op.emplace_back(cost.bytes_moved);
@@ -150,7 +160,6 @@ vector<float> SimpleNet::TEST_Benchmark(
             param_bytes_per_op_type[op_type] += cost.params_bytes;
           }
         }
-        std::cout << "Running op[" << idx << "]: " << op_type << std::endl;
         timer.Start();
         CAFFE_ENFORCE(
             op->Run(),
