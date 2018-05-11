@@ -173,7 +173,7 @@ void THCSTensor_(sspaddmm)(THCState *state, THCSTensor *r_, real beta, THCSTenso
 }
 
 void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor *sparse_, THCTensor *dense) {
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined(__HIP_PLATFORM_HCC__)
   THCThrustAllocator thrustAlloc(state);
 #define THRUST_EXEC(fn, ...) fn(thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)), ##__VA_ARGS__)
 #else
@@ -507,7 +507,7 @@ void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t_, real valu
 #if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE) || defined(THCS_REAL_IS_HALF)
 accreal THCSTensor_(normall)(THCState *state, THCSTensor *self, real value) {
   THCSTensor* self_coalesced = THCSTensor_(newCoalesce)(state, self);
-  accreal result = THCTensor_(normall)(state, self_coalesced->values, value); 
+  accreal result = THCTensor_(normall)(state, self_coalesced->values, value);
   THCSTensor_(free)(state, self_coalesced);
   return result;
 }

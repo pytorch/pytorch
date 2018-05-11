@@ -31,9 +31,6 @@ IF(WITH_ROCM)
   INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/LoadHIP.cmake)
 ENDIF()
 
-# Load the CMake Utilities (For multiplexing between CUDA and HIP).
-INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/utils.cmake)
-
 # Create the project in all cases
 project(ATen CXX C)
 

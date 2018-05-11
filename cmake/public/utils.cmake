@@ -113,9 +113,9 @@ endfunction()
 #
 function(torch_cuda_based_add_executable cuda_target)
   IF (WITH_ROCM)
-    hip_add_executable(cuda_target)
+    hip_add_executable(${cuda_target} ${ARGN})
   ELSEIF(NOT NO_CUDA)
-    cuda_add_executable(cuda_target)
+    cuda_add_executable(${cuda_target} ${ARGN})
   ELSE()
 
   ENDIF()
@@ -128,9 +128,9 @@ endfunction()
 #
 function(torch_cuda_based_add_library cuda_target)
   IF (WITH_ROCM)
-    hip_add_library(cuda_target)
+    hip_add_library(${cuda_target} ${ARGN})
   ELSEIF(NOT NO_CUDA)
-    cuda_add_library(cuda_target)
+    cuda_add_library(${cuda_target} ${ARGN})
   ELSE()
 
   ENDIF()
