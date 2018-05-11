@@ -122,7 +122,7 @@ class Embedding(Module):
         return s.format(**self.__dict__)
 
     @classmethod
-    def from_pretrained(cls, embeddings, freeze=True):
+    def from_pretrained(cls, embeddings, freeze=True, sparse=False):
         r"""Creates Embedding instance from given 2-dimensional FloatTensor.
 
         Args:
@@ -144,7 +144,8 @@ class Embedding(Module):
         assert embeddings.dim() == 2, \
             'Embeddings parameter is expected to be 2-dimensional'
         rows, cols = embeddings.shape
-        embedding = cls(num_embeddings=rows, embedding_dim=cols, _weight=embeddings)
+        embedding = cls(num_embeddings=rows, embedding_dim=cols,
+            _weight=embeddings, sparse=sparse)
         embedding.weight.requires_grad = not freeze
         return embedding
 
