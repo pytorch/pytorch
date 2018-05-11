@@ -26,35 +26,41 @@ struct Vec256<int64_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int64_t v) { values = _mm256_set1_epi64x(v); }
-  static Vec256<int64_t> s_load(const void* ptr) {
-    Vec256<int64_t> vec;
-    vec.load(ptr);
-    return vec;
-  }
-  template <int64_t count>
-  void load(const void* ptr) {
+  template <int64_t mask_>
+  static Vec256<int64_t> blend(Vec256<int64_t> a, Vec256<int64_t> b) {
+    int64_t mask = mask_;
     __at_align32__ int64_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
-    for (int64_t i = count; i < size; i++)
-      tmp_values[i] = _mm256_extract_epi64(values, i);
-    values = _mm256_load_si256(reinterpret_cast<const __m256i*>(tmp_values));
+    for (int64_t i = 0; i < size; i++) {
+      if (mask & 0x01) {
+        tmp_values[i] = _mm256_extract_epi64(b.values, i);
+      } else {
+        tmp_values[i] = _mm256_extract_epi64(a.values, i);
+      }
+      mask = mask >> 1;
+    }
+    return loadu(tmp_values);
   }
-  void load(const void* ptr, int count = size) {
+  static Vec256<int64_t>
+  set(Vec256<int64_t> a, Vec256<int64_t> b, int64_t count = size) {
     switch (count) {
       case 0:
-        break;
+        return a;
       case 1:
-        load<1>(ptr);
-        break;
+        return blend<1>(a, b);
       case 2:
-        load<2>(ptr);
-        break;
+        return blend<3>(a, b);
       case 3:
-        load<3>(ptr);
-        break;
-      case 4:
-        values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+        return blend<7>(a, b);
     }
+    return b;
+  }
+  static Vec256<int64_t> loadu(const void* ptr) {
+    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+  }
+  static Vec256<int64_t> loadu(const void* ptr, int64_t count) {
+    __at_align32__ int64_t tmp_values[size];
+    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
+    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size) const {
     if (count == size) {
@@ -79,47 +85,39 @@ struct Vec256<int32_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int32_t v) { values = _mm256_set1_epi32(v); }
-  static Vec256<int32_t> s_load(const void* ptr) {
-    Vec256<int32_t> vec;
-    vec.load(ptr);
-    return vec;
+  template <int64_t mask>
+  static Vec256<int32_t> blend(Vec256<int32_t> a, Vec256<int32_t> b) {
+    return _mm256_blend_epi32(a, b, mask);
   }
-  template <int64_t count>
-  void load(const void* ptr) {
-    __at_align32__ int32_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
-    __m256i tmp_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(tmp_values));
-    values = _mm256_blend_epi32(values, tmp_vec, (1 << count) - 1);
-  }
-  void load(const void* ptr, int64_t count = size) {
-    // TODO: Add bounds checking (error on switch default)?
+  static Vec256<int32_t>
+  set(Vec256<int32_t> a, Vec256<int32_t> b, int32_t count = size) {
     switch (count) {
       case 0:
-        break;
+        return a;
       case 1:
-        load<1>(ptr);
-        break;
+        return blend<1>(a, b);
       case 2:
-        load<2>(ptr);
-        break;
+        return blend<3>(a, b);
       case 3:
-        load<3>(ptr);
-        break;
+        return blend<7>(a, b);
       case 4:
-        load<4>(ptr);
-        break;
+        return blend<15>(a, b);
       case 5:
-        load<5>(ptr);
-        break;
+        return blend<31>(a, b);
       case 6:
-        load<6>(ptr);
-        break;
+        return blend<63>(a, b);
       case 7:
-        load<7>(ptr);
-        break;
-      case 8:
-      values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+        return blend<127>(a, b);
     }
+    return b;
+  }
+  static Vec256<int32_t> loadu(const void* ptr) {
+    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+  }
+  static Vec256<int32_t> loadu(const void* ptr, int32_t count) {
+    __at_align32__ int32_t tmp_values[size];
+    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
+    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size) const {
     if (count == size) {
@@ -141,72 +139,65 @@ struct Vec256<int16_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int16_t v) { values = _mm256_set1_epi16(v); }
-  static Vec256<int16_t> s_load(const void* ptr) {
-    Vec256<int16_t> vec;
-    vec.load(ptr);
-    return vec;
-  }
-  template <int64_t count>
-  void load(const void* ptr) {
+  template <int64_t mask_>
+  static Vec256<int16_t> blend(Vec256<int16_t> a, Vec256<int16_t> b) {
+    int64_t mask = mask_;
     __at_align32__ int16_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
-    for (int64_t i = count; i < size; i++)
-      tmp_values[i] = _mm256_extract_epi16(values, i);
-    values = _mm256_load_si256(reinterpret_cast<const __m256i*>(tmp_values));
+    for (int64_t i = 0; i < size; i++) {
+      if (mask & 0x01) {
+        tmp_values[i] = _mm256_extract_epi16(b.values, i);
+      } else {
+        tmp_values[i] = _mm256_extract_epi16(a.values, i);
+      }
+      mask = mask >> 1;
+    }
+    return loadu(tmp_values);
   }
-  void load(const void* ptr, int64_t count = size) {
-    // TODO: Add bounds checking (error on switch default)?
+  static Vec256<int16_t>
+  set(Vec256<int16_t> a, Vec256<int16_t> b, int16_t count = size) {
     switch (count) {
       case 0:
-        break;
+        return a;
       case 1:
-        load<1>(ptr);
-        break;
+        return blend<1>(a, b);
       case 2:
-        load<2>(ptr);
-        break;
+        return blend<3>(a, b);
       case 3:
-        load<3>(ptr);
-        break;
+        return blend<7>(a, b);
       case 4:
-        load<4>(ptr);
-        break;
+        return blend<15>(a, b);
       case 5:
-        load<5>(ptr);
-        break;
+        return blend<31>(a, b);
       case 6:
-        load<6>(ptr);
-        break;
+        return blend<63>(a, b);
       case 7:
-        load<7>(ptr);
-        break;
+        return blend<127>(a, b);
       case 8:
-        load<8>(ptr);
-        break;
+        return blend<255>(a, b);
       case 9:
-        load<9>(ptr);
-        break;
+        return blend<511>(a, b);
       case 10:
-        load<10>(ptr);
-        break;
+        return blend<1023>(a, b);
       case 11:
-        load<11>(ptr);
-        break;
+        return blend<2047>(a, b);
       case 12:
-        load<12>(ptr);
-        break;
+        return blend<4095>(a, b);
       case 13:
-        load<13>(ptr);
-        break;
+        return blend<8191>(a, b);
       case 14:
-        load<14>(ptr);
-        break;
+        return blend<16383>(a, b);
       case 15:
-        load<15>(ptr);
-        break;
-      case 16:
-        values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+        return blend<32767>(a, b);
     }
+    return b;
+  }
+  static Vec256<int16_t> loadu(const void* ptr) {
+    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+  }
+  static Vec256<int16_t> loadu(const void* ptr, int16_t count) {
+    __at_align32__ int16_t tmp_values[size];
+    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size) const {
     if (count == size) {

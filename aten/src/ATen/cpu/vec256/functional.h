@@ -13,37 +13,137 @@ inline int64_t _leftover(int64_t x, int64_t y) {
 
 } // namespace
 
-template <typename scalar_t>
-inline scalar_t reduce_all(
-    Vec256<scalar_t> (*vec_fun)(Vec256<scalar_t>&, Vec256<scalar_t>&),
-    scalar_t* data,
-    int64_t size,
-    scalar_t ident) {
-  Vec256<scalar_t> acc_vec(ident);
-  for (int64_t d = 0; d < size; d += Vec256<scalar_t>::size) {
-    Vec256<scalar_t> value(ident);
-    int64_t leftover = _leftover<Vec256<scalar_t>::size>(d, size);
-    value.load(data + d, leftover);
-    acc_vec = vec_fun(acc_vec, value);
-  }
-  scalar_t acc_arr[Vec256<scalar_t>::size];
+// TODO: Make this more efficient
+template <typename scalar_t, typename Op>
+inline scalar_t vec_reduce_all(
+    const Op& vec_fun,
+    vec256::Vec256<scalar_t> acc_vec,
+    int64_t size) {
+  using Vec = vec256::Vec256<scalar_t>;
+  scalar_t acc_arr[Vec::size];
   acc_vec.store(acc_arr);
-
-  for (int64_t i = Vec256<scalar_t>::size / 2; i >= 1; i = i / 2) {
-    scalar_t acc_arr_first[Vec256<scalar_t>::size];
-    scalar_t acc_arr_second[Vec256<scalar_t>::size];
-    for (int64_t j = 0; j < i; j++) {
-      acc_arr_first[j] = acc_arr[j];
-      acc_arr_second[j] = acc_arr[j + i];
-    }
-    Vec256<scalar_t> vec_first;
-    Vec256<scalar_t> vec_second;
-    vec_first.load(acc_arr_first, i);
-    vec_second.load(acc_arr_second, i);
-    acc_vec = vec_fun(vec_first, vec_second);
-    acc_vec.store(acc_arr, i);
+  for (int64_t i = 1; i < size; i++) {
+    scalar_t acc_arr_next[Vec::size];
+    acc_arr_next[0] = acc_arr[i];
+    Vec acc_vec_next = Vec::loadu(acc_arr_next);
+    acc_vec = vec_fun(acc_vec, acc_vec_next);
   }
+  acc_vec.store(acc_arr);
   return acc_arr[0];
+}
+
+template <typename scalar_t, typename Op>
+inline scalar_t reduce_all(const Op& vec_fun, scalar_t* data, int64_t size) {
+  using Vec = vec256::Vec256<scalar_t>;
+  if (size < Vec::size)
+    return vec_reduce_all(vec_fun, Vec::loadu(data, size), size);
+  int64_t d = Vec::size;
+  Vec acc_vec = Vec::loadu(data);
+  for (; d < size - (size % Vec::size); d += Vec::size) {
+    Vec data_vec = Vec::loadu(data + d);
+    acc_vec = vec_fun(acc_vec, data_vec);
+  }
+  if (size - d > 0) {
+    Vec data_vec = Vec::loadu(data + d, size - d);
+    acc_vec = Vec::set(acc_vec, vec_fun(acc_vec, data_vec), size - d);
+  }
+  return vec_reduce_all(vec_fun, acc_vec, Vec::size);
+}
+
+template <typename scalar_t, typename MapOp, typename ReduceOp>
+inline scalar_t map_reduce_all(
+    const MapOp& map_fun,
+    const ReduceOp& red_fun,
+    scalar_t* data,
+    int64_t size) {
+  using Vec = vec256::Vec256<scalar_t>;
+  if (size < Vec::size)
+    return vec_reduce_all(red_fun, map_fun(Vec::loadu(data, size)), size);
+  int64_t d = Vec::size;
+  Vec acc_vec = map_fun(Vec::loadu(data));
+  for (; d < size - (size % Vec::size); d += Vec::size) {
+    Vec data_vec = Vec::loadu(data + d);
+    data_vec = map_fun(data_vec);
+    acc_vec = red_fun(acc_vec, data_vec);
+  }
+  if (size - d > 0) {
+    Vec data_vec = Vec::loadu(data + d, size - d);
+    data_vec = map_fun(data_vec);
+    acc_vec = Vec::set(acc_vec, red_fun(acc_vec, data_vec), size - d);
+  }
+  return vec_reduce_all(red_fun, acc_vec, Vec::size);
+}
+
+template <typename scalar_t, typename MapOp, typename ReduceOp>
+inline scalar_t map2_reduce_all(
+    const MapOp& map_fun,
+    const ReduceOp& red_fun,
+    scalar_t* data,
+    scalar_t* data2,
+    int64_t size) {
+  using Vec = vec256::Vec256<scalar_t>;
+  if (size < Vec::size) {
+    Vec data_vec = Vec::loadu(data, size);
+    Vec data2_vec = Vec::loadu(data2, size);
+    data_vec = map_fun(data_vec, data2_vec);
+    return vec_reduce_all(red_fun, data_vec, size);
+  }
+  int64_t d = Vec::size;
+  Vec acc_vec = map_fun(Vec::loadu(data), Vec::loadu(data2));
+  for (; d < size - (size % Vec::size); d += Vec::size) {
+    Vec data_vec = Vec::loadu(data + d);
+    Vec data2_vec = Vec::loadu(data2 + d);
+    data_vec = map_fun(data_vec, data2_vec);
+    acc_vec = red_fun(acc_vec, data_vec);
+  }
+  if (size - d > 0) {
+    Vec data_vec = Vec::loadu(data + d, size - d);
+    Vec data2_vec = Vec::loadu(data2 + d, size - d);
+    data_vec = map_fun(data_vec, data2_vec);
+    acc_vec = Vec::set(acc_vec, red_fun(acc_vec, data_vec), size - d);
+  }
+  return vec_reduce_all(red_fun, acc_vec, Vec::size);
+}
+
+template <typename scalar_t, typename Op>
+inline void map(
+    const Op& vec_fun,
+    scalar_t* output_data,
+    scalar_t* input_data,
+    int64_t size) {
+  using Vec = vec256::Vec256<scalar_t>;
+  int64_t d = 0;
+  for (; d < size - (size % Vec::size); d += Vec::size) {
+    Vec output_vec = vec_fun(Vec::loadu(input_data + d));
+    output_vec.store(output_data + d);
+  }
+  if (size - d > 0) {
+    Vec output_vec = vec_fun(Vec::loadu(input_data + d, size - d));
+    output_vec.store(output_data + d, size - d);
+  }
+}
+
+template <typename scalar_t, typename Op>
+inline void map2(
+    const Op& vec_fun,
+    scalar_t* output_data,
+    scalar_t* input_data,
+    scalar_t* input_data2,
+    int64_t size) {
+  using Vec = vec256::Vec256<scalar_t>;
+  int64_t d = 0;
+  for (; d < size - (size % Vec::size); d += Vec::size) {
+    Vec data_vec = Vec::loadu(input_data + d);
+    Vec data_vec2 = Vec::loadu(input_data2 + d);
+    Vec output_vec = vec_fun(data_vec, data_vec2);
+    output_vec.store(output_data + d);
+  }
+  if (size - d > 0) {
+    Vec data_vec = Vec::loadu(input_data + d, size - d);
+    Vec data_vec2 = Vec::loadu(input_data2 + d, size - d);
+    Vec output_vec = vec_fun(data_vec, data_vec2);
+    output_vec.store(output_data + d, size - d);
+  }
 }
 
 }} // namespace at::vec256

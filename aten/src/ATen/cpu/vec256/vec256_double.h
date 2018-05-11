@@ -3,6 +3,7 @@
 #include "intrinsics.h"
 #include "vec256_base.h"
 #include <sleef.h>
+#include <iostream>
 
 namespace at {
 namespace vec256 {
@@ -22,35 +23,33 @@ public:
   operator __m256d() const {
     return values;
   }
-  template <int64_t count>
-  void load(const void* ptr) {
-    __at_align32__ double tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(double));
-    __m256d tmp_vec = _mm256_load_pd(reinterpret_cast<const double*>(tmp_values));
-    values = _mm256_blend_pd(values, tmp_vec, (1 << count) - 1);
+  template <int64_t mask>
+  static Vec256<double> blend(Vec256<double> a, Vec256<double> b) {
+    return _mm256_blend_pd(a.values, b.values, mask);
   }
-  void load(const void* ptr, int64_t count = size) {
-    // TODO: Add bounds checking (error on switch default)?
+  static Vec256<double> set(Vec256<double> a, Vec256<double> b, int64_t count = size) {
     switch (count) {
       case 0:
-        break;
+        return a;
       case 1:
-        load<1>(ptr);
-        break;
+        return blend<1>(a, b);
       case 2:
-        load<2>(ptr);
-        break;
+        return blend<3>(a, b);
       case 3:
-        load<3>(ptr);
-        break;
-      case 4:
-        values = _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
+        return blend<7>(a, b);
     }
+    return b;
   }
-  static Vec256<double> s_load(const void* ptr) {
-    Vec256<double> vec;
-    vec.load(ptr);
-    return vec;
+  static Vec256<double> loadu(const void* ptr, int64_t count = size) {
+    if (count == size)
+      return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
+
+    __at_align32__ double tmp_values[size];
+    std::memcpy(
+        tmp_values,
+        reinterpret_cast<const double*>(ptr),
+        count * sizeof(double));
+    return _mm256_load_pd(tmp_values);
   }
   void store(void* ptr, int count = size) const {
     if (count == size) {
@@ -67,7 +66,7 @@ public:
     for (int64_t i = 0; i < 4; i++) {
       tmp[i] = f(tmp[i]);
     }
-    return s_load(tmp);
+    return loadu(tmp);
   }
   Vec256<double> abs() const {
     auto mask = _mm256_set1_pd(-0.f);

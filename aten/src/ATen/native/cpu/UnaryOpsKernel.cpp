@@ -19,13 +19,12 @@ unary_kernel(scalar_t* arr_out, const scalar_t* arr_in, int64_t size, F func) {
   int64_t size_rounded = size - (size % Vec::size);
   int64_t k = 0;
   for (; k != size_rounded; k += Vec::size) {
-    auto value = func(Vec::s_load(arr_in + k));
+    auto value = func(Vec::loadu(arr_in + k));
     value.store(arr_out + k);
   }
   auto leftover = size - k;
   if (leftover > 0) {
-    Vec a;
-    a.load(arr_in + k, leftover);
+    Vec a = Vec::loadu(arr_in + k, leftover);
     func(a).store(arr_out + k, leftover);
   }
 }

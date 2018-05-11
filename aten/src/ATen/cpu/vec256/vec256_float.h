@@ -22,47 +22,38 @@ public:
   operator __m256() const {
     return values;
   }
-  template <int64_t count>
-  void load(const void* ptr) {
-    __at_align32__ float tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(float));
-    __m256 tmp_vec = _mm256_load_ps(reinterpret_cast<const float*>(tmp_values));
-    values = _mm256_blend_ps(values, tmp_vec, (1 << count) - 1);
+  template <int64_t mask>
+  static Vec256<float> blend(Vec256<float> a, Vec256<float> b) {
+    return _mm256_blend_ps(a.values, b.values, mask);
   }
-  void load(const void* ptr, int64_t count = size) {
-    // TODO: Add bounds checking (error on switch default)?
+  static Vec256<float> set(Vec256<float> a, Vec256<float> b, int64_t count = size) {
     switch (count) {
       case 0:
-        break;
+        return a;
       case 1:
-        load<1>(ptr);
-        break;
+        return blend<1>(a, b);
       case 2:
-        load<2>(ptr);
-        break;
+        return blend<3>(a, b);
       case 3:
-        load<3>(ptr);
-        break;
+        return blend<7>(a, b);
       case 4:
-        load<4>(ptr);
-        break;
+        return blend<15>(a, b);
       case 5:
-        load<5>(ptr);
-        break;
+        return blend<31>(a, b);
       case 6:
-        load<6>(ptr);
-        break;
+        return blend<63>(a, b);
       case 7:
-        load<7>(ptr);
-        break;
-      case 8:
-        values = _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
+        return blend<127>(a, b);
     }
+    return b;
   }
-  static Vec256<float> s_load(const void* ptr) {
-    Vec256<float> vec;
-    vec.load(ptr);
-    return vec;
+  static Vec256<float> loadu(const void* ptr, int64_t count = size) {
+    if (count == size)
+      return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
+    __at_align32__ float tmp_values[size];
+    std::memcpy(
+        tmp_values, reinterpret_cast<const float*>(ptr), count * sizeof(float));
+    return _mm256_loadu_ps(tmp_values);
   }
   void store(void* ptr, int64_t count = size) const {
     if (count == size) {
@@ -79,7 +70,7 @@ public:
     for (int64_t i = 0; i < 8; i++) {
       tmp[i] = f(tmp[i]);
     }
-    return s_load(tmp);
+    return loadu(tmp);
   }
   Vec256<float> abs() const {
     auto mask = _mm256_set1_ps(-0.f);

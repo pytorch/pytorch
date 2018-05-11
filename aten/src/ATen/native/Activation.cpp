@@ -87,19 +87,21 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
           for (int64_t d = 0; d < dim_size; d++)
             max_input = std::max(max_input, input_data[d * dim_stride]);
 
+
           scalar_t tmpsum = 0;
           for (int64_t d = 0; d < dim_size; d++) {
             scalar_t z = std::exp(input_data[d * dim_stride] - max_input);
-            tmpsum += z;
             if (!LogSoftMax) {
               output_data[d * dim_stride] = z;
             }
+            tmpsum += z;
           }
 
           if (LogSoftMax)
             tmpsum = max_input + std::log(tmpsum);
           else
             tmpsum = 1 / tmpsum;
+
 
           for (int64_t d = 0; d < dim_size; d++)
             if (LogSoftMax)
@@ -180,6 +182,9 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_) {
       "dim must be non-negative and less than input dimensions");
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
     softmax_lastdim_kernel(output, input);
+    AT_DISPATCH_FLOATING_TYPES(input.type(), "softmax", [&] {
+      host_softmax<scalar_t, false>(output2, input, dim);
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(input.type(), "softmax", [&] {
       host_softmax<scalar_t, false>(output, input, dim);
@@ -221,6 +226,7 @@ Tensor softmax_backward_cpu(
   auto grad = grad_.contiguous();
   auto output = output_.contiguous();
   Tensor grad_input = at::native::empty_like(grad);
+  Tensor grad_input2 = at::native::empty_like(grad);
 
   if (grad.dim() == 0)
     grad = grad.view(1);
@@ -231,6 +237,9 @@ Tensor softmax_backward_cpu(
       "dim must be non-negative and less than input dimensions");
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
     softmax_backward_lastdim_kernel(grad_input, grad, output);
+    AT_DISPATCH_FLOATING_TYPES(grad.type(), "softmax_backward", [&] {
+      host_softmax_backward<scalar_t, false>(grad_input2, grad, output, dim);
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(grad.type(), "softmax_backward", [&] {
       host_softmax_backward<scalar_t, false>(grad_input, grad, output, dim);
