@@ -130,6 +130,8 @@ class Embedding(Module):
                 First dimension is being passed to Embedding as 'num_embeddings', second as 'embedding_dim'.
             freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
+            sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. 
+                See Notes for more details regarding sparse gradients.
 
         Examples::
 
@@ -144,8 +146,12 @@ class Embedding(Module):
         assert embeddings.dim() == 2, \
             'Embeddings parameter is expected to be 2-dimensional'
         rows, cols = embeddings.shape
-        embedding = cls(num_embeddings=rows, embedding_dim=cols,
-            _weight=embeddings, sparse=sparse)
+        embedding = cls(
+            num_embeddings=rows,
+            embedding_dim=cols,
+            _weight=embeddings,
+            sparse=sparse,
+        )
         embedding.weight.requires_grad = not freeze
         return embedding
 
