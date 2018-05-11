@@ -36,7 +36,8 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
         "*",
         group_);
 
-    bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
+    bool weights_changed =
+        (cached_weights_descriptor_ != filter.get_descriptor());
     if (weights_changed && !training_mode_) {
       cached_weights_descriptor_ = filter.get_descriptor();
       filter_ = filter;
@@ -52,8 +53,16 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
 
     if (InputSize() > BIAS) {
       ideep::convolution_forward::compute(
-          X, training_mode_ ? filter : filter_, Input(BIAS), Y_dims, *Y,
-          stride_, dilation_, pad_tl(), pad_br(), group_);
+          X,
+          training_mode_ ? filter : filter_,
+          Input(BIAS),
+          Y_dims,
+          *Y,
+          stride_,
+          dilation_,
+          pad_tl(),
+          pad_br(),
+          group_);
     } else {
       ideep::convolution_forward::compute(
           X,
@@ -84,9 +93,9 @@ class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_CONV_POOL_BASE_FUNCTIONS();
 
-  IDEEPConvGradientOp(const OperatorDef& operator_def, Workspace *ws)
-    : IDEEPConvPoolOpBase(operator_def, ws),
-      no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
+  IDEEPConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : IDEEPConvPoolOpBase(operator_def, ws),
+        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
@@ -108,20 +117,42 @@ class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
 
     if (no_bias_) {
       ideep::convolution_backward_weights::compute(
-          X, dY, filter.get_dims(), *dfilter,
-          stride_, dilation_, pad_tl(), pad_br(), group_);
+          X,
+          dY,
+          filter.get_dims(),
+          *dfilter,
+          stride_,
+          dilation_,
+          pad_tl(),
+          pad_br(),
+          group_);
     } else {
       auto* dbias = Output(BIAS_OR_INPUT_GRAD);
       ideep::convolution_backward_weights::compute(
-          X, dY, filter.get_dims(), *dfilter, *dbias,
-          stride_, dilation_, pad_tl(), pad_br(), group_);
+          X,
+          dY,
+          filter.get_dims(),
+          *dfilter,
+          *dbias,
+          stride_,
+          dilation_,
+          pad_tl(),
+          pad_br(),
+          group_);
     }
 
     if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
       auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
       ideep::convolution_backward_data::compute(
-          dY, filter, X.get_dims(), *dX,
-          stride_, dilation_, pad_tl(), pad_br(), group_);
+          dY,
+          filter,
+          X.get_dims(),
+          *dX,
+          stride_,
+          dilation_,
+          pad_tl(),
+          pad_br(),
+          group_);
     }
 
     return true;
@@ -134,8 +165,7 @@ class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
   OUTPUT_TAGS(FILTER_GRAD, BIAS_OR_INPUT_GRAD, INPUT_GRAD);
 };
 
-
 REGISTER_IDEEP_OPERATOR(Conv, IDEEPConvOp);
 REGISTER_IDEEP_OPERATOR(ConvGradient, IDEEPConvGradientOp);
 
-}  // namespace caffe2
+} // namespace caffe2
