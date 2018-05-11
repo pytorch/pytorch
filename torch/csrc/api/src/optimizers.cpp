@@ -1,6 +1,8 @@
 #include "torch/optimizers.h"
 
-namespace autograd {
+#include <torch/nn/module.h>
+
+namespace torch {
 
 void OptimizerImpl::zero_grad() {
   for (auto p : model_->parameters()) {
@@ -12,7 +14,7 @@ void OptimizerImpl::zero_grad() {
   }
 }
 
-void OptimizerImpl::set_model(Container model) {
+void OptimizerImpl::set_model(std::shared_ptr<nn::Module> model) {
   model_ = model;
 }
 
@@ -196,4 +198,4 @@ void Adam::init_state() {
   exp_avg_sq_buffer_.clear();
 }
 
-} // namespace autograd
+} // namespace torch

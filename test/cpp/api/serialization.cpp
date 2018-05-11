@@ -1,10 +1,11 @@
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
 #include "cereal/archives/portable_binary.hpp"
 
-using namespace autograd;
+using namespace torch;
+using namespace torch::nn;
 
 TEST_CASE("serialization") {
   SECTION("undefined") {
@@ -152,10 +153,10 @@ TEST_CASE("serialization") {
   SECTION("xor") {
     // We better be able to save and load a XOR model!
     auto makeModel = []() {
-      return ContainerList()
-          .append(Linear(2, 8).make())
-          .append(Linear(8, 1).make())
-          .make();
+      ContainerList list;
+      list.append(make(Linear(2, 8)));
+      list.append(make(Linear(8, 1)));
+      return make(list);
     };
     auto getLoss = [](std::shared_ptr<ContainerList> model, uint32_t bs) {
       auto inp = at::CPU(at::kFloat).tensor({bs, 2});
@@ -205,9 +206,9 @@ TEST_CASE("serialization") {
   }
 
   SECTION("optim") {
-    auto model1 = Linear(5, 2).make();
-    auto model2 = Linear(5, 2).make();
-    auto model3 = Linear(5, 2).make();
+    auto model1 = make(Linear(5, 2));
+    auto model2 = make(Linear(5, 2));
+    auto model3 = make(Linear(5, 2));
 
     // Models 1, 2, 3 will have the same params
     std::stringstream ss;
@@ -225,7 +226,7 @@ TEST_CASE("serialization") {
 
     auto x = Var(at::CPU(at::kFloat).ones({10, 5}), true);
 
-    auto step = [&](Optimizer optim, Container model) {
+    auto step = [&](Optimizer optim, std::shared_ptr<Module> model) {
       optim->zero_grad();
       auto y = model->forward({x})[0].sum();
       backward(y);
@@ -263,10 +264,10 @@ TEST_CASE("serialization_cuda", "[cuda]") {
   SECTION("xor") {
     // We better be able to save and load a XOR model!
     auto makeModel = []() {
-      return ContainerList()
-          .append(Linear(2, 8).make())
-          .append(Linear(8, 1).make())
-          .make();
+      ContainerList list;
+      list.append(make(Linear(2, 8)));
+      list.append(make(Linear(8, 1)));
+      return make(list);
     };
     auto getLoss = [](std::shared_ptr<ContainerList> model, uint32_t bs) {
       auto inp = at::CPU(at::kFloat).tensor({bs, 2});

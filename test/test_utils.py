@@ -20,7 +20,7 @@ from torch.utils.trainer.plugins.plugin import Plugin
 from torch.utils.serialization import load_lua
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS
+from common import IS_WINDOWS, IS_PPC
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -361,6 +361,7 @@ class TestFFI(TestCase):
 
     @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
     @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
+    @unittest.skipIf(IS_PPC, "skip for ppc64le due to incompatible exception handling")
     def test_cpu(self):
         create_extension(
             name='test_extensions.cpulib',

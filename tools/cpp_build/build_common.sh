@@ -27,7 +27,9 @@ BUILD_TYPE=${BUILD_TYPE:-Debug}
 # Try to build with as many threads as we have cores, default to 4 if the
 # command fails.
 set +e
-if [[ "$(uname)" == "Linux" ]]; then
+if [ -n "$MAX_JOBS" ]; then  # Use MAX_JOBS if it is set
+  JOBS=$MAX_JOBS
+elif [[ "$(uname)" == "Linux" ]]; then
   # https://stackoverflow.com/questions/6481005/how-to-obtain-the-number-of-cpus-cores-in-linux-from-the-command-line
   JOBS="$(grep -c '^processor' /proc/cpuinfo)"
 else # if [[ "$(uname)" == "Darwin"]]

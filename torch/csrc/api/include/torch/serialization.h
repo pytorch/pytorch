@@ -9,7 +9,7 @@
 #include "cereal/types/unordered_map.hpp"
 #include "cereal/types/vector.hpp"
 
-namespace autograd {
+namespace torch {
 
 // Some convenience functions for saving and loading
 template <typename T>
@@ -35,12 +35,12 @@ void load(std::istream& stream, T* obj) {
 template <typename T>
 void save(std::string const& path, T const& obj) {
   std::ofstream os(path, std::ios::binary);
-  autograd::save(os, obj);
+  torch::save(os, obj);
 }
 template <typename T>
 void load(std::string const& path, T& obj) {
   std::ifstream is(path, std::ios::binary);
-  autograd::load(is, obj);
+  torch::load(is, obj);
 }
 
 namespace detail {
@@ -108,21 +108,21 @@ inline at::Backend backendFromId(int32_t id) {
 }
 
 } // namespace detail
-} // namespace autograd
+} // namespace torch
 
 // This is super ugly and I don't know how to simplify it
-CEREAL_REGISTER_TYPE(autograd::SGD);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(autograd::OptimizerImpl, autograd::SGD);
-CEREAL_REGISTER_TYPE(autograd::Adagrad);
+CEREAL_REGISTER_TYPE(torch::SGD);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(torch::OptimizerImpl, torch::SGD);
+CEREAL_REGISTER_TYPE(torch::Adagrad);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    autograd::OptimizerImpl,
-    autograd::Adagrad);
-CEREAL_REGISTER_TYPE(autograd::RMSprop);
+    torch::OptimizerImpl,
+    torch::Adagrad);
+CEREAL_REGISTER_TYPE(torch::RMSprop);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    autograd::OptimizerImpl,
-    autograd::RMSprop);
-CEREAL_REGISTER_TYPE(autograd::Adam);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(autograd::OptimizerImpl, autograd::Adam);
+    torch::OptimizerImpl,
+    torch::RMSprop);
+CEREAL_REGISTER_TYPE(torch::Adam);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(torch::OptimizerImpl, torch::Adam);
 
 namespace cereal {
 
@@ -162,11 +162,11 @@ loadBinary(BinaryInputArchive& archive, void* data, std::size_t size) {
 template <class Archive>
 void save(Archive& archive, at::Tensor const& tensor) {
   if (!tensor.defined()) {
-    int32_t typeId = ::autograd::detail::scalarTypeId(at::ScalarType::Undefined);
+    int32_t typeId = ::torch::detail::scalarTypeId(at::ScalarType::Undefined);
     archive(CEREAL_NVP(typeId));
     return;
   } else {
-    int32_t typeId = ::autograd::detail::scalarTypeId(tensor.type().scalarType());
+    int32_t typeId = ::torch::detail::scalarTypeId(tensor.type().scalarType());
     archive(CEREAL_NVP(typeId));
   }
   auto sizes = std::vector<int64_t>();
@@ -175,7 +175,7 @@ void save(Archive& archive, at::Tensor const& tensor) {
     sizes.push_back(s);
   }
   auto contig = tensor.toBackend(at::kCPU).contiguous();
-  int32_t backend = ::autograd::detail::backendId(tensor.type().backend());
+  int32_t backend = ::torch::detail::backendId(tensor.type().backend());
 
   archive(CEREAL_NVP(backend), CEREAL_NVP(sizes));
   agimpl::saveBinary(
@@ -195,7 +195,7 @@ void load(Archive& archive, at::Tensor& tensor) {
   at::ScalarType type;
   int32_t typeId;
   archive(CEREAL_NVP(typeId));
-  type = ::autograd::detail::scalarTypeFromId(typeId);
+  type = ::torch::detail::scalarTypeFromId(typeId);
   if (type == at::ScalarType::Undefined) {
     tensor = at::Tensor();
     return;
@@ -206,7 +206,7 @@ void load(Archive& archive, at::Tensor& tensor) {
   auto buf = std::vector<uint8_t>();
   archive(CEREAL_NVP(backendId), CEREAL_NVP(sizes));
 
-  at::Backend backend = ::autograd::detail::backendFromId(backendId);
+  at::Backend backend = ::torch::detail::backendFromId(backendId);
   if (!tensor.defined() || tensor.type().scalarType() != type) {
     tensor = at::getType(backend, type).tensor();
   }

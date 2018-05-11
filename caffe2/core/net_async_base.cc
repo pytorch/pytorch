@@ -74,6 +74,16 @@ AsyncNetBase::AsyncNetBase(
   }
 }
 
+void AsyncNetBase::handleRunError() {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
+  if (caught_exception_) {
+    std::rethrow_exception(caught_exception_);
+  }
+#endif // CAFFE2_USE_EXCEPTION_PTR
+  NetBase::handleRunError();
+}
+
 bool AsyncNetBase::RunAsync() {
   tracing::startIter(tracer_);
   for (auto& op : GetOperators()) {
@@ -145,7 +155,8 @@ bool AsyncNetBase::isStreamFree(int task_id, int stream_id) const {
 
 bool AsyncNetBase::canSchedule(
     int task_id,
-    const std::vector<EventStatus>* status) {
+    const std::vector<EventStatus>* status,
+    bool* parent_failed) {
   auto first_child_op_id = chains_[task_id].front();
   for (auto parent_id : parents(task_id)) {
     auto last_parent_op_id = chains_[parent_id].back();
@@ -155,6 +166,11 @@ bool AsyncNetBase::canSchedule(
     } else {
       parent_status = operators_[last_parent_op_id]->event().Query();
     }
+
+    if (parent_status == EventStatus::EVENT_FAILED && parent_failed) {
+      *parent_failed = true;
+    }
+
     bool can_schedule = Event::CanSchedule(
         operators_[last_parent_op_id]->event().GetType(),
         parent_status,
@@ -210,6 +226,15 @@ void AsyncNetBase::asyncWait(
   first_op->WaitEvents(events, stream_id);
 }
 
+void AsyncNetBase::storeExceptionPtr() {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
+  if (!caught_exception_) {
+    caught_exception_ = std::current_exception();
+  }
+#endif // CAFFE2_USE_EXCEPTION_PTR
+}
+
 void AsyncNetBase::run(int task_id, int stream_id) {
   std::string err_msg;
   for (auto& op_id : chains_[task_id]) {
@@ -224,13 +249,29 @@ void AsyncNetBase::run(int task_id, int stream_id) {
           stream_id);
       CAFFE_ENFORCE(op->RunAsync(stream_id), "Failed to execute an op");
     } catch (const std::exception& e) {
-      CAFFE_THROW(
-          std::string(e.what()) + ",  op " +
-          (op->has_debug_def() ? op->type() : " unknown"));
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+      storeExceptionPtr();
+#endif // CAFFE2_USE_EXCEPTION_PTR
+      auto err_msg = std::string(e.what()) + ",  op " +
+          (op->has_debug_def() ? op->type() : " unknown");
+      if (query(task_id) == EventStatus::EVENT_INITIALIZED) {
+        // mark the chain's event as failed,
+        // not throwing because event is in initialized state
+        event(task_id).SetFinished(err_msg.c_str());
+      }
+      LOG(ERROR) << err_msg;
+      throw;
     } catch (...) {
-      CAFFE_THROW(
-          "Failed to execute task: unknown error,  op " +
-          (op->has_debug_def() ? op->type() : " unknown"));
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+      storeExceptionPtr();
+#endif // CAFFE2_USE_EXCEPTION_PTR
+      auto err_msg = "Failed to execute task: unknown error,  op " +
+          (op->has_debug_def() ? op->type() : " unknown");
+      if (query(task_id) == EventStatus::EVENT_INITIALIZED) {
+        event(task_id).SetFinished(err_msg.c_str());
+      }
+      LOG(ERROR) << err_msg;
+      throw;
     }
   }
 

@@ -73,6 +73,7 @@ void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
     auto graph = node->owningGraph();
     Node *expand = graph->create(aten::expand, {node->inputs().at(input_idx)})
                         ->is_(attr::size, expected_size)
+                        ->i_(attr::implicit, 0)
                         ->insertBefore(node);
     PropagateShapeOnNode(expand);
     node->replaceInput(input_idx, expand->output());
@@ -90,11 +91,13 @@ void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>&
   for(auto & type : types) {
     stack.push_back(representativeTensor(type));
   }
+
   // XXX: we're not catching any exceptions from the op for now. This
   // is to uncover any mistakes we could make when editing this code,
   // and eventually it shouldn't matter, because this phase should be
   // preceded by schema checking.
   op_info.op(stack);
+
   JIT_ASSERT(stack.size() == node->outputs().size());
   for(size_t i = 0; i < stack.size(); ++i) {
     node->outputs()[i]->inferTypeFrom(stack[i]);

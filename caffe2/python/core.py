@@ -122,6 +122,19 @@ def InferBlobDevices(net):
     return mapping
 
 
+def InferOpBlobDevicesAsDict(op):
+    input_dev_list, output_dev_list = InferOpBlobDevices(op)
+    input_dict = {
+        op.input[i]: input_dev_list[i]
+        for i in range(len(op.input))
+    }
+    output_dict = {
+        op.output[i]: output_dev_list[i]
+        for i in range(len(op.output))
+    }
+    return input_dict, output_dict
+
+
 def InferOpBlobDevices(op):
     device_info = C.infer_op_input_output_device(op.SerializeToString())
     input_info = []
@@ -434,7 +447,7 @@ class IR(object):
         # a) ssa: a list of [op, in_versions, out_versions] recording the
         #    input and the output version of each operator, similar
         #    to a normal SSA form.
-        # b) input_count: a dictionary specifying for each blob and
+        # b) input_usages: a dictionary specifying for each blob and
         #    each of its version, how many times it is used as input for another
         #    op.
         # c) frontier: maintaining the current versions of the blobs

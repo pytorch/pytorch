@@ -28,9 +28,11 @@ struct DepthwiseArgs {
 
 #ifdef __ARM_NEON__
 
-static inline void
-winograd_f2k3_input_transform_inplace__neon(float32x4_t *d0, float32x4_t *d1,
-                                            float32x4_t *d2, float32x4_t *d3) {
+static inline void winograd_f2k3_input_transform_inplace__neon(
+    float32x4_t* d0,
+    float32x4_t* d1,
+    float32x4_t* d2,
+    float32x4_t* d3) {
   //*d7 = wd7;
   float32x4_t wd0 = *d0 - *d2;
   float32x4_t wd1 = *d1 + *d2;
@@ -42,15 +44,17 @@ winograd_f2k3_input_transform_inplace__neon(float32x4_t *d0, float32x4_t *d1,
   *d3 = wd3;
 }
 
-static inline void
-winograd_f2k3_output_transform_inplace__neon(float32x4_t *m0, float32x4_t *m1,
-                                             float32x4_t *m2, float32x4_t *m3) {
+static inline void winograd_f2k3_output_transform_inplace__neon(
+    float32x4_t* m0,
+    float32x4_t* m1,
+    float32x4_t* m2,
+    float32x4_t* m3) {
   *m0 = *m0 + *m1 + *m2;
   *m1 = *m1 - *m2 - *m3;
 }
 
-static inline float32x4_t vmuladdq_f32(float32x4_t c, float32x4_t a,
-                                       float32x4_t b) {
+static inline float32x4_t
+vmuladdq_f32(float32x4_t c, float32x4_t a, float32x4_t b) {
 #if defined(__aarch64__)
   return vfmaq_f32(c, a, b);
 #else
@@ -58,8 +62,8 @@ static inline float32x4_t vmuladdq_f32(float32x4_t c, float32x4_t a,
 #endif
 }
 
-static inline float32x4_t vmulsubq_f32(float32x4_t c, float32x4_t a,
-                                       float32x4_t b) {
+static inline float32x4_t
+vmulsubq_f32(float32x4_t c, float32x4_t a, float32x4_t b) {
 #if defined(__aarch64__)
   return vfmsq_f32(c, a, b);
 #else
@@ -68,9 +72,13 @@ static inline float32x4_t vmulsubq_f32(float32x4_t c, float32x4_t a,
 }
 
 static inline void winograd_f2k3_kernel_transform__neon(
-    const float32x4_t g0, const float32x4_t g1, const float32x4_t g2,
-    float32x4_t *transform0, float32x4_t *transform1, float32x4_t *transform2,
-    float32x4_t *transform3) {
+    const float32x4_t g0,
+    const float32x4_t g1,
+    const float32x4_t g2,
+    float32x4_t* transform0,
+    float32x4_t* transform1,
+    float32x4_t* transform2,
+    float32x4_t* transform3) {
   const float32x4_t const_half = vdupq_n_f32(0.5f);
   float32x4_t half_g0_plus_g2 = const_half * (g0 + g2);
   *transform0 = g0;
@@ -81,13 +89,16 @@ static inline void winograd_f2k3_kernel_transform__neon(
 
 static inline float32x4x4_t v4f_transpose4x4__neon(float32x4x4_t m) {
   float32x4x4_t ret;
-  vst4q_f32((float *)(&ret), m);
+  vst4q_f32((float*)(&ret), m);
   return ret;
 }
 
-void runDepthwise3x3Conv(const DepthwiseArgs &args, const float *input,
-                         const float *kernel, const float *bias,
-                         float *output) {
+void runDepthwise3x3Conv(
+    const DepthwiseArgs& args,
+    const float* input,
+    const float* kernel,
+    const float* bias,
+    float* output) {
   const float32x4_t vbias = vsetq_lane_f32(*bias, vdupq_n_f32(0.0), 1);
   float32x4x4_t kernel_tile;
   {
@@ -97,36 +108,49 @@ void runDepthwise3x3Conv(const DepthwiseArgs &args, const float *input,
     const float32x4_t g2 =
         vextq_f32(vld1q_f32(kernel + 5), vld1q_f32(kernel + 5), 1);
     float32x4x4_t w;
-    winograd_f2k3_kernel_transform__neon(g0, g1, g2, &w.val[0], &w.val[1],
-                                         &w.val[2], &w.val[3]);
+    winograd_f2k3_kernel_transform__neon(
+        g0, g1, g2, &w.val[0], &w.val[1], &w.val[2], &w.val[3]);
     w = v4f_transpose4x4__neon(w);
 
     winograd_f2k3_kernel_transform__neon(
-        w.val[0], w.val[1], w.val[2], &kernel_tile.val[0], &kernel_tile.val[1],
-        &kernel_tile.val[2], &kernel_tile.val[3]);
+        w.val[0],
+        w.val[1],
+        w.val[2],
+        &kernel_tile.val[0],
+        &kernel_tile.val[1],
+        &kernel_tile.val[2],
+        &kernel_tile.val[3]);
   }
 
-#define TILE                                                                   \
-  winograd_f2k3_input_transform_inplace__neon(                                 \
-      &input_tile.val[0], &input_tile.val[1], &input_tile.val[2],              \
-      &input_tile.val[3]);                                                     \
-  input_tile = v4f_transpose4x4__neon(input_tile);                             \
-  winograd_f2k3_input_transform_inplace__neon(                                 \
-      &input_tile.val[0], &input_tile.val[1], &input_tile.val[2],              \
-      &input_tile.val[3]);                                                     \
-                                                                               \
-  for (int row = 0; row < 4; ++row) {                                          \
-    input_tile.val[row] =                                                      \
-        vmulq_f32(input_tile.val[row], kernel_tile.val[row]);                  \
-  }                                                                            \
-                                                                               \
-  input_tile.val[1] = input_tile.val[1] + vbias;                               \
-  winograd_f2k3_output_transform_inplace__neon(                                \
-      &input_tile.val[0], &input_tile.val[1], &input_tile.val[2],              \
-      &input_tile.val[3]);                                                     \
-  input_tile = v4f_transpose4x4__neon(input_tile);                             \
-  winograd_f2k3_output_transform_inplace__neon(                                \
-      &input_tile.val[0], &input_tile.val[1], &input_tile.val[2],              \
+#define TILE                                                  \
+  winograd_f2k3_input_transform_inplace__neon(                \
+      &input_tile.val[0],                                     \
+      &input_tile.val[1],                                     \
+      &input_tile.val[2],                                     \
+      &input_tile.val[3]);                                    \
+  input_tile = v4f_transpose4x4__neon(input_tile);            \
+  winograd_f2k3_input_transform_inplace__neon(                \
+      &input_tile.val[0],                                     \
+      &input_tile.val[1],                                     \
+      &input_tile.val[2],                                     \
+      &input_tile.val[3]);                                    \
+                                                              \
+  for (int row = 0; row < 4; ++row) {                         \
+    input_tile.val[row] =                                     \
+        vmulq_f32(input_tile.val[row], kernel_tile.val[row]); \
+  }                                                           \
+                                                              \
+  input_tile.val[1] = input_tile.val[1] + vbias;              \
+  winograd_f2k3_output_transform_inplace__neon(               \
+      &input_tile.val[0],                                     \
+      &input_tile.val[1],                                     \
+      &input_tile.val[2],                                     \
+      &input_tile.val[3]);                                    \
+  input_tile = v4f_transpose4x4__neon(input_tile);            \
+  winograd_f2k3_output_transform_inplace__neon(               \
+      &input_tile.val[0],                                     \
+      &input_tile.val[1],                                     \
+      &input_tile.val[2],                                     \
       &input_tile.val[3])
 
   // Non-padded regime.
@@ -139,11 +163,11 @@ void runDepthwise3x3Conv(const DepthwiseArgs &args, const float *input,
       int ih = oth * 2 - args.pad_rows;
       int iw = otw * 2 - args.pad_cols;
       // fast-path, all accesses in-bounds
-      if (__builtin_expect(ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
-                               iw + 3 < args.in_cols &&
-                               2 * oth + 1 < args.out_rows &&
-                               2 * otw + 1 < args.out_cols,
-                           1)) {
+      if (__builtin_expect(
+              ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
+                  iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
+                  2 * otw + 1 < args.out_cols,
+              1)) {
         float32x4x4_t input_tile;
         for (int row = 0; row < 4; ++row) {
           input_tile.val[row] =
@@ -153,8 +177,9 @@ void runDepthwise3x3Conv(const DepthwiseArgs &args, const float *input,
         TILE;
 
         for (size_t row = 0; row < 2; ++row) {
-          vst1_f32(output + (oth * 2 + row) * args.out_cols + otw * 2,
-                   vget_low_f32(input_tile.val[row]));
+          vst1_f32(
+              output + (oth * 2 + row) * args.out_cols + otw * 2,
+              vget_low_f32(input_tile.val[row]));
         }
       } else {
         float block[4][4];
@@ -200,12 +225,12 @@ void runDepthwise3x3Conv(const DepthwiseArgs &args, const float *input,
 typedef float psimd_f32 __attribute__((vector_size(16), aligned(1)));
 typedef int psimd_s32 __attribute__((__vector_size__(16)));
 
-PSIMD_INTRINSIC void psimd_store_f32(void *address, psimd_f32 value) {
-  *((psimd_f32 *)address) = value;
+PSIMD_INTRINSIC void psimd_store_f32(void* address, psimd_f32 value) {
+  *((psimd_f32*)address) = value;
 }
 
-PSIMD_INTRINSIC psimd_f32 psimd_load_f32(const void *address) {
-  return *((const psimd_f32 *)address);
+PSIMD_INTRINSIC psimd_f32 psimd_load_f32(const void* address) {
+  return *((const psimd_f32*)address);
 }
 
 PSIMD_INTRINSIC psimd_f32 psimd_splat_f32(float c) {
@@ -249,12 +274,15 @@ PSIMD_INTRINSIC psimd_f32 psimd_concat_hi_f32(psimd_f32 a, psimd_f32 b) {
 
 #endif
 
-static inline void psimd_transpose4x4_f32(const psimd_f32 row0,
-                                          const psimd_f32 row1,
-                                          const psimd_f32 row2,
-                                          const psimd_f32 row3, psimd_f32 *col0,
-                                          psimd_f32 *col1, psimd_f32 *col2,
-                                          psimd_f32 *col3) {
+static inline void psimd_transpose4x4_f32(
+    const psimd_f32 row0,
+    const psimd_f32 row1,
+    const psimd_f32 row2,
+    const psimd_f32 row3,
+    psimd_f32* col0,
+    psimd_f32* col1,
+    psimd_f32* col2,
+    psimd_f32* col3) {
   const psimd_f32 row01lo = psimd_interleave_lo_f32(row0, row1);
   const psimd_f32 row01hi = psimd_interleave_hi_f32(row0, row1);
   const psimd_f32 row23lo = psimd_interleave_lo_f32(row2, row3);
@@ -265,22 +293,29 @@ static inline void psimd_transpose4x4_f32(const psimd_f32 row0,
   *col3 = psimd_concat_hi_f32(row01hi, row23hi);
 }
 
-static inline void
-winograd_f2k3_input_transform(const psimd_f32 d0, const psimd_f32 d1,
-                              const psimd_f32 d2, const psimd_f32 d3,
-                              psimd_f32 *transform0, psimd_f32 *transform1,
-                              psimd_f32 *transform2, psimd_f32 *transform3) {
+static inline void winograd_f2k3_input_transform(
+    const psimd_f32 d0,
+    const psimd_f32 d1,
+    const psimd_f32 d2,
+    const psimd_f32 d3,
+    psimd_f32* transform0,
+    psimd_f32* transform1,
+    psimd_f32* transform2,
+    psimd_f32* transform3) {
   *transform0 = d0 - d2;
   *transform1 = d1 + d2;
   *transform2 = -d1 + d2;
   *transform3 = d1 - d3;
 }
 
-static inline void
-winograd_f2k3_kernel_transform(const psimd_f32 g0, const psimd_f32 g1,
-                               const psimd_f32 g2, psimd_f32 *transform0,
-                               psimd_f32 *transform1, psimd_f32 *transform2,
-                               psimd_f32 *transform3) {
+static inline void winograd_f2k3_kernel_transform(
+    const psimd_f32 g0,
+    const psimd_f32 g1,
+    const psimd_f32 g2,
+    psimd_f32* transform0,
+    psimd_f32* transform1,
+    psimd_f32* transform2,
+    psimd_f32* transform3) {
   const psimd_f32 const_half = psimd_splat_f32(0.5);
   const psimd_f32 half_g0_plus_g2 = const_half * (g0 + g2);
   *transform0 = g0;
@@ -289,17 +324,23 @@ winograd_f2k3_kernel_transform(const psimd_f32 g0, const psimd_f32 g1,
   *transform3 = g2;
 }
 
-static inline void
-winograd_f2k3_output_transform(const psimd_f32 m0, const psimd_f32 m1,
-                               const psimd_f32 m2, const psimd_f32 m3,
-                               psimd_f32 *output0, psimd_f32 *output1) {
+static inline void winograd_f2k3_output_transform(
+    const psimd_f32 m0,
+    const psimd_f32 m1,
+    const psimd_f32 m2,
+    const psimd_f32 m3,
+    psimd_f32* output0,
+    psimd_f32* output1) {
   *output0 = m0 + m1 + m2;
   *output1 = m1 - m2 - m3;
 }
 
-void runDepthwise3x3Conv(const DepthwiseArgs &args, const float *input,
-                         const float *kernel, const float *bias,
-                         float *output) {
+void runDepthwise3x3Conv(
+    const DepthwiseArgs& args,
+    const float* input,
+    const float* kernel,
+    const float* bias,
+    float* output) {
   const psimd_f32 vbias = {0, *bias, 0, 0};
   const psimd_f32 g0 = psimd_load_f32(kernel);
   const psimd_f32 g1 = psimd_load_f32(kernel + 3);
@@ -314,8 +355,8 @@ void runDepthwise3x3Conv(const DepthwiseArgs &args, const float *input,
   winograd_f2k3_kernel_transform(g0, g1, g2, &w[0], &w[1], &w[2], &w[3]);
   psimd_transpose4x4_f32(w[0], w[1], w[2], w[3], &w[0], &w[1], &w[2], &w[3]);
   psimd_f32 wg[4];
-  winograd_f2k3_kernel_transform(w[0], w[1], w[2], &wg[0], &wg[1], &wg[2],
-                                 &wg[3]);
+  winograd_f2k3_kernel_transform(
+      w[0], w[1], w[2], &wg[0], &wg[1], &wg[2], &wg[3]);
 
   // Iterate over non-padded output tiles.
   for (int oth = 0; oth < (args.out_rows + 1) / 2; ++oth) {
@@ -338,13 +379,18 @@ void runDepthwise3x3Conv(const DepthwiseArgs &args, const float *input,
       }
       psimd_f32 wd[4];
       winograd_f2k3_input_transform(
-          psimd_load_f32(&block[0]), psimd_load_f32(&block[1]),
-          psimd_load_f32(&block[2]), psimd_load_f32(&block[3]), &wd[0], &wd[1],
-          &wd[2], &wd[3]);
-      psimd_transpose4x4_f32(wd[0], wd[1], wd[2], wd[3], &wd[0], &wd[1], &wd[2],
-                             &wd[3]);
-      winograd_f2k3_input_transform(wd[0], wd[1], wd[2], wd[3], &wd[0], &wd[1],
-                                    &wd[2], &wd[3]);
+          psimd_load_f32(&block[0]),
+          psimd_load_f32(&block[1]),
+          psimd_load_f32(&block[2]),
+          psimd_load_f32(&block[3]),
+          &wd[0],
+          &wd[1],
+          &wd[2],
+          &wd[3]);
+      psimd_transpose4x4_f32(
+          wd[0], wd[1], wd[2], wd[3], &wd[0], &wd[1], &wd[2], &wd[3]);
+      winograd_f2k3_input_transform(
+          wd[0], wd[1], wd[2], wd[3], &wd[0], &wd[1], &wd[2], &wd[3]);
 
       for (int row = 0; row < 4; ++row) {
         wd[row] = wg[row] * wd[row];
@@ -352,8 +398,8 @@ void runDepthwise3x3Conv(const DepthwiseArgs &args, const float *input,
       wd[1] += vbias;
       psimd_f32 s[4] = {{0}};
       winograd_f2k3_output_transform(wd[0], wd[1], wd[2], wd[3], &s[0], &s[1]);
-      psimd_transpose4x4_f32(s[0], s[1], s[2], s[3], &s[0], &s[1], &s[2],
-                             &s[3]);
+      psimd_transpose4x4_f32(
+          s[0], s[1], s[2], s[3], &s[0], &s[1], &s[2], &s[3]);
 
       psimd_f32 t0, t1;
       winograd_f2k3_output_transform(s[0], s[1], s[2], s[3], &t0, &t1);
@@ -377,12 +423,13 @@ void runDepthwise3x3Conv(const DepthwiseArgs &args, const float *input,
 #endif
 
 class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
-public:
+ public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
-  Depthwise3x3ConvOp(const OperatorDef &operator_def, Workspace *ws)
+  Depthwise3x3ConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW,
-                           "Depthwise3x3ConvOp only supports NCHW order");
+    OPERATOR_NEEDS_FEATURE(
+        this->order_ == StorageOrder::NCHW,
+        "Depthwise3x3ConvOp only supports NCHW order");
     OPERATOR_NEEDS_FEATURE(this->group_ > 1);
     OPERATOR_NEEDS_FEATURE(this->kernel_w() == 3);
     OPERATOR_NEEDS_FEATURE(this->kernel_h() == 3);
@@ -391,9 +438,9 @@ public:
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
-    const Tensor<CPUContext> &X = Input(0);
-    auto &filter = Input(1);
-    Tensor<CPUContext> *Y = Output(0);
+    const Tensor<CPUContext>& X = Input(0);
+    auto& filter = Input(1);
+    Tensor<CPUContext>* Y = Output(0);
     const int N = X.dim32(0), C = X.dim32(1);
     CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
     const int M = filter.dim32(0);
@@ -423,16 +470,19 @@ public:
     if (InputSize() != 3 && bias_.size() != M) {
       // no bias.
       bias_.Resize(M);
-      math::Set<float, CPUContext>(M, 0.0, bias_.mutable_data<float>(),
-                                   &context_);
+      math::Set<float, CPUContext>(
+          M, 0.0, bias_.mutable_data<float>(), &context_);
     }
-    const auto *bias =
+    const auto* bias =
         InputSize() == 3 ? Input(2).data<float>() : bias_.data<float>();
 
     auto f = [&](int n, int g) {
-      runDepthwise3x3Conv(args, X.data<float>() + g * IS + n * G * IS,
-                          filter.data<float>() + g * 3 * 3, bias + g,
-                          Y->mutable_data<float>() + g * OS + n * G * OS);
+      runDepthwise3x3Conv(
+          args,
+          X.data<float>() + g * IS + n * G * IS,
+          filter.data<float>() + g * 3 * 3,
+          bias + g,
+          Y->mutable_data<float>() + g * OS + n * G * OS);
     };
 
     Timer t;
@@ -485,7 +535,7 @@ public:
     return true;
   }
 
-private:
+ private:
   Tensor<CPUContext> bias_;
 };
 

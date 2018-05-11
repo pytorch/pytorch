@@ -3,6 +3,7 @@
 import numpy as np
 import copy
 from caffe2.python import workspace
+from caffe2.python.core import InferOpBlobDevicesAsDict
 from future.utils import viewitems
 
 
@@ -31,17 +32,20 @@ class DeviceChecker(object):
           boolean: True if it passes, False if it does not pass.
         """
         op = copy.deepcopy(op)
-        input_device_options = input_device_options or {}
         # Entering the checker workspace
         old_ws_name = workspace.CurrentWorkspace()
         results = []
         workspace.SwitchWorkspace("_device_check_", True)
         for i, device_option in enumerate(self._device_options):
+            op.device_option.CopyFrom(device_option)
+            _input_device_options = input_device_options or \
+                InferOpBlobDevicesAsDict(op)[0]
+            print(_input_device_options)
             for i, arr in enumerate(inputs):
                 workspace.FeedBlob(
                     op.input[i], np.array(arr),
-                    input_device_options.get(op.input[i], device_option))
-            op.device_option.CopyFrom(device_option)
+                    _input_device_options.get(op.input[i], device_option)
+                )
             workspace.RunOperatorOnce(op)
             results.append(
                 [workspace.FetchBlob(op.output[idx])

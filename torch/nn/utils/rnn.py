@@ -85,6 +85,23 @@ class PackedSequence(PackedSequence_):
         r"""Returns copy with `self.data` cast to byte type"""
         return type(self)(self.data.byte(), self.batch_sizes)
 
+    def to(self, *args, **kwargs):
+        r"""Performs dtype and/or device conversion on `self.data`.
+
+        It has similar signature as :meth:`torch.Tensor.to`.
+
+        .. note::
+
+            If the ``self.data`` Tensor already has the correct :class:`torch.dtype`
+            and :class:`torch.device`, then ``self`` is returned.
+            Otherwise, returns a copy with the desired configuration.
+        """
+        data = self.data.to(*args, **kwargs)
+        if data is self.data:
+            return self
+        else:
+            return type(self)(data, self.batch_sizes)
+
     @property
     def is_cuda(self):
         r"""Returns true if `self.data` stored on a gpu"""
@@ -248,7 +265,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     r"""Pad a list of variable length Tensors with zero
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
-    and padds them to equal length. For example, if the input is list of
+    and pads them to equal length. For example, if the input is list of
     sequences with size ``L x *`` and if batch_first is False, and ``T x B x *``
     otherwise. The list of sequences should be sorted in the order of
     decreasing length.
@@ -298,7 +315,8 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
         length = tensor.size(0)
         # temporary sort check, can be removed when we handle sorting internally
         if prev_l < length:
-            raise ValueError("lengths array has to be sorted in decreasing order")
+            raise ValueError(
+                "sequences must be sorted in the order of decreasing length")
         prev_l = length
         # use index notation to prevent duplicate references to the tensor
         if batch_first:
@@ -321,7 +339,7 @@ def pack_sequence(sequences):
         >>> a = torch.tensor([1,2,3])
         >>> b = torch.tensor([4,5])
         >>> c = torch.tensor([6])
-        >>> pack_sequence([a, b, c]])
+        >>> pack_sequence([a, b, c])
         PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
 
 
