@@ -122,6 +122,19 @@ def InferBlobDevices(net):
     return mapping
 
 
+def InferOpBlobDevicesAsDict(op):
+    input_dev_list, output_dev_list = InferOpBlobDevices(op)
+    input_dict = {
+        op.input[i]: input_dev_list[i]
+        for i in range(len(op.input))
+    }
+    output_dict = {
+        op.output[i]: output_dev_list[i]
+        for i in range(len(op.output))
+    }
+    return input_dict, output_dict
+
+
 def InferOpBlobDevices(op):
     device_info = C.infer_op_input_output_device(op.SerializeToString())
     input_info = []

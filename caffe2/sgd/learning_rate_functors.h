@@ -1,6 +1,9 @@
 #ifndef CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
 #define CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
 
+#include <list>
+#include <map>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
@@ -163,6 +166,40 @@ class HillLearningRate : public LearningRateFunctor<T> {
   InvLearningRate<T> inv_lr_;
   int64_t num_iter_;
   T end_multiplier_;
+};
+
+template <typename T>
+class CompositeLearningRateItem {
+ public:
+  CompositeLearningRateItem(int64_t num_iter, LearningRateFunctor<T>* policy)
+      : num_iter_(num_iter), policy_(policy) {}
+  int64_t num_iter_;
+  LearningRateFunctor<T>* policy_;
+};
+
+// composite: the learning policy changes according to current iteration #
+template <typename T>
+class CompositeLearningRate : public LearningRateFunctor<T> {
+ public:
+  CompositeLearningRate(
+      const std::list<CompositeLearningRateItem<T>>& sub_policies) {
+    DCHECK_GT(sub_policies.size(), 0);
+    int64_t num_iter_start = 1;
+    for (auto it = sub_policies.begin(); it != sub_policies.end(); ++it) {
+      DCHECK_GT(it->num_iter_, 0);
+      sub_policies_[num_iter_start].reset(it->policy_);
+      num_iter_start += it->num_iter_;
+    }
+  }
+  T operator()(const int64_t iter) const override {
+    auto sub_policy = sub_policies_.upper_bound(iter);
+    DCHECK(sub_policy != sub_policies_.begin());
+    --sub_policy;
+    return (*sub_policy->second)(iter);
+  }
+
+ private:
+  std::map<int64_t, std::unique_ptr<LearningRateFunctor<T>>> sub_policies_;
 };
 
 } // namespace caffe2

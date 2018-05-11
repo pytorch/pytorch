@@ -1,7 +1,4 @@
 #include "caffe2/core/predictor.h"
-#if CAFFE2_MOBILE
-#include "caffe2/core/init.h"
-#endif
 
 #include <unordered_set>
 
@@ -89,9 +86,6 @@ Predictor::Predictor(
   if (run_init) {
     CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
   }
-#if CAFFE2_MOBILE
-  GlobalInit();
-#endif
 
   // real model inputs can be fed later in run* functions
   const auto& initialized_vec = ws_.Blobs();
