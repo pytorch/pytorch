@@ -1,4 +1,4 @@
-#include "ATen/native/cpu/ActivationKernel.h"
+#include "ATen/native/cpu/SoftmaxKernel.h"
 
 #include <algorithm>
 #include <iterator>
@@ -45,10 +45,10 @@ inline void _vec_log_softmax_lastdim(
         for (int64_t ii = r.begin(); ii < r.end(); ii += CHUNK_SIZE) {
           scalar_t tmp_sum_scalar[CHUNK_SIZE];
           scalar_t max_input_arr[CHUNK_SIZE];
-          int64_t inner_loop_end = CHUNK_SIZE;
+          int64_t loop_end = CHUNK_SIZE;
           if (ii + CHUNK_SIZE > r.end())
-            inner_loop_end = r.end() - ii;
-          for (int64_t j = 0; j < inner_loop_end; j++) {
+            loop_end = r.end() - ii;
+          for (int64_t j = 0; j < loop_end; j++) {
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;
             max_input_arr[j] = vec256::reduce_all<scalar_t>(
@@ -56,7 +56,7 @@ inline void _vec_log_softmax_lastdim(
                 input_data,
                 dim_size);
           }
-          for (int64_t j = 0; j < inner_loop_end; j++) {
+          for (int64_t j = 0; j < loop_end; j++) {
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;
             scalar_t max_input = max_input_arr[j];
@@ -66,17 +66,21 @@ inline void _vec_log_softmax_lastdim(
                 input_data,
                 dim_size);
           }
-          for (int64_t j = 0; j < inner_loop_end; j += Vec::size) {
-            int64_t leftover = _leftover<Vec::size>(j, inner_loop_end);
-            Vec tmp_sum_scalar_vec = Vec::loadu(tmp_sum_scalar + j, leftover);
-            // See [Note AVX-SSE transitions] for why this should call the
-            // vectorized version (aside from perf improvements).
-            tmp_sum_scalar_vec = tmp_sum_scalar_vec.log();
-            Vec max_input_vec = Vec::loadu(max_input_arr + j, leftover);
-            tmp_sum_scalar_vec = max_input_vec + tmp_sum_scalar_vec;
-            tmp_sum_scalar_vec.store(tmp_sum_scalar + j, leftover);
+          // See [Note AVX-SSE transitions] for why this should call the
+          // vectorized version (aside from perf improvements).
+          int64_t j = 0;
+          for (; j < (loop_end - loop_end % Vec::size); j += Vec::size) {
+            Vec tmp_sum_scalar_vec = Vec::loadu(max_input_arr + j) +
+                Vec::loadu(tmp_sum_scalar + j).log();
+            tmp_sum_scalar_vec.store(tmp_sum_scalar + j);
           }
-          for (int64_t j = 0; j < inner_loop_end; j++) {
+          if (loop_end - j > 0) {
+            Vec tmp_sum_scalar_vec =
+                Vec::loadu(max_input_arr + j, loop_end - j) +
+                Vec::loadu(tmp_sum_scalar + j, loop_end - j).log();
+            tmp_sum_scalar_vec.store(tmp_sum_scalar + j, loop_end - j);
+          }
+          for (int64_t j = 0; j < loop_end; j++) {
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;
             scalar_t* output_data = output_data_base + i * dim_size;
@@ -98,32 +102,28 @@ inline void _vec_softmax_lastdim(
     scalar_t* output_data_base,
     int64_t outer_size,
     int64_t dim_size) {
+  using Vec = vec256::Vec256<scalar_t>;
   int64_t grain_size = internal::TBB_GRAIN_SIZE / dim_size;
   if (grain_size < 1)
     grain_size = 1;
 
-  using Vec = vec256::Vec256<scalar_t>;
   tbb::parallel_for(
       tbb::blocked_range<int64_t>(0, outer_size, grain_size),
       [&](const tbb::blocked_range<int64_t>& r) {
         for (int64_t i = r.begin(); i < r.end(); i++) {
           scalar_t* input_data = input_data_base + i * dim_size;
           scalar_t* output_data = output_data_base + i * dim_size;
-
           scalar_t max_input = vec256::reduce_all<scalar_t>(
               [](Vec& x, Vec& y) { return vec256::max(x, y); },
               input_data,
               dim_size);
-
           vec256::map(
               [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
               output_data,
               input_data,
               dim_size);
-
           scalar_t tmp_sum = vec256::reduce_all<scalar_t>(
               [](Vec x, Vec y) { return x + y; }, output_data, dim_size);
-
           tmp_sum = 1 / tmp_sum;
           vec256::map(
               [tmp_sum](Vec x) { return x * Vec(tmp_sum); },
@@ -143,10 +143,9 @@ inline void _vec_host_softmax_backward_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
-  static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size;
-  int64_t grain_size = internal::TBB_GRAIN_SIZE / (dim_size * CHUNK_SIZE);
-  if (grain_size < CHUNK_SIZE)
-    grain_size = CHUNK_SIZE;
+  int64_t grain_size = internal::TBB_GRAIN_SIZE / dim_size;
+  if (grain_size < 1)
+    grain_size = 1;
 
   tbb::parallel_for(
       tbb::blocked_range<int64_t>(0, outer_size, grain_size),
@@ -155,7 +154,6 @@ inline void _vec_host_softmax_backward_lastdim(
           scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
           scalar_t* grad_data = grad_data_base + i * dim_size;
           scalar_t* output_data = output_data_base + i * dim_size;
-
           scalar_t sum;
           if (log_softmax) {
             sum = vec256::reduce_all<scalar_t>(
@@ -168,7 +166,6 @@ inline void _vec_host_softmax_backward_lastdim(
                 output_data,
                 dim_size);
           }
-
           if (log_softmax) {
             vec256::map2(
                 [sum](Vec x, Vec y) { return x - ((y.exp()) * Vec(sum)); },
@@ -193,7 +190,6 @@ template <typename scalar_t, bool LogSoftMax>
 struct vec_host_softmax_lastdim {
   static void apply(Tensor& output, const Tensor& input) {
     internal::init_tbb_num_threads();
-
     int64_t outer_size = 1;
     int64_t dim_size = input.size(input.ndimension() - 1);
     for (int64_t i = 0; i < input.ndimension() - 1; ++i)
@@ -215,7 +211,6 @@ struct vec_host_softmax_backward_lastdim {
   static void
   apply(Tensor& grad_input, const Tensor& grad, const Tensor& output) {
     internal::init_tbb_num_threads();
-
     int64_t outer_size = 1;
     int64_t dim_size = grad.size(grad.ndimension() - 1);
     for (int64_t i = 0; i < grad.ndimension() - 1; ++i)

@@ -2,16 +2,6 @@
 #include "vec256.h"
 
 namespace at { namespace vec256 {
-namespace {
-
-template <int64_t size>
-inline int64_t _leftover(int64_t x, int64_t y) {
-  if (x + size > y)
-    return y - x;
-  return size;
-}
-
-} // namespace
 
 // TODO: Make this more efficient
 template <typename scalar_t, typename Op>

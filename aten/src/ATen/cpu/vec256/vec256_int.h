@@ -26,18 +26,18 @@ struct Vec256<int64_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int64_t v) { values = _mm256_set1_epi64x(v); }
-  template <int64_t mask_>
+  template <int64_t mask>
   static Vec256<int64_t> blend(Vec256<int64_t> a, Vec256<int64_t> b) {
-    int64_t mask = mask_;
     __at_align32__ int64_t tmp_values[size];
-    for (int64_t i = 0; i < size; i++) {
-      if (mask & 0x01) {
-        tmp_values[i] = _mm256_extract_epi64(b.values, i);
-      } else {
-        tmp_values[i] = _mm256_extract_epi64(a.values, i);
-      }
-      mask = mask >> 1;
-    }
+    a.store(tmp_values);
+    if (mask & 0x01)
+      tmp_values[0] = _mm256_extract_epi16(b.values, 0);
+    if (mask & 0x02)
+      tmp_values[1] = _mm256_extract_epi16(b.values, 1);
+    if (mask & 0x04)
+      tmp_values[2] = _mm256_extract_epi16(b.values, 2);
+    if (mask & 0x08)
+      tmp_values[3] = _mm256_extract_epi16(b.values, 3);
     return loadu(tmp_values);
   }
   static Vec256<int64_t>
@@ -139,18 +139,42 @@ struct Vec256<int16_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int16_t v) { values = _mm256_set1_epi16(v); }
-  template <int64_t mask_>
+  template <int64_t mask>
   static Vec256<int16_t> blend(Vec256<int16_t> a, Vec256<int16_t> b) {
-    int64_t mask = mask_;
     __at_align32__ int16_t tmp_values[size];
-    for (int64_t i = 0; i < size; i++) {
-      if (mask & 0x01) {
-        tmp_values[i] = _mm256_extract_epi16(b.values, i);
-      } else {
-        tmp_values[i] = _mm256_extract_epi16(a.values, i);
-      }
-      mask = mask >> 1;
-    }
+    a.store(tmp_values);
+    if (mask & 0x01)
+      tmp_values[0] = _mm256_extract_epi16(b.values, 0);
+    if (mask & 0x02)
+      tmp_values[1] = _mm256_extract_epi16(b.values, 1);
+    if (mask & 0x04)
+      tmp_values[2] = _mm256_extract_epi16(b.values, 2);
+    if (mask & 0x08)
+      tmp_values[3] = _mm256_extract_epi16(b.values, 3);
+    if (mask & 0x10)
+      tmp_values[4] = _mm256_extract_epi16(b.values, 4);
+    if (mask & 0x20)
+      tmp_values[5] = _mm256_extract_epi16(b.values, 5);
+    if (mask & 0x40)
+      tmp_values[6] = _mm256_extract_epi16(b.values, 6);
+    if (mask & 0x80)
+      tmp_values[7] = _mm256_extract_epi16(b.values, 7);
+    if (mask & 0x100)
+      tmp_values[8] = _mm256_extract_epi16(b.values, 8);
+    if (mask & 0x200)
+      tmp_values[9] = _mm256_extract_epi16(b.values, 9);
+    if (mask & 0x400)
+      tmp_values[10] = _mm256_extract_epi16(b.values, 10);
+    if (mask & 0x800)
+      tmp_values[11] = _mm256_extract_epi16(b.values, 11);
+    if (mask & 0x1000)
+      tmp_values[12] = _mm256_extract_epi16(b.values, 12);
+    if (mask & 0x2000)
+      tmp_values[13] = _mm256_extract_epi16(b.values, 13);
+    if (mask & 0x4000)
+      tmp_values[14] = _mm256_extract_epi16(b.values, 14);
+    if (mask & 0x8000)
+      tmp_values[15] = _mm256_extract_epi16(b.values, 15);
     return loadu(tmp_values);
   }
   static Vec256<int16_t>
