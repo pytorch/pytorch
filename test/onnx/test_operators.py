@@ -239,25 +239,6 @@ class TestOperators(TestCase):
         x = Variable(torch.randn(20, 16, 50))
         self.assertONNX(nn.MaxPool1d(3, stride=2), x)
 
-    def test_rnn_single_layer(self):
-        rnn = nn.RNN(10, 20, 1, nonlinearity='relu')
-        input = Variable(torch.randn(5, 3, 10))
-        h0 = Variable(torch.randn(1, 3, 20))
-        self.assertONNX(rnn, input, h0)
-
-    def test_rnn(self):
-        rnn = nn.RNN(10, 20, 2)
-        input = Variable(torch.randn(5, 3, 10))
-        h0 = Variable(torch.randn(2, 3, 20))
-        self.assertONNX(rnn, input, h0)
-
-    def test_lstm(self):
-        rnn = nn.LSTM(10, 20, 2)
-        input = Variable(torch.randn(5, 3, 10))
-        h0 = Variable(torch.randn(2, 3, 20))
-        c0 = Variable(torch.randn(2, 3, 20))
-        self.assertONNX(rnn, input, (h0, c0))
-
     def test_at_op(self):
         x = Variable(torch.randn(3, 4))
 
