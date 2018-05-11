@@ -211,7 +211,8 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
   ${TORCH_SRC_DIR}/csrc/onnx/onnx.cpp
   ${TORCH_SRC_DIR}/csrc/onnx/onnx.pb.cpp
-  ${TORCH_SRC_DIR}/csrc/Exceptions.cpp)
+  ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
+  ${TORCH_SRC_DIR}/csrc/torch.cpp)
 
 if (NOT NO_API)
   list(APPEND TORCH_SRCS

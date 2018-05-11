@@ -3,6 +3,7 @@
 
 #include <array>
 #include <type_traits>
+#include "torch/csrc/autograd/variable.h"
 
 namespace torch { namespace jit {
 
@@ -84,6 +85,11 @@ inline at::Tensor as_tensor(at::IntList l) {
 
 inline at::Tensor as_tensor(const at::Scalar& s) {
   return s.toTensor();
+}
+
+template<typename T>
+inline at::Tensor as_variable(const T& t) {
+  return autograd::make_variable(as_tensor(t));
 }
 
 }} // namespace torch::jit
