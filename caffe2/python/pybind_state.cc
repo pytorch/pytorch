@@ -1519,7 +1519,7 @@ void addGlobalMethods(py::module& m) {
 
     auto nn = caffe2::convertToNNModule(proto);
     opt::fuseConvBN(&nn, gWorkspace);
-    auto new_proto = caffe2::convertToCaffe2Proto(nn);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
 
     std::string out;
     new_proto.SerializeToString(&out);

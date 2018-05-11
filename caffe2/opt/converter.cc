@@ -1,4 +1,6 @@
 #include "caffe2/opt/converter.h"
+#include "caffe2/core/logging.h"
+
 #include "nomnigraph/Graph/Algorithms.h"
 
 #include "nomnigraph/Support/Casting.h"
@@ -295,15 +297,26 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
   auto bbNode =
       cfg.createNode(util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
 
+  std::unordered_map<std::string, repr::NNGraph::NodeRef> entryNodeMap;
+  std::unordered_map<std::string, repr::NNGraph::NodeRef> exitNodeMap;
+
+  for (auto external_input : net.external_input()) {
+    entryNodeMap[external_input] = nullptr;
+  }
+  for (auto external_output : net.external_output()) {
+    exitNodeMap[external_output] = nullptr;
+  }
+
   for (auto &op : *net.mutable_op()) {
     auto opNode = dfg.createNode(); // Create an empty node for the operator.
     // First calculate in-edges (data dependencies).
     for (const auto &input : op.input()) {
       // If we've never seen this tensor, make one.
       if (!blobMap.count(input)) {
-        auto tensor = util::make_unique<repr::Tensor>(input);
-        blobMap[input] =
-            dfg.createNode(unique_dyn_cast<repr::NeuralNetData>(tensor));
+        blobMap[input] = dfg.createNode(util::make_unique<repr::Tensor>(input));
+        if (entryNodeMap.count(input) && !entryNodeMap[input]) {
+          entryNodeMap[input] = blobMap[input];
+        }
       }
 
       auto tensorNode = blobMap[input];
@@ -312,11 +325,12 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
 
     // Then save outputs into the blobMap for later consumption.
     for (const auto &output : op.output()) {
-      auto tensor = util::make_unique<repr::Tensor>(output);
-      auto tensorNode =
-          dfg.createNode(unique_dyn_cast<repr::NeuralNetData>(tensor));
+      auto tensorNode = dfg.createNode(util::make_unique<repr::Tensor>(output));
       dfg.createEdge(opNode, tensorNode);
       blobMap[output] = tensorNode;
+      if (exitNodeMap.count(output)) {
+        exitNodeMap[output] = tensorNode;
+      }
     }
 
     if (op.type() == "While") {
@@ -345,6 +359,14 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
   repr::NNModule module;
   module.dataFlow = std::move(dfg);
   module.controlFlow = std::move(cfg);
+
+  for (auto external_input : net.external_input()) {
+    module.entryNodes.emplace_back(entryNodeMap[external_input]);
+  }
+  for (auto external_output : net.external_output()) {
+    module.exitNodes.emplace_back(exitNodeMap[external_output]);
+  }
+
   if (blobMapOut) {
     *blobMapOut = blobMap;
   }
@@ -420,12 +442,88 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m) {
   return convertToCaffe2Proto(m, predictNet);
 }
 
+bool shouldBeInplace(repr::NNGraph::NodeRef node) {
+  CAFFE_ENFORCE(repr::nn::is<repr::NeuralNetOperator>(node));
+  auto op = repr::nn::get<repr::NeuralNetOperator>(node);
+  using NNKind = repr::NeuralNetOperator::NNKind;
+  switch (op->getKind()) {
+    case NNKind::Relu:
+      return true;
+    default:
+      return false;
+  }
+}
+
+void addVersions(repr::NNModule* nn) {
+  std::unordered_map<std::string, uint64_t> versionMap;
+  for (auto& node : nn->dataFlow.getMutableNodes()) {
+    if (repr::nn::is<repr::NeuralNetData>(node)) {
+      auto d = repr::nn::get<repr::NeuralNetData>(node);
+      d->setVersion(versionMap[d->getName()]++);
+    }
+  }
+  for (auto& node_pair :
+       repr::nn::dataIterator<repr::NeuralNetOperator>(nn->dataFlow)) {
+    repr::NNGraph::NodeRef node;
+    repr::NeuralNetOperator* nnOp;
+    std::tie(nnOp, node) = node_pair;
+    // If we have an in-place node, all inputs/outputs should be versioned
+    // accordingly.
+    if (shouldBeInplace(node)) {
+      for (auto& input : repr::nn::getInputs(node)) {
+        for (auto& output : repr::nn::getInputs(node)) {
+          auto input_tensor = repr::nn::get<repr::NeuralNetData>(input);
+          auto output_tensor = repr::nn::get<repr::NeuralNetData>(output);
+          if (input_tensor->getName() == output_tensor->getName()) {
+            output_tensor->setVersion(input_tensor->getVersion());
+          }
+        }
+      }
+    }
+  }
+}
+
+void nameTensors(repr::NNModule* nn, const caffe2::NetDef& oldNet) {
+  addVersions(nn);
+
+  for (auto& node_pair : repr::nn::dataIterator<repr::Tensor>(nn->dataFlow)) {
+    repr::NNGraph::NodeRef node;
+    repr::Tensor* tensor;
+    std::tie(tensor, node) = node_pair;
+
+    auto name = tensor->getName();
+    auto version = tensor->getVersion();
+    tensor->setName(name + "_" + caffe2::to_string(version));
+  }
+
+  // At this point every single blob is versioned and we are in a Caffe2
+  // compatible SSA.  First we reconcile the in/out tensors.
+  auto num_inputs = oldNet.external_input().size();
+  CAFFE_ENFORCE(num_inputs <= nn->entryNodes.size());
+  for (auto i = 0; i < num_inputs; ++i) {
+    auto node = nn->entryNodes[i];
+    CAFFE_ENFORCE(repr::nn::is<repr::NeuralNetData>(node));
+    auto name = oldNet.external_input(i);
+    repr::nn::get<repr::NeuralNetData>(node)->setName(name);
+  }
+
+  auto num_outputs = oldNet.external_output().size();
+  CAFFE_ENFORCE(num_outputs <= nn->exitNodes.size());
+  for (auto i = 0; i < num_outputs; ++i) {
+    auto node = nn->exitNodes[i];
+    CAFFE_ENFORCE(repr::nn::is<repr::NeuralNetData>(node));
+    auto name = oldNet.external_output(i);
+    repr::nn::get<repr::NeuralNetData>(node)->setName(name);
+  }
+}
+
 caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& oldNet) {
   auto predictNet = caffe2::NetDef();
   // We copy the old net rather than mutate it.
   predictNet.CopyFrom(oldNet);
   predictNet.mutable_op()->Clear();
 
+  nameTensors(&m, oldNet);
   repr::nn::coalesceInsertedDataDependencies(&m);
 
   // Simply iterate through the CFG and populate data dependencies

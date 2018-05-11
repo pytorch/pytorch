@@ -32,6 +32,17 @@ const std::string NeuralNetData::getName() const {
   }
 }
 
+void NeuralNetData::setName(std::string name) {
+  switch (getKind()) {
+    case NNDataKind::Tensor: {
+      dyn_cast<Tensor>(this)->setName(name);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 namespace nn {
 
 bool hasProducer(NNGraph::NodeRef n) {

@@ -153,6 +153,7 @@ class NeuralNetData : public Data {
   virtual NeuralNetData* clone() = 0;
 
   const std::string getName() const;
+  void setName(std::string);
 
   virtual ~NeuralNetData() = 0;
 
@@ -188,6 +189,9 @@ class Tensor : public NeuralNetData {
 
   const std::string getName() const {
     return name_;
+  }
+  void setName(std::string name) {
+    name_ = name;
   }
   ~Tensor() {}
 
@@ -246,6 +250,8 @@ using NNSubgraph = nom::Subgraph<std::unique_ptr<nom::repr::Value>, int>;
 using NNCFGraph = nom::repr::ControlFlowGraph<NNGraph>;
 
 struct NNModule {
+  std::vector<NNGraph::NodeRef> entryNodes;
+  std::vector<NNGraph::NodeRef> exitNodes;
   NNGraph dataFlow;
   NNCFGraph controlFlow;
   NNModule(const NNModule&) = delete;
