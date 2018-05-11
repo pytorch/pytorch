@@ -107,6 +107,74 @@ public:
   Vec256<float> sqrt() const {
     return _mm256_sqrt_ps(values);
   }
+
+  /*
+   * This is an AVX implementation of the cephes tanh function for single
+   * precision. http://www.netlib.org/cephes/
+   */
+  Vec256<float> tanh() const {
+    __m256 s, y, z;
+    __m256 xmm0, xmm1, xmm2, xmm3;
+    __m256 one = _mm256_set1_ps(1.0f);
+
+    // z is absolute value of the loaded values (x)
+    z = _mm256_and_ps(
+        values, _mm256_castsi256_ps(_mm256_set1_epi32(~0x80000000)));
+    __m256 sign_bit = _mm256_and_ps(
+        values, _mm256_castsi256_ps(_mm256_set1_epi32((int)0x80000000)));
+
+    // if (z >= 0.625)
+    // {
+    //  s = expf(z + z);
+    //  z =  1.0  - 2.0/(s + 1.0);
+    //  if (x < 0)
+    //    z = -z;
+    //  }
+    // }
+    xmm1 = _mm256_cmp_ps(z, _mm256_set1_ps(0.625f), _CMP_LT_OS);
+    xmm2 = _mm256_add_ps(z, z);
+
+    // using Sleef_expf8_u10 for e^(2x)
+    s = Sleef_expf8_u10(xmm2);
+    xmm2 = _mm256_sub_ps(
+        one, _mm256_div_ps(_mm256_set1_ps(2.0f), _mm256_add_ps(one, s)));
+    xmm2 = _mm256_or_ps(sign_bit, xmm2);
+
+    // z = x * x;
+    // z =
+    //  ((((-5.70498872745E-3 * z
+    //  + 2.06390887954E-2) * z
+    //  - 5.37397155531E-2) * z
+    //  + 1.33314422036E-1) * z
+    //  - 3.33332819422E-1) * z * x
+    //  + x;
+    z = _mm256_mul_ps(values, values);
+    y = _mm256_mul_ps(z, _mm256_set1_ps(-5.70498872745E-3f));
+    y = _mm256_add_ps(y, _mm256_set1_ps(2.06390887954E-2f));
+    y = _mm256_mul_ps(y, z);
+    y = _mm256_add_ps(y, _mm256_set1_ps(-5.37397155531E-2f));
+    y = _mm256_mul_ps(y, z);
+    y = _mm256_add_ps(y, _mm256_set1_ps(1.33314422036E-1f));
+    y = _mm256_mul_ps(y, z);
+    y = _mm256_add_ps(y, _mm256_set1_ps(-3.33332819422E-1f));
+    y = _mm256_mul_ps(y, z);
+    y = _mm256_mul_ps(y, values);
+    xmm3 = _mm256_add_ps(y, values);
+
+    s = _mm256_add_ps(_mm256_and_ps(xmm1, xmm3), _mm256_andnot_ps(xmm1, xmm2));
+
+    // MAXLOGF = 88.02969187150841
+    // if (z > 0.5 * MAXLOGF)
+    // {
+    //  if (x > 0)
+    //    return(1.0);
+    //  else
+    //    return(-1.0);
+    // }
+    xmm0 = _mm256_cmp_ps(z, _mm256_set1_ps(44.014845935754205f), _CMP_LE_OS);
+    xmm2 = _mm256_xor_ps(sign_bit, one);
+    return _mm256_add_ps(_mm256_and_ps(xmm0, s), _mm256_andnot_ps(xmm0, xmm2));
+  }
 };
 
 template <>

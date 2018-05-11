@@ -110,6 +110,9 @@ struct Vec256 {
   Vec256<T> sqrt() const {
     return map(std::sqrt);
   }
+  Vec256<T> tanh() const {
+    return map(std::tanh);
+  }
 };
 
 template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
