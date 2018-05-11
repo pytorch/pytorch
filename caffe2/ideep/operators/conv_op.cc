@@ -8,7 +8,9 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
   USE_IDEEP_CONV_POOL_BASE_FUNCTIONS();
 
   IDEEPConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPConvPoolOpBase(operator_def, ws) {
+      : IDEEPConvPoolOpBase(operator_def, ws),
+        constant_weight_(
+            OperatorBase::GetSingleArgument<int>("constant_weight", 1)) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
@@ -34,13 +36,30 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
         "*",
         group_);
 
+    bool weight_changed = (cached_weights_descriptor_ != filter.get_descriptor());
+    if ( weight_changed || !constant_weight_) {
+      cached_weights_descriptor_ = filter.get_descriptor();
+      filter_ = filter;
+      auto expected_descriptor =
+          ideep::convolution_forward::expected_weights_descriptor(
+              filter.get_dims());
+      if (filter_.get_descriptor() != expected_descriptor) {
+        filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
+            expected_descriptor);
+        ideep::reorder::compute(filter, filter_);
+      }
+      //ideep::convolution_forward::reorder_weights(
+      //    filter_, filter, expected_descriptor);
+      LOG(INFO) << "!!!! Converted weights";
+    }
+
     if (InputSize() > BIAS) {
       ideep::convolution_forward::compute(
-          X, filter, Input(BIAS), Y_dims, *Y,
+          X, filter_, Input(BIAS), Y_dims, *Y,
           stride_, dilation_, pad_tl(), pad_br(), group_);
     } else {
       ideep::convolution_forward::compute(
-          X, filter, Y_dims, *Y,
+          X, filter_, Y_dims, *Y,
           stride_, dilation_, pad_tl(), pad_br(), group_);
     }
 
@@ -48,9 +67,12 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
   }
 
  private:
-
   INPUT_TAGS(INPUT, FILTER, BIAS);
   OUTPUT_TAGS(OUTPUT);
+
+  bool constant_weight_;
+  ideep::tensor filter_;
+  ideep::tensor::descriptor cached_weights_descriptor_;
 };
 
 class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
