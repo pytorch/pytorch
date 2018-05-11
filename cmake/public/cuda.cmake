@@ -195,8 +195,8 @@ set_property(
 # Default is set to cuda 9. If we detect the cuda architectores to be less than
 # 9, we will lower it to the corresponding known archs.
 set(Caffe2_known_gpu_archs "30 35 50 52 60 61 70") # for CUDA 9.x
-set(Caffe2_known_gpu_archs8 "20 21(20) 30 35 50 52 60 61") # for CUDA 8.x
-set(Caffe2_known_gpu_archs7 "20 21(20) 30 35 50 52") # for CUDA 7.x
+set(Caffe2_known_gpu_archs8 "30 35 50 52 60 61") # for CUDA 8.x
+set(Caffe2_known_gpu_archs7 "30 35 50 52") # for CUDA 7.x
 
 ################################################################################################
 # A function for automatic detection of GPUs installed  (if autodetection is enabled)
