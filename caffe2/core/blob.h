@@ -42,6 +42,9 @@ class Blob {
   }
 
   Blob& operator=(Blob&& other) noexcept {
+    if (pointer_ && destroy_) {
+      destroy_(pointer_);
+    }
     meta_ = std::move(other.meta_);
     pointer_ = std::move(other.pointer_);
     destroy_ = std::move(other.destroy_);

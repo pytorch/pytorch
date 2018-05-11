@@ -13,18 +13,23 @@ more exponential. Learning rate is controlled by the following arguments:
 
 
 Required:
-  `iterations`
-  `base_lr`: base learning rate
-  `policy`: this controls how the learning rate is applied, options are:
-    `fixed`
-    `step`: uses `stepsize`, `gamma`
-    `exp`: uses `gamma`
-    `inv`: uses `gamma`, `power`
-    `linearWarmup`: uses `start_multiplier`, `num_iter`
-    `constantWarmup`: uses `multiplier`, `num_iter`
-    `alter`: uses  `active_first`, `active_period`, `inactive_period`
-    `hill`: uses those in both `linearWarmup` and `inv`, plus `end_multiplier`
-
+ `iterations`
+ `base_lr`: base learning rate
+ `policy`: this controls how the learning rate is applied, options are:
+   `fixed`
+   `step`: uses `stepsize`, `gamma`
+   `exp`: uses `gamma`
+   `inv`: uses `gamma`, `power`
+   `linearWarmup`: uses `start_multiplier`, `num_iter`
+   `constantWarmup`: uses `multiplier`, `num_iter`
+   `alter`: uses  `active_first`, `active_period`, `inactive_period`
+   `hill`: uses those in both `linearWarmup` and `inv`, plus `end_multiplier`
+   `composite`: uses `sub_policy_num_iters` and additional args with format
+   sub_policy_{sub_policy_index}_{sub_policy_arg}, for example:
+   sub_policy_0_policy: "exp", sub_policy_0_gamma: 0.99,
+   sub_policy_0_lr_scale: 1.2
+   sub_policy_0_policy: "fixed", sub_policy_0_lr_scale: 1.0
+   sub_policy_num_iters: [1000, 1000]
 
 Optional:
   `stepsize`: defaults to 0
@@ -67,6 +72,9 @@ Example usage:
     .Arg(
         "multiplier",
         "(float, default 0.5) constant multiplier for learning rate")
+    .Arg(
+        "sub_policy_num_iters",
+        "(int array, default empty) number of iterations for each sub learning rate policy in composite policy")
     .Input(0, "input", "description needed")
     .Output(0, "output", "description needed")
     .DeviceInferenceFunction([](const OperatorDef& def) {
