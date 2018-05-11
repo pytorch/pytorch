@@ -51,6 +51,12 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
       }
     }
 
+    // NB: actually, in the case when `group_ > 1`, IDEEP will create
+    // an itermediate tensor for each run below. However, this tensor is merely
+    // a view of of the weights and there is no actual data copy, so I'll let it
+    // go now. If we encounter performance surprise when convoluting with group
+    // > 1, this is the first place to check and we need to do the same cache
+    // trick as above
     if (InputSize() > BIAS) {
       ideep::convolution_forward::compute(
           X,
