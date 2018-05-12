@@ -13,12 +13,10 @@ class Linear : public torch::nn::CloneableModule<Linear> {
   Linear(uint32_t nin, uint32_t nout);
 
   variable_list forward(variable_list) override;
-  void reset_parameters() override;
-  void initialize_parameters() override;
   TORCH_AUTOGRAD_KWARG(Linear, bool, no_bias, false, true);
 
-  Variable weight, bias;
   uint32_t nin, nout;
+  Variable weight, bias;
 };
 
 }} // namespace torch::nn

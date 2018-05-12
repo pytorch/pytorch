@@ -1,8 +1,25 @@
 #include <torch/nn/modules/linear.h>
 
+#include <ATen/ATen.h>
+
+#include <cmath>
+#include <cstdint>
+
 namespace torch { namespace nn {
 
-Linear::Linear(uint32_t nin, uint32_t nout) : nin(nin), nout(nout) {}
+Linear::Linear(uint32_t nin, uint32_t nout)
+    : nin(nin),
+      nout(nout),
+      weight(add(Var(at::CPU(at::kFloat).empty({nout, nin})), "weight")) {
+  if (!no_bias_) {
+    bias = add(Var(at::CPU(at::kFloat).empty(nout)), "bias");
+  }
+
+  const auto stdv = 1.0 / std::sqrt(weight.size(1));
+  for (auto& p : parameters()) {
+    p.second.data().uniform_(-stdv, stdv);
+  }
+}
 
 variable_list Linear::forward(variable_list input) {
   auto x = input[0];
@@ -17,20 +34,5 @@ variable_list Linear::forward(variable_list input) {
     output += bias;
   }
   return variable_list({output});
-}
-
-void Linear::reset_parameters() {
-  auto stdv = 1.0 / std::sqrt(weight.size(1));
-  for (auto& p : parameters()) {
-    p.second.data().uniform_(-stdv, stdv);
-  }
-}
-
-void Linear::initialize_parameters() {
-  weight =
-      this->add(Var(at::CPU(at::kFloat).empty({nout, nin}), true), "weight");
-  if (!no_bias_) {
-    bias = this->add(Var(at::CPU(at::kFloat).empty(nout), true), "bias");
-  }
 }
 }} // namespace torch::nn

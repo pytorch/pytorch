@@ -6,92 +6,58 @@
 
 namespace torch { namespace nn {
 class Conv : public torch::nn::CloneableModule<Conv> {
- private:
-  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan);
-
  public:
-  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan, int ks)
-      : Conv(Nd, in_chan, out_chan) {
-    ks_ = makeTup(ks, 1);
-  }
+  // TODO: Create a type that can be implicitly constructed from a vector, or an
+  // int, and does the right thing. Then we can remove one overload here.
+  Conv(
+      uint32_t Nd,
+      uint32_t in_chan,
+      uint32_t out_chan,
+      IntVec ks,
+      bool transposed = false,
+      bool with_bias = true,
+      int groups = 1);
 
-  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan, IntVec ks)
-      : Conv(Nd, in_chan, out_chan) {
-    ks_ = makeTup(ks);
-  }
+  Conv(
+      uint32_t Nd,
+      uint32_t in_chan,
+      uint32_t out_chan,
+      int ks,
+      bool transposed = false,
+      bool with_bias = true,
+      int groups = 1);
 
-  void reset_parameters() override;
   variable_list forward(variable_list) override;
-  void initialize_parameters() override;
 
-  template <typename T>
-  Conv& stride(T s) {
-    stride_ = makeTup(s, 1);
-    return *this;
-  }
-  template <typename T>
-  Conv& padding(T s) {
-    padding_ = makeTup(s);
-    return *this;
-  }
-  template <typename T>
-  Conv& dilation(T s) {
-    dilation_ = makeTup(s, 1);
-    return *this;
-  }
-  template <typename T>
-  Conv& output_padding(T s) {
-    output_padding_ = makeTup(s);
-    return *this;
-  }
-
-  TORCH_AUTOGRAD_KWARG(Conv, bool, transposed, false, true)
-  TORCH_AUTOGRAD_KWARG(Conv, bool, no_bias, false, true)
-  TORCH_AUTOGRAD_KWARG(Conv, int, groups, 1, 1)
+  Conv& stride(size_t value);
+  Conv& padding(size_t value);
+  Conv& dilation(size_t value);
+  Conv& output_padding(size_t value);
 
   Variable weight, bias;
   uint32_t Nd_;
   uint32_t in_channels_;
   uint32_t out_channels_;
+  bool transposed_;
+  int groups_;
   IntVec ks_;
   IntVec stride_;
   IntVec padding_;
   IntVec dilation_;
   bool dilated_;
   IntVec output_padding_;
+};
 
- protected:
-  IntVec makeTup(int x, int def = 0) {
-    IntVec ret;
-    if (Nd_ == 1) {
-      ret.push_back(x);
-      ret.push_back(def);
-    } else {
-      for (auto i = 0U; i < Nd_; i++)
-        ret.push_back(x);
-    }
-    return ret;
+#define CONV_D(D)                                                          \
+  class Conv##D##d : public Conv {                                         \
+   public:                                                                 \
+    Conv##D##d(uint32_t i, uint32_t o, int ks) : Conv((D), i, o, ks) {}    \
+    Conv##D##d(uint32_t i, uint32_t o, IntVec ks) : Conv((D), i, o, ks) {} \
   }
-  IntVec makeTup(IntVec x) {
-    return x;
-  }
-};
 
-class Conv1d : public Conv {
- public:
-  Conv1d(uint32_t i, uint32_t o, int ks) : Conv(1, i, o, ks) {}
-  Conv1d(uint32_t i, uint32_t o, IntVec ks) : Conv(1, i, o, ks) {}
-};
+CONV_D(1);
+CONV_D(2);
+CONV_D(3);
 
-class Conv2d : public Conv {
- public:
-  Conv2d(uint32_t i, uint32_t o, int ks) : Conv(2, i, o, ks) {}
-  Conv2d(uint32_t i, uint32_t o, IntVec ks) : Conv(2, i, o, ks) {}
-};
-
-class Conv3d : public Conv {
- public:
-  Conv3d(uint32_t i, uint32_t o, int ks) : Conv(3, i, o, ks) {}
-  Conv3d(uint32_t i, uint32_t o, IntVec ks) : Conv(3, i, o, ks) {}
-};
+#undef CONV_D
 }} // namespace torch::nn

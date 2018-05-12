@@ -16,9 +16,7 @@ class BatchNorm : public torch::nn::CloneableModule<BatchNorm> {
   TORCH_AUTOGRAD_KWARG(BatchNorm, bool, affine, true, true)
   TORCH_AUTOGRAD_KWARG(BatchNorm, bool, stateful, false, true)
 
-  void reset_parameters() override;
   variable_list forward(variable_list) override;
-  void initialize_parameters() override;
 
   Variable weight;
   Variable bias;

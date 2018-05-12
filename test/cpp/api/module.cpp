@@ -71,7 +71,8 @@ TEST_CASE("module/name") {
 }
 
 TEST_CASE("module/conversions", "[cuda]") {
-  auto model = make(LSTM(128, 64).nlayers(3).dropout(0.2));
+  auto model =
+      make(LSTM(/*in=*/128, /*out=*/64, /*layers=*/3, /*dropout=*/0.2));
   SECTION("starts as float on CPU") {
     for (auto& parameter : model->parameters()) {
       REQUIRE(parameter.second.type().backend() == at::kCPU);
