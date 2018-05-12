@@ -132,6 +132,7 @@ target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
 
 # Compile exposed libraries.
 add_library(caffe2 ${Caffe2_CPU_SRCS} ${C10_SRCS})
+target_compile_options(caffe2 PRIVATE "-DC10_BUILD_MAIN_LIB")
 caffe2_interface_library(caffe2_protos caffe2_protos_whole)
 target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
 if (${CAFFE2_LINK_LOCAL_PROTOBUF})

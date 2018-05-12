@@ -1,3 +1,5 @@
+project(c10 CXX)
+
 include(CheckCXXSourceCompiles)
 
 check_cxx_source_compiles("#include <execinfo.h>

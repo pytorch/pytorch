@@ -243,6 +243,7 @@ ENDIF()
 # built when NO_CUDA=0 and CUDA is available.
 
 add_library(ATen_cpu ${AT_LINK_STYLE} ${all_cpu_cpp} ${C10_SRCS})
+target_compile_options(ATen_cpu PRIVATE "-DC10_BUILD_MAIN_LIB")
 target_link_libraries(ATen_cpu)
 add_dependencies(ATen_cpu aten_files_are_generated)
 if(NOT NO_CUDA)
@@ -513,8 +514,6 @@ if(NOT NO_CUDA)
   get_filename_component(ATEN_CUDA_OUTPUT_NAME ${ATEN_CUDA_OUTPUT_NAME} NAME)
 endif()
 
-# TODO: Technically, C10 does not respect AT_INSTALL_LIB_DIR at the moment.
-# But this entire business seems highly questionable
 set(ATEN_LIBRARIES
   "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_LIB_DIR}/${ATEN_CPU_OUTPUT_NAME}")
 
