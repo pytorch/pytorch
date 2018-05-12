@@ -100,6 +100,9 @@ public:
   Vec256<double> round() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
+  Vec256<double> tanh() const {
+    return Vec256<double>(Sleef_tanhd4_u10(values));
+  }
   Vec256<double> trunc() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
