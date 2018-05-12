@@ -36,8 +36,9 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       filter.dim32(image_ndim + 1),
       "*",
       group_);
-  CAFFE_ENFORCE(
-      shape.M % group_ == 0,
+  CAFFE_ENFORCE_EQ(
+      shape.M % group_,
+      0,
       "The number of output channels is not divisible by group.");
 
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, shape.M);
@@ -45,7 +46,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   shape.output_image_size = GetDimsSize(*Y);
   const std::vector<int> output_image_dims = GetDims(*Y);
   for (int i = 0; i < image_ndim; ++i) {
-    CAFFE_ENFORCE(output_image_dims[i] == filter.dim32(i));
+    CAFFE_ENFORCE_EQ(output_image_dims[i], filter.dim32(i));
   }
 
   int kernel_dims_size = 1;
@@ -54,14 +55,15 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     kernel_dims_size *= kernel_[i];
   }
 
-  shape.input_image_dims = GetDims(X);
-  const std::vector<int> X_dims(X.dims().cbegin() + 1, X.dims().cend());
+  shape.X_dims.assign(X.dims().cbegin() + 1, X.dims().cend());
   shape.kernel_size = shape.C / group_ * kernel_dims_size;
   lc_op_util::SetColumnBufferShape(
       shape.N,
       shape.kernel_size,
       shape.output_image_size,
+      output_image_dims,
       order_,
+      &shape.column_slice_dims,
       &shape.column_dims,
       &shape.column_transposed_dims,
       &shape.column_axes);
@@ -73,19 +75,17 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       &shape.Y_dims,
       &shape.Y_transposed_dims,
       &shape.Y_axes);
-  SetDeviceTensor(X_dims, &X_dims_device_);
-  SetDeviceTensor(shape.column_dims, &column_dims_device_);
 
   const T* X_data = X.template data<T>();
   const T* filter_data = filter.template data<T>();
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(bias.ndim() == image_ndim + 1);
+    CAFFE_ENFORCE_EQ(bias.ndim(), image_ndim + 1);
     for (int i = 0; i < image_ndim; ++i) {
-      CAFFE_ENFORCE(bias.dim32(i) == output_image_dims[i]);
+      CAFFE_ENFORCE_EQ(bias.dim32(i), output_image_dims[i]);
     }
-    CAFFE_ENFORCE(bias.dim32(image_ndim) == shape.M);
+    CAFFE_ENFORCE_EQ(bias.dim32(image_ndim), shape.M);
     bias_data = bias.template data<T>();
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
@@ -119,18 +119,18 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(3);
-  shape.input_image_dims = {X.dim32(1), X.dim32(2)};
+  shape.X_dims = {X.dim32(1), X.dim32(2), X.dim32(3)};
   shape.M = filter.dim32(image_ndim);
-  CAFFE_ENFORCE(filter.dim32(image_ndim + 1) == kernel_h());
-  CAFFE_ENFORCE(filter.dim32(image_ndim + 2) == kernel_w());
-  CAFFE_ENFORCE(filter.dim32(image_ndim + 3) == shape.C);
+  CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 1), kernel_h());
+  CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 2), kernel_w());
+  CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 3), shape.C);
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, shape.M);
 
   shape.input_image_size = GetDimsSize(X);
   shape.output_image_size = GetDimsSize(*Y);
   const std::vector<int> output_image_dims = GetDims(*Y);
   for (int i = 0; i < image_ndim; ++i) {
-    CAFFE_ENFORCE(output_image_dims[i] == filter.dim32(i));
+    CAFFE_ENFORCE_EQ(output_image_dims[i], filter.dim32(i));
   }
 
   shape.kernel_size = kernel_h() * kernel_w() * shape.C;
@@ -138,7 +138,9 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       shape.N,
       shape.kernel_size,
       shape.output_image_size,
+      output_image_dims,
       order_,
+      &shape.column_slice_dims,
       &shape.column_dims,
       &shape.column_transposed_dims,
       &shape.column_axes);
@@ -156,11 +158,11 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(bias.ndim() == image_ndim + 1);
+    CAFFE_ENFORCE_EQ(bias.ndim(), image_ndim + 1);
     for (int i = 0; i < image_ndim; ++i) {
-      CAFFE_ENFORCE(bias.dim32(i) == output_image_dims[i]);
+      CAFFE_ENFORCE_EQ(bias.dim32(i), output_image_dims[i]);
     }
-    CAFFE_ENFORCE(bias.dim32(image_ndim) == shape.M);
+    CAFFE_ENFORCE_EQ(bias.dim32(image_ndim), shape.M);
     bias_data = bias.template data<T>();
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
@@ -201,11 +203,10 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
   for (int image_id = 0; image_id < shape.N; ++image_id) {
     for (int group_id = 0; group_id < group_; ++group_id) {
       if (kernel_.size() == 2) {
-        math::Im2col<T, Context, StorageOrder::NCHW>(
-            X_data + group_id * input_stride,
+        math::Im2Col<T, Context, StorageOrder::NCHW>(
             shape.C / group_,
-            shape.input_image_dims[0],
-            shape.input_image_dims[1],
+            shape.X_dims[1],
+            shape.X_dims[2],
             kernel_h(),
             kernel_w(),
             dilation_h(),
@@ -216,20 +217,21 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
             pad_r(),
             stride_h(),
             stride_w(),
+            X_data + group_id * input_stride,
             column_buffer_data + group_id * column_stride,
             &context_);
       } else {
-        math::Im2colNd<T, Context, StorageOrder::NCHW>(
-            X_data + group_id * input_stride,
-            X_dims_device_.template data<int>(),
-            column_dims_device_.template data<int>() + 1,
+        math::Im2ColNd<T, Context, StorageOrder::NCHW>(
+            kernel_.size(),
             shape.C * shape.input_image_size,
             column_stride,
-            kernel_device_.template data<int>(),
-            stride_device_.template data<int>(),
-            dilation_device_.template data<int>(),
-            pads_device_.template data<int>(),
-            kernel_.size(),
+            shape.X_dims.data(),
+            shape.column_slice_dims.data(),
+            kernel_.data(),
+            stride_.data(),
+            dilation_.data(),
+            pads_.data(),
+            X_data + group_id * input_stride,
             column_buffer_data + group_id * column_stride,
             &context_);
       }
@@ -298,11 +300,10 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
   T* column_buffer_data = column_buffer->template mutable_data<T>();
   T* Y_transposed_buffer_data = Y_transposed_buffer->template mutable_data<T>();
   for (int image_id = 0; image_id < shape.N; ++image_id) {
-    math::Im2col<T, Context, StorageOrder::NHWC>(
-        X_data + image_id * input_stride,
+    math::Im2Col<T, Context, StorageOrder::NHWC>(
         shape.C,
-        shape.input_image_dims[0],
-        shape.input_image_dims[1],
+        shape.X_dims[0],
+        shape.X_dims[1],
         kernel_h(),
         kernel_w(),
         dilation_h(),
@@ -313,6 +314,7 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         pad_r(),
         stride_h(),
         stride_w(),
+        X_data + image_id * input_stride,
         column_buffer_data + image_id * column_stride,
         &context_);
   }
@@ -372,17 +374,17 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   shape.N = X.dim32(0);
   shape.C = X.dim32(1);
   shape.M = filter.dim32(image_ndim);
-  CAFFE_ENFORCE(filter.dim32(image_ndim + 1) * group_ == shape.C);
-  CAFFE_ENFORCE(shape.M % group_ == 0);
+  CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 1) * group_, shape.C);
+  CAFFE_ENFORCE_EQ(shape.M % group_, 0);
 
-  shape.input_image_dims = GetDims(X);
+  const std::vector<int> input_image_dims = GetDims(X);
   shape.input_image_size = GetDimsSize(X);
   const std::vector<int> output_image_dims = GetDims(dY);
   shape.output_image_size = GetDimsSize(dY);
   for (int i = 0; i < image_ndim; ++i) {
-    CAFFE_ENFORCE(output_image_dims[i] == filter.dim32(i));
+    CAFFE_ENFORCE_EQ(output_image_dims[i], filter.dim32(i));
   }
-  ConvPoolOpBase<Context>::ComputePads(shape.input_image_dims);
+  ConvPoolOpBase<Context>::ComputePads(input_image_dims);
 
   int kernel_dims_size = 1;
   for (std::size_t i = 0; i < kernel_.size(); ++i) {
@@ -390,13 +392,15 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     kernel_dims_size *= kernel_[i];
   }
 
-  const std::vector<int> X_dims(X.dims().cbegin() + 1, X.dims().cend());
+  shape.X_dims.assign(X.dims().cbegin() + 1, X.dims().cend());
   shape.kernel_size = shape.C / group_ * kernel_dims_size;
   lc_op_util::SetColumnBufferShape(
       shape.N,
       shape.kernel_size,
       shape.output_image_size,
+      output_image_dims,
       order_,
+      &shape.column_slice_dims,
       &shape.column_dims,
       &shape.column_transposed_dims,
       &shape.column_axes);
@@ -408,8 +412,6 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       &shape.Y_dims,
       &shape.Y_transposed_dims,
       &shape.Y_axes);
-  SetDeviceTensor(X_dims, &X_dims_device_);
-  SetDeviceTensor(shape.column_dims, &column_dims_device_);
 
   dfilter->ResizeLike(filter);
   const T* X_data = X.template data<T>();
@@ -462,18 +464,19 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(3);
-  shape.input_image_dims = {X.dim32(1), X.dim32(2)};
+  shape.X_dims = {X.dim32(1), X.dim32(2), X.dim32(3)};
   shape.M = filter.dim32(image_ndim);
-  CAFFE_ENFORCE(filter.dim32(image_ndim + 1) == kernel_h());
-  CAFFE_ENFORCE(filter.dim32(image_ndim + 2) == kernel_w());
-  CAFFE_ENFORCE(filter.dim32(image_ndim + 3) == shape.C);
-  ConvPoolOpBase<Context>::ComputePads(shape.input_image_dims);
+  CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 1), kernel_h());
+  CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 2), kernel_w());
+  CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 3), shape.C);
+  const std::vector<int> input_image_dims = {X.dim32(1), X.dim32(2)};
+  ConvPoolOpBase<Context>::ComputePads(input_image_dims);
 
   shape.input_image_size = GetDimsSize(X);
   shape.output_image_size = GetDimsSize(dY);
   const std::vector<int> output_image_dims = GetDims(dY);
   for (int i = 0; i < image_ndim; ++i) {
-    CAFFE_ENFORCE(output_image_dims[i] == filter.dim32(i));
+    CAFFE_ENFORCE_EQ(output_image_dims[i], filter.dim32(i));
   }
 
   shape.kernel_size = kernel_h() * kernel_w() * shape.C;
@@ -481,7 +484,9 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       shape.N,
       shape.kernel_size,
       shape.output_image_size,
+      output_image_dims,
       order_,
+      &shape.column_slice_dims,
       &shape.column_dims,
       &shape.column_transposed_dims,
       &shape.column_axes);
@@ -554,11 +559,10 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
   for (int image_id = 0; image_id < shape.N; ++image_id) {
     for (int group_id = 0; group_id < group_; ++group_id) {
       if (kernel_.size() == 2) {
-        math::Im2col<T, Context, StorageOrder::NCHW>(
-            X_data + group_id * input_stride,
+        math::Im2Col<T, Context, StorageOrder::NCHW>(
             shape.C / group_,
-            shape.input_image_dims[0],
-            shape.input_image_dims[1],
+            shape.X_dims[1],
+            shape.X_dims[2],
             kernel_h(),
             kernel_w(),
             dilation_h(),
@@ -569,20 +573,21 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
             pad_r(),
             stride_h(),
             stride_w(),
+            X_data + group_id * input_stride,
             column_buffer_data + group_id * column_stride,
             &context_);
       } else {
-        math::Im2colNd<T, Context, StorageOrder::NCHW>(
-            X_data + group_id * input_stride,
-            X_dims_device_.template data<int>(),
-            column_dims_device_.template data<int>() + 1,
+        math::Im2ColNd<T, Context, StorageOrder::NCHW>(
+            kernel_.size(),
             shape.C * shape.input_image_size,
             column_stride,
-            kernel_device_.template data<int>(),
-            stride_device_.template data<int>(),
-            dilation_device_.template data<int>(),
-            pads_device_.template data<int>(),
-            kernel_.size(),
+            shape.X_dims.data(),
+            shape.column_slice_dims.data(),
+            kernel_.data(),
+            stride_.data(),
+            dilation_.data(),
+            pads_.data(),
+            X_data + group_id * input_stride,
             column_buffer_data + group_id * column_stride,
             &context_);
       }
@@ -661,11 +666,10 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
     for (int image_id = 0; image_id < shape.N; ++image_id) {
       for (int group_id = 0; group_id < group_; ++group_id) {
         if (kernel_.size() == 2) {
-          math::Col2im<T, Context, StorageOrder::NCHW>(
-              const_column_buffer_data + group_id * column_stride,
+          math::Col2Im<T, Context, StorageOrder::NCHW>(
               shape.C / group_,
-              shape.input_image_dims[0],
-              shape.input_image_dims[1],
+              shape.X_dims[1],
+              shape.X_dims[2],
               kernel_h(),
               kernel_w(),
               dilation_h(),
@@ -676,20 +680,21 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
               pad_r(),
               stride_h(),
               stride_w(),
+              const_column_buffer_data + group_id * column_stride,
               dX_data + group_id * input_stride,
               &context_);
         } else {
-          math::Col2imNd<T, Context, StorageOrder::NCHW>(
-              const_column_buffer_data + group_id * column_stride,
-              X_dims_device_.template data<int>(),
-              column_dims_device_.template data<int>() + 1,
+          math::Col2ImNd<T, Context, StorageOrder::NCHW>(
+              kernel_.size(),
               shape.C * shape.input_image_size,
               column_stride,
-              kernel_device_.template data<int>(),
-              stride_device_.template data<int>(),
-              dilation_device_.template data<int>(),
-              pads_device_.template data<int>(),
-              kernel_.size(),
+              shape.X_dims.data(),
+              shape.column_slice_dims.data(),
+              kernel_.data(),
+              stride_.data(),
+              dilation_.data(),
+              pads_.data(),
+              const_column_buffer_data + group_id * column_stride,
               dX_data + group_id * input_stride,
               &context_);
         }
@@ -721,11 +726,10 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
   T* dY_transposed_buffer_data =
       dY_transposed_buffer->template mutable_data<T>();
   for (int image_id = 0; image_id < shape.N; ++image_id) {
-    math::Im2col<T, Context, StorageOrder::NHWC>(
-        X_data + image_id * input_stride,
+    math::Im2Col<T, Context, StorageOrder::NHWC>(
         shape.C,
-        shape.input_image_dims[0],
-        shape.input_image_dims[1],
+        shape.X_dims[0],
+        shape.X_dims[1],
         kernel_h(),
         kernel_w(),
         dilation_h(),
@@ -736,6 +740,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         pad_r(),
         stride_h(),
         stride_w(),
+        X_data + image_id * input_stride,
         column_buffer_data + image_id * column_stride,
         &context_);
   }
@@ -807,11 +812,10 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         &context_);
     const T* const_column_buffer_data = column_buffer->template data<T>();
     for (int image_id = 0; image_id < shape.N; ++image_id) {
-      math::Col2im<T, Context, StorageOrder::NHWC>(
-          const_column_buffer_data,
+      math::Col2Im<T, Context, StorageOrder::NHWC>(
           shape.C,
-          shape.input_image_dims[0],
-          shape.input_image_dims[1],
+          shape.X_dims[0],
+          shape.X_dims[1],
           kernel_h(),
           kernel_w(),
           dilation_h(),
@@ -822,6 +826,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
           pad_r(),
           stride_h(),
           stride_w(),
+          const_column_buffer_data,
           dX_data,
           &context_);
       dX_data += input_stride;
