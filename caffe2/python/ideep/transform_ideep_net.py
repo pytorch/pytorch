@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace, utils
+import caffe2.python._import_c_extension as C
 
 import numpy as np
 import argparse
@@ -40,6 +41,7 @@ def GetArgumentParser():
     parser.add_argument("--pred_net", type=str, help="predict net")
     parser.add_argument("--fuse_bn", default=False, action='store_true')
     parser.add_argument("--fuse_mul_add", default=False, action='store_true')
+    parser.add_argument("--fuse_conv_relu", default=False, action='store_true')
     return parser
 
 
@@ -258,6 +260,17 @@ def gen_init_net_from_blobs(blobs):
     return ret
 
 
+def fuse_conv_relu(net):
+    net = copy.deepcopy(net)
+    device_option = core.DeviceOption(caffe2_pb2.IDEEP)
+    for op in net.op:
+        op.device_option.CopyFrom(device_option)
+
+    new_net = caffe2_pb2.NetDef()
+    new_net.ParseFromString(C.transform_optimizeForIDEEP(net.SerializeToString()))
+    return new_net
+
+
 def Optimize(args):
     init_net = caffe2_pb2.NetDef()
     predict_net = caffe2_pb2.NetDef()
@@ -273,6 +286,9 @@ def Optimize(args):
         predict_net, param_dict, _ = fuse_mul_add(predict_net, param_dict)
     if args.fuse_bn:
         predict_net, param_dict, _ = fuse_bn(predict_net, param_dict, False)
+    if args.fuse_conv_relu:
+        predict_net = fuse_conv_relu(predict_net)
+
     for i, o in enumerate(predict_net.op):
         print("op[{}]: {}".format(i, o.type))
     init_net = gen_init_net_from_blobs(param_dict)
