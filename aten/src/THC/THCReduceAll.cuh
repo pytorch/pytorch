@@ -35,7 +35,7 @@ kernelReduceAll(TensorInfo<T, IndexType> in,
   AccT r = init;
   for (IndexType i = threadIdx.x; i < totalElements; i += blockDim.x) {
     const IndexType inOffset = IndexToOffset<T, IndexType, ADims>::get(i, in);
-    const AccT val = ScalarConvert<T, AccT>::to(in.data[inOffset]);
+    const AccT val = scalar_cast<AccT>(in.data[inOffset]);
     r = reduceOp(r, modifyOp(val));
   }
 
@@ -83,7 +83,7 @@ kernelReduceAllPass1(TensorInfo<T, IndexType> in,
   AccT r = init;
   for (IndexType i = startIndex + threadIdx.x; i < endIndex; i += blockDim.x) {
     const IndexType inOffset = IndexToOffset<T, IndexType, ADims>::get(i, in);
-    const AccT val = ScalarConvert<T, AccT>::to(in.data[inOffset]);
+    const AccT val = scalar_cast<AccT>(in.data[inOffset]);
     r = reduceOp(r, modifyOp(val));
   }
 

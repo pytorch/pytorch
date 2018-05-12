@@ -35,6 +35,7 @@ THCudaByteTensor_logicalAnd(THCState* state, THCudaByteTensor *self, THCudaByteT
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<unsigned char>(),
                      LogicalAll(),
+                     thrust::identity<unsigned char>(),
                      (unsigned char) 1,
                      dimension,
                      keepdim)) {
@@ -50,6 +51,7 @@ THCudaByteTensor_logicalAny(THCState* state, THCudaByteTensor *self, THCudaByteT
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<unsigned char>(),
                      LogicalAny(),
+                     thrust::identity<unsigned char>(),
                      (unsigned char) 0,
                      dimension,
                      keepdim)) {
