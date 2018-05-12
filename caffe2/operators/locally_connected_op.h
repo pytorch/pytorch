@@ -58,10 +58,6 @@ class LocallyConnectedOp final : public ConvPoolOpBase<Context> {
   Tensor<Context> column_transposed_buffer_;
   Tensor<Context> Y_transposed_buffer_;
 
-  // Dims devices.
-  Tensor<Context> X_dims_device_;
-  Tensor<Context> column_dims_device_;
-
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -121,10 +117,6 @@ class LocallyConnectedGradientOp final : public ConvPoolOpBase<Context> {
   Tensor<Context> column_buffer_;
   Tensor<Context> column_transposed_buffer_;
   Tensor<Context> dY_transposed_buffer_;
-
-  // Dims devices.
-  Tensor<Context> X_dims_device_;
-  Tensor<Context> column_dims_device_;
 
   // input: X, W, dY
   // output: dW, db, and optionally dX

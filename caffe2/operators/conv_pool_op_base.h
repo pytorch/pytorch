@@ -145,11 +145,6 @@ class ConvPoolOpBase : public Operator<Context> {
       }
     }
 
-    AllocateAndCopy(kernel_, kernel_device_);
-    AllocateAndCopy(stride_, stride_device_);
-    AllocateAndCopy(dilation_, dilation_device_);
-    AllocateAndCopy(pads_, pads_device_);
-
     // Check kernel only if we are doing conv or pooling. The reason is that a
     // few other ops, like PadImage, are also using this base class. We really
     // need to clean this up.
@@ -583,12 +578,6 @@ class ConvPoolOpBase : public Operator<Context> {
 
   bool float16_compute_;
 
-  // We need the above parameters to be available for the devices.
-  Tensor<Context> kernel_device_;
-  Tensor<Context> dilation_device_;
-  Tensor<Context> stride_device_;
-  Tensor<Context> pads_device_;
-
   int group_;
   StorageOrder order_;
   bool shared_buffer_;
@@ -725,7 +714,6 @@ class ConvPoolOpBase : public Operator<Context> {
 #define USE_CONV_POOL_BASE_FUNCTIONS(Context)      \
   USE_OPERATOR_FUNCTIONS(Context);                 \
   using ConvPoolOpBase<Context>::pads_;            \
-  using ConvPoolOpBase<Context>::pads_device_;     \
   using ConvPoolOpBase<Context>::pad_t;            \
   using ConvPoolOpBase<Context>::pad_l;            \
   using ConvPoolOpBase<Context>::pad_b;            \
@@ -733,15 +721,12 @@ class ConvPoolOpBase : public Operator<Context> {
   using ConvPoolOpBase<Context>::legacy_pad_;      \
   using ConvPoolOpBase<Context>::global_pooling_;  \
   using ConvPoolOpBase<Context>::kernel_;          \
-  using ConvPoolOpBase<Context>::kernel_device_;   \
   using ConvPoolOpBase<Context>::kernel_h;         \
   using ConvPoolOpBase<Context>::kernel_w;         \
   using ConvPoolOpBase<Context>::dilation_;        \
-  using ConvPoolOpBase<Context>::dilation_device_; \
   using ConvPoolOpBase<Context>::dilation_h;       \
   using ConvPoolOpBase<Context>::dilation_w;       \
   using ConvPoolOpBase<Context>::stride_;          \
-  using ConvPoolOpBase<Context>::stride_device_;   \
   using ConvPoolOpBase<Context>::stride_h;         \
   using ConvPoolOpBase<Context>::stride_w;         \
   using ConvPoolOpBase<Context>::group_;           \
