@@ -1,6 +1,7 @@
 #include <torch/nn/modules/conv.h>
 
-#include <cassert>
+#include <ATen/Error.h>
+
 #include <stdexcept>
 
 namespace torch { namespace nn {
@@ -38,7 +39,7 @@ void Conv::initialize_parameters() {
   if (!no_bias_) {
     bias = this->add(Var(at::CPU(at::kFloat).empty(out_channels_)), "bias");
   } else {
-    assert(!bias.defined());
+    AT_ASSERT(!bias.defined());
   }
 }
 
@@ -55,12 +56,12 @@ void Conv::reset_parameters() {
 variable_list Conv::forward(variable_list input) {
   auto x = input[0];
   if (Nd_ == 1) {
-    assert(x.ndimension() == 3);
+    AT_ASSERT(x.ndimension() == 3);
     x = x.unsqueeze(-1); // TODO: Use conv1d once available
   } else if (Nd_ == 2) {
-    assert(x.ndimension() == 4);
+    AT_ASSERT(x.ndimension() == 4);
   } else if (Nd_ == 3) {
-    assert(x.ndimension() == 5);
+    AT_ASSERT(x.ndimension() == 5);
   } else {
     throw std::runtime_error("Only Conv{1,2,3}d are supported");
   }
