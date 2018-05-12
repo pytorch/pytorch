@@ -38,8 +38,8 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
               input_data_base + outer_idx * outer_stride + inner_idx;
           scalar_t* output_data =
               output_data_base + outer_idx * outer_stride + inner_idx;
-          scalar_t max_input = -std::numeric_limits<scalar_t>::max();
-          for (int64_t d = 0; d < dim_size; d++)
+          scalar_t max_input = input_data[0];
+          for (int64_t d = 1; d < dim_size; d++)
             max_input = std::max(max_input, input_data[d * dim_stride]);
 
           scalar_t tmpsum = 0;

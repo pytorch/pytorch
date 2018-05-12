@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <iterator>
-#include <limits>
 #include <numeric>
 
 #include "ATen/Dispatch.h"
