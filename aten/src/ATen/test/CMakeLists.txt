@@ -55,7 +55,7 @@ endif()
 
 if(NOT NO_CUDA)
   cuda_add_executable(apply_test apply_test.cpp)
-  target_link_libraries(apply_test ATen)
+  target_link_libraries(apply_test ATen_cpu ATen_cuda_library)
 endif()
 
 if (CUDNN_FOUND)
