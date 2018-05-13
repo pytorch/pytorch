@@ -666,7 +666,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float atan (float a) { return  atanf(a); }
   static inline __host__ __device__  float tanh (float a) { return  tanhf(a); }
   static inline __host__ __device__  float erf  (float a) { return   erff(a); }
-  static inline __host__ __device__  float abs  (float a) { return   fabs(a); }
+  static inline __host__ __device__  float abs  (float a) { return  fabsf(a); }
   static inline __host__ __device__  float round(float a) { return roundf(a); }
   static inline __host__ __device__  float frac (float a) { return a - truncf(a); }
   static inline __host__ __device__  float cinv (float a) { return 1.0f / a; }
