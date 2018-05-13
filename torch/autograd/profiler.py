@@ -6,12 +6,7 @@ import itertools
 from collections import defaultdict
 
 import torch
-
-try:
-    FileNotFoundError
-except NameError:
-    # py2.7
-    FileNotFoundError = IOError
+from torch._six import FileNotFoundError
 
 
 class range(object):
