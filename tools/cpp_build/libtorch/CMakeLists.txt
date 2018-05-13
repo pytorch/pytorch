@@ -271,8 +271,10 @@ endif()
 target_include_directories(torch
   PUBLIC
   "${ATEN_INCLUDE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../c10"
   "${ATEN_INCLUDE_DIR}/TH"
   "${ATEN_BUILD_INCLUDE_DIR}"
+  "${ATEN_BUILD_PATH}/c10"
   "${ATEN_BUILD_PATH}/src/TH"
   "${TORCH_SRC_DIR}/.."
   "${CMAKE_CURRENT_SOURCE_DIR}")

@@ -9,6 +9,7 @@
 namespace at {
   using ::c10::Error;
   using ::c10::SourceLocation;
+  using ::c10::demangle;
 }
 
 #define AT_ERROR(...) C10_ERROR(__VA_ARGS__)
