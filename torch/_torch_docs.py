@@ -1257,8 +1257,9 @@ Args:
            sorted list of all indices appearing exactly once in the left hand side.
            The indices not apprearing in the output are summed over after multiplying the operands
            entries.
-           `einsum` does not implement diagonals (multiple occurences of a single index for one tensor,
-           e.g. `ii->i`) and ellipses (`...`).
+           If an index appears several times for the same operand, a diagonal is taken.
+           Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
+           the ellipsis dimensions are at the beginning of the output.
     operands (list of Tensors): The operands to compute the Einstein sum of.
            Note that the operands are passed as a list, not as individual arguments.
 
@@ -1294,12 +1295,20 @@ Examples::
             [[ 2.8153,  1.8787, -4.3839, -1.2112],
              [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
+    >>> A = torch.randn(3, 3)
+    >>> torch.einsum('ii->i', (A,)) # diagonal
+    tensor([-0.7825,  0.8291, -0.1936])
 
+    >>> A = torch.randn(4, 3, 3)
+    >>> torch.einsum('...ii->...i', (A,)) # batch diagonal
+    tensor([[-1.0864,  0.7292,  0.0569],
+            [-0.9725, -1.0270,  0.6493],
+            [ 0.5832, -1.1716, -1.5084],
+            [ 0.4041, -1.1690,  0.8570]])
 
-
-
-
-
+    >>> A = torch.randn(2, 3, 4, 5)
+    >>> torch.einsum('...ij->...ji', (A,)).shape # batch permute
+    torch.Size([2, 3, 5, 4])
 """)
 
 add_docstr(torch.eq,
