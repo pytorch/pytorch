@@ -53,6 +53,11 @@ if(NOT NO_CUDA)
   target_link_libraries(cuda_rng_test ATen_cpu ATen_cuda_library)
 endif()
 
+if(NOT NO_CUDA)
+  cuda_add_executable(apply_test apply_test.cpp)
+  target_link_libraries(apply_test ATen)
+endif()
+
 if (CUDNN_FOUND)
   add_executable(cudnn_test cudnn_test.cpp)
   target_link_libraries(cudnn_test ATen_cpu ATen_cuda_library)
