@@ -44,10 +44,16 @@ rm -rf ninja
 
 echo "Installing torchvision at branch master"
 rm -rf vision
-# TODO: This git clone is bad
+# TODO: This git clone is bad, it means pushes to torchvision can break
+# PyTorch CI
 git clone https://github.com/pytorch/vision --quiet
 pushd vision
-time python setup.py install
+# python setup.py install with a tqdm dependency is broken in the
+# Travis Python nightly (but not in latest Python nightlies, so
+# this should be a transient requirement...)
+# See https://github.com/pytorch/pytorch/issues/7525
+#time python setup.py install
+pip install .
 popd
 
 if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
