@@ -14,32 +14,34 @@ class SpectralNorm(object):
         self.eps = eps
 
     def compute_weight(self, module):
-        weight = module._parameters[self.name + '_org']
-        u = module._buffers[self.name + '_u']
+        weight = getattr(module, self.name + '_org')
+        u = getattr(module, self.name + '_u')
         height = weight.size(0)
         weight_mat = weight.view(height, -1)
-        for _ in range(self.n_power_iterations):
-            # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
-            # are the first left and right singular vectors.
-            # This power iteration produces approximations of `u` and `v`.
-            v = normalize(torch.matmul(weight_mat.t(), u), dim=0, eps=self.eps)
-            u = normalize(torch.matmul(weight_mat, v), dim=0, eps=self.eps)
+        with torch.no_grad():
+            for _ in range(self.n_power_iterations):
+                # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
+                # are the first left and right singular vectors.
+                # This power iteration produces approximations of `u` and `v`.
+                v = normalize(torch.matmul(weight_mat.t(), u), dim=0, eps=self.eps)
+                u = normalize(torch.matmul(weight_mat, v), dim=0, eps=self.eps)
 
-        sigma = torch.dot(u, torch.matmul(weight_mat, v))
-        weight.data /= sigma
+            sigma = torch.dot(u, torch.matmul(weight_mat, v))
+        weight = weight / sigma
         return weight, u
 
     def remove(self, module):
         weight = module._parameters[self.name + '_org']
-        del module._parameters[self.name]
-        del module._buffers[self.name + '_u']
-        del module._parameters[self.name + '_org']
+        delattr(module, self.name)
+        delattr(module, self.name + '_u')
+        delattr(module, self.name + '_org')
         module.register_parameter(self.name, weight)
 
     def __call__(self, module, inputs):
         weight, u = self.compute_weight(module)
         setattr(module, self.name, weight)
-        setattr(module, self.name + '_u', u)
+        with torch.no_grad():
+            getattr(module, self.name).copy_(weight)
 
     @staticmethod
     def apply(module, name, n_power_iterations, eps):
@@ -48,7 +50,9 @@ class SpectralNorm(object):
         height = weight.size(0)
 
         u = normalize(weight.new_empty(height).normal_(0, 1), dim=0, eps=fn.eps)
+        delattr(module, fn.name)
         module.register_parameter(fn.name + "_org", weight)
+        module.register_buffer(fn.name, weight)
         module.register_buffer(fn.name + "_u", u)
 
         module.register_forward_pre_hook(fn)
