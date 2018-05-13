@@ -56,7 +56,7 @@ class IDEEPOperator : public OperatorBase {
       err.AppendMessage(getErrorMsg());
       throw;
     } catch (ideep::error& e) {
-      VLOG(1) << "IDEEP error:" << e.message; 
+      LOG(ERROR) << "IDEEP error:" << e.message;
       throw;
     }
   }

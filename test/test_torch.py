@@ -1435,6 +1435,8 @@ class TestTorch(TestCase):
         E = torch.randn(7, 9)
         F = torch.randn(2, 3, 5, 7)
         G = torch.randn(7, 11, 13)
+        H = torch.randn(4, 4)
+        I = torch.randn(3, 4, 4)
         l = torch.randn(5, 10)
         r = torch.randn(5, 20)
         w = torch.randn(30, 10, 20)
@@ -1461,14 +1463,22 @@ class TestTorch(TestCase):
             ("ijk,jk->ij", C, A),       # tensor matrix contraction with double indices
             ("ijk,ik->j", C, B),        # non contiguous
             ("ijk,ik->jk", C, B),       # non contiguous with double indices
+            # -- Diagonal
+            ("ii", H),                 # trace
+            ("ii->i", H),              # diagonal
+            # -- Ellipsis
+            ("i...->...", H),
+            ("ki,...k->i...", A.t(), B),
+            ("k...,jk", A.t(), B),
+            ("...ii->...i", I),       # batch diagonal
             # -- Other
             ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
         ]
         for test in test_list:
             actual = torch.einsum(test[0], test[1:])
             expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
-            self.assertEqual(expected.shape, actual.shape)
-            self.assertTrue(np.allclose(expected, actual.numpy()))
+            self.assertEqual(expected.shape, actual.shape, test[0])
+            self.assertTrue(np.allclose(expected, actual.numpy()), test[0])
 
             def do_einsum(*args):
                 return torch.einsum(test[0], args)
@@ -4992,7 +5002,11 @@ class TestTorch(TestCase):
 
                 # weird shape
                 [slice(None), [[0, 1],
-                               [2, 3]]]
+                               [2, 3]]],
+                # negatives
+                [[-1], [0]],
+                [[0, 2], [-1]],
+                [slice(None), [-1]],
             ]
 
             # only test dupes on gets
@@ -6359,17 +6373,43 @@ class TestTorch(TestCase):
 
         def load_bytes():
             with open(test_file_path, 'rb') as f:
-                data = io.BytesIO(f.read())
-            return data
+                return io.BytesIO(f.read())
 
         fileobject_lambdas = [lambda: test_file_path, load_bytes]
-        map_locations = [map_location, {'cuda:0': 'cpu'}, 'cpu']
+        cpu_map_locations = [
+            map_location,
+            {'cuda:0': 'cpu'},
+            'cpu',
+            torch.device('cpu'),
+        ]
+        gpu_0_map_locations = [
+            {'cuda:0': 'cuda:0'},
+            'cuda',
+            'cuda:0',
+            torch.device('cuda'),
+            torch.device('cuda', 0)
+        ]
+        gpu_last_map_locations = [
+            'cuda:{}'.format(torch.cuda.device_count() - 1),
+        ]
 
-        for fileobject_lambda in fileobject_lambdas:
-            for map_location in map_locations:
-                tensor = torch.load(fileobject_lambda(), map_location=map_location)
-                self.assertIsInstance(tensor, torch.FloatTensor)
-                self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
+        def check_map_locations(map_locations, tensor_class, intended_device):
+            for fileobject_lambda in fileobject_lambdas:
+                for map_location in map_locations:
+                    tensor = torch.load(fileobject_lambda(), map_location=map_location)
+
+                    self.assertEqual(tensor.device, intended_device)
+                    self.assertIsInstance(tensor, tensor_class)
+                    self.assertEqual(tensor, tensor_class([[1.0, 2.0], [3.0, 4.0]]))
+
+        check_map_locations(cpu_map_locations, torch.FloatTensor, torch.device('cpu'))
+        if torch.cuda.is_available():
+            check_map_locations(gpu_0_map_locations, torch.cuda.FloatTensor, torch.device('cuda', 0))
+            check_map_locations(
+                gpu_last_map_locations,
+                torch.cuda.FloatTensor,
+                torch.device('cuda', torch.cuda.device_count() - 1)
+            )
 
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)
@@ -6744,6 +6784,11 @@ class TestTorch(TestCase):
         # check zero dimensional
         x = np.zeros((0, 2))
         self.assertEqual(torch.from_numpy(x).shape, (0,))
+
+        # check ill-sized strides raise exception
+        x = np.array([3., 5., 8.])
+        x.strides = (3,)
+        self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self):

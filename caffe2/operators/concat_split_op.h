@@ -59,6 +59,35 @@ class SplitOp final : public Operator<Context> {
 };
 
 template <class Context>
+class SplitByLengthsOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  SplitByLengthsOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {
+    CAFFE_ENFORCE(
+        !(OperatorBase::HasArgument("axis") &&
+          OperatorBase::HasArgument("order")),
+        "You shouldn't specify both the dim to split, and the order "
+        "in the case of 4-D images.");
+    if (OperatorBase::HasArgument("axis")) {
+      axis_ = OperatorBase::GetSingleArgument<int>("axis", 0);
+    } else {
+      axis_ = GetDimFromOrderString(
+          OperatorBase::GetSingleArgument<string>("order", "NCHW"));
+    }
+  }
+
+  bool RunOnDevice() override;
+
+ protected:
+  int axis_;
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
+  // Input: X, optionally split
+  // The split tensor is stored in CPU.
+};
+
+template <class Context>
 class ConcatOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -150,6 +179,52 @@ bool SplitOp<Context>::RunOnDevice() {
     if (!add_axis_) {
       output_dims[canonical_axis] = axis_data[i];
     }
+    output->Resize(output_dims);
+    math::CopyMatrix<Context>(
+        input.itemsize(),
+        before,
+        axis_dim * after,
+        static_cast<const char*>(input.raw_data()) + input_offset,
+        input.dim32(canonical_axis) * after,
+        output->raw_mutable_data(input.meta()),
+        axis_dim * after,
+        &context_,
+        input.meta().copy());
+    input_offset += axis_dim * after * input.itemsize();
+  }
+  return true;
+}
+
+// Implementations
+template <class Context>
+bool SplitByLengthsOp<Context>::RunOnDevice() {
+  auto& input = Input(0);
+  auto& length = OperatorBase::Input<TensorCPU>(1);
+  auto length_length = length.size();
+  CAFFE_ENFORCE_EQ(
+      length_length % OutputSize(),
+      0,
+      "len(Lengths) should be divisible by OutputSize().");
+  int canonical_axis = input.canonical_axis_index(axis_);
+  CAFFE_ENFORCE_LT(
+      canonical_axis, input.ndim(), "Axis not in input ndim range.");
+  const int input_channels = input.dim32(canonical_axis);
+  const auto* axis_data = length.template data<int>();
+  CAFFE_ENFORCE_EQ(
+      std::accumulate(axis_data, axis_data + length.size(), 0),
+      input_channels,
+      "Sum of split dimensions do not match: should be ",
+      input_channels);
+  vector<TIndex> output_dims(input.dims());
+  int before = input.size_to_dim(canonical_axis);
+  int after = input.size_from_dim(canonical_axis + 1);
+  size_t input_offset = 0;
+  for (int i = 0; i < OutputSize(); ++i) {
+    auto* output = Output(i);
+    const auto* axis_offset = axis_data + length_length / OutputSize() * i;
+    auto axis_dim = std::accumulate(
+        axis_offset, axis_offset + length_length / OutputSize(), 0);
+    output_dims[canonical_axis] = axis_dim;
     output->Resize(output_dims);
     math::CopyMatrix<Context>(
         input.itemsize(),

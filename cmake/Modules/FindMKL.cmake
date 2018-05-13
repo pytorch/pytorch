@@ -2,6 +2,12 @@
 #
 # This module finds the Intel Mkl libraries.
 #
+#   USE_IDEEP                         : use IDEEP interface
+#   USE_MKLML                         : use MKLML interface
+#   MKLML_USE_SINGLE_DYNAMIC_LIBRARY  : use single dynamic library interface
+#   MKLML_USE_STATIC_LIBS             : use static libraries
+#   MKLML_MULTI_THREADED              : use multi-threading
+#
 # This module sets the following variables:
 #  MKL_FOUND - set to true if a library implementing the CBLAS interface is found
 #  MKL_VERSION - best guess

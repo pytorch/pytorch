@@ -1684,8 +1684,8 @@ For a 3-D tensor, :attr:`self` is updated as::
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
 :attr:`self`, :attr:`index` and :attr:`src` should have same number of
-dimensions. It is also required that `index->size[d] <= src->size[d]` for all
-dimension `d`, and that `index->size[d] <= real->size[d]` for all dimensions
+dimensions. It is also required that `index.size(d) <= src.size(d)` for all
+dimensions `d`, and that `index.size(d) <= self.size(d)` for all dimensions
 `d != dim`.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be

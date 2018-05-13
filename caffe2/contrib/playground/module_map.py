@@ -11,6 +11,13 @@ import caffe2.contrib.playground.resnetdemo.\
 import caffe2.contrib.playground.resnetdemo.\
     IN1k_resnet as IN1k_resnet # noqa
 
+import caffe2.contrib.playground.resnetdemo.\
+    IN1k_resnet_no_test_model as IN1k_resnet_no_test_model # noqa
+
+# Additional override
+import caffe2.contrib.playground.resnetdemo.\
+    override_no_test_model_no_checkpoint as override_no_test_model_no_checkpoint # noqa
+
 # FORWARD_PASS
 import caffe2.contrib.playground.resnetdemo.\
     caffe2_resnet50_default_forward as caffe2_resnet50_default_forward # noqa

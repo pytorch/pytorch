@@ -1554,6 +1554,14 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [data], lambda x: (x.shape, ))
 
     @given(data=hu.tensor(), **hu.gcs_cpu_only)
+    def test_shape_with_axes(self, data, gc, dc):
+        def shape_ref(x, y):
+            return ([x.shape[i] for i in y],)
+        axes = np.random.randint(len(data.shape), size=10).tolist()
+        op = core.CreateOperator("Shape", ["data"], ["shape"], axes=axes)
+        self.assertReferenceChecks(gc, op, [data, axes], shape_ref)
+
+    @given(data=hu.tensor(), **hu.gcs_cpu_only)
     def test_has_elements(self, data, gc, dc):
         op = core.CreateOperator("HasElements", ["data"], ["has_elements"])
         self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) > 0, ))

@@ -207,8 +207,8 @@ void calculate_norms_and_renorm(DType *weights,
     v += FastPow<DType, AccType, Norm>::pow(weights[baseIndex + i], normType);
   }
 
-  v = reduceBlock<AccType, ReduceAdd<AccType, AccType>>
-        (sdata, blockDim.x, v, ReduceAdd<AccType, AccType>(), accZero);
+  v = reduceBlock<AccType, ReduceAdd<AccType>>
+        (sdata, blockDim.x, v, ReduceAdd<AccType>(), accZero);
 
   if (tid == 0) {
     sdata[0] = std::pow(v, 

@@ -348,8 +348,7 @@ class Caffe2Backend(Backend):
                 seq_len = pred_mh.net.Slice(input_shape, name + '/seq_len_slice', starts=[0], ends=[1])
                 dummy_sequence_lens = pred_mh.net.Tile([seq_len, batch_size], name + '/dummy_sequence_lens', axis=0)
                 pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, cls.dummy_name()], shape=[-1])
-                seq_lens_for_reverse = dummy_sequence_lens
-
+                seq_lens_for_reverse = pred_mh.net.Cast(dummy_sequence_lens, name + '/seq_lens_for_reverse', to=core.DataType.INT32)
         reform(Bi, Br, W_, R_, name, hidden_size, init_net)
 
         if direction_offset == 1:

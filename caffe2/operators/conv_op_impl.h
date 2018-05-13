@@ -84,12 +84,11 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto f = [&](Tensor<Context>* col_buffer) {
     col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
-    // Im2col, followed by gemm.
+    // Im2Col, followed by gemm.
     for (int image_id = 0; image_id < N; ++image_id) {
       for (int group_id = 0; group_id < group_; ++group_id) {
         if (kernel_.size() == 2) {
-          math::Im2col<T, Context, StorageOrder::NCHW>(
-              Xdata + group_id * input_offset,
+          math::Im2Col<T, Context, StorageOrder::NCHW>(
               C / group_,
               input_dims[0],
               input_dims[1],
@@ -103,20 +102,21 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
               pad_r(),
               stride_h(),
               stride_w(),
+              Xdata + group_id * input_offset,
               col_buffer_data,
               &context_);
         } else {
-          math::Im2colNd<T, Context, StorageOrder::NCHW>(
-              Xdata + group_id * input_offset,
-              img_shape_device_.template data<int>(),
-              col_buffer_shape_device_.template data<int>(),
+          math::Im2ColNd<T, Context, StorageOrder::NCHW>(
+              kernel_.size(),
               C * input_image_size,
               col_buffer_size,
-              kernel_device_.template data<int>(),
-              stride_device_.template data<int>(),
-              dilation_device_.template data<int>(),
-              pads_device_.template data<int>(),
-              kernel_.size(),
+              img_shape.data(),
+              buffer_shape.data(),
+              kernel_.data(),
+              stride_.data(),
+              dilation_.data(),
+              pads_.data(),
+              Xdata + group_id * input_offset,
               col_buffer_data,
               &context_);
         }
@@ -251,10 +251,9 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       col_buffer->Resize(
           vector<TIndex>{Y->dim32(1), Y->dim32(2), kernel_h(), kernel_w(), C});
       T* col_buffer_data = col_buffer->template mutable_data<T>();
-      // Im2col, followed by gemm.
+      // Im2Col, followed by gemm.
       for (int image_id = 0; image_id < N; ++image_id) {
-        math::Im2col<T, Context, StorageOrder::NHWC>(
-            Xdata,
+        math::Im2Col<T, Context, StorageOrder::NHWC>(
             C,
             H,
             W,
@@ -268,6 +267,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             pad_r(),
             stride_h(),
             stride_w(),
+            Xdata,
             col_buffer_data,
             &context_);
         // Weight term
@@ -395,8 +395,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       // When we compute the gradient with respect to the filters, we need to do
       // im2col to allow gemm-type computation.
       if (kernel_.size() == 2) {
-        math::Im2col<T, Context, StorageOrder::NCHW>(
-            Xdata + group_id * input_offset,
+        math::Im2Col<T, Context, StorageOrder::NCHW>(
             C / group_,
             input_dims[0],
             input_dims[1],
@@ -410,20 +409,21 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
             pad_r(),
             stride_h(),
             stride_w(),
+            Xdata + group_id * input_offset,
             col_buffer_data,
             &context_);
       } else {
-        math::Im2colNd<T, Context, StorageOrder::NCHW>(
-            Xdata + group_id * input_offset,
-            img_shape_device_.template data<int>(),
-            col_buffer_shape_device_.template data<int>(),
+        math::Im2ColNd<T, Context, StorageOrder::NCHW>(
+            kernel_.size(),
             C * input_image_size,
             col_buffer_size,
-            kernel_device_.template data<int>(),
-            stride_device_.template data<int>(),
-            dilation_device_.template data<int>(),
-            pads_device_.template data<int>(),
-            kernel_.size(),
+            img_shape.data(),
+            col_buffer_shape.data(),
+            kernel_.data(),
+            stride_.data(),
+            dilation_.data(),
+            pads_.data(),
+            Xdata + group_id * input_offset,
             col_buffer_data,
             &context_);
       }
@@ -479,8 +479,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
             col_buffer_data,
             &context_);
         if (kernel_.size() == 2) {
-          math::Col2im<T, Context, StorageOrder::NCHW>(
-              col_buffer_data,
+          math::Col2Im<T, Context, StorageOrder::NCHW>(
               C / group_,
               input_dims[0],
               input_dims[1],
@@ -494,20 +493,21 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
               pad_r(),
               stride_h(),
               stride_w(),
+              col_buffer_data,
               dXdata,
               &context_);
         } else {
-          math::Col2imNd<T, Context, StorageOrder::NCHW>(
-              col_buffer_data,
-              img_shape_device_.template data<int>(),
-              col_buffer_shape_device_.template data<int>(),
+          math::Col2ImNd<T, Context, StorageOrder::NCHW>(
+              kernel_.size(),
               C * input_image_size,
               col_buffer_size,
-              kernel_device_.template data<int>(),
-              stride_device_.template data<int>(),
-              dilation_device_.template data<int>(),
-              pads_device_.template data<int>(),
-              kernel_.size(),
+              img_shape.data(),
+              col_buffer_shape.data(),
+              kernel_.data(),
+              stride_.data(),
+              dilation_.data(),
+              pads_.data(),
+              col_buffer_data,
               dXdata,
               &context_);
         }
@@ -576,8 +576,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   for (int image_id = 0; image_id < N; ++image_id) {
     // When we compute the gradient with respect to the filters, we need to do
     // im2col to allow gemm-type computation.
-    math::Im2col<T, Context, StorageOrder::NHWC>(
-        Xdata,
+    math::Im2Col<T, Context, StorageOrder::NHWC>(
         C,
         H,
         W,
@@ -591,6 +590,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         pad_r(),
         stride_h(),
         stride_w(),
+        Xdata,
         col_buffer_data,
         &context_);
     // Gradient with respect to filter.
@@ -641,8 +641,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           0,
           col_buffer_data,
           &context_);
-      math::Col2im<T, Context, StorageOrder::NHWC>(
-          col_buffer_data,
+      math::Col2Im<T, Context, StorageOrder::NHWC>(
           C,
           H,
           W,
@@ -656,6 +655,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           pad_r(),
           stride_h(),
           stride_w(),
+          col_buffer_data,
           dXdata,
           &context_);
       dXdata += input_offset;

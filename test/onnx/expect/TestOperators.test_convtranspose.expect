@@ -1,0 +1,127 @@
+ir_version: 3
+producer_name: "pytorch"
+producer_version: "0.3"
+graph {
+  node {
+    input: "0"
+    input: "1"
+    output: "2"
+    op_type: "ConvTranspose"
+    attribute {
+      name: "dilations"
+      ints: 1
+      ints: 1
+      type: INTS
+    }
+    attribute {
+      name: "group"
+      i: 1
+      type: INT
+    }
+    attribute {
+      name: "kernel_shape"
+      ints: 3
+      ints: 3
+      type: INTS
+    }
+    attribute {
+      name: "output_padding"
+      ints: 2
+      ints: 2
+      type: INTS
+    }
+    attribute {
+      name: "pads"
+      ints: 1
+      ints: 1
+      ints: 1
+      ints: 1
+      type: INTS
+    }
+    attribute {
+      name: "strides"
+      ints: 3
+      ints: 3
+      type: INTS
+    }
+  }
+  name: "torch-jit-export"
+  initializer {
+    dims: 3
+    dims: 3
+    dims: 3
+    dims: 3
+    data_type: FLOAT
+    name: "1"
+    raw_data: "\306\306\264=\020\351c\275\020\362\301<)\341\026>\326\253,\276v,\375=\214\350l\275\014] \275\352\215\273=x\267#\276H+\356\274\315R<>j\332\215=l\275\221\275\360\263+\275\327i\033>\206\350\224=w\226\005>2\316\375\275(Cc=$\351\014=\210h\t=\031\3756>\362.\332=\023\327\007>\336\017\255=b\246\245=D\035\t\275\016\356-\276Qx&\276\247z\365\275\211.\377\275\346\212\271=\304\005t=\330\304`\275z\036\026\276\343\001B>\201\026\024>\336q\273=\317\020C>\221\327\321\275\035t\340\275\231\264\346\275\260\247\030\274\331\365-\276\007\002\034>\2409\242;^G\304=\367r\330\275Pk\242\274\000\\\317<X\301W\275i\003:>K\022\264\275\264\301t=\204\266\005\276\020\233\272\274\020!Q\275\306\r\252=7\251\t>\360\266?=\240$\217\274P\332I\275\375\201\032>\260B:\275qD\016>Z]\257\275\361j\">\251GD>\217\026\007>J\016\342=\326\262\222=\352\313\301\275\300\206\026;\322\266\207=\310\371M\275\354O\r=R\326\346=>\2276\276`_3\276r\326\353\275"
+  }
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 12
+          }
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 6
+}

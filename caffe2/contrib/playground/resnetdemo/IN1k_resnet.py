@@ -22,7 +22,7 @@ def init_model(self):
     test_model = cnn.CNNModelHelper(
         order="NCHW",
         name="resnet_test",
-        use_cudnn=False,
+        use_cudnn=True,
         cudnn_exhaustive_search=False,
         init_params=False,
     )

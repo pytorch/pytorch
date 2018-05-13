@@ -26,37 +26,6 @@ static void AddConstInput(
   return;
 }
 
-TEST(UtilityOpGPUTest, testEnsureCPUOutput) {
-  if (!HasCudaGPU())
-    return;
-  Workspace ws;
-  OperatorDef def;
-  def.set_name("test");
-  def.set_type("EnsureCPUOutput");
-  def.add_input("X");
-  def.add_output("Y");
-  def.mutable_device_option()->set_device_type(CUDA);
-  AddConstInput(vector<TIndex>{5, 10}, 3.14, "X", &ws);
-  Blob* Xblob = ws.GetBlob("X");
-  EXPECT_NE(nullptr, Xblob);
-  // input X should start as a CUDATensor
-  EXPECT_TRUE(Xblob->IsType<Tensor<CUDAContext>>());
-  // now execute the op to get Y
-  unique_ptr<OperatorBase> op(CreateOperator(def, &ws));
-  EXPECT_NE(nullptr, op.get());
-  EXPECT_TRUE(op->Run());
-  Blob* Yblob = ws.GetBlob("Y");
-  EXPECT_NE(nullptr, Yblob);
-  // output Y should be a CPUTensor
-  EXPECT_TRUE(Yblob->IsType<Tensor<CPUContext>>());
-  const TensorCPU& Y_cpu = Yblob->Get<Tensor<CPUContext>>();
-  EXPECT_EQ(Y_cpu.size(), 5 * 10);
-  for (int i = 0; i < Y_cpu.size(); ++i) {
-    EXPECT_LT(Y_cpu.data<float>()[i], 3.15);
-    EXPECT_GT(Y_cpu.data<float>()[i], 3.13);
-  }
-}
-
 TEST(UtilityOpGPUTest, testReshapeWithScalar) {
   if (!HasCudaGPU())
     return;

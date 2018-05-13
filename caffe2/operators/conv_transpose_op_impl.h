@@ -80,9 +80,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           col_buffer_data,
           &context_);
 
-      // Col2im
-      math::Col2im<T, Context, StorageOrder::NCHW>(
-          col_buffer_data,
+      // Col2Im
+      math::Col2Im<T, Context, StorageOrder::NCHW>(
           C,
           Y->dim32(2),
           Y->dim32(3),
@@ -96,6 +95,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           this->pad_r(),
           this->stride_h(),
           this->stride_w(),
+          col_buffer_data,
           Ydata,
           &context_);
 
@@ -199,9 +199,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           0,
           col_buffer_data,
           &context_);
-      // Col2im
-      math::Col2im<T, Context, StorageOrder::NHWC>(
-          col_buffer_data,
+      // Col2Im
+      math::Col2Im<T, Context, StorageOrder::NHWC>(
           C,
           Y->dim32(1),
           Y->dim32(2),
@@ -215,6 +214,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           this->pad_r(),
           this->stride_h(),
           this->stride_w(),
+          col_buffer_data,
           Ydata,
           &context_);
       // Bias term
@@ -298,10 +298,9 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
   }
   for (auto image_id = 0; image_id < N; ++image_id) {
-    // gradient w.r.t. filters. Im2col followed by Gemm
-    // Im2col.
-    math::Im2col<T, Context, StorageOrder::NCHW>(
-        dYdata,
+    // gradient w.r.t. filters. Im2Col followed by Gemm
+    // Im2Col.
+    math::Im2Col<T, Context, StorageOrder::NCHW>(
         C,
         dY.dim32(2),
         dY.dim32(3),
@@ -315,6 +314,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         this->pad_r(),
         this->stride_h(),
         this->stride_w(),
+        dYdata,
         col_buffer_data,
         &context_);
     // Gemm
@@ -358,11 +358,10 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     dX->ResizeLike(X);
     T* dXdata = dX->template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {
-      // Im2col.
+      // Im2Col.
       // TODO(zyan3): Probably duplicate work as in gradient computation
       // w.r.t filters
-      math::Im2col<T, Context, StorageOrder::NCHW>(
-          dYdata,
+      math::Im2Col<T, Context, StorageOrder::NCHW>(
           C,
           dY.dim32(2),
           dY.dim32(3),
@@ -376,6 +375,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           this->pad_r(),
           this->stride_h(),
           this->stride_w(),
+          dYdata,
           col_buffer_data,
           &context_);
       // Gemm
@@ -450,10 +450,9 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
   }
   for (auto image_id = 0; image_id < N; ++image_id) {
-    // gradient w.r.t. filters. Im2col followed by Gemm
-    // Im2col.
-    math::Im2col<T, Context, StorageOrder::NHWC>(
-        dYdata,
+    // gradient w.r.t. filters. Im2Col followed by Gemm
+    // Im2Col.
+    math::Im2Col<T, Context, StorageOrder::NHWC>(
         C,
         dY.dim32(1),
         dY.dim32(2),
@@ -467,6 +466,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         this->pad_r(),
         this->stride_h(),
         this->stride_w(),
+        dYdata,
         col_buffer_data,
         &context_);
     // Gemm
@@ -510,11 +510,10 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     dX->ResizeLike(X);
     T* dXdata = dX->template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {
-      // Im2col.
+      // Im2Col.
       // TODO(zyan3): Probably duplicate work as in gradient computation
       // w.r.t filters
-      math::Im2col<T, Context, StorageOrder::NHWC>(
-          dYdata,
+      math::Im2Col<T, Context, StorageOrder::NHWC>(
           C,
           dY.dim32(1),
           dY.dim32(2),
@@ -528,6 +527,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           this->pad_r(),
           this->stride_h(),
           this->stride_w(),
+          dYdata,
           col_buffer_data,
           &context_);
       // Gemm

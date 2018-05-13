@@ -24,7 +24,6 @@ void AsyncSchedulingNet::reset() {
     auto& task_op_node = operator_nodes_[task_ops.front()];
     task_op_node.runtime_parent_count_ = parents(task_id).size();
   }
-  exception_messages_.clear();
 }
 
 void AsyncSchedulingNet::Wait() {
@@ -43,8 +42,6 @@ void AsyncSchedulingNet::schedule(int task_id) {
       try {
         run(task_id, stream_id);
       } catch (const std::exception& e) {
-        std::unique_lock<std::mutex> lock(exception_mutex_);
-        exception_messages_.push_back(e.what());
         success_ = false;
       }
     }
@@ -54,7 +51,8 @@ void AsyncSchedulingNet::schedule(int task_id) {
     for (auto child_id : children(task_id)) {
       int parent_count = updateParentCount(child_id);
       if (parent_count == 0) {
-        if (cleanup_ || FLAGS_caffe2_net_async_always_schedule_child ||
+        if (!success_ || cleanup_ ||
+            FLAGS_caffe2_net_async_always_schedule_child ||
             canSchedule(child_id)) {
           schedule(child_id);
         } else {
@@ -103,8 +101,16 @@ void AsyncSchedulingNet::schedule(int task_id) {
 }
 
 void AsyncSchedulingNet::pollAndSchedule(int task_id) {
-  if (canSchedule(task_id) || cleanup_) {
-    // force schedule the rest of the tasks if cleanup is started
+  bool parent_failed = false;
+  bool can_schedule = canSchedule(task_id, nullptr, &parent_failed);
+  if (parent_failed) {
+    success_ = false;
+  }
+  // schedule the task if:
+  //  - parents are ready
+  //  - we failed / cleanup started (no ops will run)
+
+  if (can_schedule || cleanup_ || !success_ || parent_failed) {
     schedule(task_id);
   } else {
     const auto& device_option = event(task_id).GetDeviceOption();
@@ -140,6 +146,10 @@ bool AsyncSchedulingNet::DoRunAsync() {
     if (parents(task_id).empty()) {
       schedule(task_id);
     }
+  }
+
+  if (tasksNum() == 0) {
+    finishRun();
   }
 
   return true;
