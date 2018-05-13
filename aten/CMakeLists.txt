@@ -1,5 +1,5 @@
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if (NOT BUILD_ATEN)
+  if (NOT USE_ATEN)
     return()
   endif()
 else()
