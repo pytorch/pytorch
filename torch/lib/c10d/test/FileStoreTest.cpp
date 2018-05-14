@@ -1,49 +1,10 @@
-#include <unistd.h>
-
-#include <condition_variable>
-#include <iostream>
-#include <mutex>
-#include <sstream>
-#include <thread>
-
+#include "StoreTestCommon.hpp"
 #include "FileStore.hpp"
 
-using namespace c10d;
+#include <unistd.h>
+#include <iostream>
+#include <thread>
 
-class Semaphore {
- public:
-  void post(int n = 1) {
-    std::unique_lock<std::mutex> lock(m_);
-    n_ += n;
-    cv_.notify_all();
-  }
-
-  void wait(int n = 1) {
-    std::unique_lock<std::mutex> lock(m_);
-    while (n_ < n) {
-      cv_.wait(lock);
-    }
-    n_ -= n;
-  }
-
- protected:
-  int n_ = 0;
-  std::mutex m_;
-  std::condition_variable cv_;
-};
-
-void set(Store& store, const std::string& key, const std::string& value) {
-  std::vector<uint8_t> data(value.begin(), value.end());
-  store.set(key, data);
-}
-
-void check(Store& store, const std::string& key, const std::string& expected) {
-  auto tmp = store.get(key);
-  auto actual = std::string((const char*) tmp.data(), tmp.size());
-  if (actual != expected) {
-    throw std::runtime_error("Expected " + expected + ", got " + actual);
-  }
-}
 
 std::string tmppath() {
   const char* tmpdir = getenv("TMPDIR");
@@ -71,29 +32,29 @@ int main(int argc, char** argv) {
 
   // Basic set/get
   {
-    FileStore store(path);
-    set(store, "key0", "value0");
-    set(store, "key1", "value1");
-    set(store, "key2", "value2");
-    check(store, "key0", "value0");
-    check(store, "key1", "value1");
-    check(store, "key2", "value2");
+    c10d::FileStore store(path);
+    c10d::test::set(store, "key0", "value0");
+    c10d::test::set(store, "key1", "value1");
+    c10d::test::set(store, "key2", "value2");
+    c10d::test::check(store, "key0", "value0");
+    c10d::test::check(store, "key1", "value1");
+    c10d::test::check(store, "key2", "value2");
   }
 
   // Perform get on new instance
   {
-    FileStore store(path);
-    check(store, "key0", "value0");
+    c10d::FileStore store(path);
+    c10d::test::check(store, "key0", "value0");
   }
 
   // Hammer on FileStore#add
   std::vector<std::thread> threads;
   const auto numThreads = 4;
   const auto numIterations = 100;
-  Semaphore sem1, sem2;
+  c10d::test::Semaphore sem1, sem2;
   for (auto i = 0; i < numThreads; i++) {
     threads.push_back(std::move(std::thread([&] {
-            FileStore store(path);
+            c10d::FileStore store(path);
             sem1.post();
             sem2.wait();
             for (auto j = 0; j < numIterations; j++) {
@@ -109,12 +70,12 @@ int main(int argc, char** argv) {
 
   // Check that the counter has the expected value
   {
-    FileStore store(path);
-    std::stringstream ss;
-    ss << (numThreads * numIterations);
-    check(store, "counter", ss.str());
+    c10d::FileStore store(path);
+    std::string expected = std::to_string(numThreads * numIterations);
+    c10d::test::check(store, "counter", expected);
   }
 
   unlink(path.c_str());
+  std::cout << "Test succeeded" << std::endl;
   return 0;
 }
