@@ -110,7 +110,7 @@ case "${BUILD_ENVIRONMENT}" in
     CMAKE_ARGS+=("-DCUDA_ARCH_NAME=Maxwell")
     CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
 
-    # Explicitly set path to NVCC such that the symlink to ccache is used
+    # Explicitly set path to NVCC such that the symlink to ccache or sccache is used
     CMAKE_ARGS+=("-DCUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
 
     # Ensure FindCUDA.cmake can infer the right path to the CUDA toolkit.
