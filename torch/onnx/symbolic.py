@@ -964,6 +964,11 @@ def RNN_variant_symbolic_builder(
                 prev_output, h_out, c_out = g.op('LSTM', *inputs, outputs=3,
                                                  hidden_size_i=hidden_size,
                                                  **extra_kwargs)
+
+            if bidirectional:
+                prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 1, 0, -1])))
+            prev_output = g.op('Squeeze', prev_output, axes_i=[1])
+
             h_outs.append(h_out)
             if variant == 'LSTM':
                 c_outs.append(c_out)
