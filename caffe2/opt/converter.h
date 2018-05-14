@@ -1,5 +1,5 @@
-#ifndef NOM_CONVERTERS_CAFFE2_H
-#define NOM_CONVERTERS_CAFFE2_H
+#ifndef CAFFE2_OPT_CONVERTER_H
+#define CAFFE2_OPT_CONVERTER_H
 
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/ControlFlow.h"
@@ -55,4 +55,4 @@ std::unique_ptr<nom::repr::NeuralNetOperator> convertToOperatorDef(caffe2::Opera
 } // namespace caffe2 
 
 
-#endif // NOM_CONVERTERS_CAFFE2_H
+#endif // CAFFE2_OPT_CONVERTER_H

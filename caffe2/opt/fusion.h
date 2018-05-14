@@ -17,9 +17,7 @@
 #ifndef CAFFE2_OPT_FUSION_H_
 #define CAFFE2_OPT_FUSION_H_
 
-#include "caffe2/core/common.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
 #include "nomnigraph/Representations/NeuralNet.h"
 
 namespace caffe2 {
