@@ -335,10 +335,10 @@ def emit_schema(jit_decls, out):
     for decl in jit_decls:
         emit(decl)
 
-    env['names'] = names.keys()
-    env['tensors'] = tensors.keys()
-    env['attributes'] = attributes.keys()
-    env['types'] = types.keys()
+    env['names'] = list(names.keys())
+    env['tensors'] = list(tensors.keys())
+    env['attributes'] = list(attributes.keys())
+    env['types'] = list(types.keys())
 
     write(out, 'aten_schema.cpp', ATEN_SCHEMA_CPP, env)
 
