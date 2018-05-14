@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/THTensorCopy.cpp"
 #else
 
-#ifndef _WIN32
+#ifndef _MSC_VER
 #define PRAGMA(P) _Pragma(#P)
 #else
 #define PRAGMA(P) __pragma(P)

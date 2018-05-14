@@ -86,7 +86,10 @@ if "%REBUILD%"=="" (
   .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
 )
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
-if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 )
+if "%REBUILD%"=="" ( 
+  call conda install -y -q numpy cffi pyyaml boto3 
+  call conda install -y -q -c conda-forge m2w64-toolchain_win-64
+)
 
 :: Install ninja
 if "%REBUILD%"=="" ( pip install ninja )
@@ -109,33 +112,33 @@ set TORCH_CUDA_ARCH_LIST=5.2
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
-set CC=sccache cl
-set CXX=sccache cl
+set CC=gcc
+set CXX=g++
 
 set DISTUTILS_USE_SDK=1
 
 set CMAKE_GENERATOR=Ninja
 
-if not "%USE_CUDA%"=="1" (
-  if "%REBUILD%"=="" (
-    set NO_CUDA=1
-    python setup.py install
-  )
-  if errorlevel 1 exit /b 1
-  if not errorlevel 0 exit /b 1
-)
+REM if not "%USE_CUDA%"=="1" (
+REM   if "%REBUILD%"=="" (
+REM     set NO_CUDA=1
+REM     python setup.py install
+REM   )
+REM   if errorlevel 1 exit /b 1
+REM   if not errorlevel 0 exit /b 1
+REM )
 
-if not "%USE_CUDA%"=="0" (
-  if "%REBUILD%"=="" (
-    sccache --show-stats
-    sccache --zero-stats
-    rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
-    copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
-  )
+REM if not "%USE_CUDA%"=="0" (
+REM   if "%REBUILD%"=="" (
+REM     sccache --show-stats
+REM     sccache --zero-stats
+REM     rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
+REM     copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+REM   )
 
   set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
 
-  if "%REBUILD%"=="" set NO_CUDA=0
+  if "%REBUILD%"=="" set NO_CUDA=1
 
   python setup.py install && sccache --show-stats && (
     if "%BUILD_ENVIRONMENT%"=="" (

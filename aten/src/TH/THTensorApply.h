@@ -247,7 +247,7 @@
 
 #ifdef _OPENMP
 
-#ifndef _WIN32
+#ifndef _MSC_VER
 #define PRAGMA(P) _Pragma(#P)
 #else
 #define PRAGMA(P) __pragma(P)

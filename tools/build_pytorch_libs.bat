@@ -12,8 +12,6 @@ set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
 set CWRAP_FILES=%BASE_DIR%/torch/lib/ATen/Declarations.cwrap;%BASE_DIR%/torch/lib/ATen/Local.cwrap;%BASE_DIR%/torch/lib/THNN/generic/THNN.h;%BASE_DIR%/torch/lib/THCUNN/generic/THCUNN.h;%BASE_DIR%/torch/lib/ATen/nn.yaml
-set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
-set LINK_FLAGS=/DEBUG:FULL
 
 mkdir torch/lib/tmp_install
 
@@ -77,7 +75,7 @@ IF NOT DEFINED MAX_JOBS (
 
 IF "%CMAKE_GENERATOR%"=="" (
   set CMAKE_GENERATOR_COMMAND=
-  set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
+  set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=%BUILD_TYPE%
 ) ELSE (
   set CMAKE_GENERATOR_COMMAND=-G "%CMAKE_GENERATOR%"
   IF "%CMAKE_GENERATOR%"=="Ninja" (
@@ -89,6 +87,20 @@ IF "%CMAKE_GENERATOR%"=="" (
   )
 )
 
+IF "%CC%"=="gcc" IF "%CXX%"=="g++" (
+  set BASIC_C_FLAGS=%BASIC_C_FLAGS: /= -%
+  set LDFLAGS=%LDFLAGS:/LIBPATH:=-L%
+  set USE_GCC=1
+  goto read_loop
+)
+
+IF "%USE_GCC%" == "1" (
+  set "C_FLAGS=%BASIC_C_FLAGS%"
+  set "LINK_FLAGS=%LDFLAGS%"
+) ELSE (
+  set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
+  set LINK_FLAGS=/DEBUG:FULL
+)
 
 :read_loop
 if "%1"=="" goto after_loop

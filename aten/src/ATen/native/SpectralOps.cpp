@@ -1,5 +1,5 @@
 // define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__MINGW64__)
 #define _USE_MATH_DEFINES
 #include <math.h>
 #endif
