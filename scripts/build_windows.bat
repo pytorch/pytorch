@@ -37,6 +37,23 @@ if NOT DEFINED CMAKE_GENERATOR (
   )
 )
 
+:: Install sccache
+mkdir %CD%\tmp_bin
+curl -k https://s3.amazonaws.com/ossci-windows/sccache.exe --output %CD%\tmp_bin\sccache.exe
+
+copy %CD%\tmp_bin\sccache.exe tmp_bin\nvcc.exe
+
+set PATH=%CD%\tmp_bin;%PATH%
+
+set CC=sccache cl
+set CXX=sccache cl
+set CUDA_NVCC_EXECUTABLE=%CD%\tmp_bin\nvcc
+
+set SCCACHE_BUCKET=ossci-compiler-cache
+
+sccache --stop-server || set ERRORLEVEL=0
+sccache --start-server
+
 echo CAFFE2_ROOT=%CAFFE2_ROOT%
 echo CMAKE_GENERATOR=%CMAKE_GENERATOR%
 echo CMAKE_BUILD_TYPE=%CMAKE_BUILD_TYPE%
@@ -64,8 +81,12 @@ cmake .. ^
   -DBUILD_PYTHON=OFF^
   || goto :label_error
 
+sccache --zero-stats
+
 :: Actually run the build
 cmake --build . --config %CMAKE_BUILD_TYPE% -- /maxcpucount:%NUMBER_OF_PROCESSORS% || goto :label_error
+
+sccache --show-stats
 
 echo "Caffe2 built successfully"
 cd %ORIGINAL_DIR%
