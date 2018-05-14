@@ -29,7 +29,8 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+    auto inputs = toValues(inputs_);
     std::vector<TypePtr> arg_types;
     TypePtr ret_type;
     std::tie(arg_types, ret_type) = getFunctionType(inputs.size(), n_binders);
@@ -98,7 +99,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // torch, torch.nn.functional, and the functions they expose.
     py::object member = getattr(loc, field);
     if (isBuiltinModule() && py::isinstance<py::function>(member)) {
-      return std::make_shared<BuiltinFunction>(field);
+      return std::make_shared<BuiltinFunction>(field, at::nullopt);
     }
     if (py::isinstance<py::module>(self) && py::isinstance<py::module>(member)) {
       return std::make_shared<PythonValue>(member);
@@ -203,11 +204,8 @@ struct MethodValue : public SugaredValue {
   std::string kind() const override {
     return "method";
   }
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    if(attributes.size() != 0) {
-      throw ErrorReport(loc) << "not yet implemented - calls to script methods using keyword arguments";
-    }
-    return packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs));
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+    return packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes));
   }
 private:
   std::shared_ptr<Module> module;
@@ -249,7 +247,7 @@ struct ModuleValue : public SugaredValue {
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
   // call module.forward
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 

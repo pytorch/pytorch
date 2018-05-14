@@ -15,7 +15,8 @@ namespace torch { namespace jit {
 _(DynamicType) \
 _(TensorType) \
 _(HandleType) \
-_(TupleType)
+_(TupleType) \
+_(ListType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -206,6 +207,28 @@ struct HandleType : public Type {
   static TypePtr get();
 };
 
+struct ListType : public Type {
+  friend struct Type;
+  static const TypeKind Kind = TypeKind::ListType;
+  ListType(TypePtr elem)
+  : Type(TypeKind::ListType), elem(elem) {}
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  virtual std::string name() const override {
+    std::stringstream ss;
+    ss << "List[" << getElementType()->name() << "]";
+    return ss.str();
+  }
+  TypePtr getElementType() const {
+    return elem;
+  }
+  // common cast List[Tensor]
+  static TypePtr ofTensors();  
+private:
+  TypePtr elem;
+};
+
 struct TupleType : public Type {
   friend struct Type;
   TupleType(std::vector<TypePtr> elements_)
@@ -221,6 +244,15 @@ struct TupleType : public Type {
     });
   }
   virtual bool isSubtypeOf(const Type& rhs) const override {
+    // e.g. (Tensor, Tensor, Tensor) <: List[Tensor]
+    if(auto lt = rhs.cast<ListType>()) {
+      for(auto e : elements()) {
+        if(!e->isSubtypeOf(*lt->getElementType()))
+          return false;
+      }
+      return true;
+    }
+    // co-variant rules for tuples
     return compare(rhs, [](const Type& a, const Type&b) {
       return a.isSubtypeOf(b);
     });
