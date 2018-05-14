@@ -113,7 +113,7 @@ fi
 if [[ -n $CONDA_INSTALL_LOCALLY ]]; then
   install_locally=1
 fi
-if [[ -n $BUILD_INTEGRATED ]]; then
+if [[ -n $INTEGRATED ]]; then
   pytorch_too=1
 fi
 
