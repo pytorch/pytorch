@@ -7,12 +7,12 @@
 
 namespace torch { namespace nn {
 
-Linear::Linear(uint32_t nin, uint32_t nout)
+Linear::Linear(uint32_t nin, uint32_t nout, bool with_bias)
     : nin(nin),
       nout(nout),
       weight(add(Var(at::CPU(at::kFloat).empty({nout, nin})), "weight")) {
-  if (!no_bias_) {
-    bias = add(Var(at::CPU(at::kFloat).empty(nout)), "bias");
+  if (with_bias) {
+    bias.emplace(add(Var(at::CPU(at::kFloat).empty(nout)), "bias"));
   }
 
   const auto stdv = 1.0 / std::sqrt(weight.size(1));
@@ -23,15 +23,15 @@ Linear::Linear(uint32_t nin, uint32_t nout)
 
 variable_list Linear::forward(variable_list input) {
   auto x = input[0];
-  if (x.ndimension() == 2 && !no_bias_) {
+  if (x.ndimension() == 2 && bias.has_value()) {
     // Fused op is marginally faster
     assert(x.size(1) == weight.size(1));
-    return variable_list({at::addmm(bias, x, weight.t())});
+    return variable_list({at::addmm(*bias, x, weight.t())});
   }
 
   auto output = x.matmul(weight.t());
-  if (!no_bias_) {
-    output += bias;
+  if (bias.has_value()) {
+    output += *bias;
   }
   return variable_list({output});
 }

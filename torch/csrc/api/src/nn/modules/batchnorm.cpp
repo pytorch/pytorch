@@ -2,7 +2,8 @@
 
 namespace torch { namespace nn {
 
-BatchNorm::BatchNorm(uint32_t num_features) : num_features_(num_features) {
+BatchNorm::BatchNorm(uint32_t num_features, bool affine, bool stateful)
+    : num_features_(num_features), affine_(affine), stateful_(stateful) {
   if (affine_) {
     weight = add(
         Var(at::CPU(at::kFloat).empty({num_features_}).uniform_()), "weight");

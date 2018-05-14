@@ -113,20 +113,19 @@ class CloneableModule : public Module {
  public:
   using Module::Module;
 
+  // should it also detach the gradients, like a deepcopy? Or maybe let's just
+  // give clone() a boolean for this?
   std::unique_ptr<Module> clone() const override {
     auto ptr = std::unique_ptr<Module>(
         new Derived(*static_cast<const Derived*>(this)));
-    ptr->children_.clear();
-    ptr->parameters_.clear();
-    auto newParams = ptr->parameters();
-    for (auto& param : parameters()) {
-      newParams[param.first].data().copy_(param.second.data());
+    for (auto& parameter : ptr->parameters_) {
+      parameter.second = this->parameters_.at(parameter.first).clone();
+    }
+    for (auto& child : ptr->children_) {
+      child.second = this->children_.at(child.first)->clone();
     }
     return ptr;
   }
-
-  // return std::unique_ptr<Module>(new
-  // Derived(static_cast<Derived&>(*this)));
 };
 
 template <class Module>
