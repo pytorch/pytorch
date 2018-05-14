@@ -24,8 +24,18 @@ if [ -n "${SCCACHE_BUCKET}" ]; then
     chmod +x "./sccache/$compiler"
   done
 
+  if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
+    (
+      echo "#!/bin/sh"
+      echo "exec $SCCACHE $(which nvcc) \"\$@\""
+    ) > "./sccache/nvcc"
+    chmod +x "./sccache/nvcc"
+  fi
+
+  export CACHE_WRAPPER_DIR="$PWD/sccache"
+
   # CMake must find these wrapper scripts
-  export PATH="$PWD/sccache:$PATH"
+  export PATH="$CACHE_WRAPPER_DIR:$PATH"
 fi
 
 # Setup ccache if configured to use it (and not sccache)
@@ -36,8 +46,11 @@ if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   ln -sf "$(which ccache)" ./ccache/gcc
   ln -sf "$(which ccache)" ./ccache/g++
   ln -sf "$(which ccache)" ./ccache/x86_64-linux-gnu-gcc
-  export CCACHE_WRAPPER_DIR="$PWD/ccache"
-  export PATH="$CCACHE_WRAPPER_DIR:$PATH"
+  if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
+    ln -sf "$(which ccache)" ./ccache/nvcc
+  fi
+  export CACHE_WRAPPER_DIR="$PWD/ccache"
+  export PATH="$CACHE_WRAPPER_DIR:$PATH"
 fi
 
 CMAKE_ARGS=("-DBUILD_BINARY=ON")
@@ -97,11 +110,8 @@ case "${BUILD_ENVIRONMENT}" in
     CMAKE_ARGS+=("-DCUDA_ARCH_NAME=Maxwell")
     CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
 
-    # Add ccache symlink for nvcc
-    ln -sf "$(which ccache)" "${CCACHE_WRAPPER_DIR}/nvcc"
-
     # Explicitly set path to NVCC such that the symlink to ccache is used
-    CMAKE_ARGS+=("-DCUDA_NVCC_EXECUTABLE=${CCACHE_WRAPPER_DIR}/nvcc")
+    CMAKE_ARGS+=("-DCUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
 
     # Ensure FindCUDA.cmake can infer the right path to the CUDA toolkit.
     # Setting PATH to resolve to the right nvcc alone isn't enough.
@@ -140,8 +150,15 @@ CMAKE_ARGS+=("-DONNX_NAMESPACE=ONNX_NAMESPACE_FOR_C2_CI")
 ${CMAKE_BINARY} "${ROOT_DIR}" ${CMAKE_ARGS[*]} "$@"
 
 # Build
+# sccache will fail for CUDA builds if all cores are used for compiling
+if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
+  MAX_JOBS=`expr $(nproc) - 1`
+else
+  MAX_JOBS=$(nproc)
+fi
+
 if [ "$(uname)" == "Linux" ]; then
-  make "-j$(nproc)" install
+  make "-j${MAX_JOBS}" install
 else
   echo "Don't know how to build on $(uname)"
   exit 1
