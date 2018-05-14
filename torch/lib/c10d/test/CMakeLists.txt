@@ -1,11 +1,13 @@
 set(test_srcs
   FileStoreTest.cpp
   TCPStoreTest.cpp
+  ProcessGroupGlooTest.cpp
   )
 
 set(test_libraries
   store
   pthread
+  process_group_gloo
   )
 
 foreach(test_src ${test_srcs})

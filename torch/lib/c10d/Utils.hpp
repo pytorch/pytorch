@@ -3,15 +3,69 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#include <cstdlib>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <string>
 #include <system_error>
 #include <tuple>
 #include <vector>
-#include <chrono>
+
+#include <ATen/ATen.h>
+
+#include "Types.hpp"
+
+inline void hash_combine(std::size_t& seed) { }
+
+template <typename T, typename... Rest>
+inline void hash_combine(std::size_t& seed, const T& v, Rest... rest) {
+  std::hash<T> hasher;
+  seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  hash_combine(seed, rest...);
+}
+
+#define MAKE_HASHABLE(type, ...)                                              \
+  namespace std {                                                             \
+    template<> struct hash<type> {                                            \
+      std::size_t operator()(const type &t) const {                           \
+        std::size_t ret = 0;                                                  \
+        hash_combine(ret, __VA_ARGS__);                                       \
+        return ret;                                                           \
+      }                                                                       \
+    };                                                                        \
+  }
+
+// Make std::vector<T> hashable
+namespace std {
+template<typename T> struct hash<vector<T>> {
+  std::size_t operator()(const vector<T>& v) const {
+    std::size_t ret = v.size();
+    for (const auto& e : v) {
+      hash_combine(ret, e);
+    }
+    return ret;
+  }
+};
+} // namespace std
+
+// Make at::ArrayRef<T> hashable
+namespace std {
+template<typename T> struct hash<at::ArrayRef<T>> {
+  std::size_t operator()(const at::ArrayRef<T>& v) const {
+    std::size_t ret = v.size();
+    for (const auto& e : v) {
+      hash_combine(ret, e);
+    }
+    return ret;
+  }
+};
+} // namespace std
+
+MAKE_HASHABLE(::c10d::CollectiveType, static_cast<std::uint8_t>(t));
+MAKE_HASHABLE(::c10d::DeviceType, static_cast<std::uint8_t>(t));
+MAKE_HASHABLE(::c10d::ReduceOp, static_cast<std::uint8_t>(t));
 
 namespace c10d {
 
