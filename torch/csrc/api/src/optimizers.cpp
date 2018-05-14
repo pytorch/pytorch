@@ -50,6 +50,8 @@ void LBFGS::step(std::function<at::Scalar()> closure) {
   at::Tensor ONE = flat_grad.type().scalarTensor(1);
   at::Scalar loss;
 
+  int current_evals = 1;
+
   int n_iter = 0;
   while(n_iter < max_iter_) {
     n_iter++;
@@ -62,7 +64,7 @@ void LBFGS::step(std::function<at::Scalar()> closure) {
       if(ys.toFloatData()[0] > 1e-10) {
         // updating memory
 
-        if(old_dirs.size() == history_size_) {
+        if((int)old_dirs.size() == history_size_) {
           // shift history by one (limited memory)
           old_dirs.pop_front();
           old_stps.pop_front();
@@ -115,7 +117,7 @@ void LBFGS::step(std::function<at::Scalar()> closure) {
       t = lr_;
     }
 
-    at::Tensor gtd = flat_grad.dot(d);
+    at::Scalar gtd = at::Scalar(flat_grad.dot(d));
     add_grad(t, d);
     int ls_func_evals = 0;
     if(n_iter != max_iter_) {
@@ -128,8 +130,25 @@ void LBFGS::step(std::function<at::Scalar()> closure) {
       ls_func_evals = 1;
     }
 
-    // current_evals
+    current_evals += ls_func_evals;
 
+    /**
+     * Check conditions
+     */
+    
+    if(n_iter == max_iter_) {
+      break;
+    } else if (current_evals >= max_eval_) {
+      break;
+    } else if (abs_grad_sum.toFloat() <= tolerance_grad_) {
+      break;
+    } else if (gtd.toFloat() > -tolerance_grad_) {
+      break;
+    } else if (at::Scalar(d.mul(t).abs_().sum()).toFloat() <= tolerance_change_) {
+      break;
+    } else if (std::abs(loss.toFloat() - prev_loss.toFloat()) < tolerance_change_) {
+      break;
+    } 
   }
 }
 
@@ -138,7 +157,7 @@ void LBFGS::init_state() {
   t = 0;
   H_diag = at::CPU(at::kFloat).empty({0});
   prev_flat_grad = at::CPU(at::kFloat).empty({0});
-  prev_loss = at::CPU(at::kFloat).empty({0});
+  prev_loss = 0;
   ro.resize(history_size_);
   al.resize(history_size_);
 }

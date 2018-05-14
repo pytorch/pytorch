@@ -68,8 +68,8 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(LBFGS) {
   Tensor gather_flat_grad();
   void add_grad(const at::Scalar& step_size, const at::Tensor& update);
 
-  at::Tensor d, H_diag, prev_flat_grad, prev_loss;
-  at::Scalar t;
+  at::Tensor d, H_diag, prev_flat_grad;
+  at::Scalar t, prev_loss;
   std::vector<at::Tensor> ro, al;
   std::deque<at::Tensor> old_dirs, old_stps;
 };
