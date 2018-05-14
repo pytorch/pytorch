@@ -90,7 +90,7 @@ def _unimplemented(op, msg):
 # increasing this number.  This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
 
-_onnx_opset_version = 6
+_onnx_opset_version = 7
 
 
 # ---------------------------------------------------------------------
