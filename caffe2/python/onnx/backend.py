@@ -487,22 +487,24 @@ class Caffe2Backend(Backend):
             for i in range(1, len(outputs)):
                 pred_mh.net.Copy(outputs[i], n.outputs[i])
 
-            pred_mh.net = pred_mh.net.Clone(
-                "dummy-clone-net", blob_remap={ outputs[0]: n.outputs[0] }
-            )
+            if sequence_lens is not None:
+                pred_mh.net.VariableLengthSequencePadding(
+                    [outputs[0], sequence_lens], [outputs[0]])
+            pred_mh.net.ExpandDims([outputs[0]], [n.outputs[0]], dims=[1])
         elif direction == 'bidirectional':
             outputs_f = make_rnn(0)
             outputs_b = make_rnn(1)
 
-            pred_mh.net.Concat([outputs_f[0], outputs_b[0]],
-                               [n.outputs[0], cls.dummy_name()], axis=2)
+            concatted_output, _ = pred_mh.net.Concat(
+                [outputs_f[0], outputs_b[0]], [cls.dummy_name(), cls.dummy_name()], axis=2)
+            if sequence_lens is not None:
+                pred_mh.net.VariableLengthSequencePadding(
+                    [concatted_output, sequence_lens], [concatted_output])
+            unsqueezed_output = pred_mh.net.ExpandDims([concatted_output], [cls.dummy_name()], dims=[1])
+            pred_mh.net.Reshape(unsqueezed_output, [n.outputs[0], cls.dummy_name()], shape=[0,2,0,-1])
             for i in range(1, len(n.outputs)):
                 pred_mh.net.Concat([outputs_f[i], outputs_b[i]],
                                    [n.outputs[i], cls.dummy_name()], axis=0)
-
-        if sequence_lens is not None:
-            pred_mh.net.VariableLengthSequencePadding(
-                [n.outputs[0], sequence_lens], [n.outputs[0]])
 
         return Caffe2Ops(list(pred_mh.Proto().op),
                          list(init_net.Proto().op),
