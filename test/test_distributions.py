@@ -1126,6 +1126,10 @@ class TestDistributions(TestCase):
         self.assertEqual(uniform.log_prob(above_high).item(), -float('inf'), allow_inf=True)
         self.assertEqual(uniform.log_prob(below_low).item(), -float('inf'), allow_inf=True)
 
+        # check cdf computation when value outside range
+        self.assertEqual(uniform.cdf(below_low).item(), 0)
+        self.assertEqual(uniform.cdf(above_high).item(), 1)
+
         set_rng_seed(1)
         self._gradcheck_log_prob(Uniform, (low, high))
         self._gradcheck_log_prob(Uniform, (low, 1.0))
