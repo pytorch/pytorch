@@ -70,7 +70,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
 
   Tensor out_t = self.clone();
   for (auto d : dims) {
-    out_t.copy_(reverse_dim(out_t, d));
+    out_t = reverse_dim(out_t, d);
   }
   return out_t;
 }
