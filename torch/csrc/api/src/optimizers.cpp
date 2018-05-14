@@ -1,6 +1,7 @@
 #include "torch/optimizers.h"
 
 #include <torch/nn/module.h>
+#include <assert.h>
 
 namespace torch {
 
@@ -16,6 +17,130 @@ void OptimizerImpl::zero_grad() {
 
 void OptimizerImpl::set_model(std::shared_ptr<nn::Module> model) {
   model_ = model;
+}
+
+at::Tensor LBFGS::gather_flat_grad() {
+  std::vector<at::Tensor> views;
+  for(auto& pair : model_->parameters()) {
+    views.push_back(pair.second.data().view(-1));
+  }
+  return at::cat(views);
+}
+
+void LBFGS::add_grad(const at::Scalar& step_size, const at::Tensor& update) {
+  int offset = 0;
+  for(auto& pair : model_->parameters()) {
+    int numel = pair.second.numel();
+    at::Tensor& pd = pair.second.data();
+    pd.add_(update.slice(offset, offset + numel).view_as(pd), step_size);
+    offset += numel;
+  }
+}
+
+void LBFGS::step() {
+  AT_ERROR(
+    "LBFGS step requires a closure for evaluating the model loss", 
+    "See: https://pytorch.org/docs/stable/optim.html#optimizer-step-closure");
+}
+
+void LBFGS::step(std::function<at::Scalar()> closure) {
+  at::Tensor flat_grad = gather_flat_grad();
+  at::Scalar abs_grad_sum = at::Scalar(flat_grad.abs().sum());
+
+  at::Tensor ONE = flat_grad.type().scalarTensor(1);
+  at::Scalar loss;
+
+  int n_iter = 0;
+  while(n_iter < max_iter_) {
+    n_iter++;
+
+    if(n_iter > 1) {
+      at::Tensor y = flat_grad.sub(prev_flat_grad);
+      at::Tensor s = d.mul(t);
+      at::Tensor ys = y.dot(s);
+
+      if(ys.toFloatData()[0] > 1e-10) {
+        // updating memory
+
+        if(old_dirs.size() == history_size_) {
+          // shift history by one (limited memory)
+          old_dirs.pop_front();
+          old_stps.pop_front();
+        }
+
+        // store new direction/step
+        old_dirs.push_back(y);
+        old_stps.push_back(s);
+
+        // update scale of initial Hessian approximation
+        H_diag = ys / y.dot(y);
+      }
+
+      int num_old = old_dirs.size();
+
+      for(int i = 0; i < num_old; i++) {
+        ro[i] = ONE / old_dirs[i].dot(old_stps[i]);
+      }
+
+      at::Tensor q = flat_grad.neg();
+      for(int i = num_old - 1; i >= 0; i--) {
+        al[i] = old_stps[i].dot(q) * ro[i];
+        q.add_(-al[i], at::Scalar(old_dirs[i]));
+      }
+
+      // Multiply by initial Hessian
+      // r/d is the final direction
+      at::Tensor r = q.mul(H_diag);
+      d = r;
+
+      for(int i = 0; i < num_old; i++) {
+        at::Tensor be_i = old_dirs[i].dot(r) * ro[i];
+        r.add_(al[i] - be_i, at::Scalar(old_stps[i]));
+      }
+      prev_flat_grad.copy_(flat_grad);
+    }else {
+      d = flat_grad.neg();
+      H_diag = flat_grad.type().scalarTensor(1);
+      prev_flat_grad = flat_grad.clone();
+    }
+
+    /**
+     * comute step length
+     */
+
+    // reset initial guess for step size
+    if(n_iter == 1) {
+      t = at::Scalar(at::min(ONE, ONE / abs_grad_sum) * lr_);
+    } else {
+      t = lr_;
+    }
+
+    at::Tensor gtd = flat_grad.dot(d);
+    add_grad(t, d);
+    int ls_func_evals = 0;
+    if(n_iter != max_iter_) {
+      // re-evaluate function only if not in last iteration
+      // the reason we do this: in a stochastic setting,
+      // no use to re-evaluate that function here
+      loss = closure();
+      flat_grad = gather_flat_grad();
+      abs_grad_sum = at::Scalar(flat_grad.abs().sum());
+      ls_func_evals = 1;
+    }
+
+    // current_evals
+
+  }
+}
+
+void LBFGS::init_state() {
+  d = at::CPU(at::kFloat).empty({0});
+  t = 0;
+  H_diag = at::CPU(at::kFloat).empty({0});
+  prev_flat_grad = at::CPU(at::kFloat).empty({0});
+  prev_loss = at::CPU(at::kFloat).empty({0});
+  ro.resize(history_size_);
+  al.resize(history_size_);
 }
 
 void SGD::step() {
