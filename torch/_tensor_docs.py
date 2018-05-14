@@ -1693,7 +1693,6 @@ between `0` and `(self.size(dim) -1)` inclusive, and all values in a row along
 the specified dimension :attr:`dim` must be unique.
 
 Args:
-    input (Tensor): the source tensor
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter
     src (Tensor or float): the source element(s) to scatter
