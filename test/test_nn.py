@@ -5018,6 +5018,19 @@ class TestNNInit(TestCase):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
                     init.eye_(tensor)
 
+    def test_max_unpool(self):
+        # Test 1D
+        output, indices = F.max_pool1d(torch.randn([1, 1, 4]), 2, stride=2, return_indices=True)
+        self.assertEqual(F.max_unpool1d(output, indices, 2), F.max_unpool1d(output, indices, 2, stride=2))
+
+        # Test 2D
+        output, indices = F.max_pool2d(torch.randn([1, 1, 4, 4]), 2, stride=2, return_indices=True)
+        self.assertEqual(F.max_unpool2d(output, indices, 2), F.max_unpool2d(output, indices, 2, stride=2))
+
+        # Test 3D
+        output, indices = F.max_pool3d(torch.randn([4, 4, 4, 4, 4]), 2, stride=2, return_indices=True)
+        self.assertEqual(F.max_unpool3d(output, indices, 2), F.max_unpool3d(output, indices, 2, stride=2))
+
     def test_dirac_properties(self):
         for as_variable in [True, False]:
             for dims in [3, 4, 5]:
