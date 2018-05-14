@@ -108,7 +108,7 @@ inline at::Tensor as_tensor(const at::Scalar& s) {
   return s.toTensor();
 }
 
-template<uint64_t N>
+template<size_t N>
 inline at::Tensor as_tensor(std::array<bool, N>&& bools) {
   auto r = at::CPU(at::kByte).tensor({N});
   auto accessor = r.accessor<uint8_t, 1>();
