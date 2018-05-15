@@ -2,57 +2,56 @@
 
 #include <torch/nn/module.h>
 
+#include <ATen/ScalarType.h>
+
+#include <array>
 #include <cstdint>
+#include <initializer_list>
+#include <vector>
 
 namespace torch { namespace nn {
-class Conv : public torch::nn::CloneableModule<Conv> {
+
+template <size_t D, typename Derived>
+class Conv : public torch::nn::CloneableModule<Derived> {
  public:
-  // TODO: Create a type that can be implicitly constructed from a vector, or an
-  // int, and does the right thing. Then we can remove one overload here.
-  Conv(
-      uint32_t Nd,
-      uint32_t in_chan,
-      uint32_t out_chan,
-      IntVec ks,
-      bool transposed = false,
-      bool with_bias = true,
-      int groups = 1);
+  struct ExpandingSize {
+    ExpandingSize(std::initializer_list<int64_t> list);
+    ExpandingSize(std::vector<int64_t> sizes);
+    ExpandingSize(int64_t single_size);
+    std::array<int64_t, D>& operator*();
+    std::array<int64_t, D>* operator->();
+    operator at::IntList();
+    std::array<int64_t, D> sizes_;
+  };
 
   Conv(
-      uint32_t Nd,
-      uint32_t in_chan,
-      uint32_t out_chan,
-      int ks,
-      bool transposed = false,
-      bool with_bias = true,
-      int groups = 1);
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingSize kernel_size);
 
-  variable_list forward(variable_list) override;
+  void reset() override;
 
-  Conv& stride(size_t value);
-  Conv& padding(size_t value);
-  Conv& dilation(size_t value);
-  Conv& output_padding(size_t value);
+  TORCH_PARAMETER(int64_t, input_channels);
+  TORCH_PARAMETER(int64_t, output_channels);
+  TORCH_PARAMETER(ExpandingSize, kernel_size);
+  TORCH_PARAMETER(ExpandingSize, stride) = 1;
+  TORCH_PARAMETER(ExpandingSize, padding) = 0;
+  TORCH_PARAMETER(ExpandingSize, dilation) = 1;
+  TORCH_PARAMETER(ExpandingSize, output_padding) = 0;
+  TORCH_PARAMETER(bool, transposed) = false;
+  TORCH_PARAMETER(bool, with_bias) = true;
+  TORCH_PARAMETER(int64_t, groups) = 1;
 
-  Variable weight, bias;
-  uint32_t Nd_;
-  uint32_t in_channels_;
-  uint32_t out_channels_;
-  bool transposed_;
-  int groups_;
-  IntVec ks_;
-  IntVec stride_;
-  IntVec padding_;
-  IntVec dilation_;
-  bool dilated_;
-  IntVec output_padding_;
+ protected:
+  Variable weights_;
+  Variable bias_;
 };
 
-#define CONV_D(D)                                                          \
-  class Conv##D##d : public Conv {                                         \
-   public:                                                                 \
-    Conv##D##d(uint32_t i, uint32_t o, int ks) : Conv((D), i, o, ks) {}    \
-    Conv##D##d(uint32_t i, uint32_t o, IntVec ks) : Conv((D), i, o, ks) {} \
+#define CONV_D(dimensions)                                                     \
+  class Conv##dimensions##d : public Conv<(dimensions), Conv##dimensions##d> { \
+   public:                                                                     \
+    using Conv<(dimensions), Conv##dimensions##d>::Conv;                       \
+    variable_list forward(variable_list) override;                             \
   }
 
 CONV_D(1);
@@ -60,4 +59,5 @@ CONV_D(2);
 CONV_D(3);
 
 #undef CONV_D
+
 }} // namespace torch::nn

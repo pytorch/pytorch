@@ -8,13 +8,13 @@ using namespace torch::nn;
 TEST_CASE("misc") {
   SECTION("no_grad") {
     no_grad_guard guard;
-    auto model = make(Linear(5, 2));
+    auto model = Linear(5, 2).build();
     auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);
     auto y = model->forward({x})[0];
     Variable s = y.sum();
 
     backward(s);
-    REQUIRE(!model->parameters()["weight"].grad().defined());
+    REQUIRE(!model->parameters()["weights"].grad().defined());
   }
 
   SECTION("CPU random seed") {
