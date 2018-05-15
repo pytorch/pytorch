@@ -181,6 +181,11 @@ pip install "${ROOT_DIR}/third_party/onnx" -t "${ONNX_INSTALL_PATH}"
 report_compile_cache_stats
 
 if [[ -n "$INTEGRATED" ]]; then
+  # sccache will be stuck if  all cores are used for compiling
+  # see https://github.com/pytorch/pytorch/pull/7361
+  if [[ -n "${SCCACHE}" ]]; then
+    export MAX_JOBS=`expr $(nproc) - 1`
+  fi
   TORCH_INSTALL_PATH="/usr/local/torch"
   pip install -v "${ROOT_DIR}" -t "$TORCH_INSTALL_PATH"
 fi
