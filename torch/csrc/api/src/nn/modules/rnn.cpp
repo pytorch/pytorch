@@ -24,13 +24,23 @@ Variable linear(Tensor x, Tensor w, Tensor b) {
 } // namespace
 
 template <typename Derived>
-void RNNBase<Derived>::initialize_containers() {
-  if (dropout_ > 0)
+RNNBase<Derived>::RNNBase(
+    uint32_t input_size,
+    uint32_t hidden_size,
+    int mode,
+    uint32_t nlayers,
+    bool with_bias,
+    float dropout)
+    : input_size_(input_size),
+      hidden_size_(hidden_size),
+      mode_(static_cast<RNNMode>(mode)),
+      nlayers_(nlayers),
+      with_bias_(with_bias),
+      dropout_(dropout) {
+  if (dropout_ > 0) {
     dropout_module = make(Dropout(dropout_));
-}
+  }
 
-template <typename Derived>
-void RNNBase<Derived>::initialize_parameters() {
   auto gate_size = hidden_size_;
   if (mode_ == RNNMode::LSTM) {
     gate_size *= 4;
@@ -38,36 +48,30 @@ void RNNBase<Derived>::initialize_parameters() {
     gate_size *= 3;
   }
 
-  ihw.clear();
-  hhw.clear();
-  ihb.clear();
-  hhb.clear();
-  for (auto i = 0U; i < nlayers_; i++) {
-    auto input_size = (i == 0) ? input_size_ : hidden_size_;
-    ihw.push_back(this->add(
-        Var(at::CPU(at::kFloat).empty({gate_size, input_size})),
-        "weight_ih_l" + std::to_string(i)));
-    hhw.push_back(this->add(
-        Var(at::CPU(at::kFloat).empty({gate_size, hidden_size_})),
-        "weight_hh_l" + std::to_string(i)));
-    ihb.push_back(
-        no_bias_ ? Variable()
-                 : this->add(
-                       Var(at::CPU(at::kFloat).empty({gate_size})),
-                       "bias_ih_l" + std::to_string(i)));
-    hhb.push_back(
-        no_bias_ ? Variable()
-                 : this->add(
-                       Var(at::CPU(at::kFloat).empty({gate_size})),
-                       "bias_hh_l" + std::to_string(i)));
+  for (size_t i = 0; i < nlayers_; ++i) {
+    const auto input_size = (i == 0) ? input_size_ : hidden_size_;
+    ihw.push_back(
+        add(Var(at::CPU(at::kFloat).empty({gate_size, input_size})),
+            "weight_ih_l" + std::to_string(i)));
+    hhw.push_back(
+        add(Var(at::CPU(at::kFloat).empty({gate_size, hidden_size_})),
+            "weight_hh_l" + std::to_string(i)));
+    if (with_bias_) {
+      ihb.push_back(
+          add(Var(at::CPU(at::kFloat).empty({gate_size})),
+              "bias_ih_l" + std::to_string(i)));
+      hhb.push_back(
+          add(Var(at::CPU(at::kFloat).empty({gate_size})),
+              "bias_hh_l" + std::to_string(i)));
+    } else {
+      ihb.emplace_back();
+      hhb.emplace_back();
+    }
   }
-  this->flatten_parameters();
-}
+  flatten_parameters();
 
-template <typename Derived>
-void RNNBase<Derived>::reset_parameters() {
   auto stdv = 1.0 / std::sqrt(hidden_size_);
-  for (auto& p : this->parameters()) {
+  for (auto& p : parameters()) {
     p.second.data().uniform_(-stdv, stdv);
   }
 }
@@ -198,7 +202,7 @@ bool RNNBase<Derived>::flatten_parameters() {
     return false;
   }
   std::unordered_set<void*> unique_data_ptrs;
-  auto params = this->parameters();
+  auto params = parameters();
   for (auto& p : params) {
     unique_data_ptrs.insert(p.second.data().data_ptr());
   }
@@ -218,12 +222,12 @@ bool RNNBase<Derived>::flatten_parameters() {
   for (size_t i = 0; i < nlayers_; i++) {
     weight_list.push_back(ihw[i]);
     weight_list.push_back(hhw[i]);
-    if (!no_bias_) {
+    if (with_bias_) {
       weight_list.push_back(ihb[i]);
       weight_list.push_back(hhb[i]);
     }
   }
-  auto weight_stride0 = no_bias_ ? 2 : 4;
+  auto weight_stride0 = with_bias_ ? 4 : 2;
 
   {
     no_grad_guard guard;
@@ -249,12 +253,12 @@ variable_list RNNBase<Derived>::CUDNN_forward(variable_list inputs) {
   for (size_t i = 0; i < nlayers_; i++) {
     weight_list.push_back(ihw[i]);
     weight_list.push_back(hhw[i]);
-    if (!no_bias_) {
+    if (with_bias_) {
       weight_list.push_back(ihb[i]);
       weight_list.push_back(hhb[i]);
     }
   }
-  auto weight_stride0 = no_bias_ ? 2 : 4;
+  auto weight_stride0 = with_bias_ ? 4 : 2;
 
   auto x = inputs[0];
   Variable hx, cx;
@@ -270,7 +274,7 @@ variable_list RNNBase<Derived>::CUDNN_forward(variable_list inputs) {
   auto dropout_state = x.type().tensor();
 
   std::vector<void*> weight_data_ptrs;
-  auto params = this->parameters();
+  auto params = parameters();
   for (auto& p : params) {
     weight_data_ptrs.emplace_back(p.second.data().data_ptr());
   }
@@ -295,7 +299,7 @@ variable_list RNNBase<Derived>::CUDNN_forward(variable_list inputs) {
       nlayers_,
       false, // batch first
       0, // TODO Use C++ dropout descriptors
-      this->is_training(),
+      is_training(),
       false, // bidirectional
       {}, // packing not supported
       dropout_state // TODO waiting on dropout state descriptor in C++ pytorch

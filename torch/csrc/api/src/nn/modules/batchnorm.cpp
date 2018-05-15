@@ -2,32 +2,20 @@
 
 namespace torch { namespace nn {
 
-BatchNorm::BatchNorm(uint32_t num_features) : num_features_(num_features) {}
-
-void BatchNorm::initialize_parameters() {
+BatchNorm::BatchNorm(uint32_t num_features, bool affine, bool stateful)
+    : num_features_(num_features), affine_(affine), stateful_(stateful) {
   if (affine_) {
-    weight = this->add(Var(at::CPU(at::kFloat).empty(num_features_)), "weight");
-    bias = this->add(Var(at::CPU(at::kFloat).empty(num_features_)), "bias");
+    weight = add(
+        Var(at::CPU(at::kFloat).empty({num_features_}).uniform_()), "weight");
+    bias = add(Var(at::CPU(at::kFloat).zeros({num_features_})), "bias");
   }
 
   if (stateful_) {
     // TODO: Make into buffers instead of parameters
-    running_mean = this->add(
+    running_mean = add(
         Var(at::CPU(at::kFloat).zeros({num_features_}), false), "running_mean");
-    running_var = this->add(
+    running_var = add(
         Var(at::CPU(at::kFloat).ones({num_features_}), false), "running_var");
-  }
-}
-
-void BatchNorm::reset_parameters() {
-  if (affine_) {
-    weight.data().uniform_();
-    bias.data().zero_();
-  }
-
-  if (stateful_) {
-    running_mean.data().zero_();
-    running_var.data().fill_(1);
   }
 }
 
