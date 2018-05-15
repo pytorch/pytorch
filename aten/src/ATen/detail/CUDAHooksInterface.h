@@ -37,6 +37,10 @@ namespace at {
 // in CUDAHooks.  This probably doesn't buy us much though.
 struct AT_API CUDAHooksInterface {
 
+  // This should never actually be implemented, but it is used to
+  // squelch -Werror=non-virtual-dtor
+  virtual ~CUDAHooksInterface() {}
+
   // Initialize THCState and, transitively, the CUDA state
   virtual std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const {
     AT_ERROR("cannot initialize CUDA without ATen_cuda library");
