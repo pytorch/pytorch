@@ -78,7 +78,6 @@ def get_lstm_inputs(device):
     return (input, hx, cx) + tuple(p.requires_grad_(False) for p in module.parameters())
 
 
-
 class TestJit(TestCase):
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, aten=False)
@@ -151,7 +150,7 @@ class TestJit(TestCase):
         def fn(x, y):
             return x[y]
 
-        fn(x, y) # Fails
+        fn(x, y)  # Fails
 
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
@@ -498,6 +497,7 @@ class TestJit(TestCase):
         # Check that the trace looks ok
         trace, _ = torch.jit.get_trace_graph(fn, (x,))
         self.assertExpectedGraph(trace)
+
     def test_trace_size(self):
         self.do_trace_size(False)
 
@@ -666,7 +666,7 @@ class TestJit(TestCase):
         self.assertExportImport(trace, (x,))
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
-                           optimize=True, drop=None, allow_unused=False):
+                   optimize=True, drop=None, allow_unused=False):
         def allSum(vs):
             # drop allows us to remove some values from ever being used
             # to test unused outputs
@@ -736,8 +736,8 @@ class TestJit(TestCase):
                 t = t.cuda()
             return t
         self.checkTrace(lambda a, b: a * b + b,
-                                [rand(1), rand(1)], [rand(2, 3), rand(2, 3)],
-                                optimize=optimize)
+                        [rand(1), rand(1)], [rand(2, 3), rand(2, 3)],
+                        optimize=optimize)
         # trivial identity
         self.checkTrace(lambda a, b: (
             b, a), [rand(1), rand(1)], optimize=optimize)
@@ -754,8 +754,8 @@ class TestJit(TestCase):
         self.checkTrace(foo, [rand(1)], drop=1, optimize=optimize)
         # test autograd fallback
         self.checkTrace(lambda a, b: a * b /
-                                (a - 2 * b) + b, [rand(1), rand(1)],
-                                optimize=optimize)
+                        (a - 2 * b) + b, [rand(1), rand(1)],
+                        optimize=optimize)
 
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
