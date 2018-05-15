@@ -6918,6 +6918,27 @@ class TestTorch(TestCase):
             model.weight.data = weight
             out = model(input)
 
+    def test_tensor_from_sequence(self):
+        class MockSequence(object):
+            def __init__(self, lst):
+                self.lst = lst
+
+            def __len__(self):
+                return len(self.lst)
+
+            def __getitem__(self, item):
+                raise TypeError
+
+        class GoodMockSequence(MockSequence):
+            def __getitem__(self, item):
+                return self.lst[item]
+
+        bad_mock_seq = MockSequence([1.0, 2.0, 3.0])
+        good_mock_seq = GoodMockSequence([1.0, 2.0, 3.0])
+        self.assertRaises(ValueError, lambda: torch.Tensor(bad_mock_seq))
+        self.assertEqual(torch.Tensor([1.0, 2.0, 3.0]), torch.Tensor(good_mock_seq))
+
+
     def test_comparison_ops(self):
         x = torch.randn(5, 5)
         y = torch.randn(5, 5)
