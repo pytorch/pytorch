@@ -138,31 +138,6 @@ const char* rocblasGetErrorString(rocblas_status error);
         CHECK(error == hipSuccess) << hipGetErrorString(error); \
     } while(0)
 
-#if 0 // Ashish TBD: Fix this
-#define CUDA_DRIVERAPI_ENFORCE(condition)                                  \
-    do                                                                     \
-    {                                                                      \
-        CUresult result = condition;                                       \
-        if(result != CUDA_SUCCESS)                                         \
-        {                                                                  \
-            const char* msg;                                               \
-            cuGetErrorName(result, &msg);                                  \
-            CAFFE_THROW("Error at: ", __FILE__, ":", __LINE__, ": ", msg); \
-        }                                                                  \
-    } while(0)
-#define CUDA_DRIVERAPI_CHECK(condition)                                               \
-    do                                                                                \
-    {                                                                                 \
-        CUresult result = condition;                                                  \
-        if(result != CUDA_SUCCESS)                                                    \
-        {                                                                             \
-            const char* msg;                                                          \
-            cuGetErrorName(result, &msg);                                             \
-            LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": " << msg; \
-        }                                                                             \
-    } while(0)
-#endif
-
 #define ROCBLAS_ENFORCE(condition)                                 \
     do                                                             \
     {                                                              \
