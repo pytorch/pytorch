@@ -4476,7 +4476,7 @@ class TestNN(NNTestCase):
                 # check that zero-dimensional input strides don't error out
                 base_input = torch.randn(C, ID, IH, IW)
                 input_cpu = Variable(base_input.expand(input_cuda.size()), requires_grad=True)
-                grid_cpu = torch.randn(N, H, W, 2, requires_grad=True)
+                grid_cpu = torch.randn(N, D, H, W, 3, requires_grad=True)
                 out_cpu = F.grid_sample(input_cpu, grid_cpu, padding_mode=padding_mode)
 
                 input_cuda = Variable(base_input.cuda().expand(input_cuda.size()), requires_grad=True)
@@ -4550,11 +4550,7 @@ class TestNN(NNTestCase):
                 # check that zero-dimensional input strides don't error out
                 base_input = torch.randn(C, IH, IW)
                 input_cpu = Variable(base_input.expand(input_cuda.size()), requires_grad=True)
-<<<<<<< HEAD
                 grid_cpu = torch.randn(N, H, W, 2, requires_grad=True)
-=======
-                grid_cpu = torch.randn(N, H, W, 20 requires_grad=True)
->>>>>>> 2902bfaaf... add gaussian sampler
                 out_cpu = F.grid_sample(input_cpu, grid_cpu, padding_mode=padding_mode, mode='gaussian')
 
                 input_cuda = Variable(base_input.cuda().expand(input_cuda.size()), requires_grad=True)
