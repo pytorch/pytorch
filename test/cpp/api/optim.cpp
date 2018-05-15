@@ -9,13 +9,13 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
   float running_loss = 1;
   int epoch = 0;
   while (running_loss > 0.1) {
-    auto bs = 4U;
+    int64_t bs = 4;
     auto inp = at::CPU(at::kFloat).tensor({bs, 2});
     auto lab = at::CPU(at::kFloat).tensor({bs});
-    for (auto i = 0U; i < bs; i++) {
-      auto a = std::rand() % 2;
-      auto b = std::rand() % 2;
-      auto c = a ^ b;
+    for (size_t i = 0; i < bs; i++) {
+      const int64_t a = std::rand() % 2;
+      const int64_t b = std::rand() % 2;
+      const int64_t c = static_cast<uint64_t>(a) ^ static_cast<uint64_t>(b);
       inp[i][0] = a;
       inp[i][1] = b;
       lab[i] = c;
@@ -23,7 +23,7 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
     // forward
     auto x = Var(inp);
     auto y = Var(lab, false);
-    for (auto layer : *model)
+    for (auto& layer : *model)
       x = layer->forward({x})[0].sigmoid_();
     Variable loss = at::binary_cross_entropy(x, y);
 
@@ -68,10 +68,10 @@ TEST_CASE("optim") {
   }
 
   /*
-  // This test appears to be flaky, see https://github.com/pytorch/pytorch/issues/7288
-  SECTION("adam") {
-    auto optim = Adam(model, 1.0).weight_decay(1e-6).make();
-    REQUIRE(test_optimizer_xor(optim, model));
+  // This test appears to be flaky, see
+  https://github.com/pytorch/pytorch/issues/7288 SECTION("adam") { auto optim =
+  Adam(model, 1.0).weight_decay(1e-6).make(); REQUIRE(test_optimizer_xor(optim,
+  model));
   }
   */
 

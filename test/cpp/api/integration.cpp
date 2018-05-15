@@ -357,10 +357,12 @@ TEST_CASE("integration/mnist", "[cuda]") {
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto model = make(SimpleContainer());
   auto conv1 = model->add(make(Conv2d(1, 10, 5)), "conv1");
-  auto batchnorm2d = model->add(make(BatchNorm(10).stateful()), "batchnorm2d");
+  auto batchnorm2d = model->add(
+      make(BatchNorm(10, /*affine=*/true, /*stateful=*/true)), "batchnorm2d");
   auto conv2 = model->add(make(Conv2d(10, 20, 5)), "conv2");
   auto linear1 = model->add(make(Linear(320, 50)), "linear1");
-  auto batchnorm1 = model->add(make(BatchNorm(50).stateful()), "batchnorm1");
+  auto batchnorm1 = model->add(
+      make(BatchNorm(50, /*affine=*/true, /*stateful=*/true)), "batchnorm1");
   auto linear2 = model->add(make(Linear(50, 10)), "linear2");
 
   auto forward = [&](Variable x) {
