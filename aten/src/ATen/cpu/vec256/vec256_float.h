@@ -3,7 +3,6 @@
 #include "intrinsics.h"
 #include "vec256_base.h"
 #include <sleef.h>
-#include <iostream>
 
 namespace at {
 namespace vec256 {
@@ -13,7 +12,7 @@ namespace {
 
 template <> class Vec256<float> {
 public:
-  static constexpr int size = 8;
+  static constexpr int64_t size = 8;
   __m256 values;
   Vec256() {}
   Vec256(__m256 v) : values(v) {}
@@ -23,26 +22,47 @@ public:
   operator __m256() const {
     return values;
   }
-  void load(const void *ptr) {
-    values = _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
+  template <int64_t mask>
+  static Vec256<float> blend(Vec256<float> a, Vec256<float> b) {
+    return _mm256_blend_ps(a.values, b.values, mask);
   }
-  void load_partial(const void *ptr, int count) {
-    float tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(float));
-    load(tmp_values);
+  static Vec256<float> set(Vec256<float> a, Vec256<float> b, int64_t count = size) {
+    switch (count) {
+      case 0:
+        return a;
+      case 1:
+        return blend<1>(a, b);
+      case 2:
+        return blend<3>(a, b);
+      case 3:
+        return blend<7>(a, b);
+      case 4:
+        return blend<15>(a, b);
+      case 5:
+        return blend<31>(a, b);
+      case 6:
+        return blend<63>(a, b);
+      case 7:
+        return blend<127>(a, b);
+    }
+    return b;
   }
-  static Vec256<float> s_load(const void* ptr) {
-    Vec256<float> vec;
-    vec.load(ptr);
-    return vec;
+  static Vec256<float> loadu(const void* ptr, int64_t count = size) {
+    if (count == size)
+      return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
+    __at_align32__ float tmp_values[size];
+    std::memcpy(
+        tmp_values, reinterpret_cast<const float*>(ptr), count * sizeof(float));
+    return _mm256_loadu_ps(tmp_values);
   }
-  void store(void *ptr) const {
-    _mm256_storeu_ps(reinterpret_cast<float*>(ptr), values);
-  }
-  void store_partial(void* ptr, int count) const {
-    float tmp_values[size];
-    store(tmp_values);
-    std::memcpy(ptr, tmp_values, count * sizeof(float));
+  void store(void* ptr, int64_t count = size) const {
+    if (count == size) {
+      _mm256_storeu_ps(reinterpret_cast<float*>(ptr), values);
+    } else {
+      float tmp_values[size];
+      _mm256_storeu_ps(reinterpret_cast<float*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(float));
+    }
   }
   Vec256<float> map(float (*f)(float)) const {
     __at_align32__ float tmp[8];
@@ -50,7 +70,7 @@ public:
     for (int64_t i = 0; i < 8; i++) {
       tmp[i] = f(tmp[i]);
     }
-    return s_load(tmp);
+    return loadu(tmp);
   }
   Vec256<float> abs() const {
     auto mask = _mm256_set1_ps(-0.f);
@@ -118,6 +138,11 @@ Vec256<float> inline operator+(const Vec256<float>& a, const Vec256<float>& b) {
 }
 
 template <>
+Vec256<float> inline operator-(const Vec256<float>& a, const Vec256<float>& b) {
+  return _mm256_sub_ps(a, b);
+}
+
+template <>
 Vec256<float> inline operator*(const Vec256<float>& a, const Vec256<float>& b) {
   return _mm256_mul_ps(a, b);
 }
@@ -125,6 +150,11 @@ Vec256<float> inline operator*(const Vec256<float>& a, const Vec256<float>& b) {
 template <>
 Vec256<float> inline operator/(const Vec256<float>& a, const Vec256<float>& b) {
   return _mm256_div_ps(a, b);
+}
+
+template <>
+Vec256<float> inline max(const Vec256<float>& a, const Vec256<float>& b) {
+  return _mm256_max_ps(a, b);
 }
 
 #endif
