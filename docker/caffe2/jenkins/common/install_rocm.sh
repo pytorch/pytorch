@@ -27,8 +27,8 @@ install_ubuntu() {
                    rocm-profiler \
                    cxlactivitylogger
 
-    export PATH="/opt/rocm/bin:/opt/rocm/hcc/bin:/opt/rocm/hip/bin:/opt/rocm/opencl/bin:${PATH}"
-    export MIOPEN_DISABLE_CACHE=1
+    echo 'export PATH="/opt/rocm/bin:/opt/rocm/hcc/bin:/opt/rocm/hip/bin:/opt/rocm/opencl/bin:${PATH}"' >> /etc/profile.d/rocm.sh
+    echo 'export MIOPEN_DISABLE_CACHE=1' >> /etc/profile.d/rocm.sh
 }
 
 install_centos() {
@@ -42,7 +42,7 @@ install_hip_thrust() {
     rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
     cd /data/Thrust/thrust/system/cuda/detail/cub-hip && git checkout hip_port_1.7.4_caffe2 && cd -
-    export THRUST_ROOT=/data/Thrust
+    echo 'export THRUST_ROOT=/data/Thrust' >> /etc/profile.d/rocm.sh
 }
 
 
