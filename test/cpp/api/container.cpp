@@ -7,7 +7,7 @@ using namespace torch::nn;
 
 class TestModel : public CloneableModule<TestModel> {
  public:
-  void initialize_containers() override {
+  TestModel() {
     add(make(Linear(10, 3)), "l1");
     add(make(Linear(3, 5)), "l2");
     add(make(Linear(5, 100)), "l3");
@@ -20,12 +20,9 @@ class TestModel : public CloneableModule<TestModel> {
 
 class NestedModel : public CloneableModule<NestedModel> {
  public:
-  void initialize_containers() override {
+  NestedModel() {
     add(make(Linear(5, 20)), "l1");
     add(make(TestModel()), "test");
-  }
-
-  void initialize_parameters() override {
     add(Var(at::CPU(at::kFloat).tensor({3, 2, 21}), false), "param");
   }
 
@@ -155,21 +152,6 @@ TEST_CASE("containers") {
       REQUIRE(x.size(0) == 1000);
       REQUIRE(x.size(1) == 100);
       REQUIRE(x.data().min().toCFloat() == 0);
-    }
-  }
-
-  SECTION("clone") {
-    auto model = make(TestModel());
-
-    auto model2 = model->clone();
-    auto m1param = model->parameters();
-    auto m2param = model2->parameters();
-    for (auto& param : m1param) {
-      REQUIRE(param.second.allclose(m2param[param.first]));
-      param.second.data().mul_(2);
-    }
-    for (auto& param : m1param) {
-      REQUIRE(!param.second.allclose(m2param[param.first]));
     }
   }
 
