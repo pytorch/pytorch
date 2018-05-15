@@ -189,7 +189,7 @@ if(BUILD_CAFFE2)
     # order of the libraries in the linker call matters here when statically
     # linking; libculibos and cublas must be last.
     target_link_libraries(
-            caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+        caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
     caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
     list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
