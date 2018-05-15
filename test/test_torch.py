@@ -6935,9 +6935,9 @@ class TestTorch(TestCase):
 
         bad_mock_seq = MockSequence([1.0, 2.0, 3.0])
         good_mock_seq = GoodMockSequence([1.0, 2.0, 3.0])
-        self.assertRaises(ValueError, lambda: torch.Tensor(bad_mock_seq))
+        with self.assertRaisesRegex(ValueError, 'could not determine the shape'):
+            torch.Tensor(bad_mock_seq)
         self.assertEqual(torch.Tensor([1.0, 2.0, 3.0]), torch.Tensor(good_mock_seq))
-
 
     def test_comparison_ops(self):
         x = torch.randn(5, 5)
