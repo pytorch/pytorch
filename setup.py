@@ -601,6 +601,7 @@ main_sources = [
     "torch/csrc/Dtype.cpp",
     "torch/csrc/Device.cpp",
     "torch/csrc/Exceptions.cpp",
+    "torch/csrc/Exceptions_python.cpp"
     "torch/csrc/Layout.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/DataLoader.cpp",
