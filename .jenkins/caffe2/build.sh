@@ -53,6 +53,14 @@ if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   export PATH="$CACHE_WRAPPER_DIR:$PATH"
 fi
 
+report_compile_cache_stats() {
+  if [[ -n "${SCCACHE}" ]]; then
+    "$SCCACHE" --show-stats
+  elif which ccache > /dev/null; then
+    ccache -s
+  fi
+}
+
 CMAKE_ARGS=("-DBUILD_BINARY=ON")
 CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
 CMAKE_ARGS+=("-DUSE_ZSTD=ON")
@@ -75,6 +83,7 @@ if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   export LC_ALL=C.UTF-8
 
   "${ROOT_DIR}/scripts/build_anaconda.sh" --skip-tests --install-locally "$@"
+  report_compile_cache_stats
 
   # This build will be tested against onnx tests, which needs onnx installed.
   # At this point the visible protbuf installation will be in conda, since one
@@ -82,7 +91,8 @@ if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   # headers are those in conda as well
   # This path comes from install_anaconda.sh which installs Anaconda into the
   # docker image
-  PROTOBUF_INCDIR=/opt/conda/include pip install "${ROOT_DIR}/third_party/onnx"
+  PROTOBUF_INCDIR=/opt/conda/include pip install -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+  report_compile_cache_stats
   exit 0
 fi
 
@@ -164,9 +174,23 @@ else
   exit 1
 fi
 
+report_compile_cache_stats
+
 # Install ONNX into a local directory
-ONNX_INSTALL_PATH="/usr/local/onnx"
-pip install "${ROOT_DIR}/third_party/onnx" -t "${ONNX_INSTALL_PATH}"
+pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+
+report_compile_cache_stats
+
+if [[ -n "$INTEGRATED" ]]; then
+  # sccache will be stuck if  all cores are used for compiling
+  # see https://github.com/pytorch/pytorch/pull/7361
+  if [[ -n "${SCCACHE}" ]]; then
+    export MAX_JOBS=`expr $(nproc) - 1`
+  fi
+  pip install --user -v -b /tmp/pip_install_torch "file://${ROOT_DIR}#egg=torch"
+fi
+
+report_compile_cache_stats
 
 # Symlink the caffe2 base python path into the system python path,
 # so that we can import caffe2 without having to change $PYTHONPATH.
@@ -187,14 +211,12 @@ if [ -n "${JENKINS_URL}" ]; then
     if [[ "$ID_LIKE" == *debian* ]]; then
       python_path="/usr/local/lib/$(python_version)/dist-packages"
       sudo ln -sf "${INSTALL_PREFIX}/caffe2" "${python_path}"
-      sudo ln -sf "${ONNX_INSTALL_PATH}/onnx" "${python_path}"
     fi
 
     # RHEL/CentOS
     if [[ "$ID_LIKE" == *rhel* ]]; then
       python_path="/usr/lib64/$(python_version)/site-packages/"
       sudo ln -sf "${INSTALL_PREFIX}/caffe2" "${python_path}"
-      sudo ln -sf "${ONNX_INSTALL_PATH}/onnx" "${python_path}"
     fi
 
     # /etc/ld.so.conf.d is used on both Debian and RHEL
