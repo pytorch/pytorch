@@ -175,7 +175,7 @@ fi
 report_compile_cache_stats
 
 # Install ONNX into a local directory
-pip install --user "${ROOT_DIR}/third_party/onnx"
+pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 report_compile_cache_stats
 
@@ -185,7 +185,7 @@ if [[ -n "$INTEGRATED" ]]; then
   if [[ -n "${SCCACHE}" ]]; then
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
-  pip install --user -v "${ROOT_DIR}"
+  pip install --user -v -b /tmp/pip_install_torch "file://${ROOT_DIR}#egg=torch"
 fi
 
 report_compile_cache_stats
