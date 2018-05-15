@@ -53,8 +53,8 @@ if(NOT NO_CUDA OR WITH_ROCM)
   target_link_libraries(cuda_rng_test ATen_cpu ATen_cuda_library)
 endif()
 
-if(NOT NO_CUDA)
-  cuda_add_executable(apply_test apply_test.cpp)
+if(NOT NO_CUDA OR WITH_ROCM)
+  torch_cuda_based_add_executable(apply_test apply_test.cpp)
   target_link_libraries(apply_test ATen_cpu ATen_cuda_library)
 endif()
 
