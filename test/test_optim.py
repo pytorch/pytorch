@@ -475,6 +475,17 @@ class TestOptim(TestCase):
             ignore_multidevice=True
         )
 
+    def test_lbfgs_return_type(self):
+        params = [torch.randn(10, 5), torch.randn(10)]
+        opt1 = optim.LBFGS(params, 0.01, tolerance_grad=float('inf'))
+        opt2 = optim.LBFGS(params, 0.01, tolerance_grad=-float('inf'))
+        def closure():
+            return torch.Tensor([10])
+
+        res1 = opt1.step(closure)
+        res2 = opt2.step(closure)
+        self.assertEqual(type(res1), type(res2))
+
     def test_invalid_param_type(self):
         with self.assertRaises(TypeError):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
