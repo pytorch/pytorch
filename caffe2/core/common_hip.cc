@@ -252,20 +252,6 @@ bool GetHipPeerAccessPattern(vector<vector<bool>>* pattern)
     return true;
 }
 
-#if 0
-bool TensorCoreAvailable() {
-  // requires CUDA 9.0 and above
-#if CUDA_VERSION < 9000
-  return false;
-#else
-  int device = CaffeCudaGetDevice();
-  auto& prop = GetDeviceProperty(device);
-
-  return prop.major >= 7;
-#endif
-}
-#endif
-
 const char* rocblasGetErrorString(rocblas_status error)
 {
     switch(error)

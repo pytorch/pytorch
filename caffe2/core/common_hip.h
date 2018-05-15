@@ -5,41 +5,12 @@
 #include <assert.h>
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
+#include <hip/hip_fp16.h>
 #include <hiprand.h>
 #include <rocblas.h>
 
 #include "caffe2/core/logging.h"
 #include "caffe2/core/common.h"
-
-// This is a macro defined for cuda fp16 support. In default, cuda fp16 is
-// supported by NVCC 7.5, but it is also included in the Tegra X1 platform with
-// a (custom?) NVCC 7.0. As a result, we would normally just check the cuda
-// version here, but would also allow a use to pass in the flag
-// CAFFE_HAS_CUDA_FP16 manually.
-
-#if 0 // ashish TBD: check if this is needed
-#ifndef CAFFE_HAS_CUDA_FP16
-#if CUDA_VERSION >= 7050
-#define CAFFE_HAS_CUDA_FP16
-#endif // CUDA_VERSION >= 7050
-#endif // CAFFE_HAS_CUDA_FP16
-
-#ifdef CAFFE_HAS_CUDA_FP16
-#include <hip/hip_fp16.h>
-#endif
-#else
-#include <hip/hip_fp16.h>
-#endif
-
-/*// Re-enable strict aliasing diagnostic if it was disabled.
-#if CUDA_VERSION >= 9000
-#ifdef __GNUC__
-#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
-#pragma GCC diagnostic pop
-#endif
-#endif // __GNUC__
-#endif // CUDA_VERSION >= 9000
-*/
 
 /**
  * The maximum number of GPUs that caffe2 recognizes.
@@ -234,13 +205,6 @@ const char* rocblasGetErrorString(rocblas_status error);
 // CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
 // kernels. This is not supported by Apple platforms so we special case it.
 // See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
-#if 0 // TBD Ashish: Disabling assert(..) which is under development for device code
-#ifdef __APPLE__
-#define HIP_KERNEL_ASSERT(...)
-#else // __APPLE__
-#define HIP_KERNEL_ASSERT(...) assert(__VA_ARGS__)
-#endif // __APPLE__
-#endif
 #define HIP_KERNEL_ASSERT(...)
 
 // The following helper functions are here so that you can write a kernel call
