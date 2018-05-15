@@ -1,7 +1,11 @@
 r"""
 The ``distributions`` package contains parameterizable probability distributions
 and sampling functions. This allows the construction of stochastic computation
-graphs and stochastic gradient estimators for optimization.
+graphs and stochastic gradient estimators for optimization. This package
+generally follows the design of the `TensorFlow Distributions`_ package.
+
+.. _`TensorFlow Distributions`:
+    https://arxiv.org/abs/1711.10604
 
 It is not possible to directly backpropagate through random samples. However,
 there are two main methods for creating surrogate functions that can be
