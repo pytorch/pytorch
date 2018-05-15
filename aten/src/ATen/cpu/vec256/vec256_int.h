@@ -3,8 +3,6 @@
 #include "intrinsics.h"
 #include "vec256_base.h"
 
-//TODO: Add tests for partial loads
-
 namespace at {
 namespace vec256 {
 namespace {

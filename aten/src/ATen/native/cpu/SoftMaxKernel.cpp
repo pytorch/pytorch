@@ -24,13 +24,6 @@ namespace {
 
 static tbb::affinity_partitioner ap;
 
-template <int64_t size>
-inline int64_t _leftover(int64_t x, int64_t y) {
-  if (x + size > y)
-    return y - x;
-  return size;
-}
-
 template <typename scalar_t>
 inline void _vec_log_softmax_lastdim(
     scalar_t* input_data_base,
@@ -72,18 +65,12 @@ inline void _vec_log_softmax_lastdim(
           }
           // See [Note AVX-SSE transitions] for why this should call the
           // vectorized version (aside from perf improvements).
-          int64_t j = 0;
-          for (; j < (loop_end - loop_end % Vec::size); j += Vec::size) {
-            Vec tmp_sum_scalar_vec = Vec::loadu(max_input_arr + j) +
-                Vec::loadu(tmp_sum_scalar + j).log();
-            tmp_sum_scalar_vec.store(tmp_sum_scalar + j);
-          }
-          if (loop_end - j > 0) {
-            Vec tmp_sum_scalar_vec =
-                Vec::loadu(max_input_arr + j, loop_end - j) +
-                Vec::loadu(tmp_sum_scalar + j, loop_end - j).log();
-            tmp_sum_scalar_vec.store(tmp_sum_scalar + j, loop_end - j);
-          }
+          vec256::map2(
+              [](Vec x, Vec y) { return x.log() + y; },
+              tmp_sum_scalar,
+              tmp_sum_scalar,
+              max_input_arr,
+              loop_end);
           for (int64_t j = 0; j < loop_end; j++) {
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;

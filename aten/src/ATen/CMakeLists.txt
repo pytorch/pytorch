@@ -17,7 +17,6 @@ ENDIF()
 IF(NOT MSVC)
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-ignored-qualifiers")
   SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-ignored-qualifiers")
-  # TODO: GCC unrecognized option warning
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-absolute-value")
   SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-absolute-value")
 ENDIF(NOT MSVC)
