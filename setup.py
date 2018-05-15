@@ -123,14 +123,7 @@ IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
 # Check if ROCM is enabled
-if check_env_flag('WITH_ROCM'):
-    WITH_ROCM = True
-    WITH_CUDA = False
-
-    # Distributed disabled for now since RCCL development isn't complete. https://github.com/ROCmSoftwarePlatform/rccl
-    WITH_DISTRIBUTED = False
-else:
-    WITH_ROCM = False
+WITH_ROCM = check_env_flag('WITH_ROCM'):
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
