@@ -83,6 +83,7 @@ if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   export LC_ALL=C.UTF-8
 
   "${ROOT_DIR}/scripts/build_anaconda.sh" --skip-tests --install-locally "$@"
+  report_compile_cache_stats
 
   # This build will be tested against onnx tests, which needs onnx installed.
   # At this point the visible protbuf installation will be in conda, since one
@@ -90,7 +91,8 @@ if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   # headers are those in conda as well
   # This path comes from install_anaconda.sh which installs Anaconda into the
   # docker image
-  PROTOBUF_INCDIR=/opt/conda/include pip install "${ROOT_DIR}/third_party/onnx"
+  PROTOBUF_INCDIR=/opt/conda/include pip install -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+  report_compile_cache_stats
   exit 0
 fi
 
