@@ -102,5 +102,8 @@ echo "Running Python tests.."
   "${EXTRA_TESTS[@]}"
 
 if [[ -n "$INTEGRATED" ]]; then
+  TMP_TESTS_REQUIRE=/tmp/integration_tests_require
+  pip install pytest-xdist torchvision -t "$TMP_TESTS_REQUIRE"
+  PYTHONPATH="$TMP_TESTS_REQUIRE:$PYTHONPATH"
   "$ROOT_DIR/scripts/onnx/test.sh" -p
 fi
