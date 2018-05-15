@@ -174,9 +174,6 @@ fi
 
 report_compile_cache_stats
 
-# This can be used to speed up the installations of onnx and pytorch
-pip install ninja
-
 # Install ONNX into a local directory
 ONNX_INSTALL_PATH="/usr/local/onnx"
 pip install "${ROOT_DIR}/third_party/onnx" -t "${ONNX_INSTALL_PATH}"
