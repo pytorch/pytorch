@@ -44,7 +44,7 @@ class RNNBase(Module):
         else:
             gate_size = hidden_size
 
-        self._all_weights = []
+        self.all_weights_names = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
@@ -63,7 +63,7 @@ class RNNBase(Module):
 
                 for name, param in zip(param_names, layer_params):
                     setattr(self, name, param)
-                self._all_weights.append(param_names)
+                self.all_weights_names.append(param_names)
 
         self.flatten_parameters()
         self.reset_parameters()
@@ -212,25 +212,25 @@ class RNNBase(Module):
         super(RNNBase, self).__setstate__(d)
         self.__dict__.setdefault('_data_ptrs', [])
         if 'all_weights' in d:
-            self._all_weights = d['all_weights']
-        if isinstance(self._all_weights[0][0], str):
+            self.all_weights_names = d['all_weights']
+        if isinstance(self.all_weights_names[0][0], str):
             return
         num_layers = self.num_layers
         num_directions = 2 if self.bidirectional else 1
-        self._all_weights = []
+        self.all_weights_names = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 suffix = '_reverse' if direction == 1 else ''
                 weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}', 'bias_hh_l{}{}']
                 weights = [x.format(layer, suffix) for x in weights]
                 if self.bias:
-                    self._all_weights += [weights]
+                    self.all_weights_names += [weights]
                 else:
-                    self._all_weights += [weights[:2]]
+                    self.all_weights_names += [weights[:2]]
 
     @property
     def all_weights(self):
-        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
+        return [[getattr(self, weight) for weight in weights] for weights in self.all_weights_names]
 
 
 class RNN(RNNBase):
