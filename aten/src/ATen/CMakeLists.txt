@@ -289,7 +289,7 @@ endfunction()
 
 if(NOT MSVC)
   aten_compile_options(ATen_cpu)
-  if(NOT NO_CUDA)
+  if(NOT NO_CUDA OR WITH_ROCM)
     aten_compile_options(ATen_cuda)
   endif()
 endif()
@@ -307,7 +307,7 @@ target_link_libraries(ATen_cpu tbb_static)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
   set_property(TARGET ATen_cpu PROPERTY CXX_STANDARD 11)
-  if(NOT NO_CUDA)
+  if(NOT NO_CUDA OR WITH_ROCM)
     set_property(TARGET ATen_cuda PROPERTY CXX_STANDARD 11)
   endif()
 endif()
@@ -316,12 +316,12 @@ IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
     TARGET_LINK_LIBRARIES(ATen_cpu "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-    if(NOT NO_CUDA)
+    if(NOT NO_CUDA OR WITH_ROCM)
       TARGET_LINK_LIBRARIES(ATen_cuda "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     endif()
   ELSE ($ENV{TH_BINARY_BUILD})
     TARGET_LINK_LIBRARIES(ATen_cpu ${BLAS_LIBRARIES})
-    if(NOT NO_CUDA)
+    if(NOT NO_CUDA OR WITH_ROCM)
       TARGET_LINK_LIBRARIES(ATen_cuda "${BLAS_LIBRARIES}")
     endif()
   ENDIF ($ENV{TH_BINARY_BUILD})
@@ -329,7 +329,7 @@ ENDIF(BLAS_FOUND)
 
 IF(LAPACK_FOUND)
   TARGET_LINK_LIBRARIES(ATen_cpu ${LAPACK_LIBRARIES})
-  if(NOT NO_CUDA)
+  if(NOT NO_CUDA OR WITH_ROCM)
     # Although Lapack provides CPU (and thus, one might expect that ATen_cuda
     # would not need this at all), some of our libraries (magma in particular)
     # backend to CPU BLAS/LAPACK implementations, and so it is very important
@@ -379,7 +379,7 @@ ELSE(NOT MSVC)
     set_target_properties(ATen_cpu PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
     set_target_properties(ATen_cpu PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
     set_target_properties(ATen_cpu PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
-    if(NOT NO_CUDA)
+    if(NOT NO_CUDA OR WITH_ROCM)
       set_target_properties(ATen_cuda PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
       set_target_properties(ATen_cuda PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
       set_target_properties(ATen_cuda PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
@@ -512,7 +512,7 @@ IF(NOT NO_CUDA)
 ENDIF()
 
 IF(WITH_ROCM)
- ### Link in the ROCm stuff ###
+ ### Link in the ROCm libraries BLAS / RNG.
  FIND_LIBRARY(HIPBLAS_LIBRARY hipblas HINTS ${HIPBLAS_PATH}/lib)
  FIND_LIBRARY(HIPRNG_LIBRARY hiprng HINTS ${HIPRNG_PATH}/lib)
 
@@ -524,7 +524,7 @@ install(TARGETS ATen_cpu
   LIBRARY DESTINATION "${AT_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${AT_INSTALL_LIB_DIR}")
 
-if(NOT NO_CUDA)
+if(NOT NO_CUDA OR WITH_ROCM)
   install(TARGETS ATen_cuda
     RUNTIME DESTINATION "${AT_INSTALL_BIN_DIR}"
     LIBRARY DESTINATION "${AT_INSTALL_LIB_DIR}"
@@ -534,7 +534,7 @@ endif()
 get_target_property(ATEN_CPU_OUTPUT_NAME ATen_cpu LOCATION)
 get_filename_component(ATEN_CPU_OUTPUT_NAME ${ATEN_CPU_OUTPUT_NAME} NAME)
 
-if(NOT NO_CUDA)
+if(NOT NO_CUDA OR WITH_ROCM)
   get_target_property(ATEN_CUDA_OUTPUT_NAME ATen_cuda LOCATION)
   get_filename_component(ATEN_CUDA_OUTPUT_NAME ${ATEN_CUDA_OUTPUT_NAME} NAME)
 endif()

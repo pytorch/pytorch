@@ -579,7 +579,7 @@ library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 ATEN_LIBS = [os.path.join(lib_path, 'libATen_cpu.so')]
-if WITH_CUDA:
+if WITH_CUDA or WITH_ROCM:
     ATEN_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libATen_cuda.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
@@ -589,13 +589,13 @@ NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if IS_DARWIN:
     ATEN_LIBS = [os.path.join(lib_path, 'libATen_cpu.dylib')]
-    if WITH_CUDA:
+    if WITH_CUDA or WITH_ROCM:
         ATEN_LIBS.append(os.path.join(lib_path, 'libATen_cuda.dylib'))
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
     ATEN_LIBS = [os.path.join(lib_path, 'ATen_cpu.lib')]
-    if WITH_CUDA:
+    if WITH_CUDA or WITH_ROCM:
         ATEN_LIBS.append(os.path.join(lib_path, 'ATen_cuda.lib'))
     if DEBUG:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
@@ -792,11 +792,8 @@ if WITH_ROCM:
     include_dirs.append(tmp_install_path + "/include/THCUNN")
     extra_link_args.append('-L' + hip_lib_path)
     extra_link_args.append('-Wl,-rpath,' + hip_lib_path)
-    extra_link_args.append('-shared')
     extra_compile_args += ['-DWITH_ROCM']
     extra_compile_args += ['-D__HIP_PLATFORM_HCC__']
-
-    os.environ["LDSHARED"] = 'gcc'
 
     main_sources += [
         "torch/csrc/cuda/Module.cpp",

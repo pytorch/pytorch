@@ -40,11 +40,6 @@ list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
 
 cmake_policy(SET CMP0012 NEW)
 
-# Load HIP specific paths.
-IF(WITH_ROCM)
-  include(LoadHIP)
-ENDIF()
-
 # For caffe2_interface_library
 include(utils)
 
@@ -121,6 +116,11 @@ endif()
 # for CUDA language, it seemed not worth fixing.
 IF(NOT CUDA_FOUND AND NOT NO_CUDA)
   FIND_PACKAGE(CUDA 5.5)
+ENDIF()
+
+# Find the HIP package, set the HIP paths, load the HIP CMake.
+IF(WITH_ROCM)
+  include(LoadHIP)
 ENDIF()
 
 IF(MSVC)
