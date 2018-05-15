@@ -231,11 +231,11 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     } break;
     case aten::sum: {
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
-                         {{AKind::i, attr::dim},
+                         {{AKind::is, attr::dim},
                           {AKind::i, attr::keepdim}})) {
         auto tp = types.at(0);
         auto sizes = tp->sizes();
-        int64_t dim = node->i(attr::dim);
+        int64_t dim = node->is(attr::dim).at(0);
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
         if (node->i(attr::keepdim)) {
           sizes.at(dim) = 1;
