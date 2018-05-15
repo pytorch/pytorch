@@ -19,6 +19,7 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/opt/optimizer.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
@@ -63,6 +64,7 @@ CAFFE2_DEFINE_string(
     "folder must already exist in the file system.");
 CAFFE2_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
 CAFFE2_DEFINE_int(iter, 10, "The number of iterations to run.");
+CAFFE2_DEFINE_int(opt, 0, "The level of optimization to run automatically.");
 CAFFE2_DEFINE_bool(
     run_individual,
     false,
@@ -170,6 +172,10 @@ int main(int argc, char** argv) {
           ->set_s(caffe2::FLAGS_algo);
     }
   }
+  if (caffe2::FLAGS_opt) {
+    net_def = caffe2::opt::optimize(net_def, workspace.get(), caffe2::FLAGS_opt);
+  }
+
   caffe2::NetBase* net = workspace->CreateNet(net_def);
   CHECK_NOTNULL(net);
   CAFFE_ENFORCE(net->Run());
