@@ -155,21 +155,6 @@ TEST_CASE("containers") {
     }
   }
 
-  SECTION("clone") {
-    auto model = make(TestModel());
-
-    auto model2 = model->clone();
-    auto m1param = model->parameters();
-    auto m2param = model2->parameters();
-    for (auto& param : m1param) {
-      REQUIRE(param.second.allclose(m2param[param.first]));
-      param.second.data().mul_(2);
-    }
-    for (auto& param : m1param) {
-      REQUIRE(!param.second.allclose(m2param[param.first]));
-    }
-  }
-
   SECTION("embedding") {
     SECTION("basic") {
       int dict_size = 10;
