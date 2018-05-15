@@ -203,7 +203,7 @@ void Broadcast(
     T* Y,
     Context* context);
 
-// COmputes mean and variance over axes.
+// Computes mean and variance over axes.
 template <typename T, class Context>
 void Moments(
     const int num_dims,
@@ -407,40 +407,38 @@ void Axpby(
     T* y,
     Context* context);
 
-template <typename T, class Context, int order>
-void Im2colNd(
-    const T* data_img,
-    const int* im_shape,
-    const int* col_shape,
+template <typename T, class Context, StorageOrder kOrder>
+void Im2ColNd(
+    const int N,
     const int img_size,
     const int col_size,
-    const int* kernel_shape,
-    const int* stride,
-    const int* dilation,
-    const int* pad,
-    const int N,
-    T* data_col,
-    Context* context,
-    bool accumulate_output = false);
-
-template <typename T, class Context, int order>
-void Col2imNd(
-    const T* data_col,
     const int* img_shape,
     const int* col_shape,
-    const int img_size,
-    const int col_size,
     const int* kernel_shape,
     const int* stride,
     const int* dilation,
     const int* pad,
-    const int N,
-    T* data_img,
+    const T* img_data,
+    T* col_data,
     Context* context);
 
-template <typename T, class Context, int order>
-void Im2col(
-    const T* data_im,
+template <typename T, class Context, StorageOrder kOrder>
+void Col2ImNd(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const T* col_data,
+    T* img_data,
+    Context* context);
+
+template <typename T, class Context, StorageOrder kOrder>
+void Im2Col(
     const int channels,
     const int height,
     const int width,
@@ -454,12 +452,12 @@ void Im2col(
     const int pad_r,
     const int stride_h,
     const int stride_w,
-    T* data_col,
+    const T* img_data,
+    T* col_data,
     Context* context);
 
 template <typename T, class Context, int order>
-void Col2im(
-    const T* data_col,
+void Col2Im(
     const int channels,
     const int height,
     const int width,
@@ -473,7 +471,8 @@ void Col2im(
     const int pad_r,
     const int stride_h,
     const int stride_w,
-    T* data_im,
+    const T* col_data,
+    T* img_data,
     Context* context);
 
 // Applies a per-channel bias value to each channel of the input

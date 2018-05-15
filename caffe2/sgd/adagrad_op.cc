@@ -5,7 +5,7 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(Adagrad, AdagradOp<float, CPUContext>);
 OPERATOR_SCHEMA(Adagrad)
     .NumInputs(4)
-    .NumOutputs(2)
+    .NumOutputs(2, 4)
     .AllowInplace({{0, 0}, {1, 1}})
     .SetDoc(R"DOC(
 
@@ -14,9 +14,12 @@ history. Concretely, given inputs (param, grad, moment, learning_rate),
 computes
 
     new_moment = moment + square(grad)
-    new_grad = learning_rate * grad / (sqrt(new_moment) + epsilon)
-    new_param = param + new_grad
+    effective_lr = learning_rate / (sqrt(new_moment) + epsilon)
+    update = learning_rate * grad / (sqrt(new_moment) + epsilon)
+    new_param = param + update
 and returns (new_param, new_moment).
+
+Optionally returns effective_lr and update as well.
 
 )DOC")
     .Input(0, "param", "Parameters to be updated")
@@ -25,6 +28,9 @@ and returns (new_param, new_moment).
     .Input(3, "lr", "learning rate")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated moment")
+    .Output(2, "output_effective_lr", "(optional) Effective learning rate")
+    .Output(3, "output_update", "(optional) Actual update that is applied.")
+
     .Arg("epsilon", "Default 1e-5")
     .Arg(
         "decay",

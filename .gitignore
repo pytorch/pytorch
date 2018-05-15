@@ -14,6 +14,7 @@ torch.egg-info/
 */**/__pycache__
 aten/build/
 aten/src/ATen/Config.h
+aten/src/ATen/cuda/CUDAConfig.h
 third_party/build/
 torch/version.py
 torch/csrc/generic/TensorMethods.cpp
@@ -55,6 +56,7 @@ test/.coverage
 test/data/legacy_serialized.pt
 test/data/linear.pt
 .mypy_cache
+test/cpp/api/mnist
 
 # IPython notebook checkpoints
 .ipynb_checkpoints

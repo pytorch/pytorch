@@ -12,7 +12,7 @@ namespace at {
 // make sense.  These are particularly useful for native functions,
 // which do NO argument checking by default.
 
-struct TensorArg {
+struct AT_API TensorArg {
   Tensor tensor;
   const char* name;
   int pos; // 1-indexed
@@ -22,7 +22,7 @@ struct TensorArg {
   const Tensor& operator*() const { return tensor; }
 };
 
-struct TensorGeometryArg {
+struct AT_API TensorGeometryArg {
   TensorGeometry tensor;
   const char* name;
   int pos; // 1-indexed
@@ -49,33 +49,33 @@ using CheckedFrom = const char*;
 // not TensorGeometryArg, because the Tensor to TensorGeometry
 // conversion will blow up if you have undefined tensors.
 
-std::ostream& operator<<(std::ostream & out, TensorGeometryArg t);
-void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim);
+AT_API std::ostream& operator<<(std::ostream & out, TensorGeometryArg t);
+AT_API void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim);
 // NB: this is an inclusive-exclusive range
-void checkDimRange(CheckedFrom c, const TensorGeometryArg& t, int64_t dim_start, int64_t dim_end);
-void checkSameDim(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2);
-void checkContiguous(CheckedFrom c, const TensorGeometryArg& t);
-void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts);
-void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntList sizes);
-void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t size);
-void checkNumel(CheckedFrom c, const TensorGeometryArg& t, int64_t numel);
-void checkSameNumel(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2);
-void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
-void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType s);
-void checkScalarTypes(CheckedFrom c, const TensorArg& t, at::ArrayRef<ScalarType> l);
-void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
-void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors);
-void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
-void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors);
-void checkSameSize(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
-void checkDefined(CheckedFrom c, const TensorArg& t);
-void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
+AT_API void checkDimRange(CheckedFrom c, const TensorGeometryArg& t, int64_t dim_start, int64_t dim_end);
+AT_API void checkSameDim(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2);
+AT_API void checkContiguous(CheckedFrom c, const TensorGeometryArg& t);
+AT_API void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts);
+AT_API void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntList sizes);
+AT_API void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t size);
+AT_API void checkNumel(CheckedFrom c, const TensorGeometryArg& t, int64_t numel);
+AT_API void checkSameNumel(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2);
+AT_API void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
+AT_API void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType s);
+AT_API void checkScalarTypes(CheckedFrom c, const TensorArg& t, at::ArrayRef<ScalarType> l);
+AT_API void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
+AT_API void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors);
+AT_API void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
+AT_API void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors);
+AT_API void checkSameSize(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
+AT_API void checkDefined(CheckedFrom c, const TensorArg& t);
+AT_API void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
 
 // FixMe: does TensorArg slow things down?
-void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend backend);
+AT_API void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend backend);
 
 // Methods for getting data_ptr if tensor is defined
-void * maybe_data_ptr(const Tensor& tensor);
-void * maybe_data_ptr(const TensorArg& tensor);
+AT_API void * maybe_data_ptr(const Tensor& tensor);
+AT_API void * maybe_data_ptr(const TensorArg& tensor);
 
 }

@@ -2,7 +2,8 @@
 #error "This should only be included by Graph/Algorithms.h"
 #endif
 
-template <typename T, typename U> struct GraphWrapper {
+template <typename T, typename U>
+struct GraphWrapper {
   struct NodeWrapper {
     using NodeRef = typename Graph<T, U>::NodeRef;
     NodeWrapper(NodeRef n) : node(n) {}
@@ -33,40 +34,43 @@ template <typename T, typename U> struct GraphWrapper {
 /// \note Head/Tail is used in reverse in Tarjan's early papers.
 /// \bug Edges not included in returned subgraphs.
 ///
-template <typename T, typename U = T> class Tarjans {
+template <typename T, typename U = T>
+class Tarjans {
   using NodeWrapper = typename GraphWrapper<T, U>::NodeWrapper;
   using EdgeWrapper = typename GraphWrapper<T, U>::EdgeWrapper;
   using WrappedGraph = Graph<NodeWrapper, EdgeWrapper>;
   using WrappedSubgraph = Subgraph<NodeWrapper, EdgeWrapper>;
 
-private:
+ private:
   int Index = 0;
   std::vector<typename WrappedGraph::NodeRef> Stack;
-  Graph<T, U> *InputGraph;
+  Graph<T, U>* InputGraph;
   WrappedGraph WrappedInputGraph;
   std::vector<WrappedSubgraph> WrappedSCCs;
 
-public:
+ public:
   /// \brief Constructor wraps the input graph with an annotated graph
   ///        set up with the datastructures needed for the algorithm.
   /// \p g The graph Tarjan's will be run on.
-  Tarjans(Graph<T, U> *g) : InputGraph(g) {
+  Tarjans(Graph<T, U>* g) : InputGraph(g) {
     // Wrap Graph with node labels
-    std::unordered_map<typename Graph<T, U>::NodeRef,
-                       typename WrappedGraph::NodeRef>
+    std::unordered_map<
+        typename Graph<T, U>::NodeRef,
+        typename WrappedGraph::NodeRef>
         n_to_wrappedNode;
 
-    for (const auto &n : InputGraph->getMutableNodes()) {
+    for (const auto& n : InputGraph->getMutableNodes()) {
       NodeWrapper wrappedNode(n);
       n_to_wrappedNode[n] =
           WrappedInputGraph.createNode(std::move(wrappedNode));
     }
 
-    for (const auto &e : InputGraph->getMutableEdges()) {
+    for (const auto& e : InputGraph->getMutableEdges()) {
       EdgeWrapper wrappedEdge = {e};
-      WrappedInputGraph.createEdge(n_to_wrappedNode[e->tail()],
-                                   n_to_wrappedNode[e->head()],
-                                   std::move(wrappedEdge));
+      WrappedInputGraph.createEdge(
+          n_to_wrappedNode[e->tail()],
+          n_to_wrappedNode[e->head()],
+          std::move(wrappedEdge));
     }
   }
 
@@ -80,7 +84,7 @@ public:
     Stack.emplace_back(n);
     n->mutableData()->OnStack = true;
 
-    for (const auto &outEdge : n->getOutEdges()) {
+    for (const auto& outEdge : n->getOutEdges()) {
       typename WrappedGraph::NodeRef newNode = outEdge->head();
       // Check if we've considered this node before.
       if (newNode->data().Index == -1) {
@@ -108,9 +112,9 @@ public:
 
       // Add all the edges into the SCC.
       // TODO include edges in the SCC in a smarter way.
-      const auto &sccNodes = wrappedSCC.getNodes();
-      for (const auto &sccNode : sccNodes) {
-        for (const auto &outEdge : sccNode->getOutEdges()) {
+      const auto& sccNodes = wrappedSCC.getNodes();
+      for (const auto& sccNode : sccNodes) {
+        for (const auto& outEdge : sccNode->getOutEdges()) {
           if (std::find(sccNodes.begin(), sccNodes.end(), outEdge->head()) !=
               sccNodes.end()) {
             wrappedSCC.addEdge(outEdge);
@@ -125,7 +129,7 @@ public:
   /// \p wrappedS A wrapped subgraph.
   /// \return A subgraph of the original input graph.
   ///
-  inline Subgraph<T, U> unwrapSubgraph(const WrappedSubgraph &wrappedSubgraph) {
+  inline Subgraph<T, U> unwrapSubgraph(const WrappedSubgraph& wrappedSubgraph) {
     Subgraph<T, U> s;
     for (auto wrappedNode : wrappedSubgraph.getNodes()) {
       s.addNode(wrappedNode->data().node);
@@ -154,7 +158,7 @@ public:
 
 /// \brief A function wrapper to infer the graph template parameters.
 template <typename T, typename U>
-std::vector<Subgraph<T, U>> tarjans(Graph<T, U> *g) {
+std::vector<Subgraph<T, U>> tarjans(Graph<T, U>* g) {
   Tarjans<T, U> t(g);
   return t.run();
 }

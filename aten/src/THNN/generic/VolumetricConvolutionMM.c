@@ -180,9 +180,9 @@ static void THNN_(unfolded_acc_vol)(
     int64_t kHkW = kH*kW;
     int64_t kTkHkW = kT*kHkW;
 
-    register int64_t coeff_d_col = outputHW - dT * kHkW * outputDHW;
-    register int64_t coeff_h_col = outputWidth - dH * kW * outputDHW;
-    register int64_t coeff_w_col = (1 - dW * outputDHW);
+    int64_t coeff_d_col = outputHW - dT * kHkW * outputDHW;
+    int64_t coeff_h_col = outputWidth - dH * kW * outputDHW;
+    int64_t coeff_w_col = (1 - dW * outputDHW);
 
     int64_t count = 0;
     while (count < line_seg_len) {
@@ -202,9 +202,9 @@ static void THNN_(unfolded_acc_vol)(
       real val = 0;
       int64_t offset = (c * kTkHkW + d * kHkW + h * kW + w) * outputDHW;
 
-      register int64_t offset_w_col_start = w_col_start * coeff_w_col;
-      register int64_t offset_d_col_start = d_col_start * coeff_d_col;
-      register int64_t offset_h_col_start = h_col_start * coeff_h_col;
+      int64_t offset_w_col_start = w_col_start * coeff_w_col;
+      int64_t offset_d_col_start = d_col_start * coeff_d_col;
+      int64_t offset_h_col_start = h_col_start * coeff_h_col;
       int64_t offset_w_col = offset_w_col_start + offset;
       int64_t offset_d_col;
       int64_t offset_h_col;
@@ -341,8 +341,8 @@ static void THNN_(unfolded_copy_vol)(
 
     int64_t count = 0;
     real* dst = finput_data + line_index_offset;
-    register int64_t inputHW = inputHeight*inputWidth;
-    register int64_t inputDHW = inputHW*inputDepth;
+    int64_t inputHW = inputHeight*inputWidth;
+    int64_t inputDHW = inputHW*inputDepth;
 
     while (count < line_seg_len) {
       int64_t w = w_out * dW - pW + k;

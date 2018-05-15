@@ -26,10 +26,7 @@ REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
-// From whatever the current context, ensure the output is TensorCPU
-REGISTER_CPU_OPERATOR(
-    EnsureCPUOutput,
-    CopyOp<CPUContext, CPUContext, CPUContext>);
+
 // From CPU, copy it to whatever the current context
 REGISTER_CPU_OPERATOR(
     CopyFromCPUInput,
@@ -71,6 +68,13 @@ OPERATOR_SCHEMA(Print)
         "(bool) if 1, saves contents to the root folder of the current "
         "workspace, appending the tensor contents to a file named after "
         "the blob name. Otherwise, logs to stderr.")
+    .Arg(
+        "limit",
+        "(int, default 0) If set, prints the first `limit` elements of tensor. "
+        "If 0, prints the first `k_limit_default`(1000) elements of tensor")
+    .Arg(
+        "every_n",
+        "(int, default 1) Print tensor every `every_n` runs")
     .Input(0, "tensor", "The tensor to print.");
 
 OPERATOR_SCHEMA(LengthsToShape).NumInputs(1).NumOutputs(1);
@@ -292,26 +296,6 @@ Copy tensor for CPU to GPU context. Must be run under GPU device option.
 )DOC")
     .Input(0, "input", "The input tensor.")
     .Output(0, "output", "Tensor that will contain a copy of the input.");
-
-OPERATOR_SCHEMA(EnsureCPUOutput)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .IdenticalTypeAndShape()
-    .InputsCanCrossDevices()
-    .DeviceInferenceFunction([](const OperatorDef& def) {
-      auto op_device =
-          def.has_device_option() ? def.device_option() : DeviceOption();
-      auto cpu_option = DeviceOption();
-      vector<DeviceOption> in_dev(def.input_size(), op_device);
-      vector<DeviceOption> out_dev(def.output_size(), cpu_option);
-      return std::make_pair(in_dev, out_dev);
-    })
-    .SetDoc(R"DOC(
-Take an input tensor in the current Context (GPU or CPU) and create an output
-which is always a TensorCPU. This may involves cross-device MemCpy.
-)DOC")
-    .Input(0, "input", "The input CUDA or CPU tensor.")
-    .Output(0, "output", "TensorCPU that is a copy of the input.");
 
 OPERATOR_SCHEMA(CopyFromCPUInput)
     .NumInputs(1)

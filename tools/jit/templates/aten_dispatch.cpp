@@ -1,4 +1,4 @@
-#include "aten_dispatch.h"
+#include "torch/csrc/jit/aten_dispatch.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/tensor_conversions.h"
@@ -27,7 +27,7 @@ namespace {
 // pack takes the return values of aten functions pushes them onto the stack
 template<typename T>
 void pack(Stack & stack, T&& v) {
-  stack.push_back(as_tensor(std::move(v)));
+  stack.push_back(as_variable(std::move(v)));
 }
 template<>
 void pack(Stack & stack, Tensor&& v) {
@@ -76,6 +76,7 @@ int deviceForInputs(Stack & stack, size_t N) {
 // the number of inputs to choose an overload).
 std::unordered_set<Symbol> tensor_vararg_fns = {
   aten::cat,
+  aten::stack,
 };
 
 template<size_t N>
@@ -86,7 +87,6 @@ std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   return res;
 }
 
-
 using operator_constructor = std::function<TensorOp(jit::Node*)>;
 std::unordered_map<std::string, operator_constructor> constructors = {
   ${constructors}
@@ -94,7 +94,7 @@ std::unordered_map<std::string, operator_constructor> constructors = {
 
 std::string getDescriptor(jit::Node* n) {
   std::stringstream s;
-  JIT_ASSERT(n->kind().is_aten());
+  JIT_ASSERTM(n->kind().is_aten(), "%s is not an ATen op", n->kind().toDisplayString());
   s << n->kind().toUnqualString();
   if (tensor_vararg_fns.count(n->kind()) == 0)
     s << "-" << n->inputs().size();

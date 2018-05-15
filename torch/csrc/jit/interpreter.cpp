@@ -9,10 +9,11 @@
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/fusion_compiler.h"
-#include "torch/csrc/jit/generated/aten_dispatch.h"
+#include "torch/csrc/jit/aten_dispatch.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include <typeinfo>
 
@@ -406,20 +407,21 @@ struct HandleBuilder {
       handle->forward_inputs = std::make_shared<DummyFunction>();
     }
   }
-  autograd::Variable addInput(at::Tensor && input, const VariableFlags & flags_) {
+  autograd::Variable addInput(at::Tensor && input_, const VariableFlags & flags_) {
+    autograd::Variable& input = static_cast<autograd::Variable&>(input_);
     if(handle && flags_.requires_grad) {
-      auto variable = autograd::make_variable(std::move(input), /*requires_grad=*/false);
+      auto variable = autograd::make_variable(input.data(), /*requires_grad=*/false);
       autograd::create_gradient_edge(variable, handle->forward_inputs);
       return variable;
     } else {
-      return autograd::make_variable(std::move(input), /*requires_grad=*/false);
+      return autograd::make_variable(input.data(), /*requires_grad=*/false);
     }
   }
   at::Tensor addOutput(const autograd::Variable & output) {
     if(handle) {
       handle->forward_outputs.push_back(output.gradient_edge());
     }
-    return output.data();
+    return output.detach();
   }
   void writeTo(Stack & outputs) {
     // outputs takes ownership of handle
@@ -440,7 +442,7 @@ bool hasHandleOutput(Node * n) {
 }
 
 #ifndef NO_PYTHON
-Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
+Operation createPythonOperation(PythonOp* op) {
   py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
   bool tracing_autograd_python_function = op->tracing_autograd_python_function;
   bool has_handle = hasHandleOutput(op);
@@ -505,21 +507,12 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
       builder.writeTo(stack);
       return 0;
     } else {
-      // In this case we're not hooking this PythonOp up to autograd. We always
-      // pass in and return Variables to the PythonOp. The flag
-      // values_are_variables indicates that the actual inputs and outputs are
-      // Variable types. In the case that this is false, we must wrap up inputs
-      // Tensors into Variables and we must unwrap the outputs to Tensors. In
-      // the other case, we pass in inputs and return outputs as-is
       for (auto arg_type : op->cconv) {
         if (arg_type == 's') {
           py_inputs[i] = py::reinterpret_borrow<py::object>(
               op->scalar_args[next_scalar++].get());
         } else if (arg_type == 't') {
           auto var = peek(stack, next_tensor, num_inputs);
-          if (!values_are_variables) {
-            var = autograd::make_variable(var);
-          }
           py_inputs[i] =
               py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
           next_tensor++;
@@ -537,7 +530,7 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
         }
         THPVariable* var = (THPVariable*)entry.ptr();
         auto cdata = var->cdata;
-        stack.push_back(values_are_variables ? std::move(cdata) : cdata.data());
+        stack.push_back(std::move(cdata));
       };
 
       if (!PyTuple_Check(py_outputs.ptr())) {
@@ -561,7 +554,7 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
   };
 }
 #else
-Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
+Operation createPythonOperation(PythonOp* op) {
   throw std::runtime_error("Trying to create Python operation from a C++ build");
   return [=](Stack & stack) {
     return 0;
@@ -626,9 +619,9 @@ Operation createEvalOperation(CppOp * op) {
 
 // Returns a function implementing functionality of a given node,
 // or nullptr if it's a no-op for autograd.
-Operation getOperation(jit::Node* node, bool values_are_variables) {
+Operation getOperation(jit::Node* node) {
   IR_IFM(node, PythonOp)
-    return createPythonOperation(value, values_are_variables);
+    return createPythonOperation(value);
   IR_ELSEIFM(CppOp)
     if(dynamic_cast<autograd::Eval*>(value->fn.get())) {
       return createEvalOperation(value);
@@ -648,19 +641,11 @@ Operation getOperation(jit::Node* node, bool values_are_variables) {
       return 0;
     };
   IR_ELSEIF(Constant)
-  if (values_are_variables) {
-    auto t = torch::autograd::make_variable(value->t(attr::value), false);
-    return [t](Stack& stack) {
+    auto t = autograd::make_variable(value->t(attr::value));
+    return [t](Stack & stack) {
       stack.push_back(t);
       return 0;
     };
-    } else {
-      auto t = value->t(attr::value);
-      return [t](Stack & stack) {
-        stack.push_back(t);
-        return 0;
-      };
-    }
   IR_ELSEIF(Undefined)
     return [](Stack & stack) {
       stack.push_back(at::Tensor());
@@ -736,6 +721,32 @@ Operation getOperation(jit::Node* node, bool values_are_variables) {
       return 0;
     };
   IR_ELSE()
+    switch (node->kind()) {
+      case onnx::Reshape: {
+        return [=](Stack& stack) {
+          auto shape = pop(stack).contiguous();
+          auto input = pop(stack);
+          JIT_ASSERT(shape.ndimension() == 1);
+          at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
+          stack.push_back(input.reshape(shape_list));
+          return 0;
+        };
+      } break;
+      case onnx::Shape: {
+        return [=](Stack& stack) {
+          auto t = pop(stack);
+          at::IntList sizes = t.sizes();
+          auto sizes_tensor = torch::CPU(at::kLong).tensor(sizes.size());
+          auto accessor = sizes_tensor.accessor<int64_t, 1>();
+          for (size_t i=0; i<sizes.size(); ++i) {
+            accessor[i] = sizes[i];
+          }
+          stack.push_back(sizes_tensor);
+          return 0;
+        };
+      } break;
+      default: ;
+    };
     return getTensorOp(node).op;
   IR_END()
 }
@@ -774,8 +785,8 @@ int relativeJump(int from_inst, int to_inst) {
 }
 
 struct CodeImpl {
-  CodeImpl(std::shared_ptr<Graph>& graph_, bool values_are_variables)
-      : values_are_variables(values_are_variables), preprocess(*graph_) {
+  CodeImpl(std::shared_ptr<Graph>& graph_)
+      : preprocess(*graph_) {
     graph = preprocess.graph;
     //std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
@@ -902,7 +913,7 @@ struct CodeImpl {
 
   size_t insertInstruction(Node * n) {
     auto inst = insertInstruction(n->kind(), n->getSourceLocation(), n->inputs(), moveFlags(n) , n->outputs());
-    instructions[inst].callback = getOperation(n, values_are_variables);
+    instructions[inst].callback = getOperation(n);
     return inst;
   }
   size_t insertInstruction(Symbol sym,
@@ -1028,7 +1039,6 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
-  bool values_are_variables;
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
@@ -1134,8 +1144,8 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
   return out;
 }
 
-Code::Code(std::shared_ptr<Graph>& graph, bool values_are_variables)
-    : pImpl(new CodeImpl(graph, values_are_variables)) {}
+Code::Code(std::shared_ptr<Graph>& graph)
+    : pImpl(new CodeImpl(graph)) {}
 Code::~Code() {}
 InterpreterState::InterpreterState(const Code & function)
 : pImpl(new InterpreterStateImpl(function)) {}

@@ -1,19 +1,15 @@
-# ---[ Macro to update cached options.
-macro (caffe2_update_option variable value)
-  get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
-  set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
-endmacro()
-
 # ---[ Custom Protobuf
 include("cmake/ProtoBuf.cmake")
 
 # ---[ Threads
-include(cmake/public/threads.cmake)
-if (TARGET Threads::Threads)
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
-else()
-  message(FATAL_ERROR
-      "Cannot find threading library. Caffe2 requires Threads to compile.")
+if(BUILD_CAFFE2)
+  include(cmake/public/threads.cmake)
+  if (TARGET Threads::Threads)
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
+  else()
+    message(FATAL_ERROR
+        "Cannot find threading library. Caffe2 requires Threads to compile.")
+  endif()
 endif()
 
 # ---[ protobuf
@@ -46,7 +42,7 @@ message(STATUS "The BLAS backend of choice:" ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
   # Eigen is header-only and we do not have any dependent libraries
-  set(CAFFE2_USE_EIGEN_FOR_BLAS 1)
+  set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
   include_directories(${ATLAS_INCLUDE_DIRS})
@@ -193,7 +189,7 @@ endif()
 if (USE_OPENCL)
   message(INFO "USING OPENCL")
   find_package(OpenCL REQUIRED)
-  include_directories(${OpenCV_INCLUDE_DIRS})
+  include_directories(${OpenCL_INCLUDE_DIRS})
   include_directories(${PROJECT_SOURCE_DIR}/caffe2/contrib/opencl)
   list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCL_LIBRARIES})
 endif()
@@ -378,13 +374,20 @@ endif()
 if(USE_CUDA)
   include(cmake/public/cuda.cmake)
   if(CAFFE2_FOUND_CUDA)
-    # A helper variable recording the list of Caffe2 dependent librareis
+    # A helper variable recording the list of Caffe2 dependent libraries
     # caffe2::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-        caffe2::cuda caffe2::curand caffe2::cublas caffe2::cudnn caffe2::nvrtc)
-    if(USE_TENSORRT) 
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt) 
+        caffe2::cuda caffe2::curand caffe2::cudnn caffe2::nvrtc)
+    if(CAFFE2_STATIC_LINK_CUDA)
+      # When statically linking, this must be the order of the libraries
+      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
+    else()
+      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
+    endif()
+    if(USE_TENSORRT)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
     endif()
   else()
     message(WARNING
@@ -596,11 +599,21 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if (USE_ATEN)
-  list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen ATen)
-  include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten/aten/src/ATen)
+if (BUILD_ATEN)
+  if (BUILD_CAFFE2)
+    list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
+    if (USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
+    endif()
+    include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten/aten/src/ATen)
+    include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
+  endif()
+
+  list(APPEND Caffe2_DEPENDENCY_LIBS ATen_cpu)
+  if (USE_CUDA)
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ATen_cuda)
+  endif()
   include_directories(${PROJECT_SOURCE_DIR}/aten/src)
-  include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
 endif()
 
 if (USE_ZSTD)
@@ -611,7 +624,9 @@ if (USE_ZSTD)
 endif()
 
 # ---[ Onnx
-SET(ONNX_NAMESPACE "onnx_c2")
+if (NOT DEFINED ONNX_NAMESPACE)
+  SET(ONNX_NAMESPACE "onnx_c2")
+endif()
 if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
   set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
 endif()
@@ -634,11 +649,11 @@ list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 
 # --[ TensorRT integration with onnx-trt
-if (USE_TENSORRT) 
+if (USE_TENSORRT)
   set(CMAKE_CUDA_COMPILER ${CUDA_NVCC_EXECUTABLE})
-  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/onnx-trt)
-  include_directories("${PROJECT_SOURCE_DIR}/third_party/onnx-trt")
-  caffe2_interface_library(onnx2trt_importer_static onnx_trt_library)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/onnx-tensorrt)
+  include_directories("${PROJECT_SOURCE_DIR}/third_party/onnx-tensorrt")
+  caffe2_interface_library(nvonnxparser_static onnx_trt_library)
   list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_trt_library)
   set(CAFFE2_USE_TRT 1)
 endif()

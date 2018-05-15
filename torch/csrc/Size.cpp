@@ -5,16 +5,43 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/python_tuples.h"
 
+#include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/jit/tracer.h"
+
 struct THPSize {
   PyTupleObject tuple;
 };
 
-PyObject * THPSize_New(int dim, const int64_t *sizes)
+PyObject * THPSize_New(const torch::autograd::Variable& var)
+{
+  if (!torch::jit::tracer::isTracing(var)) {
+    auto sizes = var.sizes();
+    return THPSize_NewFromSizes(var.dim(), sizes.data());
+  }
+  auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, var.dim()));
+  if (!self) throw python_error();
+
+  for (int64_t i = 0; i < var.dim(); ++i) {
+    PyObject *py_size_tensor = THPVariable_Wrap(torch::jit::tracer::getSizeOf(var, i));
+    if (!py_size_tensor) throw python_error();
+    PyTuple_SET_ITEM(self.get(), i, py_size_tensor);
+  }
+
+  return self.release();
+}
+
+PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
 {
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, dim));
   if (!self) throw python_error();
   THPUtils_packInt64Array(self, dim, sizes);
   return self.release();
+}
+
+static bool isTracedVar(PyObject *item) {
+  if (!THPVariable_Check(item)) return false;
+  auto & var = reinterpret_cast<THPVariable*>(item)->cdata;
+  return torch::jit::tracer::isTracing(var);
 }
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
@@ -23,7 +50,7 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
       PyObject *item = PyTuple_GET_ITEM(self.get(), i);
-      if (!THPUtils_checkLong(item)) {
+      if (!THPUtils_checkLong(item) && !isTracedVar(item)) {
         return PyErr_Format(PyExc_TypeError, "torch.Size() takes an iterable of 'int' (item %zd is '%s')",
             i, Py_TYPE(item)->tp_name);
       }

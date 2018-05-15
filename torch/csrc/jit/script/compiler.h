@@ -17,6 +17,11 @@ struct CallsiteDescriptor {
   bool allow_varargs;
 };
 
+static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
+  return fmap(nvs, [](const NamedValue& v) {
+    return v.value;
+  });
+}
 
 // The AST can contain nodes like `self`, `self.b` or `python_fn` that
 // are not first-class values in the graph representation, but instead
@@ -51,8 +56,9 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   virtual std::shared_ptr<SugaredValue> call(
     SourceRange loc,
     Method & m,
-    at::ArrayRef<Value*> inputs,
-    List<Attribute> attributes,
+    // note: names for args will be 'argument 0', 'argument 1', etc..
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
 // n_binders is always set to the number of variables an expression is
 // syntactically bound to:
@@ -96,10 +102,12 @@ private:
 };
 
 struct BuiltinFunction : public SugaredValue {
-  BuiltinFunction(const std::string& name, Value* value=nullptr)
-    : name(name), value(value) {}
+  BuiltinFunction(const std::string& name, at::optional<NamedValue> value)
+    : name(name), value(std::move(value)) {}
   std::string name;
-  Value* value;
+
+  // if this is method, then this is the self argument.
+  at::optional<NamedValue> value;
 
   virtual std::string kind() const override {
     return "builtin";
@@ -107,8 +115,8 @@ struct BuiltinFunction : public SugaredValue {
   virtual std::shared_ptr<SugaredValue> call(
     SourceRange loc,
     Method & m,
-    at::ArrayRef<Value*> inputs_,
-    List<Attribute> attributes,
+    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> inputs,
     size_t n_binders) override;
 };
 
@@ -130,6 +138,18 @@ std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values)
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
 void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
+
+// try to match a list if inputs and keyword 'attributes' to this schema,
+// if it works return the flat list of positional inputs to the call
+// if it returns nullopt, then failure_messages contains a good error report
+at::optional<std::vector<Value*>> tryMatchSchema(
+  const FunctionSchema& schema,
+  const SourceRange& loc,
+  Graph& graph,
+  at::ArrayRef<NamedValue> inputs,
+  at::ArrayRef<NamedValue> attributes,
+  std::ostream& failure_messages);
+
 
 } // namespace script
 } // namespace jit

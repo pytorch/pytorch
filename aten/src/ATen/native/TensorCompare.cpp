@@ -64,7 +64,7 @@ bool is_nonzero(const Tensor& self) {
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   if (condition.type().scalarType() != ScalarType::Byte) {
-    AT_ERROR("Expected condition to have ScalarType Byte, but got ScalarType %s",
+    AT_ERROR("Expected condition to have ScalarType Byte, but got ScalarType ",
                   toString(condition.type().scalarType()));
   }
   Tensor b_condition, b_self, b_other;

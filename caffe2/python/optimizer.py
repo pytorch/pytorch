@@ -28,7 +28,8 @@ class Optimizer(object):
         self._instance_num = _optimizer_instance_count[self.__class__.__name__]
         _optimizer_instance_count[self.__class__.__name__] += 1
         self._lr_multiplier = None
-        self._lr_multiplier_on_gpu = False
+        self._local_lr_multiplier = None
+        self._local_lr_multiplier_on_gpu = False
 
     '''
     Adds optimization operators to the net for given parameter and its gradient
@@ -117,29 +118,59 @@ class Optimizer(object):
             lr = net.GetBlobRef(learning_rate_blob)
 
         if self._lr_multiplier is not None:
-            current_scope = scope.CurrentDeviceScope()
-            if (current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA
-                    and not self._lr_multiplier_on_gpu):
-                lr_multiplier = net.CopyFromCPUInput(
-                    self._lr_multiplier,
-                    self.make_unique_blob_name('lr_multiplier')
-                )
-            else:
-                lr_multiplier = self._lr_multiplier
+            lr_multiplier = net.CopyFromCPUInput(
+                self._lr_multiplier, self.make_unique_blob_name('lr_multiplier')
+            )
 
-            scaled_lr = net.Mul(
+            lr = net.Mul(
                 [lr, lr_multiplier],
                 self.make_unique_blob_name('scaled_lr'),
                 broadcast=1,
             )
-            lr = scaled_lr
+
+        if self._local_lr_multiplier is not None:
+            current_scope = scope.CurrentDeviceScope()
+            if (current_scope is not None
+                    and current_scope.device_type == caffe2_pb2.CUDA
+                    and not self._local_lr_multiplier_on_gpu):
+                local_lr_multiplier = net.CopyFromCPUInput(
+                    self._local_lr_multiplier,
+                    self.make_unique_blob_name('local_lr_multiplier')
+                )
+            else:
+                local_lr_multiplier = self._local_lr_multiplier
+
+            lr = net.Mul(
+                [lr, local_lr_multiplier],
+                self.make_unique_blob_name('local_scaled_lr'),
+                broadcast=1,
+            )
 
         return lr, iteration
 
-    def add_lr_multiplier(self, lr_multiplier, is_gpu_blob=False):
+    def add_lr_multiplier(self, lr_multiplier):
+        """
+        Set the global learning rate multiplier. If a multiplier already
+        existed, this will overwrite the existing multiplier. The multiplier is
+        used for all future calls to _run(), unless it is overwritten.
+        """
         self._lr_multiplier = lr_multiplier
-        self._lr_multiplier_on_gpu = is_gpu_blob
+
+    def _add_local_lr_multiplier(self, local_lr_multiplier, is_gpu_blob=False):
+        """
+        Set the local learning rate multiplier. This local multiplier is
+        multiplied with the global learning rate multiplier if it exists. As
+        with the global learning rate multiplier, this multiplier will be
+        used for all future calls to _run(), so please call
+        _clear_local_lr_multiplier() at the beginning of the optimizer's _run()
+        before optionally calling this function.
+        """
+        self._local_lr_multiplier = local_lr_multiplier
+        self._local_lr_multiplier_on_gpu = is_gpu_blob
+
+    def _clear_local_lr_multiplier(self):
+        self._local_lr_multiplier = None
+        self._local_lr_multiplier_on_gpu = False
 
     @staticmethod
     def dedup(net, sparse_dedup_aggregator, grad):
@@ -206,6 +237,8 @@ class SgdOptimizer(Optimizer):
             "Expect positive base learning rate, got {}".format(
                 self.base_learning_rate))
 
+        self._clear_local_lr_multiplier()
+
         # TODO(zqq): support LARS for sparse parameters
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
             assert self.lars >= 0, (
@@ -215,7 +248,7 @@ class SgdOptimizer(Optimizer):
                 self.make_unique_blob_name(str(param) + "_lars"),
                 offset=self.lars)
             current_scope = scope.CurrentDeviceScope()
-            self.add_lr_multiplier(
+            self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
                     and current_scope.device_type == caffe2_pb2.CUDA),
@@ -470,7 +503,8 @@ class WeightDecayBuilder(Optimizer):
 class AdagradOptimizer(Optimizer):
     def __init__(self, alpha=0.01, epsilon=1e-4, decay=1, policy="fixed",
                  sparse_dedup_aggregator=None, rowWise=False, engine='',
-                 lars=None, **kwargs):
+                 lars=None, output_effective_lr=False,
+                 output_effective_lr_and_update=False, **kwargs):
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
@@ -480,6 +514,8 @@ class AdagradOptimizer(Optimizer):
         self.rowWise = rowWise
         self.engine = engine
         self.lars = lars
+        self.output_effective_lr = output_effective_lr
+        self.output_effective_lr_and_update = output_effective_lr_and_update
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
@@ -489,6 +525,8 @@ class AdagradOptimizer(Optimizer):
         if self.alpha <= 0:
             return
 
+        self._clear_local_lr_multiplier()
+
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
             assert self.lars >= 0, (
                 'Lars offset must be nonnegative, got {}'.format(self.lars))
@@ -497,7 +535,7 @@ class AdagradOptimizer(Optimizer):
                 self.make_unique_blob_name(str(param) + "_lars"),
                 offset=self.lars)
             current_scope = scope.CurrentDeviceScope()
-            self.add_lr_multiplier(
+            self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
                     and current_scope.device_type == caffe2_pb2.CUDA),
@@ -564,9 +602,16 @@ class AdagradOptimizer(Optimizer):
                 engine=self.engine
             )
         else:
+            output_args = [param, param_squared_sum]
+            if self.output_effective_lr_and_update:
+                output_args.append(str(param) + '_effective_lr')
+                output_args.append(str(param) + '_update')
+            elif self.output_effective_lr:
+                output_args.append(str(param) + '_effective_lr')
+
             net.Adagrad(
                 [param, param_squared_sum, grad, lr],
-                [param, param_squared_sum],
+                output_args,
                 epsilon=self.epsilon,
                 decay=float(self.decay),
                 engine=self.engine

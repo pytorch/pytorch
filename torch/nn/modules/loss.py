@@ -262,20 +262,22 @@ class KLDivLoss(_Loss):
     and is often useful when performing direct regression over the space of
     (discretely sampled) continuous output distributions.
 
-    As with `NLLLoss`, the `input` given is expected to contain
-    *log-probabilities*, however unlike `ClassNLLLoss`, `input` is not
+    As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
+    *log-probabilities*. However, unlike :class:`~torch.nn.NLLLoss`, `input` is not
     restricted to a 2D Tensor, because the criterion is applied element-wise.
+    The targets are given as *probabilities* (i.e. without taking the logarithm).
 
     This criterion expects a `target` `Tensor` of the same size as the
     `input` `Tensor`.
 
-    The loss can be described as:
+    The unreduced (i.e. with :attr:`reduce` set to ``False``) loss can be described as:
 
     .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = y_n \odot \left( \log y_n - x_n \right),
+        l(x,y) = L := \{ l_1,\dots,l_N \}, \quad
+        l_n = y_n \cdot \left( \log y_n - x_n \right),
 
-    where :math:`N` is the batch size. If reduce is ``True``, then:
+    where the index :math:`N` spans all dimensions of ``input`` and :math:`L` has the same
+    shape as ``input``. If :attr:`reduce` is ``True`` (the default), then:
 
     .. math::
         \ell(x, y) = \begin{cases}
@@ -285,13 +287,31 @@ class KLDivLoss(_Loss):
 
     By default, the losses are averaged for each minibatch over observations
     **as well as** over dimensions. However, if the field
-    `size_average` is set to ``False``, the losses are instead summed.
+    :attr:`size_average` is set to ``False``, the losses are instead summed.
 
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
 
+    .. note:: The default averaging means that the loss is actually **not** the
+          KL Divergence because the terms are already probability weighted.
+          A future release of PyTorch may move the default loss closer to the
+          mathematical definition.
+
+          To get the real KL Divergence, use ``size_average=False``, and
+          then divide the output by the batch size.
+
+          Example::
+
+            >>> loss = nn.KLDivLoss(size_average=False)
+            >>> batch_size = 5
+            >>> log_probs1 = F.log_softmax(torch.randn(batch_size, 10), 1)
+            >>> probs2 = F.softmax(torch.randn(batch_size, 10), 1)
+            >>> loss(log_probs1, probs2) / batch_size
+            tensor(0.7142)
+
+
     Args:
-        size_average (bool, optional: By default, the losses are averaged
+        size_average (bool, optional): By default, the losses are averaged
             for each minibatch over observations **as well as** over
             dimensions. However, if ``False`` the losses are instead summed.
         reduce (bool, optional): By default, the losses are averaged
@@ -303,8 +323,8 @@ class KLDivLoss(_Loss):
         - input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - target: :math:`(N, *)`, same shape as the input
-        - output: scalar. If `reduce` is ``True``, then :math:`(N, *)`,
-            same shape as the input
+        - output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
+            the same shape as the input
 
     """
     def __init__(self, size_average=True, reduce=True):
@@ -507,7 +527,7 @@ class HingeEmbeddingLoss(_Loss):
     dissimilar, e.g. using the L1 pairwise distance as `x`, and is typically
     used for learning nonlinear embeddings or semi-supervised learning::
 
-    The loss function for :math:`n`-th sample in the mini-batch is:
+    The loss function for :math:`n`-th sample in the mini-batch is
 
     .. math::
         l_n = \begin{cases}
@@ -894,7 +914,7 @@ class MultiMarginLoss(_WeightedLoss):
     The loss function then becomes:
 
     .. math::
-        \text{loss}(x, y) = \frac{\sum_i \max(0, w[y] * (\text{margin} - x[y] - x[i]))^p)}{\text{x.size}(0)}
+        \text{loss}(x, y) = \frac{\sum_i \max(0, w[y] * (\text{margin} - x[y] + x[i]))^p)}{\text{x.size}(0)}
 
     Args:
         p (int, optional): Has a default value of `1`. `1` and `2` are the only

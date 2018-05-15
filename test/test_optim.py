@@ -647,6 +647,16 @@ class TestLRScheduler(TestCase):
             lambda: CosineAnnealingLR(self.opt, T_max=epochs // 2, eta_min=eta_min / 2),
             epochs=epochs)
 
+    def test_reduce_lr_on_plateau_state_dict(self):
+        scheduler = ReduceLROnPlateau(self.opt, mode='min', factor=0.1, patience=2)
+        for score in [1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 5.0, 3.0, 2.0, 1.0]:
+            scheduler.step(score)
+        scheduler_copy = ReduceLROnPlateau(self.opt, mode='max', factor=0.5, patience=10)
+        scheduler_copy.load_state_dict(scheduler.state_dict())
+        for key in scheduler.__dict__.keys():
+            if key not in {'optimizer', 'is_better'}:
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
         for _ in range(epochs):

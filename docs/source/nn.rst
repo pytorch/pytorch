@@ -404,7 +404,13 @@ Normalization layers
 .. autoclass:: BatchNorm3d
     :members:
 
-:hidden:`InstanceNorm1d`
+:hidden:`GroupNorm`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: GroupNorm
+    :members:
+
+    :hidden:`InstanceNorm1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: InstanceNorm1d
@@ -719,6 +725,16 @@ Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.remove_weight_norm
+
+:hidden:`spectral_norm`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.spectral_norm
+
+:hidden:`remove_spectral_norm`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.remove_spectral_norm
 
 
 .. currentmodule:: torch.nn.utils.rnn

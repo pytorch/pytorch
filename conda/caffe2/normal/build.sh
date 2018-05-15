@@ -18,17 +18,15 @@ set -ex
 
 echo "Installing caffe2 to ${PREFIX}"
 
-PYTHON_ARGS="$(python ./scripts/get_python_cmake_flags.py)"
-
 # Install under specified prefix
-CMAKE_ARGS=()
-CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=$PREFIX")
-CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$PREFIX")
+cmake_args=()
+cmake_args+=("-DCMAKE_INSTALL_PREFIX=$PREFIX")
+cmake_args+=("-DCMAKE_PREFIX_PATH=$PREFIX")
 
 # Build Caffe2
 mkdir -p build
 cd build
-cmake "${CMAKE_ARGS[@]}" "$PYTHON_ARGS" $CONDA_CMAKE_BUILD_ARGS ..
+cmake "${cmake_args[@]}" $CAFFE2_CMAKE_ARGS ..
 if [ "$(uname)" == 'Darwin' ]; then
   make "-j$(sysctl -n hw.ncpu)"
 else

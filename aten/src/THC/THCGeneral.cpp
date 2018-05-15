@@ -1,4 +1,5 @@
 #include "THCGeneral.h"
+#include "THCStream.hpp"
 #include "TH.h"
 #include "THCAllocator.h"
 #include "THCCachingHostAllocator.h"
@@ -119,10 +120,6 @@ void THCudaInit(THCState* state)
     THCudaCheck(cudaSetDevice(i));
     THCudaCheck(cudaGetDeviceProperties(&state->deviceProperties[i], i));
 
-    // Allocate space for the default stream
-    res->streams = (THCStream**) malloc(sizeof(THCStream*));
-    res->streams[0] = THCStream_defaultStream(i);
-
     /* The scratch space that we want to have available per each device is
        based on the number of SMs available per device. We guarantee a
        minimum of 128kb of space per device, but to future-proof against
@@ -171,10 +168,6 @@ void THCudaShutdown(THCState* state)
   for (int dev = 0; dev < deviceCount; ++dev) {
     THCudaCheck(cudaSetDevice(dev));
     THCCudaResourcesPerDevice* res = &(state->resourcesPerDevice[dev]);
-    /* Free all streams */
-    for (int i = 0; i <= state->numUserStreams; ++i) {
-      THCStream_free(res->streams[i]);
-    }
     /* Free user defined BLAS handles */
     for (int i = 0; i < res->numBlasHandles; ++i) {
       THCublasCheck(cublasDestroy(res->blasHandles[i]));
@@ -184,7 +177,6 @@ void THCudaShutdown(THCState* state)
       THCusparseCheck(cusparseDestroy(res->sparseHandles[i]));
     }
 
-    free(res->streams);
     free(res->blasHandles);
     free(res->sparseHandles);
     THCStream_free((THCStream*)THCThreadLocal_get(state->currentStreams[dev]));
@@ -394,11 +386,6 @@ void THCState_reserveSparseHandles(THCState* state, int numSparseHandles)
   }
 }
 
-int THCState_getNumStreams(THCState* state)
-{
-  return state->numUserStreams;
-}
-
 int THCState_getNumBlasHandles(THCState* state)
 {
   return state->numUserBlasHandles;
@@ -419,17 +406,6 @@ THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   }
 
   return &(state->resourcesPerDevice[device]);
-}
-
-cudaStream_t THCState_getDeviceStream(THCState *state, int device, int streamIndex)
-{
-  if (streamIndex > state->numUserStreams || streamIndex < 0)
-  {
-    THError("%d is not a stream", streamIndex);
-  }
-  THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
-  THCStream* stream = res->streams[streamIndex];
-  return stream->stream;
 }
 
 cublasHandle_t THCState_getDeviceBlasHandle(THCState *state, int device, int handle)
@@ -533,22 +509,6 @@ cusparseHandle_t THCState_getCurrentSparseHandle(THCState *state)
   return NULL;
 }
 
-int THCState_getCurrentStreamIndex(THCState *state)
-{
-  THCStream* stream = THCState_getStream(state);
-
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
-  THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
-  for (int i = 0; i <= state->numUserStreams; ++i) {
-    if (res->streams[i] == stream) {
-      return i;
-    }
-  }
-
-  return -1;
-}
-
 int THCState_getCurrentBlasHandleIndex(THCState *state)
 {
   void* value = THCThreadLocal_get(state->currentPerDeviceBlasHandle);
@@ -579,20 +539,6 @@ void THCState_setStream(THCState *state, THCStream *stream)
   int device;
   THCudaCheck(cudaGetDevice(&device));
   THCState_setStreamOnDevice(state, device, stream);
-}
-
-void THCState_setCurrentStreamIndex(THCState *state, int streamIndex)
-{
-  if (streamIndex < 0 || streamIndex > state->numUserStreams) {
-    THError("%d is not a valid stream, valid range is: (0, %d)", streamIndex,
-        state->numUserStreams);
-  }
-
-  int device;
-  for (device = 0; device < state->numDevices; ++device) {
-    THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
-    THCState_setStreamOnDevice(state, device, res->streams[streamIndex]);
-  }
 }
 
 void THCState_setCurrentBlasHandleIndex(THCState *state, int handle)
@@ -829,8 +775,8 @@ cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* 
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE
 
-#include "THCStorage.c"
-#include "THCAllocator.c"
+#include "THCStorage.cpp"
+#include "THCAllocator.cpp"
 
 /* from THCHalf.h */
 

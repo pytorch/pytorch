@@ -497,7 +497,7 @@ void THDTensor_(catArray)(THDTensor *result, THDTensor **inputs,
       }
     }
     allEmpty = allEmpty && !dimSize;
-    size->data[i] = dimSize;
+    THLongStorage_set(size, i, dimSize);
   }
 
   if (!allEmpty) {

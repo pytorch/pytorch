@@ -37,6 +37,11 @@ CPUGenerator& CPUGenerator::manualSeed(uint64_t seed) {
   return *this;
 }
 
+CPUGenerator& CPUGenerator::manualSeedAll(uint64_t seed) {
+  // There's only one CPU generator
+  return manualSeed(seed);
+}
+
 void * CPUGenerator::unsafeGetTH() {
   return generator;
 }

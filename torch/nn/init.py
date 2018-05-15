@@ -96,6 +96,34 @@ def constant_(tensor, val):
         return tensor.fill_(val)
 
 
+def ones_(tensor):
+    r"""Fills the input Tensor with ones`.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+
+    Examples:
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.ones_(w)
+    """
+    with torch.no_grad():
+        return tensor.fill_(1)
+
+
+def zeros_(tensor):
+    r"""Fills the input Tensor with zeros`.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+
+    Examples:
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.zeros_(w)
+    """
+    with torch.no_grad():
+        return tensor.zero_()
+
+
 def eye_(tensor):
     r"""Fills the 2-dimensional input `Tensor` with the identity
     matrix. Preserves the identity of the inputs in `Linear` layers, where as
@@ -360,17 +388,14 @@ def sparse_(tensor, sparsity, std=0.01):
         raise ValueError("Only tensors with 2 dimensions are supported")
 
     rows, cols = tensor.shape
-    num_zeros = int(math.ceil(rows * sparsity))
+    num_zeros = int(math.ceil(sparsity * rows))
 
     with torch.no_grad():
         tensor.normal_(0, std)
         for col_idx in range(cols):
-            row_indices = list(range(rows))
-            random.shuffle(row_indices)
+            row_indices = torch.randperm(rows)
             zero_indices = row_indices[:num_zeros]
-            for row_idx in zero_indices:
-                tensor[row_idx, col_idx] = 0
-
+            tensor[zero_indices, col_idx] = 0
     return tensor
 
 

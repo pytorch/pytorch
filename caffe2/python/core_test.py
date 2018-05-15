@@ -238,10 +238,6 @@ class TestCreateOperator(test_util.TestCase):
         self.assertEqual(arg_map["arg2"].s, b"2")
         self.assertEqual(list(arg_map["arg3"].ints), [1, 2, 3])
 
-    def testCreateWithNoneKwarg(self):
-        with self.assertRaises(ValueError):
-            core.CreateOperator("Ludicrous", "x", "y", arg1=None)
-
 
 class TestAutoNaming(test_util.TestCase):
     def assertOperatorListEqual(self, operatorDefList1, operatorDefList2):
@@ -617,10 +613,24 @@ class TestInferDevice(test_util.TestCase):
         with core.DeviceScope(op_option):
             op = core.CreateOperator(op_name, inputs, outputs)
         input_dev, output_dev = core.InferOpBlobDevices(op)
-        for in_dev in input_dev:
-            self.assertEqual(in_dev, in_option)
-        for out_dev in output_dev:
-            self.assertEqual(out_dev, out_option)
+        if isinstance(in_option, list):
+            assert len(in_option) == len(input_dev), \
+                'Length of input device option should match' \
+                '{} vs. {}'.format(in_option, input_dev)
+            for in_dev, in_opt in zip(input_dev, in_option):
+                self.assertEqual(in_dev, in_opt)
+        else:
+            for in_dev in input_dev:
+                self.assertEqual(in_dev, in_option)
+        if isinstance(out_option, list):
+            assert len(out_option) == len(output_dev), \
+                'Length of output device option should match' \
+                '{} vs. {}'.format(out_option, output_dev)
+            for out_dev, out_opt in zip(output_dev, out_option):
+                self.assertEqual(out_dev, out_opt)
+        else:
+            for out_dev in output_dev:
+                self.assertEqual(out_dev, out_option)
 
     def test_infer_device(self):
         self._test_op(
@@ -629,6 +639,16 @@ class TestInferDevice(test_util.TestCase):
             self.cuda_option,
             op_option=self.cuda_option,
             inputs=["data", "fc_w", "fc_b"],
+            outputs=["fc_1"]
+        )
+
+    def test_infer_device_split_by_lengths(self):
+        self._test_op(
+            "SplitByLengths",
+            [self.cuda_option, self.cpu_option],
+            self.cuda_option,
+            op_option=self.cuda_option,
+            inputs=["data", "fc_w"],
             outputs=["fc_1"]
         )
 

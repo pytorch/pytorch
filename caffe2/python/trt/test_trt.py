@@ -102,13 +102,13 @@ class TensorRTOpTest(TestCase):
         np.testing.assert_almost_equal(Y_c2, Y_trt)
 
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_relu_graph_simple(self):
         X = np.random.randn(1, 1, 3, 2).astype(np.float32)
         self._test_relu_graph(X, 1, 50)
 
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_relu_graph_big_batch(self):
         X = np.random.randn(52, 1, 3, 2).astype(np.float32)
         self._test_relu_graph(X, 52, 50)
@@ -134,47 +134,46 @@ class TensorRTOpTest(TestCase):
             Y_trt = namedtupledict('Outputs', op_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_resnet50(self):
         self._test_onnx_importer('resnet50')
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_bvlc_alexnet(self):
         self._test_onnx_importer('bvlc_alexnet')
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_densenet121(self):
         self._test_onnx_importer('densenet121', -1)
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v1(self):
         self._test_onnx_importer('inception_v1', -1)
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v2(self):
         self._test_onnx_importer('inception_v2')
 
-    # Doesn't work yet due to recent change of reshape definition of Reshape node in ONNX
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skip('Need to revisit our ChannelShuffle exporter to avoid generating 5D tensor')
     def test_shufflenet(self):
         self._test_onnx_importer('shufflenet')
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_squeezenet(self):
         self._test_onnx_importer('squeezenet', -1)
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg16(self):
         self._test_onnx_importer('vgg16')
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg19(self):
         self._test_onnx_importer('vgg19', -1)
 
 class TensorRTTransformTest(TestCase):
     def _model_dir(self, model):
-        caffe2_home = os.path.expanduser(os.getenv('ONNX_HOME', '~/.caffe2'))
-        models_dir = os.getenv('ONNX_MODELS', os.path.join(caffe2_home, 'models'))
+        caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
+        models_dir = os.getenv('CAFFE2_MODELS', os.path.join(caffe2_home, 'models'))
         return os.path.join(models_dir, model)
 
     def _download(self, model):
@@ -243,7 +242,7 @@ class TensorRTTransformTest(TestCase):
         pred_net.external_output[0] = new_tail
 
 
-    @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_resnet50_core(self):
         N = 2
         warmup = 20

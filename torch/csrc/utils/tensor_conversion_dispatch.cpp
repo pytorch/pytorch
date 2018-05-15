@@ -1,3 +1,5 @@
+#include <Python.h>
+
 #include "tensor_conversion_dispatch.h"
 
 #include "torch/csrc/utils/auto_gil.h"
@@ -6,19 +8,19 @@
 
 namespace torch { namespace utils {
 
-at::Tensor dispatch_type_conversion(const at::Tensor & self, const at::Type & type) {
-  int64_t device = self.is_cuda() ? self.get_device() : -1;
-  return dispatch_type_conversion(self, type, device, false);
-}
-
-at::Tensor dispatch_type_conversion(const at::Tensor & self, const at::Type & type,
-                                    int device, bool non_blocking) {
+at::Tensor dispatch_type_conversion(
+    const at::Tensor & self,
+    const at::Type & type,
+    at::optional<int> device,
+    bool non_blocking) {
   if (type.is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(device);
+
   int64_t tensor_device = self.is_cuda() ? self.get_device() : -1;
+  AutoGPU auto_gpu(device.value_or(tensor_device));
+
   if (self.is_cuda() && type.is_cuda() && tensor_device != at::current_device()) {
     // copy if the devices are different even if the types are the same
     return type.copy(self, non_blocking);

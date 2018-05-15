@@ -12,8 +12,9 @@ namespace repr {
 /// \brief A basic block holds a reference to a subgraph
 /// of the data flow graph as well as an ordering on instruction
 /// execution.  Basic blocks are used for control flow analysis.
-template <typename T, typename U> class BasicBlock {
-public:
+template <typename T, typename U>
+class BasicBlock {
+ public:
   using NodeRef = typename Subgraph<T, U>::NodeRef;
   BasicBlock() {}
   ~BasicBlock() {
@@ -23,9 +24,11 @@ public:
   }
 
   void trackNode(NodeRef node) {
-    callbacks[node] = node->registerDestructorCallback([&](NodeRef n){
-        assert(hasInstruction(n) && "Destructor callback invoked on untracked node in BasicBlock.");
-        deleteInstruction(n);
+    callbacks[node] = node->registerDestructorCallback([&](NodeRef n) {
+      assert(
+          hasInstruction(n) &&
+          "Destructor callback invoked on untracked node in BasicBlock.");
+      deleteInstruction(n);
     });
     Nodes.addNode(node);
   }
@@ -36,48 +39,69 @@ public:
   }
 
   void pushInstructionNode(NodeRef node) {
-    assert(isa<Instruction>(node->data()) &&
-           "Cannot push non-instruction node to basic block.");
+    assert(
+        isa<Instruction>(node->data()) &&
+        "Cannot push non-instruction node to basic block.");
     Instructions.emplace_back(node);
     trackNode(node);
   }
-  const std::vector<NodeRef> &getInstructions() { return Instructions; }
+  const std::vector<NodeRef>& getInstructions() {
+    return Instructions;
+  }
 
   const bool hasInstruction(NodeRef instr) const {
     return Nodes.hasNode(instr);
   }
 
   void insertInstructionBefore(NodeRef newInstr, NodeRef instr) {
-    auto it = std::find(std::begin(Instructions), std::end(Instructions), instr);
+    auto it =
+        std::find(std::begin(Instructions), std::end(Instructions), instr);
     Instructions.insert(it, newInstr);
     trackNode(newInstr);
   }
 
+  void moveInstructionBefore(NodeRef instr1, NodeRef instr2) {
+    assert(hasInstruction(instr1) && "Instruction not in basic block.");
+    assert(hasInstruction(instr2) && "Instruction not in basic block.");
+    auto it1 =
+        std::find(std::begin(Instructions), std::end(Instructions), instr1);
+    auto it2 =
+        std::find(std::begin(Instructions), std::end(Instructions), instr2);
+    Instructions.erase(it1);
+    Instructions.insert(it2, instr1);
+  }
+
   void deleteInstruction(NodeRef instr) {
     assert(hasInstruction(instr) && "Instruction not in basic block.");
-    Instructions.erase(std::remove(Instructions.begin(), Instructions.end(), instr),
+    Instructions.erase(
+        std::remove(Instructions.begin(), Instructions.end(), instr),
         Instructions.end());
     untrackNode(instr);
   }
 
-private:
+ private:
   Subgraph<T, U> Nodes;
   std::vector<NodeRef> Instructions;
   // Because we reference a dataflow graph, we need to register callbacks
   // for when the dataflow graph is modified.
-  std::unordered_map<NodeRef, typename Notifier<Node<T, U>>::Callback *> callbacks;
+  std::unordered_map<NodeRef, typename Notifier<Node<T, U>>::Callback*>
+      callbacks;
 };
 
 using Program = Graph<Value>;
 
-template <typename G> struct ControlFlowGraphImpl {
+template <typename G>
+struct ControlFlowGraphImpl {
   // Hack to help debugging in case this class is misused.
-  static_assert(sizeof(ControlFlowGraphImpl), "Template parameter G in "
-                                              "ControlFlowGraph<G> must be of "
-                                              "type Graph<T, U>.");
+  static_assert(
+      sizeof(ControlFlowGraphImpl),
+      "Template parameter G in "
+      "ControlFlowGraph<G> must be of "
+      "type Graph<T, U>.");
 };
 
-template <typename T, typename U> struct ControlFlowGraphImpl<Graph<T, U>> {
+template <typename T, typename U>
+struct ControlFlowGraphImpl<Graph<T, U>> {
   using type = Graph<std::unique_ptr<BasicBlock<T, U>>, int>;
   using bbType = BasicBlock<T, U>;
 };
@@ -86,16 +110,15 @@ template <typename T, typename U> struct ControlFlowGraphImpl<Graph<T, U>> {
 /// can be used as an analysis tool.
 ///
 /// \note G Must be of type Graph<T, U>.
-template<typename G>
+template <typename G>
 class ControlFlowGraph : public ControlFlowGraphImpl<G>::type {
-public:
+ public:
   // This is for C++11 compatibility, otherwise we could use "using"
   ControlFlowGraph() {}
-  ControlFlowGraph(const ControlFlowGraph &) = delete;
-  ControlFlowGraph(ControlFlowGraph &&) = default;
-  ControlFlowGraph& operator=(ControlFlowGraph &&) = default;
-  ~ControlFlowGraph() {
-  }
+  ControlFlowGraph(const ControlFlowGraph&) = delete;
+  ControlFlowGraph(ControlFlowGraph&&) = default;
+  ControlFlowGraph& operator=(ControlFlowGraph&&) = default;
+  ~ControlFlowGraph() {}
 };
 
 /// \brief Helper for extracting the type of BasicBlocks given
@@ -106,12 +129,18 @@ using BasicBlockType = typename ControlFlowGraphImpl<G>::bbType;
 
 /// \brief Converts graph to SSA representation.  Modifies the graph
 /// by inserting versions and phi nodes.
-template <typename Phi, typename G> void addSSA(G* dfg, ControlFlowGraph<G> *cfg) {
-  static_assert(std::is_base_of<Instruction, Phi>::value, "Phi type must be derived from Instruction.");
+template <typename Phi, typename G>
+void addSSA(G* dfg, ControlFlowGraph<G>* cfg) {
+  static_assert(
+      std::is_base_of<Instruction, Phi>::value,
+      "Phi type must be derived from Instruction.");
   auto dfMap = dominanceFrontierMap(cfg);
   for (auto pair : dfMap) {
     for (auto n : pair.second) {
-      printf("%llu -> %llu\n", (unsigned long long)pair.first, (unsigned long long)n);
+      printf(
+          "%llu -> %llu\n",
+          (unsigned long long)pair.first,
+          (unsigned long long)n);
     }
   }
 }

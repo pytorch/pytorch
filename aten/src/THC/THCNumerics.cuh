@@ -47,6 +47,7 @@ struct THCNumerics<uint8_t> {
   static inline __host__ __device__  uint8_t div(uint8_t a, uint8_t b) { return a / b; }
   static inline __host__ __device__  uint8_t abs(uint8_t a) { return a; }
   static inline __host__ __device__  uint8_t pow(uint8_t a, uint8_t b) { return powi<uint8_t>(a, b); }
+  static inline __host__ __device__  bool isnan(uint8_t a) { return false; }
 };
 
 template <>
@@ -68,6 +69,7 @@ struct THCNumerics<int8_t> {
   static inline __host__ __device__  int8_t div(int8_t a, int8_t b) { return a / b; }
   static inline __host__ __device__  int8_t abs(int8_t a) { return ::abs((int)a); }
   static inline __host__ __device__  int8_t pow(int8_t a, int8_t b) { return powi<int8_t>(a, b); }
+  static inline __host__ __device__  bool isnan(int8_t a) { return false; }
 };
 
 template <>
@@ -89,6 +91,7 @@ struct THCNumerics<int16_t> {
   static inline __host__ __device__  int16_t div(int16_t a, int16_t b) { return a / b; }
   static inline __host__ __device__  int16_t abs(int16_t a) { return ::abs((int)a); }
   static inline __host__ __device__  int16_t pow(int16_t a, int16_t b) { return powi<int16_t>(a, b); }
+  static inline __host__ __device__  bool isnan(int16_t a) { return false; }
 };
 
 template <>
@@ -110,6 +113,7 @@ struct THCNumerics<int32_t> {
   static inline __host__ __device__  int32_t div(int32_t a, int32_t b) { return a / b; }
   static inline __host__ __device__  int32_t abs(int32_t a) { return ::abs(a); }
   static inline __host__ __device__  int32_t pow(int32_t a, int32_t b) { return powi<int32_t>(a, b); }
+  static inline __host__ __device__  bool isnan(int32_t a) { return false; }
 };
 
 template <>
@@ -137,6 +141,7 @@ struct THCNumerics<int64_t> {
   static inline __host__ __device__  int64_t div(int64_t a, int64_t b) { return a / b; };
   static inline __host__ __device__  int64_t abs(int64_t a) { return labs(a); }
   static inline __host__ __device__  int64_t pow(int64_t a, int64_t b) { return powi<int64_t>(a, b); }
+  static inline __host__ __device__  bool isnan(int64_t a) { return false; }
 };
 
 #ifdef CUDA_HALF_TENSOR
@@ -614,6 +619,11 @@ static inline __host__ __device__ half lgamma(half a) {
 #endif
   }
 
+  static inline __host__ __device__ bool isnan(half a) {
+    // implemented using that a!=a if and only if a is nan
+    return ne(a, a);
+  }
+
 };
 #endif
 
@@ -656,7 +666,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float atan (float a) { return  atanf(a); }
   static inline __host__ __device__  float tanh (float a) { return  tanhf(a); }
   static inline __host__ __device__  float erf  (float a) { return   erff(a); }
-  static inline __host__ __device__  float abs  (float a) { return   fabs(a); }
+  static inline __host__ __device__  float abs  (float a) { return  fabsf(a); }
   static inline __host__ __device__  float round(float a) { return roundf(a); }
   static inline __host__ __device__  float frac (float a) { return a - truncf(a); }
   static inline __host__ __device__  float cinv (float a) { return 1.0f / a; }
@@ -666,6 +676,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float sub  (float a, float b) { return a - b; }
   static inline __host__ __device__  float pow  (float a, float b) { return powf(a, b); }
   static inline __host__ __device__  float atan2(float a, float b) { return atan2f(a, b); }
+  static inline __host__ __device__  bool isnan(float a) { return ::isnan(a); }
 };
 
 template <>
@@ -717,6 +728,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double sub  (double a, double b) { return a - b; }
   static inline __host__ __device__  double pow  (double a, double b) { return ::pow(a, b); }
   static inline __host__ __device__  double atan2(double a, double b) { return ::atan2(a, b); }
+  static inline __host__ __device__  bool isnan(double a) { return ::isnan(a); }
 };
 
 /// `half` has some type conversion issues associated with it, since it

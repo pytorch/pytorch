@@ -43,16 +43,7 @@
 #include <process.h>
 #endif
 
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-#include "unsupported/Eigen/CXX11/Tensor"
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
 namespace caffe2 {
-
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-template <typename T, int D>
-using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D>>;
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
 namespace math {
 
@@ -701,108 +692,6 @@ int GetIndexFromDims(const int n, const int* dims, const int* index) {
 
 namespace {
 
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
-template <typename T, class Reducer, int kNumDims, int kNumAxes>
-void EigenReduceTensorImpl(
-    const int* dims,
-    const int* axes,
-    const Reducer& reducer,
-    const T* X,
-    T* Y) {
-  Eigen::DSizes<Eigen::DenseIndex, kNumDims> X_dims;
-  Eigen::DSizes<Eigen::DenseIndex, kNumDims> Y_dims;
-  Eigen::array<Eigen::DenseIndex, kNumAxes> reduce_dims;
-  for (int i = 0; i < kNumDims; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
-  }
-  for (int i = 0; i < kNumAxes; ++i) {
-    Y_dims[kNumDims - 1 - axes[i]] = static_cast<Eigen::DenseIndex>(1);
-    reduce_dims[kNumAxes - 1 - i] =
-        static_cast<Eigen::DenseIndex>(kNumDims - 1 - axes[i]);
-  }
-  EigenTensorMap<T, kNumDims>(Y, Y_dims) =
-      EigenTensorMap<T, kNumDims>(const_cast<T*>(X), X_dims)
-          .reduce(reduce_dims, reducer);
-}
-
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
-template <typename T, class Reducer>
-bool EigenReduceTensor(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const Reducer& reducer,
-    const T* X,
-    T* Y) {
-  switch (num_dims) {
-    case 1: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 1, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 2: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 2, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 2, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 3: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 3, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 3, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 3: {
-          EigenReduceTensorImpl<T, Reducer, 3, 3>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 4: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 4, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 4, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 3: {
-          EigenReduceTensorImpl<T, Reducer, 4, 3>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 4: {
-          EigenReduceTensorImpl<T, Reducer, 4, 4>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    default: { return false; }
-  }
-}
-
 template <typename T, class Reducer>
 void ReduceTensor(
     const int num_dims,
@@ -814,6 +703,7 @@ void ReduceTensor(
     const T* X,
     T* Y,
     CPUContext* context) {
+  CAFFE_ENFORCE_LE(num_axes, num_dims);
   std::vector<int> Y_dims(dims, dims + num_dims);
   for (int i = 0; i < num_axes; ++i) {
     Y_dims[axes[i]] = 1;
@@ -833,100 +723,6 @@ void ReduceTensor(
 }
 
 template <typename T>
-void ReduceMinImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::MinReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ReduceTensor(
-      num_dims,
-      dims,
-      num_axes,
-      axes,
-      [](const T& a, const T& b) { return std::min(a, b); },
-      std::numeric_limits<T>::max(),
-      X,
-      Y,
-      context);
-}
-
-template <typename T>
-void ReduceMaxImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::MaxReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ReduceTensor(
-      num_dims,
-      dims,
-      num_axes,
-      axes,
-      [](const T& a, const T& b) { return std::max(a, b); },
-      std::numeric_limits<T>::lowest(),
-      X,
-      Y,
-      context);
-}
-
-template <typename T>
-void ReduceSumImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::SumReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ReduceTensor(
-      num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context);
-}
-
-template <typename T>
 void ReduceMeanImpl(
     const int num_dims,
     const int* dims,
@@ -935,19 +731,6 @@ void ReduceMeanImpl(
     const T* X,
     T* Y,
     CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::MeanReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   ReduceTensor(
       num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context);
   const int X_size =
@@ -962,49 +745,77 @@ void ReduceMeanImpl(
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_REDUCE_MIN(T)                             \
-  template <>                                                        \
-  void ReduceMin<T, CPUContext>(                                     \
-      const int num_dims,                                            \
-      const int* dims,                                               \
-      const int num_axes,                                            \
-      const int* axes,                                               \
-      const T* X,                                                    \
-      T* Y,                                                          \
-      CPUContext* context) {                                         \
-    ReduceMinImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_REDUCE_MIN(T)                       \
+  template <>                                                  \
+  void ReduceMin<T, CPUContext>(                               \
+      const int num_dims,                                      \
+      const int* dims,                                         \
+      const int num_axes,                                      \
+      const int* axes,                                         \
+      const T* X,                                              \
+      T* Y,                                                    \
+      CPUContext* context) {                                   \
+    ReduceTensor(                                              \
+        num_dims,                                              \
+        dims,                                                  \
+        num_axes,                                              \
+        axes,                                                  \
+        [](const T& a, const T& b) { return std::min(a, b); }, \
+        std::numeric_limits<T>::max(),                         \
+        X,                                                     \
+        Y,                                                     \
+        context);                                              \
   }
+CAFFE2_SPECIALIZED_REDUCE_MIN(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_MIN(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_MIN(float)
+CAFFE2_SPECIALIZED_REDUCE_MIN(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MIN
 
-#define CAFFE2_SPECIALIZED_REDUCE_MAX(T)                             \
-  template <>                                                        \
-  void ReduceMax<T, CPUContext>(                                     \
-      const int num_dims,                                            \
-      const int* dims,                                               \
-      const int num_axes,                                            \
-      const int* axes,                                               \
-      const T* X,                                                    \
-      T* Y,                                                          \
-      CPUContext* context) {                                         \
-    ReduceMaxImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_REDUCE_MAX(T)                       \
+  template <>                                                  \
+  void ReduceMax<T, CPUContext>(                               \
+      const int num_dims,                                      \
+      const int* dims,                                         \
+      const int num_axes,                                      \
+      const int* axes,                                         \
+      const T* X,                                              \
+      T* Y,                                                    \
+      CPUContext* context) {                                   \
+    ReduceTensor(                                              \
+        num_dims,                                              \
+        dims,                                                  \
+        num_axes,                                              \
+        axes,                                                  \
+        [](const T& a, const T& b) { return std::max(a, b); }, \
+        std::numeric_limits<T>::lowest(),                      \
+        X,                                                     \
+        Y,                                                     \
+        context);                                              \
   }
+CAFFE2_SPECIALIZED_REDUCE_MAX(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_MAX(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_MAX(float)
+CAFFE2_SPECIALIZED_REDUCE_MAX(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MAX
 
-#define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                             \
-  template <>                                                        \
-  void ReduceSum<T, CPUContext>(                                     \
-      const int num_dims,                                            \
-      const int* dims,                                               \
-      const int num_axes,                                            \
-      const int* axes,                                               \
-      const T* X,                                                    \
-      T* Y,                                                          \
-      CPUContext* context) {                                         \
-    ReduceSumImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                                      \
+  template <>                                                                 \
+  void ReduceSum<T, CPUContext>(                                              \
+      const int num_dims,                                                     \
+      const int* dims,                                                        \
+      const int num_axes,                                                     \
+      const int* axes,                                                        \
+      const T* X,                                                             \
+      T* Y,                                                                   \
+      CPUContext* context) {                                                  \
+    ReduceTensor(                                                             \
+        num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context); \
   }
+CAFFE2_SPECIALIZED_REDUCE_SUM(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_SUM(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_SUM(float)
+CAFFE2_SPECIALIZED_REDUCE_SUM(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_SUM
 
 #define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                             \
@@ -1065,7 +876,10 @@ void BroadcastImpl(
       CPUContext* /* context */) {                          \
     BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, X, Y); \
   }
+CAFFE2_SPECIALIZED_BROADCAST(std::int32_t)
+CAFFE2_SPECIALIZED_BROADCAST(std::int64_t)
 CAFFE2_SPECIALIZED_BROADCAST(float)
+CAFFE2_SPECIALIZED_BROADCAST(double)
 #undef CAFFE2_SPECIALIZED_BROADCAST
 
 namespace {
@@ -1404,115 +1218,123 @@ void Select<float, CPUContext>(
     y[i] = x[i * D + idx[i]];
   }
 }
-// Ported from caffe 1.
-template <>
-void Im2colNd<float, CPUContext, StorageOrder::NCHW>(
-    const float* data_img,
-    const int* im_shape,
-    const int* col_shape,
-    const int /* img_size*/,
-    const int /* col_size*/,
-    const int* kernel_shape,
-    const int* stride,
-    const int* dilation,
-    const int* pad,
-    const int N,
-    float* data_col,
-    CPUContext* /* context */,
-    bool accumulate_output) {
-  int kernel_size = 1;
-  for (int i = 0; i < N; ++i) {
-    kernel_size *= kernel_shape[i];
-  }
-  const int channels_col = col_shape[0];
-  vector<int> d_offset(N, 0);
-  vector<int> d_iter(N, 0);
-  for (int c_col = 0; c_col < channels_col; ++c_col) {
-    // Loop over spatial axes in reverse order to compute a per-axis offset.
-    int offset = c_col;
-    for (int d_i = N - 1; d_i >= 0; --d_i) {
-      if (d_i < N - 1) {
-        offset /= kernel_shape[d_i + 1];
-      }
-      d_offset[d_i] = offset % kernel_shape[d_i];
-    }
-    for (bool incremented = true; incremented;) {
-      // Loop over spatial axes in forward order to compute the indices in the
-      // image and column, and whether the index lies in the padding.
-      int index_col = c_col;
-      int index_im = c_col / kernel_size;
-      bool is_padding = false;
-      for (int d_i = 0; d_i < N; ++d_i) {
-        const int d = d_iter[d_i];
-        const int d_im =
-            d * stride[d_i] - pad[d_i] + d_offset[d_i] * dilation[d_i];
-        is_padding |= d_im < 0 || d_im >= im_shape[d_i + 1];
-        index_col *= col_shape[d_i + 1];
-        index_col += d;
-        index_im *= im_shape[d_i + 1];
-        index_im += d_im;
-      }
-      if (!accumulate_output) {
-        if (is_padding) {
-          data_col[index_col] = 0;
-        } else {
-          data_col[index_col] = data_img[index_im];
-        }
-      } else if (!is_padding) { // col2im
-        data_col[index_im] += data_img[index_col];
-      }
-      // Loop over spatial axes in reverse order to choose an index,
-      // like counting.
-      incremented = false;
-      for (int d_i = N - 1; d_i >= 0; --d_i) {
-        const int d_max = col_shape[d_i + 1];
-        DCHECK_LT(d_iter[d_i], d_max);
-        if (d_iter[d_i] == d_max - 1) {
-          d_iter[d_i] = 0;
-        } else { // d_iter[d_i] < d_max - 1
-          ++d_iter[d_i];
-          incremented = true;
-          break;
-        }
-      }
-    } // while(incremented) {
-  } // for (int c = 0; c < channels_col; ++c) {
-}
 
-template <>
-void Col2imNd<float, CPUContext, StorageOrder::NCHW>(
-    const float* data_col,
-    const int* img_shape,
-    const int* col_shape,
+namespace {
+
+template <typename T, bool kCol2Im>
+void Im2ColNdNCHWImpl(
+    const int N,
     const int img_size,
     const int col_size,
+    const int* img_shape,
+    const int* col_shape,
     const int* kernel_shape,
     const int* stride,
     const int* dilation,
     const int* pad,
-    const int N,
-    float* data_img,
+    const float* X_data,
+    float* Y_data,
     CPUContext* context) {
-  Set<float, CPUContext>(img_size, 0, data_img, context);
-  Im2colNd<float, CPUContext, StorageOrder::NCHW>(
-      data_col,
-      img_shape,
-      col_shape,
+  if (kCol2Im) {
+    Set<T, CPUContext>(img_size, 0, Y_data, context);
+  }
+  const int outer_size = col_shape[0];
+  const int inner_size = col_size / outer_size;
+  const int kernel_size = std::accumulate(
+      kernel_shape, kernel_shape + N, 1, std::multiplies<int>());
+  std::vector<int> d_offset(N, 0);
+  std::vector<int> d_iter(N, 0);
+  for (int i = 0; i < outer_size; ++i) {
+    // Loop over spatial axes in reverse order to compute a per-axis offset.
+    int offset = i;
+    for (int d_i = N - 1; d_i >= 0; --d_i) {
+      d_offset[d_i] = offset % kernel_shape[d_i];
+      offset /= kernel_shape[d_i];
+    }
+    for (int j = 0; j < inner_size; ++j) {
+      // Loop over spatial axes in forward order to compute the indices in the
+      // image and column, and whether the index lies in the padding.
+      const int col_index = i * inner_size + j;
+      int img_index = i / kernel_size;
+      bool is_padding = false;
+      for (int d_i = 0; d_i < N; ++d_i) {
+        const int d_img = d_iter[d_i] * stride[d_i] - pad[d_i] +
+            d_offset[d_i] * dilation[d_i];
+        is_padding |= d_img < 0 || d_img >= img_shape[d_i + 1];
+        img_index = img_index * img_shape[d_i + 1] + d_img;
+      }
+      if (!kCol2Im) {
+        Y_data[col_index] = is_padding ? 0 : X_data[img_index];
+      } else if (!is_padding) {
+        Y_data[img_index] += X_data[col_index];
+      }
+      internal::IncreaseIndexInDims(N, col_shape + 1, d_iter.data());
+    }
+  }
+}
+
+} // namespace
+
+template <>
+void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const float* img_data,
+    float* col_data,
+    CPUContext* context) {
+  Im2ColNdNCHWImpl<float, false>(
+      N,
       img_size,
       col_size,
+      img_shape,
+      col_shape,
       kernel_shape,
       stride,
       dilation,
       pad,
-      N,
-      data_img,
-      context,
-      true);
+      img_data,
+      col_data,
+      context);
 }
 
 template <>
-void Im2col<float, CPUContext, StorageOrder::NCHW>(
-    const float* data_im,
+void Col2ImNd<float, CPUContext, StorageOrder::NCHW>(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const float* col_data,
+    float* img_data,
+    CPUContext* context) {
+  Im2ColNdNCHWImpl<float, true>(
+      N,
+      img_size,
+      col_size,
+      img_shape,
+      col_shape,
+      kernel_shape,
+      stride,
+      dilation,
+      pad,
+      col_data,
+      img_data,
+      context);
+}
+
+template <>
+void Im2Col<float, CPUContext, StorageOrder::NCHW>(
     const int channels,
     const int height,
     const int width,
@@ -1526,7 +1348,8 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
     const int pad_r,
     const int stride_h,
     const int stride_w,
-    float* data_col,
+    const float* img_data,
+    float* col_data,
     CPUContext* /*context*/) {
   const int output_h =
       (height + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h +
@@ -1544,9 +1367,9 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
       const auto rest = k % (kernel_h * kernel_w);
       const auto kh = rest / kernel_w;
       const auto kw = rest % kernel_w;
-      auto* dst = data_col + nip * (kernel_h * kernel_w * output_h * output_w) +
+      auto* dst = col_data + nip * (kernel_h * kernel_w * output_h * output_w) +
           kh * (kernel_w * output_h * output_w) + kw * (output_h * output_w);
-      const auto* src = data_im + nip * (height * width);
+      const auto* src = img_data + nip * (height * width);
       for (auto y = 0; y < output_h; y++) {
         const auto iy = y * stride_h + kh;
         const auto ix = kw;
@@ -1574,22 +1397,22 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
     const int pad_h = pad_t;
     const int pad_w = pad_l;
     const int channel_size = height * width;
-    for (int channel = channels; channel--; data_im += channel_size) {
+    for (int channel = channels; channel--; img_data += channel_size) {
       for (int kernel_row = 0; kernel_row < kernel_h; kernel_row++) {
         for (int kernel_col = 0; kernel_col < kernel_w; kernel_col++) {
           int input_row = -pad_h + kernel_row * dilation_h;
           for (int output_rows = output_h; output_rows; output_rows--) {
             if (!is_a_ge_zero_and_a_lt_b(input_row, height)) {
               for (int output_cols = output_w; output_cols; output_cols--) {
-                *(data_col++) = 0;
+                *(col_data++) = 0;
               }
             } else {
               int input_col = -pad_w + kernel_col * dilation_w;
               for (int output_col = output_w; output_col; output_col--) {
                 if (is_a_ge_zero_and_a_lt_b(input_col, width)) {
-                  *(data_col++) = data_im[input_row * width + input_col];
+                  *(col_data++) = img_data[input_row * width + input_col];
                 } else {
-                  *(data_col++) = 0;
+                  *(col_data++) = 0;
                 }
                 input_col += stride_w;
               }
@@ -1618,19 +1441,19 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
       for (int w = 0; w < width_col; ++w) {
         int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
         int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
-        if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width)
-          data_col[(c * height_col + h) * width_col + w] =
-              data_im[(c_im * height + h_pad) * width + w_pad];
-        else
-          data_col[(c * height_col + h) * width_col + w] = 0;
+        if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width) {
+          col_data[(c * height_col + h) * width_col + w] =
+              img_data[(c_im * height + h_pad) * width + w_pad];
+        } else {
+          col_data[(c * height_col + h) * width_col + w] = 0;
+        }
       }
     }
   }
 }
 
 template <>
-void Im2col<float, CPUContext, StorageOrder::NHWC>(
-    const float* data_im,
+void Im2Col<float, CPUContext, StorageOrder::NHWC>(
     const int channels,
     const int height,
     const int width,
@@ -1644,7 +1467,8 @@ void Im2col<float, CPUContext, StorageOrder::NHWC>(
     const int pad_r,
     const int stride_h,
     const int stride_w,
-    float* data_col,
+    const float* img_data,
+    float* col_data,
     CPUContext* /*context*/) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
@@ -1659,13 +1483,15 @@ void Im2col<float, CPUContext, StorageOrder::NHWC>(
       for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
         for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
           if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
-            memcpy(data_col, data_im + (ih * width + iw) * channels,
-                   sizeof(float) * channels);
+            memcpy(
+                col_data,
+                img_data + (ih * width + iw) * channels,
+                sizeof(float) * channels);
           } else {
             // This should be simply padded with zero.
-            memset(data_col, 0, sizeof(float) * channels);
+            memset(col_data, 0, sizeof(float) * channels);
           }
-          data_col += channels;
+          col_data += channels;
         }
       }
       w_pad += stride_w;
@@ -1675,8 +1501,7 @@ void Im2col<float, CPUContext, StorageOrder::NHWC>(
 }
 
 template <>
-void Col2im<float, CPUContext, StorageOrder::NCHW>(
-    const float* data_col,
+void Col2Im<float, CPUContext, StorageOrder::NCHW>(
     const int channels,
     const int height,
     const int width,
@@ -1690,7 +1515,8 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
     const int pad_r,
     const int stride_h,
     const int stride_w,
-    float* data_im,
+    const float* col_data,
+    float* img_data,
     CPUContext* context) {
   const int output_h =
       (height + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h +
@@ -1699,7 +1525,7 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
       (width + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w +
       1;
 
-  Set<float, CPUContext>(height * width * channels, 0, data_im, context);
+  Set<float, CPUContext>(height * width * channels, 0, img_data, context);
 
   // Fast path for zero padding and no dilation
   // From Torch, modified THNN_(unfolded_acc)
@@ -1710,10 +1536,10 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
       const auto rest = k % (kernel_h * kernel_w);
       const auto kh = rest / kernel_w;
       const auto kw = rest % kernel_w;
-      const auto* dst = data_col +
+      const auto* dst = col_data +
           nip * (kernel_h * kernel_w * output_h * output_w) +
           kh * (kernel_w * output_h * output_w) + kw * (output_h * output_w);
-      auto* src = data_im + nip * (height * width);
+      auto* src = img_data + nip * (height * width);
       for (auto y = 0; y < output_h; y++) {
         const auto iy = y * stride_h + kh;
         const auto ix = kw;
@@ -1741,20 +1567,20 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
     const int pad_h = pad_t;
     const int pad_w = pad_l;
     const int channel_size = height * width;
-    for (int channel = channels; channel--; data_im += channel_size) {
+    for (int channel = channels; channel--; img_data += channel_size) {
       for (int kernel_row = 0; kernel_row < kernel_h; kernel_row++) {
         for (int kernel_col = 0; kernel_col < kernel_w; kernel_col++) {
           int input_row = -pad_h + kernel_row * dilation_h;
           for (int output_rows = output_h; output_rows; output_rows--) {
             if (!is_a_ge_zero_and_a_lt_b(input_row, height)) {
-              data_col += output_w;
+              col_data += output_w;
             } else {
               int input_col = -pad_w + kernel_col * dilation_w;
               for (int output_col = output_w; output_col; output_col--) {
                 if (is_a_ge_zero_and_a_lt_b(input_col, width)) {
-                  data_im[input_row * width + input_col] += *data_col;
+                  img_data[input_row * width + input_col] += *col_data;
                 }
-                data_col++;
+                ++col_data;
                 input_col += stride_w;
               }
             }
@@ -1782,8 +1608,8 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
         int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
         int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
         if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width) {
-          data_im[(c_im * height + h_pad) * width + w_pad] +=
-              data_col[(c * height_col + h) * width_col + w];
+          img_data[(c_im * height + h_pad) * width + w_pad] +=
+              col_data[(c * height_col + h) * width_col + w];
         }
       }
     }
@@ -1791,8 +1617,7 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
 }
 
 template <>
-void Col2im<float, CPUContext, StorageOrder::NHWC>(
-    const float* data_col,
+void Col2Im<float, CPUContext, StorageOrder::NHWC>(
     const int channels,
     const int height,
     const int width,
@@ -1806,12 +1631,13 @@ void Col2im<float, CPUContext, StorageOrder::NHWC>(
     const int pad_r,
     const int stride_h,
     const int stride_w,
-    float* data_im,
+    const float* col_data,
+    float* img_data,
     CPUContext* context) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
 
-  Set<float, CPUContext>(height * width * channels, 0, data_im, context);
+  Set<float, CPUContext>(height * width * channels, 0, img_data, context);
   int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
   int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int h_pad = -pad_t;
@@ -1821,11 +1647,11 @@ void Col2im<float, CPUContext, StorageOrder::NHWC>(
       for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
         for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
           if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
-            auto* data_im_patch = data_im + (ih * width + iw) * channels;
+            auto* img_data_patch = img_data + (ih * width + iw) * channels;
             Add<float, CPUContext>(
-                  channels, data_im_patch, data_col, data_im_patch, context);
+                channels, img_data_patch, col_data, img_data_patch, context);
           }
-          data_col += channels;
+          col_data += channels;
         }
       }
       w_pad += stride_w;
@@ -2065,68 +1891,6 @@ void TransposeCPUImpl(
   }
 }
 
-template <typename T, int D>
-void EigenTransposeImpl(const int* dims, const int* axes, const T* X, T* Y) {
-  Eigen::DSizes<Eigen::DenseIndex, D> X_dims;
-  Eigen::DSizes<Eigen::DenseIndex, D> Y_dims;
-  Eigen::array<Eigen::DenseIndex, D> axes_array;
-#pragma unroll
-  for (int i = 0; i < D; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - axes[i]]);
-    axes_array[D - 1 - i] = static_cast<Eigen::DenseIndex>(D - 1 - axes[i]);
-  }
-  EigenTensorMap<T, D>(Y, Y_dims) =
-      EigenTensorMap<T, D>(const_cast<T*>(X), X_dims).shuffle(axes_array);
-}
-
-template <typename T>
-bool EigenTranspose(
-    const int ndim,
-    const int* dims,
-    const int* axes,
-    const T* X,
-    T* Y) {
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  switch (ndim) {
-    case 1: {
-      EigenTransposeImpl<T, 1>(dims, axes, X, Y);
-      return true;
-    }
-    case 2: {
-      EigenTransposeImpl<T, 2>(dims, axes, X, Y);
-      return true;
-    }
-    case 3: {
-      EigenTransposeImpl<T, 3>(dims, axes, X, Y);
-      return true;
-    }
-    case 4: {
-      EigenTransposeImpl<T, 4>(dims, axes, X, Y);
-      return true;
-    }
-    case 5: {
-      EigenTransposeImpl<T, 5>(dims, axes, X, Y);
-      return true;
-    }
-    case 6: {
-      EigenTransposeImpl<T, 6>(dims, axes, X, Y);
-      return true;
-    }
-    case 7: {
-      EigenTransposeImpl<T, 7>(dims, axes, X, Y);
-      return true;
-    }
-    case 8: {
-      EigenTransposeImpl<T, 8>(dims, axes, X, Y);
-      return true;
-    }
-    default: { return false; }
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  return false;
-}
-
 } // namespace
 
 template <>
@@ -2142,9 +1906,6 @@ void Transpose<float, CPUContext>(
     return;
   }
 #endif // CAFFE2_USE_HPTT
-  if (EigenTranspose(ndim, dims, axes, X, Y)) {
-    return;
-  }
   TransposeCPUImpl(ndim, dims, axes, X, Y);
 }
 
@@ -2157,9 +1918,6 @@ void Transpose<float, CPUContext>(
       const T* X,                                 \
       T* Y,                                       \
       CPUContext* /* context */) {                \
-    if (EigenTranspose(ndim, dims, axes, X, Y)) { \
-      return;                                     \
-    }                                             \
     TransposeCPUImpl(ndim, dims, axes, X, Y);     \
   }
 CAFFE2_SPECIALIZED_TRANSPOSE(double)

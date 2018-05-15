@@ -1,10 +1,6 @@
 #ifndef THS_TENSOR_INC
 #define THS_TENSOR_INC
 
-#ifdef THS_EXPORTS
-#define TH_EXPORTS
-#endif
-
 #include "TH.h"
 #include <stdint.h>
 

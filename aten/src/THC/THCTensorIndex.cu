@@ -12,6 +12,8 @@
 #include "THCAtomics.cuh"
 #include "THCThrustAllocator.cuh"
 #include "THCTensorSort.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <algorithm> // for std::min

@@ -30,7 +30,7 @@ static inline void THNN_(SpatialGridSamplerBilinear_shapeCheck)(
   }
 }
 
-TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
+THC_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
     THCState *state,
     THCTensor *input,
     THCTensor *grid,
@@ -60,7 +60,7 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
   THCudaCheck(cudaGetLastError());
 }
 
-TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
+THC_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
     THCState *state,
     THCTensor *input, THCTensor *gradInput,
     THCTensor *grid, THCTensor *gradGrid,

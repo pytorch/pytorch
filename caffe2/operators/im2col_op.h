@@ -84,8 +84,7 @@ class Im2ColOp final : public Operator<Context> {
         for (int n = 0; n < N; ++n) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
-          math::Im2col<T, Context, StorageOrder::NCHW>(
-              xdata,
+          math::Im2Col<T, Context, StorageOrder::NCHW>(
               C,
               H,
               W,
@@ -99,6 +98,7 @@ class Im2ColOp final : public Operator<Context> {
               pad_,
               stride_h_,
               stride_w_,
+              xdata,
               ydata,
               &context_);
         }
@@ -112,8 +112,7 @@ class Im2ColOp final : public Operator<Context> {
         for (int n = 0; n < N; ++n) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
-          math::Im2col<T, Context, StorageOrder::NHWC>(
-              xdata,
+          math::Im2Col<T, Context, StorageOrder::NHWC>(
               C,
               H,
               W,
@@ -127,6 +126,7 @@ class Im2ColOp final : public Operator<Context> {
               pad_,
               stride_h_,
               stride_w_,
+              xdata,
               ydata,
               &context_);
         }
@@ -227,8 +227,7 @@ class Col2ImOp final : public Operator<Context> {
         for (int n = 0; n < N; ++n) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
-          math::Col2im<T, Context, StorageOrder::NCHW>(
-              xdata,
+          math::Col2Im<T, Context, StorageOrder::NCHW>(
               C,
               H,
               W,
@@ -242,6 +241,7 @@ class Col2ImOp final : public Operator<Context> {
               pad_,
               stride_h_,
               stride_w_,
+              xdata,
               ydata,
               &context_);
         }
@@ -250,8 +250,7 @@ class Col2ImOp final : public Operator<Context> {
         for (int n = 0; n < N; ++n) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
-          math::Col2im<T, Context, StorageOrder::NHWC>(
-              xdata,
+          math::Col2Im<T, Context, StorageOrder::NHWC>(
               C,
               H,
               W,
@@ -265,6 +264,7 @@ class Col2ImOp final : public Operator<Context> {
               pad_,
               stride_h_,
               stride_w_,
+              xdata,
               ydata,
               &context_);
         }

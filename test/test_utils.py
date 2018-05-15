@@ -20,7 +20,7 @@ from torch.utils.trainer.plugins.plugin import Plugin
 from torch.utils.serialization import load_lua
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS
+from common import IS_WINDOWS, IS_PPC
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -28,10 +28,13 @@ from common import TestCase, run_tests, download_file
 
 try:
     import cffi
-    from torch.utils.ffi import compile_extension
     HAS_CFFI = True
 except ImportError:
     HAS_CFFI = False
+
+
+if HAS_CFFI:
+    from torch.utils.ffi import create_extension
 
 
 class SimplePlugin(Plugin):
@@ -246,7 +249,7 @@ class TestDataLoader(TestCase):
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
-    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
+    @unittest.skip("FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN")
     def test_multi_keep(self):
         dataloader = torch.utils.data.DataLoader(self.dataset,
                                                  batch_size=self.batch_size,
@@ -357,16 +360,18 @@ class TestFFI(TestCase):
         shutil.rmtree(self.tmpdir)
 
     @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
+    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
+    @unittest.skipIf(IS_PPC, "skip for ppc64le due to incompatible exception handling")
     def test_cpu(self):
-        compile_extension(
+        create_extension(
             name='test_extensions.cpulib',
-            header=test_dir + '/ffi/src/cpu/lib.h',
+            headers=[test_dir + '/ffi/src/cpu/lib.h'],
             sources=[
                 test_dir + '/ffi/src/cpu/lib1.c',
                 test_dir + '/ffi/src/cpu/lib2.c',
             ],
             verbose=False,
-        )
+        ).build()
         from test_extensions import cpulib
         tensor = torch.ones(2, 2).float()
 
@@ -385,16 +390,17 @@ class TestFFI(TestCase):
                           lambda: cpulib.bad_func(tensor, 2, 1.5))
 
     @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
+    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
     def test_gpu(self):
-        compile_extension(
+        create_extension(
             name='gpulib',
-            header=test_dir + '/ffi/src/cuda/cudalib.h',
+            headers=[test_dir + '/ffi/src/cuda/cudalib.h'],
             sources=[
                 test_dir + '/ffi/src/cuda/cudalib.c',
             ],
             with_cuda=True,
             verbose=False,
-        )
+        ).build()
         import gpulib
         tensor = torch.ones(2, 2).float()
 
@@ -520,7 +526,7 @@ class TestBottleneck(TestCase):
         if scriptargs != '':
             scriptargs = ' {}'.format(scriptargs)
         rc, out, err = self._run(
-            'python -m torch.utils.bottleneck {}{}'.format(filepath, scriptargs))
+            '{} -m torch.utils.bottleneck {}{}'.format(sys.executable, filepath, scriptargs))
         return rc, out, err
 
     def _check_run_args(self):

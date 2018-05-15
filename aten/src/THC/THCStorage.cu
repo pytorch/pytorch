@@ -1,4 +1,4 @@
-#include "THCStorage.h"
+#include "THCStorage.hpp"
 
 #include "THCThrustAllocator.cuh"
 #include <thrust/device_ptr.h>

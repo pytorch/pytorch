@@ -34,12 +34,15 @@ class AsyncNetBase : public NetBase {
     return operators_;
   }
 
+  void handleRunError() override;
+
   bool RunAsync() override;
 
  protected:
   bool canSchedule(
       int chain_id,
-      const std::vector<EventStatus>* status = nullptr);
+      const std::vector<EventStatus>* status = nullptr,
+      bool* parent_failed = nullptr);
 
   int tasksNum() const;
   Event& event(int task_id) const;
@@ -78,12 +81,19 @@ class AsyncNetBase : public NetBase {
   static thread_local std::vector<int> stream_counters_;
   int num_workers_;
 
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  // Mutex that protects caught_exception_
+  std::mutex exception_mutex_;
+  std::exception_ptr caught_exception_;
+#endif // CAFFE2_USE_EXCEPTION_PTR
   // Tracing
   std::shared_ptr<tracing::Tracer> tracer_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
+  void storeExceptionPtr();
+
   std::shared_ptr<TaskThreadPool>
   pool_getter(PoolsMap& pools, int device_type, int device_id, int pool_size);
 

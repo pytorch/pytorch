@@ -2,6 +2,7 @@
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
+#include "THCTensor.hpp"
 
 #include "common.h"
 

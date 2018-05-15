@@ -486,6 +486,13 @@ class TestShapeInference(test_util.TestCase):
         workspace.FeedBlob('x', np.random.rand(1, 2, 3, 4).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
+    def testInt8Conversion(self):
+        model = model_helper.ModelHelper(name="int8_conversion_test")
+        model.FloatToFused8BitRowwiseQuantized('x', 'x_8bit')
+        model.Fused8BitRowwiseQuantizedToFloat('x_8bit', 'x_recovered')
+        workspace.FeedBlob('x', np.random.rand(100, 150).astype(np.float32))
+        self.InferTensorRunAndCompare(model)
+
     def InferTensorRunAndCompare(self, model, expected_uninferred_blobs=None):
         '''
         Runs shape inference, and then the model to check

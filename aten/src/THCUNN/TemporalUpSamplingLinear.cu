@@ -1,6 +1,7 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
 #include "THCUNN.h"
+#include "THCTensor.hpp"
 #include "common.h"
 #include "linear_upsampling.h"
 #include "THCDeviceTensor.cuh"

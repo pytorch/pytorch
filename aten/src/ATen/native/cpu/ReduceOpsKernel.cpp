@@ -1,6 +1,8 @@
 #include "ATen/native/cpu/ReduceOpsKernel.h"
 
 #include <numeric>
+#include <iterator>
+#include <algorithm>
 
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
@@ -107,7 +109,7 @@ struct Reduction {
     static_assert(sizeof(acc) == 128, "accumulator should be 128 bytes");
     for (int64_t row = 0; row != rows; row++) {
       for (int j = 0; j != 4; j++) {
-        auto val = Vec::s_load(&data[row * stride + j * Vec::size]);
+        auto val = Vec::loadu(&data[row * stride + j * Vec::size]);
         acc[j] = Reduce()(acc[j], val);
       }
     }
@@ -125,10 +127,12 @@ struct Reduction {
     });
 
     if (cols_rounded != cols) {
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
       scalar_t buf[WIDTH];
-      for (int64_t j = 0; j != cols - cols_rounded; j++) {
-        buf[j] = ident;
-      }
+
+      // Initializes the entire (tiny) array to avoid uninitialized warnings
+      std::fill(std::begin(buf), std::end(buf), ident);
+
       for (int64_t row = 0; row != rows; row++) {
         for (int64_t j = 0; j != cols - cols_rounded; j++) {
           auto val = data[row * stride + j + cols_rounded];

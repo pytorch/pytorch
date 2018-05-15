@@ -79,12 +79,12 @@ class TransformedDistribution(Distribution):
         y = value
         for transform in reversed(self.transforms):
             x = transform.inv(y)
-            log_prob -= _sum_rightmost(transform.log_abs_det_jacobian(x, y),
-                                       event_dim - transform.event_dim)
+            log_prob = log_prob - _sum_rightmost(transform.log_abs_det_jacobian(x, y),
+                                                 event_dim - transform.event_dim)
             y = x
 
-        log_prob += _sum_rightmost(self.base_dist.log_prob(y),
-                                   event_dim - len(self.base_dist.event_shape))
+        log_prob = log_prob + _sum_rightmost(self.base_dist.log_prob(y),
+                                             event_dim - len(self.base_dist.event_shape))
         return log_prob
 
     def _monotonize_cdf(self, value):

@@ -53,7 +53,6 @@ ELSE()
   FIND_PACKAGE(CUDA 7.5)
   IF(CUDA_FOUND)
     INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
-    INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
     LINK_DIRECTORIES("${CUDA_TOOLKIT_ROOT_DIR}/lib" "${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
     ADD_DEFINITIONS(-DWITH_CUDA=1)
@@ -128,8 +127,14 @@ ENDIF()
 
 EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
 
-SET(all_cpp ${base_cpp} ${process_group_cpp} ${master_worker_cpp})
-SET(all_h THD.h ${base_h} ${process_group_h} ${master_worker_h})
+SET(all_cpp ${base_cpp} ${process_group_cpp})
+SET(all_h THD.h ${base_h} ${process_group_h})
+
+IF(WITH_DISTRIBUTED_MW)
+  ADD_DEFINITIONS(-DWITH_DISTRIBUTED_MW=1)
+  SET(all_cpp ${all_cpp} ${master_worker_cpp})
+  SET(all_h THD.h ${all_h} ${master_worker_h})
+ENDIF()
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 

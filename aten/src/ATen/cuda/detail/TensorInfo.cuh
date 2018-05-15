@@ -21,14 +21,19 @@ struct TensorInfo {
   // slice)
   void reduceDim(int dim);
 
-  // Collapses all runs of successive dimensions if the size/strides
-  // match up within the run and there are no holes between the
-  // dimensions.
-  // If excludeDim is set (not -1), then excludeDim will not be
-  // collapsed with any other dimension.
-  // Function returns the new dimension index that excludeDim maps to,
-  // since the collapsed dimensions are <= the input dimensions.
-  int collapseDims(int excludeDim = -1);
+  /*
+  Updates the TensorInfo's dims, sizes, and strides to reflect a "collapse" of
+  the info, possibly excluding the optional excludeDim. A "collapsed" version
+  of the info is the fewest dims that order the tensor's elements in the same
+  way as the original info. If excludeDim is specified, the collapse is the
+  fewest dims that order the tensor's elements as the original and preserve the
+  excluded dimension, unless the tensor collapses to a point.
+
+  Returns the (new) index of the preserved dimension if excludeDim is
+  specified. Returns 0 if the tensor is collapsed to a point. Returns -1
+  otherwise.
+  */
+  int collapseDims(const int excludeDim = -1);
 
   // Contiguous tensors of more than one dimension are collapsed down
   // to one tensor
@@ -49,7 +54,7 @@ TensorInfo<T, IndexType>::TensorInfo(T* p,
                                      IndexType st[MAX_TENSORINFO_DIMS]) {
   data = p;
   dims = dim;
-  assert(dims < MAX_TENSORINFO_DIMS);
+  AT_ASSERT(dims < MAX_TENSORINFO_DIMS);
 
   for (int i = 0; i < dim; ++i) {
     sizes[i] = sz[i];
@@ -60,162 +65,79 @@ TensorInfo<T, IndexType>::TensorInfo(T* p,
 template <typename T, typename IndexType>
 void
 TensorInfo<T, IndexType>::reduceDim(int dim) {
-  assert(dim < dims && dim >= 0);
+  AT_CHECK(dim < dims && dim >= 0, "expected dim between 0 and dims - 1");
   sizes[dim] = 1;
 }
 
 template <typename T, typename IndexType>
 int
-TensorInfo<T, IndexType>::collapseDims(int excludeDim) {
-  // Find the innermost dimension not of size 1, since dimensions of size 1 are
-  // collapsible.
-  int firstNonOneDim = -1;
+TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
 
-  for (int i = dims - 1; i >= 0; --i) {
-    if (i == excludeDim) {
-      // We cannot collapse this dimension, even if it is size 1
-      firstNonOneDim = i;
-      break;
+  AT_CHECK(excludeDim >= -1 && excludeDim < dims, 
+    "expected excluded dim between -1 and dims - 1");
+
+  int stopDim = (excludeDim == -1) ? dims : excludeDim;
+  int newIndex = -1;
+  int oldIndex = 0;
+  int remappedExcludedDim = -1;
+
+  while (oldIndex < dims) {
+    // Finds a dimension to collapse into
+    for (; oldIndex < stopDim; ++oldIndex) {
+      if (sizes[oldIndex] == 1) {
+        continue;
+      }
+      
+      ++newIndex;
+      sizes[newIndex] = sizes[oldIndex];
+      strides[newIndex] = strides[oldIndex];
+      ++oldIndex;
+      break; 
     }
 
-    if (sizes[i] != 1) {
-      firstNonOneDim = i;
-      break;
+    // Collapses dims
+    for (; oldIndex < stopDim; ++oldIndex) {
+      if (sizes[oldIndex] == 1) {
+        continue;
+      }
+  
+      if (strides[newIndex] == sizes[oldIndex] * strides[oldIndex]) {
+        sizes[newIndex] *= sizes[oldIndex];
+        strides[newIndex] = strides[oldIndex];
+      } else {
+        ++newIndex;
+        sizes[newIndex] = sizes[oldIndex];
+        strides[newIndex] = strides[oldIndex];
+      }
+    }
+
+    // Handles excludeDim being set (oldIndex == excludeDim)
+    if (oldIndex != dims) {
+      
+      // Preserves excluded dimension
+      ++newIndex;
+      sizes[newIndex] = sizes[oldIndex];
+      strides[newIndex] = strides[oldIndex];
+      remappedExcludedDim = newIndex;
+
+      // Restarts iteration after excludeDim
+      ++oldIndex;
+      stopDim = dims;
     }
   }
 
-  // Special case: if all dimensions are of size 1, then this is a
-  // single-point tensor that we still have to operate on. Reduce to a
-  // single point.
-  if (firstNonOneDim == -1) {
-    assert(excludeDim == -1);
-
+  // Handles special case of all dims size 1
+  if (newIndex == -1 || (newIndex == 0 && sizes[0] == 1)) {
     dims = 1;
     sizes[0] = 1;
     strides[0] = 1;
 
-    // Everything effectively got collapsed into this dimension
     return 0;
   }
 
-  // Count the number of successive dimensions that can be collapsed, from
-  // innermost to outermost.
-  int numCollapsed = 0;
-
-  // Skip the leading size 1 dims
-  numCollapsed += dims - 1 - firstNonOneDim;
-
-  // We perform one pass through to determine how many dimensions we
-  // can collapse, before calculating the actual size of the collapsed
-  // dimensions.
-  // size/strideInner are the size/strides of the previous inner
-  // non-collapsible dim we encounter.
-  int64_t sizeInner = sizes[firstNonOneDim];
-  int64_t strideInner = strides[firstNonOneDim];
-
-  for (int i = firstNonOneDim - 1; i >= 0; --i) {
-    int64_t sizeOuter = sizes[i];
-    int64_t strideOuter = strides[i];
-
-    // Don't collapse this dimension if we want to exclude it from
-    // collapsing.
-    // Since this code is attempting to collapse a subsequent
-    // dimension (i) with the preceding dimension (i + 1), we can only
-    // perform collapsing if the preceding dimension can be collapsed
-    // (i.e., not excludeDim)
-    if ((excludeDim != i) && (excludeDim != i + 1)) {
-      // The next outermost dimension can be skipped if size 1
-      if (sizeOuter == 1) {
-        ++numCollapsed;
-        continue;
-      }
-
-      // If the next outermost dimension is contiguous with the
-      // previous non-collapsed one, collapse it
-      if (strideOuter == strideInner * sizeInner) {
-        ++numCollapsed;
-
-        // This is the run of collapsed dimensions' size
-        sizeInner = sizeInner * sizeOuter;
-        continue;
-      }
-    }
-
-    // Otherwise, this new outer dimension at `i` cannot be collapsed
-    // because it is excluded from collapsing, or it is not contiguous
-    // with the previous inner dimension.
-    sizeInner = sizeOuter;
-    strideInner = strideOuter;
-  }
-
-  // This will be our new size/stride and dimension.
-  IndexType newSizes[MAX_TENSORINFO_DIMS];
-  IndexType newStrides[MAX_TENSORINFO_DIMS];
-
-  assert(numCollapsed < dims);
-  int newDims = dims - numCollapsed;
-
-  // We return the index of the excluded dimension that is excluded
-  // from being collapsed here.
-  int returnDim = -1;
-
-  // We perform a second pass through the dimensions to actually
-  // calculate the size of the collapsed dimensions.
-  int collapsedIndex = dims - numCollapsed - 1;
-  newSizes[collapsedIndex] = sizes[firstNonOneDim];
-  newStrides[collapsedIndex] = strides[firstNonOneDim];
-
-  if (firstNonOneDim == excludeDim) {
-    returnDim = collapsedIndex;
-  }
-
-  for (int i = firstNonOneDim - 1; i >= 0; --i) {
-    IndexType sizeOuter = sizes[i];
-    IndexType strideOuter = strides[i];
-
-    if ((excludeDim != i) && (excludeDim != i + 1)) {
-      if (sizeOuter == 1) {
-        // skip
-        continue;
-      }
-
-      if (strideOuter == newSizes[collapsedIndex] * newStrides[collapsedIndex]) {
-        // collapse
-        newSizes[collapsedIndex] *= sizeOuter;
-        continue;
-      }
-    }
-
-    // Otherwise, strides don't match, or dim `i` is excluded from
-    // collapsing.
-    --collapsedIndex;
-    assert(collapsedIndex >= 0);
-    assert(collapsedIndex < newDims);
-    newSizes[collapsedIndex] = sizeOuter;
-    newStrides[collapsedIndex] = strideOuter;
-
-    if (excludeDim == i) {
-      returnDim = collapsedIndex;
-    }
-  }
-
-  // We must have filled all the dimensions we're looking for
-  assert(collapsedIndex == 0);
-  assert((excludeDim == -1) || (returnDim != -1));
-
-  dims = newDims;
-
-  for (int i = 0; i < dims; ++i) {
-    sizes[i] = newSizes[i];
-    strides[i] = newStrides[i];
-  }
-
-  // After collapsing, the original `excludeDim` may have been
-  // renumbered to this new `returnDim`, since some dimensions could
-  // have been collapsed.
-  return returnDim;
+  dims = newIndex + 1;
+  return remappedExcludedDim;
 }
-
 
 // Translate a linear index for the apply to a T* offset;
 // specialized on `Dims` to reduce nvcc compilation time
@@ -224,50 +146,38 @@ struct IndexToOffset {
   static __host__ __device__ IndexType get(
     IndexType linearId,
     const TensorInfo<T, IndexType>& info) {
+    
     IndexType offset = 0;
 
-    // Use static dims
-    for (int i = Dims - 1; i >= 0; --i) {
+    // Uses static dims
+    for (int i = Dims - 1; i > 0; --i) {
       IndexType curDimIndex = linearId % info.sizes[i];
       IndexType curDimOffset = curDimIndex * info.strides[i];
       offset += curDimOffset;
-
-      if (i > 0) {
-        linearId /= info.sizes[i];
-      }
+      linearId /= info.sizes[i];
     }
 
-    return offset;
+    return offset + linearId * info.strides[0];
   }
 };
 
-// For contiguous tensors, the offset = index
-template <typename T, typename IndexType>
-struct IndexToOffset<T, IndexType, -2> {
-  static inline __host__ __device__ IndexType
-    get(IndexType linearId, const TensorInfo<T, IndexType>& info) {
-    return linearId;
-  }
-};
-
+// Uses dynamic (runtime) instead of static (compiletime) dims
 template <typename T, typename IndexType>
 struct IndexToOffset<T, IndexType, -1> {
   static inline __host__ __device__ IndexType get(
     IndexType linearId,
     const TensorInfo<T, IndexType>& info) {
 
-    IndexType offset = 0;
+      IndexType offset = 0;
 
-    // Use dynamic dims
-    for (int i = info.dims - 1; i >= 0; --i) {
-      IndexType curDimIndex = linearId % info.sizes[i];
-      IndexType curDimOffset = curDimIndex * info.strides[i];
-      offset += curDimOffset;
+      for (int i = info.dims - 1; i > 0; --i) {
+        IndexType curDimIndex = linearId % info.sizes[i];
+        IndexType curDimOffset = curDimIndex * info.strides[i];
+        offset += curDimOffset;
+        linearId /= info.sizes[i];
+      }
 
-      linearId /= info.sizes[i];
-    }
-
-    return offset;
+      return offset + linearId * info.strides[0];
   }
 };
 

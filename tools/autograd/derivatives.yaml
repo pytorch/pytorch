@@ -163,14 +163,17 @@
 - name: ceil(Tensor self)
   self: zeros_like(grad)
 
+# For clamp, clamp_min, and clamp_max, gradient is not defined at the
+# boundaries. But empirically it's helpful to be able to get gradient on min and
+# max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar min, Scalar max)
-  self: grad * (self > min).type_as(grad) * (self < max).type_as(grad)
+  self: grad * ((self >= min) * (self <= max)).type_as(grad)
 
 - name: clamp_min(Tensor self, Scalar min)
-  self: grad * (self > min).type_as(grad)
+  self: grad * (self >= min).type_as(grad)
 
 - name: clamp_max(Tensor self, Scalar max)
-  self: grad * (self < max).type_as(grad)
+  self: grad * (self <= max).type_as(grad)
 
 - name: clone(Tensor self)
   self: grad
@@ -199,6 +202,9 @@
 
 - name: diag(Tensor self, int64_t diagonal)
   self: diag_backward(grad, self.sizes(), diagonal)
+
+- name: diagonal(Tensor self, int64_t offset, int64_t dim1, int64_t dim2)
+  self: diagonal_backward(grad, self.sizes(), offset, dim1, dim2)
 
 - name: dist(Tensor self, Tensor other, Scalar p)
   self: norm_backward(grad, self - other, p, result)
@@ -237,7 +243,7 @@
 - name: expm1(Tensor self)
   self: grad * (result + 1)
 
-- name: expand(Tensor self, IntList size)
+- name: expand(Tensor self, IntList size, *, bool implicit)
   self: reduce_to(grad, self.sizes())
 
 - name: exponential_(Tensor self, double lambd, Generator generator)
@@ -287,9 +293,13 @@
   self: grad.mv(vec2)
   vec2: grad.t().mv(self)
 
-- name: gesv(Tensor self, Tensor A)
-  self: std::get<0>(gesv(grad, A.t()))
-  A: -at::mm(std::get<0>(gesv(grad, A.t())), solution.t())
+- name: _gesv_single(Tensor self, Tensor A)
+  self: gesv_backward_self(grad, self, A)
+  A: gesv_backward_A(grad, self, A, solution)
+
+- name: _gesv_helper(Tensor self, Tensor A)
+  self: gesv_backward_self(grad, self, A)
+  A: gesv_backward_A(grad, self, A, result0)
 
 - name: gt_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -362,6 +372,9 @@
 
 - name: log_normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
+
+- name: logsumexp(Tensor self, int64_t dim, bool keepdim)
+  self: logsumexp_backward(grad, self, result, dim, keepdim)
 
 - name: lt_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -604,7 +617,7 @@
 - name: _sum(Tensor self)
   self: grad.expand(self.sizes())
 
-- name: _sum(Tensor self, int64_t dim, bool keepdim)
+- name: _sum(Tensor self, IntList dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: svd(Tensor self, bool some)
@@ -682,7 +695,7 @@
   mask: not_implemented("_sparse_mask")
 
 - name: _standard_gamma(Tensor self, Generator generator)
-  self: grad * self._standard_gamma_grad(output)
+  self: grad * self._standard_gamma_grad(result)
 
 - name: _standard_gamma_grad(Tensor self, Tensor output)
   self: not_implemented("_standard_gamma_grad")
@@ -698,7 +711,7 @@
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
 
 - name: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
-  weight: embedding_bag_backward(grad, indices, offsets, result1, result2, weight.size(0), scale_grad_by_freq, mode, sparse)
+  weight: embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse)
 
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   self: not_implemented("embedding_renorm")
@@ -757,8 +770,8 @@
 - name: log_sigmoid_forward(Tensor self)
   self: log_sigmoid_backward(grad, self, buffer)
 
-- name: log_softmax_forward(Tensor self, int64_t dim)
-  self: log_softmax_backward(grad, self, dim, output)
+- name: log_softmax(Tensor self, int64_t dim)
+  self: log_softmax_backward_data(grad, result, dim, self)
 
 - name: prelu_forward(Tensor self, Tensor weight)
   self, weight: prelu_backward(grad, self, weight, grad_input_mask)
@@ -769,8 +782,8 @@
 - name: rrelu_with_noise_forward_(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_with_noise_backward(grad, output, noise, lower, upper, training)
 
-- name: softmax_forward(Tensor self, int64_t dim)
-  self: softmax_backward(grad, self, dim, output)
+- name: softmax(Tensor self, int64_t dim)
+  self: softmax_backward_data(grad, result, dim, self)
 
 - name: softplus_forward(Tensor self, Scalar beta, Scalar threshold)
   self: softplus_backward(grad, self, beta, threshold, output)
@@ -959,7 +972,7 @@
   grad_output: log_sigmoid_backward(grad, self, buffer)
   self: log_sigmoid_double_backward(grad * grad_output, self)
 
-- name: log_softmax_backward(Tensor grad_output, Tensor self, int64_t dim, Tensor output)
+- name: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
   grad_output: grad - (grad * output.exp()).sum(dim, true)
   self: log_softmax_double_backward(grad, grad_output, dim, output)
 
@@ -1026,8 +1039,8 @@
   grad_output: softplus_backward(grad, self, beta, threshold, output)
   self: softplus_double_backward(grad * grad_output, self, beta, threshold)
 
-- name: softmax_backward(Tensor grad_output, Tensor self, int64_t dim, Tensor output)
-  grad_output: softmax_backward(grad, self, dim, output)
+- name: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
+  grad_output: softmax_backward_data(grad, output, dim, self)
   self: softmax_double_backward(grad, grad_output, dim, output)
 
 - name: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce)

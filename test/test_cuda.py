@@ -817,6 +817,8 @@ class TestCuda(TestCase):
     def test_type_conversions_same_gpu(self):
         x = torch.randn(5, 5).cuda(1)
         self.assertEqual(x.int().get_device(), 1)
+        self.assertEqual(x.type(torch.int).get_device(), 1)
+        self.assertEqual(x.to(torch.int).get_device(), 1)
 
     def test_neg(self):
         TestTorch._test_neg(self, lambda t: t.cuda())
@@ -834,6 +836,20 @@ class TestCuda(TestCase):
 
     def test_broadcast_gpu(self):
         self._test_broadcast(torch.randn(5, 5).cuda())
+
+    def test_min_max_nan(self):
+        tests = [(lambda x: x.min(), 'min'),
+                 (lambda x: x.max(), 'max'),
+                 (lambda x: x.min(0)[0], 'min_dim'),
+                 (lambda x: x.max(0)[0], 'max_dim')]
+        for f, name in tests:
+            a = torch.arange(25.0).view(5, 5)
+            a[2, 2] = float('nan')
+            actual = f(a.cuda()).cpu()
+            expected = f(a).cpu()
+            self.assertEqual(torch.isnan(actual), torch.isnan(expected), 'nans for {}'.format(name))
+            self.assertEqual(actual[~torch.isnan(actual)],
+                             expected[~torch.isnan(expected)], 'nans for {}'.format(name))
 
     @staticmethod
     def _test_broadcast_coalesced(self, tensors, buffer_size):
@@ -1306,6 +1322,14 @@ class TestCuda(TestCase):
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_gesv_batched(self):
+        TestTorch._test_gesv_batched(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_gesv_batched_dims(self):
+        TestTorch._test_gesv_batched_dims(self, lambda t: t.cuda())
+
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
 
@@ -1599,6 +1623,24 @@ class TestCuda(TestCase):
 
     def test_random_neg_values(self):
         TestTorch._test_random_neg_values(self, use_cuda=True)
+
+    def test_overlapped_indices(self):
+        a = torch.arange(0, 128).view(32, 4).cuda()
+        b = torch.arange(0, 128).view(32, 4).cuda()
+        b = b.set_(b.storage(), storage_offset=0, size=(65, 64), stride=(1, 1))
+        b += 5
+        b = b.set_(b.storage(),
+                   storage_offset=0,
+                   size=a.size(),
+                   stride=a.stride())
+        a += 5
+        self.assertEqual(a, b)
+
+    def test_tiny_half_norm_(self):
+        a = torch.arange(25).cuda().float()
+        a /= 100000000
+        b = a.half()
+        self.assertGreater(b.norm().item(), 0)
 
 
 def load_ignore_file():

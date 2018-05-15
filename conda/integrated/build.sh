@@ -24,26 +24,39 @@ set -ex
 # Pytorch environment variables needed during the build
 export CMAKE_LIBRARY_PATH=$PREFIX/lib:$PREFIX/include:$CMAKE_LIBRARY_PATH
 export CMAKE_PREFIX_PATH=$PREFIX
-# compile for Kepler, Kepler+Tesla, Maxwell, Pascal, Volta
-export TORCH_CUDA_ARCH_LIST="3.5;5.2+PTX;6.0;6.1;7.0"
-export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
 export PYTORCH_BINARY_BUILD=1
 export TH_BINARY_BUILD=1
 export PYTORCH_BUILD_VERSION=$PKG_VERSION
 export PYTORCH_BUILD_NUMBER=$PKG_BUILDNUM
-export NCCL_ROOT_DIR=/usr/local/cuda
+
+# Pytorch CUDA flags
+if [[ -n $CUDA_VERSION ]]; then
+  if [[ $CUDA_VERSION == 9* ]]; then
+    # compile for Kepler, Kepler+Tesla, Maxwell, Pascal, Volta
+    export TORCH_CUDA_ARCH_LIST="3.5;5.2+PTX;6.0;6.1;7.0"
+  else
+    # don't compile for Volta
+    export TORCH_CUDA_ARCH_LIST="3.5;5.2+PTX;6.0;6.1"
+  fi
+  export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
+  export NCCL_ROOT_DIR=/usr/local/cuda
+  #export USE_STATIC_CUDNN=1
+  #export USE_STATIC_NCCL=1
+  #export ATEN_STATIC_CUDA=1
+else
+  export NO_CUDA=1
+fi
 
 
 ###########################################################
 # Build Caffe2
 ###########################################################
-PYTHON_ARGS="$(python ./scripts/get_python_cmake_flags.py)"
-CMAKE_ARGS=()
-CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=$PREFIX")
+cmake_args=()
+cmake_args+=("-DCMAKE_INSTALL_PREFIX=$PREFIX")
 
 # Build Caffe2
 mkdir -p caffe2_build && pushd caffe2_build
-cmake "${CMAKE_ARGS[@]}" "$PYTHON_ARGS" $CONDA_CAFFE2_CMAKE_ARGS ..
+cmake "${cmake_args[@]}" $CAFFE2_CMAKE_ARGS ..
 if [ "$(uname)" == 'Darwin' ]; then
   make "-j$(sysctl -n hw.ncpu)"
 else
@@ -71,7 +84,7 @@ python setup.py install
 #########################################################################
 # Copies libnvrtc and libnvToolsExt to the site-packages/torch/lib/ directory
 # All other CUDA libraries should be statically linked
-if [[ -z $PACKAGE_CUDA_LIBS ]]; then
+if [[ -z $CUDA_VERSION || -z $PACKAGE_CUDA_LIBS ]]; then
   exit 0
 fi
 

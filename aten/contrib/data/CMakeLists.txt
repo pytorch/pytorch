@@ -23,7 +23,7 @@ set(src
 )
 
 add_library(xtdata ${TH_LINK_STYLE} ${src})
-target_link_libraries(xtdata ATen)
+target_link_libraries(xtdata ATen_cpu)
 
 include_directories(.)
 # add_executable(test-data test/basic.cc)

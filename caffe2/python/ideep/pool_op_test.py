@@ -38,6 +38,9 @@ class PoolTest(hu.HypothesisTestCase):
 
         self.assertDeviceChecks(dc, op, [X], [0])
 
+        if 'MaxPool' not in method:
+            self.assertGradientChecks(gc, op, [X], 0, [0])
+
 
 if __name__ == "__main__":
     unittest.main()

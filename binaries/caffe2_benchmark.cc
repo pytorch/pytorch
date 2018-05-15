@@ -2,24 +2,18 @@
 #include <iterator>
 #include <string>
 
-#include "caffe2/core/blob_serialization.h"
-#include "caffe2/core/init.h"
-#include "caffe2/core/logging.h"
-#include "caffe2/core/net.h"
-#include "caffe2/core/operator.h"
-#include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/utils/proto_utils.h"
-#include "caffe2/utils/string_utils.h"
+#include "binaries/benchmark_helper.h"
 
-#include "observers/net_observer_reporter_print.h"
-#include "observers/observer_config.h"
-#include "observers/perf_observer.h"
+using std::make_shared;
+using std::string;
+using std::vector;
 
 CAFFE2_DEFINE_string(
     backend,
     "builtin",
     "The backend to use when running the model. The allowed "
-    "backend choices are: builtin, default, nnpack, eigen, mkl");
+    "backend choices are: builtin, default, nnpack, eigen, mkl, cuda");
+
 CAFFE2_DEFINE_string(
     init_net,
     "",
@@ -73,198 +67,52 @@ CAFFE2_DEFINE_bool(
     "Whether to write out output in text format for regression purpose.");
 CAFFE2_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
 
-using std::string;
-using std::unique_ptr;
-using std::vector;
-
-static void writeTextOutput(
-    caffe2::TensorCPU* tensor,
-    const string& output_prefix,
-    const string& name) {
-  string output_name = output_prefix + "/" + name + ".txt";
-  caffe2::TensorSerializer<caffe2::CPUContext> ser;
-  caffe2::BlobProto blob_proto;
-  ser.Serialize(
-      *tensor, output_name, blob_proto.mutable_tensor(), 0, tensor->size());
-  blob_proto.set_name(output_name);
-  blob_proto.set_type("Tensor");
-  CAFFE_ENFORCE(blob_proto.has_tensor());
-  caffe2::TensorProto tensor_proto = blob_proto.tensor();
-  vector<float> data;
-  switch (tensor_proto.data_type()) {
-    case caffe2::TensorProto::FLOAT: {
-      std::copy(
-          tensor_proto.float_data().begin(),
-          tensor_proto.float_data().end(),
-          std::back_inserter(data));
-      break;
-    }
-    case caffe2::TensorProto::INT32: {
-      std::copy(
-          tensor_proto.int32_data().begin(),
-          tensor_proto.int32_data().end(),
-          std::back_inserter(data));
-      break;
-    }
-    default:
-      CAFFE_THROW("Unimplemented Blob type.");
-  }
-  std::ofstream output_file(output_name);
-  std::ostream_iterator<float> output_iterator(output_file, "\n");
-  std::copy(data.begin(), data.end(), output_iterator);
-}
-
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
-  caffe2::ClearGlobalNetObservers();
-  caffe2::AddGlobalNetObserverCreator([](caffe2::NetBase* subject) {
-    return caffe2::make_unique<caffe2::PerfNetObserver>(subject);
-  });
-  caffe2::ObserverConfig::setReporter(
-      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
 
+  observerConfig();
   caffe2::ShowLogInfoToStderr();
-  unique_ptr<caffe2::Workspace> workspace(new caffe2::Workspace());
+
+  auto workspace = make_shared<caffe2::Workspace>(new caffe2::Workspace());
+  bool run_on_gpu = backendCudaSet(caffe2::FLAGS_backend);
+
+  // support other device type in the future?
+  caffe2::DeviceType run_dev = run_on_gpu ? caffe2::CUDA : caffe2::CPU;
 
   // Run initialization network.
   caffe2::NetDef init_net_def;
   CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_init_net, &init_net_def));
+  setDeviceType(&init_net_def, run_dev);
+  setOperatorEngine(&init_net_def, caffe2::FLAGS_backend);
   CAFFE_ENFORCE(workspace->RunNetOnce(init_net_def));
-
-  // Load input.
-  if (caffe2::FLAGS_input.size()) {
-    vector<string> input_names = caffe2::split(',', caffe2::FLAGS_input);
-    if (caffe2::FLAGS_input_file.size()) {
-      vector<string> input_files = caffe2::split(',', caffe2::FLAGS_input_file);
-      CAFFE_ENFORCE_EQ(
-          input_names.size(),
-          input_files.size(),
-          "Input name and file should have the same number.");
-      for (int i = 0; i < input_names.size(); ++i) {
-        caffe2::BlobProto blob_proto;
-        CAFFE_ENFORCE(caffe2::ReadProtoFromFile(input_files[i], &blob_proto));
-        workspace->CreateBlob(input_names[i])->Deserialize(blob_proto);
-      }
-    } else if (
-        caffe2::FLAGS_input_dims.size() || caffe2::FLAGS_input_type.size()) {
-      CAFFE_ENFORCE_GE(
-          caffe2::FLAGS_input_dims.size(),
-          0,
-          "Input dims must be specified when input tensors are used.");
-      CAFFE_ENFORCE_GE(
-          caffe2::FLAGS_input_type.size(),
-          0,
-          "Input type must be specified when input tensors are used.");
-
-      vector<string> input_dims_list =
-          caffe2::split(';', caffe2::FLAGS_input_dims);
-      CAFFE_ENFORCE_EQ(
-          input_names.size(),
-          input_dims_list.size(),
-          "Input name and dims should have the same number of items.");
-      vector<string> input_type_list =
-          caffe2::split(';', caffe2::FLAGS_input_type);
-      CAFFE_ENFORCE_EQ(
-          input_names.size(),
-          input_type_list.size(),
-          "Input name and type should have the same number of items.");
-      for (size_t i = 0; i < input_names.size(); ++i) {
-        vector<string> input_dims_str = caffe2::split(',', input_dims_list[i]);
-        vector<int> input_dims;
-        for (const string& s : input_dims_str) {
-          input_dims.push_back(caffe2::stoi(s));
-        }
-        caffe2::Blob* blob = workspace->GetBlob(input_names[i]);
-        if (blob == nullptr) {
-          blob = workspace->CreateBlob(input_names[i]);
-        }
-        caffe2::TensorCPU* tensor = blob->GetMutable<caffe2::TensorCPU>();
-        CHECK_NOTNULL(tensor);
-        tensor->Resize(input_dims);
-        if (input_type_list[i] == "uint8_t") {
-          tensor->mutable_data<uint8_t>();
-        } else if (input_type_list[i] == "float") {
-          tensor->mutable_data<float>();
-        } else {
-          CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
-        }
-      }
-    } else {
-      CAFFE_THROW(
-          "You requested input tensors, but neither input_file nor "
-          "input_dims is set.");
-    }
-  }
 
   // Run main network.
   caffe2::NetDef net_def;
   CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_net, &net_def));
-  if (!net_def.has_name()) {
-    net_def.set_name("benchmark");
-  }
-  if (caffe2::FLAGS_backend != "builtin") {
-    std::string engine = caffe2::FLAGS_backend == "nnpack"
-        ? "NNPACK"
-        : caffe2::FLAGS_backend == "eigen" ? "EIGEN"
-                                           : caffe2::FLAGS_backend == "mkl"
-                ? "MKLDNN"
-                : caffe2::FLAGS_backend == "default" ? "" : "NONE";
-    CAFFE_ENFORCE(engine != "NONE", "Backend is not supported");
-    for (int i = 0; i < net_def.op_size(); i++) {
-      caffe2::OperatorDef* op_def = net_def.mutable_op(i);
-      op_def->set_engine(engine);
-    }
-  }
+  setDeviceType(&net_def, run_dev);
+  setOperatorEngine(&net_def, caffe2::FLAGS_backend);
 
-  caffe2::NetBase* net = workspace->CreateNet(net_def);
-  CHECK_NOTNULL(net);
+  loadInput(
+      workspace,
+      run_on_gpu,
+      caffe2::FLAGS_input,
+      caffe2::FLAGS_input_file,
+      caffe2::FLAGS_input_dims,
+      caffe2::FLAGS_input_type);
 
-  LOG(INFO) << "Starting benchmark.";
-  caffe2::ObserverConfig::initSampleRate(
-      1, 1, 1, caffe2::FLAGS_run_individual, caffe2::FLAGS_warmup);
-  LOG(INFO) << "Running warmup runs.";
-  for (int i = 0; i < caffe2::FLAGS_warmup; ++i) {
-    CAFFE_ENFORCE(net->Run(), "Warmup run ", i, " has failed.");
-  }
+  runNetwork(
+      workspace,
+      net_def,
+      caffe2::FLAGS_run_individual,
+      caffe2::FLAGS_warmup,
+      caffe2::FLAGS_iter);
 
-  LOG(INFO) << "Main runs.";
-  CAFFE_ENFORCE(
-      caffe2::FLAGS_iter >= 0,
-      "Number of main runs should be non negative, provided ",
-      caffe2::FLAGS_iter,
-      ".");
-  for (int i = 0; i < caffe2::FLAGS_iter; ++i) {
-    caffe2::ObserverConfig::initSampleRate(1, 1, 1, 0, caffe2::FLAGS_warmup);
-    CAFFE_ENFORCE(net->Run(), "Main run ", i, " has failed.");
-    if (caffe2::FLAGS_run_individual) {
-      caffe2::ObserverConfig::initSampleRate(1, 1, 1, 1, caffe2::FLAGS_warmup);
-      CAFFE_ENFORCE(net->Run(), "Main run ", i, " with operator has failed.");
-    }
-  }
-
-  string output_prefix = caffe2::FLAGS_output_folder.size()
-      ? caffe2::FLAGS_output_folder + "/"
-      : "";
-  if (caffe2::FLAGS_output.size()) {
-    vector<string> output_names = caffe2::split(',', caffe2::FLAGS_output);
-    if (caffe2::FLAGS_output == "*") {
-      output_names = workspace->Blobs();
-    }
-    for (const string& name : output_names) {
-      CAFFE_ENFORCE(
-          workspace->HasBlob(name),
-          "You requested a non-existing blob: ",
-          name);
-      if (caffe2::FLAGS_text_output) {
-        auto blob = workspace->GetBlob(name)->GetMutable<caffe2::TensorCPU>();
-        writeTextOutput(blob, output_prefix, name);
-      } else {
-        string serialized = workspace->GetBlob(name)->Serialize(name);
-        string output_filename = output_prefix + name;
-        caffe2::WriteStringToFile(serialized, output_filename.c_str());
-      }
-    }
-  }
+  writeOutput(
+      workspace,
+      run_on_gpu,
+      caffe2::FLAGS_output,
+      caffe2::FLAGS_output_folder,
+      caffe2::FLAGS_text_output);
 
   return 0;
 }

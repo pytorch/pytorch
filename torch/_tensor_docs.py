@@ -139,9 +139,9 @@ Args:
 Example::
 
     >>> tensor = torch.tensor((), dtype=torch.float64)
-    >>> tensor.new_ones((2, 3))
-    tensor([[ 1.,  1.,  1.],
-            [ 1.,  1.,  1.]], dtype=torch.float64)
+    >>> tensor.new_zeros((2, 3))
+    tensor([[ 0.,  0.,  0.],
+            [ 0.,  0.,  0.]], dtype=torch.float64)
 
 """.format(**new_common_args))
 
@@ -1028,7 +1028,7 @@ add_docstr_all('item', r"""
 item() -> number
 
 Returns the value of this tensor as a standard Python number. This only works
-for tensors with one element.
+for tensors with one element. For other cases, see :meth:`~Tensor.tolist`.
 
 This operation is not differentiable.
 
@@ -1141,6 +1141,13 @@ the underlying normal distribution, and not of the returned distribution:
 .. math::
 
     f(x) = \\dfrac{1}{x \\sigma \\sqrt{2\\pi}}\ e^{-\\dfrac{(\\ln x - \\mu)^2}{2\\sigma^2}}
+""")
+
+add_docstr_all('logsumexp',
+               r"""
+logsumexp(dim, keepdim=False) -> Tensor
+
+See :func:`torch.logsumexp`
 """)
 
 add_docstr_all('lt',
@@ -1684,8 +1691,8 @@ For a 3-D tensor, :attr:`self` is updated as::
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
 :attr:`self`, :attr:`index` and :attr:`src` should have same number of
-dimensions. It is also required that `index->size[d] <= src->size[d]` for all
-dimension `d`, and that `index->size[d] <= real->size[d]` for all dimensions
+dimensions. It is also required that `index.size(d) <= src.size(d)` for all
+dimensions `d`, and that `index.size(d) <= self.size(d)` for all dimensions
 `d != dim`.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
@@ -1693,7 +1700,6 @@ between `0` and `(self.size(dim) -1)` inclusive, and all values in a row along
 the specified dimension :attr:`dim` must be unique.
 
 Args:
-    input (Tensor): the source tensor
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter
     src (Tensor or float): the source element(s) to scatter
@@ -2107,6 +2113,26 @@ tanh_() -> Tensor
 In-place version of :meth:`~Tensor.tanh`
 """)
 
+add_docstr_all('tolist',
+               r""""
+tolist() -> list or number
+
+Returns the tensor as a (nested) list. For scalars, a standard
+Python number is returned, just like with :meth:`~Tensor.item`.
+Tensors are automatically moved to the CPU first if necessary.
+
+This operation is not differentiable.
+
+Examples::
+
+    >>> a = torch.randn(2, 2)
+    >>> a.tolist()
+    [[0.012766935862600803, 0.5415473580360413],
+     [-0.08909505605697632, 0.7729271650314331]]
+    >>> a[0,0].tolist()
+    0.012766935862600803
+""")
+
 add_docstr_all('topk',
                r"""
 topk(k, dim=None, largest=True, sorted=True) -> (Tensor, LongTensor)
@@ -2240,7 +2266,7 @@ Args:
 
 Example::
 
-    >>> x = torch.arange(1, 8)
+    >>> x = torch.arange(1., 8)
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.,  6.,  7.])
     >>> x.unfold(0, 2, 1)
