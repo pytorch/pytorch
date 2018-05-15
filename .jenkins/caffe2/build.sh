@@ -53,6 +53,14 @@ if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   export PATH="$CACHE_WRAPPER_DIR:$PATH"
 fi
 
+report_compile_cache_stats() {
+  if [[ -n "${SCCACHE}" ]]; then
+    "$SCCACHE" --show-stats
+  elif which ccache > /dev/null; then
+    ccache -s
+  fi
+}
+
 CMAKE_ARGS=("-DBUILD_BINARY=ON")
 CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
 CMAKE_ARGS+=("-DUSE_ZSTD=ON")
@@ -164,14 +172,20 @@ else
   exit 1
 fi
 
+report_compile_cache_stats
+
 # Install ONNX into a local directory
 ONNX_INSTALL_PATH="/usr/local/onnx"
-pip install "${ROOT_DIR}/third_party/onnx" -t "${ONNX_INSTALL_PATH}"
+pip install -v "${ROOT_DIR}/third_party/onnx" -t "${ONNX_INSTALL_PATH}"
+
+report_compile_cache_stats
 
 if [[ -n "$INTEGRATED" ]]; then
   TORCH_INSTALL_PATH="/usr/local/torch"
-  pip install "${ROOT_DIR}" -t "$TORCH_INSTALL_PATH"
+  pip install -v "${ROOT_DIR}" -t "$TORCH_INSTALL_PATH"
 fi
+
+report_compile_cache_stats
 
 # Symlink the caffe2 base python path into the system python path,
 # so that we can import caffe2 without having to change $PYTHONPATH.
