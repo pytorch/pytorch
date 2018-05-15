@@ -1,0 +1,4 @@
+graph(%x : Dynamic) {
+  %1 : Dynamic = aten::sum[dim=[4], keepdim=0](%x)
+  return (%1);
+}

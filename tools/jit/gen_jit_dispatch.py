@@ -105,12 +105,13 @@ def is_tensor_arg(arg):
     return arg['simple_type'] in {'Tensor', 'TensorList'}
 
 
+def is_sized_intlist_arg(arg):
+    """Returns True for arguments declared as IntList[k], but False for IntList."""
+    return (arg['simple_type'] == 'IntList') and ('size' in arg)
+
+
 def gen_jit_dispatch(declarations, out):
     ops = {}
-
-    def is_sized_intlist_arg(arg):
-        """Returns True for arguments declared as IntList[k], but False for IntList."""
-        return (arg['simple_type'] == 'IntList') and ('size' in arg)
 
     def get_invocation(decl, args):
         if 'namespace' in decl['method_of']:
@@ -118,7 +119,7 @@ def gen_jit_dispatch(declarations, out):
         else:
             return CALL_METHOD.substitute(name=decl['name'], first=args[0], args=args[1:])
 
-    def emit_decl_variant(decl, is_positional_arg, has_tensorlist, override_types=None):
+    def emit_decl_variant(decl, is_positional_arg, has_tensorlist):
         # is_positional_arg is a boolean list the same length as decl['arguments']
         # that indicates if the argument should come from the postional list
         # of inputs. If false, the argument comes from the constant attributes
@@ -126,7 +127,6 @@ def gen_jit_dispatch(declarations, out):
         attr_names = []
         pos_assignments = []
         arguments = []
-        override_types = override_types or {}
 
         if has_tensorlist:
             kw_assignments.append('size_t varargs_length = node->inputs().size();')
@@ -162,7 +162,7 @@ def gen_jit_dispatch(declarations, out):
                 pos_assignments.append(assign)
                 arguments.append(arg['name'])
             else:
-                simple_type = override_types.get(arg['name'], arg['simple_type'])
+                simple_type = arg['simple_type']
 
                 attr_method = ATTR_METHOD_MAP[simple_type]
                 assign = KW_ASSIGNMENT.substitute(type_cast=TYPE_CASTS.get(simple_type, simple_type),
@@ -216,18 +216,9 @@ def gen_jit_dispatch(declarations, out):
         all_arguments_are_inputs = tuple(True for _ in arguments)
         only_tensors_are_inputs = tuple(is_tensor_arg(arg) for arg in arguments)
 
-        sized_intlist_args = [a['name'] for a in arguments if is_sized_intlist_arg(a)]
-        overrides_powerset = ({name: 'int64_t' for name in c}
-                              for r in range(len(sized_intlist_args) + 1)
-                              for c in combinations(sized_intlist_args, r))
-
         # NB: if there are no scalar args then both options on LHS are equivalent, so deduplicate them.
         for variant in {all_arguments_are_inputs, only_tensors_are_inputs}:
-            if variant is only_tensors_are_inputs:
-                for override in overrides_powerset:
-                    emit_decl_variant(decl, variant, has_tensorlist, override)
-            else:
-                emit_decl_variant(decl, variant, has_tensorlist)
+            emit_decl_variant(decl, variant, has_tensorlist)
 
     # We need to add methods implemented manually in TensorImpl
     tensor_impl_methods = [{
@@ -308,7 +299,8 @@ def emit_schema(jit_decls, out):
                 if 'default' in arg and arg['default'] == '{}':
                     tensor = 'at::Tensor()'
             else:
-                attribute = 'AttributeKind::{}'.format(ATTR_METHOD_MAP[arg['simple_type']])
+                data = 'at::nullopt' if not is_sized_intlist_arg(arg) else str(arg['size'])
+                attribute = 'AttributeInfo{{ AttributeKind::{}, {} }}'.format(ATTR_METHOD_MAP[arg['simple_type']], data)
                 if 'default' in arg:
                     value = arg['default']
                     # conversion in yaml turns string 'true' into python bool

@@ -304,6 +304,20 @@ at::optional<T> constant_as(Value* v) {
   }
 }
 
+at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
+  auto list = constant_as<at::IntList>(input);
+  if(list)
+    return std::vector<int64_t>(*list);
+  // broadcast IntList[3] with value 4 -> {4, 4, 4}
+  if(!N)
+    return at::nullopt;
+  auto r = constant_as<int64_t>(input);
+  if(!r)
+    return at::nullopt;
+  // broadcast to attribute size
+  return std::vector<int64_t>(*N, *r);
+}
+
 // try to turn constant inputs into attributes
 void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
   // we shouldn't start with attributes, just inputs
@@ -313,8 +327,8 @@ void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
   for(size_t i = 0; i < node->inputs().size(); ++i) {
     const auto& arg = schema.arguments[i];
     auto input = node->input(i);
-    if(arg.attribute_kind) {
-      switch(*arg.attribute_kind) {
+    if(arg.attribute_info) {
+      switch(arg.attribute_info->kind) {
         case AttributeKind::i: {
           auto r = constant_as<int64_t>(input);
           if(!r)
@@ -322,7 +336,7 @@ void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
           attributes.i_(Symbol::attr(arg.name), *r);
         } break;
         case AttributeKind::is: {
-          auto r = constant_as<at::IntList>(input);
+          auto r = getIntListAttribute(arg.attribute_info->data, input);
           if(!r)
             return;
           attributes.is_(Symbol::attr(arg.name), *r);
@@ -356,6 +370,15 @@ void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
     node->addInput(input);
   }
   node->copyAttributes(attributes);
+}
+
+at::ArrayRef<Value*> createTupleUnpack(Value* v) {
+  // small peephole optimization to ensure IntList attributes can still turn
+  // into constants e.g. in x.expand([3, 4])
+  if(v->node()->kind() == prim::TupleConstruct)
+    return v->node()->inputs();
+  auto & g = *v->owningGraph();
+  return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
 at::optional<std::vector<Value*>> tryMatchSchema(
@@ -415,10 +438,11 @@ at::optional<std::vector<Value*>> tryMatchSchema(
 
       // implicit conversion from List[Tensor] -> Tensor for when the argument
       // is an IntList in aten, for things like x.expand(sizes=[3,4,5])
-      if(arg.attribute_kind == AttributeKind::is &&
+      if(arg.attribute_info &&
+         arg.attribute_info->kind == AttributeKind::is &&
          v.value->type()->isSubtypeOf(*ListType::ofTensors())) {
-        auto unpacked = graph.insertNode(graph.createTupleUnpack(v.value));
-        v.value = createStack(graph, loc, unpacked->outputs());
+        auto unpacked = createTupleUnpack(v.value);
+        v.value = createStack(graph, loc, unpacked);
       }
 
       if(!v.value->type()->isSubtypeOf(*arg.type)) {
@@ -430,8 +454,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
 
       // we only support lists for builtins, where they must be flattened
       if(arg.type->kind() == TypeKind::ListType) {
-        auto unpacked = graph.insertNode(graph.createTupleUnpack(v.value));
-        const auto & outputs = unpacked->outputs();
+        auto outputs = createTupleUnpack(v.value);
         flat_inputs.insert(flat_inputs.end(), outputs.begin(), outputs.end());
       } else {
         flat_inputs.push_back(v.value);
@@ -1414,10 +1437,9 @@ std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {
-  auto & graph = *m.graph();
   if(value->type()->kind() == TypeKind::TupleType) {
-    auto n = graph.insertNode(graph.createTupleUnpack(value));
-    return fmap(n->outputs(), [](Value* v) -> std::shared_ptr<SugaredValue> {
+    auto outputs = createTupleUnpack(value);
+    return fmap(outputs, [](Value* v) -> std::shared_ptr<SugaredValue> {
       return std::make_shared<SimpleValue>(v);
     });
   }
