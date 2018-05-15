@@ -9,23 +9,23 @@
 namespace torch { namespace nn {
 class BatchNorm : public torch::nn::CloneableModule<BatchNorm> {
  public:
-  explicit BatchNorm(uint32_t num_features);
+  explicit BatchNorm(
+      uint32_t num_features,
+      bool affine = true,
+      bool stateful = false);
 
   TORCH_AUTOGRAD_KWARG(BatchNorm, double, eps, 1e-5, 1e-5)
   TORCH_AUTOGRAD_KWARG(BatchNorm, double, momentum, 0.1, 0.1)
-  TORCH_AUTOGRAD_KWARG(BatchNorm, bool, affine, true, true)
-  TORCH_AUTOGRAD_KWARG(BatchNorm, bool, stateful, false, true)
 
-  void reset_parameters() override;
   variable_list forward(variable_list) override;
-  void initialize_parameters() override;
 
   Variable weight;
   Variable bias;
   Variable running_mean;
   Variable running_var;
 
- protected:
   uint32_t num_features_;
+  bool affine_;
+  bool stateful_;
 };
 }} // namespace torch::nn

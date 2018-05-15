@@ -2738,6 +2738,7 @@ method_tests = [
     ('addcdiv', (), (0.5, (S, S, 1), (1, S)), 'scalar_scale_broadcast_lhs'),
     ('zero_', (S, S, S), NO_ARGS),
     ('zero_', (), NO_ARGS, 'scalar'),
+    ('logsumexp', (S, S), (1,)),
     ('norm', (S, S), (2,)),
     ('norm', (S, S), (0,), '0'),
     ('norm', (S, S), (0.5,), '0_5'),

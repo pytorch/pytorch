@@ -5,6 +5,8 @@
 
 #include <torch/csrc/autograd/variable.h>
 
+#include <ATen/Error.h>
+
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -14,22 +16,22 @@ template <typename Derived>
 class RNNBase : public CloneableModule<Derived> {
  public:
   // These must line up with the CUDNN mode codes
-  enum RNNMode : int64_t { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
+  enum RNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
-  RNNBase(uint32_t input_size, uint32_t hidden_size)
-      : input_size_(input_size), hidden_size_(hidden_size) {}
+  RNNBase(
+      uint32_t input_size,
+      uint32_t hidden_size,
+      int mode,
+      uint32_t nlayers,
+      bool with_bias,
+      float dropout);
 
-  TORCH_AUTOGRAD_KWARG(RNNBase, RNNMode, mode, RNNMode::LSTM, RNNMode::LSTM)
-  TORCH_AUTOGRAD_KWARG(RNNBase, uint32_t, nlayers, 1, 1);
-  TORCH_AUTOGRAD_KWARG(RNNBase, bool, no_bias, false, true)
-  TORCH_AUTOGRAD_KWARG(RNNBase, float, dropout, 0, 0)
+  using CloneableModule<Derived>::parameters;
+  using CloneableModule<Derived>::is_training;
 
   bool flatten_parameters(); // Flatten for cudnn
 
   variable_list forward(variable_list) override;
-  void initialize_containers() override;
-  void initialize_parameters() override;
-  void reset_parameters() override;
 
   void cpu() override;
   void cuda() override;
@@ -39,10 +41,17 @@ class RNNBase : public CloneableModule<Derived> {
   std::vector<Variable> hhw;
   std::vector<Variable> hhb;
 
- protected:
+ private:
+  using CloneableModule<Derived>::add;
+
   uint32_t input_size_;
   uint32_t hidden_size_;
   uint32_t gate_size_;
+  RNNMode mode_;
+  uint32_t nlayers_;
+  bool with_bias_;
+  float dropout_;
+
   // This is copied from pytorch, to determine whether weights are flat for
   // the fast CUDNN route. Otherwise, we have to use non flattened weights,
   // which
@@ -67,30 +76,46 @@ class RNNBase : public CloneableModule<Derived> {
 // We must instantiate these templates so we can put implementations in the .cpp
 class LSTM : public RNNBase<LSTM> {
  public:
-  LSTM(uint32_t inp_size, uint32_t hid_size) : RNNBase(inp_size, hid_size) {
-    mode_ = RNNBase::RNNMode::LSTM;
-  }
+  LSTM(
+      uint32_t input_size,
+      uint32_t hidden_size,
+      uint32_t nlayers = 1,
+      bool with_bias = true,
+      float dropout = 0)
+      : RNNBase(
+            input_size,
+            hidden_size,
+            RNNMode::LSTM,
+            nlayers,
+            with_bias,
+            dropout) {}
 };
 
 class GRU : public RNNBase<GRU> {
  public:
-  GRU(uint32_t inp_size, uint32_t hid_size) : RNNBase(inp_size, hid_size) {
-    mode_ = RNNBase::RNNMode::GRU;
-  }
+  GRU(uint32_t input_size,
+      uint32_t hidden_size,
+      uint32_t nlayers = 1,
+      bool with_bias = true,
+      float dropout = 0)
+      : RNNBase(
+            input_size,
+            hidden_size,
+            RNNMode::GRU,
+            nlayers,
+            with_bias,
+            dropout) {}
 };
 
 class RNN : public RNNBase<RNN> {
  public:
-  enum Mode { Tanh, Relu };
-  RNN(uint32_t inp_size, uint32_t hid_size, Mode mode = Mode::Tanh)
-      : RNNBase(inp_size, hid_size) {
-    if (mode == Mode::Tanh) {
-      mode_ = RNNBase::RNNMode::RNN_TANH;
-    } else if (mode == Mode::Relu) {
-      mode_ = RNNBase::RNNMode::RNN_RELU;
-    } else {
-      throw std::runtime_error("RNN Mode not supported");
-    }
-  }
+  enum Mode { Tanh = RNNMode::RNN_TANH, Relu = RNNMode::RNN_RELU };
+  RNN(uint32_t input_size,
+      uint32_t hidden_size,
+      Mode mode = Mode::Tanh,
+      uint32_t nlayers = 1,
+      bool with_bias = true,
+      float dropout = 0)
+      : RNNBase(input_size, hidden_size, mode, nlayers, with_bias, dropout) {}
 };
 }} // namespace torch::nn

@@ -87,7 +87,12 @@ void check_lstm_sizes(variable_list tup) {
 TEST_CASE("rnn") {
   SECTION("lstm") {
     SECTION("sizes") {
-      auto model = make(LSTM(128, 64).nlayers(3).dropout(0.2));
+      auto model = make(LSTM(
+          /*input_size=*/128,
+          /*hidden_size=*/64,
+          /*nlayers=*/3,
+          /*with_bias=*/true,
+          /*dropout=*/0.2));
       Variable x = Var(at::CPU(at::kFloat).randn({10, 16, 128}));
       auto tup = model->forward({x});
       auto y = x.mean();
@@ -103,7 +108,7 @@ TEST_CASE("rnn") {
 
       // Hiddens changed
       REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);
-    };
+    }
 
     SECTION("outputs") {
       // Make sure the outputs match pytorch outputs
@@ -163,28 +168,30 @@ TEST_CASE("rnn") {
       for (size_t i = 0; i < 16; i++) {
         REQUIRE(std::abs(flat[i].toCFloat() - h_out[i]) < 1e-3);
       }
-    };
-  }
-  SECTION("integration") {
-    SECTION("LSTM") {
-      REQUIRE(test_RNN_xor<LSTM>(
-          [](int s) { return make(LSTM(s, s).nlayers(2)); }));
     }
-
-    SECTION("gru") {
-      REQUIRE(
-          test_RNN_xor<GRU>([](int s) { return make(GRU(s, s).nlayers(2)); }));
-    }
-
-    SECTION("rnn") {
-      SECTION("relu") {
-        REQUIRE(test_RNN_xor<RNN>(
-            [](int s) { return make(RNN(s, s, RNN::Mode::Relu).nlayers(2)); }));
+    SECTION("integration") {
+      SECTION("LSTM") {
+        REQUIRE(test_RNN_xor<LSTM>(
+            [](int s) { return make(LSTM(s, s, /*nlayers=*/2)); }));
       }
 
-      SECTION("tanh") {
-        REQUIRE(test_RNN_xor<RNN>(
-            [](int s) { return make(RNN(s, s, RNN::Mode::Tanh).nlayers(2)); }));
+      SECTION("gru") {
+        REQUIRE(test_RNN_xor<GRU>(
+            [](int s) { return make(GRU(s, s, /*nlayers=*/2)); }));
+      }
+
+      SECTION("rnn") {
+        SECTION("relu") {
+          REQUIRE(test_RNN_xor<RNN>([](int s) {
+            return make(RNN(s, s, RNN::Mode::Relu, /*nlayers=*/2));
+          }));
+        }
+
+        SECTION("tanh") {
+          REQUIRE(test_RNN_xor<RNN>([](int s) {
+            return make(RNN(s, s, RNN::Mode::Tanh, /*nlayers=*/2));
+          }));
+        }
       }
     }
   }
@@ -192,7 +199,12 @@ TEST_CASE("rnn") {
 
 TEST_CASE("rnn_cuda", "[cuda]") {
   SECTION("sizes") {
-    auto model = make(LSTM(128, 64).nlayers(3).dropout(0.2));
+    auto model = make(LSTM(
+        /*input_size=*/128,
+        /*hidden_size=*/64,
+        /*nlayers=*/3,
+        /*with_bias=*/true,
+        /*dropout=*/0.2));
     model->cuda();
     Variable x = Var(at::CUDA(at::kFloat).randn({10, 16, 128}));
     auto tup = model->forward({x});
@@ -213,24 +225,24 @@ TEST_CASE("rnn_cuda", "[cuda]") {
 
   SECTION("lstm") {
     REQUIRE(test_RNN_xor<LSTM>(
-        [](int s) { return make(LSTM(s, s).nlayers(2)); }, true));
+        [](int s) { return make(LSTM(s, s, /*nlayers=*/2)); }, true));
   }
 
   SECTION("gru") {
     REQUIRE(test_RNN_xor<GRU>(
-        [](int s) { return make(GRU(s, s).nlayers(2)); }, true));
+        [](int s) { return make(GRU(s, s, /*nlayers=*/2)); }, true));
   }
 
   SECTION("rnn") {
     SECTION("Relu") {
       REQUIRE(test_RNN_xor<RNN>(
-          [](int s) { return make(RNN(s, s, RNN::Mode::Relu).nlayers(2)); },
+          [](int s) { return make(RNN(s, s, RNN::Mode::Relu, /*nlayers=*/2)); },
           true));
     }
 
     SECTION("tanh") {
       REQUIRE(test_RNN_xor<RNN>(
-          [](int s) { return make(RNN(s, s, RNN::Mode::Tanh).nlayers(2)); },
+          [](int s) { return make(RNN(s, s, RNN::Mode::Tanh, /*nlayers=*/2)); },
           true));
     }
   }

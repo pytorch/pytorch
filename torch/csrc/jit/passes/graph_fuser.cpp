@@ -111,11 +111,14 @@ struct GraphFuser {
   GraphFuser(Block * block)
   : block(block) {}
 
-  int getDevice(Node * node) {
+  at::optional<int> getDevice(Node * node) {
     if(node->kind() == prim::FusionGroup) {
       return node->i(attr::device);
     }
-    return node->output()->type()->expect<TensorType>()->device();
+    if(auto tt = node->output()->type()->cast<TensorType>()) {
+      return tt->device();
+    }
+    return at::nullopt;
   }
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
@@ -208,11 +211,11 @@ struct GraphFuser {
     // if the consumer allInputsAreThisProducer(consumer,producer)
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
-    int consumer_device = getDevice(consumer);
+    at::optional<int> consumer_device = getDevice(consumer);
     return isFusable(producer->node()) &&
       allUsersAreThisConsumerOrOccurAfterIt(consumer, producer) &&
-      consumer_device == getDevice(producer->node()) &&
-      (consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
+      consumer_device && consumer_device == getDevice(producer->node()) &&
+      (*consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
   }
 
   // insert a producer node into a consuming fusion group.
@@ -320,7 +323,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
-    auto group = block->owningGraph()->createFusionGroup(getDevice(n));
+    auto group = block->owningGraph()->createFusionGroup(getDevice(n).value());
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];
