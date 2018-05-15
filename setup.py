@@ -123,7 +123,7 @@ IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
 # Check if ROCM is enabled
-WITH_ROCM = check_env_flag('WITH_ROCM'):
+WITH_ROCM = check_env_flag('WITH_ROCM')
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
