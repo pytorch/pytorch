@@ -1,7 +1,6 @@
 #include "torch/optimizers.h"
 
 #include <torch/nn/module.h>
-#include <assert.h>
 
 namespace torch {
 
@@ -22,7 +21,7 @@ void OptimizerImpl::set_model(std::shared_ptr<nn::Module> model) {
 at::Tensor LBFGS::gather_flat_grad() {
   std::vector<at::Tensor> views;
   for(auto& pair : model_->parameters()) {
-    views.push_back(pair.second.data().view(-1));
+    views.push_back(torch::autograd::as_variable_ref(pair.second.grad()).data().view(-1));
   }
   return at::cat(views);
 }
@@ -32,7 +31,7 @@ void LBFGS::add_grad(const at::Scalar& step_size, const at::Tensor& update) {
   for(auto& pair : model_->parameters()) {
     int numel = pair.second.numel();
     at::Tensor& pd = pair.second.data();
-    pd.add_(update.slice(offset, offset + numel).view_as(pd), step_size);
+    pd.add_(update.slice(0, offset, offset + numel, 1).view_as(pd), step_size);
     offset += numel;
   }
 }
@@ -43,25 +42,36 @@ void LBFGS::step() {
     "See: https://pytorch.org/docs/stable/optim.html#optimizer-step-closure");
 }
 
-void LBFGS::step(std::function<at::Scalar()> closure) {
+at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
+  at::Scalar orig_loss = closure();
+  at::Scalar loss = orig_loss;
+  int current_evals = 1;
+  func_evals += 1;
+
   at::Tensor flat_grad = gather_flat_grad();
   at::Scalar abs_grad_sum = at::Scalar(flat_grad.abs().sum());
 
-  at::Tensor ONE = flat_grad.type().scalarTensor(1);
-  at::Scalar loss;
+  if(at::Scalar(abs_grad_sum).toFloat() <= tolerance_grad_) {
+    return loss;
+  }
 
-  int current_evals = 1;
+  at::Tensor ONE = flat_grad.type().scalarTensor(1);
 
   int n_iter = 0;
   while(n_iter < max_iter_) {
     n_iter++;
+    state_n_iter += 1;
 
-    if(n_iter > 1) {
+    if(state_n_iter == 1) {
+      d = flat_grad.neg();
+      H_diag = flat_grad.type().scalarTensor(1);
+      prev_flat_grad = flat_grad.clone();
+    } else {
       at::Tensor y = flat_grad.sub(prev_flat_grad);
       at::Tensor s = d.mul(t);
-      at::Tensor ys = y.dot(s);
+      at::Scalar ys = at::Scalar(y.dot(s));
 
-      if(ys.toFloatData()[0] > 1e-10) {
+      if(ys.toFloat() > 1e-10) {
         // updating memory
 
         if((int)old_dirs.size() == history_size_) {
@@ -87,7 +97,7 @@ void LBFGS::step(std::function<at::Scalar()> closure) {
       at::Tensor q = flat_grad.neg();
       for(int i = num_old - 1; i >= 0; i--) {
         al[i] = old_stps[i].dot(q) * ro[i];
-        q.add_(-al[i], at::Scalar(old_dirs[i]));
+        q.add_(old_dirs[i], at::Scalar(-al[i]));
       }
 
       // Multiply by initial Hessian
@@ -97,13 +107,9 @@ void LBFGS::step(std::function<at::Scalar()> closure) {
 
       for(int i = 0; i < num_old; i++) {
         at::Tensor be_i = old_dirs[i].dot(r) * ro[i];
-        r.add_(al[i] - be_i, at::Scalar(old_stps[i]));
+        r.add_(old_stps[i], at::Scalar(al[i] - be_i));
       }
       prev_flat_grad.copy_(flat_grad);
-    }else {
-      d = flat_grad.neg();
-      H_diag = flat_grad.type().scalarTensor(1);
-      prev_flat_grad = flat_grad.clone();
     }
 
     /**
@@ -150,6 +156,7 @@ void LBFGS::step(std::function<at::Scalar()> closure) {
       break;
     } 
   }
+  return orig_loss;
 }
 
 void LBFGS::init_state() {
@@ -160,6 +167,14 @@ void LBFGS::init_state() {
   prev_loss = 0;
   ro.resize(history_size_);
   al.resize(history_size_);
+  func_evals = 0;
+  state_n_iter = 0;
+}
+
+at::Scalar SGD::step(std::function<at::Scalar()> closure) {
+  at::Scalar loss = closure();
+  step();
+  return loss;
 }
 
 void SGD::step() {
@@ -200,6 +215,12 @@ void SGD::init_state() {
   momentum_buffers_.clear();
 }
 
+at::Scalar Adagrad::step(std::function<at::Scalar()> closure) {
+  at::Scalar loss = closure();
+  step();
+  return loss;
+}
+
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 void Adagrad::step() {
@@ -233,6 +254,12 @@ void Adagrad::step() {
 void Adagrad::init_state() {
   sum_.clear();
   step_.clear();
+}
+
+at::Scalar RMSprop::step(std::function<at::Scalar()> closure) {
+  at::Scalar loss = closure();
+  step();
+  return loss;
 }
 
 /// Adapted from
@@ -286,6 +313,12 @@ void RMSprop::init_state() {
   square_avg_buffer_.clear();
   momentum_buffer_.clear();
   grad_avg_buffer_.clear();
+}
+
+at::Scalar Adam::step(std::function<at::Scalar()> closure) {
+  at::Scalar loss = closure();
+  step();
+  return loss;
 }
 
 void Adam::step() {

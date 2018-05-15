@@ -13,6 +13,7 @@ class OptimizerImpl {
   virtual ~OptimizerImpl() = default;
   virtual void init_state() {}
   virtual void step() = 0;
+  virtual at::Scalar step(std::function<at::Scalar()> closure) = 0;
   void zero_grad();
 
   void set_model(std::shared_ptr<nn::Module> model);
@@ -48,7 +49,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(LBFGS) {
 
   double lr_;
   void step() override;
-  void step(std::function<at::Scalar()> closure);
+  at::Scalar step(std::function<at::Scalar()> closure) override;
   void init_state() override;
 
   template <class Archive>
@@ -72,6 +73,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(LBFGS) {
   at::Scalar t, prev_loss;
   std::vector<at::Tensor> ro, al;
   std::deque<at::Tensor> old_dirs, old_stps;
+  int func_evals, state_n_iter;
 };
 
 TORCH_AUTOGRAD_OPTIMIZER_CLASS(SGD) {
@@ -85,6 +87,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(SGD) {
   double lr_;
 
   void step() override;
+  at::Scalar step(std::function<at::Scalar()> closure) override;
 
   void init_state() override;
 
@@ -107,6 +110,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
   TORCH_AUTOGRAD_KWARG(Adagrad, double, weight_decay, 0, 0);
   double lr_;
   void step() override;
+  at::Scalar step(std::function<at::Scalar()> closure) override;
   void init_state() override;
 
   template <class Archive>
@@ -134,6 +138,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(RMSprop) {
 
   double lr_;
   void step() override;
+  at::Scalar step(std::function<at::Scalar()> closure) override;
   void init_state() override;
 
   template <class Archive>
@@ -162,6 +167,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adam) {
   TORCH_AUTOGRAD_KWARG(Adam, bool, amsgrad, false, true);
   double lr_;
   void step() override;
+  at::Scalar step(std::function<at::Scalar()> closure) override;
   void init_state() override;
 
   template <class Archive>
