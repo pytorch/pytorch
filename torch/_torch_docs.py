@@ -2179,6 +2179,36 @@ Example::
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
 """.format(**factory_common_args))
 
+add_docstr(torch.logsumexp,
+           r"""
+logsumexp(input, dim, keepdim=False, out=None)
+
+Returns the log of summed exponentials of each row of the :attr:`input`
+tensor in the given dimension :attr:`dim`. The computation is numerically
+stabilized.
+
+For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
+
+           :math:`\text{logsumexp}(x)_{i} = \log \sum_j \exp(x_ij).`
+
+If :attr:`keepdim` is ``True``, the output tensor is of the same size
+as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
+the output tensor having 1 fewer dimension than :attr:`input`.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int or tuple of ints): the dimension or dimensions to reduce
+    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    out (Tensor, optional): the output tensor
+
+
+Example::
+    >>> a = torch.randn(3, 3)
+    >>> torch.logsumexp(a, 1)
+    tensor([ 0.8442,  1.4322,  0.8711])
+""")
+
 add_docstr(torch.lt,
            r"""
 lt(input, other, out=None) -> Tensor

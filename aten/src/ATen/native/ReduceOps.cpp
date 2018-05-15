@@ -264,6 +264,23 @@ Tensor _prod(const Tensor &self, int64_t dim_, bool keepdim) {
   return at::_prod_out(result, self, dim, keepdim);
 }
 
+Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool keepdim) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+  auto maxes = at::max_values(self, dim, true);
+  result = at::where((maxes == INFINITY).__or__(maxes == -INFINITY),
+		     maxes,
+		     maxes + at::log(at::sum(at::exp(self - maxes), dim, true)));
+  if (! keepdim)
+    result.squeeze_(dim);
+  return result;
+}
+
+Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+  Tensor result = self.type().tensor();
+  return at::native::logsumexp_out(result, self, dim, keepdim);
+}
+
 // \DIM REDUCE ################################################################
 
 // MULTI DIM REDUCE ###########################################################
