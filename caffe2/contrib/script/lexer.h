@@ -358,7 +358,7 @@ struct Token {
   double doubleValue() {
     assert(TK_NUMBER == kind);
     size_t idx;
-    double r = stod(text(), &idx);
+    double r = ::caffe2::stod(text(), &idx);
     assert(idx == range.size());
     return r;
   }
