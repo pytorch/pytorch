@@ -16,6 +16,10 @@ def grid_sampler(input, grid, padding_mode):
         return GridSampler.apply(input, grid, padding_mode)
 
 
+def gaussian_grid_sampler(input, grid, padding_mode, kernel_size, kernel_std):
+    return GaussianGridSampler.apply(input, grid, kernel_size, kernel_std, padding_mode)
+
+
 def affine_grid_generator(theta, size):
     if theta.data.is_cuda:
         if not cudnn.enabled:
@@ -79,6 +83,42 @@ class GridSampler(Function):
         else:
             raise ValueError("input has to be 4d or 5d but got input of shape: {}".format(input.shape))
         return grad_input, grad_grid, None
+
+
+class GaussianGridSampler(Function):
+
+    @staticmethod
+    def forward(ctx, input, grid, kernel_size=3, kernel_std=0.45, padding_mode='zeros'):
+        ctx.save_for_backward(input, grid)
+        if padding_mode == 'zeros':
+            ctx.padding_mode = MODE_ZEROS
+        elif padding_mode == 'border':
+            ctx.padding_mode = MODE_BORDER
+        else:
+            raise ValueError("padding_mode needs to be 'zeros' or 'border', but got {}"
+                             .format(padding_mode))
+        ctx.kernel_size = kernel_size
+        ctx.kernel_std = kernel_std
+        grid_sz = grid.size()
+        backend = type2backend[input.type()]
+        output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
+        backend.SpatialGridSamplerGaussian_updateOutput(
+            backend.library_state, input, grid, output,
+            ctx.kernel_size, ctx.kernel_std, ctx.padding_mode)
+        return output
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        input, grid = ctx.saved_tensors
+        padding_mode = ctx.padding_mode
+        backend = type2backend[input.type()]
+        grad_input = input.new(input.size())
+        grad_grid = grid.new(grid.size())
+        backend.SpatialGridSamplerGaussian_updateGradInput(backend.library_state, input, grad_input,
+                                                           grid, grad_grid, grad_output, ctx.kernel_size,
+                                                           ctx.kernel_std, padding_mode)
+        return grad_input, grad_grid, None, None, None
 
 
 class AffineGridGenerator(Function):
