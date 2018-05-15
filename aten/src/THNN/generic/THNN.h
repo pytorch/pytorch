@@ -931,6 +931,7 @@ TH_API void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
           THTensor *output,
           THIndexTensor *indices,
           int osizeW, int osizeH);
+
 TH_API void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
           THNNState *state,
           THTensor *input,
@@ -1276,6 +1277,24 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
           THTensor *input, THTensor *gradInput,
           THTensor *grid, THTensor *gradGrid,
           THTensor *gradOutput,
+          int padding_mode);
+
+TH_API void THNN_(SpatialGridSamplerGaussian_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *grid,
+          THTensor *output,
+          int kernel_size,
+          real kernel_std,
+          int padding_mode);
+
+TH_API void THNN_(SpatialGridSamplerGaussian_updateGradInput)(
+          THNNState *state,
+          THTensor *input, THTensor *gradInput,
+          THTensor *grid, THTensor *gradGrid,
+          THTensor *gradOutput,
+          int kernel_size,
+          real kernel_size,
           int padding_mode);
 
 TH_API void THNN_(unfolded_acc)(

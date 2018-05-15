@@ -1084,6 +1084,24 @@ THC_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
                   THCTensor *gradOutput,
                   int padding_mode);
 
+TH_API void THNN_(SpatialGridSamplerGaussian_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *grid,
+                  THCTensor *output,
+                  int kernel_size,
+                  float std,
+                  int padding_mode);
+
+TH_API void THNN_(SpatialGridSamplerGaussian_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input, THCTensor *gradInput,
+                  THCTensor *grid, THCTensor *gradGrid,
+                  THCTensor *gradOutput,
+                  int kernel_size,
+                  float std,
+                  int padding_mode);
+
 THC_API void THNN_(RReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
