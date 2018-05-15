@@ -62,7 +62,12 @@ declare -f -t trap_add
 trap_add cleanup EXIT
 
 if which sccache > /dev/null; then
+  # Start sccache server in foreground mode, so that we can see better logging
+  sccache --stop-server || true
+  SCCACHE_NO_DAEMON=1 RUST_LOG=sccache::server=error sccache --start-server
+
   # Report sccache stats for easier debugging
+  sccache --zero-stats
   sccache --show-stats
   function sccache_epilogue() {
      sccache --show-stats
