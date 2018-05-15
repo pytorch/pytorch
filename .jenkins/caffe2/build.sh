@@ -168,6 +168,11 @@ fi
 ONNX_INSTALL_PATH="/usr/local/onnx"
 pip install "${ROOT_DIR}/third_party/onnx" -t "${ONNX_INSTALL_PATH}"
 
+if [[ -n "$INTEGRATED" ]]; then
+  TORCH_INSTALL_PATH="/usr/local/torch"
+  pip install "${ROOT_DIR}" -t "$TORCH_INSTALL_PATH"
+fi
+
 # Symlink the caffe2 base python path into the system python path,
 # so that we can import caffe2 without having to change $PYTHONPATH.
 # Run in a subshell to contain environment set by /etc/os-release.
@@ -188,6 +193,9 @@ if [ -n "${JENKINS_URL}" ]; then
       python_path="/usr/local/lib/$(python_version)/dist-packages"
       sudo ln -sf "${INSTALL_PREFIX}/caffe2" "${python_path}"
       sudo ln -sf "${ONNX_INSTALL_PATH}/onnx" "${python_path}"
+      if [[ -n "$INTEGRATED" ]]; then
+        sudo ln -sf "${TORCH_INSTALL_PATH}/torch" "${python_path}"
+      fi
     fi
 
     # RHEL/CentOS
@@ -195,6 +203,9 @@ if [ -n "${JENKINS_URL}" ]; then
       python_path="/usr/lib64/$(python_version)/site-packages/"
       sudo ln -sf "${INSTALL_PREFIX}/caffe2" "${python_path}"
       sudo ln -sf "${ONNX_INSTALL_PATH}/onnx" "${python_path}"
+      if [[ -n "$INTEGRATED" ]]; then
+        sudo ln -sf "${TORCH_INSTALL_PATH}/torch" "${python_path}"
+      fi
     fi
 
     # /etc/ld.so.conf.d is used on both Debian and RHEL

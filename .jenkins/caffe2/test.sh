@@ -100,3 +100,7 @@ echo "Running Python tests.."
   ${conda_ignore_test[@]} \
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
+
+if [[ -n "$INTEGRATED" ]]; then
+  "$ROOT_DIR/scripts/onnx/test.sh" -p
+fi
