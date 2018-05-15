@@ -1294,7 +1294,7 @@ TH_API void THNN_(SpatialGridSamplerGaussian_updateGradInput)(
           THTensor *grid, THTensor *gradGrid,
           THTensor *gradOutput,
           int kernel_size,
-          real kernel_size,
+          real kernel_std,
           int padding_mode);
 
 TH_API void THNN_(unfolded_acc)(

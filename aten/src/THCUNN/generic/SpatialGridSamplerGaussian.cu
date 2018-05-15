@@ -60,7 +60,7 @@ TH_API void THNN_(SpatialGridSamplerGaussian_updateOutput)(
   SpatialGridSamplerGaussian_updateOutput_kernel
     <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
       count, devInput, devGrid, devOutput, kernel_size, kernel_std, padding_mode);
-  THCudaCheck(cudaGetLastError());
+  THCudaCheck(cudaGetLastError())
 }
 
 TH_API void THNN_(SpatialGridSamplerGaussian_updateGradInput)(
