@@ -175,8 +175,7 @@ fi
 report_compile_cache_stats
 
 # Install ONNX into a local directory
-ONNX_INSTALL_PATH="/usr/local/onnx"
-pip install "${ROOT_DIR}/third_party/onnx" -t "${ONNX_INSTALL_PATH}"
+pip install --user "${ROOT_DIR}/third_party/onnx"
 
 report_compile_cache_stats
 
@@ -186,8 +185,7 @@ if [[ -n "$INTEGRATED" ]]; then
   if [[ -n "${SCCACHE}" ]]; then
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
-  TORCH_INSTALL_PATH="/usr/local/torch"
-  pip install -v "${ROOT_DIR}" -t "$TORCH_INSTALL_PATH"
+  pip install --user -v "${ROOT_DIR}"
 fi
 
 report_compile_cache_stats
@@ -211,20 +209,12 @@ if [ -n "${JENKINS_URL}" ]; then
     if [[ "$ID_LIKE" == *debian* ]]; then
       python_path="/usr/local/lib/$(python_version)/dist-packages"
       sudo ln -sf "${INSTALL_PREFIX}/caffe2" "${python_path}"
-      sudo ln -sf "${ONNX_INSTALL_PATH}/onnx" "${python_path}"
-      if [[ -n "$INTEGRATED" ]]; then
-        sudo ln -sf "${TORCH_INSTALL_PATH}/torch" "${python_path}"
-      fi
     fi
 
     # RHEL/CentOS
     if [[ "$ID_LIKE" == *rhel* ]]; then
       python_path="/usr/lib64/$(python_version)/site-packages/"
       sudo ln -sf "${INSTALL_PREFIX}/caffe2" "${python_path}"
-      sudo ln -sf "${ONNX_INSTALL_PATH}/onnx" "${python_path}"
-      if [[ -n "$INTEGRATED" ]]; then
-        sudo ln -sf "${TORCH_INSTALL_PATH}/torch" "${python_path}"
-      fi
     fi
 
     # /etc/ld.so.conf.d is used on both Debian and RHEL
