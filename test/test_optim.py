@@ -479,6 +479,7 @@ class TestOptim(TestCase):
         params = [torch.randn(10, 5), torch.randn(10)]
         opt1 = optim.LBFGS(params, 0.01, tolerance_grad=float('inf'))
         opt2 = optim.LBFGS(params, 0.01, tolerance_grad=-float('inf'))
+
         def closure():
             return torch.Tensor([10])
 
