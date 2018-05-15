@@ -171,8 +171,7 @@ void runConv(
     int group = 1,
     int planesIn = randInt(1, 6),
     int planesOut = randInt(1, 6),
-    int n = randInt(1, 2))
-{
+    int n = randInt(1, 2)) {
   int h = randInt(20, 100);
   int w = randInt(20, 100);
   // This pad restriction is imposed by NNPACK
@@ -210,12 +209,10 @@ constexpr size_t kIters = 20;
 TEST(DEPTHWISE3x3, Conv) {
   for (int i = 0; i < kIters; ++i) {
     int channel = 2;
-    runConv(
-        3, 3, 1, 1, channel, channel, channel, randInt(1, 2));
+    runConv(3, 3, 1, 1, channel, channel, channel, randInt(1, 2));
   }
 }
 
 #endif
 
 } // namespace caffe2
-

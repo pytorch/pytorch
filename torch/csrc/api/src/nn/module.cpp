@@ -5,7 +5,6 @@
 #include <ATen/Error.h>
 
 #include <algorithm>
-#include <cassert>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -36,10 +35,10 @@ const std::string& Module::name() const noexcept {
 std::unique_ptr<Module> Module::clone() const {
   AT_ERROR(
       "clone() has not been implemented for ",
-      "_____________name_______________",
+      name(),
       ". Use the copy constructor if you don't require polymorphic cloning. "
       "Otherwise, subclass torch::nn::CloneableModule<",
-      "_____________name_______________",
+      name(),
       "> instead of torch::nn::Module to inherit the ability to clone.");
 }
 
@@ -114,8 +113,8 @@ void Module::to(at::Type& type) {
   for (auto& pair : parameters_) {
     auto& parameter = pair.second;
     at::detail::set_data(parameter, parameter.data().toType(type));
-    assert(parameter.data().type() == type);
-    assert(&parameter.type() == autograd::VariableType::getType(type));
+    AT_ASSERT(parameter.data().type() == type);
+    AT_ASSERT(&parameter.type() == autograd::VariableType::getType(type));
   }
 }
 
@@ -127,8 +126,8 @@ void Module::to(at::ScalarType scalar_type) {
     auto& parameter = pair.second;
     auto& new_type = parameter.data().type().toScalarType(scalar_type);
     at::detail::set_data(parameter, parameter.data().toType(new_type));
-    assert(parameter.data().type().scalarType() == scalar_type);
-    assert(parameter.type().scalarType() == scalar_type);
+    AT_ASSERT(parameter.data().type().scalarType() == scalar_type);
+    AT_ASSERT(parameter.type().scalarType() == scalar_type);
   }
 }
 
@@ -140,8 +139,8 @@ void Module::to(at::Backend backend) {
     auto& parameter = pair.second;
     auto& new_type = parameter.data().type().toBackend(backend);
     at::detail::set_data(parameter, parameter.data().toType(new_type));
-    assert(parameter.data().type().backend() == backend);
-    assert(parameter.type().backend() == backend);
+    AT_ASSERT(parameter.data().type().backend() == backend);
+    AT_ASSERT(parameter.type().backend() == backend);
   }
 }
 

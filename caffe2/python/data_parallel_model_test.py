@@ -384,7 +384,7 @@ class DataParallelModelTest(TestCase):
             # Set network timeout to 2 seconds, and add a 3 seconds
             # sleep for 1 host.  Make sure there is no timeout on the
             # second RunNet.
-            data_parallel_model._DEFAULT_TIMEOUT_SEC=2
+            data_parallel_model._DEFAULT_TIMEOUT_SEC = 2
             data_parallel_model.Parallelize_CPU(
                 model,
                 input_builder_fun=add_input_ops,

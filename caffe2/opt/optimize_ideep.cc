@@ -1,6 +1,6 @@
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/converter.h"
-#include "caffe2/opt/fuse_conv_relu.h"
+#include "caffe2/opt/fusion.h"
 
 namespace caffe2 {
 namespace opt {
@@ -36,7 +36,7 @@ void OptimizeForIdeep(repr::NNModule* nn) {
     // 1 means FUSION_CONV_RELU
     arg->set_i(1);
   };
-  fuseConvRelu(nn, should_fuse, postprocess);
+  fuseActivation<repr::Conv, repr::Relu>(nn, should_fuse, postprocess);
 }
 
 } // namespace opt

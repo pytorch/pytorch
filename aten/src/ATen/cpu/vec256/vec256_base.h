@@ -104,6 +104,9 @@ struct Vec256 {
   Vec256<T> sin() const {
     return map(std::sin);
   }
+  Vec256<T> tanh() const {
+    return map(std::tanh);
+  }
   Vec256<T> trunc() const {
     return map(std::trunc);
   }

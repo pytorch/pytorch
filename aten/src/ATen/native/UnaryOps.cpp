@@ -141,7 +141,7 @@ IMPLEMENT_UNARY_OP_FLOAT_CMATH(sin, std::sin)
 IMPLEMENT_UNARY_OP_FLOAT_CMATH(sinh, std::sinh)
 IMPLEMENT_UNARY_OP_VEC(sqrt, std::sqrt)
 IMPLEMENT_UNARY_OP_FLOAT_CMATH(tan, std::tan)
-IMPLEMENT_UNARY_OP_FLOAT_CMATH(tanh, std::tanh)
+IMPLEMENT_UNARY_OP_VEC(tanh, std::tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc, std::trunc)
 }
 } // namespace at
