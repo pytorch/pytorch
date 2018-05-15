@@ -44,6 +44,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFractionalMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullDilatedConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialGridSamplerBilinear.cu
+${CMAKE_CURRENT_SOURCE_DIR}/SpatialGridSamplerGaussian.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxUnpooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialReflectionPadding.cu

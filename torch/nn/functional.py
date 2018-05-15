@@ -1833,7 +1833,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     return upsample(input, size, scale_factor, mode='bilinear', align_corners=True)
 
 
-def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
+def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', kernel_size=3, kernel_std=0.45):
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     `output` using input pixel locations from the grid.
 
@@ -1867,12 +1867,18 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         grid (Tensor): flow-field of size (N x OH x OW x 2) or (N x OD x OH x OW x 3)
         padding_mode (str): padding mode for outside grid values
             'zeros' | 'border'. Default: 'zeros'
+        mode (str): sampling kernel mode 'bilinear' | 'gaussian'. Default : 'bilinear'
+        kernel_size (int): if gaussian, size of the kernel. Default : 3
+        kernel_std (float): if gaussian, standard deviation of the kernel. Default : 0.45
 
     Returns:
         output (Tensor): output Tensor
 
     """
-    return vision.grid_sampler(input, grid, padding_mode)
+    if mode == 'bilinear':
+        return vision.grid_sampler(input, grid, padding_mode)
+    else:
+        return vision.gaussian_grid_sampler(input, grid, padding_mode, kernel_size=kernel_size, kernel_std=kernel_std)
 
 
 def affine_grid(theta, size):
