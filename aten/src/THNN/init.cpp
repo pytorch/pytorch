@@ -255,6 +255,9 @@
 #include "generic/SpatialGridSamplerBilinear.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialGridSamplerGaussian.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/VolumetricAveragePooling.c"
 #include "THGenerateFloatTypes.h"
 
