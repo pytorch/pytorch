@@ -91,7 +91,9 @@ if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   # headers are those in conda as well
   # This path comes from install_anaconda.sh which installs Anaconda into the
   # docker image
-  PROTOBUF_INCDIR=/opt/conda/include pip install -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+  # TODO: remove this CMAKE_ARGS after changing onnx to not strictly
+  # require generating protobuf type stubs
+  CMAKE_ARGS='-DONNX_GEN_PB_TYPE_STUBS=OFF' PROTOBUF_INCDIR=/opt/conda/include pip install -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
   report_compile_cache_stats
   exit 0
 fi
@@ -177,7 +179,9 @@ fi
 report_compile_cache_stats
 
 # Install ONNX into a local directory
-pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+# TODO: remove this CMAKE_ARGS after changing onnx to not strictly
+# require generating protobuf type stubs
+CMAKE_ARGS='-DONNX_GEN_PB_TYPE_STUBS=OFF' pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 report_compile_cache_stats
 
