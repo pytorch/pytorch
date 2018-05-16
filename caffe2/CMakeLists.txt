@@ -197,14 +197,7 @@ if(BUILD_CAFFE2)
     foreach(test_src ${Caffe2_ALL_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       add_executable(${test_name} "${test_src}")
-      # For tests, some of the test code actually directly call the dependent
-      # libraries even if they are not part of the public dependency libs. As a
-      # result, we will explicitly link the test against the Caffe2 dependency
-      # libs.
-      target_link_libraries(${test_name} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_MAIN_LIBS} gtest_main)
-      if (USE_CUDA)
-        target_link_libraries(${test_name} ${Caffe2_CUDA_DEPENDENCY_LIBS})
-      endif()
+      target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
       if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
         target_compile_features(${test_name} PRIVATE cxx_range_for)
       endif()
