@@ -115,12 +115,16 @@ class CloneableModule : public Module {
 
   virtual void reset() = 0;
 
+  /// Moves the `Module` into a `shared_ptr` and calls `reset()` on it.
   std::shared_ptr<Derived> build() {
     auto module = std::make_shared<Derived>(static_cast<Derived&&>(*this));
     module->reset();
     return std::move(module);
   }
 
+  /// Performs a recursive "deep copy" of the `Module`, such that all parameters
+  /// and submodules in the cloned module are different from those in the
+  /// original module.
   std::shared_ptr<Module> clone() const override {
     auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
     ptr->parameters_.clear();
@@ -137,7 +141,7 @@ class CloneableModule : public Module {
 };
 }} // namespace torch::nn
 
-#define TORCH_ATTR(T, name)                    \
+#define TORCH_ATTR(T, name)                         \
   auto name(const T& new_##name)->decltype(*this) { \
     this->name##_ = new_##name;                     \
     return *this;                                   \
