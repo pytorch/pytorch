@@ -12,11 +12,11 @@ class OptimizerImpl {
   OptimizerImpl(std::shared_ptr<nn::Module> model) : model_(model) {}
   virtual ~OptimizerImpl() = default;
   virtual void init_state() {}
-  virtual void step() = 0;
-  virtual at::Scalar step(std::function<at::Scalar()> closure) = 0;
+  virtual at::Scalar step(std::function<at::Scalar()> closure = NoLoss) = 0;
   void zero_grad();
 
   void set_model(std::shared_ptr<nn::Module> model);
+  at::Scalar static NoLoss();
 
  protected:
   OptimizerImpl() {}
@@ -48,7 +48,6 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(LBFGS) {
   TORCH_AUTOGRAD_KWARG(LBFGS, int, history_size, 100, 100);
 
   double lr_;
-  void step() override;
   at::Scalar step(std::function<at::Scalar()> closure) override;
   void init_state() override;
 
@@ -86,8 +85,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(SGD) {
   TORCH_AUTOGRAD_KWARG(SGD, bool, nesterov, false, true);
   double lr_;
 
-  void step() override;
-  at::Scalar step(std::function<at::Scalar()> closure) override;
+  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
 
   void init_state() override;
 
@@ -109,8 +107,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
   TORCH_AUTOGRAD_KWARG(Adagrad, double, lr_decay, 0, 0);
   TORCH_AUTOGRAD_KWARG(Adagrad, double, weight_decay, 0, 0);
   double lr_;
-  void step() override;
-  at::Scalar step(std::function<at::Scalar()> closure) override;
+  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
   void init_state() override;
 
   template <class Archive>
@@ -137,8 +134,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(RMSprop) {
   TORCH_AUTOGRAD_KWARG(RMSprop, bool, centered, false, true);
 
   double lr_;
-  void step() override;
-  at::Scalar step(std::function<at::Scalar()> closure) override;
+  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
   void init_state() override;
 
   template <class Archive>
@@ -166,8 +162,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adam) {
   TORCH_AUTOGRAD_KWARG(Adam, double, eps, 1e-8, 1e-8);
   TORCH_AUTOGRAD_KWARG(Adam, bool, amsgrad, false, true);
   double lr_;
-  void step() override;
-  at::Scalar step(std::function<at::Scalar()> closure) override;
+  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
   void init_state() override;
 
   template <class Archive>

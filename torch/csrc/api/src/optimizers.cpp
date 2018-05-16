@@ -14,6 +14,10 @@ void OptimizerImpl::zero_grad() {
   }
 }
 
+at::Scalar OptimizerImpl::NoLoss() {
+  return at::Scalar();
+}
+
 void OptimizerImpl::set_model(std::shared_ptr<nn::Module> model) {
   model_ = model;
 }
@@ -36,12 +40,6 @@ void LBFGS::add_grad(const at::Scalar& step_size, const at::Tensor& update) {
   }
 }
 
-void LBFGS::step() {
-  AT_ERROR(
-    "LBFGS step requires a closure for evaluating the model loss", 
-    "See: https://pytorch.org/docs/stable/optim.html#optimizer-step-closure");
-}
-
 at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
   at::Scalar orig_loss = closure();
   at::Scalar loss = orig_loss;
@@ -60,11 +58,11 @@ at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
   int n_iter = 0;
   while(n_iter < max_iter_) {
     n_iter++;
-    state_n_iter += 1;
+    state_n_iter++;
 
     if(state_n_iter == 1) {
       d = flat_grad.neg();
-      H_diag = flat_grad.type().scalarTensor(1);
+      H_diag = ONE;
       prev_flat_grad = flat_grad.clone();
     } else {
       at::Tensor y = flat_grad.sub(prev_flat_grad);
@@ -173,11 +171,6 @@ void LBFGS::init_state() {
 
 at::Scalar SGD::step(std::function<at::Scalar()> closure) {
   at::Scalar loss = closure();
-  step();
-  return loss;
-}
-
-void SGD::step() {
   for (auto& pair : model_->parameters()) {
     auto& name = pair.first;
     auto& grad = pair.second.grad();
@@ -209,21 +202,17 @@ void SGD::step() {
 
     p.add_(d_p, -lr_);
   }
+  return loss;
 }
 
 void SGD::init_state() {
   momentum_buffers_.clear();
 }
 
-at::Scalar Adagrad::step(std::function<at::Scalar()> closure) {
-  at::Scalar loss = closure();
-  step();
-  return loss;
-}
-
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
-void Adagrad::step() {
+at::Scalar Adagrad::step(std::function<at::Scalar()> closure) {
+  at::Scalar loss = closure();
   for (auto& pair : model_->parameters()) {
     auto& name = pair.first;
     auto& grad = pair.second.grad();
@@ -249,6 +238,7 @@ void Adagrad::step() {
     at::Tensor std = buf.sqrt().add_(1e-10);
     p.addcdiv_(d_p, std, -clr);
   }
+  return loss;
 }
 
 void Adagrad::init_state() {
@@ -256,15 +246,10 @@ void Adagrad::init_state() {
   step_.clear();
 }
 
-at::Scalar RMSprop::step(std::function<at::Scalar()> closure) {
-  at::Scalar loss = closure();
-  step();
-  return loss;
-}
-
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
-void RMSprop::step() {
+at::Scalar RMSprop::step(std::function<at::Scalar()> closure) {
+  at::Scalar loss = closure();
   for (auto& pair : model_->parameters()) {
     auto& name = pair.first;
     auto& grad = pair.second.grad();
@@ -307,6 +292,7 @@ void RMSprop::step() {
       p.addcdiv_(d_p, avg, -lr_);
     };
   }
+  return loss;
 }
 
 void RMSprop::init_state() {
@@ -317,11 +303,6 @@ void RMSprop::init_state() {
 
 at::Scalar Adam::step(std::function<at::Scalar()> closure) {
   at::Scalar loss = closure();
-  step();
-  return loss;
-}
-
-void Adam::step() {
   for (auto& pair : model_->parameters()) {
     auto& name = pair.first;
     auto& grad = pair.second.grad();
@@ -367,6 +348,7 @@ void Adam::step() {
 
     p.addcdiv_(exp_avg, denom, -step_size);
   }
+  return loss;
 }
 
 void Adam::init_state() {
