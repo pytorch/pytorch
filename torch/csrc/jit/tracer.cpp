@@ -206,7 +206,6 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
                                   std::string arg_types,
                                   at::ArrayRef<Variable> inputs,
                                   pyobj_list scalar_args) {
-  std::vector<VariableFlags> var_flags = fmap(inputs, &VariableFlags::of);
   THPObjectPtr apply(PyObject_GetAttrString(pyobj.get(), "apply"));
   if(!apply) {
     throw python_error();
@@ -215,7 +214,6 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
     return graph.createPythonOp(
         std::move(apply),
         arg_types,
-        std::move(var_flags),
         std::move(scalar_args));
   });
 }
