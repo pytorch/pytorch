@@ -32,15 +32,20 @@ inline Tensor Tensor::toBackend(Backend b) const {
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
 
-#define DEFINE_CAST(T,name,_) \
-template<> \
-inline T* Tensor::data() const { \
-  AT_CHECK(type().scalarType() == ScalarType::name, \
-    "expected scalar type % s but found %s", #name, \
-    at::toString(type().scalarType())); \
-  return static_cast<T*>(this->data_ptr()); \
-} \
-inline T* Tensor::to##name##Data() const { return data<T>(); }
+#define DEFINE_CAST(T, name, _)                  \
+  template <>                                    \
+  inline T* Tensor::data() const {               \
+    AT_CHECK(                                    \
+        type().scalarType() == ScalarType::name, \
+        "expected scalar type ",                 \
+        #name,                                   \
+        " but found ",                           \
+        at::toString(type().scalarType()));      \
+    return static_cast<T*>(this->data_ptr());    \
+  }                                              \
+  inline T* Tensor::to##name##Data() const {     \
+    return data<T>();                            \
+  }
 
 AT_FORALL_SCALAR_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST

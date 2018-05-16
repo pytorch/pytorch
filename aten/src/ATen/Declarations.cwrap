@@ -3610,7 +3610,7 @@
     - double p
 ]]
 [[
-  name: bernoulli
+  name: _th_bernoulli
   types:
     - Float
     - Double
