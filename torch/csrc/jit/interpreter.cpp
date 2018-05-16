@@ -367,25 +367,6 @@ public:
   }
 };
 
-
-// HandleBuilder is used to construct the correct Autograd Handle objects
-// for use in a future stage.
-// It is used even when the future stage does not require a handle since
-// it also performs the conversions between Tensor and Variable, which
-// behave differently depending on whether a future handle needs to be
-// created.
-struct HandleBuilder {
-  autograd::Variable addInput(at::Tensor && input_, const VariableFlags & flags_) {
-    autograd::Variable& input = static_cast<autograd::Variable&>(input_);
-    return autograd::make_variable(input.data(), /*requires_grad=*/false);
-  }
-  at::Tensor addOutput(const autograd::Variable & output) {
-    return output.detach();
-  }
-  void writeTo(Stack & outputs) {
-  }
-};
-
 bool hasHandleOutput(Node * n) {
   if(n->outputs().size() == 0)
     return false;
@@ -396,7 +377,7 @@ bool hasHandleOutput(Node * n) {
 #ifndef NO_PYTHON
 Operation createPythonOperation(PythonOp* op) {
   py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
-  bool tracing_autograd_python_function = op->tracing_autograd_python_function;
+  JIT_ASSERT(!op->tracing_autograd_python_function);
   JIT_ASSERT(!hasHandleOutput(op));
   size_t num_inputs = 0;
   for(auto arg_type : op->cconv) {
@@ -409,100 +390,49 @@ Operation createPythonOperation(PythonOp* op) {
     size_t i = 0;
     size_t next_scalar = 0;
     size_t next_tensor = 0;
-    HandleBuilder builder;
-    // Note: The first branch here should be considered deprecated and will
-    // probably be removed in the future.
-    //
-    // tracing_autograd_python_function indicates that we need to hook this
-    // PythonOp up to autograd with the HandleBuilder
-    if (tracing_autograd_python_function) {
-      for (auto arg_type : op->cconv) {
-        if (arg_type == 's') {
-          py_inputs[i] = py::reinterpret_borrow<py::object>(
-              op->scalar_args[next_scalar++].get());
-        } else if (arg_type == 't') {
-          py_inputs[i] = py::reinterpret_steal<py::object>(
-              THPVariable_Wrap(builder.addInput(
-                  std::move(peek(stack, next_tensor, num_inputs)),
-                  op->var_flags.at(next_tensor))));
-          next_tensor++;
-        }
-        i++;
+    for (auto arg_type : op->cconv) {
+      if (arg_type == 's') {
+        py_inputs[i] = py::reinterpret_borrow<py::object>(
+            op->scalar_args[next_scalar++].get());
+      } else if (arg_type == 't') {
+        auto var = peek(stack, next_tensor, num_inputs);
+        py_inputs[i] =
+            py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
+        next_tensor++;
       }
-      drop(stack, num_inputs);
-      py::object py_outputs(func(*py_inputs));
-      auto num_outputs = op->outputs().size();
-      auto addOutput = [&](py::handle entry) {
-        if (!THPVariable_Check(entry.ptr())) {
-          throw std::runtime_error(
-              "Function.apply returned a non-Variable output");
-        }
-        THPVariable* var = (THPVariable*)entry.ptr();
-        stack.push_back(builder.addOutput(var->cdata));
-      };
-      if (!PyTuple_Check(py_outputs.ptr())) {
-        if (num_outputs != 1) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        addOutput(py_outputs);
-      } else {
-        auto output_tuple = py::tuple(py_outputs);
-        if (output_tuple.size() != num_outputs) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        for (py::handle entry : output_tuple) {
-          addOutput(entry);
-        }
-      }
-      builder.writeTo(stack);
-      return 0;
-    } else {
-      for (auto arg_type : op->cconv) {
-        if (arg_type == 's') {
-          py_inputs[i] = py::reinterpret_borrow<py::object>(
-              op->scalar_args[next_scalar++].get());
-        } else if (arg_type == 't') {
-          auto var = peek(stack, next_tensor, num_inputs);
-          py_inputs[i] =
-              py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
-          next_tensor++;
-        }
-        i++;
-      }
-      drop(stack, num_inputs);
-      py::object py_outputs(func(*py_inputs));
-
-      auto num_outputs = op->outputs().size();
-      auto addOutput = [&](py::handle entry) {
-        if (!THPVariable_Check(entry.ptr())) {
-          throw std::runtime_error(
-              "Function application returned a non-Variable output");
-        }
-        THPVariable* var = (THPVariable*)entry.ptr();
-        auto cdata = var->cdata;
-        stack.push_back(std::move(cdata));
-      };
-
-      if (!PyTuple_Check(py_outputs.ptr())) {
-        if (num_outputs != 1) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        addOutput(py_outputs);
-      } else {
-        auto output_tuple = py::tuple(py_outputs);
-        if (output_tuple.size() != num_outputs) {
-          throw std::runtime_error(
-              "Function application returned the wrong number of outputs.");
-        }
-        for (py::handle entry : py::tuple(py_outputs)) {
-          addOutput(entry);
-        }
-      }
-      return 0;
+      i++;
     }
+    drop(stack, num_inputs);
+    py::object py_outputs(func(*py_inputs));
+
+    auto num_outputs = op->outputs().size();
+    auto addOutput = [&](py::handle entry) {
+      if (!THPVariable_Check(entry.ptr())) {
+        throw std::runtime_error(
+            "Function application returned a non-Variable output");
+      }
+      THPVariable* var = (THPVariable*)entry.ptr();
+      auto cdata = var->cdata;
+      stack.push_back(std::move(cdata));
+    };
+
+    if (!PyTuple_Check(py_outputs.ptr())) {
+      if (num_outputs != 1) {
+        throw std::runtime_error(
+            "Function.apply returned the wrong number of outputs.");
+      }
+      addOutput(py_outputs);
+    } else {
+      auto output_tuple = py::tuple(py_outputs);
+      if (output_tuple.size() != num_outputs) {
+        throw std::runtime_error(
+            "Function application returned the wrong number of outputs.");
+      }
+      for (py::handle entry : py::tuple(py_outputs)) {
+        addOutput(entry);
+      }
+    }
+    return 0;
   };
 }
 #else
@@ -519,17 +449,15 @@ Operation createCppOperation(CppOp* op) {
   JIT_ASSERT(!hasHandleOutput(op));
   auto num_inputs = op->inputs().size();
   return [=](Stack & stack) {
-    HandleBuilder builder;
     autograd::variable_list v_inputs;
     for(size_t i = 0; i < num_inputs; i++) {
-      v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
+      v_inputs.push_back(std::move(peek(stack, i, num_inputs)));
     }
     drop(stack, num_inputs);
     autograd::variable_list v_outputs = (*func)(v_inputs);
     for(auto & output : v_outputs) {
-      stack.push_back(builder.addOutput(output));
+      stack.push_back(output);
     }
-    builder.writeTo(stack);
     return 0;
   };
 }
