@@ -739,6 +739,11 @@ def _write_ninja_file(path,
                       extra_ldflags,
                       extra_include_paths,
                       with_cuda=False):
+    extra_cflags = [flag.strip() for flag in extra_cflags]
+    extra_cuda_cflags = [flag.strip() for flag in extra_cuda_cflags]
+    extra_ldflags = [flag.strip() for flag in extra_ldflags]
+    extra_include_paths = [flag.strip() for flag in extra_include_paths]
+
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
     config.append('cxx = {}'.format(os.environ.get('CXX', 'c++')))
