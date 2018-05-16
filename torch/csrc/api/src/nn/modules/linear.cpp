@@ -11,9 +11,10 @@ Linear::Linear(size_t features_in, size_t features_out)
     : in_(features_in), out_(features_out) {}
 
 void Linear::reset() {
-  weight_ = add(Var(at::CPU(at::kFloat).empty({out_, in_})), "weight");
+  register_parameter(
+      "weight", &Linear::weight_, at::CPU(at::kFloat).empty({out_, in_}));
   if (with_bias_) {
-    bias_ = add(Var(at::CPU(at::kFloat).empty(out_)), "bias");
+    register_parameter("bias", &Linear::bias_, at::CPU(at::kFloat).empty(out_));
   }
 
   const auto stdv = 1.0 / std::sqrt(weight_.size(1));

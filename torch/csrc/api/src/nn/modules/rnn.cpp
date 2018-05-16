@@ -1,6 +1,7 @@
 #include <torch/nn/modules/rnn.h>
 
 #include <torch/nn/modules/dropout.h>
+#include <torch/parameter_list.h>
 
 #include <ATen/Error.h>
 #include <ATen/optional.h>
@@ -59,25 +60,32 @@ void RNNBase<Derived>::reset() {
 
   for (int64_t layer = 0; layer < layers_; ++layer) {
     const int64_t input_size = (layer == 0) ? input_size_ : hidden_size_;
-    ihw_.push_back(this->add(
-        Var(at::CPU(at::kFloat).empty({gate_size, input_size})),
-        "weight_ih_l" + std::to_string(layer)));
-    hhw_.push_back(this->add(
-        Var(at::CPU(at::kFloat).empty({gate_size, hidden_size_})),
-        "weight_hh_l" + std::to_string(layer)));
+    ihw_.push_back(
+        "weight_ih_l" + std::to_string(layer),
+        Var(at::CPU(at::kFloat).empty({gate_size, input_size})));
+
+    hhw_.push_back(
+        "weight_hh_l" + std::to_string(layer),
+        Var(at::CPU(at::kFloat).empty({gate_size, hidden_size_})));
+
     if (with_bias_) {
-      ihb_.push_back(this->add(
-          Var(at::CPU(at::kFloat).empty({gate_size})),
-          "bias_ih_l" + std::to_string(layer)));
-      hhb_.push_back(this->add(
-          Var(at::CPU(at::kFloat).empty({gate_size})),
-          "bias_hh_l" + std::to_string(layer)));
+      ihb_.push_back(
+          "bias_ih_l" + std::to_string(layer),
+          Var(at::CPU(at::kFloat).empty({gate_size})));
+      hhb_.push_back(
+          "bias_hh_l" + std::to_string(layer),
+          Var(at::CPU(at::kFloat).empty({gate_size})));
     } else {
-      ihb_.emplace_back();
-      hhb_.emplace_back();
+      // ihb_.emplace_back();
+      // hhb_.emplace_back();
     }
   }
   flatten_parameters_for_cudnn();
+
+  this->register_parameters(&RNNBase::ihw_);
+  this->register_parameters(&RNNBase::hhw_);
+  this->register_parameters(&RNNBase::ihb_);
+  this->register_parameters(&RNNBase::hhb_);
 
   auto stdv = 1.0 / std::sqrt(hidden_size_);
   for (auto& p : this->parameters()) {

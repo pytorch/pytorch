@@ -46,6 +46,7 @@ class RNNBase : public CloneableModule<Derived> {
   TORCH_ATTR(double, dropout) = 0.0;
 
  protected:
+
   virtual variable_list cell_forward(variable_list, int64_t layer) = 0;
 
   variable_list CUDNN_forward(variable_list);
@@ -54,10 +55,10 @@ class RNNBase : public CloneableModule<Derived> {
   void flatten_parameters_for_cudnn();
   std::vector<Tensor> flat_weights() const;
 
-  std::vector<Variable> ihw_;
-  std::vector<Variable> ihb_;
-  std::vector<Variable> hhw_;
-  std::vector<Variable> hhb_;
+  ParameterList ihw_;
+  ParameterList ihb_;
+  ParameterList hhw_;
+  ParameterList hhb_;
 
   int64_t number_of_gates_;
   bool has_cell_state_;

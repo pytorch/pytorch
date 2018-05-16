@@ -24,7 +24,8 @@ class ContainerListImpl : public Module {
 
   ContainerListImpl<Derived>& append(std::shared_ptr<Module> m) {
     modules_.push_back(m);
-    Module::add(modules_.back(), std::to_string(size() - 1));
+    register_module(
+        std::to_string(size() - 1), &ContainerListImpl::modules_, size() - 1);
     return *this;
   }
 
@@ -70,20 +71,8 @@ class Sequential : public ContainerListImpl<Sequential> {
       name = std::to_string(size());
     }
     modules_.push_back(m);
-    Module::add(modules_.back(), name);
+    register_module(name, &Sequential::modules_, size() - 1);
     return *this;
   }
-};
-
-class SimpleContainer : public Module {
-  // Lets you use a container without making a new class,
-  // for experimental implementations
- public:
-  virtual variable_list forward(variable_list) override {
-    throw std::runtime_error(
-        "SimpleContainer has no forward, maybe you"
-        " wanted to subclass and override this function?");
-  }
-  using Module::add;
 };
 }} // namespace torch::nn

@@ -8,17 +8,25 @@ BatchNorm::BatchNorm(int64_t features) : features_(features) {}
 
 void BatchNorm::reset() {
   if (affine_) {
-    weight_ =
-        add(Var(at::CPU(at::kFloat).empty({features_}).uniform_()), "weight");
-    bias_ = add(Var(at::CPU(at::kFloat).zeros({features_})), "bias");
+    register_parameter(
+        "weight",
+        &BatchNorm::weight_,
+        at::CPU(at::kFloat).empty({features_}).uniform_());
+    register_parameter(
+        "bias", &BatchNorm::bias_, at::CPU(at::kFloat).zeros({features_}));
   }
 
   if (stateful_) {
-    // TODO: Make into buffers instead of parameters
-    running_mean_ = add(
-        Var(at::CPU(at::kFloat).zeros({features_}), false), "running_mean");
-    running_variance_ = add(
-        Var(at::CPU(at::kFloat).ones({features_}), false), "running_variance");
+    // TODO: create distinction between parameters and buffers and make these
+    // gradient-less buffers
+    register_parameter(
+        "running_mean",
+        &BatchNorm::running_mean_,
+        at::CPU(at::kFloat).zeros({features_}));
+    register_parameter(
+        "running_variance",
+        &BatchNorm::running_variance_,
+        at::CPU(at::kFloat).ones({features_}));
   }
 }
 
