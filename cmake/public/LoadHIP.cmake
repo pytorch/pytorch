@@ -56,4 +56,10 @@ FIND_PACKAGE(HIP 1.0)
 
 IF(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
+  # Need to set this explicitly, otherwise hipconfig will look at the
+  # actual gpu cards on the build machine to determine whether to use
+  # hcc or nvcc
+  IF(NOT DEFINED $ENV{HIP_PLATFORM})
+    SET(ENV{HIP_PLATFORM} "hcc")
+  ENDIF()
 ENDIF()
