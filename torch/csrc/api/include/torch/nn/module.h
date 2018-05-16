@@ -138,7 +138,6 @@ class CloneableModule : public Module {
 }} // namespace torch::nn
 
 #define TORCH_PARAMETER(T, name)             \
- public:                                     \
   auto name(T new_##name)->decltype(*this) { \
     this->name##_ = std::move(new_##name);   \
     return *this;                            \
@@ -146,6 +145,4 @@ class CloneableModule : public Module {
   const T& name() const noexcept {           \
     return this->name##_;                    \
   }                                          \
-                                             \
- protected:                                  \
   T name##_

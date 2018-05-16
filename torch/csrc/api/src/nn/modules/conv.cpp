@@ -1,57 +1,20 @@
 #include <torch/nn/modules/conv.h>
 
+#include <torch/expanding_array.h>
+
 #include <ATen/ATen.h>
 
-#include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
-#include <initializer_list>
 #include <vector>
 
 namespace torch { namespace nn {
 template <size_t D, typename Derived>
-Conv<D, Derived>::ExpandingSize::ExpandingSize(
-    std::initializer_list<int64_t> sizes)
-    : ExpandingSize(std::vector<int64_t>(sizes)) {}
-
-template <size_t D, typename Derived>
-Conv<D, Derived>::ExpandingSize::ExpandingSize(std::vector<int64_t> sizes) {
-  AT_CHECK(
-      sizes.size() == D,
-      "Expected ",
-      D,
-      " sizes, but instead got ",
-      sizes.size());
-  std::copy(sizes.begin(), sizes.end(), sizes_.begin());
-}
-
-template <size_t D, typename Derived>
-Conv<D, Derived>::ExpandingSize::ExpandingSize(int64_t single_size) {
-  sizes_.fill(single_size);
-}
-
-template <size_t D, typename Derived>
-std::array<int64_t, D>& Conv<D, Derived>::ExpandingSize::operator*() {
-  return sizes_;
-}
-
-template <size_t D, typename Derived>
-std::array<int64_t, D>* Conv<D, Derived>::ExpandingSize::operator->() {
-  return &sizes_;
-}
-
-template <size_t D, typename Derived>
-Conv<D, Derived>::ExpandingSize::operator at::IntList() {
-  return sizes_;
-}
-
-template <size_t D, typename Derived>
 Conv<D, Derived>::Conv(
     int64_t input_channels,
     int64_t output_channels,
-    ExpandingSize kernel_size)
+    ExpandingArray<D> kernel_size)
     : input_channels_(input_channels),
       output_channels_(output_channels),
       kernel_size_(std::move(kernel_size)) {}
