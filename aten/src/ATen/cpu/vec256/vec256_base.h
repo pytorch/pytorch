@@ -2,7 +2,6 @@
 
 #include <cstring>
 #include <functional>
-#include <cmath>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -29,42 +28,21 @@ struct Vec256 {
       values[i] = val;
     }
   }
-  template <int64_t mask_>
-  static Vec256<T> blend(Vec256<T> a, Vec256<T> b) {
-    int64_t mask = mask_;
+  void load(const void* ptr) {
+    std::memcpy(values, ptr, 32);
+  };
+  void load_partial(const void* ptr, int count) {
+    std::memcpy(values, ptr, count * sizeof(T));
+  }
+  static Vec256 s_load(const T* ptr) {
     Vec256 vec;
-    for (int64_t i = 0; i < size; i++) {
-      if (mask & 0x01) {
-        vec.values[i] = b[i];
-      } else {
-        vec.values[i] = a[i];
-      }
-      mask = mask >> 1;
-    }
+    vec.load(ptr);
     return vec;
   }
-  static Vec256<T> set(Vec256<T> a, Vec256<T> b, int64_t count = size) {
-    Vec256 vec;
-    for (int64_t i = 0; i < size; i++) {
-      if (i < count) {
-        vec.values[i] = b.values[i];
-      } else {
-        vec.values[i] = a.values[i];
-      }
-    }
-    return vec;
+  void store(T *ptr) const {
+    std::memcpy(ptr, values, 32);
   }
-  static Vec256<T> loadu(const void* ptr) {
-    Vec256 vec;
-    std::memcpy(vec.values, ptr, 32);
-    return vec;
-  }
-  static Vec256<T> loadu(const void* ptr, int64_t count) {
-    Vec256 vec;
-    std::memcpy(vec.values, ptr, count * sizeof(T));
-    return vec;
-  }
-  void store(void* ptr, int count = size) const {
+  void store_partial(void* ptr, int count) const {
     std::memcpy(ptr, values, count * sizeof(T));
   }
   Vec256<T> map(T (*f)(T)) const {
@@ -139,23 +117,15 @@ struct Vec256 {
 
 template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
+  for (int i = 0; i != c.size; i++) {
     c.values[i] = a.values[i] + b.values[i];
-  }
-  return c;
-}
-
-template <class T> Vec256<T> operator-(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = a.values[i] - b.values[i];
   }
   return c;
 }
 
 template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
+  for (int i = 0; i != c.size; i++) {
     c.values[i] = a.values[i] * b.values[i];
   }
   return c;
@@ -163,16 +133,8 @@ template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
 
 template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
+  for (int i = 0; i != c.size; i++) {
     c.values[i] = a.values[i] / b.values[i];
-  }
-  return c;
-}
-
-template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = std::max(a.values[i], b.values[i]);
   }
   return c;
 }
