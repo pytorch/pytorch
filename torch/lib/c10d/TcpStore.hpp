@@ -7,43 +7,48 @@
 #include <thread>
 #include <unordered_map>
 
-
 namespace c10d {
 
-class TcpStoreDaemon {
+class TCPStoreDaemon {
 
  public:
 
-  explicit TcpStoreDaemon(int storeListenSocket);
-  ~TcpStoreDaemon();
+  explicit TCPStoreDaemon(int storeListenSocket);
+  ~TCPStoreDaemon();
 
   void join();
 
  protected:
 
   void run();
-  void query(RankType rank);
+  void stop();
+
+  void query(int socket);
+
+  void setHandler(int socket);
+  void addHandler(int socket);
+  void getHandler(int socket);
+  void checkHandler(int socket);
+
   bool checkAndUpdate(std::vector<std::string>& keys) const;
-  void wakeUpWaitingRanks(const std::string& key);
 
   std::thread daemonThread_;
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
-  std::unordered_map<std::string, std::vector<RankType>> waiting_;
-  std::vector<size_t> keysAwaited_;
-  std::vector<int> sockets_;
 
+  std::vector<int> sockets_;
   int storeListenSocket_;
+  std::vector<int> controlPipeFd_;
 };
 
-class TcpStore : public Store {
+class TCPStore : public Store {
 
  public:
 
-  explicit TcpStore(const std::string& masterAddr,
+  explicit TCPStore(const std::string& masterAddr,
                     PortType masterPort,
                     bool isServer = false);
 
-  virtual ~TcpStore();
+  virtual ~TCPStore();
 
   void set(
       const std::string& key,
@@ -68,8 +73,8 @@ class TcpStore : public Store {
   std::string tcpStoreAddr_;
   PortType tcpStorePort_;
 
-  // Only needs to be launched on master rank
-  std::unique_ptr<TcpStoreDaemon> tcpStoreDaemon_ = nullptr;
+  // Only needs to be launched as the server
+  std::unique_ptr<TCPStoreDaemon> tcpStoreDaemon_ = nullptr;
 };
 
 } // namespace c10d

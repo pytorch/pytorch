@@ -5,7 +5,6 @@
 #include <iostream>
 #include <thread>
 
-
 std::string tmppath() {
   const char* tmpdir = getenv("TMPDIR");
   if (tmpdir == nullptr) {

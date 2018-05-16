@@ -11,9 +11,9 @@
 #include <system_error>
 #include <tuple>
 #include <vector>
+#include <chrono>
 
 namespace c10d {
-
 
 using RankType = uint32_t;
 using PortType = uint16_t;
@@ -41,6 +41,8 @@ inline RankType convertToRank(int64_t rank, int64_t min = 0) {
 // TCP util namespace
 namespace tcputil {
 
+constexpr std::chrono::milliseconds kNoTimeout =
+  std::chrono::milliseconds(-1);
 
 // Send and receive
 template<typename T>
@@ -161,9 +163,11 @@ std::pair<int, PortType> listen(PortType port);
 int connect(const std::string& address,
             PortType port,
             bool wait = true,
-            int timeout = -1);
+            const std::chrono::milliseconds& timeout = kNoTimeout);
 
-std::tuple<int, std::string> accept(int listenSocket, int timeout = -1);
+std::tuple<int, std::string>
+accept(int listenSocket,
+       const std::chrono::milliseconds& timeout = kNoTimeout);
 
 // Helper resource guard class
 class ResourceGuard {

@@ -19,7 +19,6 @@
 namespace c10d {
 namespace tcputil {
 
-
 namespace {
 
 constexpr int LISTEN_QUEUE_SIZE = 64;
@@ -133,7 +132,7 @@ std::pair<int, PortType> listen(PortType port) {
 int connect(const std::string& address,
             PortType port,
             bool wait,
-            int timeout) {
+            const std::chrono::milliseconds& timeout) {
 
   struct ::addrinfo hints, *res = NULL;
 
@@ -184,7 +183,7 @@ int connect(const std::string& address,
       pfd.fd = socket;
       pfd.events = POLLOUT;
 
-      int numReady = ::poll(&pfd, 1, timeout);
+      int numReady = ::poll(&pfd, 1, timeout.count());
       if (numReady < 0) {
         throw std::system_error(errno, std::system_category());
       } else if (numReady == 0) {
@@ -238,14 +237,16 @@ int connect(const std::string& address,
   return socket;
 }
 
-std::tuple<int, std::string> accept(int listenSocket, int timeout) {
+std::tuple<int, std::string> accept(
+    int listenSocket,
+    const std::chrono::milliseconds& timeout) {
 
   // poll on listen socket, it allows to make timeout
   std::unique_ptr<struct ::pollfd[]> events(new struct ::pollfd[1]);
   events[0] = {.fd = listenSocket, .events = POLLIN};
 
   while (true) {
-    int res = ::poll(events.get(), 1, timeout);
+    int res = ::poll(events.get(), 1, timeout.count());
     if (res == 0) {
       throw std::runtime_error("waiting for processes to "
                                "connect has timed out");
