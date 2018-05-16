@@ -182,6 +182,18 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
         self.grad_variant_input_test(
             "ReduceFrontSumGradient", X, ref_sum, num_reduce_dim)
 
+    @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    def test_reduce_front_sum_empty_batch(self, num_reduce_dim, gc, dc):
+        X = np.random.rand(0, 4, 3, 5).astype(np.float32)
+
+        def ref_sum(X):
+            return [np.sum(X, axis=(tuple(range(num_reduce_dim))))]
+
+        self.reduce_op_test(
+            "ReduceFrontSum", ref_sum, [X], ["input"], num_reduce_dim, gc)
+        self.grad_variant_input_test(
+            "ReduceFrontSumGradient", X, ref_sum, num_reduce_dim)
+
     @given(**hu.gcs)
     def test_reduce_front_sum_with_length(self, dc, gc):
         num_reduce_dim = 1
