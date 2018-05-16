@@ -64,9 +64,15 @@ struct FunctionTask {
     , inputs(std::move(inputs)) {}
 };
 
+/*
+Returns true when t2 should be (weakly) BEFORE t1 in the queue.
+*/
 struct CompareFunctionTaskTime {
   bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
-    return t1.fn->sequence_nr() < t2.fn->sequence_nr();
+    if (t1.fn->backwards_priority() == t2.fn->backwards_priority()) {
+      return t1.fn->sequence_nr() < t2.fn->sequence_nr();
+    }
+    return t1.fn->backwards_priority() < t2.fn->backwards_priority();
   }
 };
 

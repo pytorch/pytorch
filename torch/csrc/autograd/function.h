@@ -92,8 +92,9 @@ struct Function : std::enable_shared_from_this<Function> {
       uint32_t num_inputs = 0,
       edge_list&& next_edges = edge_list())
       : sequence_nr_(next_sequence_nr_++),
-        num_inputs_(num_inputs),
-        next_edges_(std::move(next_edges)) {}
+      backwards_priority_(0),
+      num_inputs_(num_inputs),
+      next_edges_(std::move(next_edges)) {}
 
   /// Functions are neither copyable nor moveable.
   Function(const Function& other) = delete;
@@ -167,6 +168,10 @@ struct Function : std::enable_shared_from_this<Function> {
   /// The sequence number of this `Function`.
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
+  }
+
+  int backwards_priority() const noexcept {
+    return backwards_priority_;
   }
 
   /// Returns a shared pointer to `this`. `PyFunction`s are not managed by
@@ -303,6 +308,7 @@ struct Function : std::enable_shared_from_this<Function> {
   // Since `Function`s are neither copyable nor moveable, we can have const
   // fields.
   const uint64_t sequence_nr_;
+  int backwards_priority_;
 
   uint32_t num_inputs_;
   edge_list next_edges_;
