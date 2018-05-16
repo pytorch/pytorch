@@ -3,7 +3,7 @@
 COMPACT_JOB_NAME="short-perf-test-gpu"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-cd .jenkins/pytorch/perf_test
+pushd .jenkins/pytorch/perf_test
 
 echo "Running GPU perf test for PyTorch..."
 
@@ -64,3 +64,5 @@ if [[ "$COMMIT_SOURCE" == master ]]; then
     # but the chance of them executing this line at the same time is low.
     aws s3 cp new_gpu_runtime.json s3://ossci-perf-test/pytorch/gpu_runtime/${MASTER_COMMIT_ID}.json --acl public-read
 fi
+
+popd
