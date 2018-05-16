@@ -1,7 +1,6 @@
 #pragma once
 
 #include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/jit/generic_if.h"
 #include "torch/csrc/assertions.h"
 
 #include <ATen/ATen.h>
