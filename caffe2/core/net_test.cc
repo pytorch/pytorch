@@ -607,6 +607,8 @@ class ExecutorHelperDummyOp final : public OperatorBase {
 
 REGISTER_CPU_OPERATOR(ExecutorHelperDummy, ExecutorHelperDummyOp);
 
+OPERATOR_SCHEMA(ExecutorHelperDummy);
+
 TEST(NetTest, OperatorWithExecutorHelper) {
   const auto spec = R"DOC(
         name: "example"
