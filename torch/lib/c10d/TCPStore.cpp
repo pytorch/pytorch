@@ -146,7 +146,6 @@ void TCPStoreDaemon::stop() {
   }
 }
 
-
 // query communicates with the worker. The format
 // of the query is as follows:
 // type of query | size of arg1 | arg1 | size of arg2 | arg2 | ...
@@ -252,8 +251,7 @@ void TCPStoreDaemon::waitHandler(int socket) {
   }
 }
 
-bool TCPStoreDaemon::
-checkKeys(const std::vector<std::string>& keys) const {
+bool TCPStoreDaemon::checkKeys(const std::vector<std::string>& keys) const {
   return std::all_of(keys.begin(), keys.end(),
       [this](const std::string& s) {
       return tcpStore_.count(s) > 0;
