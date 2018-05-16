@@ -545,7 +545,7 @@
   variants: function
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
-- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor) 
+- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
   dispatch:
     CPU: _gesv_helper_cpu
     CUDA: _gesv_helper_cuda
@@ -844,6 +844,16 @@
 - func: relu(Tensor self) -> Tensor
 
 - func: relu_(Tensor self) -> Tensor
+
+- func: hard_shrink(Tensor self, double lambda=0.5) -> Tensor
+  dispatch:
+    CPU: hard_shrink_cpu
+    CUDA: hard_shrink_cuda
+
+- func: hard_shrink_backward(Tensor grad_out, Tensor self, double lambda=0.5) -> Tensor
+  dispatch:
+    CPU: hard_shrink_backward_cpu
+    CUDA: hard_shrink_backward_cuda
 
 - func: rsqrt(Tensor self) -> Tensor
 

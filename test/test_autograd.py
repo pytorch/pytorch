@@ -2511,6 +2511,7 @@ method_tests = [
     ('clamp', (), (0, 1), 'scalar'),
     ('clamp', (), (None, 0.5), 'min_scalar'),
     ('clamp', (), (0.5, None), 'max_scalar'),
+    ('hard_shrink', (S, S, S), (0.3,), 'lambda=0.3'),
     ('sqrt', torch.rand(S, S, S) + 5e-4, NO_ARGS),
     ('sqrt', uniform_scalar(5e-4, requires_grad=True), NO_ARGS, 'scalar'),
     ('sin', (S, S, S), NO_ARGS),

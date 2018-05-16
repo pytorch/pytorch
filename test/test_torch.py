@@ -18,6 +18,8 @@ from functools import reduce
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
 
+import time
+
 if TEST_NUMPY:
     import numpy as np
 
@@ -5537,6 +5539,31 @@ class TestTorch(TestCase):
         bignumber = 2 ^ 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
+
+    def test_hardshrink(self):
+        float_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
+        float_types = ['torch.DoubleTensor', 'torch.FloatTensor']
+        for t in float_types:
+            data = float_original.type(t)
+            print(data.hard_shrink(0.3))
+            self.assertEqual(torch.tensor([1, 0.5, 0, 0.6]).view(2, 2), data.hard_shrink(0.3))
+            # test default lambda (0.5)
+            print(data.hard_shrink())
+            self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), data.hard_shrink())
+            # test non-contiguous case
+            print(data.hard_shrink(0.1))
+            self.assertEqual(torch.tensor([1, 0.3, 0.5, 0.6]).view(2, 2), data.t().hard_shrink(0.1))
+
+        # performance test
+        large_original = torch.zeros(1000, 1000, 1000).fill_(0.3)
+        start = time.time()
+        f = torch.nn.Hardshrink(0.3)
+        large_out = f(large_original)
+        print("orig run time = %0.5f\n" % (time.time() - start))
+
+        start = time.time()
+        large_out = large_original.hard_shrink(0.3)
+        print("new run time = %0.5f\n" % (time.time() - start))
 
     def test_unbiased(self):
         tensor = torch.randn(100)

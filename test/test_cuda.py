@@ -273,6 +273,7 @@ tests = [
     ('chunk', medium_2d, lambda t: [4, -2], 'neg_dim'),
     ('clamp', medium_2d_scaled, lambda t: [-1, 5], None, signed_types),
     ('clamp', medium_2d_scaled, lambda t: [1, 5], None, unsigned_types),
+    ('hard_shrink', medium_2d, lambda t: [0.3], 'lambda=0.3', float_types_no_half, True),
     ('clone', medium_2d, lambda t: [],),
     ('contiguous', medium_2d, lambda t: [],),
     ('cross', new_t(M, 3, M), lambda t: [new_t(M, 3, M)(t)],),
