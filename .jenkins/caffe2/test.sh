@@ -8,12 +8,8 @@ TEST_DIR=$ROOT_DIR/caffe2_tests
 
 # Figure out which Python to use
 PYTHON="python"
-if [ -n "$BUILD_ENVIRONMENT" ]; then
-  if [[ "$BUILD_ENVIRONMENT" == py2* ]]; then
-    PYTHON="python2"
-  elif [[ "$BUILD_ENVIRONMENT" == py3* ]]; then
-    PYTHON="python3"
-  fi
+if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  PYTHON="python${BASH_REMATCH[1]}"
 fi
 
 # The prefix must mirror the setting from build.sh
