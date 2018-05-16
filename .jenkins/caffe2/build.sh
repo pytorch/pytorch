@@ -132,6 +132,8 @@ case "${BUILD_ENVIRONMENT}" in
     export PATH="/usr/local/cuda/bin:$PATH"
     ;;
   *-rocm*)
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
     # TODO: These should be setup correctly in the docker images instead of here
     export PATH="/opt/rocm/bin:/opt/rocm/hcc/bin:/opt/rocm/hip/bin:/opt/rocm/opencl/bin:${PATH}"
     export MIOPEN_DISABLE_CACHE=1
