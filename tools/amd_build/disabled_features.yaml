@@ -1,0 +1,306 @@
+{
+  "disabled_hip_function_calls":
+    [
+      {
+        "path": "aten/src/THC/generic/THCTensorSort.cu",
+        "functions": {
+            "thrust::copy": ";",
+            "thrust::stable_sort_by_key": ";"
+        }
+      },
+      {
+        "path": "aten/src/THC/THCBlas.cu",
+        "functions": {
+          "cublasSgemmEx": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasSgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasDgetrfBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasSgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasDgetrsBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasSgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR",
+          "cublasDgetriBatched": "HIPBLAS_STATUS_INTERNAL_ERROR"
+        },
+        "constants": {
+            "HIPBLAS_DATA_HALF": "0"
+        }
+      },
+      {
+        "path": "aten/src/THCUNN/SoftMaxCommon.cuh",
+        "functions": {
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/cuda/SoftMax.cu",
+        "functions": {
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
+        }
+      },
+      {
+        "path": "aten/src/THC/THCStream.cpp",
+        "functions": {
+          "cudaStreamCreateWithFlags": "hipSuccess",
+          "cudaStreamCreateWithPriority": "hipSuccess"
+        }
+      },
+      {
+        "path": "aten/src/THC/THCAllocator.cpp",
+        "functions": {
+          "cudaMallocManaged": "hipSuccess"
+        }
+      },
+      {
+        "path": "aten/src/TH/generic/THTensorMath.cpp",
+        "constants": {
+          "_OPENMP": "_OPENMP_STUB"
+        }
+      },
+      {
+        "path": "aten/src/ATen/Context.cpp",
+        "s_constants": {
+          "#ifdef USE_SSE3": "#if defined(USE_SSE3) && !defined(__HIP_DEVICE_COMPILE__)"
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/Distributions.h",
+        "s_constants": {
+          "scalar_cast": "static_cast"
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/cuda/Distributions.cu",
+        "s_constants": {
+          "#include <nvfunctional>": ""
+        }
+      },
+      {
+        "path": "aten/src/THC/THCNumerics.cuh",
+        "s_constants": {
+          "#ifdef __CUDA_ARCH__": "#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)",
+          "labs": "fabs",
+          "#if CUDA_VERSION < 9000": "#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)"
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/cuda/RoiPooling.cu",
+        "s_constants": {
+          "RoiPooling2d_forward_kernel<<<": "RoiPooling2d_forward_kernel<float><<<"
+        }
+      },
+      {
+        "path": "aten/src/ATen/Error.h",
+        "s_constants": {
+          "#if !defined(_WIN32)": "#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)"
+        }
+      },
+      {
+        "path": "aten/src/ATen/Error.cpp",
+        "s_constants": {
+          "#if !defined(_WIN32)": "#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)",
+          "#if defined(_MSC_VER)": "#if defined(_MSC_VER) || defined(__HIP_PLATFORM_HCC__)"
+        }
+      },
+      {
+        "path": "aten/src/THC/THCTensorRandom.cpp",
+        "s_constants": {
+          "struct curandStateMtgp32*": "curandStateMtgp32*"
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/cuda/CuFFTUtils.h",
+        "s_constants": {
+          "#include <cufft.h>": "",
+          "#include <cufftXt.h>": ""
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/cuda/SpectralOps.cu",
+        "s_constants": {
+          "#include <cufft.h>": "",
+          "#include <cufftXt.h>": ""
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/cuda/RoiPooling.cu",
+        "s_constants": {
+            "RoiPooling2d_backward_kernel<<<": "RoiPooling2d_backward_kernel<float><<<"
+        }
+      }
+    ],
+  "disabled_modules": [
+    "aten/src/ATen/native/cuda/CuFFTUtils.h",
+    "aten/src/ATen/native/cuda/SpectralOps.cu",
+    "aten/src/ATen/native/cuda/Distributions.cu",
+    "aten/src/THCUNN/RReLU.cu"
+  ],
+  "disabled_functions": [
+    {
+      "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
+      "non_device_functions": [
+        "maybeOverlappingIndices"
+      ]
+    },
+    {
+      "path": "aten/src/THCUNN/LookupTable.cu",
+      "functions": [
+        "warpHasCollision"
+      ]
+    },
+    {
+      "path": "aten/src/ATen/native/cuda/Distributions.cu",
+      "functions": [
+        "_s_poisson_cuda"
+      ]
+    },
+    {
+      "path": "aten/src/THC/THCGeneral.cpp",
+      "functions": [
+        "THC_float2half",
+        "THC_half2float"
+      ]
+    },
+    {
+      "path": "aten/src/THCUNN/generic/SparseLinear.cu",
+      "functions": [
+        "THNN_(SparseLinear_updateOutput)",
+        "THNN_(SparseLinear_accGradParameters)"
+      ]
+    },
+    {
+      "path": "aten/src/THCUNN/generic/RReLU.cu",
+      "functions": [
+        "THNN_(RReLU_updateOutput)",
+        "THNN_(RReLU_updateGradInput)"
+      ]
+    },
+    {
+      "path": "aten/src/THCUNN/generic/LookupTable.cu",
+      "functions": [
+        "THNN_(LookupTable_accGradParameters)",
+        "THNN_(LookupTable_renorm)"
+      ]
+    },
+    {
+      "path": "aten/src/THCUNN/LookupTable.cu",
+      "functions": [
+        "calculate_norms_and_renorm"
+      ]
+    },
+    {
+      "path": "aten/src/THCS/generic/THCSTensorMath.cu",
+      "functions": [
+        "THCSTensor_(spaddmm)",
+        "THCSTensor_(sspaddmm)",
+        "THCSTensor_(spcadd)",
+        "THCSTensor_(mul)",
+        "THCSTensor_(div)",
+        "THCSTensor_(cadd)",
+        "THCSTensor_(csub)",
+        "THCSTensor_(cmul)",
+        "THCSTensor_(pow)"
+      ]
+    },
+    {
+      "path": "aten/src/THCS/generic/THCSTensor.cu",
+      "functions": [
+        "THCSTensor_(toDense)",
+        "THCSTensor_(newCoalesce)",
+        "THCSTensor_(newFlattenedIndices)",
+        "THCSTensor_(transpose)",
+        "THCSTensor_(getDevice)"
+      ]
+    },
+    {
+      "path": "aten/src/THCS/generic/THCSTensor.cpp",
+      "functions": [
+        "THCSTensor_(newIndices)",
+        "THCSTensor_(newValues)",
+        "THCSTensor_(rawInit)",
+        "THCSTensor_(rawResize)",
+        "THCSTensor_(_move)",
+        "THCSTensor_(_set)",
+        "THCSTensor_(new)",
+        "THCSTensor_(newWithTensor)",
+        "THCSTensor_(newWithTensorAndSize)",
+        "THCSTensor_(newWithSize)",
+        "THCSTensor_(newWithSize1d)",
+        "THCSTensor_(newWithSize2d)",
+        "THCSTensor_(newWithSize3d)",
+        "THCSTensor_(newWithSize4d)",
+        "THCSTensor_(newClone)",
+        "THCSTensor_(newTranspose)",
+        "THCSTensor_(newValuesWithSizeOf)",
+        "THCSTensor_(isSameSizeAs)",
+        "THCSTensor_(isSameSizeAsDense)",
+        "THCSTensor_(resize)",
+        "THCSTensor_(resizeAs)",
+        "THCSTensor_(resize1d)",
+        "THCSTensor_(resize2d)",
+        "THCSTensor_(resize3d)",
+        "THCSTensor_(resize4d)",
+        "THCSTensor_(copy)",
+        "THCSTensor_(isCoalesced)",
+        "THCSTensor_(free)",
+        "THCSTensor_(retain)",
+        "THCSTensor_(checkGPU)",
+        "THCTensor_(sparseMask)"
+      ]
+    },
+    {
+      "path": "aten/src/THCS/THCSparse.cu",
+      "functions": [
+        "THCudaSparse_Xcoo2csr",
+        "convertTransToCusparseOperation",
+        "adjustLd",
+        "THCudaSparse_Scsrmm2",
+        "THCudaSparse_Dcsrmm2",
+        "THCudaSparse_CreateIdentityPermutation",
+        "THCudaSparse_Xcsrsort_bufferSizeExt",
+        "THCudaSparse_Xcsrsort",
+        "THCudaSparse_Xcoosort_bufferSizeExt",
+        "THCudaSparse_XcoosortByRow"
+      ]
+    },
+    {
+      "path": "aten/src/THC/generic/THCTensor.cu",
+      "functions": [
+        "THCTensor_(getTextureObject)"
+      ]
+    },
+    {
+      "path": "aten/src/THCS/generic/THCSTensor.cpp",
+      "functions": [
+        "THCSTensor_(newIndices)",
+        "THCSTensor_(newValues)",
+        "THCSTensor_(rawInit)",
+        "THCSTensor_(rawResize)",
+        "THCSTensor_(_move)",
+        "THCSTensor_(_set)",
+        "THCSTensor_(new)",
+        "THCSTensor_(newWithTensor)",
+        "THCSTensor_(newWithTensorAndSize)",
+        "THCSTensor_(newWithSize)",
+        "THCSTensor_(newWithSize1d)",
+        "THCSTensor_(newWithSize2d)",
+        "THCSTensor_(newWithSize3d)",
+        "THCSTensor_(newWithSize4d)",
+        "THCSTensor_(newClone)",
+        "THCSTensor_(newTranspose)",
+        "THCSTensor_(newValuesWithSizeOf)",
+        "THCSTensor_(isSameSizeAs)",
+        "THCSTensor_(isSameSizeAsDense)",
+        "THCSTensor_(resize)",
+        "THCSTensor_(resizeAs)",
+        "THCSTensor_(resize1d)",
+        "THCSTensor_(resize2d)",
+        "THCSTensor_(resize3d)",
+        "THCSTensor_(resize4d)",
+        "THCSTensor_(copy)",
+        "THCSTensor_(isCoalesced)",
+        "THCSTensor_(free)",
+        "THCSTensor_(retain)",
+        "THCSTensor_(checkGPU)",
+        "THCTensor_(sparseMask)"
+      ]
+    }
+  ]
+}

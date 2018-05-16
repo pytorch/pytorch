@@ -59,7 +59,7 @@ def find_cuda_version(cuda_home):
         return candidates[0]
 
 
-if check_env_flag('NO_CUDA'):
+if check_env_flag('NO_CUDA') or check_env_flag('WITH_ROCM'):
     WITH_CUDA = False
     CUDA_HOME = None
     CUDA_VERSION = None

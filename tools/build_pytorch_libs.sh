@@ -17,6 +17,12 @@ if [[ "$1" == "--with-cuda" ]]; then
   shift
 fi
 
+WITH_ROCM=0
+if [[ "$1" == "--with-rocm" ]]; then
+  WITH_ROCM=1
+  shift
+fi
+
 WITH_NNPACK=0
 if [[ "$1" == "--with-nnpack" ]]; then
   WITH_NNPACK=1
@@ -236,7 +242,8 @@ function build_aten() {
       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
       -DCMAKE_EXE_LINKER_FLAGS="$USER_LDFLAGS" \
-      -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
+      -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
+      -DWITH_ROCM="$WITH_ROCM"
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to aten/CMakeLists.txt, not here.  We need the vanilla
       # cmake build to work.
