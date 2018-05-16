@@ -21,7 +21,7 @@ class Linear : public torch::nn::CloneableModule<Linear> {
   TORCH_PARAMETER(bool, with_bias) = true;
 
  public:
-  Variable weights_;
+  Variable weight_;
   Variable bias_;
 };
 

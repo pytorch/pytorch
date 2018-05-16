@@ -22,7 +22,7 @@ class BatchNorm : public torch::nn::CloneableModule<BatchNorm> {
   TORCH_PARAMETER(double, momentum) = 0.1;
 
  private:
-  Variable weights_;
+  Variable weight_;
   Variable bias_;
   Variable running_mean_;
   Variable running_variance_;

@@ -22,7 +22,7 @@ class RNNBase : public CloneableModule<Derived> {
  public:
   // These must line up with the CUDNN mode codes:
   // https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
-  enum class CuDNNMode { RNN_RELU, RNN_TANH, LSTM, GRU };
+  enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
   RNNBase(
       int64_t input_size,

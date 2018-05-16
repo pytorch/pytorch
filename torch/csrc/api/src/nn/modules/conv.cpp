@@ -77,7 +77,7 @@ void Conv<D, Derived>::reset() {
       weights_size.end(), kernel_size_->begin(), kernel_size_->end());
   AT_ASSERT(weights_size.size() == 2 + kernel_size_->size());
 
-  weights_ = this->add(Var(at::CPU(at::kFloat).empty(weights_size)), "weights");
+  weight_ = this->add(Var(at::CPU(at::kFloat).empty(weights_size)), "weight");
   if (with_bias_) {
     bias_ = this->add(Var(at::CPU(at::kFloat).empty(output_channels_)), "bias");
   }
@@ -99,7 +99,7 @@ variable_list Conv1d::forward(variable_list input) {
   if (transposed_) {
     return {at::conv_transpose1d(
         input.front(),
-        weights_,
+        weight_,
         bias_,
         stride_,
         padding_,
@@ -108,7 +108,7 @@ variable_list Conv1d::forward(variable_list input) {
         dilation_)};
   }
   return {at::conv1d(
-      input.front(), weights_, bias_, stride_, padding_, dilation_, groups_)};
+      input.front(), weight_, bias_, stride_, padding_, dilation_, groups_)};
 }
 
 variable_list Conv2d::forward(variable_list input) {
@@ -117,7 +117,7 @@ variable_list Conv2d::forward(variable_list input) {
   if (transposed_) {
     return {at::conv_transpose2d(
         input.front(),
-        weights_,
+        weight_,
         bias_,
         stride_,
         padding_,
@@ -126,7 +126,7 @@ variable_list Conv2d::forward(variable_list input) {
         dilation_)};
   }
   return {at::conv2d(
-      input.front(), weights_, bias_, stride_, padding_, dilation_, groups_)};
+      input.front(), weight_, bias_, stride_, padding_, dilation_, groups_)};
 }
 
 variable_list Conv3d::forward(variable_list input) {
@@ -135,7 +135,7 @@ variable_list Conv3d::forward(variable_list input) {
   if (transposed_) {
     return {at::conv_transpose3d(
         input.front(),
-        weights_,
+        weight_,
         bias_,
         stride_,
         padding_,
@@ -144,7 +144,7 @@ variable_list Conv3d::forward(variable_list input) {
         dilation_)};
   } else {
     return {at::conv3d(
-        input.front(), weights_, bias_, stride_, padding_, dilation_, groups_)};
+        input.front(), weight_, bias_, stride_, padding_, dilation_, groups_)};
   }
 }
 

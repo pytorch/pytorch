@@ -46,7 +46,7 @@ TEST_CASE("containers") {
         REQUIRE(y.size(i) == 2);
       }
 
-      REQUIRE(model->parameters().at("weights").grad().numel() == 3 * 2 * 3);
+      REQUIRE(model->parameters().at("weight").grad().numel() == 3 * 2 * 3);
     }
     SECTION("2d") {
       SECTION("even") {
@@ -63,7 +63,7 @@ TEST_CASE("containers") {
         }
 
         REQUIRE(
-            model->parameters().at("weights").grad().numel() == 3 * 2 * 3 * 3);
+            model->parameters().at("weight").grad().numel() == 3 * 2 * 3 * 3);
       }
 
       SECTION("uneven") {
@@ -80,7 +80,7 @@ TEST_CASE("containers") {
         }
 
         REQUIRE(
-            model->parameters().at("weights").grad().numel() == 3 * 2 * 3 * 2);
+            model->parameters().at("weight").grad().numel() == 3 * 2 * 3 * 2);
       }
     }
     SECTION("3d") {
@@ -97,7 +97,7 @@ TEST_CASE("containers") {
       }
 
       REQUIRE(
-          model->parameters().at("weights").grad().numel() ==
+          model->parameters().at("weight").grad().numel() ==
           3 * 2 * 3 * 3 * 3);
     }
   }
@@ -114,7 +114,7 @@ TEST_CASE("containers") {
       REQUIRE(y.size(0) == 10);
       REQUIRE(y.size(1) == 2);
 
-      REQUIRE(model->parameters().at("weights").grad().numel() == 2 * 5);
+      REQUIRE(model->parameters().at("weight").grad().numel() == 2 * 5);
     }
 
     SECTION("sequential") {
@@ -212,17 +212,17 @@ TEST_CASE("containers") {
     REQUIRE(model->param("param").size(1) == 2);
     REQUIRE(model->param("param").size(2) == 21);
     REQUIRE(model->param("l1.bias").size(0) == 20);
-    REQUIRE(model->param("l1.weights").size(0) == 20);
-    REQUIRE(model->param("l1.weights").size(1) == 5);
+    REQUIRE(model->param("l1.weight").size(0) == 20);
+    REQUIRE(model->param("l1.weight").size(1) == 5);
     REQUIRE(model->param("test.l1.bias").size(0) == 3);
-    REQUIRE(model->param("test.l1.weights").size(0) == 3);
-    REQUIRE(model->param("test.l1.weights").size(1) == 10);
+    REQUIRE(model->param("test.l1.weight").size(0) == 3);
+    REQUIRE(model->param("test.l1.weight").size(1) == 10);
     REQUIRE(model->param("test.l2.bias").size(0) == 5);
-    REQUIRE(model->param("test.l2.weights").size(0) == 5);
-    REQUIRE(model->param("test.l2.weights").size(1) == 3);
+    REQUIRE(model->param("test.l2.weight").size(0) == 5);
+    REQUIRE(model->param("test.l2.weight").size(1) == 3);
     REQUIRE(model->param("test.l3.bias").size(0) == 100);
-    REQUIRE(model->param("test.l3.weights").size(0) == 100);
-    REQUIRE(model->param("test.l3.weights").size(1) == 5);
+    REQUIRE(model->param("test.l3.weight").size(0) == 100);
+    REQUIRE(model->param("test.l3.weight").size(1) == 5);
   }
 
   SECTION("functional") {
@@ -254,7 +254,7 @@ TEST_CASE("containers_cuda", "[cuda]") {
     REQUIRE(y.size(0) == 10);
     REQUIRE(y.size(1) == 2);
 
-    REQUIRE(model->parameters().at("weights").grad().numel() == 2 * 5);
+    REQUIRE(model->parameters().at("weight").grad().numel() == 2 * 5);
   }
 
   SECTION("2") {
@@ -271,6 +271,6 @@ TEST_CASE("containers_cuda", "[cuda]") {
     REQUIRE(y.size(0) == 10);
     REQUIRE(y.size(1) == 2);
 
-    REQUIRE(model->parameters().at("weights").grad().numel() == 2 * 5);
+    REQUIRE(model->parameters().at("weight").grad().numel() == 2 * 5);
   }
 }

@@ -174,7 +174,7 @@ TEST_CASE("module/clone") {
   SECTION("Cloning preserves external references") {
     struct TestModel : public CloneableModule<TestModel> {
       void reset() {
-        weights = add(Var(at::ones(at::CPU(at::kFloat), {4, 4})), "weights");
+        weights = add(Var(at::ones(at::CPU(at::kFloat), {4, 4})), "weight");
       }
 
       variable_list forward(variable_list input) override {
@@ -185,12 +185,12 @@ TEST_CASE("module/clone") {
     };
 
     auto model = TestModel().build();
-    REQUIRE(pointer_equal(model->weights, model->parameters_["weights"]));
+    REQUIRE(pointer_equal(model->weights, model->parameters_["weight"]));
 
     auto model2 = std::dynamic_pointer_cast<TestModel>(
         std::shared_ptr<Module>(model->clone()));
     REQUIRE(!pointer_equal(model2->weights, model->weights));
-    REQUIRE(pointer_equal(model2->weights, model2->parameters_["weights"]));
-    REQUIRE(!pointer_equal(model2->weights, model->parameters_["weights"]));
+    REQUIRE(pointer_equal(model2->weights, model2->parameters_["weight"]));
+    REQUIRE(!pointer_equal(model2->weights, model->parameters_["weight"]));
   }
 }

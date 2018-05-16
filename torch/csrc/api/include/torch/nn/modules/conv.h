@@ -43,7 +43,7 @@ class Conv : public torch::nn::CloneableModule<Derived> {
   TORCH_PARAMETER(int64_t, groups) = 1;
 
  protected:
-  Variable weights_;
+  Variable weight_;
   Variable bias_;
 };
 

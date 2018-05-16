@@ -8,8 +8,8 @@ BatchNorm::BatchNorm(int64_t features) : features_(features) {}
 
 void BatchNorm::reset() {
   if (affine_) {
-    weights_ =
-        add(Var(at::CPU(at::kFloat).empty({features_}).uniform_()), "weights_");
+    weight_ =
+        add(Var(at::CPU(at::kFloat).empty({features_}).uniform_()), "weight_");
     bias_ = add(Var(at::CPU(at::kFloat).zeros({features_})), "bias_");
   }
 
@@ -37,7 +37,7 @@ variable_list BatchNorm::forward(variable_list inputs) {
 
   auto output = at::batch_norm(
       input,
-      weights_,
+      weight_,
       bias_,
       running_mean_,
       running_variance_,
