@@ -55,6 +55,13 @@ ARG ROCM_VERSION
 ADD ./install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh
+ENV PATH /opt/rocm/bin:$PATH
+ENV PATH /opt/rocm/hcc/bin:$PATH
+ENV PATH /opt/rocm/hip/bin:$PATH
+ENV PATH /opt/rocm/opencl/bin:$PATH
+ENV THRUST_ROOT /data/Thrust
+ENV MIOPEN_DISABLE_CACHE 1
+ENV HIP_PLATFORM hcc
 
 # (optional) Add Jenkins user
 ARG JENKINS
