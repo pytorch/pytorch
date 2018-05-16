@@ -476,6 +476,10 @@ auto Engine::execute(const edge_list& input_roots,
   return graph_task.captured_vars;
 }
 
+Engine& Engine::getDefaultEngine(){
+    static Engine engine;
+    return engine;
+}
 
 void Engine::queue_callback(std::function<void()> callback) {
   std::lock_guard<std::mutex> lock(post_callbacks_lock);

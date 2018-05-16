@@ -168,7 +168,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
-  ${TORCH_SRC_DIR}/csrc/autograd/engine_without_python.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/grad_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp

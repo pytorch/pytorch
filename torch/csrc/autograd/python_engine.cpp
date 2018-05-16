@@ -7,7 +7,6 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/python_function.h"
-#include "torch/csrc/autograd/engine_without_python.h"
 #include "torch/csrc/utils/auto_gil.h"
 
 #ifndef _WIN32
