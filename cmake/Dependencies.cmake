@@ -399,12 +399,13 @@ endif()
 
 # ---[ HIP
 if(USE_HIP)
-  include(cmake/Hip.cmake)
-  if(HAVE_HIP)
-    message(WARNING "Compiling with HIP for AMD.")
+  include(cmake/public/LoadHIP.cmake)
+  if(PYTORCH_FOUND_HIP)
+    message(INFO "Compiling with HIP for AMD.")
+    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS hip_hcc)
   else()
-    message(WARNING "Not compiling with HIP for AMD.")
-    set(USE_HIP OFF)
+    message(WARNING "Not compiling with HIP for AMD. Suppress this warning with -DUSE_HIP=OFF.")
+    caffe2_update_option(USE_HIP OFF)
   endif()
 endif()
 
