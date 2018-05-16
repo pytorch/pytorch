@@ -65,6 +65,7 @@ test/cpp/api/mnist
 *.swn
 *.swo
 *.swp
+*.swm
 *~
 
 # macOS dir files
