@@ -47,7 +47,7 @@ if (${USE_TENSORRT})
   find_package_handle_standard_args(
     TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
   if(NOT TENSORRT_FOUND)
-    message(WARNING 
+    message(WARNING
       "Caffe2: Cannot find TensorRT library. Turning the option off")
     set(USE_TENSORRT OFF)
   endif()
@@ -147,6 +147,21 @@ else()
 endif()
 set_property(
     TARGET caffe2::curand PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDA_INCLUDE_DIRS})
+
+# cufft
+add_library(caffe2::cufft UNKNOWN IMPORTED)
+if(CAFFE2_STATIC_LINK_CUDA)
+    set_property(
+        TARGET caffe2::cufft PROPERTY IMPORTED_LOCATION
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a")
+else()
+    set_property(
+        TARGET caffe2::cufft PROPERTY IMPORTED_LOCATION
+        ${CUDA_cufft_LIBRARY})
+endif()
+set_property(
+    TARGET caffe2::cufft PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
 # TensorRT
@@ -251,9 +266,9 @@ function(caffe2_select_nvcc_arch_flags out_variable)
   # List of arch names
   set(__archs_names "Kepler" "Maxwell" "Pascal" "Volta" "All" "Manual")
   set(__archs_name_default "All")
-  if(NOT CMAKE_CROSSCOMPILING)   
-    list(APPEND __archs_names "Auto")   
-    set(__archs_name_default "Auto")    
+  if(NOT CMAKE_CROSSCOMPILING)
+    list(APPEND __archs_names "Auto")
+    set(__archs_name_default "Auto")
   endif()
 
   # Set CUDA_ARCH_NAME strings (so it will be seen as dropbox in the CMake GUI)

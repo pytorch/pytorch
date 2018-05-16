@@ -135,3 +135,23 @@ macro(torch_cuda_based_add_library cuda_target)
 
   ENDIF()
 endmacro()
+
+##############################################################################
+# Add ATen compile options.
+# Usage:
+#   aten_compile_options(lib_name)
+function(aten_compile_options libname)
+  target_compile_options(${libname}
+    PRIVATE
+    -Wall
+    -Wextra
+    -fexceptions
+    -Wno-missing-field-initializers
+    -Wno-type-limits
+    -Wno-unused-parameter
+    -Wno-unknown-warning-option
+    -Wno-unknown-pragmas)
+  if ($ENV{WERROR})
+    target_compile_options(${libname} PRIVATE -Werror)
+  endif()
+endfunction()

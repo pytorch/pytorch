@@ -9,7 +9,7 @@ if [ -x "$(command -v nvcc)" ]; then
   NO_CUDA=OFF
 fi
 
-ATEN_BUILDPATH="$BUILD_PATH/aten"
+CAFFE2_BUILDPATH="$BUILD_PATH/caffe2"
 NANOPB_BUILDPATH="$BUILD_PATH/nanopb"
 LIBTORCH_BUILDPATH="$BUILD_PATH/libtorch"
 

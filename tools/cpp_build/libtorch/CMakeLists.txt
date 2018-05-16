@@ -7,16 +7,18 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (VERBOSE)
-  message(STATUS "ATEN_PATH is ${ATEN_PATH}")
-  message(STATUS "ATEN_BUILD_PATH is ${ATEN_BUILD_PATH}")
+  message(STATUS "CAFFE2_PATH is ${CAFFE2_PATH}")
+  message(STATUS "CAFFE2_BUILD_PATH is ${CAFFE2_BUILD_PATH}")
 endif()
 
-set(ATEN_INCLUDE_DIR "${ATEN_PATH}/src/")
-set(ATEN_BUILD_INCLUDE_DIR "${ATEN_BUILD_PATH}/src/ATen")
+set(CAFFE2_INCLUDE_DIR "${CAFFE2_PATH}")
+set(CAFFE2_BUILD_INCLUDE_DIR "${CAFFE2_BUILD_PATH}")
+set(ATEN_INCLUDE_DIR "${CAFFE2_PATH}/aten/src")
+set(ATEN_BUILD_INCLUDE_DIR "${CAFFE2_BUILD_PATH}/aten/src/ATen")
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch")
 
-find_library(ATEN_CPU_LIBRARY ATen_cpu PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
-find_library(ATEN_CUDA_LIBRARY ATen_cuda PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
+find_library(CAFFE2_CPU_LIBRARY caffe2 PATHS "${CAFFE2_BUILD_PATH}" NO_DEFAULT_PATH)
+find_library(CAFFE2_CUDA_LIBRARY caffe2_gpu PATHS "${CAFFE2_BUILD_PATH}" NO_DEFAULT_PATH)
 find_library(NANOPB_LIBRARY protobuf-nanopb PATHS "${NANOPB_BUILD_PATH}" NO_DEFAULT_PATH)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -87,8 +89,8 @@ if(NOT NO_CUDA)
 
   set(CUDA_INCLUDE_DIRS
       ${CUDA_INCLUDE_DIRS}
-      "${ATEN_BUILD_PATH}/src/THC"
-      "${ATEN_PATH}/src/THC")
+      "${CAFFE2_BUILD_PATH}/aten/src/THC"
+      "${CAFFE2_PATH}/aten/src/THC")
 endif()
 
 # RPATH stuff
@@ -110,7 +112,7 @@ endif()
 # Generate files
 set(TOOLS_PATH "${TORCH_SRC_DIR}/../tools")
 
-configure_file("${ATEN_PATH}/src/ATen/common_with_cwrap.py"
+configure_file("${CAFFE2_PATH}/aten/src/ATen/common_with_cwrap.py"
                "${TOOLS_PATH}/shared/cwrap_common.py"
                COPYONLY)
 
@@ -136,12 +138,12 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
   python tools/setup_helpers/generate_code.py
-    --declarations-path "${ATEN_BUILD_PATH}/src/ATen/ATen/Declarations.yaml"
+    --declarations-path "${CAFFE2_BUILD_PATH}/aten/src/ATen/ATen/Declarations.yaml"
     --nn-path "aten/src/"
   DEPENDS
-  "${ATEN_BUILD_PATH}/src/ATen/ATen/Declarations.yaml"
-  "${ATEN_PATH}/src/THNN/generic/THNN.h"
-  "${ATEN_PATH}/src/THCUNN/generic/THCUNN.h"
+  "${CAFFE2_BUILD_PATH}/aten/src/ATen/ATen/Declarations.yaml"
+  "${CAFFE2_PATH}/aten/src/THNN/generic/THNN.h"
+  "${CAFFE2_PATH}/aten/src/THCUNN/generic/THCUNN.h"
   "${TOOLS_PATH}/autograd/templates/VariableType.h"
   "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
   "${TOOLS_PATH}/autograd/templates/Functions.h"
@@ -256,23 +258,25 @@ endif()
 
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
-  ${ATEN_CPU_LIBRARY}
+  ${CAFFE2_CPU_LIBRARY}
   ${NANOPB_LIBRARY}
 )
 if(NOT NO_CUDA)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
-    target_link_libraries(torch -Wl,--no-as-needed ${ATEN_CUDA_LIBRARY} -Wl,--as-needed)
+    target_link_libraries(torch -Wl,--no-as-needed ${CAFFE2_CUDA_LIBRARY} -Wl,--as-needed)
   else()
-    target_link_libraries(torch ${ATEN_CUDA_LIBRARY})
+    target_link_libraries(torch ${CAFFE2_CUDA_LIBRARY})
   endif()
 endif()
 
 target_include_directories(torch
   PUBLIC
+  "${CAFFE2_INCLUDE_DIR}"
+  "${CAFFE2_BUILD_INCLUDE_DIR}"
   "${ATEN_INCLUDE_DIR}"
   "${ATEN_INCLUDE_DIR}/TH"
   "${ATEN_BUILD_INCLUDE_DIR}"
-  "${ATEN_BUILD_PATH}/src/TH"
+  "${CAFFE2_BUILD_PATH}/aten/src/TH"
   "${TORCH_SRC_DIR}/.."
   "${CMAKE_CURRENT_SOURCE_DIR}")
 

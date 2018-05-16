@@ -18,8 +18,10 @@ set(src
 )
 
 add_library(xtmeter ${TH_LINK_STYLE} ${src})
-target_link_libraries(xtmeter ATen_cpu)
+target_include_directories(xtmeter PRIVATE ${ATen_CPU_INCLUDE})
+target_link_libraries(xtmeter ATen_cpu_library)
 
 add_executable(test-meter test/basic.cc ${BACKWARD_ENABLE})
 # add_backward(test-meter)
+target_include_directories(test-meter PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(test-meter xtmeter)

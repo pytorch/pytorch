@@ -41,7 +41,7 @@ macro(custom_protobuf_find)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/protobuf/cmake)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 

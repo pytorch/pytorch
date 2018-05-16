@@ -24,7 +24,8 @@ set(src
 
 add_library(xtdata ${TH_LINK_STYLE} ${src})
 target_link_libraries(xtdata ATen_cpu)
+target_include_directories(xtdata PRIVATE ${ATen_CPU_INCLUDE})
+target_include_directories(xtdata PRIVATE .)
 
-include_directories(.)
 # add_executable(test-data test/basic.cc)
 # target_link_libraries(test-data xtdata)

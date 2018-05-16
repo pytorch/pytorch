@@ -7,18 +7,22 @@ SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P )"
 pushd $SCRIPTPATH
 source ./build_common.sh
 
-echo "Building ATen"
+echo "Building Caffe2"
 
-mkdir -p $ATEN_BUILDPATH
-pushd $ATEN_BUILDPATH
+mkdir -p $CAFFE2_BUILDPATH
+pushd $CAFFE2_BUILDPATH
 
-cmake -DNO_CUDA:BOOL=$NO_CUDA \
+cmake -DUSE_CUDA=$((1-$NO_CUDA)) \
+      -DBUILD_CAFFE2=OFF \
+      -DBUILD_ATEN=ON \
+      -DBUILD_PYTHON=OFF \
+      -DBUILD_BINARY=OFF \
       -DAT_LINK_STYLE:STRING=SHARED \
       -DCMAKE_BUILD_TYPE:STRING=$BUILD_TYPE \
       -DCMAKE_INSTALL_PREFIX:STRING=$INSTALL_PREFIX \
       -DCMAKE_INSTALL_MESSAGE=NEVER \
       -G "$GENERATE" \
-      $PYTORCHPATH/aten
+      $PYTORCHPATH/
 $MAKE -j "$JOBS"
 
 popd
