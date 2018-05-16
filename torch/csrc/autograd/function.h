@@ -87,22 +87,21 @@ void deleteFunction(Function* function);
 struct Function : std::enable_shared_from_this<Function> {
  public:
   /// Construct a new `Function` with `num_inputs` inputs and the given
-  /// `next_edges`. backwards_priority_ determines the priority of this 
-  /// function being called during a backward() pass, with ties broken
-  /// by sequence_nr_. 
+  /// `next_edges`. sequence_nr is a (currently THE) hint to prioritization
+  /// in the backward() pass, with higher sequence numbers prioritized
+  /// before lower sequence numbers.
   explicit Function(
       uint32_t num_inputs,
-      int backwards_priority,
+      uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
-      : sequence_nr_(next_sequence_nr_++),
-      backwards_priority_(backwards_priority),
+      : sequence_nr_(sequence_nr),
       num_inputs_(num_inputs),
       next_edges_(std::move(next_edges)) {}
 
   explicit Function(
       uint32_t num_inputs = 0,
       edge_list&& next_edges = edge_list())
-      : Function(num_inputs, 0, std::move(next_edges)) {}
+      : Function(num_inputs, next_sequence_nr++, std::move(next_edges)) {}
   
   /// Functions are neither copyable nor moveable.
   Function(const Function& other) = delete;
@@ -176,10 +175,6 @@ struct Function : std::enable_shared_from_this<Function> {
   /// The sequence number of this `Function`.
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
-  }
-
-  int backwards_priority() const noexcept {
-    return backwards_priority_;
   }
 
   /// Returns a shared pointer to `this`. `PyFunction`s are not managed by
@@ -316,7 +311,6 @@ struct Function : std::enable_shared_from_this<Function> {
   // Since `Function`s are neither copyable nor moveable, we can have const
   // fields.
   const uint64_t sequence_nr_;
-  const int backwards_priority_;
 
   uint32_t num_inputs_;
   edge_list next_edges_;
