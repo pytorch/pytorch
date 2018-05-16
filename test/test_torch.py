@@ -2845,23 +2845,21 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_randperm_cuda(self):
-        torch.set_default_tensor_type("torch.cuda.FloatTensor")
+        cuda = torch.device('cuda:0')
 
         _RNGState = torch.cuda.get_rng_state()
-        res1 = torch.randperm(100)
+        res1 = torch.randperm(100, device=cuda)
         res2 = torch.cuda.LongTensor()
         torch.cuda.set_rng_state(_RNGState)
-        torch.randperm(100, out=res2)
+        torch.randperm(100, out=res2, device=cuda)
         self.assertEqual(res1, res2, 0)
 
         # randperm of 0 elements is an empty tensor
-        res1 = torch.randperm(0)
+        res1 = torch.randperm(0, device=cuda)
         res2 = torch.cuda.LongTensor(5)
-        torch.randperm(0, out=res2)
+        torch.randperm(0, out=res2, device=cuda)
         self.assertEqual(res1.numel(), 0)
         self.assertEqual(res2.numel(), 0)
-
-        torch.set_default_tensor_type("torch.FloatTensor")
 
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36
