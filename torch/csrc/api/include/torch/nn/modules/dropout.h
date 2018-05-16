@@ -20,7 +20,7 @@ class DropoutBase : public torch::nn::CloneableModule<T> {
 
   variable_list forward(variable_list input) override;
 
-  TORCH_PARAMETER(double, rate) = 0.5;
+  TORCH_ATTR(double, rate) = 0.5;
 
  protected:
   virtual Variable noise_mask(Variable input) const = 0;

@@ -19,7 +19,7 @@ class Functional : public torch::nn::CloneableModule<Functional> {
 
   variable_list forward(variable_list input) override;
 
-  TORCH_PARAMETER(Function, function);
+  TORCH_ATTR(Function, function);
 };
 
 }} // namespace torch::nn

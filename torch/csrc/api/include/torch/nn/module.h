@@ -137,12 +137,16 @@ class CloneableModule : public Module {
 };
 }} // namespace torch::nn
 
-#define TORCH_PARAMETER(T, name)             \
-  auto name(T new_##name)->decltype(*this) { \
-    this->name##_ = std::move(new_##name);   \
-    return *this;                            \
-  }                                          \
-  const T& name() const noexcept {           \
-    return this->name##_;                    \
-  }                                          \
+#define TORCH_ATTR(T, name)                    \
+  auto name(const T& new_##name)->decltype(*this) { \
+    this->name##_ = new_##name;                     \
+    return *this;                                   \
+  }                                                 \
+  auto name(T&& new_##name)->decltype(*this) {      \
+    this->name##_ = std::move(new_##name);          \
+    return *this;                                   \
+  }                                                 \
+  const T& name() const noexcept {                  \
+    return this->name##_;                           \
+  }                                                 \
   T name##_

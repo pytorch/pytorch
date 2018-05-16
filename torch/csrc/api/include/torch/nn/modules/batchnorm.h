@@ -15,16 +15,14 @@ class BatchNorm : public torch::nn::CloneableModule<BatchNorm> {
 
   variable_list forward(variable_list) override;
 
-  TORCH_PARAMETER(int64_t, features);
-  TORCH_PARAMETER(bool, affine) = true;
-  TORCH_PARAMETER(bool, stateful) = false;
-  TORCH_PARAMETER(double, eps) = 1e-5;
-  TORCH_PARAMETER(double, momentum) = 0.1;
-
- private:
-  Variable weight_;
-  Variable bias_;
-  Variable running_mean_;
-  Variable running_variance_;
+  TORCH_ATTR(int64_t, features);
+  TORCH_ATTR(bool, affine) = true;
+  TORCH_ATTR(bool, stateful) = false;
+  TORCH_ATTR(double, eps) = 1e-5;
+  TORCH_ATTR(double, momentum) = 0.1;
+  TORCH_ATTR(Variable, weight);
+  TORCH_ATTR(Variable, bias);
+  TORCH_ATTR(Variable, running_mean);
+  TORCH_ATTR(Variable, running_variance);
 };
 }} // namespace torch::nn

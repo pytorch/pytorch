@@ -16,13 +16,11 @@ class Linear : public torch::nn::CloneableModule<Linear> {
 
   variable_list forward(variable_list) override;
 
-  TORCH_PARAMETER(int64_t, in);
-  TORCH_PARAMETER(int64_t, out);
-  TORCH_PARAMETER(bool, with_bias) = true;
-
- public:
-  Variable weight_;
-  Variable bias_;
+  TORCH_ATTR(int64_t, in);
+  TORCH_ATTR(int64_t, out);
+  TORCH_ATTR(bool, with_bias) = true;
+  TORCH_ATTR(Variable, weight);
+  TORCH_ATTR(Variable, bias);
 };
 
 }} // namespace torch::nn
