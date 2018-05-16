@@ -980,8 +980,7 @@ public:
       THPObjectPtr&& pyobj,
       const std::string& cconv,
       std::vector<VariableFlags>&& var_flags,
-      pyobj_list&& scalar_args,
-      bool tracing_autograd_python_function = true);
+      pyobj_list&& scalar_args);
   Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
@@ -1272,13 +1271,11 @@ struct PythonOp : public Node {
       THPObjectPtr&& pyobj,
       const std::string& cconv,
       std::vector<VariableFlags>&& var_flags,
-      pyobj_list&& scalar_args,
-      bool tracing_autograd_python_function = true) {
+      pyobj_list&& scalar_args) {
     this->pyobj = std::move(pyobj);
     this->scalar_args = std::move(scalar_args);
     this->cconv = cconv;
     this->var_flags = std::move(var_flags);
-    this->tracing_autograd_python_function = tracing_autograd_python_function;
     return this;
   }
   virtual Node * allocNewInstance(Graph * g) override {
@@ -1300,7 +1297,6 @@ struct PythonOp : public Node {
   // 's' -- python scalar argument
   // 't' -- tensor argument
   std::string cconv;
-  bool tracing_autograd_python_function;
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
@@ -1312,15 +1308,13 @@ inline Node* Graph::createPythonOp(
     THPObjectPtr&& pyobj,
     const std::string& cconv,
     std::vector<VariableFlags>&& var_flags,
-    pyobj_list&& scalar_args,
-    bool tracing_autograd_python_function) {
+    pyobj_list&& scalar_args) {
   auto op = new PythonOp(this);
   return op->init(
       std::move(pyobj),
       cconv,
       std::move(var_flags),
-      std::move(scalar_args),
-      tracing_autograd_python_function);
+      std::move(scalar_args));
 }
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.

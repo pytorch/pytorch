@@ -377,7 +377,6 @@ bool hasHandleOutput(Node * n) {
 #ifndef NO_PYTHON
 Operation createPythonOperation(PythonOp* op) {
   py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
-  JIT_ASSERT(!op->tracing_autograd_python_function);
   JIT_ASSERT(!hasHandleOutput(op));
   size_t num_inputs = 0;
   for(auto arg_type : op->cconv) {
