@@ -1,6 +1,6 @@
 graph(%0 : Float(3, 20)
       %1 : Float(3, 20)) {
-  %2 : Float(6, 20) = prim::FusionGroup_0(%0, %1)
+  %2 : Float(6, 20) = prim::FusionGroup_0[device=0](%0, %1)
   return (%2);
 }
 with prim::FusionGroup_0 = graph(%3 : Float(3, 20)
