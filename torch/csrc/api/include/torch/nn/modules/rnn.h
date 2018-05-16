@@ -28,7 +28,7 @@ class RNNBase : public CloneableModule<Derived> {
       int64_t input_size,
       int64_t hidden_size,
       at::optional<CuDNNMode> cudnn_mode = at::nullopt,
-      size_t number_of_gates = 1,
+      int64_t number_of_gates = 1,
       bool has_cell_state = false);
 
   void reset() override;
@@ -46,7 +46,7 @@ class RNNBase : public CloneableModule<Derived> {
   TORCH_PARAMETER(double, dropout) = 0.0;
 
  protected:
-  virtual variable_list cell_forward(variable_list, size_t layer) = 0;
+  virtual variable_list cell_forward(variable_list, int64_t layer) = 0;
 
   variable_list CUDNN_forward(variable_list);
   variable_list autograd_forward(variable_list);
@@ -59,7 +59,7 @@ class RNNBase : public CloneableModule<Derived> {
   std::vector<Variable> hhw_;
   std::vector<Variable> hhb_;
 
-  size_t number_of_gates_;
+  int64_t number_of_gates_;
   bool has_cell_state_;
   at::optional<CuDNNMode> cudnn_mode_;
   std::shared_ptr<Dropout> dropout_module_;
@@ -79,7 +79,7 @@ class LSTM : public RNNBase<LSTM> {
   LSTM(int64_t input_size, int64_t hidden_size);
 
  private:
-  variable_list cell_forward(variable_list, size_t layer) override;
+  variable_list cell_forward(variable_list, int64_t layer) override;
 };
 
 class GRU : public RNNBase<GRU> {
@@ -87,7 +87,7 @@ class GRU : public RNNBase<GRU> {
   GRU(int64_t input_size, int64_t hidden_size);
 
  private:
-  variable_list cell_forward(variable_list, size_t layer) override;
+  variable_list cell_forward(variable_list, int64_t layer) override;
 };
 
 class RNN : public RNNBase<RNN> {
@@ -106,7 +106,7 @@ class RNN : public RNNBase<RNN> {
  private:
   using ActivationFunction = std::function<Variable(Variable)>;
 
-  variable_list cell_forward(variable_list, size_t layer) override;
+  variable_list cell_forward(variable_list, int64_t layer) override;
 
   ActivationFunction activation_function_;
 };

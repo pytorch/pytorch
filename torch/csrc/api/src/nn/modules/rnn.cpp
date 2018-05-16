@@ -41,7 +41,7 @@ RNNBase<Derived>::RNNBase(
     int64_t input_size,
     int64_t hidden_size,
     at::optional<CuDNNMode> cudnn_mode,
-    size_t number_of_gates,
+    int64_t number_of_gates,
     bool has_cell_state)
     : input_size_(input_size),
       hidden_size_(hidden_size),
@@ -57,7 +57,7 @@ void RNNBase<Derived>::reset() {
 
   const int64_t gate_size = hidden_size_ * number_of_gates_;
 
-  for (size_t layer = 0; layer < layers_; ++layer) {
+  for (int64_t layer = 0; layer < layers_; ++layer) {
     const int64_t input_size = (layer == 0) ? input_size_ : hidden_size_;
     ihw_.push_back(this->add(
         Var(at::CPU(at::kFloat).empty({gate_size, input_size})),
@@ -99,7 +99,7 @@ variable_list RNNBase<Derived>::forward(variable_list inputs) {
 template <typename Derived>
 std::vector<Tensor> RNNBase<Derived>::flat_weights() const {
   std::vector<Tensor> flat;
-  for (size_t layer = 0; layer < layers_; layer++) {
+  for (int64_t layer = 0; layer < layers_; layer++) {
     flat.push_back(ihw_[layer]);
     flat.push_back(hhw_[layer]);
     if (with_bias_) {
@@ -117,16 +117,16 @@ variable_list RNNBase<Derived>::autograd_forward(variable_list inputs) {
   std::vector<Tensor> state;
   auto has_hidden = inputs[1].defined();
   auto layer_dimension = has_hidden ? inputs[1].ndimension() - 3 : -1;
-  for (size_t layer = 0; layer < layers_; layer++) {
+  for (int64_t layer = 0; layer < layers_; layer++) {
     state.push_back(
         has_hidden ? inputs[1].select(layer_dimension, layer) : Variable());
   }
 
   auto output =
       Variable(inp.type().zeros({inp.size(0), inp.size(1), hidden_size_}));
-  for (size_t t = 0; t < inp.size(0); t++) {
+  for (int64_t t = 0; t < inp.size(0); t++) {
     auto x = inp.select(0, t);
-    for (size_t i = 0; i < layers_; i++) {
+    for (int64_t i = 0; i < layers_; i++) {
       // cell_forward() returns a stacked tensor of one or more cell states.
       auto layer_output = cell_forward({x, state[i]}, i);
       // If there are multiple cell states, keep all. If there is only one,
@@ -286,7 +286,7 @@ LSTM::LSTM(int64_t input_size, int64_t hidden_size)
           /*number_of_gates=*/4,
           /*has_cell_state=*/true) {}
 
-variable_list LSTM::cell_forward(variable_list inputs, size_t layer) {
+variable_list LSTM::cell_forward(variable_list inputs, int64_t layer) {
   auto x = inputs[0];
   auto hid = inputs[1].defined() ? inputs[1]
                                  : x.type().zeros({2, x.size(0), hidden_size_});
@@ -313,7 +313,7 @@ variable_list LSTM::cell_forward(variable_list inputs, size_t layer) {
 GRU::GRU(int64_t input_size, int64_t hidden_size)
     : RNNBase(input_size, hidden_size, CuDNNMode::GRU, /*number_of_gates=*/3) {}
 
-variable_list GRU::cell_forward(variable_list inputs, size_t layer) {
+variable_list GRU::cell_forward(variable_list inputs, int64_t layer) {
   auto x = inputs[0];
   auto hx = inputs[1].defined() ? inputs[1]
                                 : x.type().zeros({x.size(0), hidden_size_});
@@ -340,7 +340,7 @@ void RNN::reset() {
   static std::array<ActivationFunction, 2> activations = {at::relu, at::tanh};
   cudnn_mode_ = static_cast<CuDNNMode>(activation_);
   RNNBase<RNN>::reset();
-  activation_function_ = activations.at(static_cast<size_t>(activation_));
+  activation_function_ = activations.at(static_cast<int64_t>(activation_));
 }
 
 RNN& RNN::tanh() {
@@ -351,7 +351,7 @@ RNN& RNN::relu() {
   return activation(Activation::ReLU);
 }
 
-variable_list RNN::cell_forward(variable_list inputs, size_t layer) {
+variable_list RNN::cell_forward(variable_list inputs, int64_t layer) {
   auto x = inputs[0];
   auto hx = inputs[1].defined() ? inputs[1]
                                 : x.type().zeros({x.size(0), hidden_size_});
