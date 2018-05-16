@@ -1,23 +1,12 @@
 #include "ATen/ATen.h"
-#include "ATen/CheckGenerator.h"
-#include "ATen/CUDAGenerator.h"
-#include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/ScalarType.h"
-#include "ATen/cuda/CUDATensorMethods.cuh"
-#include "ATen/cuda/CUDATypeConversion.cuh"
-#include "THC/THCTensorRandom.h"
-#include "THC/THCGenerator.hpp"
 
-#include "THC/THCThrustAllocator.cuh"
+#include <THC/THCGeneral.h>
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
-#include <thrust/inner_product.h>
-#include <thrust/device_vector.h>
-#include <thrust/extrema.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sequence.h>
-#include <thrust/random.h>
 
 #include <algorithm>
 #include <sstream>
