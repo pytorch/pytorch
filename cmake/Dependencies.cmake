@@ -408,6 +408,26 @@ if(USE_CUDA)
   endif()
 endif()
 
+# ---[ ROCm
+if(USE_ROCM)
+ include_directories(${HIP_PATH}/include)
+ include_directories(${HIPBLAS_PATH}/include)
+ include_directories(${HIPSPARSE_PATH}/include)
+ include_directories(${HIPRNG_PATH}/include)
+ linclude_directories(${THRUST_PATH})
+
+ # load HIP cmake module and load platform id
+ EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig -P OUTPUT_VARIABLE PLATFORM)
+ EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig --cpp_config OUTPUT_VARIABLE HIP_CXX_FLAGS)
+
+ # Link with HIPCC https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_porting_guide.md#linking-with-hipcc
+ SET(CMAKE_CXX_LINK_EXECUTABLE ${HIP_HIPCC_EXECUTABLE})
+
+ # Show message that we're using ROCm.
+ MESSAGE(STATUS "ROCM TRUE:")
+ MESSAGE(STATUS "CMAKE_CXX_COMPILER: " ${CMAKE_CXX_COMPILER})
+endif()
+
 # ---[ NCCL
 if(USE_NCCL)
   if(NOT USE_CUDA)
@@ -1046,7 +1066,7 @@ if (BUILD_ATEN)
     MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
     set(AT_CUDNN_ENABLED 0)
   ELSE()
-    list(INSERT ATen_CUDA_INCLUDE 0 ${CUDNN_INCLUDE_DIRS})
+    include_directories(${CUDNN_INCLUDE_DIRS})
     set(AT_CUDNN_ENABLED 1)
   ENDIF()
 
@@ -1059,7 +1079,7 @@ if (BUILD_ATEN)
       message(STATUS "MKLDNN not found. Compiling without MKLDNN support")
       set(AT_MKLDNN_ENABLED 0)
     else()
-      list(APPEND ATen_CPU_INCLUDE ${MKLDNN_INCLUDE_DIRS})
+      include_directories(${MKLDNN_INCLUDE_DIRS})
       set(AT_MKLDNN_ENABLED 1)
     endif()
   endif()
@@ -1069,7 +1089,7 @@ if (BUILD_ATEN)
      # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
      CHECK_LIBRARY_EXISTS(rt clock_gettime "time.h" NEED_LIBRT)
      IF(NEED_LIBRT)
-       list(APPEND ATen_CPU_DEPENDENCY_LIBS rt)
+       list(APPEND Caffe2_DEPENDENCY_LIBS rt)
        SET(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} rt)
      ENDIF(NEED_LIBRT)
   ENDIF(UNIX AND NOT APPLE)

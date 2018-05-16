@@ -1,24 +1,19 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
-IF(WITH_ROCM)
- INCLUDE_DIRECTORIES(${HIP_PATH}/include)
- INCLUDE_DIRECTORIES(${HIPBLAS_PATH}/include)
- INCLUDE_DIRECTORIES(${HIPSPARSE_PATH}/include)
- INCLUDE_DIRECTORIES(${HIPRNG_PATH}/include)
- INCLUDE_DIRECTORIES(${THRUST_PATH})
+if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  # ---[ Dependencies
+  include(../../../cmake/Dependencies.cmake)
+  list(APPEND ATen_CPU_INCLUDE ${Caffe2_CPU_INCLUDE})
+  list(APPEND ATen_CUDA_INCLUDE ${Caffe2_GPU_INCLUDE})
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS})
+  list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${Caffe2_CUDA_DEPENDENCY_LIBS})
+  list(APPEND ATen_PUBLIC_CUDA_DEPENDENCY_LIBS
+    ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
- # load HIP cmake module and load platform id
- EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig -P OUTPUT_VARIABLE PLATFORM)
- EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig --cpp_config OUTPUT_VARIABLE HIP_CXX_FLAGS)
-
- # Link with HIPCC https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_porting_guide.md#linking-with-hipcc
- SET(CMAKE_CXX_LINK_EXECUTABLE ${HIP_HIPCC_EXECUTABLE})
-
- # Show message that we're using ROCm.
- MESSAGE(STATUS "ROCM TRUE:")
- MESSAGE(STATUS "CMAKE_CXX_COMPILER: " ${CMAKE_CXX_COMPILER})
-ENDIF(WITH_ROCM)
+  # ---[ Generate and install header and cpp files
+  include(../../../cmake/Codegen.cmake)
+endif()
 
 IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
   SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
@@ -34,18 +29,6 @@ IF(NOT MSVC)
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-absolute-value")
   SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-absolute-value")
 ENDIF(NOT MSVC)
-
-if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  # ---[ Dependencies
-  include(../../../cmake/Dependencies.cmake)
-  list(APPEND ATen_CPU_INCLUDE ${Caffe2_CPU_INCLUDE})
-  list(APPEND ATen_CUDA_INCLUDE ${Caffe2_GPU_INCLUDE})
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS})
-  list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${Caffe2_CUDA_DEPENDENCY_LIBS})
-
-  # ---[ Generate and install header and cpp files
-  include(../../../cmake/Codegen.cmake)
-endif()
 
 ################################################################################
 # Helper functions
@@ -92,7 +75,6 @@ FILE(GLOB native_cuda_cu "native/cuda/*.cu")
 FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
 FILE(GLOB native_mkl_cpp "native/mkl/*.cpp")
 FILE(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
-
 
 set(all_cpu_cpp ${base_cpp} ${native_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
@@ -336,10 +318,13 @@ if(AT_LINK_STYLE STREQUAL "INTERFACE")
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB ATen_cpu)
 else()
   add_library(ATen_cpu ${AT_LINK_STYLE} ${ATen_CPU_SRCS})
+  target_include_directories(ATen_cpu INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(ATen_cpu PRIVATE ${ATen_CPU_INCLUDE})
   target_link_libraries(ATen_cpu PRIVATE
     ${ATen_CPU_DEPENDENCY_LIBS} ATEN_CPU_FILES_GEN_LIB)
   caffe2_interface_library(ATen_cpu ATen_cpu_library)
+
+  # Make sure these don't get built by parent
   set(ATen_CPU_SRCS)
 endif()
 
@@ -351,12 +336,33 @@ if(NOT NO_CUDA OR WITH_ROCM)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB ATen_cuda)
     set(ATen_CUDA_SRCS ${all_cuda_cpp})
   else()
-    cuda_add_library(ATen_cuda ${AT_LINK_STYLE} ${all_cuda_cpp})
-    target_include_directories(ATen_cuda PRIVATE ${ATen_CUDA_INCLUDE})
-    target_link_libraries(ATen_cuda
-      ${ATen_CUDA_DEPENDENCY_LIBS} ATEN_CUDA_FILES_GEN_LIB)
-    target_link_libraries(ATen_cuda ATen_cpu)
+    # A hack to deal with cuda library dependencies and modern CMake: the
+    # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
+    # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
+    # hack adds the PRIVATE keywords to CUDA_LIBRARIES so we can deal with
+    # it. We will then manually add the cudart library as interface libs.
+    set(__tmp ${CUDA_LIBRARIES})
+    set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
+    torch_cuda_based_add_library(ATen_cuda ${AT_LINK_STYLE} ${ATen_CUDA_SRCS})
+    set(CUDA_LIBRARIES ${__tmp})
+    target_link_libraries(ATen_cuda INTERFACE caffe2::cudart)
+
+    target_include_directories(
+        ATen_cuda INTERFACE $<INSTALL_INTERFACE:include>)
+    target_include_directories(
+        ATen_cuda PRIVATE ${ATen_CUDA_INCLUDE})
+    target_link_libraries(
+        ATen_cuda PRIVATE ${ATen_CUDA_DEPENDENCY_LIBS} ATEN_CUDA_FILES_GEN_LIB)
+
+    # These public dependencies must go after the previous dependencies, as the
+    # order of the libraries in the linker call matters here when statically
+    # linking; libculibos and cublas must be last.
+    target_link_libraries(
+        ATen_cuda PUBLIC ATen_cpu ${ATen_PUBLIC_CUDA_DEPENDENCY_LIBS})
+
     caffe2_interface_library(ATen_cuda ATen_cuda_library)
+
+    # Make sure these don't get built by parent
     set(ATen_CUDA_SRCS)
   endif()
 endif()
@@ -385,9 +391,9 @@ if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
 endif()
 
 if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  set(ATEN_LIBRARIES ATen_cpu)
+  set(ATEN_LIBRARIES ATen_cpu_library)
   if(NOT NO_CUDA OR WITH_ROCM)
-    list(APPEND ATEN_LIBRARIES ATen_gpu)
+    list(APPEND ATEN_LIBRARIES ATen_cuda_library)
   endif()
 
   install(TARGETS ATen_cpu
@@ -423,13 +429,55 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
     INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
   ENDFOREACH()
+  FOREACH(HEADER ${cudnn_h})
+    GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
+    INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
+  ENDFOREACH()
   INSTALL(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
     DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)
+endif()
+
+if(ATEN_NO_TEST)
+  message("disable test because ATEN_NO_TEST is set")
+else()
+  add_subdirectory(test)
+endif()
+
+if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  foreach(test_src ${ATen_CPU_TEST_SRCS})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    add_executable(${test_name} "${test_src}")
+    target_include_directories(
+        ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+    target_link_libraries(${test_name} ${ATEN_LIBRARIES})
+    add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+    install(TARGETS ${test_name} DESTINATION test)
+  endforeach()
+
+  if(NOT NO_CUDA OR WITH_ROCM)
+    foreach(test_src ${ATen_CUDA_TEST_SRCS})
+      get_filename_component(test_name ${test_src} NAME_WE)
+      torch_cuda_based_add_executable(${test_name} "${test_src}")
+      target_include_directories(
+          ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+      target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+      target_link_libraries(${test_name} ${ATEN_LIBRARIES})
+      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+      install(TARGETS ${test_name} DESTINATION test)
+    endforeach()
+  endif()
+
+  # Make sure these don't get built by parent
+  set(ATen_CPU_TEST_SRCS)
+  set(ATen_CUDA_TEST_SRCS)
 endif()
 
 # Pass source, includes, and libs to parent
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
+set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)
 set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)

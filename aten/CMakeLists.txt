@@ -12,8 +12,8 @@ else()
   cmake_dependent_option(
       USE_CUDNN "Use cuDNN" ON
       "USE_CUDA" OFF)
-  option(ATEN_NO_TEST "Do not build ATen test binaries" ON)
-  option(ATEN_NO_CONTRIB "Do not build ATen contrib" ON)
+  option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
+  option(ATEN_NO_CONTRIB "Do not build ATen contrib" OFF)
 
   # Legacy options, which we will eventually remove
   cmake_dependent_option(
@@ -34,6 +34,9 @@ else()
 endif()
 if (NOT USE_CUDA)
   set(NO_CUDA ON)
+endif()
+if (WITH_ROCM)
+  set(USE_ROCM ON)
 endif()
 
 # Create the project in all cases
@@ -72,11 +75,14 @@ endif()
 #############################################
 
 set(ATen_CPU_SRCS)
+set(ATen_CPU_TEST_SRCS)
 set(ATen_CPU_INCLUDE)
 set(ATen_CUDA_SRCS)
+set(ATen_CUDA_TEST_SRCS)
 set(ATen_CUDA_INCLUDE)
 set(ATen_CPU_DEPENDENCY_LIBS)
 set(ATen_CUDA_DEPENDENCY_LIBS)
+set(ATen_PUBLIC_CUDA_DEPENDENCY_LIBS)
 SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
 SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
 SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
@@ -143,12 +149,6 @@ list(APPEND ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 add_subdirectory(src/ATen)
 
-if(ATEN_NO_TEST)
-  message("disable test because ATEN_NO_TEST is set")
-else()
-  add_subdirectory(src/ATen/test)
-endif()
-
 if(ATEN_NO_CONTRIB)
   message("disable contrib because ATEN_NO_CONTRIB is set")
 else()
@@ -160,6 +160,8 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # Pass source, includes, and libs to parent
   set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
   set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
+  set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
+  set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
   set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
   set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)
   set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)

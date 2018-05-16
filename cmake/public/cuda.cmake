@@ -207,7 +207,7 @@ set_property(
 # ---[ Cuda flags
 
 # Known NVIDIA GPU achitectures Caffe2 can be compiled for.
-# Default is set to cuda 9. If we detect the cuda architectores to be less than
+# Default is set to cuda 9. If we detect the cuda architectures to be less than
 # 9, we will lower it to the corresponding known archs.
 set(Caffe2_known_gpu_archs "30 35 50 52 60 61 70") # for CUDA 9.x
 set(Caffe2_known_gpu_archs8 "30 35 50 52 60 61") # for CUDA 8.x

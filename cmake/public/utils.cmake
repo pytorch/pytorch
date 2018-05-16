@@ -106,20 +106,22 @@ function(caffe2_binary_target target_name_or_src)
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
+
 ##############################################################################
 # Multiplex between loading executables for CUDA versus HIP (AMD Software Stack).
 # Usage:
 #   torch_cuda_based_add_executable(cuda_target)
 #
 macro(torch_cuda_based_add_executable cuda_target)
-  IF (WITH_ROCM)
+  IF (USE_ROCM)
     hip_add_executable(${cuda_target} ${ARGN})
-  ELSEIF(NOT NO_CUDA)
+  ELSEIF(USE_CUDA)
     cuda_add_executable(${cuda_target} ${ARGN})
   ELSE()
 
   ENDIF()
 endmacro()
+
 
 ##############################################################################
 # Multiplex between adding libraries for CUDA versus HIP (AMD Software Stack).
@@ -127,14 +129,14 @@ endmacro()
 #   torch_cuda_based_add_library(cuda_target)
 #
 macro(torch_cuda_based_add_library cuda_target)
-  IF (WITH_ROCM)
+  IF (USE_ROCM)
     hip_add_library(${cuda_target} ${ARGN})
-  ELSEIF(NOT NO_CUDA)
+  ELSEIF(USE_CUDA)
     cuda_add_library(${cuda_target} ${ARGN})
   ELSE()
-
   ENDIF()
 endmacro()
+
 
 ##############################################################################
 # Add ATen compile options.
