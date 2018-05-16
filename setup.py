@@ -122,6 +122,9 @@ IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
+# Check if ROCM is enabled
+WITH_ROCM = check_env_flag('WITH_ROCM')
+
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
 if max_jobs is not None:
@@ -218,6 +221,8 @@ def build_libs(libs):
     if WITH_CUDA:
         my_env["CUDA_BIN_PATH"] = CUDA_HOME
         build_libs_cmd += ['--with-cuda']
+    if WITH_ROCM:
+        build_libs_cmd += ['--with-rocm']
     if WITH_NNPACK:
         build_libs_cmd += ['--with-nnpack']
     if WITH_CUDNN:
@@ -567,7 +572,7 @@ library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 ATEN_LIBS = [os.path.join(lib_path, 'libATen_cpu.so')]
-if WITH_CUDA:
+if WITH_CUDA or WITH_ROCM:
     ATEN_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libATen_cuda.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
@@ -577,13 +582,13 @@ NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if IS_DARWIN:
     ATEN_LIBS = [os.path.join(lib_path, 'libATen_cpu.dylib')]
-    if WITH_CUDA:
+    if WITH_CUDA or WITH_ROCM:
         ATEN_LIBS.append(os.path.join(lib_path, 'libATen_cuda.dylib'))
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
     ATEN_LIBS = [os.path.join(lib_path, 'ATen_cpu.lib')]
-    if WITH_CUDA:
+    if WITH_CUDA or WITH_ROCM:
         ATEN_LIBS.append(os.path.join(lib_path, 'ATen_cuda.lib'))
     if DEBUG:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
@@ -767,6 +772,34 @@ if WITH_CUDA:
         "torch/csrc/nn/THCUNN.cpp",
     ]
 
+if WITH_ROCM:
+    rocm_include_path = '/opt/rocm/include'
+    hcc_include_path = '/opt/rocm/hcc/include'
+    hipblas_include_path = '/opt/rocm/hipblas/include'
+    hipsparse_include_path = '/opt/rocm/hcsparse/include'
+    hip_lib_path = '/opt/rocm/hip/lib'
+    hcc_lib_path = '/opt/rocm/hcc/lib'
+    include_dirs.append(rocm_include_path)
+    include_dirs.append(hcc_include_path)
+    include_dirs.append(hipblas_include_path)
+    include_dirs.append(hipsparse_include_path)
+    include_dirs.append(tmp_install_path + "/include/THCUNN")
+    extra_link_args.append('-L' + hip_lib_path)
+    extra_link_args.append('-Wl,-rpath,' + hip_lib_path)
+    extra_compile_args += ['-DWITH_ROCM']
+    extra_compile_args += ['-D__HIP_PLATFORM_HCC__']
+
+    main_sources += [
+        "torch/csrc/cuda/Module.cpp",
+        "torch/csrc/cuda/Storage.cpp",
+        "torch/csrc/cuda/Stream.cpp",
+        "torch/csrc/cuda/utils.cpp",
+        "torch/csrc/cuda/comm.cpp",
+        "torch/csrc/cuda/python_comm.cpp",
+        "torch/csrc/cuda/serialization.cpp",
+        "torch/csrc/nn/THCUNN.cpp",
+    ]
+
 if WITH_NCCL:
     if WITH_SYSTEM_NCCL:
         main_link_args += [NCCL_SYSTEM_LIB]
@@ -822,7 +855,7 @@ extensions.append(C)
 if not IS_WINDOWS:
     DL = Extension("torch._dl",
                    sources=["torch/csrc/dl.c"],
-                   language='c',
+                   language='c'
                    )
     extensions.append(DL)
 
