@@ -1,9 +1,23 @@
 #include "ATen/ATen.h"
+#include "ATen/CheckGenerator.h"
 #include "ATen/CUDAGenerator.h"
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/ScalarType.h"
+#include "ATen/cuda/CUDATensorMethods.cuh"
+#include "ATen/cuda/CUDATypeConversion.cuh"
 #include "THC/THCTensorRandom.h"
+#include "THC/THCGenerator.hpp"
+
+#include "THC/THCThrustAllocator.cuh"
+#include <thrust/device_ptr.h>
+#include <thrust/sort.h>
+#include <thrust/inner_product.h>
+#include <thrust/device_vector.h>
+#include <thrust/extrema.h>
+#include <thrust/execution_policy.h>
+#include <thrust/sequence.h>
+#include <thrust/random.h>
 
 #include <algorithm>
 #include <sstream>
@@ -32,27 +46,6 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
-namespace {
-template <typename scalar_t>
-void randperm_cuda(Tensor& result, int64_t n, Generator* generator) {
-  result.resize_({n});
-
-  for(int64_t i = 0; i < n; i++) {
-    result[i] = i;
-  }
-
-  for(int64_t i = 0; i < n - 1; i++)
-  {
-    auto t = result.type().tensor(1).random_(generator);
-    int64_t z = Scalar(t[0]).toLong() % (n-i);
-
-    scalar_t sav = Scalar(result[i]).to<scalar_t>();
-    result[i] = result[z+i];
-    result[z+i] = sav;
-  }
-}
-} // namespace
-
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   if (n < 0) {
     std::ostringstream oss;
@@ -60,9 +53,22 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     throw std::runtime_error(oss.str());
   }
 
-  AT_DISPATCH_ALL_TYPES(result.type(), "randperm", [&]() -> void {
-    randperm_cuda<scalar_t>(result, n, generator);
-  });
+  result.resize_({n});
+
+  // Generate random values for the keys array
+  auto keys = result.type().tensor(result.sizes()).random_(generator);
+
+  auto result_data = thrust::device_ptr<int64_t>(result.data<int64_t>());
+  auto keys_data = thrust::device_ptr<int64_t>(keys.data<int64_t>());
+
+  auto state = globalContext().getTHCState();
+  THCThrustAllocator thrustAlloc(state);
+  auto policy = thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state));
+
+  thrust::sequence(policy, result_data, result_data + n);
+
+  // Use the sorted order of keys to rearrange the result array
+  thrust::sort_by_key(policy, keys_data, keys_data + n, result_data);
 
   return result;
 }
