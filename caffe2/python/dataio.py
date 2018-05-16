@@ -61,11 +61,11 @@ class Reader(object):
         return ([read_net], ) + self.read(read_net)
 
     def read_record_ex(self, local_init_net, local_finish_net):
-        nets, should_stop, fields = self.read_ex(
+        nets, should_stop, blobs = self.read_ex(
             local_init_net, local_finish_net)
         if self._schema:
-            fields = from_blob_list(self._schema, fields)
-        return nets, should_stop, fields
+            record = from_blob_list(self._schema, blobs)
+        return nets, should_stop, record
 
     def read(self, read_net):
         """Append operations to read_net that will read a batch from the
@@ -79,12 +79,12 @@ class Reader(object):
             read_net: the net that will be appended with read operations
 
         Returns:
-            A tuple (should_stop, fields), with:
+            A tuple (should_stop, blobs), with:
                 should_stop: BlobReference pointing to a boolean scalar
                     blob that indicates whether the read operation
                     was succesfull or whether the end of data has
                     been reached.
-                fields: A tuple of BlobReference containing the latest batch
+                blobs: A tuple of BlobReference containing the latest batch
                     of data that was read.
         """
         raise NotImplementedError('Readers must implement `read`.')
@@ -98,10 +98,10 @@ class Reader(object):
         raise NotImplementedError('This reader cannot be resetted.')
 
     def read_record(self, read_net):
-        should_stop, fields = self.read(read_net)
+        should_stop, blobs = self.read(read_net)
         if self._schema:
-            fields = from_blob_list(self._schema, fields)
-        return should_stop, fields
+            record = from_blob_list(self._schema, blobs)
+        return should_stop, record
 
     def execution_step(self, reader_net_name=None, external_should_stop=None):
         """Create an execution step with a net containing read operators.
@@ -111,9 +111,9 @@ class Reader(object):
 
         E.g.:
 
-            read_step, fields = reader.execution_step()
+            read_step, record = reader.execution_step()
             consume_net = core.Net('consume')
-            consume_net.Print(fields[0], [])
+            consume_net.Print(record[0], [])
             p = core.Plan('reader')
             p.AddStep(read_step.AddNet(consume_net))
             core.RunPlan(p)
@@ -124,22 +124,21 @@ class Reader(object):
                              be named accordingly.
 
         Returns:
-            A tuple (read_step, fields), with:
-                read_step: A newly created execution step containing a net with
-                           read operations. The step will have `stop_blob` set,
-                           in order to stop the loop on end of data.
-                fields: A tuple of BlobReference containing the latest batch
-                        of data that was read.
+            read_step: A newly created execution step containing a net with
+                       read operations. The step will have `stop_blob` set,
+                       in order to stop the loop on end of data.
+            record: A record of BlobReference containing the latest batch
+                    of data that was read.
         """
         reader_net = core.Net(reader_net_name or 'reader')
-        should_stop, fields = self.read_record(reader_net)
+        should_stop, record = self.read_record(reader_net)
         if external_should_stop is not None:
             should_stop = reader_net.Or([external_should_stop, should_stop])
         read_step = core.execution_step(
             '{}_step'.format(reader_net_name),
             reader_net,
             should_stop_blob=should_stop)
-        return (read_step, fields)
+        return read_step, record
 
 
 class Writer(object):
