@@ -9,16 +9,16 @@ BatchNorm::BatchNorm(int64_t features) : features_(features) {}
 void BatchNorm::reset() {
   if (affine_) {
     weight_ =
-        add(Var(at::CPU(at::kFloat).empty({features_}).uniform_()), "weight_");
-    bias_ = add(Var(at::CPU(at::kFloat).zeros({features_})), "bias_");
+        add(Var(at::CPU(at::kFloat).empty({features_}).uniform_()), "weight");
+    bias_ = add(Var(at::CPU(at::kFloat).zeros({features_})), "bias");
   }
 
   if (stateful_) {
     // TODO: Make into buffers instead of parameters
     running_mean_ = add(
-        Var(at::CPU(at::kFloat).zeros({features_}), false), "running_mean_");
+        Var(at::CPU(at::kFloat).zeros({features_}), false), "running_mean");
     running_variance_ = add(
-        Var(at::CPU(at::kFloat).ones({features_}), false), "running_variance_");
+        Var(at::CPU(at::kFloat).ones({features_}), false), "running_variance");
   }
 }
 
