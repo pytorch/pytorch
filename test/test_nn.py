@@ -4937,21 +4937,21 @@ class TestNN(NNTestCase):
         # input shapes
         with self.assertRaisesRegex(RuntimeError, "Input and target should have the same size"):
             asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
-            x = Variable(torch.randn(2, 16))
-            y = Variable(torch.LongTensor([0, 5, 10]))
+            x = torch.randn(2, 16)
+            y = torch.tensor([0, 5, 10])
             asfm(x, y)
 
         # out-of-bound targets
         with self.assertRaisesRegex(RuntimeError, "Target values should be in"):
             asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
-            x = Variable(torch.randn(2, 16))
-            y = Variable(torch.LongTensor([0, 20]))
+            x = torch.randn(2, 16)
+            y = torch.tensor([0, 20])
             asfm(x, y)
 
         # cluster sizes
         asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
-        x = Variable(torch.randn(2, 16))
-        y = Variable(torch.LongTensor([0, 17]))
+        x = torch.randn(2, 16)
+        y = torch.tensor([0, 17])
 
         self.assertEqual(asfm.head.weight.size(), (5 + 3, 16))   # 5 targets in head, 3 clusters, dimensionality 16
         self.assertEqual(asfm.tail[0][1].weight.size(), (5, 8))  # 5 targets in this cluster, dimensionality 8
@@ -4962,14 +4962,14 @@ class TestNN(NNTestCase):
 
         # log_probs actually returns log_proba
         asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 4, [2], div_value=2.)
-        x = Variable(torch.randn(4, 8))
+        x = torch.randn(4, 8)
         logprob_out = asfm.log_prob(x)
 
         self.assertEqual(torch.exp(logprob_out).data.sum(1), torch.ones(4))
 
         # forward returns the same thing as log_probs
         for v in [0, 1, 2, 3]:
-            y = Variable(torch.zeros(4).fill_(v).long())
+            y = torch.full((4,), v, dtype=torch.long)
             out, loss = asfm(x, y)
 
             self.assertEqual(out, logprob_out.gather(1, y.unsqueeze(1)).squeeze())
@@ -7353,7 +7353,7 @@ add_test(NewModuleTest(
 
 class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
     def __call__(self, input):
-        t = Variable(torch.LongTensor([0, 1, 4, 8]).type_as(input).long())
+        t = torch.tensor([0, 1, 4, 8]).to(input.device)
         return nn.AdaptiveLogSoftmaxWithLoss.__call__(self, input, t).output
 
 

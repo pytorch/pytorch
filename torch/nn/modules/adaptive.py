@@ -147,8 +147,8 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         used_rows = 0
         batch_size = target.size(0)
 
-        output = input.new(batch_size).zero_()
-        gather_inds = target.new(batch_size).zero_()
+        output = input.new_zeros(batch_size)
+        gather_inds = target.new_zeros(batch_size)
 
         cutoff_values = [0] + self.cutoffs
         for i in range(len(cutoff_values) - 1):
@@ -212,7 +212,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         """
 
         with torch.no_grad():
-            out = input.new(input.size(0), self.n_classes).zero_()
+            out = input.new_zeros((input.size(0), self.n_classes))
 
             head_output = self.head(input)
             head_logprob = log_softmax(head_output, dim=1)
