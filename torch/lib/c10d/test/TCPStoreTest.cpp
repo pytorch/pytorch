@@ -1,5 +1,5 @@
 #include "StoreTestCommon.hpp"
-#include "TcpStore.hpp"
+#include "TCPStore.hpp"
 
 #include <thread>
 #include <iostream>
@@ -8,16 +8,16 @@
 
 int main(int argc, char** argv) {
 
-  // Master store
-  c10d::TCPStore masterStore("127.0.0.1", 29500, true);
+  // server store
+  c10d::TCPStore serverStore("127.0.0.1", 29500, true);
 
-  // Basic set/get on the master store
-  c10d::test::set(masterStore, "key0", "value0");
-  c10d::test::set(masterStore, "key1", "value1");
-  c10d::test::set(masterStore, "key2", "value2");
-  c10d::test::check(masterStore, "key0", "value0");
-  c10d::test::check(masterStore, "key1", "value1");
-  c10d::test::check(masterStore, "key2", "value2");
+  // Basic set/get on the server store
+  c10d::test::set(serverStore, "key0", "value0");
+  c10d::test::set(serverStore, "key1", "value1");
+  c10d::test::set(serverStore, "key2", "value2");
+  c10d::test::check(serverStore, "key0", "value0");
+  c10d::test::check(serverStore, "key1", "value1");
+  c10d::test::check(serverStore, "key2", "value2");
 
   // Hammer on TCPStore
   std::vector<std::thread> threads;
@@ -25,29 +25,36 @@ int main(int argc, char** argv) {
   const auto numIterations = 1000;
   c10d::test::Semaphore sem1, sem2;
 
-  // Each thread will have a slave store to send/recv data
-  std::vector<std::unique_ptr<c10d::TCPStore>> slaveStores;
+  // Each thread will have a client store to send/recv data
+  std::vector<std::unique_ptr<c10d::TCPStore>> clientStores;
   for (auto i = 0; i < numThreads; i++) {
-    slaveStores.push_back(std::unique_ptr<c10d::TCPStore>(new
+    clientStores.push_back(std::unique_ptr<c10d::TCPStore>(new
       c10d::TCPStore("127.0.0.1", 29500, false)));
   }
 
+  std::string expectedCounterRes = std::to_string(numThreads * numIterations);
+
   for (auto i = 0; i < numThreads; i++) {
-    threads.push_back(std::move(std::thread([&sem1, &sem2, &slaveStores, i] {
+    threads.push_back(std::move(std::thread([&sem1,
+                                             &sem2,
+                                             &clientStores,
+                                             i,
+                                             &expectedCounterRes] {
             for (auto j = 0; j < numIterations; j++) {
-              slaveStores[i]->add("counter", 1);
+              clientStores[i]->add("counter", 1);
             }
-            // Let each thread set and get key on its slave store
+            // Let each thread set and get key on its client store
             std::string key = "thread_" + std::to_string(i);
             for (auto j = 0; j < numIterations; j++) {
               std::string val = "thread_val_" + std::to_string(j);
-              c10d::test::set(*slaveStores[i], key, val);
-              c10d::test::check(*slaveStores[i], key, val);
+              c10d::test::set(*clientStores[i], key, val);
+              c10d::test::check(*clientStores[i], key, val);
             }
 
             sem1.post();
             sem2.wait();
-
+            // Check the counter results
+            c10d::test::check(*clientStores[i], "counter", expectedCounterRes);
             // Now check other threads' written data
             for (auto j = 0; j < numThreads; j++) {
               if (j == i) {
@@ -56,8 +63,9 @@ int main(int argc, char** argv) {
               std::string key = "thread_" + std::to_string(i);
               std::string val = "thread_val_" +
                   std::to_string(numIterations - 1);
-              c10d::test::check(*slaveStores[i], key, val);
+              c10d::test::check(*clientStores[i], key, val);
             }
+
           })));
   }
 
@@ -68,18 +76,17 @@ int main(int argc, char** argv) {
     thread.join();
   }
 
-  // Clear the store to test that slave disconnect won't shutdown the store
-  slaveStores.clear();
+  // Clear the store to test that client disconnect won't shutdown the store
+  clientStores.clear();
 
   // Check that the counter has the expected value
-  std::string expected = std::to_string(numThreads * numIterations);
-  c10d::test::check(masterStore, "counter", expected);
+  c10d::test::check(serverStore, "counter", expectedCounterRes);
 
   // Check that each threads' written data from the main thread
   for (auto i = 0; i < numThreads; i++) {
     std::string key = "thread_" + std::to_string(i);
     std::string val = "thread_val_" + std::to_string(numIterations - 1);
-    c10d::test::check(masterStore, key, val);
+    c10d::test::check(serverStore, key, val);
   }
 
   std::cout << "Test succeeded" << std::endl;

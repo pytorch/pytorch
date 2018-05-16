@@ -38,7 +38,27 @@ inline RankType convertToRank(int64_t rank, int64_t min = 0) {
   return static_cast<RankType>(rank);
 }
 
-// TCP util namespace
+// Helper resource guard class
+class ResourceGuard {
+ public:
+  ResourceGuard(std::function<void()> destructor)
+    : destructor_(std::move(destructor))
+    , released_(false) {}
+
+  ~ResourceGuard() {
+    if (!released_) {
+      destructor_();
+    }
+  }
+
+  void release() {
+    released_ = true;
+  }
+ private:
+  std::function<void()> destructor_;
+  bool released_;
+};
+
 namespace tcputil {
 
 constexpr std::chrono::milliseconds kNoTimeout =
@@ -50,7 +70,6 @@ void sendBytes(int socket,
                const T* buffer,
                size_t length,
                bool moreData = false) {
-
   size_t bytesToSend = sizeof(T) * length;
   if (bytesToSend == 0) {
     return;
@@ -80,8 +99,7 @@ void sendBytes(int socket,
 }
 
 template<typename T>
-void recvBytes(int socket, T* buffer, std::size_t length) {
-
+void recvBytes(int socket, T* buffer, size_t length) {
   size_t bytesToReceive = sizeof(T) * length;
   if (bytesToReceive == 0) {
     return;
@@ -107,7 +125,6 @@ template<typename T>
 void sendVector(int socket,
                 const std::vector<T>& vec,
                 bool moreData = false) {
-
   SizeType size = vec.size();
   sendBytes<SizeType>(socket, &size, 1, true);
   sendBytes<T>(socket, vec.data(), size, moreData);
@@ -140,7 +157,6 @@ T recvValue(int socket) {
 inline void sendString(int socket,
                 const std::string& str,
                 bool moreData = false) {
-
   SizeType size = str.size();
   sendBytes<SizeType>(socket, &size, 1, true);
   sendBytes<char>(socket, str.data(), size, moreData);
@@ -168,29 +184,6 @@ int connect(const std::string& address,
 std::tuple<int, std::string>
 accept(int listenSocket,
        const std::chrono::milliseconds& timeout = kNoTimeout);
-
-// Helper resource guard class
-class ResourceGuard {
-
- public:
-  ResourceGuard(std::function<void()> destructor)
-    : destructor_(std::move(destructor))
-    , released_(false) {}
-
-  ~ResourceGuard() {
-    if (!released_) {
-      destructor_();
-    }
-  }
-
-  void release() {
-    released_ = true;
-  }
-
- private:
-  std::function<void()> destructor_;
-  bool released_;
-};
 
 } // namespace tcputil
 } // namespace c10d

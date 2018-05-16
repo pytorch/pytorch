@@ -52,7 +52,7 @@ PortType getSocketPort(int fd) {
   return listenPort;
 }
 
-}
+} // namespace
 
 std::string sockaddrToString(struct ::sockaddr *addr) {
   char address[INET6_ADDRSTRLEN + 1];
@@ -73,14 +73,13 @@ std::string sockaddrToString(struct ::sockaddr *addr) {
 // listen, connect and accept
 std::pair<int, PortType> listen(PortType port) {
   struct ::addrinfo hints, *res = NULL;
-
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
   hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
-  // by editing `/etc/gai.conf`. so there is no need to manual sorting
+  //  by editing `/etc/gai.conf`. so there is no need to manual sorting
   // or protocol preference.
   int err = ::getaddrinfo(nullptr, std::to_string(port).data(), &hints, &res);
   if (err != 0 || !res) {
@@ -115,10 +114,8 @@ std::pair<int, PortType> listen(PortType port) {
       ::close(socket);
       nextAddr = nextAddr->ai_next;
 
-      /**
-       * we have tried all addresses but could not start
-       * listening on any of them
-       */
+      // we have tried all addresses but could not start
+      // listening on any of them
       if (!nextAddr) {
         throw;
       }
@@ -133,9 +130,7 @@ int connect(const std::string& address,
             PortType port,
             bool wait,
             const std::chrono::milliseconds& timeout) {
-
   struct ::addrinfo hints, *res = NULL;
-
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
   hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
@@ -194,12 +189,11 @@ int connect(const std::string& address,
       socklen_t errLen = sizeof(errno);
       errno = 0;
       ::getsockopt(socket, SOL_SOCKET, SO_ERROR, &errno, &errLen);
-      /**
-       * `errno` is set when:
-       *  1. `getsockopt` has failed
-       *  2. there is awaiting error in the socket
-       *  (the error is saved to the `errno` variable)
-       */
+
+      // `errno` is set when:
+      //  1. `getsockopt` has failed
+      //  2. there is awaiting error in the socket
+      //  (the error is saved to the `errno` variable)
       if (errno != 0) {
         throw std::system_error(errno, std::system_category());
       }
@@ -240,7 +234,6 @@ int connect(const std::string& address,
 std::tuple<int, std::string> accept(
     int listenSocket,
     const std::chrono::milliseconds& timeout) {
-
   // poll on listen socket, it allows to make timeout
   std::unique_ptr<struct ::pollfd[]> events(new struct ::pollfd[1]);
   events[0] = {.fd = listenSocket, .events = POLLIN};

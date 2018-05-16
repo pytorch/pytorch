@@ -27,17 +27,23 @@ class TCPStoreDaemon {
 
   void setHandler(int socket);
   void addHandler(int socket);
-  void getHandler(int socket);
-  void checkHandler(int socket);
+  void getHandler(int socket) const;
+  void checkHandler(int socket) const;
+  void waitHandler(int socket);
 
-  bool checkAndUpdate(std::vector<std::string>& keys) const;
+  bool checkKeys(const std::vector<std::string>& keys) const;
+  void wakeupWaitingClients(const std::string &key);
 
   std::thread daemonThread_;
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
+  // From key -> the list of sockets waiting on it
+  std::unordered_map<std::string, std::vector<int>> waitingSockets_;
+  // From socket -> number of keys awaited
+  std::unordered_map<int, size_t> keysAwaited_;
 
   std::vector<int> sockets_;
   int storeListenSocket_;
-  std::vector<int> controlPipeFd_;
+  std::vector<int> controlPipeFd_ {-1, -1};
 };
 
 class TCPStore : public Store {
