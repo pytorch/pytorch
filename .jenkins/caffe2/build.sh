@@ -106,8 +106,8 @@ CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
 # Explicitly set Python executable.
 # On Ubuntu 16.04 the default Python is still 2.7.
 PYTHON="$(which python)"
-if [[ "${BUILD_ENVIRONMENT}" == py3* ]]; then
-  PYTHON=/usr/bin/python3
+if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  PYTHON=$(which "python${BASH_REMATCH[1]}")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=${PYTHON}")
 fi
 

@@ -38,7 +38,6 @@ list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
 list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
 
-
 cmake_policy(SET CMP0012 NEW)
 
 # For caffe2_interface_library
@@ -117,6 +116,11 @@ endif()
 # for CUDA language, it seemed not worth fixing.
 IF(NOT CUDA_FOUND AND NOT NO_CUDA)
   FIND_PACKAGE(CUDA 5.5)
+ENDIF()
+
+# Find the HIP package, set the HIP paths, load the HIP CMake.
+IF(WITH_ROCM)
+  include(LoadHIP)
 ENDIF()
 
 IF(MSVC)
@@ -227,13 +231,16 @@ IF(NOT NO_CUDA AND MAGMA_FOUND)
     MAGMA_V2)
   IF (MAGMA_V2)
     add_definitions(-DMAGMA_V2)
-  ENDIF (MAGMA_V2)
 
-  SET(USE_MAGMA 1)
-  MESSAGE(STATUS "Compiling with MAGMA support")
-  MESSAGE(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
-  MESSAGE(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
-  MESSAGE(STATUS "MAGMA V2 check: ${MAGMA_V2}")
+    SET(USE_MAGMA 1)
+    MESSAGE(STATUS "Compiling with MAGMA V2 support")
+    MESSAGE(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
+    MESSAGE(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
+  ELSE()
+    MESSAGE(STATUS "PyTorch only supports MAGMA 2, but a different version \
+        of MAGMA was detected with includes here: ${MAGMA_INCLUDE_DIR}")
+    MESSAGE(STATUS "Compiling without MAGMA support")
+  ENDIF()
 ELSE()
   MESSAGE(STATUS "MAGMA not found. Compiling without MAGMA support")
 ENDIF()
@@ -487,16 +494,22 @@ include_directories(
 add_subdirectory(src/THNN)
 add_subdirectory(src/THS)
 
-if(NO_CUDA)
-  message("disabling CUDA because NO_CUDA is set")
-  SET(AT_CUDA_ENABLED 0)
-else()
+if(WITH_ROCM)
+  SET(AT_CUDA_ENABLED 1)
+  add_subdirectory(src/THC)
+  add_subdirectory(src/THCUNN)
+  add_subdirectory(src/THCS)
+  message("ROCm is enabled.")
+elseif(NOT NO_CUDA)
   SET(AT_CUDA_ENABLED 1)
   INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
   find_package(CUDA 5.5 REQUIRED)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
   add_subdirectory(src/THCS)
+else()
+  message("disabling CUDA because NO_CUDA is set")
+  SET(AT_CUDA_ENABLED 0)
 endif()
 
 IF (NOT NO_CUDA)
@@ -541,7 +554,7 @@ include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src
 ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include
 ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
-if(NOT NO_CUDA)
+if(NOT NO_CUDA AND NOT WITH_ROCM)
   include_directories(${CUDA_INCLUDE_DIRS})
 endif()
 

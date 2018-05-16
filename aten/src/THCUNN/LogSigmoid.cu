@@ -3,7 +3,7 @@
 #include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__HIP_PLATFORM_HCC__)
 #define ZERO_MACRO zero<T>()
 template <typename T>
 inline __device__ typename std::enable_if<std::is_same<T, double>::value, T>::type zero() {
