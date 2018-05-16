@@ -7,6 +7,7 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/python_function.h"
+#include "torch/csrc/autograd/engine_without_python.h"
 #include "torch/csrc/utils/auto_gil.h"
 
 #ifndef _WIN32
@@ -22,12 +23,6 @@ struct THPEngine {
 };
 
 static torch::autograd::python::PythonEngine engine;
-
-// Here we add a method of Engine so that we can use Engine::getDefaultEngine
-// throughout the code in both NO_PYTHON builds and regular builds
-Engine& torch::autograd::Engine::getDefaultEngine() {
-  return engine;
-}
 
 namespace torch { namespace autograd { namespace python {
 

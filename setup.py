@@ -671,6 +671,7 @@ main_sources = [
     "torch/csrc/autograd/aten_variable_hooks.cpp",
     "torch/csrc/autograd/grad_mode.cpp",
     "torch/csrc/autograd/engine.cpp",
+    "torch/csrc/autograd/engine_without_python.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
