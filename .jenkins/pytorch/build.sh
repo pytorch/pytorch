@@ -28,7 +28,8 @@ if ! which conda; then
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && which sccache > /dev/null; then
+# gcc 7.2 with sccache seems to have intermittent OOM issue if all cores are used
+if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7.2* ]]) && which sccache > /dev/null; then
   export MAX_JOBS=`expr $(nproc) - 1`
 fi
 
