@@ -131,6 +131,11 @@ case "${BUILD_ENVIRONMENT}" in
     # Ensure the ccache symlink can still find the real nvcc binary.
     export PATH="/usr/local/cuda/bin:$PATH"
     ;;
+  *-rocm*)
+    # TODO: These should be setup correctly in the docker images instead of here
+    export PATH="/opt/rocm/bin:/opt/rocm/hcc/bin:/opt/rocm/hip/bin:/opt/rocm/opencl/bin:${PATH}"
+    export MIOPEN_DISABLE_CACHE=1
+    export THRUST_ROOT=/data/Thrust
 esac
 
 # Try to include Redis support for Linux builds
