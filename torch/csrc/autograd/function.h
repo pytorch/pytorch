@@ -101,7 +101,7 @@ struct Function : std::enable_shared_from_this<Function> {
   explicit Function(
       uint32_t num_inputs = 0,
       edge_list&& next_edges = edge_list())
-      : Function(num_inputs, next_sequence_nr++, std::move(next_edges)) {}
+      : Function(num_inputs, next_sequence_nr_++, std::move(next_edges)) {}
   
   /// Functions are neither copyable nor moveable.
   Function(const Function& other) = delete;
