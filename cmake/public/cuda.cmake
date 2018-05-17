@@ -149,16 +149,17 @@ set_property(
     TARGET caffe2::curand PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
-# cufft
-add_library(caffe2::cufft UNKNOWN IMPORTED)
+# cufft. CUDA_CUFFT_LIBRARIES is actually a list, so we will make an
+# interface library similar to cudart.
+add_library(caffe2::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
-        TARGET caffe2::cufft PROPERTY IMPORTED_LOCATION
+        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a")
 else()
     set_property(
-        TARGET caffe2::cufft PROPERTY IMPORTED_LOCATION
-        ${CUDA_cufft_LIBRARY})
+        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDA_CUFFT_LIBRARIES})
 endif()
 set_property(
     TARGET caffe2::cufft PROPERTY INTERFACE_INCLUDE_DIRECTORIES
