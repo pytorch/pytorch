@@ -6676,13 +6676,61 @@ class TestTorch(TestCase):
             obj.__repr__()
             str(obj)
 
-        x = torch.Tensor([4, float('inf'), 1.5, float('-inf'), 0, float('nan'), 1])
+        # test  big integer
+        x = torch.tensor(2341234123412341)
+        x_str = "tensor(2341234123412341)"
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertEqual(x_str, str(x))
+
+        # test scientific notation
+        x = torch.tensor([1e28, 1e-28])
+        x_str = "tensor([1.0000e+28, 1.0000e-28])"
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertEqual(x_str, str(x))
+
+        # test no leading space if all elements positive
+        x = torch.tensor([1, 2])
+        x_str = "tensor([1, 2])"
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertEqual(x_str, str(x))
+
+        # test for leading space if there are negative elements
+        x = torch.tensor([1, -2])
+        x_str = "tensor([ 1, -2])"
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertEqual(x_str, str(x))
+
+        # test inf and nan
+        x = torch.tensor([4, float('inf'), 1.5, float('-inf'), 0, float('nan'), 1])
+        x_str = "tensor([4.0000,    inf, 1.5000,   -inf, 0.0000,    nan, 1.0000])"
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertEqual(x_str, str(x))
+
+        # test dtype
+        x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.double)
+        x_str = ("tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,"
+                 "                inf], dtype=torch.float64")
         x.__repr__()
         str(x)
 
-        x = torch.DoubleTensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309])
-        x.__repr__()
-        str(x),
+        # test summary
+        x = torch.zeros(10000)
+        x_str = "tensor([0., 0., 0.,  ..., 0., 0., 0.])"
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertEqual(x_str, str(x))
+
+        # test device
+        if torch.cuda.is_available():
+            x = torch.tensor([123], device='cuda:0')
+            x_str = "tensor([123], device='cuda:0')"
+            self.assertEqual(x.__repr__(), str(x))
+            self.assertEqual(x_str, str(x))
+
+        # test integral floats and requires_grad
+        x = torch.tensor([123.], requires_grad=True)
+        x_str = "tensor([123.], requires_grad=True)"
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertEqual(x_str, str(x))
 
     def test_sizeof(self):
         sizeof_empty = torch.randn(0).storage().__sizeof__()
