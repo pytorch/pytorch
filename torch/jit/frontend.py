@@ -252,14 +252,23 @@ class StmtBuilder(Builder):
 
 
 class ExprBuilder(Builder):
-    binop_map = {
-        ast.Add: '+',
-        ast.Sub: '-',
-        ast.Mult: '*',
-        ast.Div: '/',
-        ast.MatMult: '@',
-        ast.Pow: '**',
-    }
+    if PY2:
+        binop_map = {
+            ast.Add: '+',
+            ast.Sub: '-',
+            ast.Mult: '*',
+            ast.Div: '/',
+            ast.Pow: '**',
+        }
+    else:
+        binop_map = {
+            ast.Add: '+',
+            ast.Sub: '-',
+            ast.Mult: '*',
+            ast.Div: '/',
+            ast.MatMult: '@',
+            ast.Pow: '**',
+        }
 
     unop_map = {
         ast.Not: 'not',

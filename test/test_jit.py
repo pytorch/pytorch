@@ -992,6 +992,7 @@ class TestScript(TestCase):
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
 
+    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_matmul(self):
         def func(a, b):
             return a @ b
