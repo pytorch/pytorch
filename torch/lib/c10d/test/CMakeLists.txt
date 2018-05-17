@@ -1,5 +1,6 @@
 set(test_srcs
   FileStoreTest.cpp
+  TCPStoreTest.cpp
   )
 
 set(test_libraries
