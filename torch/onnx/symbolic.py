@@ -522,6 +522,14 @@ def lt(g, input, other):
     return g.op("Less", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
 
 
+def ge(g, input, other):
+    return g.op("Not", lt(g, other, input))
+
+
+def le(g, input, other):
+    return g.op("Not", gt(g, other, input))
+
+
 def log_softmax(g, input, dim=None):
     return g.op("LogSoftmax", input, axis_i=dim)
 

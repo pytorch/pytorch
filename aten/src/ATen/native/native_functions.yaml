@@ -152,9 +152,17 @@
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
 
+- func: bernoulli(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli(Tensor self, Generator* generator=nullptr) -> Tensor
+
 - func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
 
 - func: bernoulli_(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli_(Tensor self, Generator* generator=nullptr) -> Tensor
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
   variants: function
