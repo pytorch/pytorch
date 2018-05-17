@@ -317,6 +317,26 @@ class TestOperators(TestCase):
         y = Variable(torch.randn(3, 4).int(), requires_grad=True)
         self.assertONNX(lambda x, y: x == y, (x, y))
 
+    def test_lt(self):
+        x = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        y = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        self.assertONNX(lambda x, y: x < y, (x, y))
+
+    def test_gt(self):
+        x = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        y = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        self.assertONNX(lambda x, y: x > y, (x, y))
+
+    def test_le(self):
+        x = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        y = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        self.assertONNX(lambda x, y: x <= y, (x, y))
+
+    def test_ge(self):
+        x = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        y = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        self.assertONNX(lambda x, y: x >= y, (x, y))
+
     def test_exp(self):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         self.assertONNX(lambda x: x.exp(), x)

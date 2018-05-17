@@ -36,7 +36,7 @@ std::vector<FunctionSchema> createOperatorSchemas() {
 
   // the attribute kind tag for any arguments that have optional attribute encodings
   // in the IR.
-  at::optional<AttributeKind> attributes[] = {
+  at::optional<AttributeInfo> attributes[] = {
     ${attributes}
   };
 
