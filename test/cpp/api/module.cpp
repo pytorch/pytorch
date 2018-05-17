@@ -6,28 +6,32 @@ using namespace torch;
 using namespace torch::nn;
 using Catch::StartsWith;
 
-struct AGIUnit : CloneableModule<AGIUnit> {
+struct AGIUnit : nn::Module {
   variable_list forward(variable_list) {
     return {};
   }
 };
 
 namespace test {
-struct AGIUnit : CloneableModule<AGIUnit> {
+struct AGIUnit : nn::Module {
   variable_list forward(variable_list) {
     return {};
   }
 };
-struct AGIUnit2 : CloneableModule<AGIUnit2> {
-  AGIUnit2() : CloneableModule<AGIUnit2>("Foo") {}
+struct AGIUnit2 : nn::Module {
+  AGIUnit2() : nn::Module("Foo") {}
   variable_list forward(variable_list) {
     return {};
   }
 };
 } // namespace test
 
+bool pointer_equal(Tensor first, Tensor second) {
+  return first.data<float>() == second.data<float>();
+}
+
 TEST_CASE("module/training-mode") {
-  auto model = make(Linear(3, 4));
+  auto model = Linear(3, 4).build();
   REQUIRE(model->is_training());
   SECTION("Enable eval mode") {
     model->eval();
@@ -40,7 +44,7 @@ TEST_CASE("module/training-mode") {
 }
 
 TEST_CASE("module/zero-grad") {
-  auto model = make(Linear(3, 4));
+  auto model = Linear(3, 4).build();
   auto weights = Var(at::ones(at::CPU(at::kFloat), {8, 3}));
   auto loss = model->forward({weights}).front().sum();
   backward(loss);
@@ -71,8 +75,7 @@ TEST_CASE("module/name") {
 }
 
 TEST_CASE("module/conversions", "[cuda]") {
-  auto model =
-      make(LSTM(/*in=*/128, /*out=*/64, /*layers=*/3, /*dropout=*/0.2));
+  auto model = LSTM(128, 64).layers(3).dropout(0.2).build();
   SECTION("starts as float on CPU") {
     for (auto& parameter : model->parameters()) {
       REQUIRE(parameter.second.type().backend() == at::kCPU);
@@ -131,7 +134,7 @@ TEST_CASE("module/clone") {
       variable_list forward(variable_list) override {
         return {};
       }
-      std::unique_ptr<Module> clone() const override {
+      std::shared_ptr<Module> clone() const override {
         return nullptr;
       }
     };
@@ -142,17 +145,19 @@ TEST_CASE("module/clone") {
   SECTION("Cloning creates distinct parameters") {
     struct TestModel : public CloneableModule<TestModel> {
       TestModel() {
-        add(make(Linear(10, 3)), "l1");
-        add(make(Linear(3, 5)), "l2");
-        add(make(Linear(5, 100)), "l3");
+        add(Linear(10, 3).build(), "l1");
+        add(Linear(3, 5).build(), "l2");
+        add(Linear(5, 100).build(), "l3");
       }
+
+      void reset() override {}
 
       variable_list forward(variable_list input) override {
         return input;
       }
     };
 
-    auto model = make(TestModel());
+    auto model = TestModel().build();
 
     auto model2 = model->clone();
     auto m1param = model->parameters();
@@ -164,5 +169,28 @@ TEST_CASE("module/clone") {
     for (auto& param : m1param) {
       REQUIRE(!param.second.allclose(m2param[param.first]));
     }
+  }
+
+  SECTION("Cloning preserves external references") {
+    struct TestModel : public CloneableModule<TestModel> {
+      void reset() {
+        weights = add(Var(at::ones(at::CPU(at::kFloat), {4, 4})), "weight");
+      }
+
+      variable_list forward(variable_list input) override {
+        return input;
+      }
+
+      Variable weights;
+    };
+
+    auto model = TestModel().build();
+    REQUIRE(pointer_equal(model->weights, model->parameters_["weight"]));
+
+    auto model2 = std::dynamic_pointer_cast<TestModel>(
+        std::shared_ptr<Module>(model->clone()));
+    REQUIRE(!pointer_equal(model2->weights, model->weights));
+    REQUIRE(pointer_equal(model2->weights, model2->parameters_["weight"]));
+    REQUIRE(!pointer_equal(model2->weights, model->parameters_["weight"]));
   }
 }
