@@ -2367,19 +2367,19 @@ class TestTorch(TestCase):
         self._test_multinomial(self, torch.FloatTensor)
 
     def test_multinomial_invalid_probs(self):
-        x = torch.Tensor([0, -1])
+        x = torch.Tensor([0, -1]).to('cpu')
         with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
             torch.multinomial(x, 1)
 
-        x = torch.Tensor([0, float('inf')])
+        x = torch.Tensor([0, float('inf')]).to('cpu')
         with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
             torch.multinomial(x, 1)
 
-        x = torch.Tensor([0, float('-inf')])
+        x = torch.Tensor([0, float('-inf')]).to('cpu')
         with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
             torch.multinomial(x, 1)
 
-        x = torch.Tensor([0, float('nan')])
+        x = torch.Tensor([0, float('nan')]).to('cpu')
         with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
             torch.multinomial(x, 1)
 
