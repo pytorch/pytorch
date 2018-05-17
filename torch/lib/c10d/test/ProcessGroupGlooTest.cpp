@@ -161,6 +161,95 @@ std::shared_ptr<::c10d::ProcessGroup::Work> testSignal(
   return test.run(0, 2);
 }
 
+class CollectiveTest {
+ public:
+  static std::vector<CollectiveTest> initialize(const std::string& path, int num) {
+    std::vector<CollectiveTest> tests;
+    for (auto i = 0; i < num; i++) {
+      tests.push_back(std::move(CollectiveTest(path)));
+    }
+
+    std::vector<std::thread> threads;
+    for (auto i = 0; i < num; i++) {
+      threads.push_back(std::move(std::thread([i, &tests] {
+              tests[i].start(i, tests.size());
+            })));
+    }
+    for (auto& thread : threads) {
+      thread.join();
+    }
+
+    return std::move(tests);
+  }
+
+  CollectiveTest(const std::string& path)
+      : path_(path) {
+  }
+
+  ~CollectiveTest() {
+    if (pg_) {
+      pg_->destroy();
+    }
+  }
+
+  CollectiveTest(CollectiveTest&& other) {
+    path_ = std::move(other.path_);
+    pg_ = std::move(other.pg_);
+  }
+
+  ::c10d::ProcessGroupGloo& getProcessGroup() {
+    return *pg_;
+  }
+
+  void start(int rank, int size) {
+    auto store = std::make_shared<::c10d::FileStore>(path_);
+    pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
+        new ::c10d::ProcessGroupGloo(store, rank, size));
+    pg_->initialize();
+  }
+
+ protected:
+  std::string path_;
+  std::unique_ptr<::c10d::ProcessGroupGloo> pg_;
+};
+
+void testAllreduce(const std::string& path) {
+  const auto size = 4;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  // Generate inputs
+  std::vector<std::vector<at::Tensor>> inputs(size);
+  for (auto i = 0; i < size; i++) {
+    auto tensor = at::ones(at::CPU(at::kFloat), {16, 16}) * i;
+    inputs[i] = std::vector<at::Tensor>({ tensor });
+  }
+
+  // Kick off work
+  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  for (auto i = 0; i < size; i++) {
+    work[i] = tests[i].getProcessGroup().allreduce(inputs[i]);
+  }
+
+  // Wait for work to complete
+  for (auto i = 0; i < size; i++) {
+    if (!work[i]->wait()) {
+      throw work[i]->exception();
+    }
+  }
+
+  // Verify outputs
+  const auto expected = (size * (size - 1)) / 2;
+  for (auto i = 0; i < size; i++) {
+    auto& tensor = inputs[i][0];
+    auto data = tensor.data<float>();
+    for (auto j = 0; j < tensor.numel(); j++) {
+      if (data[j] != expected) {
+        throw std::runtime_error("BOOM!");
+      }
+    }
+  }
+}
+
 int main(int argc, char** argv) {
   {
     TemporaryFile file;
@@ -174,6 +263,11 @@ int main(int argc, char** argv) {
     auto work = testSignal(file.path, SIGKILL);
     auto& ex = work->exception();
     std::cout << "SIGKILL test got: " << ex.what() << std::endl;
+  }
+
+  {
+    TemporaryFile file;
+    testAllreduce(file.path);
   }
 
   return 0;
