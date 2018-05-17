@@ -1050,6 +1050,10 @@ private:
         return aten::neg;
       case '*':
         return aten::mul;
+      case TK_MATMUL:
+        return aten::matmul;
+      case TK_POW:
+        return aten::pow;
       case TK_STARRED:
         return prim::Starred;
       case '/':
@@ -1191,6 +1195,8 @@ private:
       case TK_GE:
       case '*':
       case '/':
+      case TK_MATMUL:
+      case TK_POW:
       case TK_AND:
       case TK_OR:
       case TK_NOT:

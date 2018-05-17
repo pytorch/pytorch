@@ -992,6 +992,22 @@ class TestScript(TestCase):
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
 
+    def test_matmul(self):
+        def func(a, b):
+            return a @ b
+
+        a = torch.rand(4, 3, requires_grad=True)
+        b = torch.rand(3, 2, requires_grad=True)
+        self.checkScript(func, (a, b), optimize=True)
+
+    def test_pow(self):
+        def func(a, b):
+            return a ** b
+
+        a = torch.rand(1, requires_grad=True)
+        b = torch.rand(1, requires_grad=True)
+        self.checkScript(func, (a, b), optimize=True)
+
     def test_triple(self):
         def func(x):
             return 3. * x
@@ -1426,13 +1442,6 @@ class TestScript(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             bar(Variable(torch.rand(10), requires_grad=True), Variable(torch.rand(9), requires_grad=True))
-
-    def test_binop_unsupported_error(self):
-        with self.assertRaisesRegex(NotSupportedError, "unsupported binary operator:"):
-            @torch.jit.script
-            def binop(x, y):
-                # Replace this with another unsupported op when/if it gets supported
-                return x ** y
 
     def test_python_call(self):
         def pyfunc(a):

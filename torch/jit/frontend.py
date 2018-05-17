@@ -257,6 +257,8 @@ class ExprBuilder(Builder):
         ast.Sub: '-',
         ast.Mult: '*',
         ast.Div: '/',
+        ast.MatMult: '@',
+        ast.Pow: '**',
     }
 
     unop_map = {

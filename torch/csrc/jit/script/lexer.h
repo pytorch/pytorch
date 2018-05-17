@@ -83,7 +83,9 @@ namespace script {
   _(TK_FOR, "for", "for")                        \
   _(TK_IN, "in", "in")                           \
   _(TK_STARRED, "starred", "")                   \
-  _(TK_UNARY_MINUS, "unary minus", "")
+  _(TK_UNARY_MINUS, "unary minus", "")           \
+  _(TK_POW, "pow operator", "**")                \
+  _(TK_MATMUL, "matmul operator", "@")
 
 static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
 
@@ -132,7 +134,7 @@ struct SharedParserData {
         {}, // reserve a level for unary not
         {'<', '>', TK_EQ, TK_LE, TK_GE, TK_NE},
         {'+', '-'},
-        {'*', '/'},
+        {'*', '/', TK_MATMUL, TK_POW},
     };
     std::vector<std::vector<int>> unary_ops = {
         {'-', '*'},
