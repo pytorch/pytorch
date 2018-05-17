@@ -127,7 +127,7 @@ struct SymbolicVariable {
   SymbolicVariable sum(int dim, bool keepdim) const {
     Node * n;
     auto r = create(t("sum"), {*this}, 1, &n)[0];
-    n->i_(a("dim"), dim)
+    n->is_(a("dim"), {dim})
      ->i_(a("keepdim"), keepdim);
     return r;
   }
