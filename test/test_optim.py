@@ -708,7 +708,8 @@ class TestEarlyStopping(TestCase):
         for i, (s, t) in enumerate(zip(scores, targets)):
             is_continue = early_stopping.step(s)
             self.assertEqual(t, is_continue,
-                             message='Early stopping is wrong in epoch {}: expected {}, got {}'.format(i, t, is_continue))
+                             message='Early stopping is wrong in epoch {}: expected {}, got {}'
+                             .format(i, t, is_continue))
             if not t:
                 break
 
@@ -719,7 +720,8 @@ class TestEarlyStopping(TestCase):
         for i, (s, t) in enumerate(zip(scores, targets)):
             is_continue = early_stopping.step(s)
             self.assertEqual(t, is_continue,
-                             message='Early stopping is wrong in epoch {}: expected {}, got {}'.format(i, t, is_continue))
+                             message='Early stopping is wrong in epoch {}: expected {}, got {}'
+                             .format(i, t, is_continue))
             if not t:
                 break
 
@@ -730,7 +732,8 @@ class TestEarlyStopping(TestCase):
         for i, (s, t) in enumerate(zip(scores, targets)):
             is_continue = early_stopping.step(s)
             self.assertEqual(t, is_continue,
-                             message='Early stopping is wrong in epoch {}: expected {}, got {}'.format(i, t, is_continue))
+                             message='Early stopping is wrong in epoch {}: expected {}, got {}'
+                             .format(i, t, is_continue))
             if not t:
                 break
 
@@ -740,7 +743,8 @@ class TestEarlyStopping(TestCase):
         early_stopping = EarlyStoppingCriterion(patience=1, mode='max', min_delta=0.2)
         for i, (s, t) in enumerate(zip(scores, targets)):
             is_continue = early_stopping.step(s)
-            self.assertEqual(t, is_continue, message='Early stopping is wrong in epoch {}: expected {}, got {}'.format(i, t, is_continue))
+            self.assertEqual(t, is_continue, message='Early stopping is wrong in epoch {}: expected {}, got {}'
+                             .format(i, t, is_continue))
             if not t:
                 break
 
