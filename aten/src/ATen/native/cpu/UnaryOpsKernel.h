@@ -28,6 +28,11 @@ extern DispatchStub<unary_fn> sqrtImpl;
 extern DispatchStub<unary_fn> tanhImpl;
 extern DispatchStub<unary_fn> truncImpl;
 
+extern DispatchStub<unary_fn> cosImpl;
+extern DispatchStub<unary_fn> coshImpl;
+extern DispatchStub<unary_fn> sinImpl;
+extern DispatchStub<unary_fn> sinhImpl;
+extern DispatchStub<unary_fn> tanImpl;
 
 // Missing unary functions
 // digamma
