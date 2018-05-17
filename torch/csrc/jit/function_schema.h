@@ -4,6 +4,11 @@
 
 namespace torch { namespace jit {
 
+struct AttributeInfo {
+  AttributeKind kind;
+  at::optional<int32_t> data; // extra data field, current only used for the k in IntList[k]
+};
+
 // schema as used in the compiler for resolving function calls and reporting
 // errors. These objects should be constructed from C10 schema once those
 // are availiable
@@ -14,7 +19,7 @@ struct Argument {
   const at::optional<at::Tensor> default_value;
   // if this can be a graph attribute, the kind of that attribute
   // that matches it
-  const at::optional<AttributeKind> attribute_kind;
+  const at::optional<AttributeInfo> attribute_info;
 };
 
 struct FunctionSchema {
@@ -34,13 +39,15 @@ struct FunctionSchema {
 // for debugging, make sure we can describe the call site
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // if can report more friendly types if we have an attribute
-  if(arg.attribute_kind) {
-    switch(*arg.attribute_kind) {
+  if(arg.attribute_info) {
+    switch(arg.attribute_info->kind) {
       case AttributeKind::i:
         out << "int64_t";
         break;
       case AttributeKind::is:
         out << "IntList";
+        if(arg.attribute_info->data)
+          out << "[" << *arg.attribute_info->data << "]";
         break;
       case AttributeKind::f:
         out << "float";

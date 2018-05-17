@@ -71,6 +71,10 @@ def LSTMCellC(*args, **kwargs):
     return torch.cat((hy, cy))
 
 
+def canonical(graph):
+    return str(torch._C._jit_pass_canonicalize(graph))
+
+
 def get_lstm_inputs(device):
     input = torch.randn(3, 10, dtype=torch.float, device=device)
     hx = torch.randn(3, 20, dtype=torch.float, device=device)
@@ -1071,6 +1075,20 @@ class TestScript(TestCase):
         out.backward(grad)
         self.assertEqual(x.grad, grad)
         self.assertEqual(y.grad, grad.sum(dim=0))
+
+    def test_sum(self):
+        @torch.jit.script
+        def func(x):
+            return x.sum(dim=[4])
+
+        @torch.jit.script
+        def func2(x):
+            return x.sum(dim=4)
+
+        self.assertExpected(canonical(func.graph), subname='1')
+        # test that shape analysis is written correctly for sum with IntList[1] dim argument
+        torch._C._jit_pass_shape_analysis(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
+        self.assertExpected(canonical(func2.graph), subname='2')
 
     def test_cat(self):
         @torch.jit.script
@@ -2490,7 +2508,7 @@ class TestScript(TestCase):
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         foo.graph.propagate_shapes((a, b), False)
-        self.assertExpected(str(torch._C._jit_pass_canonicalize(foo.graph)))
+        self.assertExpected(canonical(foo.graph))
 
     def test_onnx_export_speculate(self):
 
