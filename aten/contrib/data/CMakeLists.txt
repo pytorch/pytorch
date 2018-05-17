@@ -23,7 +23,7 @@ set(src
 )
 
 add_library(xtdata ${TH_LINK_STYLE} ${src})
-target_link_libraries(xtdata ATen_cpu)
+target_link_libraries(xtdata ATen_cpu_library)
 target_include_directories(xtdata PRIVATE ${ATen_CPU_INCLUDE})
 target_include_directories(xtdata PRIVATE .)
 

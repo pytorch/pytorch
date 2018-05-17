@@ -55,6 +55,21 @@ cmake_policy(SET CMP0012 NEW)
 # Polyfill for upstream FindCUDA
 include(CMakeInitializeConfigs)
 
+#############################################
+
+set(ATen_CPU_SRCS)
+set(ATen_CPU_TEST_SRCS)
+set(ATen_CPU_INCLUDE)
+set(ATen_CUDA_SRCS)
+set(ATen_CUDA_TEST_SRCS)
+set(ATen_CUDA_INCLUDE)
+set(ATen_CPU_DEPENDENCY_LIBS)
+set(ATen_CUDA_DEPENDENCY_LIBS)
+set(ATen_PUBLIC_CUDA_DEPENDENCY_LIBS)
+SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
+SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
+SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
+
 if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # ---[ Build variables set within the cmake tree
   include(../cmake/BuildVariables.cmake)
@@ -70,22 +85,16 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # TODO: merge the following 3 files into cmake/public/utils.cmake.
   include(../cmake/Utils.cmake)
   include(../cmake/public/utils.cmake)
+
+  # ---[ Dependencies
+  include(../cmake/Dependencies.cmake)
+  list(APPEND ATen_CPU_INCLUDE ${Caffe2_CPU_INCLUDE})
+  list(APPEND ATen_CUDA_INCLUDE ${Caffe2_GPU_INCLUDE})
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS})
+  list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${Caffe2_CUDA_DEPENDENCY_LIBS})
+  list(APPEND ATen_PUBLIC_CUDA_DEPENDENCY_LIBS
+    ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 endif()
-
-#############################################
-
-set(ATen_CPU_SRCS)
-set(ATen_CPU_TEST_SRCS)
-set(ATen_CPU_INCLUDE)
-set(ATen_CUDA_SRCS)
-set(ATen_CUDA_TEST_SRCS)
-set(ATen_CUDA_INCLUDE)
-set(ATen_CPU_DEPENDENCY_LIBS)
-set(ATen_CUDA_DEPENDENCY_LIBS)
-set(ATen_PUBLIC_CUDA_DEPENDENCY_LIBS)
-SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
-SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
-SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
 
 if(NOT NO_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CUDA_INCLUDE_DIRS})
