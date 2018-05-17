@@ -59,7 +59,7 @@ class ProcessGroup {
     virtual ~Work();
 
     // Checks if request has completed. Non-blocking operation.
-    virtual bool isCompleted() = 0;
+    virtual bool isCompleted() const = 0;
 
     // Waits until request completes. Blocking operation.
     // Returns false if the work completed with an exception.

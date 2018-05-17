@@ -70,14 +70,6 @@ struct AlgorithmEntry {
   // Must not be copied
   AlgorithmEntry & operator=(const AlgorithmEntry&) = delete;
   AlgorithmEntry(const AlgorithmEntry&) = delete;
-
-  // May be moved
-  AlgorithmEntry(AlgorithmEntry&& other) {
-    key = std::move(other.key);
-    algorithm = std::move(other.algorithm);
-    src = std::move(other.src);
-    dst = std::move(other.dst);
-  }
 };
 
 } // namespace c10d
@@ -105,7 +97,7 @@ class ProcessGroupGloo : public ProcessGroup {
     virtual ~WorkGloo();
 
     // Checks if request has completed. Non-blocking operation.
-    bool isCompleted() override;
+    bool isCompleted() const override;
 
     // Waits until request completes. Blocking operation.
     // Returns false if the work completed with an exception.
@@ -120,7 +112,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
     std::mutex m_;
     std::condition_variable cv_;
-    bool completed_;
+    std::atomic<bool> completed_;
 
     // Use pointer to ::gloo::Exception because it doesn't have a
     // default constructor and constructing an empty std::unique_ptr
@@ -130,15 +122,25 @@ class ProcessGroupGloo : public ProcessGroup {
     friend class ProcessGroupGloo;
   };
 
+  struct Options {
+    explicit Options();
+
+    std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
+    std::chrono::milliseconds timeout;
+    int threads;
+  };
+
   explicit ProcessGroupGloo(
       const std::shared_ptr<Store>& store,
-      const std::vector<std::shared_ptr<::gloo::transport::Device>>& devices,
       int rank,
       int size);
 
   virtual ~ProcessGroupGloo();
 
   void initialize();
+
+  void initialize(Options& options);
+
   void destroy();
 
   std::shared_ptr<Work> broadcast(
@@ -151,7 +153,6 @@ class ProcessGroupGloo : public ProcessGroup {
 
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
-  std::vector<std::shared_ptr<::gloo::transport::Device>> devices_;
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
 
   using KeyType = AlgorithmKey;

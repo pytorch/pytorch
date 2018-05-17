@@ -1,7 +1,6 @@
 #include <ProcessGroupGloo.hpp>
 #include <FileStore.hpp>
 
-#include <gloo/transport/tcp/device.h>
 
 using namespace ::c10d;
 
@@ -9,9 +8,7 @@ int main(int argc, char** argv) {
   int rank = atoi(getenv("RANK"));
   int size = atoi(getenv("SIZE"));
   auto store = std::make_shared<FileStore>("/tmp/c10d_example");
-  std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
-  devices.push_back(::gloo::transport::tcp::CreateDevice("localhost"));
-  ProcessGroupGloo pg(store, devices, rank, size);
+  ProcessGroupGloo pg(store, rank, size);
   pg.initialize();
 
   // Create some tensors

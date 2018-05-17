@@ -2,6 +2,7 @@
 
 #include <gloo/allreduce_halving_doubling.h>
 #include <gloo/rendezvous/context.h>
+#include <gloo/transport/tcp/device.h>
 
 #define GENERATE_ALL_TYPES(type, func, args...)                         \
   switch (type) {                                                       \
@@ -31,22 +32,13 @@ class GlooStore : public ::gloo::rendezvous::Store {
   }
 
   void set(const std::string& key, const std::vector<char>& value) override {
-    // @pietern was unable to figure out a way to cast the value of
-    // type std::vector<char> to an std::vector<unsigned char>,
-    // so going with a copy here (it's not a hot path so it's fine).
-    std::vector<uint8_t> tmp(value.size());
-    memcpy(tmp.data(), value.data(), value.size());
+    std::vector<unsigned char> tmp(value.begin(), value.end());
     store_->set(key, tmp);
   }
 
   std::vector<char> get(const std::string& key) override {
-    // @pietern was unable to figure out a way to cast the value of
-    // type std::vector<unsigned char> to an std::vector<char>,
-    // so going with a copy here (it's not a hot path so it's fine).
     auto value = store_->get(key);
-    std::vector<char> tmp(value.size());
-    memcpy(tmp.data(), value.data(), value.size());
-    return tmp;
+    return std::vector<char>(value.begin(), value.end());
   }
 
   void wait(const std::vector<std::string>& keys) override {
@@ -81,15 +73,13 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
 
 } // namespace
 
-ProcessGroupGloo::WorkGloo::WorkGloo() {
-  completed_ = false;
+ProcessGroupGloo::WorkGloo::WorkGloo() : completed_(false) {
 }
 
 ProcessGroupGloo::WorkGloo::~WorkGloo() {
 }
 
-bool ProcessGroupGloo::WorkGloo::isCompleted() {
-  std::unique_lock<std::mutex> lock(m_);
+bool ProcessGroupGloo::WorkGloo::isCompleted() const {
   return completed_;
 }
 
@@ -123,15 +113,18 @@ void ProcessGroupGloo::WorkGloo::finishWithException(
   cv_.notify_all();
 }
 
+ProcessGroupGloo::Options::Options() :
+    timeout(std::chrono::milliseconds(10 * 1000)),
+    threads(1) {
+}
+
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
-    const std::vector<std::shared_ptr<::gloo::transport::Device>>& devices,
     int rank,
     int size)
     : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
-      devices_(devices) {
-  stop_ = false;
+      stop_(false) {
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -141,17 +134,26 @@ ProcessGroupGloo::~ProcessGroupGloo() {
 }
 
 void ProcessGroupGloo::initialize() {
-  contexts_.clear();
-  for (auto& device : devices_) {
-    auto context = std::shared_ptr<::gloo::rendezvous::Context>(
-        new ::gloo::rendezvous::Context(rank_, size_));
-    context->setTimeout(std::chrono::milliseconds(100));
+  Options options;
+  options.timeout = std::chrono::milliseconds(100);
+  options.threads = 2;
+  initialize(options);
+}
+
+void ProcessGroupGloo::initialize(Options& options) {
+  auto& devices = options.devices;
+  if (devices.empty()) {
+    devices.push_back(::gloo::transport::tcp::CreateDevice("localhost"));
+  }
+
+  for (auto& device : options.devices) {
+    auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
+    context->setTimeout(options.timeout);
     context->connectFullMesh(*store_, device);
     contexts_.push_back(std::move(context));
   }
 
-  // TODO(@pietern): Make number of threads configurable
-  threads_.resize(2);
+  threads_.resize(options.threads);
   for (int i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this);
   }

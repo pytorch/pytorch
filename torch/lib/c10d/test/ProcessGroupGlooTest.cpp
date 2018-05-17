@@ -114,12 +114,12 @@ class SignalTest {
   std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
     auto store = std::make_shared<::c10d::FileStore>(path_);
 
-    // Local test; all connections are made through loopback
-    std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
-    devices.push_back(::gloo::transport::tcp::CreateDevice("localhost"));
+    // Use tiny timeout to make this test run fast
+    ::c10d::ProcessGroupGloo::Options options;
+    options.timeout = std::chrono::milliseconds(50);
 
-    ::c10d::ProcessGroupGloo pg(store, devices, rank, size);
-    pg.initialize();
+    ::c10d::ProcessGroupGloo pg(store, rank, size);
+    pg.initialize(options);
 
     // Initialize tensor list
     std::vector<at::Tensor> tensors = {
