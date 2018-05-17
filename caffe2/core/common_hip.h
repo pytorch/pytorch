@@ -13,9 +13,9 @@
 #include "caffe2/core/common.h"
 
 /**
- * The maximum number of GPUs that caffe2 recognizes.
+ * The maximum number of AMD HIP GPUs that caffe2 recognizes.
  */
-#define CAFFE2_COMPILE_TIME_MAX_GPUS 16
+#define CAFFE2_COMPILE_TIME_MAX_HIP_GPUS 16
 /**
  * The maximum number of peers that each gpu can have when doing p2p setup.
  * Currently, according to NVidia documentation, each device can support a

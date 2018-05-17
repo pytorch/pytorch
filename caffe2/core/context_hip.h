@@ -44,7 +44,7 @@ class ThreadLocalHIPObjects
     private:
     ThreadLocalHIPObjects()
     {
-        for(int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i)
+        for(int i = 0; i < CAFFE2_COMPILE_TIME_MAX_HIP_GPUS; ++i)
         {
             hip_streams_[i]     = vector<hipStream_t>();
             rocblas_handles_[i] = vector<rocblas_handle>();
@@ -106,7 +106,7 @@ class ThreadLocalHIPObjects
 
     ~ThreadLocalHIPObjects() noexcept
     {
-        for(int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i)
+        for(int i = 0; i < CAFFE2_COMPILE_TIME_MAX_HIP_GPUS; ++i)
         {
             for(auto& handle : rocblas_handles_[i])
             {
@@ -131,9 +131,9 @@ class ThreadLocalHIPObjects
             }
         }
     }
-    vector<hipStream_t> hip_streams_[CAFFE2_COMPILE_TIME_MAX_GPUS];
-    vector<rocblas_handle> rocblas_handles_[CAFFE2_COMPILE_TIME_MAX_GPUS];
-    vector<miopenHandle_t> miopen_handles_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+    vector<hipStream_t> hip_streams_[CAFFE2_COMPILE_TIME_MAX_HIP_GPUS];
+    vector<rocblas_handle> rocblas_handles_[CAFFE2_COMPILE_TIME_MAX_HIP_GPUS];
+    vector<miopenHandle_t> miopen_handles_[CAFFE2_COMPILE_TIME_MAX_HIP_GPUS];
 };
 
 class HIPContext final

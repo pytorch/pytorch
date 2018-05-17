@@ -80,8 +80,8 @@ static std::unordered_map<void*, uint8_t> g_hip_device_affiliation;
 // Data structures for optional memory tracking. Access to these structures
 // is garded by the HIPContext::mutex.
 static std::unordered_map<void*, long> g_size_map;
-static std::vector<long> g_total_by_gpu_map(CAFFE2_COMPILE_TIME_MAX_GPUS, 0);
-static std::vector<long> g_max_by_gpu_map(CAFFE2_COMPILE_TIME_MAX_GPUS, 0);
+static std::vector<long> g_total_by_gpu_map(CAFFE2_COMPILE_TIME_MAX_HIP_GPUS, 0);
+static std::vector<long> g_max_by_gpu_map(CAFFE2_COMPILE_TIME_MAX_HIP_GPUS, 0);
 
 static long g_total_mem = 0;
 static long g_last_rep  = 0;
@@ -118,10 +118,10 @@ static void Caffe2InitializeHip()
     // Check if the number of GPUs matches the expected compile-time max number
     // of GPUs.
     CAFFE_ENFORCE_LE(NumHipDevices(),
-                     CAFFE2_COMPILE_TIME_MAX_GPUS,
+                     CAFFE2_COMPILE_TIME_MAX_HIP_GPUS,
                      "Number of HIP devices on the machine is larger than the compiled "
                      "max number of gpus expected (",
-                     CAFFE2_COMPILE_TIME_MAX_GPUS,
+                     CAFFE2_COMPILE_TIME_MAX_HIP_GPUS,
                      "). Increase that and recompile the caffe binary.");
 
     for(int i = 0; i < NumHipDevices(); ++i)
