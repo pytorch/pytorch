@@ -29,7 +29,7 @@ class Module {
   const std::string& name() const noexcept;
 
   virtual variable_list forward(variable_list) = 0;
-  virtual std::unique_ptr<Module> clone() const;
+  virtual std::shared_ptr<Module> clone() const;
 
   std::map<std::string, Variable> parameters() const;
   Variable& param(std::string const&);
@@ -113,13 +113,25 @@ class CloneableModule : public Module {
  public:
   using Module::Module;
 
-  // should it also detach the gradients, like a deepcopy? Or maybe let's just
-  // give clone() a boolean for this?
-  std::unique_ptr<Module> clone() const override {
-    auto ptr = std::unique_ptr<Module>(
-        new Derived(*static_cast<const Derived*>(this)));
+  virtual void reset() = 0;
+
+  /// Moves the `Module` into a `shared_ptr` and calls `reset()` on it.
+  std::shared_ptr<Derived> build() {
+    auto module = std::make_shared<Derived>(static_cast<Derived&&>(*this));
+    module->reset();
+    return std::move(module);
+  }
+
+  /// Performs a recursive "deep copy" of the `Module`, such that all parameters
+  /// and submodules in the cloned module are different from those in the
+  /// original module.
+  std::shared_ptr<Module> clone() const override {
+    auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
+    ptr->parameters_.clear();
+    ptr->reset();
     for (auto& parameter : ptr->parameters_) {
-      parameter.second = this->parameters_.at(parameter.first).clone();
+      parameter.second.data().copy_(
+          this->parameters_.at(parameter.first).data());
     }
     for (auto& child : ptr->children_) {
       child.second = this->children_.at(child.first)->clone();
@@ -127,11 +139,18 @@ class CloneableModule : public Module {
     return ptr;
   }
 };
-
-template <class Module>
-std::shared_ptr<typename std::decay<Module>::type> make(Module&& module) {
-  auto ptr = std::make_shared<typename std::decay<Module>::type>(
-      std::forward<Module>(module));
-  return ptr;
-}
 }} // namespace torch::nn
+
+#define TORCH_ATTR(T, name)                         \
+  auto name(const T& new_##name)->decltype(*this) { \
+    this->name##_ = new_##name;                     \
+    return *this;                                   \
+  }                                                 \
+  auto name(T&& new_##name)->decltype(*this) {      \
+    this->name##_ = std::move(new_##name);          \
+    return *this;                                   \
+  }                                                 \
+  const T& name() const noexcept {                  \
+    return this->name##_;                           \
+  }                                                 \
+  T name##_
