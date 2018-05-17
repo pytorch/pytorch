@@ -46,6 +46,9 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
 }
 
 TEST_CASE("optim") {
+  std::srand(0);
+  setSeed(0);
+
   ContainerList list;
   list.append(make(Linear(2, 8)));
   list.append(make(Linear(8, 1)));
