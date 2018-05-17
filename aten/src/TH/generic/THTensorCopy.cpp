@@ -166,7 +166,7 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
 //
 // I think those rules are stupid and we really shouldn't conform to them.
 // The structs below ensure that for all unsigned types we use (currently
-// only uint8_t), // we will do an intermediate convertion via int64_t,
+// only uint8_t), we will do an intermediate convertion via int64_t,
 // to ensure that any negative values are wrapped around correctly.
 //
 // Note that conversions from doubles to signed integral types that can't
