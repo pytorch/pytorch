@@ -1407,6 +1407,24 @@ ormqr(input2, input3, left=True, transpose=False) -> Tensor
 See :func:`torch.ormqr`
 """)
 
+
+add_docstr_all('permute',
+               r"""
+permute(*dims) -> Tensor
+
+Permute the dimensions of this tensor.
+
+Args:
+    *dims (int...): The desired ordering of dimensions
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> x.permute(2, 0, 1).size()
+    torch.Size([5, 2, 3])
+""")
+
 add_docstr_all('potrf',
                r"""
 potrf(upper=True) -> Tensor
