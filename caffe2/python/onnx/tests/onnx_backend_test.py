@@ -37,10 +37,6 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_upsample.*'  # Upsample is redesigned in ONNX
                      '|test_operator_repeat.*'  # Tile is not compliant with ONNX yet
                      '|test_.*pool_.*same.*'
-                     '|test_asin_'
-                     '|test_acos_'
-                     '|test_atan_'
-                     '|test_tan_'
                      ')')  # Does not support pool same.
 
 # Quick patch to unbreak master CI, is working on the debugging.
