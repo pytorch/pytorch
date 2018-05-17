@@ -129,6 +129,29 @@ void TCPStoreDaemon::run() {
         // use the store. We will go ahead and close this connection whenever
         // we hit an exception here.
         ::close(fds[fdIdx].fd);
+
+        // Remove all the tracking state of the close FD
+        for (auto it = waitingSockets_.begin(); it != waitingSockets_.end(); ) {
+          for (auto vecIt = it->second.begin(); vecIt != it->second.end(); ) {
+            if (*vecIt == fds[fdIdx].fd) {
+              vecIt = it->second.erase(vecIt);
+            } else {
+              ++vecIt;
+            }
+          }
+          if (it->second.size() == 0) {
+            it = waitingSockets_.erase(it);
+          } else {
+            ++it;
+          }
+        }
+        for (auto it = keysAwaited_.begin(); it != keysAwaited_.end(); ) {
+          if (it->first == fds[fdIdx].fd) {
+            it = keysAwaited_.erase(it);
+          } else {
+            ++it;
+          }
+        }
         fds.erase(fds.begin() + fdIdx);
         sockets_.erase(sockets_.begin() + fdIdx - 2);
         --fdIdx;
