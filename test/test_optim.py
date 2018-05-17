@@ -1228,5 +1228,60 @@ class TestLRScheduler(TestCase):
                         msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
                             batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
 
+class TestEarlyStopping(TestCase):
+    def test_early_stopping_min_mode(self):
+        scores = [0.1, 0.2, 0.3, 0.2, 0.25]
+        targets = [True, True, True, False, False]
+        early_stopping = EarlyStoppingCriterion(patience=2, mode='min', min_delta=0.0)
+        for i, (s, t) in enumerate(zip(scores, targets)):
+            is_continue = early_stopping.step(s)
+            self.assertEqual(t, is_continue,
+                             message='Early stopping is wrong in epoch {}: expected {}, got {}'.format(i, t, is_continue))
+            if not t:
+                break
+
+    def test_early_stopping_max_mode(self):
+        scores = [0.3, 0.2, 0.1, 0.2, 0.25]
+        targets = [True, True, False, False, False]
+        early_stopping = EarlyStoppingCriterion(patience=1, mode='max', min_delta=0.0)
+        for i, (s, t) in enumerate(zip(scores, targets)):
+            is_continue = early_stopping.step(s)
+            self.assertEqual(t, is_continue,
+                             message='Early stopping is wrong in epoch {}: expected {}, got {}'.format(i, t, is_continue))
+            if not t:
+                break
+
+    def test_early_stopping_min_delta_1(self):
+        scores = [0.1, 0.2, 0.19, 0.2, 0.25]
+        targets = [True, True, False, False, False]
+        early_stopping = EarlyStoppingCriterion(patience=1, mode='min', min_delta=0.2)
+        for i, (s, t) in enumerate(zip(scores, targets)):
+            is_continue = early_stopping.step(s)
+            self.assertEqual(t, is_continue,
+                             message='Early stopping is wrong in epoch {}: expected {}, got {}'.format(i, t, is_continue))
+            if not t:
+                break
+
+    def test_early_stopping_min_delta_2(self):
+        scores = [0.3, 0.31, 0.4, 0.2, 0.1]
+        targets = [True, True, False, False, False]
+        early_stopping = EarlyStoppingCriterion(patience=1, mode='max', min_delta=0.2)
+        for i, (s, t) in enumerate(zip(scores, targets)):
+            is_continue = early_stopping.step(s)
+            self.assertEqual(t, is_continue, message='Early stopping is wrong in epoch {}: expected {}, got {}'.format(i, t, is_continue))
+            if not t:
+                break
+
+    def test_early_stopping_state_dict(self):
+        scores = [0.3, 0.2, 0.1, 0.2, 0.25]
+        early_stopping = EarlyStoppingCriterion(patience=5, mode='max', min_delta=0.0)
+        for s in scores:
+            early_stopping.step(s)
+        early_stopping_copy = EarlyStoppingCriterion(patience=1, mode='min', min_delta=0.5)
+        early_stopping_copy.load_state_dict(early_stopping.state_dict())
+        for key in early_stopping.__dict__.keys():
+            self.assertEqual(early_stopping.__dict__[key], early_stopping_copy.__dict__[key])
+
+
 if __name__ == '__main__':
     run_tests()
