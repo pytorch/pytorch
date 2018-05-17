@@ -44,20 +44,26 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
 
   result.resize_({n});
 
-  // Generate random values for the keys array
-  auto keys = result.type().tensor(result.sizes()).random_(generator);
+  if (n < 30000) {  // For small inputs, we offload it to CPU instead.
+    auto result_cpu = result.type().toBackend(kCPU).tensor({n});
+    randperm_out_cpu(result_cpu, n, generator);
+    result = result.type().copy(result_cpu);
+  } else {
+    // Generate random values for the keys array
+    auto keys = result.type().tensor(result.sizes()).random_(generator);
 
-  auto result_data = thrust::device_ptr<int64_t>(result.data<int64_t>());
-  auto keys_data = thrust::device_ptr<int64_t>(keys.data<int64_t>());
+    auto result_data = thrust::device_ptr<int64_t>(result.data<int64_t>());
+    auto keys_data = thrust::device_ptr<int64_t>(keys.data<int64_t>());
 
-  auto state = globalContext().getTHCState();
-  THCThrustAllocator thrustAlloc(state);
-  auto policy = thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state));
+    auto state = globalContext().getTHCState();
+    THCThrustAllocator thrustAlloc(state);
+    auto policy = thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state));
 
-  thrust::sequence(policy, result_data, result_data + n);
+    thrust::sequence(policy, result_data, result_data + n);
 
-  // Use the sorted order of keys to rearrange the result array
-  thrust::sort_by_key(policy, keys_data, keys_data + n, result_data);
+    // Use the sorted order of keys to rearrange the result array
+    thrust::sort_by_key(policy, keys_data, keys_data + n, result_data);
+  }
 
   return result;
 }
