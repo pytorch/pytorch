@@ -8,7 +8,7 @@
 namespace torch { namespace nn {
 
 template <class Derived>
-class ContainerListImpl : public CloneableModule<Derived> {
+class ContainerListImpl : public Module {
   // Lets you use a container like a vector without making a new class,
   // just for simple implementations
  public:
@@ -19,32 +19,32 @@ class ContainerListImpl : public CloneableModule<Derived> {
   }
 
   std::shared_ptr<Module> add(std::shared_ptr<Module> m) {
-    return append(m).children_.back();
+    return append(m).modules_.back();
   }
 
   ContainerListImpl<Derived>& append(std::shared_ptr<Module> m) {
-    children_.push_back(m);
-    Module::add(children_.back(), std::to_string(size() - 1));
+    modules_.push_back(m);
+    Module::add(modules_.back(), std::to_string(size() - 1));
     return *this;
   }
 
   std::shared_ptr<Module>& operator[](int index) {
-    return children_[index];
+    return modules_[index];
   }
 
   int size() {
-    return children_.size();
+    return modules_.size();
   }
 
   std::vector<std::shared_ptr<Module>>::iterator begin() {
-    return children_.begin();
+    return modules_.begin();
   }
 
   std::vector<std::shared_ptr<Module>>::iterator end() {
-    return children_.end();
+    return modules_.end();
   }
 
-  std::vector<std::shared_ptr<Module>> children_;
+  std::vector<std::shared_ptr<Module>> modules_;
 };
 
 class ContainerList : public ContainerListImpl<ContainerList> {};
@@ -53,7 +53,7 @@ class Sequential : public ContainerListImpl<Sequential> {
   // Mimics nn.Sequential from pytorch.
  public:
   variable_list forward(variable_list input) override {
-    for (auto& container : children_) {
+    for (auto& container : modules_) {
       input = container->forward(input);
     }
     return input;
@@ -62,20 +62,20 @@ class Sequential : public ContainerListImpl<Sequential> {
   std::shared_ptr<Module> add(
       std::shared_ptr<Module> m,
       std::string name = "") {
-    return append(m, name).children_.back();
+    return append(m, name).modules_.back();
   }
 
   Sequential& append(std::shared_ptr<Module> m, std::string name = "") {
     if (name == "") {
       name = std::to_string(size());
     }
-    children_.push_back(m);
-    Module::add(children_.back(), name);
+    modules_.push_back(m);
+    Module::add(modules_.back(), name);
     return *this;
   }
 };
 
-class SimpleContainer : public CloneableModule<SimpleContainer> {
+class SimpleContainer : public Module {
   // Lets you use a container without making a new class,
   // for experimental implementations
  public:

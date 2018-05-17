@@ -48,11 +48,9 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
 TEST_CASE("optim") {
   std::srand(0);
   setSeed(0);
-
-  ContainerList list;
-  list.append(make(Linear(2, 8)));
-  list.append(make(Linear(8, 1)));
-  auto model = make(list);
+  auto model = std::make_shared<ContainerList>();
+  model->append(Linear(2, 8).build());
+  model->append(Linear(8, 1).build());
 
   SECTION("lbfgs") {
     auto optim = LBFGS(model, 5e-2).max_iter(5).make();
