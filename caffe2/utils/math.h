@@ -61,7 +61,15 @@ void Log(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Cos(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
+void Acos(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
 void Sin(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Asin(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Tan(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Atan(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void SinCos(const int N, const T* x, T* ys, T* yc, Context* context);
 template <typename T, class Context>
