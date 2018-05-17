@@ -1,6 +1,7 @@
 #include "ProcessGroupGloo.hpp"
 
 #include <gloo/allreduce_halving_doubling.h>
+#include <gloo/broadcast_one_to_all.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/transport/tcp/device.h>
 
@@ -233,6 +234,12 @@ void ProcessGroupGloo::createAlgorithm(AlgorithmEntry& entry) {
           createAllreduce,
           entry);
       return;
+    case CollectiveType::BROADCAST:
+      GENERATE_ALL_TYPES(
+          key.type->scalarType(),
+          createBroadcast,
+          entry);
+      return;
   }
 
   throw std::runtime_error("Unhandled collective type");
@@ -242,21 +249,29 @@ template <typename T>
 void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
   const auto& key = entry.key;
 
-  // Turn source tensors into T*
-  auto& src = entry.src;
-  std::vector<T*> tmp(src.size());
-  for (int i = 0; i < src.size(); i++) {
-    tmp[i] = static_cast<T*>(src[i].storage()->data());
-  }
-
   // Create algorithm against first context
   auto& context = contexts_[0];
   entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
       new ::gloo::AllreduceHalvingDoubling<T>(
           context,
-          tmp,
-          src[0].numel(),
+          getDataPointers<T>(entry.src),
+          entry.src[0].numel(),
           reductionFunction<T>(key.reduceOp)));
+}
+
+template <typename T>
+void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
+  const auto& key = entry.key;
+
+  // Create algorithm against first context
+  auto& context = contexts_[0];
+  entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+      new ::gloo::BroadcastOneToAll<T>(
+          context,
+          getDataPointers<T>(entry.src),
+          entry.src[0].numel(),
+          key.srcRank,
+          key.srcTensor));
 }
 
 // Constructs an AlgorithmEntry instance, except for the Gloo
@@ -318,49 +333,58 @@ EntryType ProcessGroupGloo::checkout(const AlgorithmKey& key) {
   return std::move(entry);
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::enqueue(EntryType entry) {
+  auto work = std::shared_ptr<WorkGloo>(new WorkGloo());
+  std::unique_lock<std::mutex> lock(m_);
+  queue_.push_back(std::make_tuple(std::move(entry), work));
+  queueProduceCV_.notify_one();
+  return std::move(work);
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
-  return std::shared_ptr<Work>(new WorkGloo());
+  assertSameSizeAndType(tensors);
+
+  AlgorithmKey key;
+  key.collectiveType = CollectiveType::BROADCAST;
+  key.type = &tensors[0].type();
+  key.devices = getDevices(tensors);
+  key.srcSizes = getSizes(tensors);
+  key.srcRank = opts.rootRank;
+  key.srcTensor = opts.rootTensor;
+
+  // Retrieve (create or wait for) cache entry
+  auto entry = checkout(key);
+
+  // Only copy root tensor
+  if (getRank() == opts.rootRank) {
+    entry->src[opts.rootTensor].copy_(tensors[opts.rootTensor]);
+  }
+
+  // Define how to run the algorithm and copy back results
+  entry->run = [tensors](EntryType& entry) mutable {
+    entry->algorithm->run();
+    for (int i = 0; i < tensors.size(); i++) {
+      tensors[i].copy_(entry->src[i]);
+    }
+    // TODO(@pietern): cudaEventRecord to unblock source stream
+  };
+
+  // TODO(@pietern): cudaStreamWaitEvent on source stream
+  return enqueue(std::move(entry));
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  // Ensure we have at least one tensor
-  if (tensors.size() == 0) {
-    throw std::invalid_argument("allreduce: argument is empty");
-  }
-
-  // Ensure all tensors have identical type and shape
-  auto& type = tensors[0].type();
-  auto sizes = tensors[0].sizes();
-  for (int i = 1; i < tensors.size(); i++) {
-    if (tensors[i].type() != type) {
-      throw std::invalid_argument("allreduce: argument contains mixed types");
-    }
-    if (!tensors[i].sizes().equals(sizes)) {
-      throw std::invalid_argument("allreduce: argument contains mixed sizes");
-    }
-  }
-
-  // List of devices for tensors determines uniqueness of this call
-  std::vector<int> devices;
-  if (type.is_cuda()) {
-    devices.resize(tensors.size());
-    for (int i = 0; i < tensors.size(); i++) {
-      devices[i] = tensors[i].storage()->getDevice();
-    }
-  }
+  assertSameSizeAndType(tensors);
 
   AlgorithmKey key;
   key.collectiveType = CollectiveType::ALLREDUCE;
   key.type = &tensors[0].type();
-  key.srcSizes.resize(tensors.size());
-  for (int i = 0; i < tensors.size(); i++) {
-    key.srcSizes[i] = tensors[i].sizes();
-  }
-  key.devices = std::move(devices);
+  key.srcSizes = getSizes(tensors);
+  key.devices = getDevices(tensors);
   key.reduceOp = opts.reduceOp;
 
   // Retrieve (create or wait for) cache entry
@@ -380,13 +404,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     // TODO(@pietern): cudaEventRecord to unblock source stream
   };
 
-  auto work = std::shared_ptr<WorkGloo>(new WorkGloo());
-  std::unique_lock<std::mutex> lock(m_);
-  queue_.push_back(std::make_tuple(std::move(entry), work));
-  queueProduceCV_.notify_one();
-
   // TODO(@pietern): cudaStreamWaitEvent on source stream
-  return std::move(work);
+  return enqueue(std::move(entry));
 }
 
 } // namespace c10d

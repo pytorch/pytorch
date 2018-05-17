@@ -163,7 +163,9 @@ std::shared_ptr<::c10d::ProcessGroup::Work> testSignal(
 
 class CollectiveTest {
  public:
-  static std::vector<CollectiveTest> initialize(const std::string& path, int num) {
+  static std::vector<CollectiveTest> initialize(
+      const std::string& path,
+      int num) {
     std::vector<CollectiveTest> tests;
     for (auto i = 0; i < num; i++) {
       tests.push_back(std::move(CollectiveTest(path)));
@@ -250,6 +252,59 @@ void testAllreduce(const std::string& path) {
   }
 }
 
+void testBroadcast(const std::string& path) {
+  const auto size = 2;
+  const auto stride = 2;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  std::vector<std::vector<at::Tensor>> inputs(size);
+  const auto& type = at::CPU(at::kFloat);
+
+  // Try every permutation of root rank and root tensoro
+  for (auto i = 0; i < size; i++) {
+    for (auto j = 0; j < stride; j++) {
+      // Initialize inputs
+      for (auto k = 0; k < size; k++) {
+        inputs[k].resize(stride);
+        for (auto l = 0; l < stride; l++) {
+          inputs[k][l] = at::ones(type, {16, 16}) * (k * stride + l);
+        }
+      }
+
+      ::c10d::BroadcastOptions options;
+      options.rootRank = i;
+      options.rootTensor = j;
+
+      // Kick off work
+      std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+      for (auto i = 0; i < size; i++) {
+        work[i] = tests[i].getProcessGroup().broadcast(inputs[i], options);
+      }
+
+      // Wait for work to complete
+      for (auto i = 0; i < size; i++) {
+        if (!work[i]->wait()) {
+          throw work[i]->exception();
+        }
+      }
+
+      // Verify outputs
+      const auto expected = (i * stride + j);
+      for (auto k = 0; k < size; k++) {
+        for (auto l = 0; l < stride; l++) {
+          auto& tensor = inputs[k][l];
+          auto data = tensor.data<float>();
+          for (auto n = 0; n < tensor.numel(); n++) {
+            if (data[n] != expected) {
+              throw std::runtime_error("BOOM!");
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 int main(int argc, char** argv) {
   {
     TemporaryFile file;
@@ -268,6 +323,11 @@ int main(int argc, char** argv) {
   {
     TemporaryFile file;
     testAllreduce(file.path);
+  }
+
+  {
+    TemporaryFile file;
+    testBroadcast(file.path);
   }
 
   return 0;

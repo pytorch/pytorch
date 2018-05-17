@@ -69,6 +69,55 @@ MAKE_HASHABLE(::c10d::ReduceOp, static_cast<std::uint8_t>(t));
 
 namespace c10d {
 
+inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
+  // Ensure we have at least one tensor
+  if (tensors.size() == 0) {
+    throw std::invalid_argument("argument is empty");
+  }
+
+  // Ensure all tensors have identical type and shape
+  auto& type = tensors[0].type();
+  auto sizes = tensors[0].sizes();
+  for (auto i = 1; i < tensors.size(); i++) {
+    if (tensors[i].type() != type) {
+      throw std::invalid_argument("argument contains mixed types");
+    }
+    if (!tensors[i].sizes().equals(sizes)) {
+      throw std::invalid_argument("argument contains mixed sizes");
+    }
+  }
+}
+
+inline std::vector<std::vector<int64_t>> getSizes(
+    const std::vector<at::Tensor>& tensors) {
+  std::vector<std::vector<int64_t>> sizes(tensors.size());
+  for (auto i = 0; i < tensors.size(); i++) {
+    sizes[i] = tensors[i].sizes();
+  }
+  return sizes;
+}
+
+inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
+  std::vector<int> devices;
+  const auto& type = tensors[0].type();
+  if (type.is_cuda()) {
+    devices.resize(tensors.size());
+    for (auto i = 0; i < tensors.size(); i++) {
+      devices[i] = tensors[i].storage()->getDevice();
+    }
+  }
+  return devices;
+}
+
+template <typename T>
+std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
+  std::vector<T*> ptrs(tensors.size());
+  for (auto i = 0; i < tensors.size(); i++) {
+    ptrs[i] = static_cast<T*>(tensors[i].storage()->data());
+  }
+  return ptrs;
+}
+
 using RankType = uint32_t;
 using PortType = uint16_t;
 using SizeType = uint64_t;

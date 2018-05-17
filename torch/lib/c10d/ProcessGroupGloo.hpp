@@ -38,10 +38,10 @@ struct AlgorithmKey {
       (devices == other.devices) &&
       (srcSizes == other.srcSizes) &&
       (dstSizes == other.dstSizes) &&
-      (srcDevice == other.srcDevice) &&
-      (dstDevice == other.dstDevice) &&
       (srcRank == other.srcRank) &&
       (dstRank == other.dstRank) &&
+      (srcTensor == other.srcTensor) &&
+      (dstTensor == other.dstTensor) &&
       (reduceOp == other.reduceOp);
   }
 
@@ -50,10 +50,10 @@ struct AlgorithmKey {
   std::vector<int> devices;
   std::vector<std::vector<int64_t>> srcSizes;
   std::vector<std::vector<int64_t>> dstSizes;
-  int srcDevice = -1;
-  int dstDevice = -1;
   int srcRank = -1;
   int dstRank = -1;
+  int srcTensor = -1;
+  int dstTensor = -1;
   ReduceOp reduceOp = ReduceOp::UNUSED;
 };
 
@@ -81,10 +81,10 @@ MAKE_HASHABLE(
     t.devices,
     t.srcSizes,
     t.dstSizes,
-    t.srcDevice,
-    t.dstDevice,
     t.srcRank,
     t.dstRank,
+    t.srcTensor,
+    t.dstTensor,
     t.reduceOp);
 
 namespace c10d {
@@ -171,6 +171,8 @@ class ProcessGroupGloo : public ProcessGroup {
   std::condition_variable queueProduceCV_;
   std::condition_variable queueConsumeCV_;
 
+  std::shared_ptr<Work> enqueue(EntryType entry);
+
   std::vector<std::thread> threads_;
   bool stop_;
 
@@ -180,6 +182,9 @@ class ProcessGroupGloo : public ProcessGroup {
 
   template <typename T>
   void createAllreduce(AlgorithmEntry& entry);
+
+  template <typename T>
+  void createBroadcast(AlgorithmEntry& entry);
 };
 
 } // namespace c10d
