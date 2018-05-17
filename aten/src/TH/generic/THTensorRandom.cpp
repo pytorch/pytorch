@@ -2,6 +2,7 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.cpp"
 #else
 
+#include <cmath>
 #include "THGenerator.hpp"
 
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
@@ -314,6 +315,10 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
                             THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
                             2,
                             "invalid multinomial distribution (encountering probability entry < 0)");
+      THArgCheckWithCleanup((std::isfinite(val) > 0),
+                            THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
+                            2,
+                            "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
       sum += val;
       THDoubleStorage_set(
         cum_dist->storage, \

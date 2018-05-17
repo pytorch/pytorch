@@ -2366,6 +2366,23 @@ class TestTorch(TestCase):
     def test_multinomial(self):
         self._test_multinomial(self, torch.FloatTensor)
 
+    def test_multinomial_invalid_probs(self):
+        x = torch.Tensor([0, -1])
+        with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
+            torch.multinomial(x, 1)
+
+        x = torch.Tensor([0, float('inf')])
+        with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
+            torch.multinomial(x, 1)
+
+        x = torch.Tensor([0, float('-inf')])
+        with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
+            torch.multinomial(x, 1)
+
+        x = torch.Tensor([0, float('nan')])
+        with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
+            torch.multinomial(x, 1)
+
     @suppress_warnings
     def test_range(self):
         res1 = torch.range(0, 1)
