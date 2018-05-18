@@ -147,7 +147,7 @@ static struct PyGetSetDef THPDevice_properties[] = {
 
 PyTypeObject THPDeviceType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch.Device",                        /* tp_name */
+  "torch.device",                        /* tp_name */
   sizeof(THPDevice),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
