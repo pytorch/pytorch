@@ -2847,11 +2847,21 @@ class TestTorch(TestCase):
     def test_randperm_cuda(self):
         cuda = torch.device('cuda:0')
 
-        _RNGState = torch.cuda.get_rng_state()
+        # For small inputs, randperm is offloaded to CPU instead
+        _RNGState_cpu = torch.get_rng_state()
+        _RNGState_cuda = torch.cuda.get_rng_state()
         res1 = torch.randperm(100, device=cuda)
         res2 = torch.cuda.LongTensor()
-        torch.cuda.set_rng_state(_RNGState)
+        torch.set_rng_state(_RNGState_cpu)
+        torch.cuda.set_rng_state(_RNGState_cuda)
         torch.randperm(100, out=res2, device=cuda)
+        self.assertEqual(res1, res2, 0)
+
+        _RNGState_cuda = torch.cuda.get_rng_state()
+        res1 = torch.randperm(100000, device=cuda)
+        res2 = torch.cuda.LongTensor()
+        torch.cuda.set_rng_state(_RNGState_cuda)
+        torch.randperm(100000, out=res2, device=cuda)
         self.assertEqual(res1, res2, 0)
 
         # randperm of 0 elements is an empty tensor
