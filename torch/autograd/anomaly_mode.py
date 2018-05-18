@@ -31,11 +31,11 @@ class detect_anomaly(object):
         >>> out.backward()
             Traceback (most recent call last):
               File "<stdin>", line 1, in <module>
-              File "/your/pytorch/intall/torch/tensor.py", line 93, in backward
+              File "/your/pytorch/install/torch/tensor.py", line 93, in backward
                 torch.autograd.backward(self, gradient, retain_graph, create_graph)
-              File "/your/pytorch/intall/torch/autograd/__init__.py", line 90, in backward
+              File "/your/pytorch/install/torch/autograd/__init__.py", line 90, in backward
                 allow_unreachable=True)  # allow_unreachable flag
-              File "/your/pytorch/intall/torch/autograd/function.py", line 76, in apply
+              File "/your/pytorch/install/torch/autograd/function.py", line 76, in apply
                 return self._forward_cls.backward(self, *args)
               File "<stdin>", line 8, in backward
             RuntimeError: Some error in backward
@@ -50,11 +50,11 @@ class detect_anomaly(object):
                 out = MyFunc.apply(a)
             Traceback (most recent call last):
               File "<stdin>", line 4, in <module>
-              File "/your/pytorch/intall/torch/tensor.py", line 93, in backward
+              File "/your/pytorch/install/torch/tensor.py", line 93, in backward
                 torch.autograd.backward(self, gradient, retain_graph, create_graph)
-              File "/your/pytorch/intall/torch/autograd/__init__.py", line 90, in backward
+              File "/your/pytorch/install/torch/autograd/__init__.py", line 90, in backward
                 allow_unreachable=True)  # allow_unreachable flag
-              File "/your/pytorch/intall/torch/autograd/function.py", line 76, in apply
+              File "/your/pytorch/install/torch/autograd/function.py", line 76, in apply
                 return self._forward_cls.backward(self, *args)
               File "<stdin>", line 8, in backward
             RuntimeError: Some error in backward
