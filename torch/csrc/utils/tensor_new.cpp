@@ -96,6 +96,9 @@ static std::vector<int64_t> compute_sizes(PyObject* seq) {
     }
     if (length == 0) break;
     handle = THPObjectPtr(PySequence_GetItem(seq, 0));
+    if (!handle) {
+      throw ValueError("could not determine the shape of object type '%s'", Py_TYPE(seq)->tp_name);
+    }
     seq = handle.get();
   }
 
