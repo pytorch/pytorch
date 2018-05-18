@@ -5,8 +5,10 @@ INSTALL_PREFIX="$BUILD_PATH/install"
 PYTORCHPATH="$SCRIPTPATH/../.."
 
 NO_CUDA=ON
+USE_CUDA=OFF
 if [ -x "$(command -v nvcc)" ]; then
   NO_CUDA=OFF
+  USE_CUDA=ON
 fi
 
 CAFFE2_BUILDPATH="$BUILD_PATH/caffe2"
