@@ -216,8 +216,6 @@ def mean(g, self, dim=None, keepdim=None):
 
 
 def sum(g, self, dim=None, keepdim=None):
-    if dim is None and keepdim is None:
-        return g.op("Sum", self)
     if keepdim is None:
         keepdim = 0
     if isinstance(dim, numbers.Number):
