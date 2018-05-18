@@ -12,117 +12,6 @@ static constexpr int64_t kUnrollFactor = 8;
 static constexpr int64_t kMaxBodySize = 16;
 static constexpr int64_t kMaxBodyRepeats = 64;
 
-// XXX: only valid for for loops that will execute exactly once! Ignores the condition entirely!
-void inlineBody(Node *loop) {
-  auto graph = loop->owningGraph();
-  auto body = loop->blocks().at(0);
-  WithInsertPoint insert_point_guard { loop };
-
-  std::unordered_map<Value*, Value*> value_map;
-  auto get_value = [&](Value *v) {
-    auto it = value_map.find(v);
-    if (it != value_map.end())
-      return it->second;
-    return v;
-  };
-
-  // Loop node has extra (max_iters, initial_cond) inputs, body has an extra (loop_counter) input
-  for (size_t i = 2; i < loop->inputs().size(); ++i) {
-    value_map[body->inputs()[i - 1]] = loop->inputs()[i];
-  }
-  Node *init_counter_node = graph->insertNode(
-      graph->createConstant(at::CPU(at::kLong).scalarTensor(0)));
-  value_map[body->inputs()[0]] = init_counter_node->output();
-
-  for (Node *orig : body->nodes()) {
-    Node *clone = graph->insertNode(graph->createClone(orig, get_value));
-    for (auto orig_it = orig->outputs().begin(), clone_it = clone->outputs().begin();
-          orig_it != orig->outputs().end();
-          ++orig_it) {
-      value_map[*orig_it] = *clone_it;
-    }
-  }
-  for (size_t i = 0; i < loop->outputs().size(); ++i) {
-    loop->outputs().at(i)->replaceAllUsesWith(value_map.at(body->outputs().at(i + 1)));
-  }
-  // XXX: it is extremely important to destroy the loop in here. DCE might not be able
-  // to conclude that it's safe, because the loop might contain side effects.
-  loop->destroy();
-}
-
-void repeatBody(Block *body, int64_t times) {
-  // We will be adding nodes to it, so cache the initial start and end.
-  // XXX: they are both inclusive
-  auto body_start = body->nodes().begin();
-  auto body_end = std::prev(body->nodes().end());
-  auto graph = body->owningGraph();
-  WithInsertPoint insert_point_guard { body->return_node() };
-
-  std::unordered_map<Value*, Value*> value_map;
-  auto get_value = [&](Value *v) {
-    auto it = value_map.find(v);
-    if (it != value_map.end())
-      return it->second;
-    return v;
-  };
-
-  for (int64_t i = 1; i < times; ++i) {
-    // Update loop-carried values
-    JIT_ASSERT(body->inputs().size() == body->outputs().size());
-    for (auto input_it = std::next(body->inputs().begin()), output_it = std::next(body->outputs().begin());
-         input_it != body->inputs().end();
-         ++input_it) {
-      value_map[*input_it] = get_value(*output_it);
-    }
-    // Update the loop counter
-    Value *orig_loop_counter = body->inputs().at(0);
-    // XXX: this needs to happen before the next line, because value_map[orig_loop_counter]
-    // will insert a nullptr the first time this is run, and get_value will return nullptr in
-    // that case.
-    Value *cur_loop_counter = get_value(orig_loop_counter);
-    value_map[orig_loop_counter] = SymbolicVariable(cur_loop_counter) + at::Scalar(1);
-
-    // Clone the nodes
-    for (auto it = body_start; it != std::next(body_end); ++it) {
-      Node *orig = *it;
-      Node *clone = graph->insertNode(graph->createClone(orig, get_value));
-      for (auto orig_it = orig->outputs().begin(), clone_it = clone->outputs().begin();
-           orig_it != orig->outputs().end();
-           ++orig_it) {
-        value_map[*orig_it] = *clone_it;
-      }
-    }
-  }
-
-  const std::vector<Value*> orig_outputs = body->outputs();
-  for (int64_t i = orig_outputs.size() - 1; i >= 0; --i) {
-    body->eraseOutput(i);
-  }
-  for (Value *output : orig_outputs) {
-    body->registerOutput(value_map.at(output));
-  }
-
-  //EliminateDeadCode(body, false);
-}
-
-void multiplyTripCountBy(Block *body, int64_t factor) {
-  WithInsertPoint insert_point_guard(*body->nodes().begin());
-  Value *old_trip_count = body->inputs().at(0);
-  Value *new_trip_count = SymbolicVariable(old_trip_count) * at::Scalar(factor);
-  old_trip_count->replaceAllUsesWith(new_trip_count);
-  // Replace has changed this use as well, so we need to fix it.
-  new_trip_count->node()->replaceInput(0, old_trip_count);
-}
-
-void offsetTripCountBy(Block *body, Value *factor) {
-  WithInsertPoint insert_point_guard(*body->nodes().begin());
-  Value *old_trip_count = body->inputs().at(0);
-  Value *new_trip_count = SymbolicVariable(old_trip_count) + SymbolicVariable(factor);
-  old_trip_count->replaceAllUsesWith(new_trip_count);
-  // Replace has changed this use as well, so we need to fix it.
-  new_trip_count->node()->replaceInput(0, old_trip_count);
-}
-
 bool isTrueConstant(Value *val) {
   Node *producer = val->node();
   if (producer->kind() != prim::Constant)
@@ -164,12 +53,119 @@ at::optional<int64_t> getConstantLength(Node *loop) {
   return {trip_count->node()->t(attr::value).toCLong()};
 }
 
+// XXX: This function can only be called with a loop that is guaranteed to execute EXACTLY ONCE.
+void inlineBody(Node *loop) {
+  auto graph = loop->owningGraph();
+  auto body = loop->blocks().at(0);
+  WithInsertPoint insert_point_guard { loop };
+
+  std::unordered_map<Value*, Value*> value_map;
+  auto get_value = [&](Value *v) {
+    auto it = value_map.find(v);
+    if (it != value_map.end())
+      return it->second;
+    return v;
+  };
+
+  // Loop node has extra (max_iters, initial_cond) inputs,
+  // body has an extra (loop_counter) input.
+  for (size_t i = 2; i < loop->inputs().size(); ++i) {
+    value_map[body->inputs()[i - 1]] = loop->inputs()[i];
+  }
+
+  for (Node *orig : body->nodes()) {
+    Node *clone = graph->insertNode(graph->createClone(orig, get_value));
+    for (size_t i = 0; i < orig->outputs().size(); ++i) {
+      value_map[orig->outputs()[i]] = clone->outputs()[i];
+    }
+  }
+  for (size_t i = 0; i < loop->outputs().size(); ++i) {
+    loop->outputs().at(i)->replaceAllUsesWith(value_map.at(body->outputs().at(i + 1)));
+  }
+  // XXX: it is extremely important to destroy the loop in here. DCE might not be able
+  // to conclude that it's safe, because the loop might contain side effects.
+  loop->destroy();
+}
+
+void repeatBody(Block *body, int64_t times) {
+  // We will be adding nodes to the body, so cache the initial start and end.
+  // XXX: they are both inclusive
+  auto body_start = body->nodes().begin();
+  auto body_end = std::prev(body->nodes().end());
+  auto graph = body->owningGraph();
+  WithInsertPoint insert_point_guard { body->return_node() };
+
+  std::unordered_map<Value*, Value*> value_map;
+  auto get_value = [&](Value *v) {
+    auto it = value_map.find(v);
+    if (it != value_map.end())
+      return it->second;
+    return v;
+  };
+
+  for (int64_t i = 1; i < times; ++i) {
+    // Update loop-carried values
+    // NB: note that we don't need to worry about the loop counter, because we've
+    //     replaced it with a loop-carried variable
+    JIT_ASSERT(body->inputs().size() == body->outputs().size());
+    for (size_t i = 1; i < body->inputs().size(); ++i) {
+      value_map[body->inputs()[i]] = get_value(body->outputs()[i]);
+    }
+
+    // Clone the nodes
+    for (auto it = body_start; it != std::next(body_end); ++it) {
+      Node *orig = *it;
+      Node *clone = graph->insertNode(graph->createClone(orig, get_value));
+      for (size_t i = 0; i < orig->outputs().size(); ++i) {
+        value_map[orig->outputs()[i]] = clone->outputs()[i];
+      }
+    }
+  }
+
+  // Update outputs of the body
+  const std::vector<Value*> orig_outputs = body->outputs();
+  for (int64_t i = orig_outputs.size() - 1; i >= 0; --i) {
+    body->eraseOutput(i);
+  }
+  for (Value *output : orig_outputs) {
+    body->registerOutput(value_map.at(output));
+  }
+
+  // It's likely that we have some dead nodes now - for example the "true" constant
+  // that prevents the loop from breaking. We shouldn't wait too long before removing
+  // them because they might artificially increase the loop size and prevent outer loop
+  // unrolling.
+  EliminateDeadCode(body, false);
+}
+
+// Replaces the builtin loop counter with a "mutable" variable outside of the loop.
+void replaceLoopCounter(Node *loop) {
+  Graph *graph = loop->owningGraph();
+  Block *body = loop->blocks().at(0);
+  Node *init_counter_node = graph->createConstant(at::CPU(at::kLong).scalarTensor(0))
+                                 ->insertBefore(loop);
+  loop->insertInput(2, init_counter_node->output());
+  loop->insertOutput(0);
+
+  Value * internal_counter = body->insertInput(1);
+  body->inputs()[0]->replaceAllUsesWith(internal_counter);
+
+  WithInsertPoint insertPointGuard{ body->return_node() };
+  body->insertOutput(1, SymbolicVariable(internal_counter) + at::Scalar(1));
+}
+
 void unroll(Node *loop) {
   Graph *graph = loop->owningGraph();
   Block *body = loop->blocks().at(0);
   if (!isSmallBlock(body))
     return;
 
+  // We will be using a "mutable" counter outside of the loop instead of the default
+  // one, because this will allow us to share it between the unrolled loop and its epilogue.
+  replaceLoopCounter(loop);
+
+  // Some optimization for constant-length loops. If we know they won't run too many
+  // times, then we can unroll them entirely.
   int64_t const_len = getConstantLength(loop).value_or(-1);
   if (const_len != -1 && const_len < kMaxBodyRepeats) {
     repeatBody(body, const_len);
@@ -178,6 +174,8 @@ void unroll(Node *loop) {
   }
 
   WithInsertPoint insert_point_guard { loop };
+
+  // Clone the loop before we unroll it. The clone will become the epilogue.
   Node *loop_epilogue = graph->createClone(loop, [](Value *v) { return v; })
                              ->insertAfter(loop);
   for (size_t i = 0; i < loop->outputs().size(); ++i) {
@@ -187,13 +185,10 @@ void unroll(Node *loop) {
 
   repeatBody(body, kUnrollFactor);
 
+  // Change the iteration counts of both loops
   Value *iter_count = loop->inputs().at(0);
   loop_epilogue->replaceInput(0, SymbolicVariable(iter_count) % at::Scalar(kUnrollFactor));
   loop->replaceInput(0, SymbolicVariable(iter_count) / at::Scalar(kUnrollFactor));
-
-  Value *epilogue_offset = SymbolicVariable(iter_count) - SymbolicVariable(loop_epilogue->inputs()[0]);
-  multiplyTripCountBy(body, kUnrollFactor);
-  offsetTripCountBy(loop_epilogue->blocks().at(0), epilogue_offset);
 }
 
 void UnrollLoops(Block *block) {
