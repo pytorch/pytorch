@@ -631,7 +631,7 @@ def abs(g, self):
 
 
 def pow(g, self, exponent):
-    return g.op("Pow", self, exponent)
+    return g.op("Pow", self, _if_scalar_type_as(exponent, self), **_broadcast_if_scalar(exponent))
 
 
 def clamp(g, self, min, max):
