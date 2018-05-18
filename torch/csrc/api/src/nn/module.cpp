@@ -57,7 +57,7 @@ std::map<std::string, Variable> Module::parameters() const {
   return ret;
 }
 
-Variable Module::param(std::string const& name) {
+Variable& Module::param(std::string const& name) {
   Module* container = this;
   auto begin = 0;
   while (true) {
