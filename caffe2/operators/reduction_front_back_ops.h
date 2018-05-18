@@ -19,7 +19,7 @@ class SumReduceDimsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<int, long, float, double>>::call(
+    return DispatchHelper<TensorTypes<int, int64_t, float, double>>::call(
         this, Input(0));
   }
 
