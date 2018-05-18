@@ -458,7 +458,7 @@ class TestJit(TestCase):
             def backward(ctx, go):
                 return go
 
-        x = torch.tensor([0], requires_grad=True)
+        x = torch.tensor([0.], requires_grad=True)
 
         def fn(x):
             y = RegularFn.apply(x)
