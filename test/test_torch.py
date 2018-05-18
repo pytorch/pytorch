@@ -17,6 +17,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from itertools import product, combinations
 from functools import reduce
+from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
 
@@ -2366,22 +2367,43 @@ class TestTorch(TestCase):
     def test_multinomial(self):
         self._test_multinomial(self, torch.FloatTensor)
 
+    def _spawn_method(self, method, arg):
+        try:
+            mp.set_start_method('spawn')
+        except RuntimeError:
+            pass
+        with mp.Pool(1) as pool:
+            self.assertTrue(pool.map(method, [arg]))
+
+    @staticmethod
+    def _test_multinomial_invalid_probs(probs):
+        try:
+            torch.multinomial(probs.to('cpu'), 1)
+        except RuntimeError as e:
+            return 'invalid multinomial distribution' in str(e)
+
     def test_multinomial_invalid_probs(self):
-        x = torch.Tensor([0, -1]).to('cpu')
-        with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
-            torch.multinomial(x, 1)
+        test_method = TestTorch._test_multinomial_invalid_probs
+        self._spawn_method(test_method, torch.Tensor([0, -1]))
+        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
+        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
+        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
 
-        x = torch.Tensor([0, float('inf')]).to('cpu')
-        with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
-            torch.multinomial(x, 1)
+    @staticmethod
+    def _test_multinomial_invalid_probs_cuda(probs):
+        try:
+            torch.multinomial(probs.to('cuda'), 1)
+            torch.cuda.synchronize()
+        except RuntimeError as e:
+            return 'device-side assert triggered' in str(e)
 
-        x = torch.Tensor([0, float('-inf')]).to('cpu')
-        with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
-            torch.multinomial(x, 1)
-
-        x = torch.Tensor([0, float('nan')]).to('cpu')
-        with self.assertRaisesRegex(RuntimeError, 'invalid multinomial distribution'):
-            torch.multinomial(x, 1)
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_multinomial_invalid_probs_cuda(self):
+        test_method = TestTorch._test_multinomial_invalid_probs_cuda
+        self._spawn_method(test_method, torch.Tensor([0, -1]))
+        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
+        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
+        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
 
     @suppress_warnings
     def test_range(self):
