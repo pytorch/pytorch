@@ -21,9 +21,11 @@ def parse_kwargs(desc):
 
 
 reduceops_common_args = parse_kwargs("""
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        If specified, the input tensor is casted to :attr:`dtype` before the operation
-        is performed. This is useful for preventing data type overflows. Default: None.
+    dtype (:class:`torch.dtype`, optional): the desired data type of the returned
+        tensor and of the accumulator in which the elements are reduced. If ``None``,
+        then uses ``input.dtype``.
+        Specifying :attr:`dtype` is useful for preventing data type overflows.
+        Default: None.
 """)
 
 factory_common_args = parse_kwargs("""
