@@ -153,10 +153,10 @@ TEST_CASE("serialization") {
   SECTION("xor") {
     // We better be able to save and load a XOR model!
     auto makeModel = []() {
-      ContainerList list;
-      list.append(make(Linear(2, 8)));
-      list.append(make(Linear(8, 1)));
-      return make(list);
+      auto list = std::make_shared<ContainerList>();
+      list->append(Linear(2, 8).build());
+      list->append(Linear(8, 1).build());
+      return list;
     };
     auto getLoss = [](std::shared_ptr<ContainerList> model, uint32_t bs) {
       auto inp = at::CPU(at::kFloat).tensor({bs, 2});
@@ -206,9 +206,9 @@ TEST_CASE("serialization") {
   }
 
   SECTION("optim") {
-    auto model1 = make(Linear(5, 2));
-    auto model2 = make(Linear(5, 2));
-    auto model3 = make(Linear(5, 2));
+    auto model1 = Linear(5, 2).build();
+    auto model2 = Linear(5, 2).build();
+    auto model3 = Linear(5, 2).build();
 
     // Models 1, 2, 3 will have the same params
     std::stringstream ss;
@@ -264,10 +264,10 @@ TEST_CASE("serialization_cuda", "[cuda]") {
   SECTION("xor") {
     // We better be able to save and load a XOR model!
     auto makeModel = []() {
-      ContainerList list;
-      list.append(make(Linear(2, 8)));
-      list.append(make(Linear(8, 1)));
-      return make(list);
+      auto list = std::make_shared<ContainerList>();
+      list->append(Linear(2, 8).build());
+      list->append(Linear(8, 1).build());
+      return list;
     };
     auto getLoss = [](std::shared_ptr<ContainerList> model, uint32_t bs) {
       auto inp = at::CPU(at::kFloat).tensor({bs, 2});
