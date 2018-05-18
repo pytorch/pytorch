@@ -79,6 +79,15 @@ def get_lstm_inputs(device):
     return (input, hx, cx) + tuple(p.requires_grad_(False) for p in module.parameters())
 
 
+def get_fn(file_name, script_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(file_name, script_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    fn = module.fn
+    return fn
+
+
 class TestJit(TestCase):
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, aten=False)
@@ -994,8 +1003,6 @@ class TestScript(TestCase):
 
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_matmul_py3(self):
-        import importlib.util
-
         code = dedent("""
         def fn(a, b):
             return a @ b
@@ -1005,10 +1012,7 @@ class TestScript(TestCase):
             script_path = os.path.join(tmp_dir, 'script.py')
             with open(script_path, 'w') as f:
                 f.write(code)
-            spec = importlib.util.spec_from_file_location('test_matmul_py3', script_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            fn = module.fn
+            fn = get_fn('test_matmul_py3', script_path)
 
             a = torch.rand(4, 3, requires_grad=True)
             b = torch.rand(3, 2, requires_grad=True)
@@ -2173,10 +2177,7 @@ class TestScript(TestCase):
             script_path = os.path.join(tmp_dir, 'script.py')
             with open(script_path, 'w') as f:
                 f.write(code)
-            spec = importlib.util.spec_from_file_location('test_type_annotation_py3', script_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            fn = module.fn
+            fn = get_fn('test_type_annotation_py3', script_path)
 
             with self.assertRaisesRegex(RuntimeError, r"expected Tensor, but got"):
                 @torch.jit.script
