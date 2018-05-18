@@ -12,3 +12,4 @@ torch.utils.data
 .. autoclass:: torch.utils.data.SubsetRandomSampler
 .. autoclass:: torch.utils.data.WeightedRandomSampler
 .. autoclass:: torch.utils.data.distributed.DistributedSampler
+.. autofunction:: torch.utils.data.dataset.random_split

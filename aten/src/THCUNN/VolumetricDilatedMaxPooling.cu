@@ -57,7 +57,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
           index = t * inputH * inputW + h * inputW + w;
           Dtype val = inputData[index];
 
-          if (max < val)
+          if ((max < val) || THCNumerics<Dtype>::isnan(val))
           {
             max = val;
             maxIndex = index;

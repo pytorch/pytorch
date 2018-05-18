@@ -599,14 +599,14 @@ Args:
 
 add_docstr_all('cumprod',
                r"""
-cumprod(dim) -> Tensor
+cumprod(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumprod`
 """)
 
 add_docstr_all('cumsum',
                r"""
-cumsum(dim) -> Tensor
+cumsum(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumsum`
 """)
@@ -1407,6 +1407,24 @@ ormqr(input2, input3, left=True, transpose=False) -> Tensor
 See :func:`torch.ormqr`
 """)
 
+
+add_docstr_all('permute',
+               r"""
+permute(*dims) -> Tensor
+
+Permute the dimensions of this tensor.
+
+Args:
+    *dims (int...): The desired ordering of dimensions
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> x.permute(2, 0, 1).size()
+    torch.Size([5, 2, 3])
+""")
+
 add_docstr_all('potrf',
                r"""
 potrf(upper=True) -> Tensor
@@ -1444,7 +1462,7 @@ In-place version of :meth:`~Tensor.pow`
 
 add_docstr_all('prod',
                r"""
-prod(dim=None, keepdim=False) -> Tensor
+prod(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.prod`
 """)
@@ -1943,7 +1961,7 @@ In-place version of :meth:`~Tensor.sub`
 
 add_docstr_all('sum',
                r"""
-sum(dim=None, keepdim=False) -> Tensor
+sum(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.sum`
 """)

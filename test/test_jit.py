@@ -458,7 +458,7 @@ class TestJit(TestCase):
             def backward(ctx, go):
                 return go
 
-        x = torch.tensor([0], requires_grad=True)
+        x = torch.tensor([0.], requires_grad=True)
 
         def fn(x):
             y = RegularFn.apply(x)
@@ -2685,7 +2685,7 @@ class TestPytorchExportModes(unittest.TestCase):
             super(TestPytorchExportModes.MyModel, self).__init__()
 
         def forward(self, x):
-            return x.t()
+            return x.transpose(0, 1)
 
     def test_protobuf(self):
         torch_model = TestPytorchExportModes.MyModel()
