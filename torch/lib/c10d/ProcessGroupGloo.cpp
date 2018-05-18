@@ -274,16 +274,17 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
           key.srcTensor));
 }
 
-// Constructs an AlgorithmEntry instance, except for the Gloo
-// algorithm itself. It allocates temporary input/output tensors, CUDA
-// streams (if applicable), etcetera. These are allocated lazily for
-// every unique collective call and reused for identical collective
-// calls. They cannot be allocated asynchronously because our
-// collective functions may need thme before queueing asynchronous
-// work. For example, to work with asynchronous CUDA code, the
-// collective call needs to issue an asynchronous memory copy, and a
-// call to cudaStreamWaitEvent to make it wait for the asynchronous
-// execution of the collective call to complete.
+// Constructs an AlgorithmEntry instance, except for the algorithm
+// itself. It allocates temporary input/output tensors, CUDA streams
+// (if applicable), etcetera. These are lazily allocated and reused
+// for collective calls with the same signature.
+//
+// They cannot be allocated asynchronously because the collective
+// functions need them before queueing their asynchronous work. For
+// example, to work with asynchronous CUDA code, the collective call
+// needs to issue an asynchronous memory copy, and a call to
+// cudaStreamWaitEvent to make it wait for the asynchronous execution
+// of the collective call to complete.
 //
 // Construction of the Gloo algorithm itself it delayed until a thread
 // picks up the work, because it performs I/O and can fail. Any I/O
@@ -301,14 +302,13 @@ EntryType ProcessGroupGloo::construct(
     entry->src[i] = at::zeros(*key.type, at::IntList(srcSizes[i]));
   }
 
-  // TODO(@pietern): Create CUDA streams and events
   return std::move(entry);
 }
 
 EntryType ProcessGroupGloo::checkout(const AlgorithmKey& key) {
   std::unique_lock<std::mutex> lock(m_);
 
-  // Initialize number of entries for this key
+  // Initialize number of entries for this key.
   if (cacheCreated_.count(key) == 0) {
     cacheCreated_.emplace(key, 0);
   }
@@ -328,13 +328,14 @@ EntryType ProcessGroupGloo::checkout(const AlgorithmKey& key) {
     it = cache_.find(key);
   }
 
+  // Grab entry from the cache and return it.
   auto entry = std::move(it->second);
   cache_.erase(key);
   return std::move(entry);
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::enqueue(EntryType entry) {
-  auto work = std::shared_ptr<WorkGloo>(new WorkGloo());
+  auto work = std::make_shared<WorkGloo>();
   std::unique_lock<std::mutex> lock(m_);
   queue_.push_back(std::make_tuple(std::move(entry), work));
   queueProduceCV_.notify_one();
@@ -368,10 +369,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     for (int i = 0; i < tensors.size(); i++) {
       tensors[i].copy_(entry->src[i]);
     }
-    // TODO(@pietern): cudaEventRecord to unblock source stream
   };
 
-  // TODO(@pietern): cudaStreamWaitEvent on source stream
   return enqueue(std::move(entry));
 }
 
@@ -401,10 +400,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     for (int i = 0; i < tensors.size(); i++) {
       tensors[i].copy_(entry->src[i]);
     }
-    // TODO(@pietern): cudaEventRecord to unblock source stream
   };
 
-  // TODO(@pietern): cudaStreamWaitEvent on source stream
   return enqueue(std::move(entry));
 }
 

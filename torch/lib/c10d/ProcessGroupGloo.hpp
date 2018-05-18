@@ -26,9 +26,10 @@ namespace c10d {
 // destination device, source rank, destination rank, reduction type
 // (if applicable), etcetera. This key is used to cache instances of a
 // Gloo algorithm for reuse. The number of cached instances can vary
-// over time and is agreed upon between all processes in the group. It
-// is also used in identifying the algorithm type for which to change
-// the maximum alotted number of instances.
+// over time and is agreed upon between all processes in the group.
+//
+// When we're dealing with multiple entries per key, it is also used
+// to broadcast the number of entries such that all processes agree.
 //
 struct AlgorithmKey {
   bool operator==(const AlgorithmKey &other) const {
@@ -57,6 +58,21 @@ struct AlgorithmKey {
   ReduceOp reduceOp = ReduceOp::UNUSED;
 };
 
+// AlgorithmEntry is the state associated with a single algorithm instance.
+//
+// Keeping Gloo algorithms around for reuse is a win, since most of
+// them end up allocating some memory, constructing them takes some
+// time, and they may do some I/O (to setup communication buffers
+// between processes). Also, until it supports executing on arbitrary
+// memory, we need to hold on to memory that we instantiated the
+// algorithm with. The lifecycle of memory in ATen is arbitrary, so to
+// do caching, this entry holds on to memory that we copy to/from.
+//
+// Every unique call (in terms of number of tensors, tensor types,
+// tensor sizes, etc.) gets its own entry. In the future we may extend
+// this to allow multiple entries per unique call, to better exploit
+// parallelism for calls with the same signature.
+//
 struct AlgorithmEntry {
   AlgorithmKey key;
   std::unique_ptr<::gloo::Algorithm> algorithm;
@@ -64,10 +80,9 @@ struct AlgorithmEntry {
   std::vector<at::Tensor> dst;
   std::function<void(std::unique_ptr<AlgorithmEntry>&)> run;
 
-  explicit AlgorithmEntry() {
-  }
+  AlgorithmEntry() {}
 
-  // Must not be copied
+  // Must not be copyable
   AlgorithmEntry & operator=(const AlgorithmEntry&) = delete;
   AlgorithmEntry(const AlgorithmEntry&) = delete;
 };
@@ -89,9 +104,32 @@ MAKE_HASHABLE(
 
 namespace c10d {
 
+// ProcessGroupGloo implements Gloo bindings for c10d.
+//
+// All functions on this class are expected to be called in the same
+// order across processes in the group. This is the only way that we
+// can guarantee to match up the same calls across processes. For
+// multi-threaded usage of process groups, you can use consider using
+// multiple process group instances.
+//
+// The Gloo algorithms that this class calls into are cached by their
+// signature (see description of AlgorithmKey above). This cache works
+// as follows: every function call instantiates an AlgorithmKey and
+// looks in the cache for existing entries. If there is one, it is
+// removed from the cache and returned to the caller. If there are
+// none, a new entry is created and returned. If an entry was created
+// before, but is still in use, the call will block and wait until the
+// entry is returned to the cache.
+//
+// In the future, we hope to extend this to allow multiple entries per
+// key, to enable parallelism for a single key. The number of entries
+// per key must always be identical for all processes. This maximum
+// number can be automatically tuned, but only if we let a single
+// process take charge, and have it broadcast the limits.
+//
 class ProcessGroupGloo : public ProcessGroup {
  public:
-  class WorkGloo : public Work {
+  class WorkGloo : public ProcessGroup::Work {
    public:
     explicit WorkGloo();
     virtual ~WorkGloo();
@@ -152,32 +190,19 @@ class ProcessGroupGloo : public ProcessGroup {
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
  protected:
-  std::unique_ptr<::gloo::rendezvous::Store> store_;
-  std::vector<std::shared_ptr<::gloo::Context>> contexts_;
-
   using KeyType = AlgorithmKey;
   using EntryType = std::unique_ptr<AlgorithmEntry>;
-
-  EntryType construct(const KeyType& key);
-  EntryType checkout(const KeyType& key);
-
-  std::mutex m_;
-  std::unordered_map<KeyType, int> cacheCreated_;
-  std::unordered_map<KeyType, EntryType> cache_;
-  std::condition_variable cacheCV_;
-
   using WorkType = std::tuple<EntryType, std::shared_ptr<WorkGloo>>;
-  std::deque<WorkType> queue_;
-  std::condition_variable queueProduceCV_;
-  std::condition_variable queueConsumeCV_;
 
-  std::shared_ptr<Work> enqueue(EntryType entry);
-
+  std::unique_ptr<::gloo::rendezvous::Store> store_;
+  std::vector<std::shared_ptr<::gloo::Context>> contexts_;
   std::vector<std::thread> threads_;
   bool stop_;
 
   void runLoop(void);
+
   void runSingle(WorkType work);
+
   void createAlgorithm(AlgorithmEntry& entry);
 
   template <typename T>
@@ -185,6 +210,21 @@ class ProcessGroupGloo : public ProcessGroup {
 
   template <typename T>
   void createBroadcast(AlgorithmEntry& entry);
+
+  EntryType construct(const KeyType& key);
+
+  EntryType checkout(const KeyType& key);
+
+  std::mutex m_;
+  std::unordered_map<KeyType, int> cacheCreated_;
+  std::unordered_map<KeyType, EntryType> cache_;
+  std::condition_variable cacheCV_;
+
+  std::shared_ptr<Work> enqueue(EntryType entry);
+
+  std::deque<WorkType> queue_;
+  std::condition_variable queueProduceCV_;
+  std::condition_variable queueConsumeCV_;
 };
 
 } // namespace c10d
