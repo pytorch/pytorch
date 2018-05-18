@@ -14,6 +14,7 @@ torch.egg-info/
 */**/__pycache__
 aten/build/
 aten/src/ATen/Config.h
+aten/src/ATen/cuda/CUDAConfig.h
 third_party/build/
 torch/version.py
 torch/csrc/generic/TensorMethods.cpp
@@ -64,6 +65,7 @@ test/cpp/api/mnist
 *.swn
 *.swo
 *.swp
+*.swm
 *~
 
 # macOS dir files

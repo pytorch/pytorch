@@ -96,6 +96,34 @@ def constant_(tensor, val):
         return tensor.fill_(val)
 
 
+def ones_(tensor):
+    r"""Fills the input Tensor with ones`.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+
+    Examples:
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.ones_(w)
+    """
+    with torch.no_grad():
+        return tensor.fill_(1)
+
+
+def zeros_(tensor):
+    r"""Fills the input Tensor with zeros`.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+
+    Examples:
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.zeros_(w)
+    """
+    with torch.no_grad():
+        return tensor.zero_()
+
+
 def eye_(tensor):
     r"""Fills the 2-dimensional input `Tensor` with the identity
     matrix. Preserves the identity of the inputs in `Linear` layers, where as

@@ -13,20 +13,22 @@ import caffe2.python.ideep_test_util as mu
 
 @unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
 class ReluTest(hu.HypothesisTestCase):
-    @given(size=st.integers(8, 20),
-           input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
+    @given(X=hu.tensor(),
            inplace=st.booleans(),
            **mu.gcs)
-    def test_relu(self, size, input_channels, batch_size, inplace, gc, dc):
+    def test_relu(self, X, inplace, gc, dc):
         op = core.CreateOperator(
             "Relu",
             ["X"],
             ["Y"] if not inplace else ["X"],
         )
-        X = np.random.rand(
-            batch_size, input_channels, size, size).astype(np.float32) - 0.5
+        # go away from the origin point to avoid kink problems
+        X += 0.02 * np.sign(X)
+        X[X == 0.0] += 0.02
+
         self.assertDeviceChecks(dc, op, [X], [0])
+
+        self.assertGradientChecks(gc, op, [X], 0, [0])
 
 
 if __name__ == "__main__":

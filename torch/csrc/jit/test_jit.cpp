@@ -24,6 +24,7 @@
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/assertions.h"
 
@@ -442,7 +443,7 @@ void interpTest() {
     auto w_hh  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, hidden_size}));
 
     auto lstm_g = build_lstm();
-    Code lstm_function(lstm_g, /*values_are_variables=*/false);
+    Code lstm_function(lstm_g);
     std::vector<at::Tensor> outputs;
     InterpreterState lstm_interp(lstm_function);
     runOneStage(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
@@ -468,7 +469,7 @@ void interpStageTest() {
 
 
     auto lstm_g = build_lstm_stages();
-    Code lstm_function(lstm_g, /*values_are_variables=*/false);
+    Code lstm_function(lstm_g);
     std::vector<at::Tensor> outputs;
     InterpreterState lstm_interp(lstm_function);
     runOneStage(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
@@ -546,8 +547,8 @@ std::pair<tensor_list, tensor_list> runGradient(Gradient& grad_spec,
                                                 tensor_list& tensors_in,
                                                 tensor_list& tensor_grads_in) {
   tensor_list tensors_out, tensor_grads_out;
-  Code f_code{grad_spec.f, /*values_are_variables=*/false},
-      df_code{grad_spec.df, /*values_are_variables=*/false};
+  Code f_code{grad_spec.f},
+      df_code{grad_spec.df};
   InterpreterState f_interpreter { f_code }, df_interpreter { df_code };
 
   runOneStage(f_interpreter, tensors_in, tensors_out);
@@ -866,13 +867,13 @@ void testControlFlow() {
   script::defineMethodsInModule(cu, cf_examples, torch::jit::script::Resolver(), nullptr);
   auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
     auto graph = cu.get_method(name).graph();
-    Code code(graph, /*values_are_variables=*/false);
+    Code code(graph);
     InterpreterState interp(code);
     interp.runOneStage(stack);
     return stack;
   };
 
-  auto L = [](int64_t l) { return at::Scalar(l).toTensor(); };
+  auto L = [](int64_t l) { return autograd::make_variable(at::Scalar(l).toTensor()); };
   auto V = [](at::Tensor t) { return at::Scalar(t).toLong(); };
   auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);

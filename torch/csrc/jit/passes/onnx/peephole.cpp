@@ -92,6 +92,7 @@ void fuseBroadcast(Block *b) {
 
     // The expanded_rhs input isn't actually an expand, so no fusion available
     if (expanded_rhs->kind() != aten::expand) continue;
+    if (expanded_rhs->inputs().size() != 1) continue;
 
     auto* unexpanded_rhs = expanded_rhs->input();
 
@@ -220,6 +221,17 @@ void pushPackingPastRnn(Block *b) {
     if(rnn->owningBlock() != n->owningBlock())
       continue;
 
+    // The rnn is followed by a reshape (if bidirectional), and then
+    // by a squeeze (always).
+    Node * next = rnn->outputs()[0]->uses()[0].user;
+    Node * squeeze = next->kind() == onnx::Reshape
+      ? next->outputs()[0]->uses()[0].user
+      : next
+      ;
+    if (squeeze->kind() != onnx::Squeeze) {
+      continue;
+    }
+
     // remove PackPadded from in front of the RNN
     n->outputs()[0]->replaceAllUsesWith(n->inputs()[0]);
 
@@ -229,14 +241,14 @@ void pushPackingPastRnn(Block *b) {
 
     // and insert new PackPadded after the RNN
     Node * newPackPadded = b->owningGraph()->create(prim::PackPadded, 2);
-    newPackPadded->insertAfter(rnn);
+    newPackPadded->insertAfter(squeeze);
 
     // make things consume from the new PackPadded
-    rnn->outputs()[0]->replaceAllUsesWith(newPackPadded->outputs()[0]);
+    squeeze->outputs()[0]->replaceAllUsesWith(newPackPadded->outputs()[0]);
     n->outputs()[1]->replaceAllUsesWith(newPackPadded->outputs()[1]);
 
     // setup the new PackPadded's inputs
-    newPackPadded->addInput(rnn->outputs()[0]);
+    newPackPadded->addInput(squeeze->outputs()[0]);
     newPackPadded->addInput(n->inputs()[1]);
 
     it.destroyCurrent();

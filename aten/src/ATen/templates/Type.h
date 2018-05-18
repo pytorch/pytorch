@@ -63,7 +63,7 @@ struct AT_API Type {
   virtual bool is_sparse() const = 0;
   virtual bool is_distributed() const = 0;
   bool is_variable_or_undefined() const noexcept { return is_variable_or_undefined_; }
-  static void registerAll(Context * context);
+  static void registerCPU(Context * context);
   virtual std::unique_ptr<Storage> storage() const = 0;
   virtual std::unique_ptr<Storage> storage(size_t size) const = 0;
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
@@ -84,6 +84,7 @@ struct AT_API Type {
   Tensor copy(const Tensor & src, bool non_blocking=false) const;
   Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const;
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
+  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const = 0;
 
   Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const;
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const;

@@ -1,7 +1,5 @@
 #include "caffe2/core/predictor.h"
-#if CAFFE2_MOBILE
-#include "caffe2/core/init.h"
-#endif
+#include "caffe2/opt/optimizer.h"
 
 #include <unordered_set>
 
@@ -84,14 +82,17 @@ Predictor::Predictor(
     const NetDef& init_net,
     const NetDef& run_net,
     Workspace* parent,
-    bool run_init)
+    bool run_init,
+    int optimization)
     : run_net_(run_net), ws_(parent) {
+
   if (run_init) {
     CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
   }
-#if CAFFE2_MOBILE
-  GlobalInit();
-#endif
+
+  if (optimization) {
+    run_net_ = opt::optimize(run_net_, &ws_, optimization);
+  }
 
   // real model inputs can be fed later in run* functions
   const auto& initialized_vec = ws_.Blobs();
@@ -103,6 +104,7 @@ Predictor::Predictor(
       blob->template GetMutable<TensorCPU>();
     }
   }
+
   CAFFE_ENFORCE(ws_.CreateNet(run_net));
 }
 

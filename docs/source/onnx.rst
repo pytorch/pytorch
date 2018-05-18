@@ -16,9 +16,16 @@ saves the resulting traced model to ``alexnet.proto``::
     dummy_input = Variable(torch.randn(10, 3, 224, 224)).cuda()
     model = torchvision.models.alexnet(pretrained=True).cuda()
 
-    # providing these is optional, but makes working with the
-    # converted model nicer.
-    input_names = [ "learned_%d" % i for i in range(16) ] + [ "actual_input_1" ]
+    # Providing input and output names sets the display names for values
+    # within the model's graph. Setting these does not change the semantics
+    # of the graph; it is only for readability.
+    #
+    # The inputs to the network consist of the flat list of inputs (i.e.
+    # the values you would pass to the forward() method) followed by the
+    # flat list of parameters. You can partially specify names, i.e. provide
+    # a list here shorter than the number of inputs to the model, and we will
+    # only set that subset of names, starting from the beginning.
+    input_names = [ "actual_input_1" ] + [ "learned_%d" % i for i in range(16) ]
     output_names = [ "output1" ]
 
     torch.onnx.export(model, dummy_input, "alexnet.proto", verbose=True, input_names=input_names, output_names=output_names)
@@ -28,36 +35,33 @@ the network structure and parameters of the model you exported
 (in this case, AlexNet).  The keyword argument ``verbose=True`` causes the
 exporter to print out a human-readable representation of the network::
 
-    # All parameters are encoded explicitly as inputs.  By convention,
-    # learned parameters (ala nn.Module.state_dict) are first, and the
-    # actual inputs are last.
-    graph(%learned_0 : Float(10, 3, 224, 224)
-          %learned_1 : Float(64, 3, 11, 11)
-          # The definition sites of all variables are annotated with type
-          # information, specifying the type and size of tensors.
-          # For example, %learned_2 is a 192 x 64 x 5 x 5 tensor of floats.
-          %learned_2 : Float(64)
-          %learned_3 : Float(192, 64, 5, 5)
+    # These are the inputs and parameters to the network, which have taken on
+    # the names we specified earlier.
+    graph(%actual_input_1 : Float(10, 3, 224, 224)
+          %learned_0 : Float(64, 3, 11, 11)
+          %learned_1 : Float(64)
+          %learned_2 : Float(192, 64, 5, 5)
+          %learned_3 : Float(192)
           # ---- omitted for brevity ----
-          %learned_14 : Float(4096)
-          %learned_15 : Float(1000, 4096)
-          %actual_input_1 : Float(1000)) {
+          %learned_14 : Float(1000, 4096)
+          %learned_15 : Float(1000)) {
       # Every statement consists of some output tensors (and their types),
       # the operator to be run (with its attributes, e.g., kernels, strides,
-      # etc.), its input tensors (%learned_0, %learned_1, %learned_2)
-      %17 : Float(10, 64, 55, 55) = Conv[dilations=[1, 1], group=1, kernel_shape=[11, 11], pads=[2, 2, 2, 2], strides=[4, 4]](%learned_0, %learned_1, %learned_2), scope: AlexNet/Sequential[features]/Conv2d[0]
-      %18 : Float(10, 64, 55, 55) = Relu(%17), scope: AlexNet/Sequential[features]/ReLU[1]
-      %19 : Float(10, 64, 27, 27) = MaxPool[kernel_shape=[3, 3], pads=[0, 0, 0, 0], strides=[2, 2]](%18), scope: AlexNet/Sequential[features]/MaxPool2d[2]
+      # etc.), its input tensors (%actual_input_1, %learned_0, %learned_1)
+      %17 : Float(10, 64, 55, 55) = onnx::Conv[dilations=[1, 1], group=1, kernel_shape=[11, 11], pads=[2, 2, 2, 2], strides=[4, 4]](%actual_input_1, %learned_0, %learned_1), scope: AlexNet/Sequential[features]/Conv2d[0]
+      %18 : Float(10, 64, 55, 55) = onnx::Relu(%17), scope: AlexNet/Sequential[features]/ReLU[1]
+      %19 : Float(10, 64, 27, 27) = onnx::MaxPool[kernel_shape=[3, 3], pads=[0, 0, 0, 0], strides=[2, 2]](%18), scope: AlexNet/Sequential[features]/MaxPool2d[2]
       # ---- omitted for brevity ----
-      %29 : Float(10, 256, 6, 6) = MaxPool[kernel_shape=[3, 3], pads=[0, 0, 0, 0], strides=[2, 2]](%28), scope: AlexNet/Sequential[features]/MaxPool2d[12]
-      %30 : Float(10, 9216) = Flatten[axis=1](%29), scope: AlexNet
-      # UNKNOWN_TYPE: sometimes type information is not known.  We hope to eliminate
-      # all such cases in a later release.
-      %31 : Float(10, 9216), %32 : UNKNOWN_TYPE = Dropout[is_test=1, ratio=0.5](%30), scope: AlexNet/Sequential[classifier]/Dropout[0]
-      %33 : Float(10, 4096) = Gemm[alpha=1, beta=1, broadcast=1, transB=1](%31, %learned_11, %learned_12), scope: AlexNet/Sequential[classifier]/Linear[1]
+      %29 : Float(10, 256, 6, 6) = onnx::MaxPool[kernel_shape=[3, 3], pads=[0, 0, 0, 0], strides=[2, 2]](%28), scope: AlexNet/Sequential[features]/MaxPool2d[12]
+      # Dynamic means that the shape is not known. This may be because of a
+      # limitation of our implementation (which we would like to fix in a
+      # future release) or shapes which are truly dynamic.
+      %30 : Dynamic = onnx::Shape(%29), scope: AlexNet
+      %31 : Dynamic = onnx::Slice[axes=[0], ends=[1], starts=[0]](%30), scope: AlexNet
+      %32 : Long() = onnx::Squeeze[axes=[0]](%31), scope: AlexNet
+      %33 : Long() = onnx::Constant[value={9216}](), scope: AlexNet
       # ---- omitted for brevity ----
-      %output1 : Float(10, 1000) = Gemm[alpha=1, beta=1, broadcast=1, transB=1](%38, %learned_15, %actual_input_1), scope: AlexNet/Sequential[classifier]/Linear[6]
-      # Finally, a network returns some tensors
+      %output1 : Float(10, 1000) = onnx::Gemm[alpha=1, beta=1, broadcast=1, transB=1](%45, %learned_14, %learned_15), scope: AlexNet/Sequential[classifier]/Linear[6]
       return (%output1);
     }
 

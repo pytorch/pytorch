@@ -89,11 +89,18 @@ ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formal
 # the superclass.  But it doesn't seem to be harmful.
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
-    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
+    const auto& self_ty = *this;
+    (void)self_ty;
+    ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
+}
+""")
+TYPE_DERIVED_DEFINITION_NATIVE_MISSING = CodeTemplate("""\
+${return_type} ${Type}::${api_name}(${type_method_formals}) const {
+    AT_ERROR("${api_name} not supported on ${Type}");
 }
 """)
 TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
-${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
+${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
 
 # 6. add non-virtual declaration to Tensor.h
@@ -1162,7 +1169,7 @@ def create_derived(backend_type_env, declarations):
         is_nn = option['mode'] == 'NN'
         actuals = get_arguments(cimpl['arguments'], option)
         if is_cuda or is_nn:
-            actuals = ['context->thc_state'] + actuals
+            actuals = ['context->getTHCState()'] + actuals
 
         cname = cimpl['cname']
         if option.get('sparse', False):
@@ -1400,14 +1407,15 @@ def create_derived(backend_type_env, declarations):
                     backend_type_env['ScalarName'])
             if pair in option['backend_type_pairs']:
                 native_dispatch = dispatch.get(pair[0])
-                if native_dispatch is None:
-                    raise Exception('could not find backend {} in native function dispatch specification {}'
-                                    .format(pair[0], dispatch))
-                option['native_type_method_dispatch'] = native_dispatch
                 type_object_declarations.append(
                     TYPE_DERIVED_DECLARATION.substitute(env))
-                type_object_definitions.append(
-                    TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
+                if native_dispatch is None:
+                    type_object_definitions.append(
+                        TYPE_DERIVED_DEFINITION_NATIVE_MISSING.substitute(env))
+                else:
+                    option['native_type_method_dispatch'] = native_dispatch
+                    type_object_definitions.append(
+                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:

@@ -4,7 +4,7 @@ CUDA used to build PyTorch: 9.0.X
 
 OS: Ubuntu 16.04.X LTS
 GCC version: (Ubuntu 5.4.0-6ubuntu1~16.04.9) 5.4.0 20160609
-CMake version: version 3.9.X
+CMake version: version 3.11.X
 
 Python version: 3.6
 Is CUDA available: Yes

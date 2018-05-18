@@ -61,6 +61,10 @@ def _broadcast_if_scalar(x):
         return {"broadcast_i": 1}
 
 
+def _is_value(x):
+    return isinstance(x, torch._C.Value)
+
+
 def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
 
@@ -155,6 +159,10 @@ def div(g, self, other):
     return g.op("Div", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
 
 
+def reciprocal(g, self):
+    return g.op("Div", _if_scalar_type_as(torch.ones(1), self), self, broadcast_i=1)
+
+
 # This syntax is Python 2 portable
 def cat(g, *tensors, **kwargs):
     dim = kwargs.pop("dim")
@@ -236,7 +244,7 @@ def t(g, self):
 
 
 # There is no translation for it, but we don't want to raise an error yet
-def expand(g, self, size):
+def expand(g, self, size, implicit):
     return None
 
 
@@ -262,6 +270,13 @@ def embedding_bag(g,
                 sparse_i=sparse)
 
 
+def size(g, self, dim):
+    if _is_value(dim):
+        raise RuntimeError("ONNX export only supports constant dim values in .size()")
+    full_shape = g.op("Shape", self)
+    return select(g, full_shape, dim=0, index=dim)
+
+
 def transpose(g, self, dim0, dim1):
     if dim0 == dim1:  # micro-optimization
         return self
@@ -279,12 +294,25 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
-    if self.isTensor():
-        self_sizes = self.type().sizes()
-        if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
-            return g.op("Flatten", self, axis_i=1)
-    shape = g.op("Constant", value_t=torch.LongTensor(size))
+    if _is_value(size):
+        shape = size
+    else:
+        if self.isTensor():
+            self_sizes = self.type().sizes()
+            if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
+                return g.op("Flatten", self, axis_i=1)
+        shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
+
+
+def stack(g, *tensors, **kwargs):
+    dim = kwargs.pop('dim')
+    if kwargs:
+        raise RuntimeError("Unexpected kwargs: " + ','.join(kwargs.keys()))
+    if len(tensors) < 2:
+        raise RuntimeError("Expected at least two arguments to stack node")
+    unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in tensors]
+    return g.op("Concat", *unsqueezed, axis_i=dim)
 
 
 def split(g, self, split_size, dim):
@@ -423,28 +451,31 @@ def max_pool3d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     return r, None
 
 
-def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
-    if ceil_mode:
-        return _unimplemented("avg_pool2d", "ceil_mode")
-    if not stride:
-        stride = kernel_size
-    # TODO: What about count_include_pad?!
-    return g.op("AveragePool", input,
-                kernel_shape_i=_pair(kernel_size),
-                strides_i=_pair(stride),
-                pads_i=_pair(padding) * 2)
+def _avg_pool(name, tuple_fn):
+    def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
+        if ceil_mode:
+            return _unimplemented("avg_pool2d", "ceil_mode")
+        if not stride:
+            stride = kernel_size
+
+        padding = tuple(tuple_fn(padding))
+        if count_include_pad:
+            input = g.op("Pad", input,
+                         pads_i=((0,) * 2 + padding) * 2,
+                         mode_s='constant',
+                         value_f=0.)
+            padding = (0,) * len(padding)
+
+        return g.op("AveragePool", input,
+                    kernel_shape_i=tuple_fn(kernel_size),
+                    strides_i=tuple_fn(stride),
+                    pads_i=padding * 2)
+    return symbolic_fn
 
 
-def avg_pool3d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
-    if ceil_mode:
-        return _unimplemented("avg_pool3d", "ceil_mode")
-    if not stride:
-        stride = kernel_size
-    # TODO: What about count_include_pad?!
-    return g.op("AveragePool", input,
-                kernel_shape_i=_triple(kernel_size),
-                strides_i=_triple(stride),
-                pads_i=_triple(padding) * 2)
+avg_pool1d = _avg_pool('avg_pool1d', _single)
+avg_pool2d = _avg_pool('avg_pool2d', _pair)
+avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
 def reflection_pad(g, input, padding):
@@ -474,7 +505,9 @@ def upsample_nearest2d(g, input, scale_factor):
                 height_scale_f=scale_factor, mode_s="nearest")
 
 
-def upsample_bilinear2d(g, input, output_size):
+def upsample_bilinear2d(g, input, output_size, align_corners):
+    if align_corners:
+        return _unimplemented("upsample_bilinear2d", "align_corners == True")
     w_scale = float(output_size[-1]) / input.type().sizes()[-1]
     h_scale = float(output_size[-2]) / input.type().sizes()[-2]
     return g.op("Upsample", input, width_scale_f=w_scale,
@@ -487,6 +520,14 @@ def gt(g, input, other):
 
 def lt(g, input, other):
     return g.op("Less", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+
+
+def ge(g, input, other):
+    return g.op("Not", lt(g, other, input))
+
+
+def le(g, input, other):
+    return g.op("Not", gt(g, other, input))
 
 
 def log_softmax(g, input, dim=None):
@@ -576,8 +617,8 @@ def type_as(g, self, other):
         # no-op
         return self
     else:
-        # TODO: This should be pretty easy, just implement it with Cast
-        return _unimplemented("type_as", "non no-op application")
+        other_type_name = self.type().scalarType().lower()
+        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
 
 
 # ignore clone operators that are inserted by PyTorch autograd
@@ -590,7 +631,7 @@ def abs(g, self):
 
 
 def pow(g, self, exponent):
-    return g.op("Pow", self, exponent)
+    return g.op("Pow", self, _if_scalar_type_as(exponent, self), **_broadcast_if_scalar(exponent))
 
 
 def clamp(g, self, min, max):
@@ -729,11 +770,11 @@ def instance_norm(g, input, **kwargs):
 
 def RNN_symbolic_builder(cell_type, *args, **kwargs):
     if cell_type == 'LSTM':
-        return LSTM_symbolic_builder(*args, **kwargs)
+        return RNN_variant_symbolic_builder('LSTM', *args, **kwargs)
     elif cell_type == 'GRU':
-        return GRU_symbolic_builder(*args, **kwargs)
+        return RNN_variant_symbolic_builder('GRU', *args, **kwargs)
     elif cell_type.startswith('RNN_'):
-        return Elman_RNN_symbolic_builder(cell_type[4:], *args, **kwargs)
+        return RNN_variant_symbolic_builder('RNN', *args, nonlinearity=cell_type[4:], **kwargs)
     else:
         return lambda *args, **kwargs: _unimplemented("RNN", "cell type " + cell_type)
 
@@ -741,159 +782,6 @@ def RNN_symbolic_builder(cell_type, *args, **kwargs):
 def reform_weights(g, w, n, intervals):
     slices = [g.op('Slice', w, axes_i=[0], starts_i=[x * n], ends_i=[y * n]) for x, y in intervals]
     return g.op('Concat', *slices, axis_i=0)
-
-
-def Elman_RNN_symbolic_builder(
-        nonlinearity, input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    def symbolic(g, input, all_weights, h0, batch_sizes):
-        if batch_first:
-            return _unimplemented("RNN", "batch_first")
-        if dropout and kwargs['train']:
-            return _unimplemented("RNN", "dropout in training mode")
-
-        unidirectional = not bidirectional
-
-        prev_output = input
-        h_outs = []
-
-        sequence_lens = unused(g) if batch_sizes is None else batch_sizes
-
-        for i in range(num_layers):
-            if unidirectional:
-                weight_ih, weight_hh, bias_ih, bias_hh = all_weights[i]
-                bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
-            else:
-                weight_ih = g.op('Concat', all_weights[2 * i][0], all_weights[2 * i + 1][0], axis_i=0)
-                weight_hh = g.op('Concat', all_weights[2 * i][1], all_weights[2 * i + 1][1], axis_i=0)
-                bias_concat = g.op('Concat',
-                                   all_weights[2 * i][2],
-                                   all_weights[2 * i][3],
-                                   all_weights[2 * i + 1][2],
-                                   all_weights[2 * i + 1][3],
-                                   axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
-
-            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in]
-            extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
-            prev_output, h_out = g.op('RNN', *inputs, outputs=2,
-                                      hidden_size_i=hidden_size,
-                                      activations_s=[nonlinearity.lower()],
-                                      **extra_kwargs)
-            h_outs.append(h_out)
-        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
-        return prev_output, h_outs
-
-    return symbolic
-
-
-def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    def symbolic(g, input, all_weights, h0_and_c0, batch_sizes):
-        if batch_first:
-            return _unimplemented("LSTM", "batch_first")
-        if dropout and kwargs['train']:
-            return _unimplemented("RNN", "dropout in training mode")
-
-        unidirectional = not bidirectional
-
-        h0, c0 = h0_and_c0
-
-        prev_output = input
-        h_outs = []
-        c_outs = []
-
-        sequence_lens = unused(g) if batch_sizes is None else batch_sizes
-
-        for i in range(num_layers):
-            if unidirectional:
-                # pytorch is input, forget, cell, output.
-                # onnx is    input, output, forget, cell.
-                weight_ih, weight_hh, bias_ih, bias_hh = \
-                    [reform_weights(g, w, hidden_size, [(0, 1), (3, 4), (1, 3)]) for w in all_weights[i]]
-
-                bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
-                c_in = c0 if num_layers == 1 else g.op('Slice', c0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
-            else:
-                # pytorch is input, forget, cell, output.
-                # onnx is    input, output, forget, cell.
-                weight_ih_f, weight_hh_f, bias_ih_f, bias_hh_f = \
-                    [reform_weights(g, w, hidden_size, [(0, 1), (3, 4), (1, 3)]) for w in all_weights[2 * i]]
-                weight_ih_b, weight_hh_b, bias_ih_b, bias_hh_b = \
-                    [reform_weights(g, w, hidden_size, [(0, 1), (3, 4), (1, 3)]) for w in all_weights[2 * i + 1]]
-
-                weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
-                weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
-                bias_concat = g.op('Concat', bias_ih_f, bias_hh_f, bias_ih_b, bias_hh_b, axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
-                c_in = c0 if num_layers == 1 else g.op('Slice', c0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
-
-            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in, c_in]
-            extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
-            prev_output, h_out, c_out = g.op('LSTM', *inputs, outputs=3,
-                                             hidden_size_i=hidden_size,
-                                             **extra_kwargs)
-            h_outs.append(h_out)
-            c_outs.append(c_out)
-        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
-        c_outs = c_out if num_layers == 1 else g.op('Concat', *c_outs, axis_i=0)
-        return prev_output, h_outs, c_outs
-
-    return symbolic
-
-
-def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    def symbolic(g, input, all_weights, h0, batch_sizes):
-        if batch_first:
-            return _unimplemented("GRU", "batch_first")
-        if dropout and kwargs['train']:
-            return _unimplemented("RNN", "dropout in training mode")
-
-        unidirectional = not bidirectional
-
-        prev_output = input
-        h_outs = []
-
-        sequence_lens = unused(g) if batch_sizes is None else batch_sizes
-
-        for i in range(num_layers):
-            if unidirectional:
-                # pytorch is reset, input, hidden
-                # onnx is    input, reset, hidden
-                weight_ih, weight_hh, bias_ih, bias_hh = \
-                    [reform_weights(g, w, hidden_size, [(1, 2), (0, 1), (2, 3)]) for w in all_weights[i]]
-
-                bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
-            else:
-                # pytorch is reset, input, hidden
-                # onnx is    input, reset, hidden
-                weight_ih_f, weight_hh_f, bias_ih_f, bias_hh_f = \
-                    [reform_weights(g, w, hidden_size, [(1, 2), (0, 1), (2, 3)]) for w in all_weights[2 * i]]
-                weight_ih_b, weight_hh_b, bias_ih_b, bias_hh_b = \
-                    [reform_weights(g, w, hidden_size, [(1, 2), (0, 1), (2, 3)]) for w in all_weights[2 * i + 1]]
-
-                weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
-                weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
-                bias_concat = g.op('Concat', bias_ih_f, bias_hh_f, bias_ih_b, bias_hh_b, axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
-
-            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in]
-            extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
-            prev_output, h_out = g.op('GRU', *inputs, outputs=2,
-                                      hidden_size_i=hidden_size, linear_before_reset_i=1,
-                                      **extra_kwargs)
-            h_outs.append(h_out)
-        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
-        return prev_output, h_outs
-
-    return symbolic
 
 
 # WARNING: Here be dragons. i.e. this is a hack that should die in a fire
@@ -1004,3 +892,99 @@ def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens
         symbolic_flattened_wrapper
     )
     return tuple(o for o in outputs)
+
+
+def RNN_variant_symbolic_builder(
+        variant, input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
+    def symbolic(g, input, all_weights, initial_states, batch_sizes):
+        if batch_first:
+            return _unimplemented("RNN/GRU/LSTM", "batch_first")
+        if dropout and kwargs['train']:
+            return _unimplemented("RNN/GRU/LSTM", "dropout in training mode")
+
+        unidirectional = not bidirectional
+
+        prev_output = input
+
+        h_outs = []
+        if variant == 'RNN' or variant == 'GRU':
+            h0 = initial_states
+        elif variant == 'LSTM':
+            h0, c0 = initial_states
+            c_outs = []
+
+        sequence_lens = unused(g) if batch_sizes is None else batch_sizes
+
+        if variant == 'GRU':
+            # pytorch is reset, input, hidden
+            # onnx is    input, reset, hidden
+            reform_permutation = [(1, 2), (0, 1), (2, 3)]
+        elif variant == 'LSTM':
+            # pytorch is input, forget, cell, output.
+            # onnx is    input, output, forget, cell.
+            reform_permutation = [(0, 1), (3, 4), (1, 3)]
+
+        def transform_weights(layer_index):
+            if variant == 'RNN':
+                weight_ih, weight_hh, bias_ih, bias_hh = all_weights[layer_index]
+            elif variant == 'GRU' or variant == 'LSTM':
+                weight_ih, weight_hh, bias_ih, bias_hh = \
+                    [reform_weights(g, w, hidden_size, reform_permutation) for w in all_weights[layer_index]]
+            bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
+
+            return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh, bias_concat))
+
+        def retrieve_state(x, start, end):
+            return x if num_layers == 1 else g.op('Slice', x, axes_i=[0], starts_i=[start], ends_i=[end])
+
+        for i in range(num_layers):
+            if unidirectional:
+                weight_ih, weight_hh, bias_concat = transform_weights(i)
+                state_indices = i, i + 1
+            else:
+                weight_ih_f, weight_hh_f, bias_f = transform_weights(2 * i)
+                weight_ih_b, weight_hh_b, bias_b = transform_weights(2 * i + 1)
+
+                weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
+                weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
+                bias_concat = g.op('Concat', bias_f, bias_b, axis_i=0)
+
+                state_indices = 2 * i, 2 * i + 2
+
+            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens]
+
+            inputs.append(retrieve_state(h0, *state_indices))
+            if variant == 'LSTM':
+                inputs.append(retrieve_state(c0, *state_indices))
+
+            extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
+            if variant == 'RNN':
+                prev_output, h_out = g.op('RNN', *inputs, outputs=2,
+                                          hidden_size_i=hidden_size,
+                                          activations_s=[kwargs['nonlinearity'].lower()],
+                                          **extra_kwargs)
+            elif variant == 'GRU':
+                prev_output, h_out = g.op('GRU', *inputs, outputs=2,
+                                          hidden_size_i=hidden_size,
+                                          linear_before_reset_i=1,
+                                          **extra_kwargs)
+            elif variant == 'LSTM':
+                prev_output, h_out, c_out = g.op('LSTM', *inputs, outputs=3,
+                                                 hidden_size_i=hidden_size,
+                                                 **extra_kwargs)
+
+            if bidirectional:
+                prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 1, 0, -1])))
+            prev_output = g.op('Squeeze', prev_output, axes_i=[1])
+
+            h_outs.append(h_out)
+            if variant == 'LSTM':
+                c_outs.append(c_out)
+        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
+        if variant == 'RNN' or variant == 'GRU':
+            return prev_output, h_outs
+        elif variant == 'LSTM':
+            c_outs = c_out if num_layers == 1 else g.op('Concat', *c_outs, axis_i=0)
+            return prev_output, h_outs, c_outs
+
+    return symbolic

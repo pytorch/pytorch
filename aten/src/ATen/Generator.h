@@ -16,6 +16,7 @@ struct Generator {
   virtual uint64_t seed() = 0;
   virtual uint64_t initialSeed() = 0;
   virtual Generator& manualSeed(uint64_t seed) = 0;
+  virtual Generator& manualSeedAll(uint64_t seed) = 0;
   virtual void * unsafeGetTH() = 0;
 };
 

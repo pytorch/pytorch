@@ -2,7 +2,7 @@
 #include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 
-#include "ATen/cuda/AccumulateType.cuh"
+#include "ATen/AccumulateType.h"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
@@ -35,7 +35,7 @@ __global__ void EmbeddingBag_updateOutputKernel(
 
   // the strategy here is that each bag x feature is handled by a single thread
 
-  using accscalar_t = cuda::acc_type<scalar_t>;
+  using accscalar_t = acc_type<scalar_t, true>;
   int64_t chunksPerBag = THCCeilDiv(stride, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;
   int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
@@ -100,7 +100,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
     scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
     int64_t stride, int mode, int64_t *bag_size) {
 
-  using accscalar_t = cuda::acc_type<scalar_t>;
+  using accscalar_t = acc_type<scalar_t, true>;
   int idx = blockIdx.x * 4 + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
@@ -256,7 +256,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
     int64_t *max_indices, scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t stride, int64_t numBags) {
 
-  using accscalar_t = cuda::acc_type<scalar_t>;
+  using accscalar_t = acc_type<scalar_t, true>;
 
   int64_t chunksPerBag = THCCeilDiv(stride, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;

@@ -8,12 +8,8 @@ TEST_DIR=$ROOT_DIR/caffe2_tests
 
 # Figure out which Python to use
 PYTHON="python"
-if [ -n "$BUILD_ENVIRONMENT" ]; then
-  if [[ "$BUILD_ENVIRONMENT" == py2* ]]; then
-    PYTHON="python2"
-  elif [[ "$BUILD_ENVIRONMENT" == py3* ]]; then
-    PYTHON="python3"
-  fi
+if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  PYTHON="python${BASH_REMATCH[1]}"
 fi
 
 # The prefix must mirror the setting from build.sh
@@ -55,9 +51,6 @@ mkdir -p $TEST_DIR/{cpp,python}
 
 cd ${INSTALL_PREFIX}
 
-# Commands below may exit with non-zero status
-set +e
-
 # C++ tests
 echo "Running C++ tests.."
 for test in $INSTALL_PREFIX/test/*; do
@@ -66,17 +59,9 @@ for test in $INSTALL_PREFIX/test/*; do
     mkl_utils_test)
       continue
       ;;
-    # TODO investigate conv_op_test failures when using MKL
-    conv_op_test)
-      continue
-      ;;
   esac
 
   "$test" --gtest_output=xml:"$TEST_DIR"/cpp/$(basename "$test").xml
-  exit_code="$?"
-  if [ "$exit_code" -ne 0 ]; then
-    exit "$exit_code"
-  fi
 done
 
 # Get the relative path to where the caffe2 python module was installed
@@ -90,10 +75,11 @@ if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
   EXTRA_TESTS+=("$CAFFE2_PYPATH/contrib/nccl")
 fi
 
-# TODO find out why this breaks for conda builds
+conda_ignore_test=()
 if [[ $BUILD_ENVIRONMENT == conda* ]]; then
-  conda_ignore_test="--ignore $CAFFE2_PYPATH/python/tt_core_test.py"
-  conda_ignore_test="--ignore $CAFFE2_PYPATH/python/dataio_test.py"
+  # These tests both assume Caffe2 was built with leveldb, which is not the case
+  conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/dataio_test.py")
+  conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/checkpoint_test.py")
 fi
 
 # Python tests
@@ -107,11 +93,11 @@ echo "Running Python tests.."
   --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
   --ignore "$CAFFE2_PYPATH/python/operator_test/pack_ops_test.py" \
   --ignore "$CAFFE2_PYPATH/python/mkl/mkl_sbn_speed_test.py" \
-  $conda_ignore_test \
+  ${conda_ignore_test[@]} \
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
 
-exit_code="$?"
-
-# Exit with the first non-zero status we got
-exit "$exit_code"
+if [[ -n "$INTEGRATED" ]]; then
+  pip install --user pytest-xdist torchvision
+  "$ROOT_DIR/scripts/onnx/test.sh" -p
+fi

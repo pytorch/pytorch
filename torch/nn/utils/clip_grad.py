@@ -31,7 +31,7 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
     clip_coef = max_norm / (total_norm + 1e-6)
     if clip_coef < 1:
         for p in parameters:
-            p.grad.data.mul_(clip_coef)
+            p.grad.data.mul_(clip_coef.item())
     return total_norm
 
 

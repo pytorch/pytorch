@@ -58,10 +58,7 @@ REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<CUDAContext>);
-// From whatever the current context, ensure the output is TensorCPU
-REGISTER_CUDA_OPERATOR(
-    EnsureCPUOutput,
-    CopyOp<CUDAContext, CPUContext, CUDAContext>);
+
 // From CPU, copy it to whatever the current context
 REGISTER_CUDA_OPERATOR(
     CopyFromCPUInput,

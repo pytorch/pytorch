@@ -122,7 +122,9 @@ class OperatorBase : public Observable<OperatorBase> {
   }
 
   inline void Wait(const OperatorBase& other, int stream_id = -1) {
-    WaitEvent(other.event(), stream_id);
+    if (!other.IsEventDisabled()) {
+      WaitEvent(other.event(), stream_id);
+    }
   }
 
   virtual void WaitEvents(
@@ -162,20 +164,20 @@ class OperatorBase : public Observable<OperatorBase> {
         if (HasAsyncPart()) {
           RecordEvent();
         } else {
-          event().SetFinished();
+          SetEventFinished();
         }
       } else {
-        event().SetFinished(getErrorMsg().c_str());
+        SetEventFinished(getErrorMsg().c_str());
       }
       return result;
     } catch (EnforceNotMet& err) {
-      event().SetFinished(err.what());
+      SetEventFinished(err.what());
       throw;
     } catch (const std::exception& err) {
-      event().SetFinished(err.what());
+      SetEventFinished(err.what());
       throw;
     } catch (...) {
-      event().SetFinished(getErrorMsg().c_str());
+      SetEventFinished(getErrorMsg().c_str());
       throw;
     }
   }
@@ -316,6 +318,12 @@ class OperatorBase : public Observable<OperatorBase> {
     CAFFE_NOT_IMPLEMENTED;
   }
 
+  void SetEventFinished(const char* err_msg = nullptr) {
+    if (event_) {
+      event_->SetFinished(err_msg);
+    }
+  }
+
   std::string getErrorMsg() {
     if (has_debug_def()) {
       return "Error from operator: " + ProtoDebugString(debug_def());
@@ -438,10 +446,10 @@ class Operator : public OperatorBase {
         } else {
           // Manually set CPU operator's event status to finished,
           // unless this is an async CPU operator
-          event().SetFinished();
+          SetEventFinished();
         }
       } else {
-        event().SetFinished(getErrorMsg().c_str());
+        SetEventFinished(getErrorMsg().c_str());
         this->RecordLastFailedOpNetPosition();
       }
       return result;
@@ -451,15 +459,15 @@ class Operator : public OperatorBase {
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
-      event().SetFinished(err.what());
+      SetEventFinished(err.what());
       this->RecordLastFailedOpNetPosition();
       throw;
     } catch (const std::exception& err) {
-      event().SetFinished(err.what());
+      SetEventFinished(err.what());
       this->RecordLastFailedOpNetPosition();
       throw;
     } catch (...) {
-      event().SetFinished(getErrorMsg().c_str());
+      SetEventFinished(getErrorMsg().c_str());
       this->RecordLastFailedOpNetPosition();
       throw;
     }

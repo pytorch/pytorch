@@ -834,7 +834,7 @@ def softmin(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    return torch._C._nn.softmax(-input, dim)
+    return -input.softmax(dim)
 
 
 def softmax(input, dim=None, _stacklevel=3):
@@ -861,7 +861,7 @@ def softmax(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
-    return torch._C._nn.softmax(input, dim)
+    return input.softmax(dim)
 
 
 def _sample_gumbel(shape, eps=1e-10, out=None):
@@ -943,7 +943,7 @@ def log_softmax(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
-    return torch._C._nn.log_softmax(input, dim)
+    return input.log_softmax(dim)
 
 
 softshrink = _add_docstr(torch._C._nn.softshrink, r"""

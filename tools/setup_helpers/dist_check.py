@@ -4,8 +4,8 @@ import glob
 
 from .env import IS_CONDA, IS_WINDOWS, CONDA_DIR, check_env_flag, gather_paths
 
-
-WITH_DISTRIBUTED = not check_env_flag("NO_DISTRIBUTED") and not IS_WINDOWS
+# On ROCm, RCCL development isn't complete. https://github.com/ROCmSoftwarePlatform/rccl
+WITH_DISTRIBUTED = not check_env_flag("NO_DISTRIBUTED") and not IS_WINDOWS and not check_env_flag("WITH_ROCM")
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag("WITH_DISTRIBUTED_MW")
 WITH_GLOO_IBVERBS = False
 

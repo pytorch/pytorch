@@ -2,7 +2,6 @@
 # Each line is a file pattern followed by one or more owners.
 
 /aten/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
-/torch/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
 /torch/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /docs/source @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /test @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
@@ -12,3 +11,7 @@
 /requirements.txt @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /torch/csrc/api/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ebetica @goldsborough
 /test/cpp/api/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ebetica @goldsborough
+/torch/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
+/torch/csrc/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
+/test/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
+/scripts/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
