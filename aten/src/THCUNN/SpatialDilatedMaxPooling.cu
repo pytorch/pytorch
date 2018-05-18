@@ -2,6 +2,7 @@
 #include "THCTensor.hpp"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
+#include "THCNumerics.cuh"
 #include "common.h"
 
 // kernels borrowed from Caffe
@@ -31,9 +32,10 @@ __global__ void MaxPoolForward(const int nthreads, const Dtype* bottom_data,
     bottom_data += (n * channels + c) * height * width;
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
-        if (ScalarConvert<Dtype, AccType>::to(bottom_data[h * width + w]) > maxval) {
+        Dtype val = bottom_data[h * width + w];
+        if ((ScalarConvert<Dtype, AccType>::to(val) > maxval) || THCNumerics<Dtype>::isnan(val)) {
           maxidx = h * width + w;
-          maxval = ScalarConvert<Dtype, AccType>::to(bottom_data[maxidx]);
+          maxval = ScalarConvert<Dtype, AccType>::to(val);
         }
       }
     }

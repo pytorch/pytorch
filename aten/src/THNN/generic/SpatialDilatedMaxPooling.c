@@ -132,7 +132,7 @@ static void THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(
           {
             tcntr = y*iwidth + x;
             real val = *(ip + tcntr);
-            if (val > maxval)
+            if ((val > maxval) || isnan(val))
             {
               maxval = val;
               maxindex = tcntr;
