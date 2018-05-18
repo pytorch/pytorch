@@ -1,36 +1,59 @@
 diff --git a/aten/src/THC/THCTensorMathReduce.cuh b/aten/src/THC/THCTensorMathReduce.cuh
-index ca6bf7cbe..a523648f1 100644
+index d118f5dd3..8101bdce8 100644
 --- a/aten/src/THC/THCTensorMathReduce.cuh
 +++ b/aten/src/THC/THCTensorMathReduce.cuh
-@@ -105,7 +105,7 @@ struct SquareFunctor<ResT, half> {
+@@ -17,7 +17,7 @@
+ #endif
+ 
+ /*
+-Reductions that (only) operate on accumulate types. 
++Reductions that (only) operate on accumulate types.
+ */
+ 
+ template <typename T>
+@@ -73,14 +73,14 @@ struct SquareFunctor {
  template <typename T>
  struct ReduceMin {
    inline __device__ T operator()(T a, T b) const {
--    return (THCNumerics<T>::lt(a, b) ||
-+    return ((int)THCNumerics<T>::sub(a, b) < 0 ||
-             THCNumerics<T>::isnan(a)) ? a : b;
+-    return (THCNumerics<T>::lt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
++    return ((int)THCNumerics<T>::sub(a, b) < 0 || THCNumerics<T>::isnan(a)) ? a : b;
    }
  };
-@@ -113,7 +113,7 @@ struct ReduceMin {
+ 
  template <typename T>
  struct ReduceMax {
    inline __device__ T operator()(T a, T b) const {
--    return (THCNumerics<T>::gt(a, b) ||
-+    return ((int)THCNumerics<T>::sub(a, b) > 0 ||
-             THCNumerics<T>::isnan(a)) ? a : b;
+-    return (THCNumerics<T>::gt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
++    return ((int)THCNumerics<T>::sub(a, b) > 0 || THCNumerics<T>::isnan(a)) ? a : b;
    }
  };
-@@ -167,7 +167,7 @@ __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrd
  
-   buffer[tx] = ScalarConvert<int, Real>::to(0);
-   Real norm;
--
+@@ -104,10 +104,11 @@ inline __device__ T THCMax(const T a, const T b) {
+ }
+ 
+ template<typename T, typename AccT>
+-__global__ void THCTensor_kernel_renorm(T *data, 
+-                                        const AccT value, 
+-                                        const ptrdiff_t size, 
++__global__ void THCTensor_kernel_renorm(T *data,
++                                        const AccT value,
++                                        const ptrdiff_t size,
+                                         const AccT maxnorm) {
 +  #if !defined(__HIP_DEVICE_COMPILE__)
-   if (THCNumerics<Real>::eq(value, ScalarConvert<float, Real>::to(INFINITY))) {
+   __shared__ AccT buffer[32];
+   int64_t tx = threadIdx.x;
+   int64_t bx = blockIdx.x;
+@@ -136,7 +137,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
      // get norm of axis
-     for (ptrdiff_t i=tx; i<size; i+=step)
-@@ -225,6 +225,7 @@ __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrd
-       row[i] = THCNumerics<Real>::mul(row[i], norm);
+     for (ptrdiff_t i = tx; i < size; i += step) {
+       const AccT val = scalar_cast<AccT>(row[i]);
+-      buffer[tx] = THCNumerics<AccT>::add( 
++      buffer[tx] = THCNumerics<AccT>::add(
+         buffer[tx],
+         THCNumerics<AccT>::pow(THCNumerics<AccT>::abs(val), value)
+       );
+@@ -163,6 +164,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
+       row[i] = scalar_cast<T>(THCNumerics<AccT>::mul(val, norm));
      }
    }
 +  #endif
