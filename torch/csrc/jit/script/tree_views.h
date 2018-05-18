@@ -45,7 +45,7 @@ namespace script {
 //       |     Sub                                                      '-'
 //       |     Mul                                                      '*'
 //       |     Div                                                      '/'
-//       |     MatMult                                                  TK_MATMUL
+//       |     MatMult                                                  '@'
 //       |     Pow                                                      TK_POW
 //       | UnaryOp(Expr expr)
 //       |     Not                                                      TK_NOT
@@ -259,7 +259,7 @@ struct Expr : public TreeView {
       case TK_GATHER:
       case TK_VAR:
       case TK_LIST_LITERAL:
-      case TK_MATMUL:
+      case '@':
       case TK_POW:
         return;
       default:
@@ -519,7 +519,7 @@ struct BinOp : public Expr {
       case '*':
       case '/':
       case '-':
-      case TK_MATMUL:
+      case '@':
       case TK_POW:
         if (tree->trees().size() != 2)
           throw ErrorReport(tree) << "BinOp expected 2 subtrees, found " << tree->trees().size();

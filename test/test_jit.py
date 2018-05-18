@@ -993,21 +993,40 @@ class TestScript(TestCase):
         self.checkScript(func, (a, b), optimize=True)
 
     @unittest.skipIf(not PY35, "Python 3.5 needed")
-    def test_matmul(self):
-        def func(a, b):
-            return a @ b
+    def test_matmul_py3(self):
+        import importlib.util
 
-        a = torch.rand(4, 3, requires_grad=True)
-        b = torch.rand(3, 2, requires_grad=True)
-        self.checkScript(func, (a, b), optimize=True)
+        code = dedent("""
+        def fn(a, b):
+            return a @ b
+        """)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            script_path = os.path.join(tmp_dir, 'script.py')
+            with open(script_path, 'w') as f:
+                f.write(code)
+            spec = importlib.util.spec_from_file_location('test_matmul_py3', script_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            fn = module.fn
+
+            a = torch.rand(4, 3, requires_grad=True)
+            b = torch.rand(3, 2, requires_grad=True)
+            self.checkScript(fn, (a, b), optimize=True)
 
     def test_pow(self):
         def func(a, b):
             return a ** b
 
+        def func2(a, b, c, d):
+            return c + a ** b ** d
+
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
+        c = torch.rand(1, requires_grad=True)
+        d = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
+        self.checkScript(func2, (a, b, c, d), optimize=True)
 
     def test_triple(self):
         def func(x):
@@ -1443,6 +1462,13 @@ class TestScript(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             bar(Variable(torch.rand(10), requires_grad=True), Variable(torch.rand(9), requires_grad=True))
+
+    def test_binop_unsupported_error(self):
+        with self.assertRaisesRegex(NotSupportedError, "unsupported binary operator:"):
+            @torch.jit.script
+            def binop(x, y):
+                # Replace this with another unsupported op when/if it gets supported
+                return x << y
 
     def test_python_call(self):
         def pyfunc(a):
