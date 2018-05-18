@@ -1,4 +1,24 @@
-cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  if (NOT BUILD_TORCH)
+    return()
+  endif()
+else()
+  cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+  include(CMakeDependentOption)
+  option(USE_CUDA "Use CUDA" ON)
+
+  # Legacy options, which we will eventually remove
+  cmake_dependent_option(
+      NO_CUDA "Legacy no CUDA" OFF
+      "USE_CUDA" ON)
+
+  # Flag for shared dependencies
+  set(BUILD_TORCH ON)
+endif()
+if (NOT USE_CUDA)
+  set(NO_CUDA ON)
+endif()
+
 cmake_policy(VERSION 3.0)
 
 set(CMAKE_CXX_STANDARD 11)
@@ -9,17 +29,22 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if (VERBOSE)
   message(STATUS "CAFFE2_PATH is ${CAFFE2_PATH}")
   message(STATUS "CAFFE2_BUILD_PATH is ${CAFFE2_BUILD_PATH}")
+  message(STATUS "INSTALL_PREFIX is ${INSTALL_PREFIX}")
 endif()
 
 set(CAFFE2_INCLUDE_DIR "${CAFFE2_PATH}")
 set(CAFFE2_BUILD_INCLUDE_DIR "${CAFFE2_BUILD_PATH}")
-set(ATEN_INCLUDE_DIR "${CAFFE2_PATH}/aten/src")
-set(ATEN_BUILD_INCLUDE_DIR "${CAFFE2_BUILD_PATH}/aten/src/ATen")
+set(CAFFE2_INSTALL_INCLUDE_DIR "${INSTALL_PREFIX}/include")
+set(CAFFE2_INSTALL_SHARE_DIR "${INSTALL_PREFIX}/share")
+set(CAFFE2_INSTALL_LIB_DIR "${INSTALL_PREFIX}/lib")
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch")
 
-find_library(CAFFE2_CPU_LIBRARY caffe2 PATHS "${CAFFE2_BUILD_PATH}" NO_DEFAULT_PATH)
-find_library(CAFFE2_CUDA_LIBRARY caffe2_gpu PATHS "${CAFFE2_BUILD_PATH}" NO_DEFAULT_PATH)
-find_library(NANOPB_LIBRARY protobuf-nanopb PATHS "${NANOPB_BUILD_PATH}" NO_DEFAULT_PATH)
+find_library(CAFFE2_LIBRARY caffe2
+  PATHS ${CAFFE2_BUILD_PATH} ${CAFFE2_INSTALL_LIB_DIR} NO_DEFAULT_PATH)
+find_library(CAFFE2_GPU_LIBRARY caffe2_gpu
+  PATHS ${CAFFE2_BUILD_PATH} ${CAFFE2_INSTALL_LIB_DIR} NO_DEFAULT_PATH)
+find_library(NANOPB_LIBRARY protobuf-nanopb
+  PATHS ${NANOPB_BUILD_PATH} NO_DEFAULT_PATH)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -27,15 +52,17 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 if(NOT NO_CUDA)
   set(CMAKE_MODULE_PATH
-    ${TORCH_SRC_DIR}/../aten/cmake
-    ${TORCH_SRC_DIR}/../aten/cmake/FindCUDA
+    ${INSTALL_PREFIX}/share/cmake
+    ${TORCH_SRC_DIR}/../cmake/Modules
+    ${TORCH_SRC_DIR}/../cmake/public
+    ${TORCH_SRC_DIR}/../cmake/Modules_CUDA_fix
     /usr/lib/x86_64-linux-gnu/
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
     ${CMAKE_MODULE_PATH})
   set(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 
   if(NOT CUDA_FOUND)
-    find_package(CUDA 5.5)
+    find_package(CUDA 7.0)
   endif()
 
   find_package(MAGMA)
@@ -87,10 +114,8 @@ if(NOT NO_CUDA)
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
     ${CUDA_LIBRARIES})
 
-  set(CUDA_INCLUDE_DIRS
-      ${CUDA_INCLUDE_DIRS}
-      "${CAFFE2_BUILD_PATH}/aten/src/THC"
-      "${CAFFE2_PATH}/aten/src/THC")
+  list(APPEND CUDA_INCLUDE_DIRS
+    ${CAFFE2_INSTALL_INCLUDE_DIR}/THC)
 endif()
 
 # RPATH stuff
@@ -138,12 +163,12 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
   python tools/setup_helpers/generate_code.py
-    --declarations-path "${CAFFE2_BUILD_PATH}/aten/src/ATen/ATen/Declarations.yaml"
+    --declarations-path "${CAFFE2_INSTALL_SHARE_DIR}/ATen/Declarations.yaml"
     --nn-path "aten/src/"
   DEPENDS
-  "${CAFFE2_BUILD_PATH}/aten/src/ATen/ATen/Declarations.yaml"
-  "${CAFFE2_PATH}/aten/src/THNN/generic/THNN.h"
-  "${CAFFE2_PATH}/aten/src/THCUNN/generic/THCUNN.h"
+  "${CAFFE2_INSTALL_SHARE_DIR}/ATen/Declarations.yaml"
+  "${CAFFE2_INSTALL_INCLUDE_DIR}/THNN/generic/THNN.h"
+  "${CAFFE2_INSTALL_INCLUDE_DIR}/THCUNN/generic/THCUNN.h"
   "${TOOLS_PATH}/autograd/templates/VariableType.h"
   "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
   "${TOOLS_PATH}/autograd/templates/Functions.h"
@@ -258,14 +283,14 @@ endif()
 
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
-  ${CAFFE2_CPU_LIBRARY}
+  ${CAFFE2_LIBRARY}
   ${NANOPB_LIBRARY}
 )
 if(NOT NO_CUDA)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
-    target_link_libraries(torch -Wl,--no-as-needed ${CAFFE2_CUDA_LIBRARY} -Wl,--as-needed)
+    target_link_libraries(torch -Wl,--no-as-needed ${CAFFE2_GPU_LIBRARY} -Wl,--as-needed)
   else()
-    target_link_libraries(torch ${CAFFE2_CUDA_LIBRARY})
+    target_link_libraries(torch ${CAFFE2_GPU_LIBRARY})
   endif()
 endif()
 
@@ -273,10 +298,8 @@ target_include_directories(torch
   PUBLIC
   "${CAFFE2_INCLUDE_DIR}"
   "${CAFFE2_BUILD_INCLUDE_DIR}"
-  "${ATEN_INCLUDE_DIR}"
-  "${ATEN_INCLUDE_DIR}/TH"
-  "${ATEN_BUILD_INCLUDE_DIR}"
-  "${CAFFE2_BUILD_PATH}/aten/src/TH"
+  "${CAFFE2_INSTALL_INCLUDE_DIR}"
+  "${CAFFE2_INSTALL_INCLUDE_DIR}/TH"
   "${TORCH_SRC_DIR}/.."
   "${CMAKE_CURRENT_SOURCE_DIR}")
 
