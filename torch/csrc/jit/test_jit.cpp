@@ -572,13 +572,14 @@ void testADFormulas() {
   using VL = variable_list;
   static const var_meta_list binary_pointwise = {{2, 3, 4, 5}, {2, 3, 4, 5}};
   static const var_meta_list unary_pointwise  = {{2, 3, 4, 5}};
+  static const var_meta_list unary_pointwise_2d  = {{2, 3}};
   static const std::vector<ADTestSpec> ad_tests = {
     {"add",     binary_pointwise, [](const VL& v) -> VL { return {v[0] + v[1]}; }},
     {"sub",     binary_pointwise, [](const VL& v) -> VL { return {v[0] - v[1]}; }},
     {"mul",     binary_pointwise, [](const VL& v) -> VL { return {v[0] * v[1]}; }},
     {"sigmoid", unary_pointwise,  [](const VL& v) -> VL { return {v[0].sigmoid()}; }},
     {"tanh",    unary_pointwise,  [](const VL& v) -> VL { return {v[0].tanh()}; }},
-    {"t",       unary_pointwise,  [](const VL& v) -> VL { return {v[0].t()}; }},
+    {"t",       unary_pointwise_2d,  [](const VL& v) -> VL { return {v[0].t()}; }},
     {"mm",      {{10, 12}, {12, 15}}, [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
     {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(4, 1)); }},
     {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(3, 2)); }},
