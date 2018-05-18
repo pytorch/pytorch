@@ -2,8 +2,9 @@
 
 #include "intrinsics.h"
 #include "vec256_base.h"
+#ifdef __AVX__
 #include <sleef.h>
-#include <iostream>
+#endif
 
 namespace at {
 namespace vec256 {
