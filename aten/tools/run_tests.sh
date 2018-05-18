@@ -2,10 +2,9 @@
 set -x
 set -e
 
-pushd $BUILD_ROOT
+pushd $1
 
 VALGRIND=${VALGRIND:=ON}
-BUILD_ROOT=$1
 ./basic
 ./atest
 ./scalar_test
