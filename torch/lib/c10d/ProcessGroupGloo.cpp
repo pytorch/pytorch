@@ -5,17 +5,31 @@
 #include <gloo/rendezvous/context.h>
 #include <gloo/transport/tcp/device.h>
 
-#define GENERATE_ALL_TYPES(type, func, args...)                         \
-  switch (type) {                                                       \
-    case ::at::ScalarType::Float: func<float>(args); break;             \
-    case ::at::ScalarType::Double: func<double>(args); break;           \
-    case ::at::ScalarType::Half: func<gloo::float16>(args); break;      \
-    case ::at::ScalarType::Char: func<int8_t>(args); break;             \
-    case ::at::ScalarType::Byte: func<uint8_t>(args); break;            \
-    case ::at::ScalarType::Int: func<int32_t>(args); break;             \
-    case ::at::ScalarType::Long: func<int64_t>(args); break;            \
-    default:                                                            \
-      throw std::runtime_error("Invalid scalar type");                  \
+#define GENERATE_ALL_TYPES(type, func, args...)        \
+  switch (type) {                                      \
+    case ::at::ScalarType::Float:                      \
+      func<float>(args);                               \
+      break;                                           \
+    case ::at::ScalarType::Double:                     \
+      func<double>(args);                              \
+      break;                                           \
+    case ::at::ScalarType::Half:                       \
+      func<gloo::float16>(args);                       \
+      break;                                           \
+    case ::at::ScalarType::Char:                       \
+      func<int8_t>(args);                              \
+      break;                                           \
+    case ::at::ScalarType::Byte:                       \
+      func<uint8_t>(args);                             \
+      break;                                           \
+    case ::at::ScalarType::Int:                        \
+      func<int32_t>(args);                             \
+      break;                                           \
+    case ::at::ScalarType::Long:                       \
+      func<int64_t>(args);                             \
+      break;                                           \
+    default:                                           \
+      throw std::runtime_error("Invalid scalar type"); \
   }
 
 namespace c10d {
@@ -28,9 +42,7 @@ namespace {
 // Wrap c10d store as Gloo store
 class GlooStore : public ::gloo::rendezvous::Store {
  public:
-  GlooStore(const std::shared_ptr<::c10d::Store>& store)
-      : store_(store) {
-  }
+  GlooStore(const std::shared_ptr<::c10d::Store>& store) : store_(store) {}
 
   void set(const std::string& key, const std::vector<char>& value) override {
     std::vector<unsigned char> tmp(value.begin(), value.end());
@@ -74,11 +86,9 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
 
 } // namespace
 
-ProcessGroupGloo::WorkGloo::WorkGloo() : completed_(false) {
-}
+ProcessGroupGloo::WorkGloo::WorkGloo() : completed_(false) {}
 
-ProcessGroupGloo::WorkGloo::~WorkGloo() {
-}
+ProcessGroupGloo::WorkGloo::~WorkGloo() {}
 
 bool ProcessGroupGloo::WorkGloo::isCompleted() const {
   return completed_;
@@ -114,19 +124,14 @@ void ProcessGroupGloo::WorkGloo::finishWithException(
   cv_.notify_all();
 }
 
-ProcessGroupGloo::Options::Options() :
-    timeout(std::chrono::milliseconds(10 * 1000)),
-    threads(1) {
-}
+ProcessGroupGloo::Options::Options()
+    : timeout(std::chrono::milliseconds(10 * 1000)), threads(1) {}
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
     int rank,
     int size)
-    : ProcessGroup(rank, size),
-      store_(new GlooStore(store)),
-      stop_(false) {
-}
+    : ProcessGroup(rank, size), store_(new GlooStore(store)), stop_(false) {}
 
 ProcessGroupGloo::~ProcessGroupGloo() {
   // Require this process group to be explicitly shut down prior to being
@@ -229,16 +234,10 @@ void ProcessGroupGloo::createAlgorithm(AlgorithmEntry& entry) {
   const auto& key = entry.key;
   switch (key.collectiveType) {
     case CollectiveType::ALLREDUCE:
-      GENERATE_ALL_TYPES(
-          key.type->scalarType(),
-          createAllreduce,
-          entry);
+      GENERATE_ALL_TYPES(key.type->scalarType(), createAllreduce, entry);
       return;
     case CollectiveType::BROADCAST:
-      GENERATE_ALL_TYPES(
-          key.type->scalarType(),
-          createBroadcast,
-          entry);
+      GENERATE_ALL_TYPES(key.type->scalarType(), createBroadcast, entry);
       return;
   }
 
@@ -265,8 +264,8 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 
   // Create algorithm against first context
   auto& context = contexts_[0];
-  entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-      new ::gloo::BroadcastOneToAll<T>(
+  entry.algorithm =
+      std::unique_ptr<::gloo::Algorithm>(new ::gloo::BroadcastOneToAll<T>(
           context,
           getDataPointers<T>(entry.src),
           entry.src[0].numel(),
@@ -290,8 +289,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 // picks up the work, because it performs I/O and can fail. Any I/O
 // failure must be signaled through the Work future.
 //
-EntryType ProcessGroupGloo::construct(
-    const AlgorithmKey& key) {
+EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
   entry->key = key;
 

@@ -2,15 +2,10 @@
 
 namespace c10d {
 
-ProcessGroup::Work::~Work() {
-}
+ProcessGroup::Work::~Work() {}
 
-ProcessGroup::ProcessGroup(int rank, int size)
-    : rank_(rank),
-      size_(size) {
-}
+ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {}
 
-ProcessGroup::~ProcessGroup() {
-}
+ProcessGroup::~ProcessGroup() {}
 
 } // namespace c10d

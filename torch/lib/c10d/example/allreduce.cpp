@@ -1,6 +1,5 @@
-#include <ProcessGroupGloo.hpp>
 #include <FileStore.hpp>
-
+#include <ProcessGroupGloo.hpp>
 
 using namespace ::c10d;
 
@@ -22,7 +21,7 @@ int main(int argc, char** argv) {
   // Kick off work
   std::vector<std::shared_ptr<ProcessGroup::Work>> pending;
   for (auto i = 0; i < ntensors; i++) {
-    std::vector<at::Tensor> tmp = { tensors[i] };
+    std::vector<at::Tensor> tmp = {tensors[i]};
     pending.push_back(pg.allreduce(tmp));
   }
 

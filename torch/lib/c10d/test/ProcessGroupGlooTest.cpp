@@ -92,9 +92,7 @@ struct Fork {
 
 class SignalTest {
  public:
-  SignalTest(const std::string& path)
-      : path_(path) {
-  }
+  SignalTest(const std::string& path) : path_(path) {}
 
   ~SignalTest() {
     if (arm_.joinable()) {
@@ -106,9 +104,9 @@ class SignalTest {
   // happens as soon as the first collective completes successfully.
   void arm(int pid, int signal) {
     arm_ = std::move(std::thread([=] {
-          sem_.wait();
-          kill(pid, signal);
-        }));
+      sem_.wait();
+      kill(pid, signal);
+    }));
   }
 
   std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
@@ -123,7 +121,7 @@ class SignalTest {
 
     // Initialize tensor list
     std::vector<at::Tensor> tensors = {
-      at::ones(at::CPU(at::kFloat), {16, 16}),
+        at::ones(at::CPU(at::kFloat), {16, 16}),
     };
 
     // Loop until an exception happens
@@ -173,9 +171,8 @@ class CollectiveTest {
 
     std::vector<std::thread> threads;
     for (auto i = 0; i < num; i++) {
-      threads.push_back(std::move(std::thread([i, &tests] {
-              tests[i].start(i, tests.size());
-            })));
+      threads.push_back(std::move(
+          std::thread([i, &tests] { tests[i].start(i, tests.size()); })));
     }
     for (auto& thread : threads) {
       thread.join();
@@ -184,9 +181,7 @@ class CollectiveTest {
     return std::move(tests);
   }
 
-  CollectiveTest(const std::string& path)
-      : path_(path) {
-  }
+  CollectiveTest(const std::string& path) : path_(path) {}
 
   ~CollectiveTest() {
     if (pg_) {
@@ -223,7 +218,7 @@ void testAllreduce(const std::string& path) {
   std::vector<std::vector<at::Tensor>> inputs(size);
   for (auto i = 0; i < size; i++) {
     auto tensor = at::ones(at::CPU(at::kFloat), {16, 16}) * i;
-    inputs[i] = std::vector<at::Tensor>({ tensor });
+    inputs[i] = std::vector<at::Tensor>({tensor});
   }
 
   // Kick off work

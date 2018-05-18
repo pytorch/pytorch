@@ -32,18 +32,12 @@ namespace c10d {
 // to broadcast the number of entries such that all processes agree.
 //
 struct AlgorithmKey {
-  bool operator==(const AlgorithmKey &other) const {
-    return
-      (collectiveType == other.collectiveType) &&
-      (type == other.type) &&
-      (devices == other.devices) &&
-      (srcSizes == other.srcSizes) &&
-      (dstSizes == other.dstSizes) &&
-      (srcRank == other.srcRank) &&
-      (dstRank == other.dstRank) &&
-      (srcTensor == other.srcTensor) &&
-      (dstTensor == other.dstTensor) &&
-      (reduceOp == other.reduceOp);
+  bool operator==(const AlgorithmKey& other) const {
+    return (collectiveType == other.collectiveType) && (type == other.type) &&
+        (devices == other.devices) && (srcSizes == other.srcSizes) &&
+        (dstSizes == other.dstSizes) && (srcRank == other.srcRank) &&
+        (dstRank == other.dstRank) && (srcTensor == other.srcTensor) &&
+        (dstTensor == other.dstTensor) && (reduceOp == other.reduceOp);
   }
 
   CollectiveType collectiveType = CollectiveType::UNUSED;
@@ -83,7 +77,7 @@ struct AlgorithmEntry {
   AlgorithmEntry() {}
 
   // Must not be copyable
-  AlgorithmEntry & operator=(const AlgorithmEntry&) = delete;
+  AlgorithmEntry& operator=(const AlgorithmEntry&) = delete;
   AlgorithmEntry(const AlgorithmEntry&) = delete;
 };
 
