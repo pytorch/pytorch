@@ -80,7 +80,7 @@ void inlineBody(Node *loop) {
     }
   }
   for (size_t i = 0; i < loop->outputs().size(); ++i) {
-    loop->outputs().at(i)->replaceAllUsesWith(value_map.at(body->outputs().at(i + 1)));
+    loop->outputs().at(i)->replaceAllUsesWith(get_value(body->outputs().at(i + 1)));
   }
   // XXX: it is extremely important to destroy the loop in here. DCE might not be able
   // to conclude that it's safe, because the loop might contain side effects.
@@ -128,7 +128,7 @@ void repeatBody(Block *body, int64_t times) {
     body->eraseOutput(i);
   }
   for (Value *output : orig_outputs) {
-    body->registerOutput(value_map.at(output));
+    body->registerOutput(get_value(output));
   }
 
   // It's likely that we have some dead nodes now - for example the "true" constant
@@ -162,7 +162,9 @@ void unroll(Node *loop) {
 
   // We will be using a "mutable" counter outside of the loop instead of the default
   // one, because this will allow us to share it between the unrolled loop and its epilogue.
-  replaceLoopCounter(loop);
+  // This is necessary only if the loop counter is actually used in the body.
+  if (body->inputs()[0]->uses().size() > 0)
+    replaceLoopCounter(loop);
 
   // Some optimization for constant-length loops. If we know they won't run too many
   // times, then we can unroll them entirely.
@@ -186,9 +188,10 @@ void unroll(Node *loop) {
   repeatBody(body, kUnrollFactor);
 
   // Change the iteration counts of both loops
-  Value *iter_count = loop->inputs().at(0);
-  loop_epilogue->replaceInput(0, SymbolicVariable(iter_count) % at::Scalar(kUnrollFactor));
-  loop->replaceInput(0, SymbolicVariable(iter_count) / at::Scalar(kUnrollFactor));
+  SymbolicVariable iter_count = loop->inputs().at(0);
+  SymbolicVariable unrolled_iter_count = iter_count / kUnrollFactor;
+  loop->replaceInput(0, unrolled_iter_count);
+  loop_epilogue->replaceInput(0, iter_count - (unrolled_iter_count * kUnrollFactor));
 }
 
 void UnrollLoops(Block *block) {
@@ -203,7 +206,6 @@ void UnrollLoops(Block *block) {
     }
   }
 }
-
 
 } // anonymous namespace
 

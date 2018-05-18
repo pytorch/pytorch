@@ -3,9 +3,10 @@
 namespace torch { namespace jit {
 
 bool hasSideEffects(Node * node) {
+  // FIXME: PythonOp and CppOp should be treated as having side effects as well!
+  //        Unfortunately ONNX depends on them getting removed in this pass, so it's not
+  //        a simple change.
   return node->kind() == prim::Print ||
-         node->kind() == prim::PythonOp ||
-         node->kind() == prim::CppOp ||
          std::any_of(node->blocks().begin(), node->blocks().end(),
                      [](Block *b) {
                        return std::any_of(b->nodes().begin(), b->nodes().end(), hasSideEffects);
