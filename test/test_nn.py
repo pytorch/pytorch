@@ -2180,6 +2180,24 @@ class TestNN(NNTestCase):
     def test_AdaptiveMaxPool3d_indices_cuda(self, dtype=torch.float):
         self._test_maxpool_indices(3, adaptive=True, device="cuda", dtype=dtype)
 
+    @staticmethod
+    def _test_max_pool_nan(self, device, dtype=torch.float):
+        for adaptive in ['', 'adaptive_']:
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}max_pool{}d'.format(adaptive, num_dim)
+                fn = getattr(F, fn_name)
+                x = torch.full([1, 1] + num_dim * [3], float('nan'))
+                res = fn(x, 1 if adaptive else 3)
+                self.assertTrue(math.isnan(res.item()))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_max_pool_nan_cuda(self, dtype=torch.float):
+        self._test_max_pool_nan(self, device="cuda", dtype=dtype)
+
+    def test_max_pool_nan(self, dtype=torch.float):
+        self._test_max_pool_nan(self, device="cpu")
+
     def _test_scatter(self, tensor):
         x = torch.tensor(tensor, requires_grad=True)
         result = dp.scatter(x, (0, 1))
