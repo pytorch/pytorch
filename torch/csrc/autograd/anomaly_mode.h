@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include "torch/csrc/utils/python_stub.h"
 
 namespace torch { namespace autograd {
 
