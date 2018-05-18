@@ -2,8 +2,14 @@
 
 #include <gloo/allreduce_halving_doubling.h>
 #include <gloo/broadcast_one_to_all.h>
+#include <gloo/cuda_allreduce_halving_doubling.h>
+#include <gloo/cuda_broadcast_one_to_all.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/transport/tcp/device.h>
+
+#include <THC.h>
+
+#include "private/CUDAUtils.hpp"
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
@@ -84,6 +90,31 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
   throw std::runtime_error("Unhandled ReduceOp");
 }
 
+std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
+  std::vector<cudaStream_t> streams(entry.streams.size());
+  for (auto i = 0; i < entry.streams.size(); i++) {
+    streams[i] = entry.streams[i].getStream();
+  }
+  return streams;
+}
+
+// synchronizeStreams ensures that the private streams associated with
+// an algorithm entry wait for the public streams to complete, and
+// that the public streams wait for the private streams to complete.
+void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
+  const auto& key = entry->key;
+  for (auto i = 0; i < key.devices.size(); i++) {
+    const auto& device = key.devices[i];
+    auto publicStream = THCState_getCurrentStreamOnDevice(thcState, device);
+    auto privateStream = entry->streams[i].getStream();
+    auto startEvent = entry->startEvents[i].getEvent();
+
+    // Synchronize private stream with public stream
+    C10D_CUDA_CHECK(cudaEventRecord(startEvent, publicStream));
+    C10D_CUDA_CHECK(cudaStreamWaitEvent(privateStream, startEvent, 0));
+  }
+}
+
 } // namespace
 
 ProcessGroupGloo::WorkGloo::WorkGloo() : completed_(false) {}
@@ -98,22 +129,47 @@ bool ProcessGroupGloo::WorkGloo::isSuccess() const {
   return !ex_;
 }
 
+void ProcessGroupGloo::WorkGloo::synchronize() {
+  auto thcState = ::at::globalContext().lazyInitCUDA();
+  for (auto i = 0; i < devices_.size(); i++) {
+    auto stream = THCState_getCurrentStreamOnDevice(thcState, devices_[i]);
+    auto event = events_[i].getEvent();
+    C10D_CUDA_CHECK(cudaStreamWaitEvent(stream, event, 0));
+  }
+}
+
 bool ProcessGroupGloo::WorkGloo::wait() {
   std::unique_lock<std::mutex> lock(m_);
   while (!completed_) {
     cv_.wait(lock);
   }
-  return isSuccess();
+  auto success = isSuccess();
+  if (success) {
+    synchronize();
+  }
+  return success;
 }
 
 const std::exception& ProcessGroupGloo::WorkGloo::exception() const {
   return *ex_;
 }
 
-void ProcessGroupGloo::WorkGloo::finish() {
+void ProcessGroupGloo::WorkGloo::finish(AlgorithmEntry* entry) {
   {
     std::unique_lock<std::mutex> lock(m_);
     completed_ = true;
+
+    // Populate devices and events so that we can later synchronize
+    // with the operation associated with this work finishing.
+    devices_ = entry->key.devices;
+    events_.resize(devices_.size());
+    for (auto i = 0; i < devices_.size(); i++) {
+      CUDADevice device(devices_[i]);
+      events_[i] = CUDAEvent::create();
+      const auto& event = events_[i].getEvent();
+      const auto& stream = entry->streams[i].getStream();
+      C10D_CUDA_CHECK(cudaEventRecord(event, stream));
+    }
   }
   cv_.notify_all();
 }
@@ -153,6 +209,8 @@ ProcessGroupGloo::ProcessGroupGloo(
   for (int i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this);
   }
+
+  thcState_ = ::at::globalContext().lazyInitCUDA();
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -207,7 +265,7 @@ void ProcessGroupGloo::runSingle(WorkType tuple) {
 
   try {
     entry->run();
-    work->finish();
+    work->finish(entry);
   } catch (const ::gloo::Exception& ex) {
     work->finishWithException(ex);
   }
@@ -235,30 +293,68 @@ void ProcessGroupGloo::createAlgorithm(AlgorithmEntry& entry) {
 template <typename T>
 void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
   const auto& key = entry.key;
+  const auto& backend = key.type->backend();
 
   // Create algorithm against first context
   auto& context = contexts_[0];
-  entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-      new ::gloo::AllreduceHalvingDoubling<T>(
-          context,
-          getDataPointers<T>(entry.src),
-          entry.src[0].numel(),
-          reductionFunction<T>(key.reduceOp)));
+
+  if (backend == at::kCPU) {
+    entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+        new ::gloo::AllreduceHalvingDoubling<T>(
+            context,
+            getDataPointers<T>(entry.src),
+            entry.src[0].numel(),
+            reductionFunction<T>(key.reduceOp)));
+    return;
+  }
+
+  if (backend == at::kCUDA) {
+    entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+        new ::gloo::CudaAllreduceHalvingDoubling<T>(
+            context,
+            getDataPointers<T>(entry.src),
+            entry.src[0].numel(),
+            getStreamVector(entry)));
+    return;
+  }
+
+  throw std::runtime_error(
+      "Unhandled backend: " + std::string(at::toString(backend)));
 }
 
 template <typename T>
 void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
   const auto& key = entry.key;
+  const auto& backend = key.type->backend();
 
   // Create algorithm against first context
   auto& context = contexts_[0];
-  entry.algorithm =
-      std::unique_ptr<::gloo::Algorithm>(new ::gloo::BroadcastOneToAll<T>(
-          context,
-          getDataPointers<T>(entry.src),
-          entry.src[0].numel(),
-          key.srcRank,
-          key.srcTensor));
+
+  if (backend == at::kCPU) {
+    entry.algorithm =
+        std::unique_ptr<::gloo::Algorithm>(new ::gloo::BroadcastOneToAll<T>(
+            context,
+            getDataPointers<T>(entry.src),
+            entry.src[0].numel(),
+            key.srcRank,
+            key.srcTensor));
+    return;
+  }
+
+  if (backend == at::kCUDA) {
+    entry.algorithm =
+        std::unique_ptr<::gloo::Algorithm>(new ::gloo::CudaBroadcastOneToAll<T>(
+            context,
+            getDataPointers<T>(entry.src),
+            entry.src[0].numel(),
+            key.srcRank,
+            key.srcTensor,
+            getStreamVector(entry)));
+    return;
+  }
+
+  throw std::runtime_error(
+      "Unhandled backend: " + std::string(at::toString(backend)));
 }
 
 // Constructs an AlgorithmEntry instance, except for the algorithm
@@ -279,7 +375,21 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   auto& srcSizes = key.srcSizes;
   entry->src.resize(srcSizes.size());
   for (int i = 0; i < srcSizes.size(); i++) {
+    CUDADevice device(key.type->is_cuda() ? key.devices[i] : -1);
     entry->src[i] = key.type->tensor(srcSizes[i]);
+  }
+
+  // If these are CUDA tensors, create streams and events
+  if (key.type->is_cuda()) {
+    entry->streams.resize(key.devices.size());
+    entry->startEvents.resize(key.devices.size());
+    entry->finishEvents.resize(key.devices.size());
+    for (auto i = 0; i < key.devices.size(); i++) {
+      CUDADevice device(key.devices[i]);
+      entry->streams[i] = CUDAStream::create();
+      entry->startEvents[i] = CUDAEvent::create();
+      entry->finishEvents[i] = CUDAEvent::create();
+    }
   }
 
   return entry;
@@ -339,13 +449,34 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     entry->src[opts.rootTensor].copy_(tensors[opts.rootTensor]);
   }
 
-  // Define how to run the algorithm and copy back results
-  entry->run = [=]() mutable {
-    entry->algorithm->run();
-    for (int i = 0; i < tensors.size(); i++) {
-      tensors[i].copy_(entry->src[i]);
-    }
-  };
+  // In case of CUDA, ensure that operations that are queued after
+  // this collective wait for the collective to complete.
+  if (key.type->is_cuda()) {
+    synchronizeStreams(thcState_, entry);
+    entry->run = [=]() mutable {
+      entry->algorithm->run();
+      for (auto i = 0; i < tensors.size(); i++) {
+        auto privateStream = entry->streams[i].getStream();
+        auto finishEvent = entry->finishEvents[i].getEvent();
+
+        // The THCStreamGuard is a RAII wrapper for temporarily
+        // overriding the current THCStream. This also sets the
+        // current device to the stream's device.
+        THCStreamGuard guard(thcState_, entry->streams[i]);
+        tensors[i].copy_(entry->src[i]);
+
+        // Record event marking the completion of this operation
+        C10D_CUDA_CHECK(cudaEventRecord(finishEvent, privateStream));
+      }
+    };
+  } else {
+    entry->run = [=]() mutable {
+      entry->algorithm->run();
+      for (auto i = 0; i < tensors.size(); i++) {
+        tensors[i].copy_(entry->src[i]);
+      }
+    };
+  }
 
   return enqueue(entry);
 }
@@ -366,17 +497,38 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   auto entry = checkout(key);
 
   // Copy input tensors
-  for (int i = 0; i < tensors.size(); i++) {
+  for (auto i = 0; i < tensors.size(); i++) {
     entry->src[i].copy_(tensors[i]);
   }
 
-  // Define how to run the algorithm and copy back results
-  entry->run = [=]() mutable {
-    entry->algorithm->run();
-    for (int i = 0; i < tensors.size(); i++) {
-      tensors[i].copy_(entry->src[i]);
-    }
-  };
+  // In case of CUDA, ensure that operations that are queued after
+  // this collective wait for the collective to complete.
+  if (key.type->is_cuda()) {
+    synchronizeStreams(thcState_, entry);
+    entry->run = [=]() mutable {
+      entry->algorithm->run();
+      for (auto i = 0; i < tensors.size(); i++) {
+        auto privateStream = entry->streams[i].getStream();
+        auto finishEvent = entry->finishEvents[i].getEvent();
+
+        // The THCStreamGuard is a RAII wrapper for temporarily
+        // overriding the current THCStream. This also sets the
+        // current device to the stream's device.
+        THCStreamGuard guard(thcState_, entry->streams[i]);
+        tensors[i].copy_(entry->src[i]);
+
+        // Record event marking the completion of this operation
+        C10D_CUDA_CHECK(cudaEventRecord(finishEvent, privateStream));
+      }
+    };
+  } else {
+    entry->run = [=]() mutable {
+      entry->algorithm->run();
+      for (auto i = 0; i < tensors.size(); i++) {
+        tensors[i].copy_(entry->src[i]);
+      }
+    };
+  }
 
   return enqueue(entry);
 }

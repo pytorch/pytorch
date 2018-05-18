@@ -43,8 +43,21 @@ class ProcessGroup {
     // If false, the exception function can be called to get details.
     virtual bool isSuccess() const = 0;
 
+    // Ensures that operations on the output tensors that are invoked
+    // after this function returns are correctly sequenced after the
+    // asynchronous completion of this work.
+    virtual void synchronize() = 0;
+
     // Waits until request completes. Blocking operation.
     // Returns false if the work completed with an exception.
+    //
+    // Functionally equivalent to:
+    //
+    //   while (!isCompleted()) { /* nop */ }
+    //   auto success = isSuccess();
+    //   if (success) { synchronize(); }
+    //   return success;
+    //
     virtual bool wait() = 0;
 
     // Returns exception if wait() returned false.

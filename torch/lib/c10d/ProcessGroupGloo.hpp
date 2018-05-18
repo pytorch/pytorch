@@ -15,10 +15,14 @@
 
 #include <torch/csrc/utils/hash.h>
 
+#include "CUDAUtils.hpp"
 #include "ProcessGroup.hpp"
 #include "Store.hpp"
 #include "Types.hpp"
 #include "Utils.hpp"
+
+// Forward declaration
+struct THCState;
 
 namespace c10d {
 
@@ -91,6 +95,30 @@ struct AlgorithmEntry {
   std::vector<at::Tensor> dst;
   std::function<void()> run;
 
+  // For CUDA tensors, the following happens:
+  //
+  // - Input tensor A is copied to persistent tensor B on stream S1
+  //   (the async stream associated with the device that stores A).
+  // - Event E1 records stream S1 so that the copy can be synchronized.
+  // - On a worker thread, stream S2 waits for event E1, executes the
+  //   CUDA-aware Gloo algorithm, and then records event E2.
+  //
+  // This approach means the caller of the process group function can
+  // retain asynchrony (no need for synchronizing its CUDA streams).
+  // Once the wait() function on the associated work object returns
+  // true, the caller can launch new CUDA kernels and they will be
+  // correctly sequenced.
+  //
+  // To do so, we need to hold on to one stream and two events per
+  // tensor. The stream is passed down to the Gloo algorithm. The
+  // first event is used to record completion of the memory copy of
+  // the input tensor. The second event if used to record completion
+  // of the memory copy back to the output tensor.
+  //
+  std::vector<CUDAStream> streams;
+  std::vector<CUDAEvent> startEvents;
+  std::vector<CUDAEvent> finishEvents;
+
   // Used to synchronize between calling thread and worker threads.
   std::mutex m;
   std::condition_variable cv;
@@ -140,22 +168,14 @@ class ProcessGroupGloo : public ProcessGroup {
     explicit WorkGloo();
     virtual ~WorkGloo();
 
-    // Checks if request has completed. Non-blocking operation.
     bool isCompleted() const override;
-
-    // Returns if the work completed successfully.
-    // If false, the exception function can be called to get details.
     bool isSuccess() const override;
-
-    // Waits until request completes. Blocking operation.
-    // Returns false if the work completed with an exception.
+    void synchronize() override;
     bool wait() override;
-
-    // Returns exception if wait() returned false.
     const std::exception& exception() const override;
 
    protected:
-    void finish();
+    void finish(AlgorithmEntry* entry);
     void finishWithException(const ::gloo::Exception& ex);
 
     std::mutex m_;
@@ -166,6 +186,12 @@ class ProcessGroupGloo : public ProcessGroup {
     // default constructor and constructing an empty std::unique_ptr
     // is probably cheaper (this is highly speculative).
     std::unique_ptr<::gloo::Exception> ex_;
+
+    // List of devices and events so that we can synchronize the
+    // streams of the caller with the kernels that were launched
+    // asynchronously to finish this operation.
+    std::vector<int> devices_;
+    std::vector<CUDAEvent> events_;
 
     friend class ProcessGroupGloo;
   };
@@ -231,6 +257,9 @@ class ProcessGroupGloo : public ProcessGroup {
   std::mutex queueMutex_;
   std::condition_variable queueProduceCV_;
   std::condition_variable queueConsumeCV_;
+
+  // Store copy of pointer to THCState retrieved from ::at::globalContext().
+  THCState* thcState_;
 };
 
 } // namespace c10d
