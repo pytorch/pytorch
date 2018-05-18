@@ -2,6 +2,7 @@
 set -x
 set -e
 
+VALGRIND_SUP="${PWD}/`dirname $0`/valgrind.sup"
 pushd $1
 
 VALGRIND=${VALGRIND:=ON}
@@ -26,7 +27,7 @@ if [[ -x ./apply_test ]]; then
 fi
 if [ "$VALGRIND" == "ON" ]
 then
-  valgrind --suppressions=`dirname $0`/valgrind.sup --error-exitcode=1 ./basic "[cpu]"
+  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic "[cpu]"
 fi
 
 popd
