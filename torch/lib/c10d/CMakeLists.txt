@@ -6,12 +6,12 @@ set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake ${CMAKE_MODULE_
 # which defines ATEN_INCLUDE_DIR and ATEN_LIBRARIES.
 find_package(ATen REQUIRED)
 if(NOT ATen_FOUND)
-  message(FATAL "ATen not found")
+  message(FATAL_ERROR "ATen not found")
 endif()
 
 find_package(Gloo REQUIRED)
-if(NOT ATen_FOUND)
-  message(FATAL "Gloo not found")
+if(NOT Gloo_FOUND)
+  message(FATAL_ERROR "Gloo not found")
 endif()
 
 add_library(store Utils.cpp Store.cpp FileStore.cpp TCPStore.cpp)
