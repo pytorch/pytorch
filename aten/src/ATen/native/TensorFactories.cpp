@@ -266,14 +266,11 @@ Tensor randperm(const Type& dtype, int64_t n, Generator* generator) {
   return at::randperm_out(result, n, generator);
 }
 
-AT_API Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
+Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   if (n < 0) {
     std::ostringstream oss;
     oss << "n must be non-negative, got " << n;
     throw std::runtime_error(oss.str());
-  }
-  if (result.type().backend() != at::kCPU) {
-    throw std::runtime_error("randperm is only implemented for CPU");
   }
 
   result.resize_({n});

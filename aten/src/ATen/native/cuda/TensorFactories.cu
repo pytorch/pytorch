@@ -46,7 +46,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
 
   if (n < 30000) {  // For small inputs, we offload it to CPU instead.
     auto result_cpu = result.type().toBackend(kCPU).tensor({n});
-    randperm_out_cpu(result_cpu, n, generator);
+    randperm_out(result_cpu, n, generator);
     result = result.type().copy(result_cpu);
   } else {
     // Generate random values for the keys array
