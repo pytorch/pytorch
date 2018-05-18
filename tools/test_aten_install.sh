@@ -1,5 +1,7 @@
 #!/bin/sh
 set -xe
+rm -rf aten_build
+rm -rf aten_install
 mkdir aten_build aten_install
 cd aten_build
 cmake ../aten -DNO_CUDA=1 -DCMAKE_INSTALL_PREFIX=../aten_install

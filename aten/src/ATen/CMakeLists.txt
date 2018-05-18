@@ -382,9 +382,18 @@ if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
 endif()
 
 if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  set(ATEN_LIBRARIES ATen_cpu_library)
+  # Eventually replace this use of LOCATION with use of
+  # $<TARGET_FILE:ATen_cpu>, but generators only work in some cases
+  cmake_policy(SET CMP0026 OLD)
+  get_target_property(ATEN_CPU_OUTPUT_NAME ATen_cpu LOCATION)
+  get_filename_component(ATEN_CPU_OUTPUT_NAME ${ATEN_CPU_OUTPUT_NAME} NAME)
+  set(ATEN_LIBRARIES
+    "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_LIB_DIR}/${ATEN_CPU_OUTPUT_NAME}")
   if(NOT NO_CUDA OR WITH_ROCM)
-    list(APPEND ATEN_LIBRARIES ATen_cuda_library)
+    get_target_property(ATEN_CUDA_OUTPUT_NAME ATen_cuda LOCATION)
+    get_filename_component(ATEN_CUDA_OUTPUT_NAME ${ATEN_CUDA_OUTPUT_NAME} NAME)
+    list(APPEND ATEN_LIBRARIES
+      "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_LIB_DIR}/${ATEN_CUDA_OUTPUT_NAME}")
   endif()
 
   install(TARGETS ATen_cpu
@@ -406,20 +415,17 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 
   # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
   FOREACH(HEADER ${base_h})
-    GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
+    string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
+    GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
     INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
   ENDFOREACH()
   FOREACH(HEADER ${generated_h} ${cuda_generated_h})
     # NB: Assumed to be flat
-    GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
-    INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
+    INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
   ENDFOREACH()
   FOREACH(HEADER ${cuda_h})
-    GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
-    INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
-  ENDFOREACH()
-  FOREACH(HEADER ${cudnn_h})
-    GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
+    string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
+    GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
     INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
   ENDFOREACH()
   INSTALL(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
@@ -439,7 +445,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     target_include_directories(
         ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
-    target_link_libraries(${test_name} ${ATEN_LIBRARIES})
+    target_link_libraries(${test_name} ATen_cpu)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     install(TARGETS ${test_name} DESTINATION test)
   endforeach()
@@ -451,7 +457,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
       target_include_directories(
           ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
-      target_link_libraries(${test_name} ${ATEN_LIBRARIES})
+      target_link_libraries(${test_name} ATen_cpu ATen_cuda)
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       install(TARGETS ${test_name} DESTINATION test)
     endforeach()
