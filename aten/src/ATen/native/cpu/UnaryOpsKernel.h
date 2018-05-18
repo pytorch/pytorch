@@ -38,18 +38,4 @@ extern DispatchStub<unary_fn> tanImpl;
 // digamma
 // lgamma
 
-// TODO: See below
-// erfinv
-// fill
-// frac
-// clone
-// contiguous
-// clamp/_min/_max
-// neg
-// reciprocal
-// sigmoid
-// sign
-// zero
-
-
 }} // namespace at::native

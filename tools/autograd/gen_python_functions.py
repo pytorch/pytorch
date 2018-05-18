@@ -255,6 +255,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
     def emit_single_dispatch(declaration, out_idx, base_env):
         env = {}
         simple_return_type = declaration['return_type'].replace(' &', '')
+        if simple_return_type not in SUPPORTED_RETURN_TYPES:
+            print("HERE: " + str(simple_return_type))
         assert simple_return_type in SUPPORTED_RETURN_TYPES, \
             declaration['name'] + ' returns unsupported type: ' + simple_return_type
 

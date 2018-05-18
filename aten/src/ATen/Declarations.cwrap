@@ -160,14 +160,14 @@
     - THTensor* self
 ]]
 [[
-  name: contiguous
+  name: _th_contiguous
   cname: newContiguous
   return: THTensor*
   arguments:
     - THTensor* self
 ]]
 [[
-  name: clone
+  name: _th_clone
   cname: newClone
   return: THTensor*
   aten_sparse: True
@@ -1072,20 +1072,7 @@
     - THTensor* self
 ]]
 [[
-  name: sigmoid_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  cname: sigmoid
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: sigmoid
+  name: _th_sigmoid
   types:
     - floating_point
   backends:
@@ -1449,20 +1436,8 @@
     - THTensor* self
 ]]
 [[
-  name: erfinv_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _erfinv
   cname: erfinv
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: erfinv
   types:
     - floating_point
   backends:
@@ -1574,20 +1549,8 @@
     - THTensor* self
 ]]
 [[
-  name: frac_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _th_frac
   cname: frac
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: frac
   types:
     - floating_point
   backends:
@@ -1796,7 +1759,8 @@
           default: AS_REAL(2)
 ]]
 [[
-  name: reciprocal
+  name: _th_reciprocal
+  cname: cinv
   types:
     - floating_point
   backends:
@@ -1814,21 +1778,8 @@
         - THTensor* self
 ]]
 [[
-  name: reciprocal_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  options:
-    - cname: cinv
-      return: self
-      arguments:
-        - THTensor* self
-        - THTensor* self
-]]
-[[
-  name: neg
+  name: _th_neg
+  cname: neg
   backends:
     - CPU
     - CUDA
@@ -1841,18 +1792,6 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
-]]
-[[
-  name: neg_
-  backends:
-    - CPU
-    - CUDA
-  options:
-    - cname: neg
-      return: self
-      arguments:
-        - THTensor* self
         - THTensor* self
 ]]
 [[
@@ -2037,13 +1976,13 @@
     - arg: real max
       default: 0
 ]]
-[[
-  name: zero_
-  cname: zero
-  return: self
-  aten_sparse: True
-  arguments:
-    - THTensor* self
+[[    
+  name: _th_zero_
+  return: self    
+  cname: zero    
+  aten_sparse: True    
+  arguments:    
+    - THTensor* self    
 ]]
 [[
   name: _sumall
@@ -2132,7 +2071,8 @@
       wrap_dim: self
 ]]
 [[
-  name: sign
+  name: _sign
+  cname: sign
   variants:
     - method
     - function
@@ -2140,14 +2080,6 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - THTensor* self
-]]
-[[
-  name: sign_
-  cname: sign
-  return: self
-  arguments:
-    - THTensor* self
     - THTensor* self
 ]]
 [[
@@ -2435,21 +2367,7 @@
         - THTensor* other
 ]]
 [[
-  name: clamp
-  cname: clamp
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-    - real max
-]]
-[[
-  name: clamp_
+  name: _clamp_
   cname: clamp
   variants:
     - method
@@ -2462,20 +2380,7 @@
     - real max
 ]]
 [[
-  name: clamp_min
-  cname: cmaxValue
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-]]
-[[
-  name: clamp_min_
+  name: _clamp_min_
   cname: cmaxValue
   variants:
     - method
@@ -2487,20 +2392,7 @@
     - real min
 ]]
 [[
-  name: clamp_max
-  cname: cminValue
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real max
-]]
-[[
-  name: clamp_max_
+  name: _clamp_max_
   cname: cminValue
   variants:
     - method
