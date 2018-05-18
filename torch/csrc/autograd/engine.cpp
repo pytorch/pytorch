@@ -3,6 +3,7 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/grad_mode.h"
+#include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -269,6 +270,9 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
 auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void {
   std::lock_guard<std::mutex> lock(task.base->mutex);
   if (!task.base->has_error.load()) {
+    if (AnomalyMode::is_enabled()) {
+      AnomalyMode::print_stack(task.fn->metadata());
+    }
     task.base->exception = std::current_exception();
     task.base->has_error = true;
   }
@@ -373,6 +377,19 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
 
   int num_outputs = outputs.size();
   if (num_outputs == 0) return; // Don't even acquire the mutex
+
+  if (AnomalyMode::is_enabled()) {
+    AutoGradMode grad_mode(false);
+    for (int i = 0; i < num_outputs; ++i) {
+      auto& output = outputs[i];
+      if (output.ne(output).any().toCByte()) {
+        std::stringstream ss;
+        ss << "Function '" << fn.name() << "' returned nan values in it's " << i << "th output.";
+        throw std::runtime_error(ss.str());
+      }
+    }
+  }
+
   std::lock_guard<std::mutex> lock(task.base->mutex);
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];

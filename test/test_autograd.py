@@ -15,7 +15,7 @@ from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
     suppress_warnings
-from torch.autograd import Variable, Function
+from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
 
@@ -2305,6 +2305,30 @@ class TestAutograd(TestCase):
         out, _ = l(s)
         out.sum().backward()
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+
+    def test_anomaly_detect_nan(self):
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.sum(0, keepdim=True)
+
+            @staticmethod
+            def backward(ctx, gO):
+                gI = gO.clone()
+                gI[0] = 0
+                gI[0] /= 0  # Generate a nan
+                return gI.expand_as(gO)
+
+        inp = torch.rand(10, requires_grad=True)
+        out = MyFunc.apply(inp)
+        out.backward()  # Should not fail
+
+        inp = torch.rand(10, requires_grad=True)
+        out = MyFunc.apply(inp)
+        with self.assertRaises(RuntimeError):
+            with detect_anomaly():
+                out.backward()
 
 
 def index_variable(shape, max_indices):
