@@ -32,8 +32,6 @@ class AsyncSchedulingNet : public AsyncNetBase {
   std::atomic<bool> cleanup_;
 
   std::atomic<int> processed_tasks_num_;
-  std::mutex exception_mutex_;
-  std::vector<std::string> exception_messages_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncSchedulingNet);
 };

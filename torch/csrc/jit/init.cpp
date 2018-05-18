@@ -5,7 +5,6 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/python_compiled_function.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
@@ -107,6 +106,9 @@ void initJITBindings(PyObject *module) {
       .def_property_readonly("graph", [](GraphExecutor& ge) {
         return ge.graph();
       })
+      .def("graph_for", [](GraphExecutor& ge, py::args args) {
+        return ge.graphFor(createVariableTensorList(args));
+      })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         auto inputs = createVariableTensorList(args);
         auto outputs = ge.run(std::move(inputs));
@@ -127,7 +129,6 @@ void initJITBindings(PyObject *module) {
       });
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
-  python::initCompilerMixin(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
 }

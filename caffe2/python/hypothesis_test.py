@@ -1554,6 +1554,14 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [data], lambda x: (x.shape, ))
 
     @given(data=hu.tensor(), **hu.gcs_cpu_only)
+    def test_shape_with_axes(self, data, gc, dc):
+        def shape_ref(x, y):
+            return ([x.shape[i] for i in y],)
+        axes = np.random.randint(len(data.shape), size=10).tolist()
+        op = core.CreateOperator("Shape", ["data"], ["shape"], axes=axes)
+        self.assertReferenceChecks(gc, op, [data, axes], shape_ref)
+
+    @given(data=hu.tensor(), **hu.gcs_cpu_only)
     def test_has_elements(self, data, gc, dc):
         op = core.CreateOperator("HasElements", ["data"], ["has_elements"])
         self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) > 0, ))
@@ -1705,9 +1713,10 @@ class TestOperators(hu.HypothesisTestCase):
 
         if num_iters * num_nets > 0:
             stats_key = self.ws.blobs[("stats_key")].fetch()
-            self.assertEqual(b'atomic_iter/stats/iter/num_iter', stats_key[0])
+            atomic_iter_key = b'atomic_iter/stats/iter/num_iter'
+            self.assertTrue(atomic_iter_key in stats_key)
             stat_val = self.ws.blobs[("stats_val")].fetch()
-            self.assertEqual(num_iters * num_nets, stat_val[0])
+            self.assertEqual(num_iters * num_nets, stat_val[list(stats_key).index(atomic_iter_key)])
 
 
     @given(a=hu.tensor(),

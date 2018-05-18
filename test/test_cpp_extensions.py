@@ -214,3 +214,27 @@ class TestCppExtension(common.TestCase):
         with self.assertRaises(ValueError):
             torch.utils.cpp_extension.load_inline(
                 name='invalid_jit_extension', cpp_sources='', functions=5)
+
+    def test_lenient_flag_handling_in_jit_extensions(self):
+        cpp_source = '''
+        at::Tensor tanh_add(at::Tensor x, at::Tensor y) {
+          return x.tanh() + y.tanh();
+        }
+        '''
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='lenient_flag_handling_extension',
+            cpp_sources=cpp_source,
+            functions='tanh_add',
+            extra_cflags=['-g\n\n', '-O0 -Wall'],
+            extra_include_paths=['       cpp_extensions\n', '../'],
+            verbose=True)
+
+        x = torch.zeros(100, dtype=torch.float32)
+        y = torch.zeros(100, dtype=torch.float32)
+        z = module.tanh_add(x, y).cpu()
+        self.assertEqual(z, x.tanh() + y.tanh())
+
+
+if __name__ == '__main__':
+    common.run_tests()

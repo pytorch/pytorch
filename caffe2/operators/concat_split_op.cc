@@ -19,6 +19,7 @@ std::pair<std::vector<DeviceOption>, std::vector<DeviceOption>> splitOpDevInfer(
 } // namespace.
 
 REGISTER_CPU_OPERATOR(Split, SplitOp<CPUContext>);
+REGISTER_CPU_OPERATOR(SplitByLengths, SplitByLengthsOp<CPUContext>);
 OPERATOR_SCHEMA(Split)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
@@ -35,6 +36,28 @@ optional second input blob to the operator. Otherwise, the tensor is split
 to equal sized parts.
 )DOC")
     .InheritOnnxSchema("Split");
+
+OPERATOR_SCHEMA(SplitByLengths)
+    .NumInputs(2)
+    .NumOutputs(1, INT_MAX)
+    .Input(0, "input", "The tensor to split")
+    .Input(1, "legnths", "The tensor `l_i` indicates the logic block of input.")
+    .Arg("axis", "Which axis to split on")
+    .Arg("order", "Either NHWC or NCWH, will split on C axis, defaults to NCHW")
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      auto op_device =
+          def.has_device_option() ? def.device_option() : DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), op_device);
+      vector<DeviceOption> out_dev(def.output_size(), op_device);
+      // lengths input should be on CPU
+      in_dev[1] = DeviceOption();
+      return std::make_pair(in_dev, out_dev);
+    })
+    .SetDoc(R"DOC(
+Split a tensor into a list of tensors, given a lengths input, along the specified
+'axis'. If `K` outputs are provided, the op assumes `len(lengths) % K == 0`.
+The `input` will be split into `K` parts. Each part of length
+`sum(lengths[i*k:i*k+k))`)DOC");
 
 namespace {
 OpSchema::Cost CostInferenceForConcat(
@@ -206,6 +229,7 @@ class GetSplitGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Split, GetSplitGradient);
 REGISTER_GRADIENT(DepthSplit, GetSplitGradient);
+REGISTER_GRADIENT(SplitByLengths, GetSplitGradient);
 
 class GetConcatGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

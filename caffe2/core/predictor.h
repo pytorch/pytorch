@@ -26,7 +26,8 @@ class Predictor {
       const NetDef& init_net,
       const NetDef& run_net,
       Workspace* parent = nullptr,
-      bool run_init = true);
+      bool run_init = true,
+      int optimization = 1);
 
   ~Predictor() {}
 

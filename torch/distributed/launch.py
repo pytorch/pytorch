@@ -121,6 +121,7 @@ utility
 """
 
 
+import sys
 import subprocess
 import os
 import socket
@@ -192,7 +193,8 @@ def main():
         current_env["RANK"] = str(dist_rank)
 
         # spawn the processes
-        cmd = ["python",
+        cmd = [sys.executable,
+               "-u",
                args.training_script,
                "--local_rank={}".format(local_rank)] + args.training_script_args
 

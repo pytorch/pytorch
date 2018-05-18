@@ -121,9 +121,27 @@ void THSTensor_(div)(THSTensor *r_, THSTensor *t, real value) {
   }
 }
 
+int THSTensor_(isSameSizeIgnoringDensity)(const THSTensor *self, const THSTensor* src) {
+  int d;
+  if (self->nDimensionI + self->nDimensionV != src->nDimensionI + src->nDimensionV) {
+    return 0;
+  }
+  for(d = 0; d < self->nDimensionI + self->nDimensionV; ++d) {
+    if(self->size[d] != src->size[d]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+int THSTensor_(isSameDensity)(const THSTensor *self, const THSTensor* src) {
+  return self->nDimensionI == src->nDimensionI &&
+      self->nDimensionV == src->nDimensionV;
+}
+
 void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
-  if(!THSTensor_(isSameSizeAs)(t, src)) {
-    THError("cadd operands have incompatible sizes or dimension types");
+  if (!THSTensor_(isSameSizeIgnoringDensity)(t, src)) {
+    THError("cadd operands have incompatible sizes");
   }
 
   if (src->nnz == 0) {
@@ -133,6 +151,10 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   if (t->nnz == 0) {
     THSTensor_(mul)(r_, src, value);
     return;
+  }
+
+  if(!THSTensor_(isSameDensity)(t, src)) {
+    THError("cadd operands have incompatible densities");
   }
 
   // saving those because they can be overwritten when doing in-place operations

@@ -2,10 +2,6 @@
 #include "ATen/NativeFunctions.h"
 
 #include "ATen/Config.h"
-#if AT_CUDNN_ENABLED()
-#include "THC/THC.h"
-#include "ATen/cudnn/cudnn-wrapper.h"
-#endif
 
 namespace at { namespace native {
 
@@ -106,7 +102,9 @@ auto ConvParams::view1d_as_2d() -> void {
 }
 
 auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
-#if AT_CUDNN_ENABLED()
+  if (!detail::getCUDAHooks().compiledWithCuDNN()) {
+    return false;
+  }
   if (!input.type().is_cuda() || !cudnn_enabled) {
     return false;
   }
@@ -115,15 +113,9 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
     return false;
   }
   if (is_dilated()) {
-    cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(globalContext().thc_state);
-    // NOTE: extra parenthesis around numbers disable clang warnings about dead code
-    return ((CUDNN_VERSION >= (6021)) || (CUDNN_VERSION >= (6000) && prop->major >= 5)) && !is_output_padding_big();
+    return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
   }
   return !is_output_padding_big();
-#else
-  (void)input; // avoid unused parameter warning
-#endif
-  return false;
 }
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
@@ -231,7 +223,7 @@ at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0}}, groups);
+                         false, {0}, groups);
 }
 
 at::Tensor conv2d(
@@ -344,7 +336,6 @@ at::Tensor _convolution(
 
       output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
   } else if (params.use_cudnn(input)) {
-#if AT_CUDNN_ENABLED()
     if (input.type() != weight.type()){
       std::stringstream ss;
       ss << "Input type (" << input.type().toString() << ") and weight type (" << weight.type().toString() << ") should be the same";
@@ -365,7 +356,6 @@ at::Tensor _convolution(
           input, weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
-#endif
   } else if (params.use_mkldnn(input)) {
 #if AT_MKLDNN_ENABLED()
     if (input.type() != weight.type()){

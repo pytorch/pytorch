@@ -1126,6 +1126,10 @@ class TestDistributions(TestCase):
         self.assertEqual(uniform.log_prob(above_high).item(), -float('inf'), allow_inf=True)
         self.assertEqual(uniform.log_prob(below_low).item(), -float('inf'), allow_inf=True)
 
+        # check cdf computation when value outside range
+        self.assertEqual(uniform.cdf(below_low).item(), 0)
+        self.assertEqual(uniform.cdf(above_high).item(), 1)
+
         set_rng_seed(1)
         self._gradcheck_log_prob(Uniform, (low, high))
         self._gradcheck_log_prob(Uniform, (low, 1.0))
@@ -1192,6 +1196,11 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(LogNormal, (mean, std))
         self._gradcheck_log_prob(LogNormal, (mean, 1.0))
         self._gradcheck_log_prob(LogNormal, (0.0, std))
+
+        # check .log_prob() can broadcast.
+        dist = LogNormal(torch.zeros(4), torch.ones(2, 1, 1))
+        log_prob = dist.log_prob(torch.ones(3, 1))
+        self.assertEqual(log_prob.shape, (2, 3, 4))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lognormal_logprob(self):

@@ -1,5 +1,6 @@
 #include "Functions.h"
 #include <ATen/WrapDimUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
 
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
@@ -132,9 +133,19 @@ Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
   return grad.permute(dims);
 }
 
-Tensor sum_backward(const Tensor & grad, IntList sizes, int64_t dim, bool keepdim) {
+Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
-    return grad.unsqueeze(dim).expand(sizes);
+    if (dims.size()==1) {
+      return grad.unsqueeze(dims[0]).expand(sizes);
+    } else {
+      auto dims_to_unsqueeze = dim_list_to_bitset(dims, sizes.size());
+      Tensor res = grad;
+      for (size_t i = 0; i < sizes.size(); i++){
+	if (dims_to_unsqueeze[i])
+	  res = res.unsqueeze(i);
+      }
+      return res.expand(sizes);
+    }
   } else {
     return grad.expand(sizes);
   }
@@ -335,6 +346,18 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   return grad_input;
 }
 
+Tensor gesv_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
+  return std::get<0>(at::gesv(grad, A.transpose(-2, -1)));
+}
+
+Tensor gesv_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
+  Tensor grad_self = gesv_backward_self(grad, self, A);
+  if (self.ndimension() == 2 && A.ndimension() == 2) {
+    return -at::mm(grad_self, solution.transpose(-2, -1));
+  }
+  return -at::matmul(grad_self, solution.transpose(-2, -1));
+}
+
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   if (x.dim() == 0) {
     return x;
@@ -344,6 +367,14 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
+}
+
+Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim, bool keepdim) {
+  if (! keepdim) {
+    grad = grad.unsqueeze(dim);
+    result = result.unsqueeze(dim);
+  }
+  return grad * (self - result).exp();
 }
 
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {

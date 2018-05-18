@@ -1,15 +1,16 @@
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-using namespace autograd;
+using namespace torch;
+using namespace torch::nn;
 
-AUTOGRAD_CONTAINER_CLASS(TestModel) {
+class TestModel : public Module {
  public:
-  void initialize_containers() override {
-    add(Linear(10, 3).make(), "l1");
-    add(Linear(3, 5).make(), "l2");
-    add(Linear(5, 100).make(), "l3");
+  TestModel() {
+    add(Linear(10, 3).build(), "l1");
+    add(Linear(3, 5).build(), "l2");
+    add(Linear(5, 100).build(), "l3");
   }
 
   variable_list forward(variable_list input) override {
@@ -17,15 +18,12 @@ AUTOGRAD_CONTAINER_CLASS(TestModel) {
   };
 };
 
-AUTOGRAD_CONTAINER_CLASS(NestedModel) {
+class NestedModel : public Module {
  public:
-  void initialize_containers() override {
-    add(Linear(5, 20).make(), "l1");
-    add(TestModel().make(), "test");
-  }
-
-  void initialize_parameters() override {
-    add(Var(DefaultTensor(at::kFloat).tensor({3, 2, 21}), false), "param");
+  NestedModel() {
+    add(Linear(5, 20).build(), "l1");
+    add(std::make_shared<TestModel>(), "test");
+    add(Var(at::CPU(at::kFloat).tensor({3, 2, 21}), false), "param");
   }
 
   variable_list forward(variable_list input) override {
@@ -36,24 +34,23 @@ AUTOGRAD_CONTAINER_CLASS(NestedModel) {
 TEST_CASE("containers") {
   SECTION("conv") {
     SECTION("1d") {
-      auto model = Conv1d(3, 2, 3).stride(2).make();
+      auto model = Conv1d(3, 2, 3).stride(2).build();
       auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5}), true);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
       backward(s);
-      REQUIRE(y.ndimension() == 4);
+      REQUIRE(y.ndimension() == 3);
       REQUIRE(s.ndimension() == 0);
       for (auto i = 0; i < 3; i++) {
         REQUIRE(y.size(i) == 2);
       }
 
-      REQUIRE(model->parameters()["weight"].grad().numel() == 3 * 2 * 3);
+      REQUIRE(model->parameters().at("weight").grad().numel() == 3 * 2 * 3);
     }
-
     SECTION("2d") {
       SECTION("even") {
-        auto model = Conv2d(3, 2, 3).stride(2).make();
+        auto model = Conv2d(3, 2, 3).stride(2).build();
         auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5, 5}), true);
         auto y = model->forward({x})[0];
         Variable s = y.sum();
@@ -65,11 +62,12 @@ TEST_CASE("containers") {
           REQUIRE(y.size(i) == 2);
         }
 
-        REQUIRE(model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 3);
+        REQUIRE(
+            model->parameters().at("weight").grad().numel() == 3 * 2 * 3 * 3);
       }
 
       SECTION("uneven") {
-        auto model = Conv2d(3, 2, IntVec({3, 2})).stride(2).make();
+        auto model = Conv2d(3, 2, {3, 2}).stride({2, 2}).build();
         auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5, 4}), true);
         auto y = model->forward({x})[0];
         Variable s = y.sum();
@@ -81,12 +79,12 @@ TEST_CASE("containers") {
           REQUIRE(y.size(i) == 2);
         }
 
-        REQUIRE(model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 2);
+        REQUIRE(
+            model->parameters().at("weight").grad().numel() == 3 * 2 * 3 * 2);
       }
     }
-
     SECTION("3d") {
-      auto model = Conv3d(3, 2, 3).stride(2).make();
+      auto model = Conv3d(3, 2, 3).stride(2).build();
       auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5, 5, 5}), true);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -99,13 +97,13 @@ TEST_CASE("containers") {
       }
 
       REQUIRE(
-          model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 3 * 3);
+          model->parameters().at("weight").grad().numel() ==
+          3 * 2 * 3 * 3 * 3);
     }
   }
-
   SECTION("linear") {
     SECTION("basic1") {
-      auto model = Linear(5, 2).make();
+      auto model = Linear(5, 2).build();
       auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -116,15 +114,14 @@ TEST_CASE("containers") {
       REQUIRE(y.size(0) == 10);
       REQUIRE(y.size(1) == 2);
 
-      REQUIRE(model->parameters()["weight"].grad().numel() == 2 * 5);
+      REQUIRE(model->parameters().at("weight").grad().numel() == 2 * 5);
     }
 
     SECTION("sequential") {
-      auto model = ContainerList()
-                       .append(Linear(10, 3).make())
-                       .append(Linear(3, 5).make())
-                       .append(Linear(5, 100).make())
-                       .make();
+      auto model = std::make_shared<ContainerList>();
+      model->append(Linear(10, 3).build());
+      model->append(Linear(3, 5).build());
+      model->append(Linear(5, 100).build());
 
       auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
       for (auto layer : *model) {
@@ -140,10 +137,10 @@ TEST_CASE("containers") {
     }
 
     SECTION("simple") {
-      auto model = SimpleContainer().make();
-      auto l1 = model->add(Linear(10, 3).make(), "l1");
-      auto l2 = model->add(Linear(3, 5).make(), "l2");
-      auto l3 = model->add(Linear(5, 100).make(), "l3");
+      auto model = std::make_shared<SimpleContainer>();
+      auto l1 = model->add(Linear(10, 3).build(), "l1");
+      auto l2 = model->add(Linear(3, 5).build(), "l2");
+      auto l3 = model->add(Linear(5, 100).build(), "l3");
 
       auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
       x = l1->forward({x})[0].clamp_min(0);
@@ -158,25 +155,10 @@ TEST_CASE("containers") {
     }
   }
 
-  SECTION("clone") {
-    auto model = TestModel().make();
-
-    auto model2 = model->clone();
-    auto m1param = model->parameters();
-    auto m2param = model2->parameters();
-    for (auto& param : m1param) {
-      REQUIRE(param.second.allclose(m2param[param.first]));
-      param.second.data().mul_(2);
-    }
-    for (auto& param : m1param) {
-      REQUIRE(!param.second.allclose(m2param[param.first]));
-    }
-  }
-
   SECTION("embedding") {
     SECTION("basic") {
       int dict_size = 10;
-      auto model = Embedding(dict_size, 2).make();
+      auto model = Embedding(dict_size, 2).build();
       // Cannot get gradients to change indices (input) - only for embedding
       // params
       auto x = Var(at::CPU(at::kLong).tensor({10}).fill_(dict_size - 1), false);
@@ -189,11 +171,11 @@ TEST_CASE("containers") {
       REQUIRE(y.size(0) == 10);
       REQUIRE(y.size(1) == 2);
 
-      REQUIRE(model->parameters()["weight"].grad().numel() == 2 * dict_size);
+      REQUIRE(model->parameters().at("table").grad().numel() == 2 * dict_size);
     }
 
     SECTION("list") {
-      auto model = Embedding(6, 4).make();
+      auto model = Embedding(6, 4).build();
       auto x = Var(at::CPU(at::kLong).tensor({2, 3}).fill_(5), false);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -207,15 +189,17 @@ TEST_CASE("containers") {
   }
 
   SECTION("dropout") {
-    auto dropout = Dropout(0.5).make();
+    auto dropout = Dropout(0.5).build();
     Variable x = Var(at::CPU(at::kFloat).ones(100));
     Variable y = dropout->forward({x})[0];
 
     backward(y);
     REQUIRE(y.ndimension() == 1);
     REQUIRE(y.size(0) == 100);
-    REQUIRE(y.sum().toCFloat() < 130); // Probably
-    REQUIRE(y.sum().toCFloat() > 70); // Probably
+    // TODO: These two tests are flaky
+    // https://github.com/pytorch/pytorch/issues/7286
+    // REQUIRE(y.sum().toCFloat() < 130); // Probably
+    // REQUIRE(y.sum().toCFloat() > 70); // Probably
 
     dropout->eval();
     y = dropout->forward({x})[0];
@@ -223,7 +207,7 @@ TEST_CASE("containers") {
   }
 
   SECTION("param") {
-    auto model = NestedModel().make();
+    auto model = std::make_shared<NestedModel>();
     REQUIRE(model->param("param").size(0) == 3);
     REQUIRE(model->param("param").size(1) == 2);
     REQUIRE(model->param("param").size(2) == 21);
@@ -240,11 +224,25 @@ TEST_CASE("containers") {
     REQUIRE(model->param("test.l3.weight").size(0) == 100);
     REQUIRE(model->param("test.l3.weight").size(1) == 5);
   }
+
+  SECTION("functional") {
+    bool was_called = false;
+    // clang-format off
+    auto functional = Functional([&was_called](variable_list input) {
+      was_called = true;
+      return input;
+    }).build();
+    // clang-format on
+    auto output = functional->forward({Var(at::CPU(at::kFloat).ones(5))});
+    REQUIRE(was_called);
+    REQUIRE(output.size() == 1);
+    REQUIRE(output.front().equal(Var(at::CPU(at::kFloat).ones(5))));
+  }
 }
 
 TEST_CASE("containers_cuda", "[cuda]") {
   SECTION("1") {
-    auto model = Linear(5, 2).make();
+    auto model = Linear(5, 2).build();
     model->cuda();
     auto x = Var(at::CUDA(at::kFloat).randn({10, 5}), true);
     auto y = model->forward({x})[0];
@@ -256,11 +254,11 @@ TEST_CASE("containers_cuda", "[cuda]") {
     REQUIRE(y.size(0) == 10);
     REQUIRE(y.size(1) == 2);
 
-    REQUIRE(model->parameters()["weight"].grad().numel() == 2 * 5);
+    REQUIRE(model->parameters().at("weight").grad().numel() == 2 * 5);
   }
 
   SECTION("2") {
-    auto model = Linear(5, 2).make();
+    auto model = Linear(5, 2).build();
     model->cuda();
     model->cpu();
     auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);
@@ -273,6 +271,6 @@ TEST_CASE("containers_cuda", "[cuda]") {
     REQUIRE(y.size(0) == 10);
     REQUIRE(y.size(1) == 2);
 
-    REQUIRE(model->parameters()["weight"].grad().numel() == 2 * 5);
+    REQUIRE(model->parameters().at("weight").grad().numel() == 2 * 5);
   }
 }

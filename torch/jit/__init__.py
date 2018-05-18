@@ -47,174 +47,6 @@ def scope(scope_name, *vars):
             tracing_state.pop_scope()
 
 
-def compile(arg=None, nderivs=1, optimize=True, enabled=True):
-    """
-    Decorator which marks a function or module class as eligible for
-    just-in-time compilation.  The next time the function/module is executed, it
-    is traced, and the trace is compiled into an optimized representation which
-    is run in lieu of the original Python code upon subsequent invocations of
-    the function/module.
-
-    .. note::
-
-        A JIT compiled function/module may be compiled multiple times, as
-        different inputs can result in different traces.  Currently, the
-        JIT compiler conservatively assumes the trace may change if the
-        `size` or `requires_grad` of `Tensor` inputs change, or if
-        any of the non-Tensor inputs change.  For example, if you JIT
-        compile an RNN which takes the number of hidden units as a parameter,
-        we will compile a trace for every RNN length you use at runtime.
-
-        When a module class is JIT compiled, each instantiation of the module
-        gets a separate trace cache.
-
-    .. warning::
-
-        Just-in-time compilation currently only works for functions/modules
-        which are not data dependent (e.g., have conditionals on data in
-        tensors) and do not have any untracked external dependencies (e.g.,
-        perform input/output or access global variables). If you trace such
-        models, you will silently get incorrect results on subsequent
-        invocations of the model.
-
-    Keyword arguments:
-        nderivs (int, optional): the number of derivatives which this function/module
-            will be used with.  You MUST accurately specify this number: set it too
-            low and you will see an error when you attempt to run `backward`;
-            set it too high, and the function/module will never be compiled
-            (as we always wait to see all derivatives before compiling.)
-            Default: 1 (i.e., we will compile forwards and backwards, but not
-            double-backwards).
-        optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
-
-    Debug arguments:
-        time (bool, optional): if ``True``, whenever we execute the model in question, we
-            will also print out some timing information for how long the model
-            took to execute.  At the moment, there are three types of timings we
-            emit:
-
-                - unoptimized: the time it took to execute the vanilla Python
-                  model.  This only occurs when tracing is disabled, e.g., via
-                  `enabled=False`
-
-                - tracing: the time it took to execute the vanilla Python model
-                  with tracing enabled.
-
-                - optimized: the time it took to execute the optimized model.
-
-            At the moment, all of these timings are for the forward pass only.
-            Default: ``False``.
-        enabled (bool, optional): if ``False``, compilation is disabled and you
-            will get back your original model.  This is a convenient way to
-            disable tracing without having to delete the annotation. Default: ``True``.
-
-    Example: Compile as class decorator.
-
-        >>> @jit.compile
-        >>> class MyModel(nn.Module):
-        >>>     ...
-        >>> model = MyModel()
-        >>> out1 = model(x)        # interpreted run
-        >>> out1.sum().backward()  # won't compile without this line
-        >>> out2 = model(x)        # compiled run
-        >>> out2.sum().backward()  # also compiled
-
-    Example: Compile forward pass only as class decorator.
-
-        >>> @jit.compile(nderivs=0)
-        >>> class MyModel(nn.Module):
-        >>>     ...
-        >>> model = MyModel()
-        >>> out1 = model(x)        # interpreted run
-        >>> out2 = model(x)        # compiled run
-
-    Example: Compile as function decorator.  The same modes of use for the class
-    decorator are also supported for functions; however, the decorated
-    function must declare *all* Tensor inputs in its arguments.
-
-        >>> @jit.compile
-        >>> def f(x):
-        >>>     return x * 2
-    """
-    def _compile(arg):
-        if inspect.isclass(arg):
-            # NB: It might seem natural to create a subclass here, rather than
-            # make a copy of the class to insert the mixin.  Unfortunately, this
-            # will break many user classes.  Suppose you have:
-            #
-            #     @torch.jit.compile
-            #     class Foo(Module):
-            #         def __init__(self):
-            #             super(Foo, self).__init__() # Python 2 syntax!
-            #
-            # within the class definition, 'Foo' refers to the *decorated*
-            # class, not the undecorated class.  This is bad juju if the
-            # decorator returns a subclass, since super(Foo, self) is going to
-            # refer to the *undecorated* Foo (and thus you have an infinite
-            # loop.)  Python 3's argument-less super() does not have this
-            # problem, but in general we cannot ask users to rewrite their code.
-            #
-            # If we create a *copy* of the class (unrelated to the class the
-            # user passed in), this problem goes away, because the class
-            # __init__ is a part of is indeed Foo.
-
-            old_init = arg.__init__
-            # Python 2 has a concept of unbound methods, which are returned when
-            # you take a method form a class. They behave just like regular functions,
-            # but check the type of the first argument (self). We don't want this here,
-            # because self in our __init__ will be an instance of this new class.
-            # Python 3 already returns a plain function, so nothing has to be done.
-            if sys.version_info[0] == 2:
-                old_init = old_init.im_func
-
-            def __init__(self, *args, **kwargs):
-                torch._C.CompiledFunction.__init__(self,
-                                                   nderivs, optimize, enabled,
-                                                   self.forward,
-                                                   arg.__name__)
-                try:
-                    old_init(self, *args, **kwargs)
-                except TypeError as e:
-                    # If this fails here, the user probably didn't use this as a class decorator
-                    if "super" in str(e):
-                        raise_from(TypeError("torch.jit.compile must be used as a class decorator; "
-                                             "using it on an already defined class is not valid."
-                                             "\n\nOriginal error: {}".format(str(e))), e)
-                    else:
-                        raise
-                # NOTE: This can't be done in CompiledFunction constructor,
-                # because self.parameters() isn't well defined by then
-                # (Module constructor hasn't run yet).
-                self.set_captured_vars(list(self.parameters()))
-
-            new_dict = dict(arg.__dict__)
-            new_dict['__init__'] = __init__
-            new_dict['__call__'] = torch._C.CompiledFunction.__call__
-            # NOTE: we don't need to override casting methods, because we only capture
-            # parameters, and they mutate their data in-place.
-            return type(arg.__name__,
-                        arg.__bases__ + (torch._C.CompiledFunction,),
-                        new_dict)
-        elif isinstance(arg, Module):
-            # It requires work to compile module instances, because you would
-            # like the resulting compiled module to look just like the uncompiled
-            # version; actually achieving this requires a bit of fanciness.
-            # So for now, we just only support the class mechanism.
-            raise TypeError("Compiling model instances is not supported.  "
-                            "Use @torch.jit.compile on a class instead.")
-        elif callable(arg):
-            compiled_fn = torch._C.CompiledFunction(nderivs, optimize, enabled,
-                                                    arg, arg.__name__)
-            return compiled_fn
-        else:
-            raise TypeError("Cannot handle arg with type {}".format(type(arg)))
-    # Make empty parenthesis optional
-    if arg is None:
-        return _compile
-    else:
-        return _compile(arg)
-
-
 def get_trace_graph(f, args=tuple(), kwargs=None, nderivs=0):
     """
     Trace a function or model, returning a tuple consisting of the both the
@@ -477,7 +309,7 @@ def trace(*args, **kwargs):
     return wrapper
 
 
-def createResolutionCallback(frame_id=2):
+def createResolutionCallback(frames_up=0):
     """
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
@@ -496,8 +328,10 @@ def createResolutionCallback(frame_id=2):
 
     This is used to enable access in-scope Python variables inside
     TorchScript fragments.
+
+    frames_up is
     """
-    frame = inspect.stack()[frame_id][0]
+    frame = inspect.stack()[1 + frames_up][0]
 
     def env(key):
         if key in frame.f_locals:
@@ -511,30 +345,30 @@ def createResolutionCallback(frame_id=2):
 
 
 class CompilationUnit(object):
-    def __init__(self, lang=None, optimize=True):
+    def __init__(self, lang=None, optimize=True, _frames_up=0):
         self.module = torch._C.ScriptModule()
         self.module._set_optimized(optimize)
         if lang is not None:
-            self.define(lang, frame_id=3)
+            self.define(lang, _frames_up=_frames_up + 1)
         self.optimize = optimize
 
-    def define(self, lang, rcb=None, frame_id=2):
+    def define(self, lang, rcb=None, _frames_up=0):
         if not rcb:
-            rcb = createResolutionCallback(frame_id)
+            rcb = createResolutionCallback(_frames_up + 1)
         self.module._define(lang, rcb, False)
 
     def __getattr__(self, attr):
         return self.module._get_method(attr)
 
 
-def _script_graph(fn, frame_id=2):
-    rcb = createResolutionCallback(frame_id)
+def _script_graph(fn, _frames_up=0):
+    rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn)
     return _jit_script_compile(ast, rcb)
 
 
-def script(fn):
-    graph = _script_graph(fn, frame_id=3)
+def script(fn, _frames_up=0):
+    graph = _script_graph(fn, _frames_up=_frames_up + 1)
     return torch._C.GraphExecutor(graph, True)
 
 
@@ -542,7 +376,7 @@ ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast')
 
 
 def script_method(fn):
-    return ScriptMethodStub(createResolutionCallback(), get_jit_ast(fn))
+    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn))
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -762,7 +596,7 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
         return self.__getattr__('forward')(*args, **kwargs)
 
     def define(self, lang):
-        rcb = createResolutionCallback()
+        rcb = createResolutionCallback(frames_up=1)
         self._define(lang, rcb, True)
 
 
@@ -777,7 +611,7 @@ _compiled_methods_whitelist = {
     '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
     'state_dict', 'load_state_dict', '_load_from_state_dict', 'parameters',
     'named_parameters', '_all_buffers', 'children', 'named_children', 'modules',
-    'named_modules', 'zero_grad', 'share_memory', '_get_name'
+    'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr'
 }
 
 
@@ -814,9 +648,9 @@ class TracedModule(ScriptModule):
                 self._parameters[name] = param
                 check_unique(param)
         for name, buf in orig._buffers.items():
-            if param is not None:
+            if buf is not None:
                 self._buffers[name] = buf
-                check_unique(param)
+                check_unique(buf)
         self._orig_class = type(orig)
 
         if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:

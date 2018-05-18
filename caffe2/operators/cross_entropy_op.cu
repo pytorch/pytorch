@@ -150,10 +150,20 @@ __device__ float sigmoid_xent_backward_with_log_d_trick(float lgt, float tgt) {
   return (2 * tgt - 1.) / (1. + exp(lgt));
 }
 
+__device__ float unjoined_sigmoid_xent_forward(float lgt, float tgt) {
+  return lgt * tgt + (tgt - 1) * lgt * (lgt >= 0) -
+      (1 - tgt) * log(1 + exp(lgt - 2 * lgt * (lgt >= 0)));
+}
+
+__device__ float unjoined_sigmoid_xent_backward(float lgt, float tgt) {
+  return tgt - (1. - tgt) / (1. + exp(-lgt));
+}
+
 __global__ void SigmoidCrossEntropyWithLogitsKernel(
     const int outer_size,
     const int inner_size,
     const bool log_D_trick,
+    const bool unjoined_lr_loss,
     const float* logits_ptr,
     const float* targets_ptr,
     float* out_ptr) {
@@ -162,11 +172,16 @@ __global__ void SigmoidCrossEntropyWithLogitsKernel(
   float value = 0;
   for (int in_idx = i * inner_size + threadIdx.x; in_idx < last_idx;
        in_idx += blockDim.x) {
-    value +=
-        (log_D_trick
-             ? sigmoid_xent_forward_with_log_d_trick(
-                   logits_ptr[in_idx], targets_ptr[in_idx])
-             : sigmoid_xent_forward(logits_ptr[in_idx], targets_ptr[in_idx]));
+    if (unjoined_lr_loss) {
+      value += unjoined_sigmoid_xent_forward(
+          logits_ptr[in_idx], targets_ptr[in_idx]);
+    } else {
+      value +=
+          (log_D_trick
+               ? sigmoid_xent_forward_with_log_d_trick(
+                     logits_ptr[in_idx], targets_ptr[in_idx])
+               : sigmoid_xent_forward(logits_ptr[in_idx], targets_ptr[in_idx]));
+    }
   }
 
   typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
@@ -181,6 +196,7 @@ __global__ void SigmoidCrossEntropyGradientWithLogitsKernel(
     const int outer_size,
     const int inner_size,
     const bool log_D_trick,
+    const bool unjoined_lr_loss,
     const float* g_ptr,
     const float* logits_ptr,
     const float* targets_ptr,
@@ -188,11 +204,17 @@ __global__ void SigmoidCrossEntropyGradientWithLogitsKernel(
   CUDA_1D_KERNEL_LOOP(in_idx, outer_size * inner_size) {
     int i = in_idx / inner_size;
     auto g_factor = -g_ptr[i] / inner_size;
-    out_ptr[in_idx] = g_factor *
-        (log_D_trick
-             ? sigmoid_xent_backward_with_log_d_trick(
-                   logits_ptr[in_idx], targets_ptr[in_idx])
-             : sigmoid_xent_backward(logits_ptr[in_idx], targets_ptr[in_idx]));
+    if (unjoined_lr_loss) {
+      out_ptr[in_idx] = g_factor *
+          unjoined_sigmoid_xent_backward(
+                            logits_ptr[in_idx], targets_ptr[in_idx]);
+    } else {
+      out_ptr[in_idx] = g_factor *
+          (log_D_trick ? sigmoid_xent_backward_with_log_d_trick(
+                             logits_ptr[in_idx], targets_ptr[in_idx])
+                       : sigmoid_xent_backward(
+                             logits_ptr[in_idx], targets_ptr[in_idx]));
+    }
   }
 }
 } // namespace
@@ -227,7 +249,13 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      outer_size, inner_size, log_D_trick_, logits_ptr, targets_ptr, out_ptr);
+      outer_size,
+      inner_size,
+      log_D_trick_,
+      unjoined_lr_loss_,
+      logits_ptr,
+      targets_ptr,
+      out_ptr);
   return true;
 }
 
@@ -258,6 +286,7 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
       outer_size,
       inner_size,
       log_D_trick_,
+      unjoined_lr_loss_,
       g_ptr,
       logits_ptr,
       targets_ptr,

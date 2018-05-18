@@ -108,14 +108,59 @@ int64_t sample_poisson(double lambda, THGenerator* generator) {
 
 namespace at {
 namespace native {
-Tensor& bernoulli_(Tensor& self, const Tensor& p, Generator* generator) {
-  self.copy_(at::bernoulli(std::get<0>(expand_inplace(self, p)), generator));
+
+Tensor bernoulli(const Tensor& self, const Tensor& p, Generator* gen) {
+  Tensor result = self.type().tensor();
+  result.resize_(self.sizes());
+  return native::bernoulli_(result, p, gen);
+}
+
+Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
+  Tensor result = self.type().tensor();
+  result.resize_(self.sizes());
+  return native::bernoulli_(result, p, gen);
+}
+
+Tensor bernoulli(const Tensor& self, Generator* gen) {
+  Tensor result = self.type().tensor();
+  result.resize_(self.sizes());
+  return native::bernoulli(result, self, gen);
+}
+
+Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
+  if (!self.is_cuda() && !p_.is_cuda()) {
+    Tensor p = p_.toType(kDouble);
+    AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_", [&] {
+      THGenerator* generator = get_generator(gen);
+      std::lock_guard<std::mutex> lock(generator->mutex);
+      CPU_tensor_apply2<scalar_t, double>(
+          self, p, [generator](scalar_t& ret_val, double& p_val) {
+            ret_val = (scalar_t)THRandom_bernoulli(generator, p_val);
+          });
+    });
+    return self;
+  }
+  self.copy_(at::_th_bernoulli(std::get<0>(expand_inplace(self, p_)), gen));
   return self;
 }
 
-Tensor& bernoulli_(Tensor& self, double p, Generator* generator) {
+Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
+  if (!self.is_cuda()) {
+    AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_", [&] {
+      THGenerator* generator = get_generator(gen);
+      std::lock_guard<std::mutex> lock(generator->mutex);
+      CPU_tensor_apply1<scalar_t>(self, [generator, p](scalar_t& ret_val) {
+        ret_val = (scalar_t)THRandom_bernoulli(generator, p);
+      });
+    });
+    return self;
+  }
   Tensor probs = self.type().toScalarType(kDouble).tensor({}).fill_(p);
-  return native::bernoulli_(self, probs, generator);
+  return native::bernoulli_(self, probs, gen);
+}
+
+Tensor& bernoulli_(Tensor& self, Generator* gen) {
+  return native::bernoulli_(self, 0.5, gen);
 }
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {

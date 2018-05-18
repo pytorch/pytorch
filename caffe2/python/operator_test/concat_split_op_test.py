@@ -7,6 +7,7 @@ import numpy as np
 import hypothesis.strategies as st
 import unittest
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 from hypothesis import given
 
@@ -125,6 +126,54 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, input_tensors, split_ref)
         self.assertDeviceChecks(dc, op, input_tensors, outputs_with_grad)
         self.assertGradientChecks(gc, op, input_tensors, 0, outputs_with_grad)
+
+    @given(
+        inputs=hu.lengths_tensor(
+            dtype=np.float32,
+            min_value=1,
+            max_value=5,
+            allow_empty=True,
+        ),
+        **hu.gcs
+    )
+    def test_split_by_lengths(self, inputs, gc, dc):
+        data, lengths = inputs
+        len_len = len(lengths)
+
+        def _find_factor_simple(x):
+            for i in [2, 3, 5]:
+                if x % i == 0:
+                    return i
+            return x
+
+        num_output = _find_factor_simple(len_len)
+        axis = 0
+        op = core.CreateOperator(
+            "SplitByLengths",
+            ["data", "lengths"],
+            ['X_{}'.format(i) for i in range(num_output)],
+            axis=axis,
+        )
+
+        def split_by_lengths_ref(data, lengths, num_output=num_output, axis=0):
+            idxs = np.cumsum([0] + list(lengths)).astype(np.int32)
+            return [
+                np.array(
+                    data.take(
+                        np.arange(
+                            idxs[i * len_len // num_output],
+                            idxs[(i + 1) * len_len // num_output]
+                        ),
+                        axis=axis
+                    )
+                ) for i in range(num_output)
+            ]
+        outputs_with_grad = range(num_output)
+        input_tensors = [data, lengths]
+        self.assertReferenceChecks(gc, op, input_tensors, split_by_lengths_ref)
+        self.assertDeviceChecks(dc, op, input_tensors, outputs_with_grad)
+        self.assertGradientChecks(gc, op, input_tensors, 0, outputs_with_grad)
+
 
 
 if __name__ == "__main__":

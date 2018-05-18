@@ -1,8 +1,11 @@
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-using namespace autograd;
+#include <ATen/Error.h>
+
+using namespace torch;
+using namespace torch::nn;
 
 #include <iostream>
 
@@ -85,7 +88,7 @@ class CartPole {
       reward = 0;
     } else {
       if (steps_beyond_done == 0) {
-        assert(false); // Can't do this
+        AT_ASSERT(false); // Can't do this
       }
     }
     step_++;
@@ -105,7 +108,7 @@ bool test_mnist(
   struct MNIST_Reader {
     FILE* fp_;
 
-    MNIST_Reader(const char* path) {
+    explicit MNIST_Reader(const char* path) {
       fp_ = fopen(path, "rb");
       if (!fp_)
         throw std::runtime_error("failed to open file");
@@ -116,17 +119,19 @@ bool test_mnist(
         fclose(fp_);
     }
 
-    int32_t read_int() {
+    uint32_t read_int() {
       uint8_t buf[4];
-      if (fread(buf, sizeof(buf), 1, fp_) != 1)
+      if (fread(buf, sizeof(buf), 1, fp_) != 1) {
         throw std::runtime_error("failed to read an integer");
-      return int32_t(buf[0] << 24 | buf[1] << 16 | buf[2] << 8 | buf[3]);
+      }
+      return buf[0] << 24u | buf[1] << 16u | buf[2] << 8u | buf[3];
     }
 
     uint8_t read_byte() {
       uint8_t i;
-      if (fread(&i, sizeof(i), 1, fp_) != 1)
+      if (fread(&i, sizeof(i), 1, fp_) != 1) {
         throw std::runtime_error("failed to read an byte");
+      }
       return i;
     }
   };
@@ -216,10 +221,10 @@ TEST_CASE("integration") {
     std::cerr
         << "Training episodic policy gradient with a critic for up to 3000"
            " episodes, rest your eyes for a bit!\n";
-    auto model = SimpleContainer().make();
-    auto linear = model->add(Linear(4, 128).make(), "linear");
-    auto policyHead = model->add(Linear(128, 2).make(), "policy");
-    auto valueHead = model->add(Linear(128, 1).make(), "action");
+    auto model = std::make_shared<SimpleContainer>();
+    auto linear = model->add(Linear(4, 128).build(), "linear");
+    auto policyHead = model->add(Linear(128, 2).build(), "policy");
+    auto valueHead = model->add(Linear(128, 1).build(), "action");
     auto optim = Adam(model, 1e-3).make();
 
     std::vector<Variable> saved_log_probs;
@@ -314,75 +319,74 @@ TEST_CASE("integration") {
   }
 }
 
-TEST_CASE("integration_cuda", "[cuda]") {
-  SECTION("mnist") {
-    auto model = SimpleContainer().make();
-    auto conv1 = model->add(Conv2d(1, 10, 5).make(), "conv1");
-    auto conv2 = model->add(Conv2d(10, 20, 5).make(), "conv2");
-    auto drop = Dropout(0.3).make();
-    auto drop2d = Dropout2d(0.3).make();
-    auto linear1 = model->add(Linear(320, 50).make(), "linear1");
-    auto linear2 = model->add(Linear(50, 10).make(), "linear2");
+TEST_CASE("integration/mnist", "[cuda]") {
+  auto model = std::make_shared<SimpleContainer>();
+  auto conv1 = model->add(Conv2d(1, 10, 5).build(), "conv1");
+  auto conv2 = model->add(Conv2d(10, 20, 5).build(), "conv2");
+  auto drop = Dropout(0.3).build();
+  auto drop2d = Dropout2d(0.3).build();
+  auto linear1 = model->add(Linear(320, 50).build(), "linear1");
+  auto linear2 = model->add(Linear(50, 10).build(), "linear2");
 
-    auto forward = [&](Variable x) {
-      x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))
-              .clamp_min(0);
-      x = conv2->forward({x})[0];
-      x = drop2d->forward({x})[0];
-      x = std::get<0>(at::max_pool2d(x, {2, 2})).clamp_min(0);
+  auto forward = [&](Variable x) {
+    x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))
+            .clamp_min(0);
+    x = conv2->forward({x})[0];
+    x = drop2d->forward({x})[0];
+    x = std::get<0>(at::max_pool2d(x, {2, 2})).clamp_min(0);
 
-      x = x.view({-1, 320});
-      x = linear1->forward({x})[0].clamp_min(0);
-      x = drop->forward({x})[0];
-      x = linear2->forward({x})[0];
-      x = at::log_softmax(x, 1);
-      return x;
-    };
+    x = x.view({-1, 320});
+    x = linear1->forward({x})[0].clamp_min(0);
+    x = drop->forward({x})[0];
+    x = linear2->forward({x})[0];
+    x = at::log_softmax(x, 1);
+    return x;
+  };
 
-    auto optim = SGD(model, 1e-2).momentum(0.5).make();
+  auto optim = SGD(model, 1e-2).momentum(0.5).make();
 
-    REQUIRE(test_mnist(
-        32, // batch_size
-        3, // num_epochs
-        true, // useGPU
-        model,
-        forward,
-        optim));
-  }
+  REQUIRE(test_mnist(
+      32, // batch_size
+      3, // num_epochs
+      true, // useGPU
+      model,
+      forward,
+      optim));
+}
 
-  SECTION("mnist_batchnorm") {
-    auto model = SimpleContainer().make();
-    auto conv1 = model->add(Conv2d(1, 10, 5).make(), "conv1");
-    auto batchnorm2d =
-        model->add(BatchNorm(10).stateful().make(), "batchnorm2d");
-    auto conv2 = model->add(Conv2d(10, 20, 5).make(), "conv2");
-    auto linear1 = model->add(Linear(320, 50).make(), "linear1");
-    auto batchnorm1 = model->add(BatchNorm(50).stateful().make(), "batchnorm1");
-    auto linear2 = model->add(Linear(50, 10).make(), "linear2");
+TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
+  auto model = std::make_shared<SimpleContainer>();
+  auto conv1 = model->add(Conv2d(1, 10, 5).build(), "conv1");
+  auto batchnorm2d =
+      model->add(BatchNorm(10).stateful(true).build(), "batchnorm2d");
+  auto conv2 = model->add(Conv2d(10, 20, 5).build(), "conv2");
+  auto linear1 = model->add(Linear(320, 50).build(), "linear1");
+  auto batchnorm1 =
+      model->add(BatchNorm(50).stateful(true).build(), "batchnorm1");
+  auto linear2 = model->add(Linear(50, 10).build(), "linear2");
 
-    auto forward = [&](Variable x) {
-      x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))
-              .clamp_min(0);
-      x = batchnorm2d->forward({x})[0];
-      x = conv2->forward({x})[0];
-      x = std::get<0>(at::max_pool2d(x, {2, 2})).clamp_min(0);
+  auto forward = [&](Variable x) {
+    x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))
+            .clamp_min(0);
+    x = batchnorm2d->forward({x})[0];
+    x = conv2->forward({x})[0];
+    x = std::get<0>(at::max_pool2d(x, {2, 2})).clamp_min(0);
 
-      x = x.view({-1, 320});
-      x = linear1->forward({x})[0].clamp_min(0);
-      x = batchnorm1->forward({x})[0];
-      x = linear2->forward({x})[0];
-      x = at::log_softmax(x, 1);
-      return x;
-    };
+    x = x.view({-1, 320});
+    x = linear1->forward({x})[0].clamp_min(0);
+    x = batchnorm1->forward({x})[0];
+    x = linear2->forward({x})[0];
+    x = at::log_softmax(x, 1);
+    return x;
+  };
 
-    auto optim = SGD(model, 1e-2).momentum(0.5).make();
+  auto optim = SGD(model, 1e-2).momentum(0.5).make();
 
-    REQUIRE(test_mnist(
-        32, // batch_size
-        3, // num_epochs
-        true, // useGPU
-        model,
-        forward,
-        optim));
-  }
+  REQUIRE(test_mnist(
+      32, // batch_size
+      3, // num_epochs
+      true, // useGPU
+      model,
+      forward,
+      optim));
 }

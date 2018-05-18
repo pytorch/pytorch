@@ -29,7 +29,7 @@
 #endif
 
 #ifdef _WIN32
-# ifdef TH_EXPORTS
+# ifdef ATen_cpu_EXPORTS
 #  define TH_API TH_EXTERNC __declspec(dllexport)
 # else
 #  define TH_API TH_EXTERNC __declspec(dllimport)

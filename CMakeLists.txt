@@ -24,8 +24,10 @@ set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
+option(BUILD_CAFFE2 "Build Caffe2" ON)
+option(BUILD_ATEN "Build ATen" OFF)
 option(BUILD_BINARY "Build C++ binaries" ON)
-option(BUILD_DOCS "Build documentation" OFF)
+option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
@@ -35,31 +37,58 @@ cmake_dependent_option(
 cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
-option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
+cmake_dependent_option(
+    BUILD_TEST "Build Caffe2 C++ test binaries (need gtest and gbenchmark)" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_ATEN "Use ATen" OFF)
-option(USE_CUDA "Use Cuda" ON)
+option(USE_CUDA "Use CUDA" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
+cmake_dependent_option(
+    USE_CUDNN "Use cuDNN" ON
+    "USE_CUDA" OFF)  # New option
 option(USE_FFMPEG "Use ffmpeg" OFF)
-option(USE_GFLAGS "Use GFLAGS" ON)
-option(USE_GLOG "Use GLOG" ON)
-option(USE_GLOO "Use Gloo" ON)
-option(USE_LEVELDB "Use LEVELDB" ON)
+cmake_dependent_option(
+    USE_GFLAGS "Use GFLAGS" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_GLOG "Use GLOG" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_GLOO "Use Gloo" ON
+    "BUILD_CAFFE2" OFF)
+option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)  # New option
+cmake_dependent_option(
+    USE_LEVELDB "Use LEVELDB" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
-option(USE_LMDB "Use LMDB" ON)
-option(USE_METAL "Use Metal for iOS build" ON)
-option(USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON)
-option(USE_MPI "Use MPI" ON)
+cmake_dependent_option(
+    USE_LMDB "Use LMDB" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_METAL "Use Metal for iOS build" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_MPI "Use MPI" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
+option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)  # New option
 option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
-option(USE_NUMA "Use NUMA (only available on Linux)" ON)
+cmake_dependent_option(
+    USE_NUMA "Use NUMA (only available on Linux)" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
-option(USE_OPENCV "Use openCV" ON)
+cmake_dependent_option(
+    USE_OPENCV "Use OpenCV" ON
+    "BUILD_CAFFE2" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" OFF)
 option(USE_PROF "Use profiling" OFF)
 option(USE_REDIS "Use Redis" OFF)
@@ -68,9 +97,52 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
-option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
-option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
+option(USE_MKLDNN "Use MKLDNN" OFF)
+cmake_dependent_option(
+    USE_IDEEP "Use IDEEP interface in MKL BLAS" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_MKLML "Use MKLML interface in MKL BLAS" ON
+    "BUILD_CAFFE2" OFF)
+option(USE_DISTRIBUTED "Use THD (distributed)" OFF)  # New option
+option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)  # New option
 
+# Legacy options, which we will eventually remove
+cmake_dependent_option(
+    WITH_CUDA "Legacy CUDA" ON
+    "USE_CUDA" OFF)
+cmake_dependent_option(
+    NO_CUDA "Legacy no CUDA" OFF
+    "USE_CUDA" ON)
+cmake_dependent_option(
+    NO_PYTHON "Legacy Python" OFF
+    "BUILD_PYTHON" ON)
+cmake_dependent_option(
+    WITH_CUDNN "Legacy cuDNN" ON
+    "USE_CUDNN" OFF)
+cmake_dependent_option(
+    WITH_NCCL "Legacy NCCL" ON
+    "USE_NCCL" OFF)
+cmake_dependent_option(
+    NO_MKLDNN "Legacy no MKLDNN" OFF
+    "USE_MKLDNN" ON)
+cmake_dependent_option(
+    WITH_DISTRIBUTED "Legacy THD (distributed)" ON
+    "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    WITH_DISTRIBUTED_MW "Legacy THD (distributed) MW" ON
+    "USE_DISTRIBUTED_MW" OFF)
+cmake_dependent_option(
+    WITH_GLOO_IBVERBS "Legacy Gloo IB verbs for distributed support" ON
+    "USE_GLOO_IBVERBS" OFF)
+if (USE_ATEN)
+    set(BUILD_ATEN ${USE_ATEN})
+endif()
+
+# ---[ Special code path for MKL module
+if (NOT BUILD_ATEN)
+  set(USE_MKL_IDEEP_OR_MKLML ON)
+endif()
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
@@ -93,6 +165,7 @@ include(cmake/BuildVariables.cmake)
 # External projects
 include(ExternalProject)
 
+# ---[ Utils
 # TODO: merge the following 3 files into cmake/public/utils.cmake.
 include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
@@ -139,8 +212,17 @@ else()
         string(REGEX REPLACE "/MT" "/MD" ${flag_var} "${${flag_var}}")
       endif()
     endif()
+    # /bigobj increases number of sections in .obj file, which is needed to link
+    # against libaries in Python 2.7 under Windows
     set(${flag_var} "${${flag_var}} /MP /bigobj")
   endforeach(flag_var)
+endif()
+
+set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer")
+set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer")
+if (USE_ASAN)
+    set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
+    set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fsanitize=address")
 endif()
 
 if(ANDROID)
@@ -166,13 +248,13 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 # in PROJECT_SOURCE_DIR.
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
-# ---[ Old caffe protobuf.
+# ---[ Old caffe protobuf
 add_subdirectory(caffe/proto)
 
 # ---[ Main build
 add_subdirectory(caffe2)
 
-# Documentation Option
+# --[ Documentation
 if(BUILD_DOCS)
   # check if Doxygen is installed
   find_package(Doxygen)
@@ -276,16 +358,19 @@ else()
 endif()
 
 # ---[ Modules
-add_subdirectory(modules)
+if (BUILD_CAFFE2)
+  add_subdirectory(modules)
+endif()
 
 # ---[ Binaries
 # Binaries will be built after the Caffe2 main libraries and the modules
 # are built. For the binaries, they will be linked to the Caffe2 main
 # libraries, as well as all the modules that are built with Caffe2 (the ones
 # built in the previous Modules section above).
-
-if (BUILD_BINARY)
-  add_subdirectory(binaries)
+if (BUILD_CAFFE2)
+  if (BUILD_BINARY)
+    add_subdirectory(binaries)
+  endif()
 endif()
 
 include(cmake/Summary.cmake)

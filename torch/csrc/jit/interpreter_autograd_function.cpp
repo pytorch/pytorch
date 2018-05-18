@@ -26,7 +26,7 @@ static at::Tensor zeroTensorWithType(const TensorType & type) {
   auto & at_type = at::getType(device, type.scalarType());
   // note: this has to be a contiguous tensor of zeros, because the fusion engine
   // specialized to what is normally here which might be fully dense
-  return at::zeros(at_type, type.sizes());
+  return autograd::make_variable(at::zeros(at_type, type.sizes()));
 }
 
 autograd::variable_list InterpreterAutogradFunction::apply(
@@ -86,7 +86,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
         stack.push_back(at::Tensor());
       }
     } else {
-      stack.push_back(inputs[i].data());
+      stack.push_back(inputs[i].detach());
     }
   }
 
@@ -143,11 +143,11 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     auto & flags = details.output_flags[i];
     if (flags.requires_grad) { // See Note [Null-edge pruning]
       if (!grad_fn) make_grad_fn();
-      auto variable = autograd::make_variable(stack[i], /*requires_grad=*/false);
+      auto variable = static_cast<const Variable&>(stack[i]);
       autograd::create_gradient_edge(variable, grad_fn);
       result.push_back(std::move(variable));
     } else {
-      result.push_back(autograd::make_variable(stack[i], /*requires_grad=*/false));
+      result.push_back(static_cast<const Variable&>(stack[i]));
     }
   }
 
@@ -155,7 +155,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
 }
 
 InterpreterFunctionFactory::InterpreterFunctionFactory(TracingState *state) {
-  code_ = jit::Code(state->graph, /*values_are_variables=*/false);
+  code_ = jit::Code(state->graph);
   stage_details_.resize(state->graph->stage() + 1);
   auto graph_inputs = state->graph->inputs();
   auto inputs_it = graph_inputs.begin();

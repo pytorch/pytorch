@@ -119,6 +119,7 @@ void EliminateCommonSubexpression(Block * block) {
     if (node->kind() == prim::PythonOp
         || node->kind() == prim::CppOp
         || node->kind() == prim::Eval
+        || node->blocks().size() > 0
        ) {
       // Do NOT have enough information to do CSE on these nodes.
       continue;

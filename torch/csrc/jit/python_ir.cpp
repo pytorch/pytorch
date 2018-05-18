@@ -257,14 +257,14 @@ void initPythonIRBindings(PyObject * module_) {
       return variables;
     })
     .def("z_",[](Node & n, const char * name, at::Tensor v) {
-        return n.t_(Symbol::attr(name), v.view({}));
+        return n.t_(Symbol::attr(name), autograd::Variable(v.view({})).data());
     })
     .def("z",[](Node & n, const char * name) {
         return n.t(Symbol::attr(name));
     })
     .def("zs_",[](Node & n, const char * name, TensorsAttr::ValueType v) {
         for (size_t i = 0; i < v.size(); ++ i) {
-            v[i] = v[i].view({});
+            v[i] = autograd::Variable(v[i].view({})).data();
         }
         return n.ts_(Symbol::attr(name), std::move(v));
     })
@@ -291,13 +291,9 @@ void initPythonIRBindings(PyObject * module_) {
     })
     ;
 
-  #define TS(name) \
-    def(#name,&Type :: name)
   py::class_<Type,std::shared_ptr<Type>>(m,"Type")
     .def("__repr__",[](Type & t) {
-      std::stringstream ss;
-      ss << t;
-      return ss.str();
+      return t.name();
     })
     .def("kind",[](Type& t_) {
       Type * t = &t_;
@@ -329,13 +325,15 @@ void initPythonIRBindings(PyObject * module_) {
     })
     ;
 
+  py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
+    .def(py::init<>());
+  py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
+    .def(py::init<std::vector<TypePtr>>());
+
   py::class_<Use>(m,"Use")
   .def_readonly("user",&Use::user)
   .def_readonly("offset",&Use::offset);
 
-  m.def("_jit_get_graph", [](tracer::TracingState* s) {
-    return s->graph;
-  });
   m.def("_jit_import_graph", [](const std::string& serialized_graph) {
     std::vector<at::Tensor> initializers;
     auto graph = ImportIRGraph(serialized_graph, initializers);

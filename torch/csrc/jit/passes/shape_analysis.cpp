@@ -1,8 +1,9 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 
+#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/generated/aten_dispatch.h"
+#include "torch/csrc/jit/aten_dispatch.h"
 
 #include <ATen/ExpandUtils.h>
 
@@ -27,6 +28,7 @@ void setDynamicType(Node * node) {
 
 at::Tensor representativeTensor(const TensorType * type) {
   auto backend = type->device() == -1 ? at::kCPU : at::kCUDA;
+  AutoGPU gpu_guard(type->device());
   auto & attype = at::getType(backend, type->scalarType());
   return attype.tensor(type->sizes(), type->strides()).zero_();
 }
@@ -73,6 +75,7 @@ void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
     auto graph = node->owningGraph();
     Node *expand = graph->create(aten::expand, {node->inputs().at(input_idx)})
                         ->is_(attr::size, expected_size)
+                        ->i_(attr::implicit, 0)
                         ->insertBefore(node);
     PropagateShapeOnNode(expand);
     node->replaceInput(input_idx, expand->output());
@@ -90,11 +93,13 @@ void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>&
   for(auto & type : types) {
     stack.push_back(representativeTensor(type));
   }
+
   // XXX: we're not catching any exceptions from the op for now. This
   // is to uncover any mistakes we could make when editing this code,
   // and eventually it shouldn't matter, because this phase should be
   // preceded by schema checking.
   op_info.op(stack);
+
   JIT_ASSERT(stack.size() == node->outputs().size());
   for(size_t i = 0; i < stack.size(); ++i) {
     node->outputs()[i]->inferTypeFrom(stack[i]);
@@ -228,11 +233,11 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     } break;
     case aten::sum: {
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
-                         {{AKind::i, attr::dim},
+                         {{AKind::is, attr::dim},
                           {AKind::i, attr::keepdim}})) {
         auto tp = types.at(0);
         auto sizes = tp->sizes();
-        int64_t dim = node->i(attr::dim);
+        int64_t dim = node->is(attr::dim).at(0);
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
         if (node->i(attr::keepdim)) {
           sizes.at(dim) = 1;

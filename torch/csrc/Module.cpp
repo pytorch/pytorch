@@ -210,7 +210,7 @@ PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
   auto size1 = THPUtils_unpackLongs(arg1);
   auto size2 = THPUtils_unpackLongs(arg2);
   auto sizes = at::infer_size(size1, size2);
-  return THPSize_New(sizes.size(), sizes.data());
+  return THPSize_NewFromSizes(sizes.size(), sizes.data());
   END_HANDLE_TH_ERRORS
 }
 

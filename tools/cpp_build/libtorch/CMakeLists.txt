@@ -4,19 +4,20 @@ cmake_policy(VERSION 3.0)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (VERBOSE)
   message(STATUS "ATEN_PATH is ${ATEN_PATH}")
   message(STATUS "ATEN_BUILD_PATH is ${ATEN_BUILD_PATH}")
 endif()
 
-find_path(ATEN_INCLUDE_DIR ATen/ATen.h PATHS "${ATEN_PATH}/src/" NO_DEFAULT_PATH)
-find_path(ATEN_BUILD_INCLUDE_DIR ATen/Type.h PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
-find_library(ATEN_LIBRARY ATen PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
+set(ATEN_INCLUDE_DIR "${ATEN_PATH}/src/")
+set(ATEN_BUILD_INCLUDE_DIR "${ATEN_BUILD_PATH}/src/ATen")
+set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch")
 
+find_library(ATEN_CPU_LIBRARY ATen_cpu PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
+find_library(ATEN_CUDA_LIBRARY ATen_cuda PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
 find_library(NANOPB_LIBRARY protobuf-nanopb PATHS "${NANOPB_BUILD_PATH}" NO_DEFAULT_PATH)
-
-find_path(TORCH_SRC_DIR torch.h PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch" NO_DEFAULT_PATH)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -61,9 +62,7 @@ if(NOT NO_CUDA)
   endif()
 endif()
 
-add_definitions(-DNO_PYTHON)
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORCE_INLINES")
+add_definitions(-DNO_PYTHON -D_FORCE_INLINES)
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -132,8 +131,8 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
-  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_dispatch.h"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_dispatch.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_schema.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
   python tools/setup_helpers/generate_code.py
@@ -156,12 +155,15 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
   "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
   "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
-  "${TOOLS_PATH}/jit/templates/aten_dispatch.h"
+  "${TOOLS_PATH}/autograd/gen_autograd.py"
+  "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
+  "${TOOLS_PATH}/autograd/gen_variable_type.py"
   "${TOOLS_PATH}/jit/templates/aten_dispatch.cpp"
   "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
   WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
 
 set(TORCH_SRCS
+  ${TORCH_SRC_DIR}/csrc/autograd/aten_variable_hooks.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
@@ -179,6 +181,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/assertions.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/aten_dispatch.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/generated/aten_schema.cpp
   ${TORCH_SRC_DIR}/csrc/jit/variable_flags.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
@@ -194,6 +197,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interned_strings.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
@@ -208,9 +212,21 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/onnx/onnx.cpp
   ${TORCH_SRC_DIR}/csrc/onnx/onnx.pb.cpp
   ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
-  ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
-  ${TORCH_SRC_DIR}/csrc/api/src/containers.cpp
-  ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp)
+  ${TORCH_SRC_DIR}/csrc/torch.cpp)
+
+if (NOT NO_API)
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/embedding.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp)
+endif()
 
 add_library(torch SHARED ${TORCH_SRCS})
 
@@ -224,7 +240,6 @@ target_compile_options(torch
   -Wcast-qual
   -Wctor-dtor-privacy
   -Wdisabled-optimization
-  -Wformat=2
   -Winit-self
   -Wmissing-include-dirs
   -Woverloaded-virtual
@@ -232,7 +247,9 @@ target_compile_options(torch
   -Wstrict-overflow=5
   -Wundef
   -fdiagnostics-show-option
-  -Wno-unused-parameter)
+  -Wno-unused-parameter
+  -Wno-missing-braces # This warning is buggy
+  -Wno-unknown-pragmas)
 
 if ($ENV{WERROR})
   target_compile_options(torch PRIVATE -Werror)
@@ -240,9 +257,16 @@ endif()
 
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
-  ${ATEN_LIBRARY}
+  ${ATEN_CPU_LIBRARY}
   ${NANOPB_LIBRARY}
 )
+if(NOT NO_CUDA)
+  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
+    target_link_libraries(torch -Wl,--no-as-needed ${ATEN_CUDA_LIBRARY} -Wl,--as-needed)
+  else()
+    target_link_libraries(torch ${ATEN_CUDA_LIBRARY})
+  endif()
+endif()
 
 target_include_directories(torch
   PUBLIC
@@ -250,10 +274,14 @@ target_include_directories(torch
   "${ATEN_INCLUDE_DIR}/TH"
   "${ATEN_BUILD_INCLUDE_DIR}"
   "${ATEN_BUILD_PATH}/src/TH"
-  "${TORCH_SRC_DIR}/csrc/api/"
-  "${TORCH_SRC_DIR}/csrc/api/include"
-  "${TORCH_SRC_DIR}/../"
+  "${TORCH_SRC_DIR}/.."
   "${CMAKE_CURRENT_SOURCE_DIR}")
+
+if (NOT NO_API)
+  target_include_directories(torch PUBLIC
+    "${TORCH_SRC_DIR}/csrc/api/"
+    "${TORCH_SRC_DIR}/csrc/api/include")
+endif()
 
 # SYSTEM headers are included with -isystem and thus do not trigger warnings.
 target_include_directories(torch SYSTEM PUBLIC
@@ -290,21 +318,22 @@ target_include_directories(test_jit PUBLIC
 
 # API Tests
 
-set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
+if (NOT NO_API)
+  set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
 
-add_executable(test_api
-  ${TORCH_API_TEST_DIR}/main.cpp
-  ${TORCH_API_TEST_DIR}/container.cpp
-  ${TORCH_API_TEST_DIR}/misc.cpp
-  ${TORCH_API_TEST_DIR}/rnn.cpp
-  ${TORCH_API_TEST_DIR}/integration.cpp
-  ${TORCH_API_TEST_DIR}/optim.cpp
-  ${TORCH_API_TEST_DIR}/serialization.cpp
-)
+  add_executable(test_api
+    ${TORCH_API_TEST_DIR}/container.cpp
+    ${TORCH_API_TEST_DIR}/integration.cpp
+    ${TORCH_API_TEST_DIR}/main.cpp
+    ${TORCH_API_TEST_DIR}/misc.cpp
+    ${TORCH_API_TEST_DIR}/module.cpp
+    ${TORCH_API_TEST_DIR}/optim.cpp
+    ${TORCH_API_TEST_DIR}/rnn.cpp
+    ${TORCH_API_TEST_DIR}/serialization.cpp)
 
-target_include_directories(test_api
-  PUBLIC
-  "${TORCH_SRC_DIR}/../third_party/catch/single_include")
+  target_include_directories(test_api
+    PUBLIC
+    "${TORCH_SRC_DIR}/../third_party/catch/single_include")
 
-target_link_libraries(test_api torch)
-
+  target_link_libraries(test_api torch)
+endif()
