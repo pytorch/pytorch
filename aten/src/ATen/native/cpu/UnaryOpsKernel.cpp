@@ -34,33 +34,6 @@ static void abs_kernel(Tensor& result, const Tensor& self) {
   });
 }
 
-static void rsqrt_kernel(Tensor& result, const Tensor& self) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "rsqrt", [&] {
-    CPU_tensor_parallel_kernel_apply2<scalar_t, scalar_t>(
-        result,
-        self,
-        [](int64_t size,
-           scalar_t* x,
-           scalar_t* y,
-           int64_t stridex,
-           int64_t stridey) {
-          if (stridex == 1 && stridey == 1) {
-            map(
-                [](const Vec256<scalar_t>& x) {
-                  return Vec256<scalar_t>((scalar_t)(1)) / x.sqrt();
-                },
-                x,
-                y,
-                size);
-          } else {
-            for (int64_t i = 0; i < size; i++) {
-              x[stridex * i] = 1 / std::sqrt(y[stridey * i]);
-            }
-          }
-        });
-  });
-}
-
 // [Note AVX-SSE transitions] In general we avoid calls into cmath for code
 // compiled with AVX/AVX2 This is because of SSE-AVX transitions and a bug in
 // Glibc2.23 See https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280
@@ -164,21 +137,21 @@ static void rsqrt_kernel(Tensor& result, const Tensor& self) {
 } // anonymous namespace
 
 REGISTER_DISPATCH(absImpl, &abs_kernel);
-REGISTER_DISPATCH(rsqrtImpl, &rsqrt_kernel);
 
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(acos, std::acos)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(asin, std::asin)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(atan, std::atan)
 IMPLEMENT_FLOAT_KERNEL(ceil, std::ceil)
-IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(erf, std::erf)
+IMPLEMENT_FLOAT_KERNEL(erf, std::erf)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(exp, std::exp)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(expm1, std::expm1)
 IMPLEMENT_FLOAT_KERNEL(floor, std::floor)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(log, std::log)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(log10, std::log10)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(log1p, std::log1p)
-IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(log2, std::log2)
+IMPLEMENT_FLOAT_KERNEL(log2, std::log2)
 IMPLEMENT_FLOAT_KERNEL(round, std::round)
+IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(rsqrt, 1 / std::sqrt)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(sqrt, std::sqrt)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(tanh, std::tanh)
 IMPLEMENT_FLOAT_KERNEL(trunc, std::trunc)

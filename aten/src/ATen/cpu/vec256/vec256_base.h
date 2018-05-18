@@ -132,14 +132,17 @@ struct Vec256 {
   Vec256<T> sin() const {
     return map(std::sin);
   }
+  Vec256<T> sqrt() const {
+    return map(std::sqrt);
+  }
+  Vec256<T> rsqrt() const {
+    return map([](T x) { return 1 / std::sqrt(x); });
+  }
   Vec256<T> tanh() const {
     return map(std::tanh);
   }
   Vec256<T> trunc() const {
     return map(std::trunc);
-  }
-  Vec256<T> sqrt() const {
-    return map(std::sqrt);
   }
 };
 
