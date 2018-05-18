@@ -57,6 +57,10 @@ for instructions on how to install GCC 4.9 or higher.
                               !! WARNING !!
 '''
 CUDA_HOME = _find_cuda_home() if torch.cuda.is_available() else None
+# PyTorch releases have the version pattern major.minor.patch, whereas when
+# PyTorch is built from source, we append the git commit hash, which gives
+# it the below pattern.
+BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -71,6 +75,8 @@ def check_compiler_abi_compatibility(compiler):
         False if the compiler is (likely) ABI-incompatible with PyTorch,
         else True.
     '''
+    if BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__):
+        return True
     try:
         check_cmd = '{}' if sys.platform == 'win32' else '{} --version'
         info = subprocess.check_output(
