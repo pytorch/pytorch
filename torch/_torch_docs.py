@@ -20,6 +20,12 @@ def parse_kwargs(desc):
     return {desc.split(' ')[0]: desc for desc in kwargs}
 
 
+reduceops_common_args = parse_kwargs("""
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+""")
+
 factory_common_args = parse_kwargs("""
     out (Tensor, optional): the output tensor
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -902,7 +908,7 @@ Example::
 
 add_docstr(torch.cumprod,
            r"""
-cumprod(input, dim, out=None) -> Tensor
+cumprod(input, dim, dtype=None) -> Tensor
 
 Returns the cumulative product of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -916,7 +922,7 @@ a vector of size N, with elements.
 Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -932,7 +938,7 @@ Example::
     >>> torch.cumprod(a, dim=0)
     tensor([ 0.6001,  0.1241, -0.0238, -0.0233, -0.0157, -0.0000, -0.0000,
              0.0000, -0.0000, -0.0000])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.cumsum,
            r"""
@@ -950,7 +956,7 @@ a vector of size N, with elements.
 Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -961,7 +967,7 @@ Example::
     >>> torch.cumsum(a, dim=0)
     tensor([-0.8286, -1.3175, -0.8020,  0.0423,  0.2289,  0.0537, -2.0058,
             -1.8209, -2.9780, -3.4022])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.diag,
            r"""
@@ -3289,12 +3295,13 @@ Example::
 
 add_docstr(torch.prod,
            r"""
-.. function:: prod(input) -> Tensor
+.. function:: prod(input, dtype=None) -> Tensor
 
 Returns the product of all elements in the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
+    {dtype}
 
 Example::
 
@@ -3304,7 +3311,7 @@ Example::
     >>> torch.prod(a)
     tensor(0.6902)
 
-.. function:: prod(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: prod(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the product of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
@@ -3318,7 +3325,7 @@ Args:
     input (Tensor): the input tensor
     dim (int): the dimension to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -3330,7 +3337,7 @@ Example::
             [ 1.1131, -1.0629]])
     >>> torch.prod(a, 1)
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.pstrf, r"""
 pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
@@ -4131,12 +4138,13 @@ Example::
 
 add_docstr(torch.sum,
            r"""
-.. function:: sum(input) -> Tensor
+.. function:: sum(input, dtype=None) -> Tensor
 
 Returns the sum of all elements in the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
+    {dtype}
 
 Example::
 
@@ -4146,7 +4154,7 @@ Example::
     >>> torch.sum(a)
     tensor(-0.5475)
 
-.. function:: sum(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
@@ -4161,7 +4169,7 @@ Args:
     input (Tensor): the input tensor
     dim (int or tuple of ints): the dimension or dimensions to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -4176,7 +4184,7 @@ Example::
     >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
     >>> torch.sum(b, (2, 1))
     tensor([  435.,  1335.,  2235.,  3135.])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.svd,
            r"""
