@@ -2046,7 +2046,7 @@ class TestNN(NNTestCase):
                                lambda: F.pad(torch.randn(1, 1, 2), (2, 1), mode='reflect'))
 
     def test_pad_scalar_error(self):
-        inputs = torch.tensor(0, requires_grad=True)
+        inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
