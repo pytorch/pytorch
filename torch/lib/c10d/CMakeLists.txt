@@ -16,6 +16,7 @@ endif()
 
 add_library(store Utils.cpp Store.cpp FileStore.cpp TCPStore.cpp)
 target_compile_options(store PUBLIC "-std=c++11")
+target_include_directories(store PUBLIC ${ATEN_INCLUDE_DIR})
 
 add_library(process_group ProcessGroup.cpp)
 target_compile_options(process_group PUBLIC "-std=c++11")
