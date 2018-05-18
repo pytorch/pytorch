@@ -10,6 +10,7 @@
 #include <sstream>
 #include <algorithm>
 #include <string>
+#include <regex>
 
 namespace torch { namespace jit {
 
@@ -537,6 +538,7 @@ std::shared_ptr<Graph> Graph::copy() {
 }
 
 inline Value* Value::setUniqueName(const std::string & name) {
+  static std::regex numbered_name_regex("(.*)\\.([0-9]+)");
   if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
     throw std::runtime_error("names may not be integers: " + name);
   }
@@ -557,10 +559,16 @@ inline Value* Value::setUniqueName(const std::string & name) {
   auto old_owner_of_name = names.find(name);
   if(old_owner_of_name != names.end()) {
     size_t suffix = 1;
+    std::string name_base = name;
+    std::smatch match;
+    if (std::regex_match(name, match, numbered_name_regex)) {
+      name_base = match[1];
+      suffix = std::stoll(match[2]);
+    }
     std::string replacement_name;
     do {
       std::stringstream ss;
-      ss << name << "." << suffix++;
+      ss << name_base << "." << suffix++;
       replacement_name = ss.str();
     } while(names.count(replacement_name) > 0);
     old_owner_of_name->second->setUniqueName(replacement_name);
