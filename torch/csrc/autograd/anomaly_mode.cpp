@@ -1,5 +1,6 @@
 #include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/python_strings.h"
 
 #include "stdexcept"
 #include "iostream"
@@ -7,7 +8,7 @@
 namespace torch { namespace autograd {
 
 bool AnomalyMode::_enabled = 0;
-PyObject* AnomalyMode::stacktrace_key = PyString_FromString("stacktrace_");
+PyObject* AnomalyMode::stacktrace_key = THPUtils_packString("stacktrace_");
 
 void AnomalyMode::store_stack(PyObject* metadata) {
   AutoGIL gil;
@@ -40,7 +41,7 @@ void AnomalyMode::print_stack(PyObject* metadata) {
   auto msg = PyUnicode_Join(empty_string, PyDict_GetItem(metadata, AnomalyMode::stacktrace_key));
 
   std::cout << "Traceback of forward call that caused the error:" << std::endl;
-  std::cout << PyString_AsString(msg) << std::endl;
+  std::cout << THPUtils_unpackString(msg) << std::endl;
 
   Py_DECREF(empty_string);
   Py_DECREF(msg);
