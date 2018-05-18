@@ -341,3 +341,9 @@ endif()
 
 # Finally, set the Caffe2_MAIN_LIBS variable in the parent scope.
 set(Caffe2_MAIN_LIBS ${Caffe2_MAIN_LIBS} PARENT_SCOPE)
+
+# here for MPI work on caffe2, you need to add linkinfo.
+SET(CMAKE_C_COMPILER mpicc)
+SET(CMAKE_CXX_COMPILER mpicxx)
+include_directories(MPI_INCLUDE_PATH)
+target_link_libraries(mpi_test ${MPI_LIBRARIES})
