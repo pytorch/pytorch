@@ -1,5 +1,5 @@
 r"""Importing this file must **not** initialize CUDA context. test_distributed
-relies on this assumption to properly run. Thsi means that when this is imported
+relies on this assumption to properly run. This means that when this is imported
 no CUDA calls shall be made, including torch.cuda.device_count(), etc. """
 
 import sys
@@ -79,11 +79,17 @@ def skipIfNoLapack(fn):
 
 
 def suppress_warnings(fn):
+    @wraps(fn)
     def wrapper(*args, **kwargs):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             fn(*args, **kwargs)
     return wrapper
+
+
+def skipCUDAMemoryCheck(fn):
+    fn.__test_skipCUDAMemoryCheck__ = True
+    return fn
 
 
 def get_cpu_type(type_name):
@@ -160,6 +166,18 @@ class TestCase(unittest.TestCase):
     precision = 1e-5
     maxDiff = None
     doCUDAMemoryCheck = False
+
+    def __init__(self, methodName='runTest'):
+        super(TestCase, self).__init__(methodName)
+        testMethod = getattr(self, methodName)
+        self.doCUDAMemoryCheck = False
+        if self.__class__.doCUDAMemoryCheck and not getattr(testMethod, '__test_skipCUDAMemoryCheck__', False):
+            # the import below initializes CUDA context, so we do it only if
+            # self.__class__.doCUDAMemoryCheck is True
+            from common_cuda import TEST_CUDA
+            fullname = self.id().lower()  # class_name.method_name
+            if 'gpu' in fullname or 'cuda' in fullname and TEST_CUDA:
+                self.doCUDAMemoryCheck = True
 
     def setUp(self):
         set_rng_seed(SEED)
@@ -424,6 +442,8 @@ class TestCase(unittest.TestCase):
     # Runs `fn(*args, **kwargs)` with CUDA memory checks. Assumes that CUDA is
     # available.
     def run_with_cuda_memory_check(self, fn, *args, **kwargs):
+        from common_cuda import initialize_cuda_context_rng
+        initialize_cuda_context_rng()
         num_devices = torch.cuda.device_count()
         gc.collect()
         torch.cuda.synchronize()
@@ -440,12 +460,7 @@ class TestCase(unittest.TestCase):
     def run(self, *args, **kwargs):
         run_fn = super(TestCase, self).run
         if self.doCUDAMemoryCheck:
-            method_name = self.id().lower()
-            if 'gpu' in method_name or 'cuda' in method_name:
-                from common_cuda import TEST_CUDA, initialize_cuda_context_rng
-                if TEST_CUDA:
-                    initialize_cuda_context_rng()
-                    return self.run_with_cuda_memory_check(run_fn, *args, **kwargs)
+            return self.run_with_cuda_memory_check(run_fn, *args, **kwargs)
         return run_fn(*args, **kwargs)
 
     if sys.version_info < (3, 2):

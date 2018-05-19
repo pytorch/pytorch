@@ -228,6 +228,7 @@ def new_t(*sizes):
 # - postfix name for the test (must be unique for a given function) (default='')
 # - tensor types to use (default=types)
 # - disable inplace test, if set to True, no inplace test will be done (default=False)
+# - decorator, e.g., unittest.skipIf (default is no decorator)
 tests = [
     ('add', small_3d, lambda t: [number(3.14, 3, t)]),
     ('add', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
@@ -401,12 +402,17 @@ tests = [
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     # lapack tests
-    ('qr', small_2d_lapack, lambda t: [], 'square', float_types),
-    ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
-    ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
-    ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
-    ('inverse', new_t(20, 20), lambda t: [], None, float_types),
-    ('geqrf', new_t(20, 20), lambda t: [], None, float_types),
+    ('qr', small_2d_lapack, lambda t: [], 'square', float_types, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('qr', large_2d_lapack, lambda t: [], 'big', float_types, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('inverse', new_t(20, 20), lambda t: [], None, float_types, False),
+    ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
 ]
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,
@@ -1338,11 +1344,11 @@ class TestCuda(TestCase):
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
-    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_gesv_batched(self):
         TestTorch._test_gesv_batched(self, lambda t: t.cuda())
 
-    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_gesv_batched_dims(self):
         TestTorch._test_gesv_batched_dims(self, lambda t: t.cuda())
 
@@ -1698,6 +1704,7 @@ def generate_tests():
             desc = ''
             type_subset = types
             no_inplace = False
+            decorator = None
             if len(decl) == 3:
                 name, constr, arg_constr = decl
             elif len(decl) == 4:
@@ -1706,6 +1713,8 @@ def generate_tests():
                 name, constr, arg_constr, desc, type_subset = decl
             elif len(decl) == 6:
                 name, constr, arg_constr, desc, type_subset, no_inplace = decl
+            elif len(decl) == 7:
+                name, constr, arg_constr, desc, type_subset, no_inplace, decorator = decl
 
             if t not in type_subset:
                 continue
@@ -1735,9 +1744,13 @@ def generate_tests():
                     test_name += '_' + desc
 
                 assert not hasattr(TestCuda, test_name), "Duplicated test name: " + test_name
-                setattr(TestCuda,
-                        test_name,
-                        compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
+
+                test_fn = compare_cpu_gpu(constr, arg_constr, name_inner, t, precision)
+
+                if decorator is not None:
+                    test_fn = decorator(test_fn)
+
+                setattr(TestCuda, test_name, test_fn)
 
 
 if __name__ == '__main__':
