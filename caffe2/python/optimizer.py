@@ -676,7 +676,8 @@ class FtrlOptimizer(Optimizer):
 
 class AdamOptimizer(Optimizer):
     def __init__(self, alpha=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8,
-                 policy='fixed', sparse_dedup_aggregator=None, rowWise=False,
+                 policy='fixed', use_lr_adaption=False, lr_alpha=0.01,
+                 sparse_dedup_aggregator=None, rowWise=False,
                  engine='', **kwargs):
         super(AdamOptimizer, self).__init__()
         self.alpha = alpha
@@ -684,6 +685,8 @@ class AdamOptimizer(Optimizer):
         self.beta2 = beta2
         self.epsilon = epsilon
         self.policy = policy
+        self.use_lr_adaption = use_lr_adaption
+        self.lr_alpha = lr_alpha
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.rowWise = rowWise
         self.engine = engine
@@ -703,11 +706,24 @@ class AdamOptimizer(Optimizer):
             **(self.init_kwargs)
         )
 
+        if self.use_lr_adaption:
+            effective_grad = param_init_net.ConstantFill(
+                [param],
+                param + "_effgrad",
+                value=0.0
+            )
+            self._aux_params.local.append(effective_grad)
+            net.LearningRateAdaption(
+                [lr, grad, effective_grad],
+                [lr],
+                lr_alpha=self.lr_alpha)
+
         m1 = param_init_net.ConstantFill(
             [param],
             param + "_first_moment",
             value=0.0
         )
+
         if self.rowWise:
             shapes, types = workspace.InferShapesAndTypes([param_init_net])
             m2 = param_init_net.ConstantFill(
@@ -716,9 +732,7 @@ class AdamOptimizer(Optimizer):
                 shape=[shapes[param][0]],
                 value=0.0
             )
-
         else:
-
             m2 = param_init_net.ConstantFill(
                 [param],
                 param + "_second_moment",
@@ -749,12 +763,20 @@ class AdamOptimizer(Optimizer):
             )
 
         else:
-            net.Adam(
-                [param, m1, m2, grad, lr, iteration],
-                [param, m1, m2],
-                beta1=self.beta1,
-                beta2=self.beta2,
-                epsilon=self.epsilon)
+            if self.use_lr_adaption:
+                net.Adam(
+                    [param, m1, m2, grad, lr, iteration],
+                    [param, m1, m2, effective_grad],
+                    beta1=self.beta1,
+                    beta2=self.beta2,
+                    epsilon=self.epsilon)
+            else:
+                net.Adam(
+                    [param, m1, m2, grad, lr, iteration],
+                    [param, m1, m2],
+                    beta1=self.beta1,
+                    beta2=self.beta2,
+                    epsilon=self.epsilon)
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale
