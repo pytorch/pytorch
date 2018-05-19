@@ -154,7 +154,7 @@ function build() {
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
-              -DATEN_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
+              -DCAFFE2_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
               -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
               -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
               -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
@@ -210,14 +210,14 @@ function build_nccl() {
   popd
 }
 
-# purpusefully not using build() because we need ATen to build the same
-# regardless of whether it is inside pytorch or not, so it
+# purposefully not using build() because we need Caffe2 to build the same
+# regardless of whether it is inside PyTorch or not, so it
 # cannot take any special flags
-# special flags need to be part of the ATen build itself
+# special flags need to be part of the Caffe2 build itself
 #
 # However, we do explicitly pass library paths when setup.py has already
 # detected them (to ensure that we have a consistent view between the
-# PyTorch and ATen builds.)
+# PyTorch and Caffe2 builds.)
 function build_caffe2() {
   mkdir -p build
   pushd build
@@ -245,8 +245,8 @@ function build_caffe2() {
       -DCMAKE_EXE_LINKER_FLAGS="$USER_LDFLAGS" \
       -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
-      # to aten/CMakeLists.txt, not here.  We need the vanilla
-      # cmake build to work.
+      # to CMakeLists.txt and aten/CMakeLists.txt, not here.
+      # We need the vanilla cmake build to work.
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
   popd
 }

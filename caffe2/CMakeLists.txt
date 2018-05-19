@@ -186,6 +186,7 @@ target_compile_options(caffe2 INTERFACE "-std=c++11")
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
+set_target_properties(caffe2 PROPERTIES VERSION 1 SOVERSION 1)
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
 caffe2_interface_library(caffe2 caffe2_library)
 list(APPEND Caffe2_MAIN_LIBS caffe2_library)
@@ -222,6 +223,7 @@ if(USE_CUDA OR USE_ROCM)
 
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
+  set_target_properties(caffe2_gpu PROPERTIES VERSION 1 SOVERSION 1)
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
 endif()
 
@@ -406,27 +408,6 @@ if(BUILD_CAFFE2)
     install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
             FILES_MATCHING PATTERN "*.py")
   endif()
-endif()
-
-if (BUILD_ATEN)
-  set(ATEN_INCLUDE_DIR ${CMAKE_INSTALL_PREFIX}/include)
-  install(FILES
-    ${CMAKE_BINARY_DIR}/cmake-exports/ATenConfig.cmake
-    DESTINATION share/cmake/ATen)
-  install(FILES
-    ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
-    DESTINATION share/ATen)
-  configure_file(
-    ../aten/src/ATen/ATenConfig.cmake.in
-    ${CMAKE_BINARY_DIR}/cmake-exports/ATenConfig.cmake)
-  install(DIRECTORY
-    ${PROJECT_SOURCE_DIR}/aten/src/ATen
-    DESTINATION include
-    FILES_MATCHING PATTERN "*.h")
-  install(DIRECTORY
-    ${CMAKE_BINARY_DIR}/aten/src/ATen
-    DESTINATION include
-    FILES_MATCHING PATTERN "*.h")
 endif()
 
 # Finally, set the Caffe2_MAIN_LIBS variable in the parent scope.

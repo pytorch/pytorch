@@ -6,11 +6,9 @@ set(CAFFE2_FOUND_CUDA FALSE)
 find_package(CUDA 7.0)
 if(NOT CUDA_FOUND)
   message(WARNING
-    "Caffe2: CUDA cannot be found. Disabling to build, but this will compromise "
-    "performance.")
-  set(USE_CUDA OFF)
-  set(WITH_CUDA OFF)
-  set(NO_CUDA ON)
+    "Caffe2: Cuda cannot be found. Depending on whether you are building "
+    "Caffe2 or a Caffe2 dependent library, the next warning / error will "
+    "give you more info.")
   return()
 endif()
 
