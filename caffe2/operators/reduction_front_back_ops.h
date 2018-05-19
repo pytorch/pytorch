@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -46,6 +47,7 @@ class SumReduceDimsOp final : public Operator<Context> {
                                : X.size_from_dim(X.ndim() - num_reduce_dims_);
 
     if (cols == 0 || rows == 0) {
+      math::Set(Y->size(), static_cast<T>(0), out_data, &context_);
       return true;
     }
 
@@ -189,8 +191,10 @@ class MaxReduceDimsOp final : public Operator<Context> {
       output_shape.push_back(X.dims()[i]);
     }
     Y->Resize(output_shape);
+    float* out_data = Y->template mutable_data<float>();
 
     if (cols == 0 || rows == 0) {
+      math::Set(Y->size(), static_cast<float>(0), out_data, &context_);
       return true;
     }
 
@@ -208,7 +212,6 @@ class MaxReduceDimsOp final : public Operator<Context> {
     }
 
     const float* data = X.template data<float>();
-    float* out_data = Y->template mutable_data<float>();
     Compute(rows, cols, data, lengths_data, out_data);
     return true;
   }
