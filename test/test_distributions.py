@@ -707,6 +707,14 @@ class TestDistributions(TestCase):
         with torch.no_grad():
             test()
 
+        mean = torch.randn(2)
+        cov = torch.eye(2, requires_grad=True)
+        distn = MultivariateNormal(mean, cov)
+        with torch.no_grad():
+            distn.scale_tril
+        distn.scale_tril.sum().backward()
+        self.assertIsNotNone(cov.grad)
+
     def test_has_examples(self):
         distributions_with_examples = set(e.Dist for e in EXAMPLES)
         for Dist in globals().values():
