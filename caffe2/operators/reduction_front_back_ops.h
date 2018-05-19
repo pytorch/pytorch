@@ -46,9 +46,6 @@ class SumReduceDimsOp final : public Operator<Context> {
                                : X.size_from_dim(X.ndim() - num_reduce_dims_);
 
     if (cols == 0 || rows == 0) {
-      if (out_data) {
-        memset(out_data, 0, Y->nbytes());
-      }
       return true;
     }
 
