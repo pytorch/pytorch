@@ -722,4 +722,35 @@ TEST(NetTest, AsyncEmptyNet) {
   }
 }
 
+TEST(NetTest, RunAsyncFailure) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "async_scheduling"
+        op {
+          type: "ExecutorHelperDummy"
+        }
+  )DOC";
+
+  Workspace ws;
+  NetDef net_def;
+  CAFFE_ENFORCE(
+      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+
+  {
+    std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+    // set incorrect device option and trigger net run failure
+    DeviceOption& dev = const_cast<DeviceOption&>(
+        net->GetOperators()[0]->event().GetDeviceOption());
+    dev.set_device_type(ONLY_FOR_TEST);
+
+    bool caught_exception = false;
+    try {
+      ASSERT_FALSE(net->Run());
+    } catch (const std::exception& e) {
+      caught_exception = true;
+    }
+    ASSERT_FALSE(caught_exception);
+  }
+}
+
 } // namespace caffe2
