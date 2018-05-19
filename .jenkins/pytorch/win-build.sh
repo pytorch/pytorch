@@ -80,7 +80,7 @@ set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 
 set TORCH_CUDA_ARCH_LIST=5.2
 
-sccache --stop-server || set ERRORLEVEL=0
+sccache --stop-server
 sccache --start-server
 sccache --zero-stats
 set CC=sccache cl
