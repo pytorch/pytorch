@@ -236,6 +236,16 @@ void AsyncNetBase::asyncWait(
   first_op->WaitEvents(events, stream_id);
 }
 
+void AsyncNetBase::reset() {
+  for (auto& op : GetOperators()) {
+    op->ResetEvent();
+  }
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
+  caught_exception_ = nullptr;
+#endif // CAFFE2_USE_EXCEPTION_PTR
+}
+
 void AsyncNetBase::storeExceptionPtr() {
 #ifdef CAFFE2_USE_EXCEPTION_PTR
   std::unique_lock<std::mutex> exception_lock(exception_mutex_);

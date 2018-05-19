@@ -15,6 +15,8 @@ AsyncSchedulingNet::AsyncSchedulingNet(
 }
 
 void AsyncSchedulingNet::reset() {
+  AsyncNetBase::reset();
+
   processed_tasks_num_ = 0;
   success_ = true;
 
@@ -115,10 +117,13 @@ void AsyncSchedulingNet::finishRun() {
   running_cv_.notify_all();
 }
 
-bool AsyncSchedulingNet::DoRunAsync() {
+bool AsyncSchedulingNet::RunAsync() {
   try {
     std::unique_lock<std::mutex> lock(running_mutex_);
-    CAFFE_ENFORCE(!running_, "Concurrent RunAsync calls");
+    if (running_) {
+      LOG(ERROR) << "Detected concurrent runs";
+      return false;
+    }
     running_ = true;
     reset();
 

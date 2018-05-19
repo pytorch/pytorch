@@ -15,11 +15,11 @@ class AsyncSchedulingNet : public AsyncNetBase {
   void Wait() override;
 
  protected:
-  bool DoRunAsync() override;
+  bool RunAsync() override;
 
   void pollAndSchedule(int task_id);
   void schedule(int task_id);
-  void reset();
+  void reset() override;
   virtual void finishRun();
   int updateParentCount(int child_id);
 

@@ -71,6 +71,8 @@ class AsyncNetBase : public NetBase {
 
   bool isStreamFree(int task_id, int stream_id) const;
 
+  virtual void reset();
+
   // Operator/task graph
   std::vector<OperatorBase*> operators_;
   std::vector<dag_utils::OperatorNode> operator_nodes_;
