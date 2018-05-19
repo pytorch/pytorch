@@ -13,7 +13,7 @@ import numpy as np
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.operator_test.adagrad_test_helper import (
-    ref_adagrad, test_adagrad_sparse_helper
+    ref_adagrad, adagrad_sparse_test_helper
 )
 
 
@@ -109,7 +109,7 @@ class TestAdagrad(hu.HypothesisTestCase):
            **hu.gcs)
     def test_sparse_adagrad(self, inputs, lr, epsilon,
                             data_strategy, gc, dc):
-        return test_adagrad_sparse_helper(self, inputs, lr, epsilon,
+        return adagrad_sparse_test_helper(self, inputs, lr, epsilon,
             data_strategy, None, ref_adagrad, gc, dc)
 
     @given(inputs=hu.tensors(n=2),

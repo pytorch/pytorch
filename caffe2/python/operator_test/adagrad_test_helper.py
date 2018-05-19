@@ -48,7 +48,7 @@ def ref_adagrad(param_in, mom_in, grad, lr, epsilon, using_fp16=False,
         return (param_out.astype(np.float32), mom_out.astype(np.float32))
 
 
-def test_adagrad_sparse_helper(parent_test, inputs, lr, epsilon,
+def adagrad_sparse_test_helper(parent_test, inputs, lr, epsilon,
         data_strategy, engine, ref_adagrad, gc, dc):
     param, momentum, grad = inputs
     momentum = np.abs(momentum)
