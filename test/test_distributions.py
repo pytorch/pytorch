@@ -53,7 +53,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
-from torch.distributions.utils import _finfo, probs_to_logits, softmax
+from torch.distributions.utils import _finfo, probs_to_logits, softmax, lazy_property
 
 TEST_NUMPY = True
 try:
@@ -689,6 +689,23 @@ class TestDistributions(TestCase):
                                          'sample and enumerate_support.').format(Dist.__name__, i + 1, len(params)))
                 except NotImplementedError:
                     pass
+
+    def test_lazy_property_grad(self):
+        x = torch.randn(1, requires_grad=True)
+
+        class Dummy(object):
+            @lazy_property
+            def y(self):
+                return x + 1
+
+        def test():
+            x.grad = None
+            Dummy().y.backward()
+            self.assertEqual(x.grad, torch.ones(1))
+
+        test()
+        with torch.no_grad():
+            test()
 
     def test_has_examples(self):
         distributions_with_examples = set(e.Dist for e in EXAMPLES)
