@@ -3,9 +3,6 @@
 #include "ATen/Dispatch.h"
 #include "ATen/CPUApplyUtils.h"
 
-// #ifdef _OPENMP
-// #include <omp.h>
-// #endif
 
 namespace at { namespace native {
 
