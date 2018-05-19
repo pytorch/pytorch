@@ -36,8 +36,10 @@ void AsyncSchedulingNet::schedule(int task_id) {
   const auto& device_option = event(task_id).GetDeviceOption();
   pool(device_option)->run([this, task_id]() {
     if (success_) {
-      int stream_id = stream(task_id);
-      asyncWait(task_id, stream_id, parents(task_id));
+      int stream_id = 0;
+      if (FLAGS_caffe2_streams_per_gpu > 1) {
+        stream_id = stream(task_id);
+      }
       try {
         run(task_id, stream_id);
       } catch (const std::exception& e) {
@@ -50,8 +52,14 @@ void AsyncSchedulingNet::schedule(int task_id) {
     for (auto child_id : children(task_id)) {
       int parent_count = updateParentCount(child_id);
       if (parent_count == 0) {
+        // Schedule a child if:
+        // - there is failure, we skip an op execution and finish the job
+        // - forced scheduling though --caffe2_net_async_always_schedule_child
+        // - --caffe2_net_async_finish_chain is set, in this case parents are
+        //   guaranteed to be finished
+        // - in all other cases, check parents with canSchedule
         if (!success_ || FLAGS_caffe2_net_async_always_schedule_child ||
-            canSchedule(child_id)) {
+            FLAGS_caffe2_net_async_finish_chain || canSchedule(child_id)) {
           schedule(child_id);
         } else {
           const auto& device_option = event(child_id).GetDeviceOption();

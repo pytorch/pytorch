@@ -36,6 +36,11 @@ CAFFE2_DEFINE_bool(
     true,
     "Select next non-busy stream");
 
+CAFFE2_DEFINE_bool(
+    caffe2_net_async_use_single_pool,
+    false,
+    "Use single pool for all devices");
+
 namespace caffe2 {
 
 thread_local std::vector<int> AsyncNetBase::stream_counters_;
@@ -109,6 +114,9 @@ std::shared_ptr<TaskThreadPool> AsyncNetBase::pool_getter(
 
 std::shared_ptr<TaskThreadPool> AsyncNetBase::pool(
     const DeviceOption& device_option) {
+  if (FLAGS_caffe2_net_async_use_single_pool) {
+    return pool_getter(cpu_pools_, CPU, -1, num_workers_);
+  }
   if (device_option.device_type() == CPU ||
       device_option.device_type() == MKLDNN ||
       device_option.device_type() == IDEEP) {
@@ -143,8 +151,8 @@ int AsyncNetBase::stream(int task_id) {
     do {
       stream_id = stream_counters_[gpu_id]++;
       stream_counters_[gpu_id] %= FLAGS_caffe2_streams_per_gpu;
-    } while (!isStreamFree(task_id, stream_id) &&
-             FLAGS_caffe2_net_async_check_stream_status);
+    } while (FLAGS_caffe2_net_async_check_stream_status &&
+             !isStreamFree(task_id, stream_id));
   }
   return stream_id;
 }
@@ -238,6 +246,12 @@ void AsyncNetBase::storeExceptionPtr() {
 }
 
 void AsyncNetBase::run(int task_id, int stream_id) {
+  // Optionally insert async wait ops,
+  // skip when using --caffe2_net_async_finish_chain -
+  // all parents are guaranteed to be finished
+  if (!FLAGS_caffe2_net_async_finish_chain) {
+    asyncWait(task_id, stream_id, parents(task_id));
+  }
   std::string err_msg;
   for (auto& op_id : chains_[task_id]) {
     auto& op = operators_[op_id];
