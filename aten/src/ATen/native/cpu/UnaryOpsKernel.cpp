@@ -65,16 +65,15 @@ static void abs_kernel(Tensor& result, const Tensor& self) {
               int64_t i = 0;                                            \
               if (size > WIDTH) {                                       \
                 for (; i < size - size % WIDTH; i += WIDTH) {           \
-                  scalar_t buffer_in[WIDTH];                            \
-                  scalar_t buffer_out[WIDTH];                           \
+                  scalar_t buffer[WIDTH];                               \
                   for (int64_t j = 0; j < WIDTH; j++)                   \
-                    buffer_in[j] = y[stridey * (j + i)];                \
-                  map([](const Vec256<scalar_t>& x) { return x.op(); }, \
-                      buffer_out,                                       \
-                      buffer_in,                                        \
+                    buffer[j] = y[stridey * (j + i)];                   \
+                  map_(                                                 \
+                      [](const Vec256<scalar_t>& x) { return x.op(); }, \
+                      buffer,                                           \
                       WIDTH);                                           \
                   for (int64_t j = 0; j < WIDTH; j++)                   \
-                    x[stridex * (j + i)] = buffer_out[j];               \
+                    x[stridex * (j + i)] = buffer[j];                   \
                 }                                                       \
               }                                                         \
               for (; i < size; i++) {                                   \
@@ -138,7 +137,7 @@ static void abs_kernel(Tensor& result, const Tensor& self) {
 
 REGISTER_DISPATCH(absImpl, &abs_kernel);
 
-IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(acos, std::acos)
+IMPLEMENT_FLOAT_KERNEL(acos, std::acos)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(asin, std::asin)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(atan, std::atan)
 IMPLEMENT_FLOAT_KERNEL(ceil, std::ceil)
@@ -146,8 +145,8 @@ IMPLEMENT_FLOAT_KERNEL(erf, std::erf)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(exp, std::exp)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(expm1, std::expm1)
 IMPLEMENT_FLOAT_KERNEL(floor, std::floor)
-IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(log, std::log)
-IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(log10, std::log10)
+IMPLEMENT_FLOAT_KERNEL(log, std::log)
+IMPLEMENT_FLOAT_KERNEL(log10, std::log10)
 IMPLEMENT_FLOAT_COMPUTEBOUND_KERNEL(log1p, std::log1p)
 IMPLEMENT_FLOAT_KERNEL(log2, std::log2)
 IMPLEMENT_FLOAT_KERNEL(round, std::round)

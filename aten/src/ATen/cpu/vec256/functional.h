@@ -96,6 +96,23 @@ inline scalar_t map2_reduce_all(
 }
 
 template <typename scalar_t, typename Op>
+inline void map_(
+    const Op& vec_fun,
+    scalar_t* data,
+    int64_t size) {
+  using Vec = vec256::Vec256<scalar_t>;
+  int64_t d = 0;
+  for (; d < size - (size % Vec::size); d += Vec::size) {
+    Vec output_vec = vec_fun(Vec::loadu(data + d));
+    output_vec.store(data + d);
+  }
+  if (size - d > 0) {
+    Vec output_vec = vec_fun(Vec::loadu(data + d, size - d));
+    output_vec.store(data + d, size - d);
+  }
+}
+
+template <typename scalar_t, typename Op>
 inline void map(
     const Op& vec_fun,
     scalar_t* output_data,
