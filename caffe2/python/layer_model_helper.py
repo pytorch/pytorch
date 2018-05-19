@@ -59,6 +59,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
         self._default_optimizer = None
         self._loss = None
+        self._prediction = []
         self._output_schema = None
 
         self._post_grad_net_modifiers = []
@@ -392,6 +393,15 @@ class LayerModelHelper(model_helper.ModelHelper):
     def preproc_output_schema(self, schema):
         assert self._preproc_output_schema is None
         self._preproc_output_schema = schema
+
+    @property
+    def prediction(self):
+        assert self._prediction, "model prediction is empty"
+        return self._prediction
+
+    def add_prediction(self, prediction, weight=1.0):
+        assert prediction is not None, "Added prediction should not be None"
+        self._prediction.append((prediction, weight))
 
     @property
     def loss(self):
