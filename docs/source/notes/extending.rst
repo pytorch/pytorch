@@ -56,11 +56,11 @@ additional comments::
         @staticmethod
         def backward(ctx, grad_output):
             # This is a pattern that is very convenient - at the top of backward
-            # unpack saved_tensors and initialize all gradients w.r.t. inputs to
+            # unpack saved_variables and initialize all gradients w.r.t. inputs to
             # None. Thanks to the fact that additional trailing Nones are
             # ignored, the return statement is simple even when the function has
             # optional inputs.
-            input, weight, bias = ctx.saved_tensors
+            input, weight, bias = ctx.saved_variables
             grad_input = grad_weight = grad_bias = None
 
             # These needs_input_grad checks are optional and there only to
@@ -108,7 +108,7 @@ numerical approximations using small finite differences::
     # evaluated with these tensors are close enough to numerical
     # approximations and returns True if they all verify this condition.
     input = (Variable(torch.randn(20,20).double(), requires_grad=True), Variable(torch.randn(30,20).double(), requires_grad=True),)
-    test = gradcheck(Linear.apply, input, eps=1e-6, atol=1e-4)
+    test = gradcheck(LinearFunction.apply, input, eps=1e-6, atol=1e-4)
     print(test)
 
 Extending :mod:`torch.nn`
