@@ -18,7 +18,8 @@ class TestLearningRateAdaption(hu.HypothesisTestCase):
            lr_alpha=st.floats(min_value=0.01, max_value=0.99,
                            allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
-    def test_learning_rate_adaption_op(self, inputs, lr, lr_alpha, gc, dc):
+    def test_learning_rate_adaption_op_normalization(self, inputs, lr, lr_alpha,
+                                                     gc, dc):
         grad, effgrad = inputs
         lr = np.array([lr], dtype=np.float32)
 
@@ -39,6 +40,37 @@ class TestLearningRateAdaption(hu.HypothesisTestCase):
             z = np.maximum(z, kEps)
             output_lr = lr
             output_lr[0] -= lr[0] * lr_alpha * float(x / (y * z))
+            return output_lr,
+
+        self.assertReferenceChecks(
+            gc, op,
+            [lr, grad, effgrad],
+            ref)
+
+    @given(inputs=hu.tensors(n=2),
+           lr=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
+           lr_alpha=st.floats(min_value=0.01, max_value=0.99,
+                           allow_nan=False, allow_infinity=False),
+           **hu.gcs_cpu_only)
+    def test_learning_rate_adaption_op_without_normalization(self, inputs, lr,
+                                                             lr_alpha, gc, dc):
+        grad, effgrad = inputs
+        lr = np.array([lr], dtype=np.float32)
+
+        op = core.CreateOperator(
+            'LearningRateAdaption',
+            ['lr', 'grad', 'effgrad'],
+            ['output_lr'],
+            lr_alpha=lr_alpha,
+            normalized_lr_adaption=False)
+
+        def ref(lr, grad, effgrad):
+            flattened_grad = grad.flatten()
+            flattened_effgrad = effgrad.flatten()
+            x = np.dot(flattened_grad, flattened_effgrad)
+            output_lr = lr
+            output_lr[0] -= lr_alpha * x
             return output_lr,
 
         self.assertReferenceChecks(

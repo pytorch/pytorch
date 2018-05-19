@@ -20,13 +20,13 @@ class TestAdam(hu.HypothesisTestCase):
     def ref_adam(param, mom1, mom2, grad, LR, ITER,
                  beta1, beta2, epsilon, output_grad=False):
         t = ITER + 1
-        corrected_local_rate = LR * np.sqrt(1 - np.power(beta2, t)) / \
+        corrected_local_rate = np.sqrt(1 - np.power(beta2, t)) / \
             (1 - np.power(beta1, t))
         mom1_out = (beta1 * mom1) + (1 - beta1) * grad
         mom2_out = (beta2 * mom2) + (1 - beta2) * np.square(grad)
         grad_out = corrected_local_rate * mom1_out / \
             (np.sqrt(mom2_out) + epsilon)
-        param_out = param + grad_out
+        param_out = param + LR * grad_out
         if output_grad:
             return param_out, mom1_out, mom2_out, grad_out
         else:

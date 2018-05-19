@@ -14,13 +14,13 @@ input gradient and momentum parameters. Concretely, given inputs
 (param, m1, m2, grad, lr, iters),
 
     t = iters + 1
-    corrected_local_rate = lr * sqrt(1 - power(beta2, t)) /
+    correction_multiplier = sqrt(1 - power(beta2, t)) /
       (1 - power(beta1, t))
     m1_o = (beta1 * m1) + (1 - beta1) * grad
     m2_o = (beta2 * m2) + (1 - beta2) * np.square(grad)
-    grad_o = corrected_local_rate * m1_o / \
+    grad_o = correction_multiplier * m1_o / \
         (sqrt(m2_o) + epsilon)
-    param_o = param + grad_o
+    param_o = param + lr * grad_o
 
 and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
 

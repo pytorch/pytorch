@@ -72,8 +72,8 @@ void adam_compute_output_grad(
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    float ngi = ng[i] = lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
-    nw[i] = w[i] + ngi;
+    float ngi = ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
+    nw[i] = w[i] + lr[0] * ngi;
   }
 }
 
