@@ -424,6 +424,11 @@ class LayerModelHelper(model_helper.ModelHelper):
         if self._loss is None:
             self._loss = schema.Struct((name, loss))
         else:
+            # loss could've been set through model.loss directly which could be
+            # a scalar
+            if isinstance(self._loss, schema.Scalar):
+                self._loss = schema.Struct(('unnamed', self._loss))
+
             prefix_base = name + '_auto_'
             index = 0
             prefix = name
