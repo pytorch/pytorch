@@ -73,7 +73,7 @@ class detect_anomaly(object):
 
 
 class set_detect_anomaly(object):
-    r"""Context-manager that sets the tracking of stacktraces for backward on or off.
+    r"""Context-manager that sets the anomaly detection for the autograd engine on or off.
 
     ``set_detect_anomaly`` will enable or disable the autograd anomaly detection
     based on its argument :attr:`mode`.

@@ -384,7 +384,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       auto& output = outputs[i];
       if (output.ne(output).any().toCByte()) {
         std::stringstream ss;
-        ss << "Function '" << fn.name() << "' returned nan values in it's " << i << "th output.";
+        ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
         throw std::runtime_error(ss.str());
       }
     }
