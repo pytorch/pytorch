@@ -86,7 +86,7 @@ OpSchema::Cost CostInferenceForConcat(
 
   struct OpSchema::Cost cost;
   cost.flops = 0;
-  cost.bytes_moved = size * sizeof(float);
+  cost.bytes_written = size * sizeof(float);
   cost.params_bytes = 0;
   return cost;
 }

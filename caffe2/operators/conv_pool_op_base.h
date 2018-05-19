@@ -446,7 +446,7 @@ class ConvPoolOpBase : public Operator<Context> {
     // grouping is NOT properly handled yet
     c.flops = N * Y_t * Y_h * Y_w * kernel_t * kernel_w * kernel_h *
         in_channels * out_channels * 2;
-    c.bytes_moved = N * out_channels * Y_t * Y_h * Y_w * sizeof(float);
+    c.bytes_written = N * out_channels * Y_t * Y_h * Y_w * sizeof(float);
     c.params_bytes = out_channels * in_channels * kernel_t * kernel_h *
         kernel_w * sizeof(float);
     return c;

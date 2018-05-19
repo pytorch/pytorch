@@ -70,7 +70,7 @@ OpSchema::Cost CostInferenceForFC(
       : size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
 
   c.flops = 2 * K * M * N + M * N;
-  c.bytes_moved = M * N * sizeof(float);
+  c.bytes_written = M * N * sizeof(float);
   c.params_bytes = (K * N + N) * sizeof(float);
   return c;
 }
@@ -134,7 +134,7 @@ OpSchema::Cost CostInferenceForFCGradient(
   }
 
   c.flops = 2 * (M * N * K + M * N);
-  c.bytes_moved = (size_dW + size_db) * sizeof(float);
+  c.bytes_written = (size_dW + size_db) * sizeof(float);
   c.params_bytes = (K * N + N) * sizeof(float);
 
   if (out.size() == 3) {
@@ -145,7 +145,7 @@ OpSchema::Cost CostInferenceForFCGradient(
     }
 
     c.flops += M * N * K;
-    c.bytes_moved += size_dX * sizeof(float);
+    c.bytes_written += size_dX * sizeof(float);
   }
   return c;
 }

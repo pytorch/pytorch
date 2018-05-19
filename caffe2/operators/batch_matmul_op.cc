@@ -105,7 +105,7 @@ OpSchema::Cost CostInferenceForBatchMatMul(
     K = in[0].dims(ndims_A - 1);
   }
   c.flops = 2 * nElemY * K;
-  c.bytes_moved = nElemY * sizeof(float);
+  c.bytes_written = nElemY * sizeof(float);
   c.params_bytes = 0;
   return c;
 }

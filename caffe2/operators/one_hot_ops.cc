@@ -64,7 +64,7 @@ OpSchema::Cost CostInferenceForBatchOneHot(
   const TensorShape output = TensorInferenceForBatchOneHot(def, in)[0];
 
   c.flops = 0;
-  c.bytes_moved = output.dims(0) * output.dims(1) * sizeof(int32_t);
+  c.bytes_written = output.dims(0) * output.dims(1) * sizeof(int32_t);
   c.params_bytes = 0;
   return c;
 }

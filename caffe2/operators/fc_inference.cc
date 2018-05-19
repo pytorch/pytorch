@@ -40,7 +40,7 @@ OpSchema::Cost CostInferenceForFC(
       canonical_axis_index_(axis_w, in[1].dims().size());
   const int N = size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
   c.flops = 2 * K * M * N + M * N;
-  c.bytes_moved = M * N * sizeof(float);
+  c.bytes_written = M * N * sizeof(float);
   c.params_bytes = (K * N + N) * sizeof(float);
   return c;
 }

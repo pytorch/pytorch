@@ -185,7 +185,7 @@ class OpSchema {
    */
   struct Cost {
     uint64_t flops; // Floating point operations.
-    uint64_t bytes_moved; // Total memory used.
+    uint64_t bytes_written; // Total memory used.
     uint64_t params_bytes; // Memory footprint of parameters
   };
   /**
@@ -503,7 +503,7 @@ OpSchema::Cost PointwiseCostInference(
   }
 
   c.flops = size * OpsPerPoint;
-  c.bytes_moved = size * sizeof(X.data_type());
+  c.bytes_written = size * sizeof(X.data_type());
   return c;
 }
 
