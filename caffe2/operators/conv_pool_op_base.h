@@ -401,7 +401,6 @@ class ConvPoolOpBase : public Operator<Context> {
     ArgumentHelper helper(def);
     const auto order =
         StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
-
     unsigned long long N;
     unsigned long long Y_t = 1;
     unsigned long long Y_h;
@@ -412,6 +411,9 @@ class ConvPoolOpBase : public Operator<Context> {
     unsigned long long in_channels;
     unsigned long long out_channels;
 
+    if (X.dims_size() == 0 || W.dims_size() == 0) {
+      return c;
+    }
     N = X.dims(0);
     if (X.dims_size() == 5) {
       // 3D convolution
@@ -427,6 +429,7 @@ class ConvPoolOpBase : public Operator<Context> {
     } else {
       // 2D convolution
       CAFFE_ENFORCE_EQ(X.dims_size(), 4, "Conv2D should have 4D input tensor");
+      CAFFE_ENFORCE_EQ(W.dims_size(), 4, "Conv2D should have 4D filter tensor");
       if (order == StorageOrder::NHWC) {
         Y_h = Y.dims(1);
         Y_w = Y.dims(2);

@@ -184,9 +184,9 @@ class OpSchema {
    * an operator such as FLOPs, total memory use and parameters.
    */
   struct Cost {
-    uint64_t flops; // Floating point operations.
-    uint64_t bytes_written; // Total memory used.
-    uint64_t params_bytes; // Memory footprint of parameters
+    uint64_t flops{0}; // Floating point operations.
+    uint64_t bytes_written{0}; // Total memory used.
+    uint64_t params_bytes{0}; // Memory footprint of parameters
   };
   /**
    * @brief Registers a function that takes in an OperatorDef
