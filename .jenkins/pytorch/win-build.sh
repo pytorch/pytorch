@@ -46,8 +46,7 @@ set MAGMA_HOME=%cd%\\magma
 mkdir %CD%\\tmp_bin
 if "%REBUILD%"=="" (
   :check_sccache
-  %CD%\\tmp_bin\\sccache.exe --show-stats
-  if %ERRORLEVEL% NEQ 0 (
+  %CD%\\tmp_bin\\sccache.exe --show-stats || (
     taskkill /im sccache.exe /f /t || set ERRORLEVEL=0
     del %CD%\\tmp_bin\\sccache.exe
     aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe
