@@ -109,7 +109,9 @@ std::shared_ptr<TaskThreadPool> AsyncNetBase::pool_getter(
 
 std::shared_ptr<TaskThreadPool> AsyncNetBase::pool(
     const DeviceOption& device_option) {
-  if (device_option.device_type() == CPU) {
+  if (device_option.device_type() == CPU ||
+      device_option.device_type() == MKLDNN ||
+      device_option.device_type() == IDEEP) {
     auto numa_node_id = device_option.numa_node_id();
     CAFFE_ENFORCE(
         numa_node_id >= -1 &&
