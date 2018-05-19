@@ -128,23 +128,29 @@ int AsyncSchedulingNet::updateParentCount(int child_id) {
 }
 
 void AsyncSchedulingNet::finishRun() {
+  {
+    std::unique_lock<std::mutex> lock(running_mutex_);
+    running_ = false;
+  }
+
   // notify observers and waiters
   StopAllObservers();
-  running_ = false;
   running_cv_.notify_all();
 }
 
 bool AsyncSchedulingNet::DoRunAsync() {
-  std::unique_lock<std::mutex> lock(running_mutex_);
-  CAFFE_ENFORCE(!running_, "Concurrent RunAsync calls");
-  running_ = true;
-  reset();
+  {
+    std::unique_lock<std::mutex> lock(running_mutex_);
+    CAFFE_ENFORCE(!running_, "Concurrent RunAsync calls");
+    running_ = true;
+    reset();
 
-  StartAllObservers();
+    StartAllObservers();
 
-  for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
-    if (parents(task_id).empty()) {
-      schedule(task_id);
+    for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
+      if (parents(task_id).empty()) {
+        schedule(task_id);
+      }
     }
   }
 
