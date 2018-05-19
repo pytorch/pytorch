@@ -36,7 +36,7 @@ Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Genera
   return at::rrelu_with_noise_(self, self.type().tensor(), lower, upper, training, generator);
 }
 
-Tensor hard_shrink_cpu(const Tensor & self, const double lambda) {
+Tensor hard_shrink_cpu(const Tensor & self, Scalar lambda) {
   auto scalarType = self.type().scalarType();
   if (scalarType != kDouble
       && scalarType != kFloat) {
@@ -67,7 +67,7 @@ Tensor hard_shrink_cpu(const Tensor & self, const double lambda) {
   return out_t;
 }
 
-Tensor hard_shrink_backward_cpu(const Tensor & grad, const Tensor & self, const double lambda) {
+Tensor hard_shrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambda) {
   auto lambda_t = at::zeros_like(self).fill_(lambda);
   auto zero_t = at::zeros_like(self);
   auto out_t = grad.clone();

@@ -40,7 +40,7 @@ void hard_shrink_backward_cuda_kernel(at::Tensor& out_t, const at::Tensor& lambd
   });
 }
 
-Tensor hard_shrink_cuda(const Tensor & self, const double lambda) {
+Tensor hard_shrink_cuda(const Tensor & self, Scalar lambda) {
   auto scalarType = self.type().scalarType();
   if (scalarType != kDouble
       && scalarType != kFloat) {
@@ -62,7 +62,7 @@ Tensor hard_shrink_cuda(const Tensor & self, const double lambda) {
   return out_t;
 }
 
-Tensor hard_shrink_backward_cuda(const Tensor & grad, const Tensor & self, const double lambda) {
+Tensor hard_shrink_backward_cuda(const Tensor & grad, const Tensor & self, Scalar lambda) {
   auto lambda_t = at::zeros_like(self).fill_(lambda);
   auto zero_t = at::zeros_like(self);
   auto out_t = grad.clone();

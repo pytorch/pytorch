@@ -845,12 +845,12 @@
 
 - func: relu_(Tensor self) -> Tensor
 
-- func: hard_shrink(Tensor self, double lambda=0.5) -> Tensor
+- func: hard_shrink(Tensor self, Scalar lambda=0.5) -> Tensor
   dispatch:
     CPU: hard_shrink_cpu
     CUDA: hard_shrink_cuda
 
-- func: hard_shrink_backward(Tensor grad_out, Tensor self, double lambda=0.5) -> Tensor
+- func: hard_shrink_backward(Tensor grad_out, Tensor self, Scalar lambda=0.5) -> Tensor
   dispatch:
     CPU: hard_shrink_backward_cpu
     CUDA: hard_shrink_backward_cuda

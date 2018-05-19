@@ -752,10 +752,10 @@
 - name: glu_forward(Tensor self, int64_t dim)
   self: glu_backward(grad, self, dim)
 
-- name: hard_shrink(Tensor self, double lambda)
+- name: hard_shrink(Tensor self, Scalar lambda)
   self: hard_shrink_backward(grad, self, lambda)
 
-- name: hard_shrink_backward(Tensor grad_out, Tensor self, double lambda)
+- name: hard_shrink_backward(Tensor grad_out, Tensor self, Scalar lambda)
   grad_out: hard_shrink_backward(grad, self, lambda)
   self: zeros_like(grad)
 
