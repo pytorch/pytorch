@@ -98,9 +98,11 @@ struct Function : std::enable_shared_from_this<Function> {
       edge_list&& next_edges = edge_list())
       : sequence_nr_(sequence_nr),
       next_edges_(std::move(next_edges)) {
+#ifndef NO_PYTHON
     if (AnomalyMode::is_enabled()) {
       AnomalyMode::store_stack(metadata());
     }
+#endif
   }
 
   explicit Function(
@@ -113,12 +115,16 @@ struct Function : std::enable_shared_from_this<Function> {
   Function& operator=(const Function& other) = delete;
   Function& operator=(Function&& other) = delete;
 
+#ifdef NO_PYTHON
+  virtual ~Function() = default;
+#else
   virtual ~Function() {
     if (metadata_) {
       AutoGIL gil;
       Py_DECREF(metadata_);
     }
   }
+#endif
 
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
@@ -251,11 +257,12 @@ struct Function : std::enable_shared_from_this<Function> {
   /// Returns the metadata stored for this `Function`.
   /// If none exist, create a new empty one.
   PyObject* metadata() noexcept {
+#ifndef NO_PYTHON
     if (!metadata_) {
       AutoGIL gil;
       metadata_ = PyDict_New();
     }
-
+#endif
     return metadata_;
   }
 

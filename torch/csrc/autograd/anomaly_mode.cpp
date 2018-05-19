@@ -2,9 +2,11 @@
 #include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/object_ptr.h"
+#include "torch/csrc/Exceptions.h"
 
-#include "stdexcept"
-#include "iostream"
+#include <stdexcept>
+#include <iostream>
 
 namespace torch { namespace autograd {
 
@@ -13,17 +15,16 @@ PyObject* AnomalyMode::stacktrace_key = THPUtils_packString("stacktrace_");
 
 void AnomalyMode::store_stack(PyObject* metadata) {
   AutoGIL gil;
-  auto mod = PyImport_ImportModule("traceback");
+  THPObjectPtr mod(PyImport_ImportModule("traceback"));
   if (!mod) {
-    return;
+    throw python_error();
   }
 
-  auto list = PyObject_CallMethod(mod, "format_stack", "");
+  THPObjectPtr list(PyObject_CallMethod(mod.get(), "format_stack", ""));
 
-  PyDict_SetItem(metadata, AnomalyMode::stacktrace_key, list);
-
-  Py_DECREF(mod);
-  Py_DECREF(list);
+  if (PyDict_SetItem(metadata, AnomalyMode::stacktrace_key, list.get())) {
+    throw python_error();
+  }
 }
 
 void AnomalyMode::print_stack(PyObject* metadata) {
@@ -38,14 +39,11 @@ void AnomalyMode::print_stack(PyObject* metadata) {
     return;
   }
 
-  PyObject* empty_string = PyUnicode_FromString("");
-  auto msg = PyUnicode_Join(empty_string, PyDict_GetItem(metadata, AnomalyMode::stacktrace_key));
+  THPObjectPtr empty_string(PyUnicode_FromString(""));
+  THPObjectPtr msg(PyUnicode_Join(empty_string, PyDict_GetItem(metadata, AnomalyMode::stacktrace_key)));
 
   std::cout << "Traceback of forward call that caused the error:" << std::endl;
   std::cout << THPUtils_unpackString(msg) << std::endl;
-
-  Py_DECREF(empty_string);
-  Py_DECREF(msg);
 }
 
 }}
