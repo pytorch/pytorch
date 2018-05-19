@@ -19,7 +19,7 @@ class SumReduceDimsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<int, long, float, double>>::call(
+    return DispatchHelper<TensorTypes<int, int64_t, float, double>>::call(
         this, Input(0));
   }
 
@@ -46,6 +46,9 @@ class SumReduceDimsOp final : public Operator<Context> {
     const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)
                                : X.size_from_dim(X.ndim() - num_reduce_dims_);
 
+    const T* in_data = X.template data<T>();
+    T* out_data = Y->template mutable_data<T>();
+
     if (cols == 0 || rows == 0) {
       math::Set(Y->size(), static_cast<T>(0), out_data, &context_);
       return true;
@@ -64,8 +67,6 @@ class SumReduceDimsOp final : public Operator<Context> {
           "The size of lengths vector doesn't match the batch size.");
     }
 
-    const T* in_data = X.template data<T>();
-    T* out_data = Y->template mutable_data<T>();
     Compute(rows, cols, in_data, lengths_data, out_data);
 
     return true;
