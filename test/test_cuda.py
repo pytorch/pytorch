@@ -1682,7 +1682,7 @@ class TestCuda(TestCase):
         with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 0"):
             self.run_with_cuda_memory_check(leak_gpu0)
 
-        if torch.cuda.device_count() > 1:
+        if TEST_MULTIGPU:
             with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 1"):
                 self.run_with_cuda_memory_check(leak_gpu1)
 

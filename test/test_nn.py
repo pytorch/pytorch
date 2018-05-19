@@ -61,7 +61,7 @@ dtype2prec = {torch.float: 1e-5,
 # Used to run the same test with different tensor types
 def repeat_test_for_types(dtypes):
     def repeat_helper(f):
-        @warps(f)
+        @wraps(f)
         def call_helper(self, *args):
             for dtype in dtypes:
                 if PY34:
@@ -4613,7 +4613,7 @@ class TestNN(NNTestCase):
         gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
 
     def test_upsamplingLinear1d(self):
-        m = nn.Upsample(size=4, mode='linear')
+        m = nn.Upsample(size=4, mode='linear', align_corners=True)
         in_t = torch.ones(1, 1, 2)
         out_t = m(Variable(in_t))
         self.assertEqual(torch.ones(1, 1, 4), out_t.data)
@@ -4643,7 +4643,7 @@ class TestNN(NNTestCase):
         gradgradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
 
     def test_upsamplingBilinear2d(self):
-        m = nn.Upsample(size=4, mode='bilinear')
+        m = nn.Upsample(size=4, mode='bilinear', align_corners=True)
         in_t = torch.ones(1, 1, 2, 2)
         out_t = m(Variable(in_t))
         self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
@@ -4669,7 +4669,7 @@ class TestNN(NNTestCase):
         gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
 
     def test_upsamplingTrilinear3d(self):
-        m = nn.Upsample(size=4, mode='trilinear')
+        m = nn.Upsample(size=4, mode='trilinear', align_corners=True)
         in_t = torch.ones(1, 1, 2, 2, 2)
         out_t = m(Variable(in_t))
         self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
