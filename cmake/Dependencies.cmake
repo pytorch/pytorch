@@ -405,7 +405,7 @@ if(USE_HIP)
 
     set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
     set(Caffe2_HIP_INCLUDES
-      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${Caffe2_HIP_INCLUDES})
+      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${Caffe2_HIP_INCLUDES} ${thrust_INCLUDE_DIRS})
     set(Caffe2_HIP_DEPENDENCY_LIBS
       ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
 
@@ -441,25 +441,6 @@ if(USE_CUDA)
   else()
     include_directories(${PROJECT_SOURCE_DIR}/third_party/cub)
   endif()
-endif()
-
-# ---[ HIP
-if(USE_HIP)
-  include(${HIP_PATH}/cmake/FindHIP.cmake)
-  if(HAVE_HIP)
-    message(WARNING "Compiling with HIP for AMD.")
-  else()
-    message(WARNING "Not compiling with HIP for AMD.")
-  endif()
-endif()
-
-# ---[ AMD Thrust
-if(USE_HIP)
-  include_directories($ENV{THRUST_ROOT})
-  #For cub-hip
-  include_directories($ENV{THRUST_ROOT}/thrust/system/cuda/detail/cub-hip)
-  message(STATUS "Found Thrust: $ENV{THRUST_ROOT}")
-  message(STATUS "Found cub-hip: $ENV{THRUST_ROOT}/thrust/system/cuda/detail/cub-hip")
 endif()
 
 if(USE_GLOO)
