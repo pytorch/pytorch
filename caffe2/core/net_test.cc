@@ -753,4 +753,20 @@ TEST(NetTest, RunAsyncFailure) {
   }
 }
 
+TEST(NetTest, NoTypeNet) {
+  const auto spec = R"DOC(
+        name: "no_type_net"
+  )DOC";
+
+  Workspace ws;
+  NetDef net_def;
+  CAFFE_ENFORCE(
+      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+
+  {
+    std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+    ASSERT_TRUE(net);
+  }
+}
+
 } // namespace caffe2
