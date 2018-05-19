@@ -165,12 +165,17 @@ Import error
 
 
 The problem is caused by the missing of the essential files. Actually,
-we include almost all the essential files that PyTorch need except VC2017
-redistributable. You can resolve this by typing the following command.
+we include almost all the essential files that PyTorch need for the conda
+package except VC2017 redistributable. 
+You can resolve this by typing the following command.
 
 .. code-block:: bat
 
     conda install -c peterjc123 vc vs2017_runtime
+
+As for the wheels package, since we didn't pack the intel-openmp files in,
+please make sure you install Numpy+MKL from this `site
+<https://www.lfd.uci.edu/~gohlke/pythonlibs/#numpy>`_ instead of Numpy.
 
 Another possible cause may be you are using GPU version without NVIDIA
 graphics cards. Please replace your GPU package with the CPU one.
