@@ -139,26 +139,13 @@ PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
 
 PyObject *THPDevice_reduce(THPDevice *self)
 {
-  PyObject *ret, *mod, *obj;
-  ret = PyTuple_New(2);
+  PyObject *ret = PyTuple_New(2);
+  if (!ret) return NULL;
 
-  if (ret == NULL)
-    return NULL;
+  py::object torch_module = py::module::import("torch");
+  py::object torch_device = torch_module.attr("device");
+  PyTuple_SET_ITEM(ret, 0, torch_device.release().ptr());
 
-  mod = PyImport_ImportModule("torch");
-  if (mod == NULL) {
-    Py_DECREF(ret);
-    return NULL;
-  }
-
-  obj = PyObject_GetAttrString(mod, "device");
-  Py_DECREF(mod);
-  if (obj == NULL) {
-    Py_DECREF(ret);
-    return NULL;
-  }
-
-  PyTuple_SET_ITEM(ret, 0, obj);
   if (self->device.is_default) {
     PyTuple_SET_ITEM(ret, 1, Py_BuildValue("(s)", deviceTypeString(self->device.type)));
   } else {

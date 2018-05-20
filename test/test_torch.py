@@ -36,13 +36,6 @@ with warnings.catch_warnings(record=True) as warns:
                 break
 
 
-class NetwithDevice(torch.nn.Module):
-    def __init__(self):
-        super(NetwithDevice, self).__init__()
-        self.param = torch.nn.Parameter(torch.Tensor(3, 5))
-        self.device = torch.device('cpu:0')
-
-
 class FilelikeMock(object):
     def __init__(self, data, has_fileno=True, has_readinto=False):
         if has_readinto:
@@ -6258,15 +6251,12 @@ class TestTorch(TestCase):
             xh2 = torch.load(f)
             self.assertEqual(xh.float(), xh2.float())
 
-    def test_save_net_with_device(self):
-        net = NetwithDevice()
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(net, f)
-            f.seek(0)
-            net2 = torch.load(f)
-            self.assertEqual(type(net), type(net2))
-            self.assertEqual(net.state_dict(), net2.state_dict())
-            self.assertEqual(net.device, net2.device)
+    def test_serialize_device(self):
+        device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
+        device_obj = [torch.device(d) for d in device_str]
+        for device in device_obj:
+            device_copied = copy.deepcopy(device)
+            self.assertEqual(device, device_copied)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_half_tensor_cuda(self):
