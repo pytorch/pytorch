@@ -18,8 +18,6 @@ from functools import reduce
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
 
-import time
-
 if TEST_NUMPY:
     import numpy as np
 
@@ -1402,7 +1400,6 @@ class TestTorch(TestCase):
             contig = make_contiguous(shape, dtype)
             non_contig = torch.empty(shape + (2,), dtype=dtype)[..., 0]
             non_contig.copy_(contig)
-            print(contig.size(), contig.stride(), non_contig.size(), non_contig.stride())
             self.assertFalse(non_contig.is_contiguous())
             return non_contig
 
@@ -5526,34 +5523,34 @@ class TestTorch(TestCase):
     def _test_flip(self, use_cuda=False):
         if use_cuda:
             cuda = torch.device("cuda")
-            x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=cuda).view(2, 2, 2)
-            # stress testing
-            y = torch.arange(0, 100000000, device=cuda).view(10000, 10000)
-            start = time.time()
-            y.flip([0, 1])
-            print("run time = %0.9f\n" % (time.time() - start))
+            data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=cuda).view(2, 2, 2)
+            # large data testing
+            large_data = torch.arange(0, 100000000, device=cuda).view(10000, 10000)
+            large_data.flip([0, 1])
         else:
-            x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2)
+            data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2)
 
-        x_flip_0 = x.flip([0])
-        self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2), x_flip_0)
-
-        x_flip_01 = x.flip([0, 1])
-        self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), x_flip_01)
-
-        x_flip_012 = x.flip([0, 1, 2])
-        self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), x_flip_012)
+        self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2), data.flip(0))
+        self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
+        self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
 
         # not allow flip on the same dim more than once
-        self.assertRaises(RuntimeError, lambda: x.flip([0, 1, 1]))
+        self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 1))
         # not allow empty list as input
-        self.assertRaises(RuntimeError, lambda: x.flip([]))
+        self.assertRaises(TypeError, lambda: data.flip())
         # not allow size of flip dim > total dims
-        self.assertRaises(RuntimeError, lambda: x.flip([0, 1, 2, 3]))
+        self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 2, 3))
         # not allow dim < 0
-        self.assertRaises(RuntimeError, lambda: x.flip([-1]))
+        self.assertRaises(RuntimeError, lambda: data.flip(-1))
         # not allow dim > max dim
-        self.assertRaises(RuntimeError, lambda: x.flip([3]))
+        self.assertRaises(RuntimeError, lambda: data.flip(3))
+
+        # test for non-contiguous case
+        if use_cuda:
+            data_to_expand = torch.arange(1, 4, device=cuda).view(3, 1)
+        else:
+            data_to_expand = torch.arange(1, 4).view(3, 1)
+        self.assertEqual(torch.tensor([3, 3, 2, 2, 1, 1]).view(3, 2), data_to_expand.expand(3, 2).flip(0))
 
     def test_flip(self):
         self._test_flip(self, use_cuda=False)

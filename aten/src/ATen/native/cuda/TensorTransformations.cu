@@ -23,8 +23,7 @@ void linear_index_to_indices(int64_t linear_index, int64_t* strides, int64_t tot
 }
 
 /*
-Map the index of an element in tensor from nD to 1D. A tensor is originally in nD shape,
-and 1D is the unfolded version of it (a vector).
+Map the index of an element in tensor from nD to 1D. A tensor is originally in nD shape, and 1D is the unfolded version of it (a vector).
 
 Example: given a 3D tensor
 [
@@ -33,9 +32,7 @@ Example: given a 3D tensor
   [ [9, 10], [11, 12] ],
 ]
 
-Here element 3 has nD index (indice) = (0, 1, 0), and stride = (4, 2, 1). To map nD to 1D,
-we can use formula: sum(indice[i] * stride[i]). For instance, in the example above,
-0 * 4 + 1 * 2 + 0 * 1 = 2, and so the oneD index = 2.
+Here element 3 has nD index (indice) = (0, 1, 0), and stride = (4, 2, 1). To map nD to 1D, we can use formula: sum(indice[i] * stride[i]). For instance, in the example above, 0 * 4 + 1 * 2 + 0 * 1 = 2, and so the oneD index = 2.
 */
 __device__ __forceinline__
 int64_t indices_to_linear_index(int64_t* indices, int64_t total_dims, int64_t* strides, int64_t src_linear_index) {
@@ -137,7 +134,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   auto strides_t = at::CPU(kLong).tensorFromBlob(strides.data(), {static_cast<int64_t>(strides.size())});
 
   auto indices = at::zeros(CUDA(kLong), {N, total_dims});
-  auto out_t = at::zeros(CUDA(in_t.type().scalarType()), in_t.sizes());
+  auto out_t = at::zeros_like(in_t);
 
   int64_t block_size = 512;
   dim3 dim_block(block_size);
