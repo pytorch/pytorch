@@ -6,8 +6,6 @@
 #include <sleef.h>
 #endif
 
-#include <iostream>
-
 namespace at {
 namespace vec256 {
 namespace {
