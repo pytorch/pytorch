@@ -226,17 +226,22 @@ def RunPlan(plan_or_step):
     return C.run_plan(StringifyProto(plan_or_step))
 
 
-def InferShapesAndTypes(nets, blob_dimensions=None):
+def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False):
     """Infers the shapes and types for the specified nets.
 
     Inputs:
       nets: the list of nets
       blob_dimensions (optional): a dictionary of blobs and their dimensions.
           If not specified, the workspace blobs are used.
+      nets_proto (optional): a boolean flag indicating whether the protobuffer
+          representation is passed to the routine.
     Returns:
       A tuple of (shapes, types) dictionaries keyed by blob name.
     """
-    net_protos = [StringifyProto(n.Proto()) for n in nets]
+    if nets_proto:
+        net_protos = [StringifyProto(n) for n in nets]
+    else:
+        net_protos = [StringifyProto(n.Proto()) for n in nets]
     if blob_dimensions is None:
         blobdesc_prototxt = C.infer_shapes_and_types_from_workspace(net_protos)
     else:

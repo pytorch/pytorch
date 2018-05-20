@@ -89,23 +89,29 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
 OpSchema::Cost CostInferenceForBatchMatMul(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
+  CAFFE_ENFORCE_EQ(in.size(), 2, "BatchMatMul requires two inputs");
+
   ArgumentHelper helper(def);
   struct OpSchema::Cost c;
+  const auto& A = in[0];
+  const auto& B = in[1];
   const TensorShape Y = TensorInferenceForBatchMatMul(def, in)[0];
 
-  auto ndims_A = in[0].dims_size();
-  long long nElemY = 1;
-  for (int i = 0; i < Y.dims_size(); i++) {
-    nElemY *= Y.dims(i);
-  }
+  uint64_t nElemA = nElemFromDim(A);
+  uint64_t nElemB = nElemFromDim(B);
+  uint64_t nElemY = nElemFromDim(Y);
+
+  auto ndims_A = A.dims_size();
   size_t K;
   if (helper.GetSingleArgument<int>("trans_a", 0)) {
     K = in[0].dims(ndims_A - 2);
   } else {
     K = in[0].dims(ndims_A - 1);
   }
+
   c.flops = 2 * nElemY * K;
-  c.bytes_moved = nElemY * sizeof(float);
+  c.bytes_read = (nElemA + nElemB) * sizeof(A.data_type());
+  c.bytes_written = nElemY * sizeof(Y.data_type());
   c.params_bytes = 0;
   return c;
 }

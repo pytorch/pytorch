@@ -15,8 +15,9 @@ AsyncSchedulingNet::AsyncSchedulingNet(
 }
 
 void AsyncSchedulingNet::reset() {
+  AsyncNetBase::reset();
+
   processed_tasks_num_ = 0;
-  cleanup_ = false;
   success_ = true;
 
   for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
@@ -37,8 +38,10 @@ void AsyncSchedulingNet::schedule(int task_id) {
   const auto& device_option = event(task_id).GetDeviceOption();
   pool(device_option)->run([this, task_id]() {
     if (success_) {
-      int stream_id = stream(task_id);
-      asyncWait(task_id, stream_id, parents(task_id));
+      int stream_id = 0;
+      if (FLAGS_caffe2_streams_per_gpu > 1) {
+        stream_id = stream(task_id);
+      }
       try {
         run(task_id, stream_id);
       } catch (const std::exception& e) {
@@ -51,9 +54,14 @@ void AsyncSchedulingNet::schedule(int task_id) {
     for (auto child_id : children(task_id)) {
       int parent_count = updateParentCount(child_id);
       if (parent_count == 0) {
-        if (!success_ || cleanup_ ||
-            FLAGS_caffe2_net_async_always_schedule_child ||
-            canSchedule(child_id)) {
+        // Schedule a child if:
+        // - there is failure, we skip an op execution and finish the job
+        // - forced scheduling though --caffe2_net_async_always_schedule_child
+        // - --caffe2_net_async_finish_chain is set, in this case parents are
+        //   guaranteed to be finished
+        // - in all other cases, check parents with canSchedule
+        if (!success_ || FLAGS_caffe2_net_async_always_schedule_child ||
+            FLAGS_caffe2_net_async_finish_chain || canSchedule(child_id)) {
           schedule(child_id);
         } else {
           const auto& device_option = event(child_id).GetDeviceOption();
@@ -64,37 +72,8 @@ void AsyncSchedulingNet::schedule(int task_id) {
       }
     }
 
-    if (success_) {
-      if (task_count == tasksNum()) {
-        // All tasks are finished, polling thread is sleeping;
-        // only one thread enters here
-        finalizeEvents();
-        finishRun();
-        return;
-      }
-    } else {
-      // Before setting running_ to false and notifying waiters we need to
-      // 1. Ensure that only one thread does the cleanup
-      // 2. Ensure that all other pending tasks in workers and polling threads
-      //    are finished and
-      // 3. Ensure that all tasks that were not scheduled have their events set
-      {
-        std::unique_lock<std::mutex> cleanup_lock(cleanup_mutex_);
-        if (cleanup_) {
-          return;
-        }
-        cleanup_ = true;
-      }
-
-      // Errors are not recoverable and happen in exceptional cases,
-      // ok to busy wait
-      while (processed_tasks_num_ != tasksNum()) {
-      }
-
-      // Make sure all events are set, wait for scheduled events
+    if (task_count == tasksNum()) {
       finalizeEvents();
-
-      // Notify observers and waiters
       finishRun();
     }
   });
@@ -110,7 +89,7 @@ void AsyncSchedulingNet::pollAndSchedule(int task_id) {
   //  - parents are ready
   //  - we failed / cleanup started (no ops will run)
 
-  if (can_schedule || cleanup_ || !success_ || parent_failed) {
+  if (can_schedule || !success_ || parent_failed) {
     schedule(task_id);
   } else {
     const auto& device_option = event(task_id).GetDeviceOption();
@@ -128,24 +107,38 @@ int AsyncSchedulingNet::updateParentCount(int child_id) {
 }
 
 void AsyncSchedulingNet::finishRun() {
+  {
+    std::unique_lock<std::mutex> lock(running_mutex_);
+    running_ = false;
+  }
+
   // notify observers and waiters
   StopAllObservers();
-  running_ = false;
   running_cv_.notify_all();
 }
 
-bool AsyncSchedulingNet::DoRunAsync() {
-  std::unique_lock<std::mutex> lock(running_mutex_);
-  CAFFE_ENFORCE(!running_, "Concurrent RunAsync calls");
-  running_ = true;
-  reset();
-
-  StartAllObservers();
-
-  for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
-    if (parents(task_id).empty()) {
-      schedule(task_id);
+bool AsyncSchedulingNet::RunAsync() {
+  try {
+    std::unique_lock<std::mutex> lock(running_mutex_);
+    if (running_) {
+      LOG(ERROR) << "Detected concurrent runs";
+      return false;
     }
+    running_ = true;
+    reset();
+
+    StartAllObservers();
+
+    for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
+      if (parents(task_id).empty()) {
+        schedule(task_id);
+      }
+    }
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Exception while starting an async run: " << e.what();
+    finalizeEvents();
+    finishRun();
+    return false;
   }
 
   if (tasksNum() == 0) {
