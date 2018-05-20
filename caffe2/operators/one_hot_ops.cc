@@ -60,11 +60,20 @@ vector<TensorShape> TensorInferenceForBatchOneHot(
 OpSchema::Cost CostInferenceForBatchOneHot(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
+  CAFFE_ENFORCE_EQ(in.size(), 3, "BatchOneHot requires three inputs");
   struct OpSchema::Cost c;
   const TensorShape output = TensorInferenceForBatchOneHot(def, in)[0];
 
+  const auto& data = in[0];
+  const auto& length = in[1];
+  const auto& values = in[2];
+
+  uint64_t nBytesData = nElemFromDim(data) * sizeof(data.data_type());
+  uint64_t nBytesLength = nElemFromDim(length) * sizeof(length.data_type());
+  uint64_t nBytesValues = nElemFromDim(values) * sizeof(values.data_type());
   c.flops = 0;
-  c.bytes_moved = output.dims(0) * output.dims(1) * sizeof(int32_t);
+  c.bytes_read = nBytesData + nBytesLength + nBytesValues;
+  c.bytes_written = nElemFromDim(output) * sizeof(output.data_type());
   c.params_bytes = 0;
   return c;
 }
