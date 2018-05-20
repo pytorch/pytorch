@@ -4613,13 +4613,16 @@ class TestNN(NNTestCase):
         gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
 
     def test_upsamplingLinear1d(self):
-        m = nn.Upsample(size=4, mode='linear', align_corners=True)
-        in_t = torch.ones(1, 1, 2)
-        out_t = m(Variable(in_t))
-        self.assertEqual(torch.ones(1, 1, 4), out_t.data)
+        for align_corners in [True, False]:
+            kwargs = dict(mode='linear', align_corners=align_corners)
 
-        input = torch.randn(1, 1, 2, requires_grad=True)
-        gradcheck(lambda x: F.upsample(x, 4, mode='linear'), (input,))
+            m = nn.Upsample(size=4, **kwargs)
+            in_t = torch.ones(1, 1, 2)
+            out_t = m(Variable(in_t))
+            self.assertEqual(torch.ones(1, 1, 4), out_t.data)
+
+            input = torch.randn(1, 1, 2, requires_grad=True)
+            gradcheck(lambda x: F.upsample(x, 4, **kwargs), (input,))
 
     def test_upsamplingLinear1d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
@@ -4643,13 +4646,16 @@ class TestNN(NNTestCase):
         gradgradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
 
     def test_upsamplingBilinear2d(self):
-        m = nn.Upsample(size=4, mode='bilinear', align_corners=True)
-        in_t = torch.ones(1, 1, 2, 2)
-        out_t = m(Variable(in_t))
-        self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
+        for align_corners in [True, False]:
+            kwargs = dict(mode='bilinear', align_corners=align_corners)
 
-        input = torch.randn(1, 1, 2, 2, requires_grad=True)
-        gradcheck(lambda x: F.upsample(x, 4, mode='bilinear'), [input])
+            m = nn.Upsample(size=4, **kwargs)
+            in_t = torch.ones(1, 1, 2, 2)
+            out_t = m(Variable(in_t))
+            self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
+
+            input = torch.randn(1, 1, 2, 2, requires_grad=True)
+            gradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
 
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
@@ -4669,17 +4675,20 @@ class TestNN(NNTestCase):
         gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
 
     def test_upsamplingTrilinear3d(self):
-        m = nn.Upsample(size=4, mode='trilinear', align_corners=True)
-        in_t = torch.ones(1, 1, 2, 2, 2)
-        out_t = m(Variable(in_t))
-        self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
+        for align_corners in [True, False]:
+            kwargs = dict(mode='trilinear', align_corners=align_corners)
 
-        input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
-        self.assertEqual(
-            F.upsample(input, (4, 4, 4), mode='trilinear'),
-            F.upsample(input, scale_factor=2, mode='trilinear'))
-        gradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), [input])
-        gradgradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), [input])
+            m = nn.Upsample(size=4, **kwargs)
+            in_t = torch.ones(1, 1, 2, 2, 2)
+            out_t = m(Variable(in_t))
+            self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
+
+            input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
+            self.assertEqual(
+                F.upsample(input, (4, 4, 4), **kwargs),
+                F.upsample(input, scale_factor=2, **kwargs))
+            gradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
+            gradgradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
 
     def test_upsamplingTrilinear3d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)

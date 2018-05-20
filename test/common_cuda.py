@@ -7,7 +7,7 @@ import torch.cuda
 TEST_CUDA = torch.cuda.is_available()
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 CUDA_DEVICE = TEST_CUDA and torch.device("cuda:0")
-TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1, device=CUDA_DEVICE))
+TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE))
 TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 
 
