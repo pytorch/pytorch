@@ -17,7 +17,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from itertools import product, combinations
 from functools import reduce
-from torch import multiprocessing as mp
+from torch.multiprocessing import set_start_method, Pool
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
 
@@ -2369,10 +2369,10 @@ class TestTorch(TestCase):
 
     def _spawn_method(self, method, arg):
         try:
-            mp.set_start_method('spawn')
+            set_start_method('spawn')
         except RuntimeError:
             pass
-        with mp.Pool(1) as pool:
+        with Pool(1) as pool:
             self.assertTrue(pool.map(method, [arg]))
 
     @staticmethod
