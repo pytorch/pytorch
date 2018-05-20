@@ -34,20 +34,10 @@ def make_jacobian(input, num_out):
 def iter_tensors(x, only_requiring_grad=False):
     if isinstance(x, torch.Tensor):
         if x.requires_grad or not only_requiring_grad:
-            yield x.data
+            yield x
     elif isinstance(x, Iterable):
         for elem in x:
             for result in iter_tensors(elem, only_requiring_grad):
-                yield result
-
-
-def iter_tensors_with_grad(x):
-    if isinstance(x, torch.Tensor):
-        if x.requires_grad:
-            yield (x.grad.data, x.data) if x.grad is not None else (None, None)
-    elif isinstance(x, Iterable):
-        for elem in x:
-            for result in iter_tensors_with_grad(elem):
                 yield result
 
 
@@ -59,10 +49,13 @@ def contiguous(input):
     return input
 
 
+# `input` is input to `fn`
+# `target` is the Tensors wrt whom Jacobians are calculated
 def get_numerical_jacobian(fn, input, target, eps=1e-3):
     # To be able to use .view(-1) input must be contiguous
     input = contiguous(input)
-    target = contiguous(target)
+    if not all(t.is_contiguous() for t in iter_tensors(target)):
+        raise RuntimeError("target must only contain contiguous Tensors")
     output_size = fn(input).numel()
     jacobian = make_jacobian(target, output_size)
 
@@ -74,7 +67,9 @@ def get_numerical_jacobian(fn, input, target, eps=1e-3):
 
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-        flat_tensor = x_tensor.view(-1).detach()
+        # need data here to get around the version check because the following
+        # code updates version but doesn't change content
+        flat_tensor = x_tensor.view(-1).data
         for i in range(flat_tensor.nelement()):
             orig = flat_tensor[i].item()
             flat_tensor[i] = orig - eps
@@ -91,6 +86,7 @@ def get_numerical_jacobian(fn, input, target, eps=1e-3):
 
 def get_analytical_jacobian(input, output):
     input = contiguous(input)
+    diff_input_list = list(iter_tensors(input, True))
     jacobian = make_jacobian(input, output.numel())
     jacobian_reentrant = make_jacobian(input, output.numel())
     grad_output = torch.zeros_like(output)
@@ -103,8 +99,9 @@ def get_analytical_jacobian(input, output):
         flat_grad_output[i] = 1
         for jacobian_c in (jacobian, jacobian_reentrant):
             zero_gradients(input)
-            output.backward(grad_output, create_graph=True)
-            for jacobian_x, (d_x, x) in zip(jacobian_c, iter_tensors_with_grad(input)):
+            grads_input = torch.autograd.grad(output, diff_input_list, grad_output,
+                                              retain_graph=True, only_inputs=True, allow_unused=True)
+            for jacobian_x, d_x, x in zip(jacobian_c, grads_input, diff_input_list):
                 if d_x is not None and d_x.size() != x.size():
                     correct_grad_sizes = False
                 elif jacobian_x.numel() != 0:
@@ -200,18 +197,19 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     zero_gradients(inputs)
     output = _differentiable_outputs(func(*inputs))
     if any([o.requires_grad for o in output]):
-        torch.autograd.backward(output, [torch.zeros_like(o) for o in output], create_graph=True)
-        var_inputs = list(filter(lambda i: isinstance(i, torch.Tensor), inputs))
-        if not var_inputs:
-            raise RuntimeError("no Tensors found in input")
-        for i in var_inputs:
-            if i.grad is None:
+        diff_input_list = list(iter_tensors(inputs, True))
+        if not diff_input_list:
+            raise RuntimeError("no Tensors requiring grad found in input")
+        grads_input = torch.autograd.grad(output, diff_input_list, [torch.zeros_like(o) for o in output],
+                                          only_inputs=True, allow_unused=True)
+        for gi, i in zip(grads_input, diff_input_list):
+            if gi is None:
                 continue
-            if not i.grad.data.eq(0).all():
+            if not gi.eq(0).all():
                 return fail_test('backward not multiplied by grad_output')
-            if i.grad.type() != i.type():
+            if gi.type() != i.type():
                 return fail_test("grad is incorrect type")
-            if i.grad.size() != i.size():
+            if gi.size() != i.size():
                 return fail_test('grad is incorrect size')
 
     return True
@@ -267,7 +265,8 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         input_args = input_args[:-len(grad_outputs)]
         outputs = _differentiable_outputs(func(*input_args))
         input_args = tuple(x for x in input_args if isinstance(x, torch.Tensor) and x.requires_grad)
-        grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True)
+        grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs,
+                                          create_graph=True, only_inputs=True, allow_unused=True)
         return grad_inputs
 
     return gradcheck(new_func, inputs + grad_outputs, eps, atol, rtol, raise_exception)

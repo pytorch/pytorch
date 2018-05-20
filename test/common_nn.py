@@ -813,8 +813,8 @@ class NNTestCase(TestCase):
         input_t = iter_tensors(input)
         numerical_t = iter_tensors(numerical_d_x)
         for x, d_x in zip(input_t, numerical_t):
-            x = x.view(-1)
-            d_x = d_x.view(-1)
+            x = x.view(-1).data
+            d_x = d_x.view(-1).data
             for i in range(x.nelement()):
                 original = x[i].item()
                 x[i] = original + eps
