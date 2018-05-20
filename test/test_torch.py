@@ -2396,8 +2396,9 @@ class TestTorch(TestCase):
     @staticmethod
     def _test_multinomial_invalid_probs_cuda(probs):
         try:
-            torch.multinomial(probs.to('cuda'), 1)
-            torch.cuda.synchronize()
+            with torch.random.fork_rng(devices=[0]):
+                torch.multinomial(probs.to('cuda'), 1)
+                torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:
             return 'device-side assert triggered' in str(e)
