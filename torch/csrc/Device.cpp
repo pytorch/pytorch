@@ -43,7 +43,7 @@ PyObject *THPDevice_repr(THPDevice *self)
   return THPUtils_packString(oss.str().c_str());
 }
 
-PyObject *THPDevice_str(THPDevice*self)
+PyObject *THPDevice_str(THPDevice *self)
 {
   std::ostringstream oss;
   if (!self->device.is_default) {
@@ -137,12 +137,48 @@ PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPDevice_reduce(THPDevice *self)
+{
+  PyObject *ret, *mod, *obj;
+  ret = PyTuple_New(2);
+
+  if (ret == NULL)
+    return NULL;
+
+  mod = PyImport_ImportModule("torch");
+  if (mod == NULL) {
+    Py_DECREF(ret);
+    return NULL;
+  }
+
+  obj = PyObject_GetAttrString(mod, "device");
+  Py_DECREF(mod);
+  if (obj == NULL) {
+    Py_DECREF(ret);
+    return NULL;
+  }
+
+  PyTuple_SET_ITEM(ret, 0, obj);
+  if (self->device.is_default) {
+    PyTuple_SET_ITEM(ret, 1, Py_BuildValue("(s)", deviceTypeString(self->device.type)));
+  } else {
+    PyTuple_SET_ITEM(ret, 1, Py_BuildValue("(si)", deviceTypeString(self->device.type), self->device.index));
+  }
+
+  return ret;
+}
+
 typedef PyObject *(*getter)(PyObject *, void *);
 
 static struct PyGetSetDef THPDevice_properties[] = {
   {"type",       (getter)THPDevice_type, nullptr, nullptr, nullptr},
   {"index",      (getter)THPDevice_index, nullptr, nullptr, nullptr},
   {nullptr}
+};
+
+static PyMethodDef THPDevice_methods[] = {
+  {"__reduce__", (PyCFunction)THPDevice_reduce, METH_NOARGS, nullptr},
+  {NULL}  /* Sentinel */
 };
 
 PyTypeObject THPDeviceType = {
@@ -173,7 +209,7 @@ PyTypeObject THPDeviceType = {
   0,                                     /* tp_weaklistoffset */
   0,                                     /* tp_iter */
   0,                                     /* tp_iternext */
-  0,                                     /* tp_methods */
+  THPDevice_methods,                     /* tp_methods */
   0,                                     /* tp_members */
   THPDevice_properties,                  /* tp_getset */
   0,                                     /* tp_base */
