@@ -2379,6 +2379,7 @@ class TestTorch(TestCase):
     def _test_multinomial_invalid_probs(probs):
         try:
             torch.multinomial(probs.to('cpu'), 1)
+            return False  # Should not be reached
         except RuntimeError as e:
             return 'invalid multinomial distribution' in str(e)
 
@@ -2394,6 +2395,7 @@ class TestTorch(TestCase):
         try:
             torch.multinomial(probs.to('cuda'), 1)
             torch.cuda.synchronize()
+            return False  # Should not be reached
         except RuntimeError as e:
             return 'device-side assert triggered' in str(e)
 
