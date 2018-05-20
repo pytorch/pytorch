@@ -1767,7 +1767,7 @@ class TestTorch(TestCase):
         all_dtypes = torch.testing.get_all_dtypes()
         for dtype in all_dtypes:
             copied_dtype = copy.deepcopy(dtype)
-            self.assertEqual(id(dtype), id(copied_dtype))
+            self.assertIs(dtype, copied_dtype)
 
     def test_device(self):
         cpu = torch.device('cpu')

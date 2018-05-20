@@ -46,9 +46,7 @@ static struct PyGetSetDef THPDtype_properties[] = {
 };
 
 static PyMethodDef THPDtype_methods[] = {
-  {"__reduce__", (PyCFunction)THPDtype_reduce, METH_NOARGS,
-   "define behavior in pickling"
-  },
+  {"__reduce__", (PyCFunction)THPDtype_reduce, METH_NOARGS, nullptr},
   {NULL}  /* Sentinel */
 };
 
