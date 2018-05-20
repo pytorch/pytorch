@@ -177,9 +177,9 @@ goto:eof
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
                   -DNO_MKLDNN=%NO_MKLDNN% ^
-                  -DMKLDNN_INCLUDE_DIR=%MKLDNN_INCLUDE_DIR% ^
-                  -DMKLDNN_LIB_DIR=%MKLDNN_LIB_DIR% ^
-                  -DMKLDNN_LIBRARY=%MKLDNN_LIBRARY% ^
+                  -DMKLDNN_INCLUDE_DIR="%MKLDNN_INCLUDE_DIR%" ^
+                  -DMKLDNN_LIB_DIR="%MKLDNN_LIB_DIR%" ^
+                  -DMKLDNN_LIBRARY="%MKLDNN_LIBRARY%" ^
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
@@ -187,7 +187,7 @@ goto:eof
                   -DCMAKE_CXX_FLAGS="%USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
-                  -DWITH_ROCM="%WITH_ROCM%"
+                  -DWITH_ROCM=%WITH_ROCM%
 
   %MAKE_COMMAND%
   IF NOT %ERRORLEVEL%==0 exit 1
