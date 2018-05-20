@@ -574,7 +574,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
 
 
 class TestCuda(TestCase):
-    doCUDAMemoryCheck = True
+    _do_cuda_memory_check = True
 
     @staticmethod
     def _test_memory_stats_generator(self, device=None, N=35):
@@ -1665,26 +1665,29 @@ class TestCuda(TestCase):
         self.assertGreater(b.norm().item(), 0)
 
     # Test that make_cuda_memory_checked_test successfully detects leak
-    def test_cuda_memory_leak_detection_in_tests(self):
+    def test_cuda_memory_leak_detection(self):
         l = []
 
+        @self.wrap_with_cuda_memory_check
         def no_leak():
             pass
 
+        @self.wrap_with_cuda_memory_check
         def leak_gpu0():
             l.append(torch.tensor(10, device=torch.device("cuda:0")))
 
-        def leak_gpu1():
-            l.append(torch.tensor(10, device=torch.device("cuda:1")))
-
-        self.run_with_cuda_memory_check(no_leak)
+        no_leak()
 
         with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 0"):
-            self.run_with_cuda_memory_check(leak_gpu0)
+            leak_gpu0()
 
         if TEST_MULTIGPU:
+            @self.wrap_with_cuda_memory_check
+            def leak_gpu1():
+                l.append(torch.tensor(10, device=torch.device("cuda:1")))
+
             with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 1"):
-                self.run_with_cuda_memory_check(leak_gpu1)
+                leak_gpu1()
 
 
 def load_ignore_file():

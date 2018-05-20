@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import torch
 import torch.legacy.nn as nn
-from common import to_gpu, freeze_rng_state, run_tests
+from common import to_gpu, freeze_rng_state, run_tests, skipCUDAMemoryCheck
 from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
     module_tests, criterion_tests, PRECISION
 from torch.autograd.gradcheck import get_numerical_jacobian
@@ -652,7 +652,7 @@ def require_grad(input):
 
 
 class TestNN(NNTestCase):
-    doCUDAMemoryCheck = True
+    _do_cuda_memory_check = True
 
     def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         def fw(input):

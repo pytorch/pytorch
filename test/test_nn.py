@@ -27,8 +27,7 @@ from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
-    TEST_SCIPY, download_file, PY3, PY34, to_gpu, get_function_arglist, \
-    skipCUDAMemoryCheck
+    TEST_SCIPY, download_file, PY3, PY34, to_gpu, get_function_arglist
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
@@ -465,7 +464,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
 
 class TestNN(NNTestCase):
-    doCUDAMemoryCheck = True
+    _do_cuda_memory_check = True
 
     def _forward(self, module, input):
         with freeze_rng_state():
@@ -4935,7 +4934,6 @@ class TestNN(NNTestCase):
                          F.conv1d(input, weights2, bias=None, stride=2, dilation=2))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipCUDAMemoryCheck
     @repeat_test_for_types(DOUBLE_TENSORTYPES)
     def test_conv_double_backward_cuda(self, dtype=torch.double):
         # Double backward only runs with DoubleTensor due to precison reason

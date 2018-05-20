@@ -1,6 +1,9 @@
 r"""Importing this file must **not** initialize CUDA context. test_distributed
 relies on this assumption to properly run. This means that when this is imported
-no CUDA calls shall be made, including torch.cuda.device_count(), etc. """
+no CUDA calls shall be made, including torch.cuda.device_count(), etc.
+
+common_cuda.py can freely initialize CUDA context when imported.
+"""
 
 import sys
 import os
@@ -78,6 +81,18 @@ def skipIfNoLapack(fn):
     return wrapper
 
 
+def skipCUDAMemoryCheck(fn):
+    fn._do_cuda_memory_check = False
+    return fn
+
+
+def get_cuda_memory_usage():
+    num_devices = torch.cuda.device_count()
+    gc.collect()
+    torch.cuda.synchronize()
+    return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
+
 def suppress_warnings(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -85,11 +100,6 @@ def suppress_warnings(fn):
             warnings.simplefilter("ignore")
             fn(*args, **kwargs)
     return wrapper
-
-
-def skipCUDAMemoryCheck(fn):
-    fn.__test_skipCUDAMemoryCheck__ = True
-    return fn
 
 
 def get_cpu_type(type_name):
@@ -165,19 +175,41 @@ def is_iterable(obj):
 class TestCase(unittest.TestCase):
     precision = 1e-5
     maxDiff = None
-    doCUDAMemoryCheck = False
+    _do_cuda_memory_check = False
 
-    def __init__(self, methodName='runTest'):
-        super(TestCase, self).__init__(methodName)
-        testMethod = getattr(self, methodName)
-        self.doCUDAMemoryCheck = False
-        if self.__class__.doCUDAMemoryCheck and not getattr(testMethod, '__test_skipCUDAMemoryCheck__', False):
-            # the import below initializes CUDA context, so we do it only if
-            # self.__class__.doCUDAMemoryCheck is True
+    def __init__(self, method_name='runTest'):
+        super(TestCase, self).__init__(method_name)
+        # Wraps the tested method if we should do CUDA memory check.
+        test_method = getattr(self, method_name)
+        self._do_cuda_memory_check &= getattr(test_method, '_do_cuda_memory_check', True)
+        if self._do_cuda_memory_check:
+            # the import below may initialize CUDA context, so we do it only if
+            # self._do_cuda_memory_check is True.
             from common_cuda import TEST_CUDA
             fullname = self.id().lower()  # class_name.method_name
-            if 'gpu' in fullname or 'cuda' in fullname and TEST_CUDA:
-                self.doCUDAMemoryCheck = True
+            if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
+                # initialize context & RNG to prevent false positive detections
+                # when the test is the first to initialize those
+                from common_cuda import initialize_cuda_context_rng
+                initialize_cuda_context_rng()
+                setattr(self, method_name, self.wrap_with_cuda_memory_check(test_method))
+
+    def wrap_with_cuda_memory_check(self, method):
+        # Assumes that `method` is the tested function in `self`.
+        # NOTE: Python Exceptions (e.g., unittest.Skip) keeps objects in scope
+        #       alive, so this cannot be done in setUp and tearDown because
+        #       tearDown is run unconditionally no matter whether the test
+        #       passes or not. For the same reason, we can't wrap the `method`
+        #       call in try-finally and always do the check.
+        @wraps(method)
+        def wrapper(*args, **kwargs):
+            befores = get_cuda_memory_usage()
+            method(*args, **kwargs)
+            afters = get_cuda_memory_usage()
+            for i, (before, after) in enumerate(zip(befores, afters)):
+                self.assertEqual(before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                                 self.id(), after - before, i))
+        return wrapper
 
     def setUp(self):
         set_rng_seed(SEED)
@@ -438,30 +470,6 @@ class TestCase(unittest.TestCase):
                 self.assertMultiLineEqual(expected, s)
             else:
                 self.assertEqual(s, expected)
-
-    # Runs `fn(*args, **kwargs)` with CUDA memory checks. Assumes that CUDA is
-    # available.
-    def run_with_cuda_memory_check(self, fn, *args, **kwargs):
-        from common_cuda import initialize_cuda_context_rng
-        initialize_cuda_context_rng()
-        num_devices = torch.cuda.device_count()
-        gc.collect()
-        torch.cuda.synchronize()
-        befores = tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-        result = fn(*args, **kwargs)
-        gc.collect()
-        torch.cuda.synchronize()
-        afters = tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-        for i, (before, after) in enumerate(zip(befores, afters)):
-            self.assertEqual(before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
-                             self, after - before, i))
-        return result
-
-    def run(self, *args, **kwargs):
-        run_fn = super(TestCase, self).run
-        if self.doCUDAMemoryCheck:
-            return self.run_with_cuda_memory_check(run_fn, *args, **kwargs)
-        return run_fn(*args, **kwargs)
 
     if sys.version_info < (3, 2):
         # assertRegexpMatches renamed to assertRegex in 3.2

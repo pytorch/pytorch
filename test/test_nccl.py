@@ -14,7 +14,6 @@ if not TEST_CUDA:
 
 
 class TestNCCL(TestCase):
-    doCUDAMemoryCheck = False
 
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     def test_unique_id(self):
