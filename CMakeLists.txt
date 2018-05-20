@@ -48,7 +48,7 @@ option(USE_ROCM "Use ROCm" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
-    "USE_CUDA" OFF)  # New option
+    "USE_CUDA" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 cmake_dependent_option(
     USE_GFLAGS "Use GFLAGS" ON
@@ -59,7 +59,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo" ON
     "BUILD_CAFFE2" OFF)
-option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)  # New option
+option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)
 cmake_dependent_option(
     USE_LEVELDB "Use LEVELDB" ON
     "BUILD_CAFFE2" OFF)
@@ -78,7 +78,7 @@ cmake_dependent_option(
     "BUILD_CAFFE2" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
-option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)  # New option
+option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
 option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
@@ -105,8 +105,8 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_MKLML "Use MKLML interface in MKL BLAS" ON
     "BUILD_CAFFE2" OFF)
-option(USE_DISTRIBUTED "Use THD (distributed)" OFF)  # New option
-option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)  # New option
+option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
+option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
 
 # Legacy options, which we will eventually remove
 cmake_dependent_option(

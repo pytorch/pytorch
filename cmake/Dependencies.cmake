@@ -389,16 +389,36 @@ if(USE_CUDA)
     # caffe2::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-        caffe2::cuda caffe2::cufft caffe2::curand caffe2::cudnn caffe2::nvrtc)
-    if(CAFFE2_STATIC_LINK_CUDA)
-      # When statically linking, this must be the order of the libraries
-      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
+        caffe2::cuda caffe2::cufft caffe2::curand caffe2::nvrtc)
+    if(CAFFE2_FOUND_CUDNN)
+      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
     else()
-      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
+      if(BUILD_CAFFE2)
+        # TODO: Get rid of special case for Caffe2 where we require
+        # CUDA *and* cuDNN to be installed.
+        message(WARNING
+            "Not compiling with CUDA since cuDNN is missing. Suppress "
+            "this warning with -DUSE_CUDA=OFF.")
+        caffe2_update_option(USE_CUDA OFF)
+        caffe2_update_option(USE_CUDNN OFF)
+      else()
+        message(WARNING
+            "Not compiling with cuDNN. Suppress this warning with "
+            "-DUSE_CUDNN=OFF.")
+        caffe2_update_option(USE_CUDNN OFF)
+      endif()
     endif()
-    if(USE_TENSORRT)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
+    if(USE_CUDA)
+      if(CAFFE2_STATIC_LINK_CUDA)
+        # When statically linking, this must be the order of the libraries
+        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+            "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
+      else()
+        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
+      endif()
+      if(USE_TENSORRT)
+        list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
+      endif()
     endif()
   else()
     message(WARNING
@@ -431,7 +451,9 @@ endif()
 # ---[ NCCL
 if(USE_NCCL)
   if(NOT USE_CUDA)
-    message(WARNING "If not using cuda, one should not use NCCL either.")
+    message(WARNING
+        "Not using CUDA, so disabling NCCL. Suppress this warning with "
+        "-DUSE_NCCL=OFF.")
     caffe2_update_option(USE_NCCL OFF)
   elseif(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
     message(WARNING "NCCL is currently only supported under Linux.")
@@ -729,7 +751,7 @@ if (BUILD_ATEN)
   # Detect CUDA architecture and get best NVCC flags
   # finding cuda must be first because other things depend on the result
   #
-  # NB: We MUST NOT run this find_package if NO_CUDA is set, because upstream
+  # NB: We MUST NOT run this find_package if NOT USE_CUDA is set, because upstream
   # FindCUDA has a bug where it will still attempt to make use of NOTFOUND
   # compiler variables to run various probe tests.  We could try to fix
   # this, but since FindCUDA upstream is subsumed by first-class support
@@ -830,7 +852,7 @@ if (BUILD_ATEN)
   SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
   FIND_PACKAGE(MAGMA)
-  IF (NOT NO_CUDA AND MAGMA_FOUND)
+  IF (USE_CUDA AND MAGMA_FOUND)
     INCLUDE_DIRECTORIES(${MAGMA_INCLUDE_DIR})
     SET(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
     INCLUDE(CheckPrototypeDefinition)
@@ -1054,17 +1076,14 @@ if (BUILD_ATEN)
     SET(USE_LAPACK 1)
   ENDIF()
 
-  if (NO_CUDA)
-    message("disabling CUDA because NO_CUDA is set")
+  if (NOT USE_CUDA)
+    message("disabling CUDA because NOT USE_CUDA is set")
     SET(AT_CUDA_ENABLED 0)
   else()
     SET(AT_CUDA_ENABLED 1)
     find_package(CUDA 5.5 REQUIRED)
   endif()
 
-  IF (NOT NO_CUDA)
-    find_package(CuDNN)
-  ENDIF()
   IF (NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
     MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
     set(AT_CUDNN_ENABLED 0)

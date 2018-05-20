@@ -1,18 +1,20 @@
 # ---[ cuda
 
 set(CAFFE2_FOUND_CUDA FALSE)
+set(CAFFE2_FOUND_CUDNN FALSE)
 
-# Find Cuda.
+# Find CUDA.
 find_package(CUDA 7.0)
 if(NOT CUDA_FOUND)
   message(WARNING
-    "Caffe2: Cuda cannot be found. Depending on whether you are building "
+    "Caffe2: CUDA cannot be found. Depending on whether you are building "
     "Caffe2 or a Caffe2 dependent library, the next warning / error will "
     "give you more info.")
   return()
 endif()
+set(CAFFE2_FOUND_CUDA TRUE)
 
-# Find cudnn.
+# Find cuDNN.
 if(CAFFE2_STATIC_LINK_CUDA)
   SET(CUDNN_LIBNAME "libcudnn_static.a")
 else()
@@ -28,12 +30,12 @@ find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
     PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64)
 find_package_handle_standard_args(
     CUDNN DEFAULT_MSG CUDNN_INCLUDE_DIR CUDNN_LIBRARY)
-
 if(NOT CUDNN_FOUND)
   message(WARNING
-      "Caffe2: cuDNN cannot be found. Caffe2 CUDA depends explicitly "
-      "on cuDNN so you should consider installing it.")
-  return()
+    "Caffe2: Cannot find cuDNN library. Turning the option off")
+  set(USE_CUDNN OFF)
+else()
+  set(CAFFE2_FOUND_CUDNN TRUE)
 endif()
 
 # Optionally, find TensorRT
@@ -53,33 +55,34 @@ if (${USE_TENSORRT})
   endif()
 endif()
 
-# After both cuda and cudnn are found, we can safely proceed.
-set(CAFFE2_FOUND_CUDA TRUE)
+# ---[ Exract versions
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
-# get cuDNN version
-file(READ ${CUDNN_INCLUDE_DIR}/cudnn.h CUDNN_HEADER_CONTENTS)
-string(REGEX MATCH "define CUDNN_MAJOR * +([0-9]+)"
-             CUDNN_VERSION_MAJOR "${CUDNN_HEADER_CONTENTS}")
-string(REGEX REPLACE "define CUDNN_MAJOR * +([0-9]+)" "\\1"
-             CUDNN_VERSION_MAJOR "${CUDNN_VERSION_MAJOR}")
-string(REGEX MATCH "define CUDNN_MINOR * +([0-9]+)"
-             CUDNN_VERSION_MINOR "${CUDNN_HEADER_CONTENTS}")
-string(REGEX REPLACE "define CUDNN_MINOR * +([0-9]+)" "\\1"
-             CUDNN_VERSION_MINOR "${CUDNN_VERSION_MINOR}")
-string(REGEX MATCH "define CUDNN_PATCHLEVEL * +([0-9]+)"
-             CUDNN_VERSION_PATCH "${CUDNN_HEADER_CONTENTS}")
-string(REGEX REPLACE "define CUDNN_PATCHLEVEL * +([0-9]+)" "\\1"
-             CUDNN_VERSION_PATCH "${CUDNN_VERSION_PATCH}")
-# Assemble cuDNN version
-if(NOT CUDNN_VERSION_MAJOR)
-  set(CUDNN_VERSION "?")
-else()
-  set(CUDNN_VERSION
-      "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
+if (CAFFE2_FOUND_CUDNN)
+  # Get cuDNN version
+  file(READ ${CUDNN_INCLUDE_DIR}/cudnn.h CUDNN_HEADER_CONTENTS)
+  string(REGEX MATCH "define CUDNN_MAJOR * +([0-9]+)"
+               CUDNN_VERSION_MAJOR "${CUDNN_HEADER_CONTENTS}")
+  string(REGEX REPLACE "define CUDNN_MAJOR * +([0-9]+)" "\\1"
+               CUDNN_VERSION_MAJOR "${CUDNN_VERSION_MAJOR}")
+  string(REGEX MATCH "define CUDNN_MINOR * +([0-9]+)"
+               CUDNN_VERSION_MINOR "${CUDNN_HEADER_CONTENTS}")
+  string(REGEX REPLACE "define CUDNN_MINOR * +([0-9]+)" "\\1"
+               CUDNN_VERSION_MINOR "${CUDNN_VERSION_MINOR}")
+  string(REGEX MATCH "define CUDNN_PATCHLEVEL * +([0-9]+)"
+               CUDNN_VERSION_PATCH "${CUDNN_HEADER_CONTENTS}")
+  string(REGEX REPLACE "define CUDNN_PATCHLEVEL * +([0-9]+)" "\\1"
+               CUDNN_VERSION_PATCH "${CUDNN_VERSION_PATCH}")
+  # Assemble cuDNN version
+  if(NOT CUDNN_VERSION_MAJOR)
+    set(CUDNN_VERSION "?")
+  else()
+    set(CUDNN_VERSION
+        "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
+  endif()
+  message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_DIR}, library: ${CUDNN_LIBRARY})")
 endif()
 
-message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_DIR}, library: ${CUDNN_LIBRARY})")
-# ---[ Cuda Libraries wrapper
+# ---[ CUDA libraries wrapper
 
 # find libcuda.so and lbnvrtc.so
 # For libcuda.so, we will find it under lib, lib64, and then the
@@ -126,13 +129,15 @@ set_property(
 
 # cudnn
 # static linking is handled by USE_STATIC_CUDNN environment variable
-add_library(caffe2::cudnn UNKNOWN IMPORTED)
-set_property(
-    TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
-    ${CUDNN_LIBRARY})
-set_property(
-    TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDNN_INCLUDE_DIR})
+if(${USE_CUDNN})
+  add_library(caffe2::cudnn UNKNOWN IMPORTED)
+  set_property(
+      TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
+      ${CUDNN_LIBRARY})
+  set_property(
+      TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+      ${CUDNN_INCLUDE_DIR})
+endif()
 
 # curand
 add_library(caffe2::curand UNKNOWN IMPORTED)
