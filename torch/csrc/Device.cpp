@@ -139,20 +139,20 @@ PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
 
 PyObject *THPDevice_reduce(THPDevice *self)
 {
-  PyObject *ret = PyTuple_New(2);
-  if (!ret) return NULL;
+  auto ret = THPObjectPtr{PyTuple_New(2)};
+  if (!ret) throw python_error();
 
   py::object torch_module = py::module::import("torch");
   py::object torch_device = torch_module.attr("device");
-  PyTuple_SET_ITEM(ret, 0, torch_device.release().ptr());
+  PyTuple_SET_ITEM(ret.get(), 0, torch_device.release().ptr());
 
   if (self->device.is_default) {
-    PyTuple_SET_ITEM(ret, 1, Py_BuildValue("(s)", deviceTypeString(self->device.type)));
+    PyTuple_SET_ITEM(ret.get(), 1, Py_BuildValue("(s)", deviceTypeString(self->device.type)));
   } else {
-    PyTuple_SET_ITEM(ret, 1, Py_BuildValue("(si)", deviceTypeString(self->device.type), self->device.index));
+    PyTuple_SET_ITEM(ret.get(), 1, Py_BuildValue("(si)", deviceTypeString(self->device.type), self->device.index));
   }
 
-  return ret;
+  return ret.release();
 }
 
 typedef PyObject *(*getter)(PyObject *, void *);
