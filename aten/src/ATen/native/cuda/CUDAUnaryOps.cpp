@@ -8,6 +8,14 @@ Tensor _contiguous_cuda(const Tensor& self) {
   return self.type()._th_contiguous(self);
 }
 
+Tensor& _fill__cuda(Tensor& self, Scalar value) {
+  return self._fill_(value);
+}
+
+Tensor& _fill__cuda(Tensor& self, const Tensor& value) {
+  return self._fill_(value);
+}
+
 Tensor& _frac_out_cuda(Tensor& result, const Tensor& self) {
   result.resize_(self.sizes());
   return at::_th_frac_out(result, self);

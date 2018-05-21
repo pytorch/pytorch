@@ -23,21 +23,32 @@
 
 namespace at { namespace native {
 
-Tensor& fill_(Tensor& self, Scalar value) {
-  return self._fill_(value);
+Tensor& _fill__cpu(Tensor& self, Scalar value_) {
+  fillImpl(self, value_);
+  return self;
 }
 
-Tensor& fill_(Tensor& self, const Tensor& value) {
-  return self._fill_(value);
+Tensor& _fill__cpu(Tensor& self, const Tensor& value__) {
+  Tensor value_ = value__;
+  if (value_.dim() == 0)
+    value_ = value_.view(1);
+  Scalar value(value_[0]);
+  fillImpl(self, value);
+  return self;
 }
 
 Tensor& zero_(Tensor& self) {
-  self._th_zero_();
+  if (self.is_sparse()) {
+    self._th_zero_();
+  } else {
+    self.fill_(0);
+  }
   return self;
 }
 
 Tensor sign(const Tensor& self) {
   Tensor result = self.type().tensor();
+  result.resize_(self.sizes());
   return native::sign_out(result, self);
 }
 
@@ -46,54 +57,53 @@ Tensor& sign_(Tensor& self) {
 }
 
 Tensor& sign_out(Tensor& result, const Tensor& self) {
-  result.resize_(self.sizes());
   result.copy_(_sign(self));
   return result;
 }
 
-Tensor clamp(const Tensor& self, Scalar value1, Scalar value2) {
+Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
   Tensor result = self.type().tensor();
-  return native::clamp_out(result, self, value1, value2);
-}
-
-Tensor& clamp_(Tensor& self, Scalar value1, Scalar value2) {
-  return self._clamp_(value1, value2);
-}
-
-Tensor& clamp_out(Tensor& result, const Tensor& self, Scalar value1, Scalar value2) {
   result.resize_(self.sizes());
-  result.copy_(self);
-  return result._clamp_(value1, value2);
+  return native::clamp_out(result, self, min, max);
 }
 
-Tensor clamp_max(const Tensor& self, Scalar value) {
+Tensor& clamp_(Tensor& self, Scalar min, Scalar max) {
+  return native::clamp_out(self, self, min, max);
+}
+
+Tensor& clamp_out(Tensor& result, const Tensor& self, Scalar min, Scalar max) {
+  clampImpl(result, self, min, max);
+  return result;
+}
+
+Tensor clamp_max(const Tensor& self, Scalar max) {
   Tensor result = self.type().tensor();
-  return native::clamp_max_out(result, self, value);
-}
-
-Tensor& clamp_max_(Tensor& self, Scalar value) {
-  return self._clamp_max_(value);
-}
-
-Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar value1) {
   result.resize_(self.sizes());
-  result.copy_(self);
-  return result._clamp_max_(value1);
+  return native::clamp_max_out(result, self, max);
 }
 
-Tensor clamp_min(const Tensor& self, Scalar value) {
+Tensor& clamp_max_(Tensor& self, Scalar max) {
+  return native::clamp_max_out(self, self, max);
+}
+
+Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
+  clampMaxImpl(result, self, max);
+  return result;
+}
+
+Tensor clamp_min(const Tensor& self, Scalar min) {
   Tensor result = self.type().tensor();
-  return native::clamp_min_out(result, self, value);
-}
-
-Tensor& clamp_min_(Tensor& self, Scalar value) {
-  return self._clamp_min_(value);
-}
-
-Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar value1) {
   result.resize_(self.sizes());
-  result.copy_(self);
-  return result._clamp_min_(value1);
+  return native::clamp_min_out(result, self, min);
+}
+
+Tensor& clamp_min_(Tensor& self, Scalar min) {
+  return native::clamp_min_out(self, self, min);
+}
+
+Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
+  clampMinImpl(result, self, min);
+  return result;
 }
 
 Tensor frac(const Tensor& self) {

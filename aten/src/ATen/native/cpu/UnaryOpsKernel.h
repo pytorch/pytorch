@@ -4,9 +4,10 @@
 #include <stdexcept>
 #include "CapabilityDispatch.h"
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-using unary_fn = void(*)(Tensor&, const Tensor&);
+using unary_fn = void (*)(Tensor&, const Tensor&);
 
 extern DispatchStub<unary_fn> absImpl;
 extern DispatchStub<unary_fn> acosImpl;
@@ -34,8 +35,15 @@ extern DispatchStub<unary_fn> sinImpl;
 extern DispatchStub<unary_fn> sinhImpl;
 extern DispatchStub<unary_fn> tanImpl;
 
+extern DispatchStub<void (*)(Tensor&, Scalar&)> fillImpl;
+extern DispatchStub<void (*)(Tensor&, const Tensor&, Scalar&, Scalar&)>
+    clampImpl;
+extern DispatchStub<void (*)(Tensor&, const Tensor&, Scalar&)> clampMinImpl;
+extern DispatchStub<void (*)(Tensor&, const Tensor&, Scalar&)> clampMaxImpl;
+
 // Missing unary functions
 // digamma
 // lgamma
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

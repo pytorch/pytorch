@@ -2,16 +2,17 @@
 
 #include "intrinsics.h"
 
-#include "vec256_base.h"
-#include "vec256_float.h"
-#include "vec256_double.h"
-#include "vec256_int.h"
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <type_traits>
+
+#include "vec256_base.h"
+#include "vec256_double.h"
+#include "vec256_float.h"
+#include "vec256_int.h"
 
 namespace at {
 namespace vec256 {

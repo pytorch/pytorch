@@ -104,11 +104,11 @@ inline void map_(
   int64_t d = 0;
   for (; d < size - (size % Vec::size); d += Vec::size) {
     Vec output_vec = vec_fun(Vec::loadu(data + d));
-    output_vec.store(data + d);
+    output_vec.storeu(data + d);
   }
   if (size - d > 0) {
     Vec output_vec = vec_fun(Vec::loadu(data + d, size - d));
-    output_vec.store(data + d, size - d);
+    output_vec.storeu(data + d, size - d);
   }
 }
 

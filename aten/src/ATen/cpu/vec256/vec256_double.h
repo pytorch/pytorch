@@ -69,17 +69,8 @@ public:
     }
     return loadu(tmp);
   }
-  double operator [](int idx) const {
-    __at_align32__ double tmp_values[size];
-    storeu(tmp_values);
-    return tmp_values[idx];
-  }
-  void set_value(int64_t idx, double value) {
-    __at_align32__ double tmp_values[size];
-    storeu(tmp_values);
-    tmp_values[idx] = value;
-    loadu(tmp_values);
-  }
+  const double& operator[](int idx) const  = delete;
+  void set_value(int64_t idx, double value)  = delete;
   Vec256<double> abs() const {
     auto mask = _mm256_set1_pd(-0.f);
     return _mm256_andnot_pd(mask, values);
@@ -166,6 +157,11 @@ Vec256<double> inline operator/(const Vec256<double>& a, const Vec256<double>& b
 template <>
 Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_max_pd(a, b);
+}
+
+template <>
+Vec256<double> inline min(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_min_pd(a, b);
 }
 
 #endif

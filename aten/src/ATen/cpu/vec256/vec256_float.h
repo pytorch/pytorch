@@ -67,24 +67,15 @@ public:
     }
   }
   Vec256<float> map(float (*f)(float)) const {
-    __at_align32__ float tmp[size];
+    __at_align32__ float tmp[8];
     storeu(tmp);
-    for (int64_t i = 0; i < size; i++) {
+    for (int64_t i = 0; i < 8; i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
   }
-  float operator [](int idx) const {
-    __at_align32__ float tmp_values[size];
-    storeu(tmp_values);
-    return tmp_values[idx];
-  }
-  void set_value(int64_t idx, float value) {
-    __at_align32__ float tmp_values[size];
-    storeu(tmp_values);
-    tmp_values[idx] = value;
-    loadu(tmp_values);
-  }
+  const float& operator[](int idx) const  = delete;
+  void set_value(int64_t idx, float value)  = delete;
   Vec256<float> abs() const {
     auto mask = _mm256_set1_ps(-0.f);
     return _mm256_andnot_ps(mask, values);

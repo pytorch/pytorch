@@ -12,6 +12,10 @@
 #define __at_align32__
 #endif
 
+template<typename T>
+struct assert_false : std::false_type
+{ };
+
 namespace at {
 namespace vec256 {
 namespace {
@@ -67,7 +71,7 @@ struct Vec256 {
   void storeu(void* ptr, int count = size) const {
     std::memcpy(ptr, values, count * sizeof(T));
   }
-  T operator [](int idx) const {
+  const T& operator [](int idx) const {
     return values[idx];
   }
   void set_value(int64_t idx, T value) {
@@ -147,7 +151,7 @@ struct Vec256 {
 };
 
 template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size; i++) {
     c.set_value(i, a[i] + b[i]);
   }
@@ -155,7 +159,7 @@ template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
 }
 
 template <class T> Vec256<T> operator-(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size; i++) {
     c.set_value(i, a[i] - b[i]);
   }
@@ -163,7 +167,7 @@ template <class T> Vec256<T> operator-(const Vec256<T> &a, const Vec256<T> &b) {
 }
 
 template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size; i++) {
     c.set_value(i, a[i] * b[i]);
   }
@@ -171,7 +175,7 @@ template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
 }
 
 template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size; i++) {
     c.set_value(i, a[i] / b[i]);
   }
@@ -179,9 +183,17 @@ template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) {
 }
 
 template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size; i++) {
     c.set_value(i, std::max(a[i], b[i]));
+  }
+  return c;
+}
+
+template <class T> Vec256<T> min(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c;
+  for (int i = 0; i != Vec256<T>::size; i++) {
+    c.values[i] = std::min(a.values[i], b.values[i]);
   }
   return c;
 }

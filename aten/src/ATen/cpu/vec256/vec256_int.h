@@ -75,15 +75,8 @@ struct Vec256<int64_t> : public Vec256i {
     auto inverse = _mm256_xor_si256(values, is_larger);
     return _mm256_sub_epi64(inverse, is_larger);
   }
-  int64_t operator [](int idx) const {
-    return _mm256_extract_epi64(values, idx);
-  }
-  void set_value(int64_t idx, int64_t value) {
-    __at_align32__ int64_t tmp_values[size];
-    storeu(tmp_values);
-    tmp_values[idx] = value;
-    loadu(tmp_values);
-  }
+  const int64_t& operator[](int idx) const  = delete;
+  void set_value(int64_t idx, int32_t value)  = delete;
 };
 
 template <>
@@ -138,15 +131,8 @@ struct Vec256<int32_t> : public Vec256i {
   Vec256<int32_t> abs() const {
     return _mm256_abs_epi32(values);
   }
-  int32_t operator [](int idx) const {
-    return _mm256_extract_epi32(values, idx);
-  }
-  void set_value(int64_t idx, int32_t value) {
-    __at_align32__ int32_t tmp_values[size];
-    storeu(tmp_values);
-    tmp_values[idx] = value;
-    loadu(tmp_values);
-  }
+  const int32_t& operator[](int idx) const  = delete;
+  void set_value(int64_t idx, int32_t value)  = delete;
 };
 
 template <>
@@ -251,15 +237,8 @@ struct Vec256<int16_t> : public Vec256i {
   Vec256<int16_t> abs() const {
     return _mm256_abs_epi16(values);
   }
-  int16_t operator [](int idx) const {
-    return _mm256_extract_epi16(values, idx);
-  }
-  void set_value(int64_t idx, int16_t value) {
-    __at_align32__ int16_t tmp_values[size];
-    storeu(tmp_values);
-    tmp_values[idx] = value;
-    loadu(tmp_values);
-  }
+  int16_t operator[](int idx) const  = delete;
+  void set_value(int64_t idx, int16_t value) = delete;
 };
 
 template <>
@@ -310,6 +289,27 @@ template <>
 Vec256<int16_t> inline operator*(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
   return _mm256_mullo_epi16(a, b);
 }
+
+template <>
+Vec256<int32_t> inline max(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+  return _mm256_max_epi32(a, b);
+}
+
+template <>
+Vec256<int16_t> inline max(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+  return _mm256_max_epi16(a, b);
+}
+
+template <>
+Vec256<int32_t> inline min(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+  return _mm256_min_epi32(a, b);
+}
+
+template <>
+Vec256<int16_t> inline min(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+  return _mm256_min_epi16(a, b);
+}
+
 #endif
 
 }}}

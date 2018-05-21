@@ -545,8 +545,14 @@
     CUDA: eye_out_cuda
 
 - func: fill_(Tensor self, Scalar value) -> Tensor
+  dispatch:
+    CPU: _fill__cpu
+    CUDA: _fill__cuda
 
 - func: fill_(Tensor self, Tensor value) -> Tensor
+  dispatch:
+    CPU: _fill__cpu
+    CUDA: _fill__cuda
 
 - func: floor(Tensor self) -> Tensor
 

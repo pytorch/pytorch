@@ -276,6 +276,33 @@ apply_kernel(int64_t numel, int64_t offset, const Op& op, Args... iters) {
   }
 }
 
+template <typename scalar1, typename Op>
+inline void
+CPU_tensor_parallel_kernel_apply1(Tensor tensor1, const Op op) {
+  if (!_apply_preamble({tensor1}))
+    return;
+  auto range = tbb::blocked_range<size_t>(0, tensor1.numel());
+  if (tensor1.ndimension() < 8) {
+    tbb::parallel_for(
+        range, [&tensor1, &op](const tbb::blocked_range<size_t> r) {
+          apply_kernel(
+              r.end() - r.begin(),
+              r.begin(),
+              op,
+              strided_tensor_iter_fixed<scalar1, 8>(tensor1));
+        });
+  } else {
+    tbb::parallel_for(
+        range, [&tensor1, &op](const tbb::blocked_range<size_t> r) {
+          apply_kernel(
+              r.end() - r.begin(),
+              r.begin(),
+              op,
+              strided_tensor_iter<scalar1>(tensor1));
+        });
+  }
+}
+
 template <typename scalar1, typename scalar2, typename Op>
 inline void
 CPU_tensor_parallel_kernel_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
