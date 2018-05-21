@@ -295,16 +295,17 @@ struct GradientNotImplementedYet : public GradientMakerBase {
   }
 };
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
+    CAFFE2_API,
     GradientRegistry,
     GradientMakerBase,
     const OperatorDef&,
     const vector<GradientWrapper>&);
 
 #define REGISTER_GRADIENT(name, ...) \
-  CAFFE_REGISTER_CLASS(GradientRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(GradientRegistry, name, __VA_ARGS__)
 #define REGISTER_GRADIENT_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(GradientRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(GradientRegistry, str_name, __VA_ARGS__)
 
 // NO_GRADIENT means that the operator does not need any gradient computation.
 #define NO_GRADIENT(name) REGISTER_GRADIENT(name, NoGradient)

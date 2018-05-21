@@ -6,5 +6,5 @@ SRC_ROOT=$2
 mkdir test_build
 cd test_build
 cmake -DCMAKE_PREFIX_PATH=$INSTALL_ROOT $SRC_ROOT/src/ATen/test/test_install
-make
+make VERBOSE=1
 ./main

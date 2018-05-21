@@ -9,7 +9,7 @@ CAFFE2_DEFINE_bool(
 
 namespace caffe2 {
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     MKLOperatorRegistry,
     OperatorBase,
     const OperatorDef&,

@@ -7,7 +7,7 @@ namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(ideep::tensor);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     IDEEPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,

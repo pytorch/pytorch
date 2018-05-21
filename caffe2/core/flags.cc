@@ -34,7 +34,7 @@ bool CommandLineFlagsHasBeenParsed() {
 #else  // CAFFE2_USE_GFLAGS
 
 
-CAFFE_DEFINE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
+C10_DEFINE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 
 namespace {
 static bool gCommandLineFlagsParsed = false;

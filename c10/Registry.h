@@ -18,10 +18,10 @@
 #include <string>
 #include <vector>
 
-#include <ATen/Error.h>
-#include <ATen/ATenGeneral.h>
+#include <c10/Error.h>
+#include <c10/API.h>
 
-namespace at {
+namespace c10 {
 
 template <typename KeyType>
 inline void PrintOffendingKey(const KeyType& /*key*/) {
@@ -44,7 +44,7 @@ inline void PrintOffendingKey(const std::string& key) {
  * objects.
  */
 template <class SrcType, class ObjectPtrType, class... Args>
-class AT_API Registry {
+class Registry {
  public:
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
@@ -114,7 +114,7 @@ class AT_API Registry {
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>
-class AT_API Registerer {
+class Registerer {
  public:
   Registerer(
       const SrcType& key,
@@ -135,82 +135,117 @@ class AT_API Registerer {
 };
 
 /**
- * AT_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
+ * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
  * str and ending with a number that varies with the line.
  * Pretty much a copy from 'folly/Preprocessor.h'
  */
-#define AT_CONCATENATE_IMPL(s1, s2) s1##s2
-#define AT_CONCATENATE(s1, s2) AT_CONCATENATE_IMPL(s1, s2)
+#define C10_CONCATENATE_IMPL(s1, s2) s1##s2
+#define C10_CONCATENATE(s1, s2) C10_CONCATENATE_IMPL(s1, s2)
 #ifdef __COUNTER__
-#define AT_ANONYMOUS_VARIABLE(str) AT_CONCATENATE(str, __COUNTER__)
+#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
 #else
-#define AT_ANONYMOUS_VARIABLE(str) AT_CONCATENATE(str, __LINE__)
+#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
 #endif
 
 /**
- * AT_DECLARE_TYPED_REGISTRY is a macro that expands to a function
+ * C10_DECLARE_TYPED_REGISTRY is a macro that expands to a function
  * declaration, as well as creating a convenient typename for its corresponding
  * registerer.
  */
-#define AT_DECLARE_TYPED_REGISTRY(                                    \
-    RegistryName, SrcType, ObjectType, PtrType, ...)                     \
-  AT_API Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* RegistryName(); \
-  typedef Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>        \
-      Registerer##RegistryName; \
-  extern template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>;
+#define C10_DECLARE_TYPED_REGISTRY_NOARG(                                    \
+    API, RegistryName, SrcType, ObjectType, PtrType)                     \
+  API ::c10::Registry<SrcType, PtrType<ObjectType>>* RegistryName(); \
+  typedef ::c10::Registerer<SrcType, PtrType<ObjectType>>        \
+      Registerer##RegistryName;
 
-#define AT_DEFINE_TYPED_REGISTRY(                                         \
-    RegistryName, SrcType, ObjectType, PtrType, ...)                         \
-  Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* RegistryName() {    \
-    static Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* registry = \
-        new Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>();         \
+#define C10_DECLARE_TYPED_REGISTRY(                                    \
+    API, RegistryName, SrcType, ObjectType, PtrType, ...)                     \
+  API ::c10::Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* RegistryName(); \
+  typedef ::c10::Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>        \
+      Registerer##RegistryName;
+
+#define C10_DEFINE_TYPED_REGISTRY_NOARG(                                         \
+    RegistryName, SrcType, ObjectType, PtrType)                         \
+  ::c10::Registry<SrcType, PtrType<ObjectType>>* RegistryName() {    \
+    static ::c10::Registry<SrcType, PtrType<ObjectType>>* registry = \
+        new ::c10::Registry<SrcType, PtrType<ObjectType>>();         \
     return registry;                                                         \
-  } \
-  template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>;
+  }
 
-// Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
-// creator with comma in its templated arguments.
-#define AT_REGISTER_TYPED_CREATOR(RegistryName, key, ...)                  \
+#define C10_DEFINE_TYPED_REGISTRY(                                         \
+    RegistryName, SrcType, ObjectType, PtrType, ...)                         \
+  ::c10::Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* RegistryName() {    \
+    static ::c10::Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* registry = \
+        new ::c10::Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>();         \
+    return registry;                                                         \
+  }
+
+#define C10_REGISTER_TYPED_CREATOR_NOARG(RegistryName, key)                  \
   namespace {                                                                 \
-  Registerer##RegistryName AT_ANONYMOUS_VARIABLE(g_##RegistryName)( \
+  Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
+      key, RegistryName());                                      \
+  }
+
+#define C10_REGISTER_TYPED_CREATOR(RegistryName, key, ...)                  \
+  namespace {                                                                 \
+  Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
       key, RegistryName(), __VA_ARGS__);                                      \
   }
 
-#define AT_REGISTER_TYPED_CLASS(RegistryName, key, ...)                    \
+// Yay, can get away without duplicating the body
+#define C10_REGISTER_TYPED_CLASS_NOARG(RegistryName, key) C10_REGISTER_TYPED_CLASS(RegistryName, key)
+
+#define C10_REGISTER_TYPED_CLASS(RegistryName, key, ...)                    \
   namespace {                                                                 \
-  Registerer##RegistryName AT_ANONYMOUS_VARIABLE(g_##RegistryName)( \
+  Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
       key,                                                                    \
       RegistryName(),                                                         \
       Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
-      ::at::demangle_type<__VA_ARGS__>());                                           \
+      ::c10::demangle_type<__VA_ARGS__>());                                           \
   }
 
-// AT_DECLARE_REGISTRY and AT_DEFINE_REGISTRY are hard-wired to use std::string
+// C10_DECLARE_REGISTRY and C10_DEFINE_REGISTRY are hard-wired to use std::string
 // as the key
 // type, because that is the most commonly used cases.
-#define AT_DECLARE_REGISTRY(RegistryName, ObjectType, ...) \
-  AT_DECLARE_TYPED_REGISTRY(                               \
+#define C10_DECLARE_REGISTRY_NOARG(API, RegistryName, ObjectType) \
+  C10_DECLARE_TYPED_REGISTRY_NOARG(                               \
+      API, RegistryName, std::string, ObjectType, std::unique_ptr)
+#define C10_DECLARE_REGISTRY(API, RegistryName, ObjectType, ...) \
+  C10_DECLARE_TYPED_REGISTRY(                               \
+      API, RegistryName, std::string, ObjectType, std::unique_ptr, __VA_ARGS__)
+
+#define C10_DEFINE_REGISTRY_NOARG(RegistryName, ObjectType) \
+  C10_DEFINE_TYPED_REGISTRY_NOARG(                               \
+      RegistryName, std::string, ObjectType, std::unique_ptr)
+#define C10_DEFINE_REGISTRY(RegistryName, ObjectType, ...) \
+  C10_DEFINE_TYPED_REGISTRY(                               \
       RegistryName, std::string, ObjectType, std::unique_ptr, __VA_ARGS__)
 
-#define AT_DEFINE_REGISTRY(RegistryName, ObjectType, ...) \
-  AT_DEFINE_TYPED_REGISTRY(                               \
-      RegistryName, std::string, ObjectType, std::unique_ptr, __VA_ARGS__)
+#define C10_DECLARE_SHARED_REGISTRY_NOARG(API, RegistryName, ObjectType) \
+  C10_DECLARE_TYPED_REGISTRY_NOARG(                                      \
+      API, RegistryName, std::string, ObjectType, std::shared_ptr)
+#define C10_DECLARE_SHARED_REGISTRY(API, RegistryName, ObjectType, ...) \
+  C10_DECLARE_TYPED_REGISTRY(                                      \
+      API, RegistryName, std::string, ObjectType, std::shared_ptr, __VA_ARGS__)
 
-#define AT_DECLARE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
-  AT_DECLARE_TYPED_REGISTRY(                                      \
+#define C10_DEFINE_SHARED_REGISTRY_NOARG(RegistryName, ObjectType) \
+  C10_DEFINE_TYPED_REGISTRY(                                      \
+      RegistryName, std::string, ObjectType, std::shared_ptr)
+#define C10_DEFINE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
+  C10_DEFINE_TYPED_REGISTRY(                                      \
       RegistryName, std::string, ObjectType, std::shared_ptr, __VA_ARGS__)
 
-#define AT_DEFINE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
-  AT_DEFINE_TYPED_REGISTRY(                                      \
-      RegistryName, std::string, ObjectType, std::shared_ptr, __VA_ARGS__)
-
-// AT_REGISTER_CREATOR and AT_REGISTER_CLASS are hard-wired to use std::string
+// C10_REGISTER_CREATOR and C10_REGISTER_CLASS are hard-wired to use std::string
 // as the key
 // type, because that is the most commonly used cases.
-#define AT_REGISTER_CREATOR(RegistryName, key, ...) \
-  AT_REGISTER_TYPED_CREATOR(RegistryName, #key, __VA_ARGS__)
+#define C10_REGISTER_CREATOR_NOARG(RegistryName, key) \
+  C10_REGISTER_TYPED_CREATOR_NOARG(RegistryName, #key)
+#define C10_REGISTER_CREATOR(RegistryName, key, ...) \
+  C10_REGISTER_TYPED_CREATOR(RegistryName, #key, __VA_ARGS__)
 
-#define AT_REGISTER_CLASS(RegistryName, key, ...) \
-  AT_REGISTER_TYPED_CLASS(RegistryName, #key, __VA_ARGS__)
+#define C10_REGISTER_CLASS_NOARG(RegistryName, key) \
+  C10_REGISTER_TYPED_CLASS_NOARG(RegistryName, #key)
+#define C10_REGISTER_CLASS(RegistryName, key, ...) \
+  C10_REGISTER_TYPED_CLASS(RegistryName, #key, __VA_ARGS__)
 
 }  // namespace at
