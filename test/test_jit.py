@@ -2714,6 +2714,30 @@ class TestScript(TestCase):
 
         self.checkScript(t2, (torch.zeros(1, 1, 2)))
 
+    def test_addmm_grad(self):
+        class LinearTest(torch.jit.ScriptModule):
+            def __init__(self, param_init):
+                super(LinearTest, self).__init__()
+                self.param = torch.nn.Parameter(param_init)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.addmm(x, x, self.param)
+
+        param_init = torch.rand(2, 2)
+        lt = LinearTest(param_init)
+        x = torch.rand(2, 2)
+        y = lt(x)
+        y.sum().backward()
+        grad_test = lt.param.grad
+
+        param_test = torch.autograd.Variable(param_init, requires_grad=True)
+        y_ref = torch.addmm(x, x, param_test)
+        y_ref.sum().backward()
+        grad_ref = param_test.grad
+
+        self.assertEqual(grad_test, grad_ref)
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):

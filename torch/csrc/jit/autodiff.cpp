@@ -17,14 +17,45 @@ bool isDifferentiable(Node * n) {
   static std::unordered_set<Symbol> differentiable_kinds = {
     aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
-    aten::unsqueeze, aten::expand,
+    aten::unsqueeze, aten::expand, aten::addmm
   };
+  // alpha and beta parameters must be attributes
+  if (n->kind() == aten::addmm && n->inputs().size() > 3) {
+    return false;
+  }
   return differentiable_kinds.count(n->kind()) > 0;
 }
 
 bool isDifferentiable(Graph & g) {
   return std::all_of(g.nodes().begin(), g.nodes().end(),
                      static_cast<bool(*)(Node*)>(isDifferentiable));
+}
+
+
+static std::vector<SymbolicVariable> mm_grads(std::vector<SymbolicVariable> inputs,
+                                             std::vector<SymbolicVariable> grads) {
+  SymbolicVariable dmat1, dmat2;
+  if (auto type = inputs.at(0).value()->type()->cast<TensorType>()) {
+    auto sizes = type->sizes(), strides = type->strides();
+    if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
+      dmat1 = inputs.at(1).mm(grads.at(0).t()).t();
+    } else {
+      dmat1 = grads.at(0).mm(inputs.at(1).t());
+    }
+  } else {
+    dmat1 = grads.at(0).mm(inputs.at(1).t());
+  }
+  if (auto type = inputs.at(1).value()->type()->cast<TensorType>()) {
+    auto sizes = type->sizes(), strides = type->strides();
+    if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
+      dmat2 = grads.at(0).t().mm(inputs.at(0)).t();
+    } else {
+      dmat2 = inputs.at(0).t().mm(grads.at(0));
+    }
+  } else {
+    dmat2 = grads.at(0).mm(inputs.at(1).t());
+  }
+  return {dmat1, dmat2};
 }
 
 
@@ -71,28 +102,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       case aten::unsqueeze:
         return {grads.at(0).squeeze(node->i(attr::dim))};
       case aten::mm: {
-        SymbolicVariable dmat1, dmat2;
-        if (auto type = inputs.at(0).value()->type()->cast<TensorType>()) {
-          auto sizes = type->sizes(), strides = type->strides();
-          if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
-            dmat1 = inputs.at(1).mm(grads.at(0).t()).t();
-          } else {
-            dmat1 = grads.at(0).mm(inputs.at(1).t());
-          }
-        } else {
-          dmat1 = grads.at(0).mm(inputs.at(1).t());
-        }
-        if (auto type = inputs.at(1).value()->type()->cast<TensorType>()) {
-          auto sizes = type->sizes(), strides = type->strides();
-          if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
-            dmat2 = grads.at(0).t().mm(inputs.at(0)).t();
-          } else {
-            dmat2 = inputs.at(0).t().mm(grads.at(0));
-          }
-        } else {
-          dmat2 = grads.at(0).mm(inputs.at(1).t());
-        }
-        return {dmat1, dmat2};
+        return mm_grads(inputs, grads);
       }
       case aten::expand: {
         const auto& input_sizes = inputs.at(0).sizes();
@@ -148,6 +158,32 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
           }
           return returned_grads;
         }
+      }
+      case aten::addmm: {
+        JIT_ASSERT(inputs.size() == 3);
+        JIT_ASSERT(outputs.size() == 1);
+        JIT_ASSERT(grads.size() == 1);
+
+        // First take the grads from the matmul
+        auto returned_grads = mm_grads({inputs[1], inputs[2]}, grads);
+
+        // Scale grads if applicable
+        auto alpha = at::Scalar(node->t(attr::alpha));
+        if (alpha.to<double>() != 1.0) {
+          for (size_t i=0; i < returned_grads.size(); ++i) {
+            returned_grads[i] = returned_grads[i] * alpha;
+          }
+        }
+
+        // Grad from the addition
+        auto beta = at::Scalar(node->t(attr::beta));
+        auto it = returned_grads.begin();
+        if (beta.to<double>() != 1.0)
+          returned_grads.insert(it, grads[0] * beta);
+        else
+          returned_grads.insert(it, grads[0]);
+
+        return returned_grads;
       }
     }
     throw std::runtime_error(std::string("don't support differentiation of `") +
