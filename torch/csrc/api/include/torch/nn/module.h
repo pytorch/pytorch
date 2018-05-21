@@ -3,7 +3,6 @@
 #include "torch/detail.h"
 
 #include <torch/detail/member_ref.h>
-#include <torch/parameter_list.h>
 
 #include <torch/csrc/autograd/variable.h>
 
@@ -14,7 +13,8 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 class Module {
  public:
@@ -124,17 +124,15 @@ class Module {
         autograd::make_variable(tensor, /*requires_grad=*/true);
   }
 
-  template <typename Derived>
-  void register_parameters(ParameterList Derived::*parameter_list) {
-    auto* derived = static_cast<const Derived*>(this);
-    const auto size = (derived->*parameter_list).size();
-    for (size_t index = 0; index < size; ++index) {
-      const auto& name = (derived->*parameter_list).name(index);
-      check_name("Parameter", name);
-      const auto pair = parameters_.insert({name, {parameter_list, index}});
-      AT_CHECK(
-          pair.second, "Parameter " + name + " has already been registered");
-    }
+  template <typename Getter, typename ConstGetter>
+  void register_parameter(
+      const std::string& name,
+      Getter getter,
+      ConstGetter const_getter) {
+    check_name("Parameter", name);
+    const auto pair = parameters_.insert(
+        {name, {std::move(getter), std::move(const_getter)}});
+    AT_CHECK(pair.second, "Parameter " + name + " has already been registered");
   }
 
   void check_name(const std::string& type, const std::string& name) {
@@ -196,7 +194,8 @@ class CloneableModule : public Module {
     return ptr;
   }
 };
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch
 
 #define TORCH_ATTR(T, name)                         \
   auto name(const T& new_##name)->decltype(*this) { \

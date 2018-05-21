@@ -148,7 +148,7 @@ thread_local size_t deleteFunctionRecursionDepth = 0;
 #ifdef _WIN32
 constexpr size_t kDeleteFunctionMaxRecursionDepth = 3000;
 #else
-constexpr size_t kDeleteFunctionMaxRecursionDepth = 5000;
+constexpr size_t kDeleteFunctionMaxRecursionDepth = 10000;
 #endif
 
 struct RecursionDepthCounter {

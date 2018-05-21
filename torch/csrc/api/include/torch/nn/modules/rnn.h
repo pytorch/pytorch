@@ -12,11 +12,14 @@
 #include <memory>
 #include <vector>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 class Dropout;
-}} // namespace torch::nn
+}
+} // namespace torch
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 template <typename Derived>
 class RNNBase : public CloneableModule<Derived> {
  public:
@@ -46,7 +49,6 @@ class RNNBase : public CloneableModule<Derived> {
   TORCH_ATTR(double, dropout) = 0.0;
 
  protected:
-
   virtual variable_list cell_forward(variable_list, int64_t layer) = 0;
 
   variable_list CUDNN_forward(variable_list);
@@ -55,10 +57,18 @@ class RNNBase : public CloneableModule<Derived> {
   void flatten_parameters_for_cudnn();
   std::vector<Tensor> flat_weights() const;
 
-  ParameterList ihw_;
-  ParameterList ihb_;
-  ParameterList hhw_;
-  ParameterList hhb_;
+  using CloneableModule<Derived>::register_parameter;
+
+  void register_parameter(
+      const std::string& name,
+      int64_t layer,
+      std::vector<Variable> RNNBase::*variables,
+      Tensor tensor);
+
+  std::vector<Variable> ihw_;
+  std::vector<Variable> ihb_;
+  std::vector<Variable> hhw_;
+  std::vector<Variable> hhb_;
 
   int64_t number_of_gates_;
   bool has_cell_state_;
@@ -111,4 +121,5 @@ class RNN : public RNNBase<RNN> {
 
   ActivationFunction activation_function_;
 };
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

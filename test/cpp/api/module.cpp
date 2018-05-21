@@ -2,8 +2,6 @@
 
 #include <torch/torch.h>
 
-#include <torch/parameter_list.h>
-
 using namespace torch;
 using namespace torch::nn;
 using Catch::StartsWith;
@@ -212,13 +210,6 @@ TEST_CASE("module/parameters") {
           "b", &TestModule::b, at::ones(at::CPU(at::kFloat), {2, 2}));
       register_parameter(
           "c", &TestModule::c, at::ones(at::CPU(at::kFloat), {2, 2}) * 2);
-
-      p = {
-          {"d", Var(at::ones(at::CPU(at::kFloat), {2, 2}) * 3)},
-          {"e", Var(at::ones(at::CPU(at::kFloat), {2, 2}) * 4)},
-      };
-
-      register_parameters(&TestModule::p);
     }
 
     variable_list forward(variable_list) override {
@@ -226,7 +217,6 @@ TEST_CASE("module/parameters") {
     }
 
     Variable a, b, c;
-    ParameterList p;
   };
 
   TestModule module;
@@ -242,14 +232,5 @@ TEST_CASE("module/parameters") {
     REQUIRE(parameters.count("c"));
     REQUIRE(parameters.count("d"));
     REQUIRE(parameters.count("e"));
-  }
-
-  SECTION("contains the parameters passed in") {
-    auto parameters = module.parameters();
-    REQUIRE(pointer_equal(parameters.at("a"), module.a));
-    REQUIRE(pointer_equal(parameters.at("b"), module.b));
-    REQUIRE(pointer_equal(parameters.at("c"), module.c));
-    REQUIRE(pointer_equal(parameters.at("d"), module.p[0]));
-    REQUIRE(pointer_equal(parameters.at("e"), module.p[1]));
   }
 }
