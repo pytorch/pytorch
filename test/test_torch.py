@@ -2393,27 +2393,6 @@ class TestTorch(TestCase):
         self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
         self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
 
-    @staticmethod
-    def _test_multinomial_invalid_probs_cuda(probs):
-        try:
-            with torch.random.fork_rng(devices=[0]):
-                torch.multinomial(probs.to('cuda'), 1)
-                torch.cuda.synchronize()
-            return False  # Should not be reached
-        except RuntimeError as e:
-            return 'device-side assert triggered' in str(e)
-
-    @unittest.skipIf(sys.version_info[0] == 2,
-                     "spawn start method is not supported in Python 2, \
-                     but we need it for creating another process with CUDA")
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_multinomial_invalid_probs_cuda(self):
-        test_method = TestTorch._test_multinomial_invalid_probs_cuda
-        self._spawn_method(test_method, torch.Tensor([0, -1]))
-        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
-
     @suppress_warnings
     def test_range(self):
         res1 = torch.range(0, 1)
