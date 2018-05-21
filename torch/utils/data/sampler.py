@@ -101,7 +101,7 @@ class WeightedRandomSampler(Sampler):
         return self.num_samples
 
 
-class BatchSampler(object):
+class BatchSampler(Sampler):
     r"""Wraps another sampler to yield a mini-batch of indices.
 
     Args:

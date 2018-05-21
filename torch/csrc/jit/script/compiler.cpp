@@ -827,6 +827,7 @@ private:
   // loop-carried variables whose definitions are updated as the loop executes
   // in a way that ensure single static assignment.
 
+
   void emitLoopCommon(
       SourceRange range,
       at::optional<Expr> max_trip_count,
@@ -1073,6 +1074,10 @@ private:
         return aten::neg;
       case '*':
         return aten::mul;
+      case TK_POW:
+        return aten::pow;
+      case '@':
+        return aten::matmul;
       case TK_STARRED:
         return prim::Starred;
       case '/':
@@ -1214,6 +1219,8 @@ private:
       case TK_GE:
       case '*':
       case '/':
+      case '@':
+      case TK_POW:
       case TK_AND:
       case TK_OR:
       case TK_NOT:

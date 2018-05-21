@@ -1763,6 +1763,12 @@ class TestTorch(TestCase):
         if torch.cuda.is_available():
             self._test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
+    def test_copy_dtypes(self):
+        all_dtypes = torch.testing.get_all_dtypes()
+        for dtype in all_dtypes:
+            copied_dtype = copy.deepcopy(dtype)
+            self.assertIs(dtype, copied_dtype)
+
     def test_device(self):
         cpu = torch.device('cpu')
         self.assertEqual('cpu', str(cpu))

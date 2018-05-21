@@ -83,9 +83,10 @@ namespace script {
   _(TK_FOR, "for", "for")                        \
   _(TK_IN, "in", "in")                           \
   _(TK_STARRED, "starred", "")                   \
-  _(TK_UNARY_MINUS, "unary minus", "")
+  _(TK_UNARY_MINUS, "unary minus", "")           \
+  _(TK_POW, "pow operator", "**")
 
-static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
+static const char* valid_single_char_tokens = "+-*/@()[]:,={}><.";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -132,7 +133,8 @@ struct SharedParserData {
         {}, // reserve a level for unary not
         {'<', '>', TK_EQ, TK_LE, TK_GE, TK_NE},
         {'+', '-'},
-        {'*', '/'},
+        {'*', '/', '@'},
+        {TK_POW},
     };
     std::vector<std::vector<int>> unary_ops = {
         {'-', '*'},
@@ -292,6 +294,7 @@ struct SharedParserData {
   bool isRightAssociative(int kind) {
     switch (kind) {
       case '?':
+      case TK_POW:
         return true;
       default:
         return false;

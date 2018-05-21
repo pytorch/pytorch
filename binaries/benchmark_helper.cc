@@ -69,12 +69,16 @@ void setDeviceType(caffe2::NetDef* net_def, caffe2::DeviceType& run_dev) {
 
 void setOperatorEngine(caffe2::NetDef* net_def, const string& backend) {
   if (backend != "builtin") {
-    string engine = backend == "nnpack" ? "NNPACK"
-                                        : backend == "eigen" ? "EIGEN"
-                                                             : backend == "mkl"
-                ? "MKLDNN"
-                : backend == "cuda" ? "CUDA"
-                                    : backend == "default" ? "" : "NONE";
+    string engine = backend == "nnpack"
+        ? "NNPACK"
+        : backend == "eigen" ? "EIGEN"
+                             : backend == "mkl" ? "MKLDNN"
+                                                : backend == "cuda"
+                    ? "CUDA"
+                    : backend == "dnnlowp" ? "DNNLOWP"
+                                           : backend == "dnnlowp_16"
+                            ? "DNNLOWP_16"
+                            : backend == "default" ? "" : "NONE";
     CAFFE_ENFORCE(engine != "NONE", "Backend is not supported");
     for (int i = 0; i < net_def->op_size(); i++) {
       caffe2::OperatorDef* op_def = net_def->mutable_op(i);

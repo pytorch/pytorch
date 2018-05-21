@@ -79,6 +79,10 @@ OpSchema::Cost CostInferenceForConcat(
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
   }
+  uint64_t nElemRead = 1;
+  for (int i = 0; i < in.size(); ++i) {
+    nElemRead += nElemFromDim(in[i]);
+  }
   int size = 1;
   for (auto& s : out_shape) {
     size *= s;
@@ -86,7 +90,8 @@ OpSchema::Cost CostInferenceForConcat(
 
   struct OpSchema::Cost cost;
   cost.flops = 0;
-  cost.bytes_moved = size * sizeof(float);
+  cost.bytes_read = nElemRead * sizeof(in[0].data_type());
+  cost.bytes_written = size * sizeof(in[0].data_type());
   cost.params_bytes = 0;
   return cost;
 }

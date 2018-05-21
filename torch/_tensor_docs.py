@@ -887,17 +887,6 @@ histc(bins=100, min=0, max=0) -> Tensor
 See :func:`torch.histc`
 """)
 
-add_docstr_all('index',
-               r"""
-index(m) -> Tensor
-
-Selects elements from :attr:`self` tensor using a binary mask or along a given
-dimension. The expression ``tensor.index(m)`` is equivalent to ``tensor[m]``.
-
-Args:
-    m (int or ByteTensor or slice): the dimension or mask used to select elements
-""")
-
 add_docstr_all('index_add_',
                r"""
 index_add_(dim, index, tensor) -> Tensor

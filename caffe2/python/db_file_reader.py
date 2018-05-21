@@ -47,7 +47,7 @@ class DBFileReader(Reader):
                 registered_dbs=C.registered_dbs(),
         )
 
-        self.db_path = db_path
+        self.db_path = os.path.expanduser(db_path)
         self.db_type = db_type
         self.name = name or '{db_name}_{default_name_suffix}'.format(
             db_name=self._extract_db_name_from_db_path(),
