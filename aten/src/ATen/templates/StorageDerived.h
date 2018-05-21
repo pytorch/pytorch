@@ -14,7 +14,7 @@ struct Allocator;
 struct ${Storage} final : public Storage {
 public:
   explicit ${Storage}(Context* context);
-  ${Storage}(Context* context, ${THStorage} *wrapped);
+  ${Storage}(Context* context, StorageImpl *wrapped);
   ${Storage}(Context* context, std::size_t size);
   ${Storage}(Context* context, std::size_t size, std::unique_ptr<Allocator> allocator);
   ${Storage}(Context* context,
@@ -48,7 +48,7 @@ public:
 
 protected:
   friend struct ${Type};
-  ${THStorage} *storage;
+  StorageImpl *storage;
   Context* context;
 };
 

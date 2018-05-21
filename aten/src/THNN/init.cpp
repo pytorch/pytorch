@@ -16,7 +16,7 @@
     }
 
 #define THNN_CHECK_SHAPE_INDICES(I1, I2)             \
-  THLongStorage *size2 = THLongTensor_newSizeOf(I2); \
+  at::LongStorageImpl *size2 = THLongTensor_newSizeOf(I2); \
   if (I1 != NULL && I2 != NULL && !THTensor_(isSize)(I1, size2)) \
     {             \
       THDescBuff s1 = THTensor_(sizeDesc)(I1);       \

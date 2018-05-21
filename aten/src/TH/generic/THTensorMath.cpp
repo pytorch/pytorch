@@ -309,7 +309,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
 {
   ptrdiff_t i, numel;
-  THLongStorage *newSize;
+  at::LongStorageImpl *newSize;
   THTensor *tSlice, *sSlice;
   int64_t *index_data;
   real *tensor_data, *src_data;
@@ -325,7 +325,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
 #ifdef DEBUG
   THAssert(numel <= LONG_MAX);
 #endif
-  newSize->data[dim] = numel;
+  newSize->data<int64_t>()[dim] = numel;
   THTensor_(resize)(tensor,newSize,NULL);
   THLongStorage_free(newSize);
 
@@ -2342,7 +2342,7 @@ void THTensor_(preserveReduceDimSemantics)(
 
 void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
@@ -2426,7 +2426,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 
 void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
@@ -2510,7 +2510,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 
 void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
@@ -2590,7 +2590,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
 void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
@@ -2812,7 +2812,7 @@ void THTensor_(cminValue)(THTensor *r, THTensor *t, real value) {
                    *r_data = *t_data < value ? *t_data : value;);
 }
 
-void THTensor_(zeros)(THTensor *r_, THLongStorage *size)
+void THTensor_(zeros)(THTensor *r_, at::LongStorageImpl *size)
 {
   THTensor_(resize)(r_, size, NULL);
   THTensor_(zero)(r_);
@@ -2830,7 +2830,7 @@ void THTensor_(onesLike)(THTensor *r_, THTensor *input)
   THTensor_(fill)(r_, 1);
 }
 
-void THTensor_(ones)(THTensor *r_, THLongStorage *size)
+void THTensor_(ones)(THTensor *r_, at::LongStorageImpl *size)
 {
   THTensor_(resize)(r_, size, NULL);
   THTensor_(fill)(r_, 1);
@@ -2965,7 +2965,7 @@ void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
   }
 }
 
-void THTensor_(reshape)(THTensor *r_, THTensor *t, THLongStorage *size)
+void THTensor_(reshape)(THTensor *r_, THTensor *t, at::LongStorageImpl *size)
 {
   THTensor_(resize)(r_, size, NULL);
   THTensor_(copy)(r_, t);
@@ -3191,7 +3191,7 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
   THTensor_(copy)(rt_, t);
 
   {
-    THLongStorage *size = THTensor_(newSizeOf)(t);
+    at::LongStorageImpl *size = THTensor_(newSizeOf)(t);
     THLongTensor_resize(ri_, size, NULL);
     THLongStorage_free(size);
   }
@@ -3315,7 +3315,7 @@ static void THTensor_(quickselect)(real *arr, int64_t *idx, int64_t k, int64_t e
 
 void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
   THTensor *temp_;
   THLongTensor *tempi_;
   real *temp__data;
@@ -3383,7 +3383,7 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
 
 void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, int64_t k, int dimension, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
   THTensor *temp_;
   THLongTensor *tempi_;
   real *temp__data;
@@ -3459,7 +3459,7 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
   THLongTensor_resize1d(tmpIndices, sliceSize);
   int64_t *tmpi__data = THLongTensor_data(tmpIndices);
 
-  THLongStorage *topKSize = THTensor_(newSizeOf)(t);
+  at::LongStorageImpl *topKSize = THTensor_(newSizeOf)(t);
   THLongStorage_set(topKSize, dim, k);
   THTensor_(resize)(rt_, topKSize, NULL);
   THLongTensor_resize(ri_, topKSize, NULL);
@@ -3644,13 +3644,13 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   }
 
   // Compute the size of the result
-  THLongStorage *size = THLongStorage_newWithSize(nDims);
+  at::LongStorageImpl *size = THLongStorage_newWithSize(nDims);
   for (int dim = 0; dim < nDims; dim++) {
     int64_t result_dim_size = notEmptyTensor->size[dim];
     if (dim == cat_dimension) {
       result_dim_size = cat_dim_size;
     }
-    size->data[dim] = result_dim_size;
+    size->data<int64_t>()[dim] = result_dim_size;
   }
   THTensor_(resize)(result, size, NULL);
 
@@ -3667,12 +3667,12 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   // Second path for non-contiguous
   int64_t offset;
   if (cat_dimension == 0 && allContiguous) {
-    real* result_data = result->storage->data + result->storageOffset;
+    real* result_data = result->storage->data<real>() + result->storageOffset;
     offset = 0;
     for (int j = 0; j < numInputs; j++) {
       if (inputs[j]->nDimension) {
         THTensor* input0 = inputs[j];
-        real* input0_data = input0->storage->data + input0->storageOffset;
+        real* input0_data = input0->storage->data<real>() + input0->storageOffset;
         int64_t input0_size = THTensor_(nElement)(input0);
         memcpy(result_data + offset, input0_data, input0_size*sizeof(real));
         offset += input0_size;
@@ -3908,7 +3908,7 @@ int THTensor_(logicalAnyAll)(THTensor *tensor)
 
 void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
@@ -3988,7 +3988,7 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
 
 void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
@@ -4142,7 +4142,7 @@ void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 3, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
@@ -4186,7 +4186,7 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
 
 void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 3, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
@@ -4230,7 +4230,7 @@ void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
 
 void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension, int keepdim)
 {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 3, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
@@ -4423,13 +4423,13 @@ void THTensor_(logspace)(THTensor *r_, real a, real b, int64_t n)
   }
 }
 
-void THTensor_(rand)(THTensor *r_, THGenerator *_generator, THLongStorage *size)
+void THTensor_(rand)(THTensor *r_, THGenerator *_generator, at::LongStorageImpl *size)
 {
   THTensor_(resize)(r_, size, NULL);
   THTensor_(uniform)(r_, _generator, 0, 1);
 }
 
-void THTensor_(randn)(THTensor *r_, THGenerator *_generator, THLongStorage *size)
+void THTensor_(randn)(THTensor *r_, THGenerator *_generator, at::LongStorageImpl *size)
 {
   THTensor_(resize)(r_, size, NULL);
   THTensor_(normal)(r_, _generator, 0, 1);

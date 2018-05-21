@@ -24,43 +24,58 @@
 // Struct definition is moved to THStorage.hpp (so this file stays C compatible)
 typedef struct THStorage THStorage;
 
-TH_API real* THStorage_(data)(const THStorage*);
-TH_API ptrdiff_t THStorage_(size)(const THStorage*);
+namespace at {
+  class StorageImpl;
+  typedef StorageImpl ByteStorageImpl;
+  typedef StorageImpl CharStorageImpl;
+  typedef StorageImpl ShortStorageImpl;
+  typedef StorageImpl IntStorageImpl;
+  typedef StorageImpl LongStorageImpl;
+  typedef StorageImpl FloatStorageImpl;
+  typedef StorageImpl DoubleStorageImpl;
+  typedef StorageImpl HalfStorageImpl;
+
+  TH_API void THStorage_(copyShort)(at::StorageImpl *storage, at::ShortStorageImpl *src);
+  TH_API void THStorage_(copyInt)(at::StorageImpl *storage, at::IntStorageImpl *src);
+  TH_API void THStorage_(copyLong)(at::StorageImpl *storage, at::LongStorageImpl *src);
+  TH_API void THStorage_(copyFloat)(at::StorageImpl *storage, at::FloatStorageImpl *src);
+  TH_API void THStorage_(copyDouble)(at::StorageImpl *storage, at::DoubleStorageImpl *src);
+  TH_API void THStorage_(copyHalf)(at::StorageImpl *storage, at::HalfStorageImpl *src);
+}
+
+TH_API real* THStorage_(data)(const at::StorageImpl *);
+TH_API ptrdiff_t THStorage_(size)(const at::StorageImpl *);
 TH_API size_t THStorage_(elementSize)(void);
 
 /* slow access -- checks everything */
-TH_API void THStorage_(set)(THStorage*, ptrdiff_t, real);
-TH_API real THStorage_(get)(const THStorage*, ptrdiff_t);
+TH_API void THStorage_(set)(at::StorageImpl *, ptrdiff_t, real);
+TH_API real THStorage_(get)(const at::StorageImpl *, ptrdiff_t);
 
-TH_API THStorage* THStorage_(new)(void);
-TH_API THStorage* THStorage_(newWithSize)(ptrdiff_t size);
-TH_API THStorage* THStorage_(newWithSize1)(real);
-TH_API THStorage* THStorage_(newWithSize2)(real, real);
-TH_API THStorage* THStorage_(newWithSize3)(real, real, real);
-TH_API THStorage* THStorage_(newWithSize4)(real, real, real, real);
-TH_API THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags);
+TH_API at::StorageImpl * THStorage_(new)(void);
+TH_API at::StorageImpl * THStorage_(newWithSize)(ptrdiff_t size);
+TH_API at::StorageImpl * THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags);
 
 /* takes ownership of data */
-TH_API THStorage* THStorage_(newWithData)(real *data, ptrdiff_t size);
+TH_API at::StorageImpl * THStorage_(newWithData)(real *data, ptrdiff_t size);
 
-TH_API THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
+TH_API at::StorageImpl * THStorage_(newWithAllocator)(ptrdiff_t size,
                                                THAllocator* allocator,
                                                void *allocatorContext);
-TH_API THStorage* THStorage_(newWithDataAndAllocator)(
+TH_API at::StorageImpl * THStorage_(newWithDataAndAllocator)(
     real* data, ptrdiff_t size, THAllocator* allocator, void *allocatorContext);
 
 /* should not differ with API */
-TH_API void THStorage_(setFlag)(THStorage *storage, const char flag);
-TH_API void THStorage_(clearFlag)(THStorage *storage, const char flag);
-TH_API void THStorage_(retain)(THStorage *storage);
-TH_API void THStorage_(swap)(THStorage *storage1, THStorage *storage2);
+TH_API void THStorage_(setFlag)(at::StorageImpl *storage, const char flag);
+TH_API void THStorage_(clearFlag)(at::StorageImpl *storage, const char flag);
+TH_API void THStorage_(retain)(at::StorageImpl *storage);
+TH_API void THStorage_(swap)(at::StorageImpl *storage1, at::StorageImpl *storage2);
 
 /* used by StorageSharing */
-TH_API int THStorage_(retainIfLive)(THStorage *storage);
+TH_API int THStorage_(retainIfLive)(at::StorageImpl *storage);
 
 /* might differ with other API (like CUDA) */
-TH_API void THStorage_(free)(THStorage *storage);
-TH_API void THStorage_(resize)(THStorage *storage, ptrdiff_t size);
-TH_API void THStorage_(fill)(THStorage *storage, real value);
+TH_API void THStorage_(free)(at::StorageImpl *storage);
+TH_API void THStorage_(resize)(at::StorageImpl *storage, ptrdiff_t size);
+TH_API void THStorage_(fill)(at::StorageImpl *storage, real value);
 
 #endif

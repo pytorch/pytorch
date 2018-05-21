@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THStorage.hpp"
 #else
 
+#include "ATen/StorageImpl.h"
+
 typedef struct THStorage
 {
     real *data;

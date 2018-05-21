@@ -40,18 +40,18 @@ TH_API void THFile_writeDoubleScalar(THFile *self, double scalar);
 
 /* storage */
 TH_API size_t THFile_readByte(THFile *self, THByteStorage *storage);
-TH_API size_t THFile_readChar(THFile *self, THCharStorage *storage);
+TH_API size_t THFile_readChar(THFile *self, at::CharStorageImpl *storage);
 TH_API size_t THFile_readShort(THFile *self, THShortStorage *storage);
 TH_API size_t THFile_readInt(THFile *self, THIntStorage *storage);
-TH_API size_t THFile_readLong(THFile *self, THLongStorage *storage);
+TH_API size_t THFile_readLong(THFile *self, at::LongStorageImpl *storage);
 TH_API size_t THFile_readFloat(THFile *self, THFloatStorage *storage);
 TH_API size_t THFile_readDouble(THFile *self, THDoubleStorage *storage);
 
 TH_API size_t THFile_writeByte(THFile *self, THByteStorage *storage);
-TH_API size_t THFile_writeChar(THFile *self, THCharStorage *storage);
+TH_API size_t THFile_writeChar(THFile *self, at::CharStorageImpl *storage);
 TH_API size_t THFile_writeShort(THFile *self, THShortStorage *storage);
 TH_API size_t THFile_writeInt(THFile *self, THIntStorage *storage);
-TH_API size_t THFile_writeLong(THFile *self, THLongStorage *storage);
+TH_API size_t THFile_writeLong(THFile *self, at::LongStorageImpl *storage);
 TH_API size_t THFile_writeFloat(THFile *self, THFloatStorage *storage);
 TH_API size_t THFile_writeDouble(THFile *self, THDoubleStorage *storage);
 
