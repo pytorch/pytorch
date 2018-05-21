@@ -74,7 +74,8 @@ struct AlgorithmEntry {
   std::vector<at::Tensor> dst;
   std::function<void(std::unique_ptr<AlgorithmEntry>&)> run;
 
-  AlgorithmEntry() {}
+  // Default constructor must be specified
+  AlgorithmEntry() = default;
 
   // Must not be copyable
   AlgorithmEntry& operator=(const AlgorithmEntry&) = delete;
