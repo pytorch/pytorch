@@ -3498,9 +3498,9 @@ Example::
     tensor([ 4.,  3.,  4.])
 
 
-    >>> torch.randint(3, 10, (2,2), dtype=torch.long)
-    tensor([[ 8,  3],
-            [ 3,  9]])
+    >>> torch.randint(10, (2,2))
+    tensor([[ 0.,  2.],
+            [ 5.,  5.]])
 
 
     >>> torch.randint(3, 10, (2,2))

@@ -394,6 +394,7 @@ class ConvPoolOpBase : public Operator<Context> {
   static struct OpSchema::Cost CostInferenceForConv(
       const OperatorDef& def,
       const vector<TensorShape>& inputs) {
+    CAFFE_ENFORCE_GE(inputs.size(), 2, "Conv requires at least 2 inputs");
     struct OpSchema::Cost c;
     const TensorShape X = inputs[0];
     const TensorShape W = inputs[1];
@@ -401,7 +402,6 @@ class ConvPoolOpBase : public Operator<Context> {
     ArgumentHelper helper(def);
     const auto order =
         StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
-
     unsigned long long N;
     unsigned long long Y_t = 1;
     unsigned long long Y_h;
@@ -412,6 +412,9 @@ class ConvPoolOpBase : public Operator<Context> {
     unsigned long long in_channels;
     unsigned long long out_channels;
 
+    if (X.dims_size() == 0 || W.dims_size() == 0) {
+      return c;
+    }
     N = X.dims(0);
     if (X.dims_size() == 5) {
       // 3D convolution
@@ -427,6 +430,7 @@ class ConvPoolOpBase : public Operator<Context> {
     } else {
       // 2D convolution
       CAFFE_ENFORCE_EQ(X.dims_size(), 4, "Conv2D should have 4D input tensor");
+      CAFFE_ENFORCE_EQ(W.dims_size(), 4, "Conv2D should have 4D filter tensor");
       if (order == StorageOrder::NHWC) {
         Y_h = Y.dims(1);
         Y_w = Y.dims(2);
@@ -443,12 +447,19 @@ class ConvPoolOpBase : public Operator<Context> {
         out_channels = W.dims(0);
       }
     }
+
+    uint64_t nElemX = nElemFromDim(X);
+    uint64_t nElemW = nElemFromDim(W);
+    uint64_t nElemBias = inputs.size() > 2 ? nElemFromDim(inputs[2]) : 0;
+
     // grouping is NOT properly handled yet
     c.flops = N * Y_t * Y_h * Y_w * kernel_t * kernel_w * kernel_h *
         in_channels * out_channels * 2;
-    c.bytes_moved = N * out_channels * Y_t * Y_h * Y_w * sizeof(float);
+    c.bytes_read = (nElemX + nElemW + nElemBias) * sizeof(X.data_type());
+    c.bytes_written =
+        N * out_channels * Y_t * Y_h * Y_w * sizeof(Y.data_type());
     c.params_bytes = out_channels * in_channels * kernel_t * kernel_h *
-        kernel_w * sizeof(float);
+        kernel_w * sizeof(W.data_type());
     return c;
   }
 

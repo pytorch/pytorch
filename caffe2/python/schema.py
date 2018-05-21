@@ -64,10 +64,11 @@ FeatureSpec = namedtuple(
         'feature_ids',
         'feature_is_request_only',
         'desired_hash_size',
+        'feature_to_index',
     ]
 )
 
-FeatureSpec.__new__.__defaults__ = (None, None, None, None, None)
+FeatureSpec.__new__.__defaults__ = (None, None, None, None, None, None)
 
 
 class Metadata(

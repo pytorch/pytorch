@@ -43,7 +43,7 @@ PyObject *THPDevice_repr(THPDevice *self)
   return THPUtils_packString(oss.str().c_str());
 }
 
-PyObject *THPDevice_str(THPDevice*self)
+PyObject *THPDevice_str(THPDevice *self)
 {
   std::ostringstream oss;
   if (!self->device.is_default) {
@@ -137,12 +137,40 @@ PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPDevice_reduce(THPDevice *self)
+{
+  HANDLE_TH_ERRORS
+  auto ret = THPObjectPtr{PyTuple_New(2)};
+  if (!ret) throw python_error();
+
+  py::object torch_module = py::module::import("torch");
+  py::object torch_device = torch_module.attr("device");
+  PyTuple_SET_ITEM(ret.get(), 0, torch_device.release().ptr());
+
+  THPObjectPtr args;
+  if (self->device.is_default) {
+    args = THPObjectPtr{Py_BuildValue("(s)", deviceTypeString(self->device.type))};
+  } else {
+    args = THPObjectPtr{Py_BuildValue("(si)", deviceTypeString(self->device.type), self->device.index)};
+  }
+  if (!args) throw python_error();
+  PyTuple_SET_ITEM(ret.get(), 1, args.release());
+
+  return ret.release();
+  END_HANDLE_TH_ERRORS
+}
+
 typedef PyObject *(*getter)(PyObject *, void *);
 
 static struct PyGetSetDef THPDevice_properties[] = {
   {"type",       (getter)THPDevice_type, nullptr, nullptr, nullptr},
   {"index",      (getter)THPDevice_index, nullptr, nullptr, nullptr},
   {nullptr}
+};
+
+static PyMethodDef THPDevice_methods[] = {
+  {"__reduce__", (PyCFunction)THPDevice_reduce, METH_NOARGS, nullptr},
+  {NULL}  /* Sentinel */
 };
 
 PyTypeObject THPDeviceType = {
@@ -173,7 +201,7 @@ PyTypeObject THPDeviceType = {
   0,                                     /* tp_weaklistoffset */
   0,                                     /* tp_iter */
   0,                                     /* tp_iternext */
-  0,                                     /* tp_methods */
+  THPDevice_methods,                     /* tp_methods */
   0,                                     /* tp_members */
   THPDevice_properties,                  /* tp_getset */
   0,                                     /* tp_base */

@@ -648,7 +648,6 @@ main_sources = [
     "torch/csrc/jit/export.cpp",
     "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/autodiff.cpp",
-    "torch/csrc/jit/interpreter_autograd_function.cpp",
     "torch/csrc/jit/python_arg_flatten.cpp",
     "torch/csrc/jit/variable_flags.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",

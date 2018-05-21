@@ -121,15 +121,16 @@ def init_data_input_workers(
         timeout=timeout
     )
 
-    # Create coordinator object
-    coordinator = WorkerCoordinator(
-        input_source_name, init_fun, batch_feeder)
-
     # Launch fetch worker threads
     worker_ids = [
         global_coordinator.get_new_worker_id()
         for i in range(num_worker_threads)
     ]
+
+    # Create coordinator object
+    coordinator = WorkerCoordinator(
+        input_source_name, worker_ids, init_fun, batch_feeder)
+
     workers = [
         threading.Thread(
             target=run_worker,

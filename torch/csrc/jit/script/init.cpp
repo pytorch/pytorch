@@ -65,7 +65,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     py::object func = self;
     std::string cconv(inputs.size(), 't');
     Node* new_node = g.insertNode(g.createPythonOp(
-      THPObjectPtr(func.release().ptr()), cconv, {}, {}, false));
+      THPObjectPtr(func.release().ptr()), cconv, {}));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for(auto i : inputs)
       new_node->addInput(i);
