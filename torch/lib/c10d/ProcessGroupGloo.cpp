@@ -300,7 +300,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     entry->src[i] = at::zeros(*key.type, at::IntList(srcSizes[i]));
   }
 
-  return std::move(entry);
+  return entry;
 }
 
 EntryType ProcessGroupGloo::checkout(const AlgorithmKey& key) {
@@ -316,7 +316,7 @@ EntryType ProcessGroupGloo::checkout(const AlgorithmKey& key) {
   // per key until we add support for a dynamic limit.
   if (cacheCreated_[key] < 1) {
     cacheCreated_[key]++;
-    return std::move(construct(key));
+    return construct(key);
   }
 
   // Optionally wait for entry to be returned to the cache.
@@ -329,7 +329,7 @@ EntryType ProcessGroupGloo::checkout(const AlgorithmKey& key) {
   // Grab entry from the cache and return it.
   auto entry = std::move(it->second);
   cache_.erase(key);
-  return std::move(entry);
+  return entry;
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::enqueue(EntryType entry) {
@@ -337,7 +337,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::enqueue(EntryType entry) {
   std::unique_lock<std::mutex> lock(m_);
   queue_.push_back(std::make_tuple(std::move(entry), work));
   queueProduceCV_.notify_one();
-  return std::move(work);
+  return work;
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
