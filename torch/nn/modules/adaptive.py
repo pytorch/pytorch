@@ -211,19 +211,18 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         """
 
-        with torch.no_grad():
-            out = input.new_empty((input.size(0), self.n_classes))
+        out = input.new_empty((input.size(0), self.n_classes))
 
-            head_output = self.head(input)
-            head_logprob = log_softmax(head_output, dim=1)
+        head_output = self.head(input)
+        head_logprob = log_softmax(head_output, dim=1)
 
-            out[:, :self.shortlist_size] = head_logprob[:, :self.shortlist_size]
+        out[:, :self.shortlist_size] = head_logprob[:, :self.shortlist_size]
 
-            for i, (start_idx, stop_idx) in enumerate(zip(self.cutoffs, self.cutoffs[1:])):
-                cluster_output = self.tail[i](input)
-                cluster_logprob = log_softmax(cluster_output, dim=1)
-                output_logprob = cluster_logprob + head_logprob[:, self.shortlist_size + i].unsqueeze(1)
+        for i, (start_idx, stop_idx) in enumerate(zip(self.cutoffs, self.cutoffs[1:])):
+            cluster_output = self.tail[i](input)
+            cluster_logprob = log_softmax(cluster_output, dim=1)
+            output_logprob = cluster_logprob + head_logprob[:, self.shortlist_size + i].unsqueeze(1)
 
-                out[:, start_idx:stop_idx] = output_logprob
+            out[:, start_idx:stop_idx] = output_logprob
 
         return out
