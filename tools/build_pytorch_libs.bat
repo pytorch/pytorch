@@ -47,6 +47,7 @@ IF "%~1"=="--with-mkldnn" (
 
 IF "%~1"=="--with-gloo-ibverbs" (
   set /a WITH_GLOO_IBVERBS=1
+  echo Warning: gloo iverbs is enabled but build is not yet implemented 1>&2
   shift
 ) ELSE (
   set /a WITH_GLOO_IBVERBS=0
@@ -54,6 +55,7 @@ IF "%~1"=="--with-gloo-ibverbs" (
 
 IF "%~1"=="--with-distributed-mw" (
   set /a WITH_DISTRIBUTED_MW=1
+  echo Warning: distributed mw is enabled but build is not yet implemented 1>&2
   shift
 ) ELSE (
   set /a WITH_DISTRIBUTED_MW=0

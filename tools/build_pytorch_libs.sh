@@ -38,14 +38,12 @@ fi
 WITH_GLOO_IBVERBS=0
 if [[ "$1" == "--with-gloo-ibverbs" ]]; then
   WITH_GLOO_IBVERBS=1
-  echo Warning: gloo iverbs is enabled but build is not yet implemented 1>&2
   shift
 fi
 
 WITH_DISTRIBUTED_MW=0
 if [[ "$1" == "--with-distributed-mw" ]]; then
   WITH_DISTRIBUTED_MW=1
-  echo Warning: distributed mw is enabled but build is not yet implemented 1>&2
   shift
 fi
 
