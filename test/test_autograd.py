@@ -687,9 +687,11 @@ class TestAutograd(TestCase):
         y = Variable(torch.ones(5, 5) * 4)
         with torch.no_grad():
             w = x + y
+
         @torch.no_grad()
         def adder(x, y):
             return x + y
+
         z = adder(x, y)
 
         self.assertFalse(w.requires_grad)
@@ -1793,14 +1795,18 @@ class TestAutograd(TestCase):
             torch.set_grad_enabled(True)
             y = x * 2
         self.assertTrue(y.requires_grad)
+
         @torch.set_grad_enabled(False)
         def doubler_without(x):
             return x * 2
+
         y = doubler_without(x)
         self.assertFalse(y.requires_grad)
+
         @torch.set_grad_enabled(True)
         def doubler_with(x):
             return x * 2
+
         y = doubler_with(x)
         self.assertTrue(y.requires_grad)
 
