@@ -173,9 +173,20 @@ You can resolve this by typing the following command.
 
     conda install -c peterjc123 vc vs2017_runtime
 
-As for the wheels package, since we didn't pack the intel-openmp files in,
-please make sure you install Numpy+MKL from this `site
-<https://www.lfd.uci.edu/~gohlke/pythonlibs/#numpy>`_ instead of Numpy.
+As for the wheels package, since we didn't pack the intel-openmp and VS2017 
+redistributable files in, please make sure you install them manually.
+The VS 2017 redistributable installer can be downloaded `here
+<https://aka.ms/vs/15/release/VC_redist.x64.exe>`_.
+The intel-openmp files can be found at `Anaconda Cloud`
+<https://anaconda.org/anaconda/intel-openmp/2018.0.0/download/win-64/intel-openmp-2018.0.0-8.tar.bz2>`_.
+You will just have to extract this package, put the dll files in `Library\bin`
+into a directory and append the path of it to the environment variable `PATH`.
+And you should also pay attention to your installation of Numpy. Make sure it
+uses MKL instead of OpenBLAS. The offical package of Numpy does the work.
+
+.. code-block:: bat
+
+    pip install numpy
 
 Another possible cause may be you are using GPU version without NVIDIA
 graphics cards. Please replace your GPU package with the CPU one.
