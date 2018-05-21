@@ -120,7 +120,7 @@ struct Reduction {
       }
     }
     for (int j = 0; j != 4; j++) {
-      acc[j].store(&out[j * Vec::size]);
+      acc[j].storeu(&out[j * Vec::size]);
     }
   }
 

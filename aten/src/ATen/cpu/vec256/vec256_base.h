@@ -64,8 +64,14 @@ struct Vec256 {
     std::memcpy(vec.values, ptr, count * sizeof(T));
     return vec;
   }
-  void store(void* ptr, int count = size) const {
+  void storeu(void* ptr, int count = size) const {
     std::memcpy(ptr, values, count * sizeof(T));
+  }
+  T operator [](int idx) const {
+    return values[idx];
+  }
+  void set_value(int64_t idx, T value) {
+    values[idx] = value;
   }
   Vec256<T> map(T (*f)(T)) const {
     Vec256<T> ret;
@@ -140,7 +146,7 @@ struct Vec256 {
 template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = a.values[i] + b.values[i];
+    c.set_value(i, a[i] + b[i]);
   }
   return c;
 }
@@ -148,7 +154,7 @@ template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
 template <class T> Vec256<T> operator-(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = a.values[i] - b.values[i];
+    c.set_value(i, a[i] - b[i]);
   }
   return c;
 }
@@ -156,7 +162,7 @@ template <class T> Vec256<T> operator-(const Vec256<T> &a, const Vec256<T> &b) {
 template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = a.values[i] * b.values[i];
+    c.set_value(i, a[i] * b[i]);
   }
   return c;
 }
@@ -164,7 +170,7 @@ template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
 template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = a.values[i] / b.values[i];
+    c.set_value(i, a[i] / b[i]);
   }
   return c;
 }
@@ -172,7 +178,7 @@ template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) {
 template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = std::max(a.values[i], b.values[i]);
+    c.set_value(i, std::max(a[i], b[i]));
   }
   return c;
 }
