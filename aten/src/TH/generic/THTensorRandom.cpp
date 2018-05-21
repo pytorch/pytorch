@@ -315,7 +315,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
                             THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
                             2,
                             "invalid multinomial distribution (encountering probability entry < 0)");
-      THArgCheckWithCleanup((std::isfinite(val) > 0),
+      THArgCheckWithCleanup((std::isfinite(val)),
                             THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
                             2,
                             "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
