@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <sstream>
 
-#include "ATen/cuda/AccumulateType.cuh"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
