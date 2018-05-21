@@ -246,9 +246,25 @@ struct ModuleValue : public SugaredValue {
     }
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
+
   // call module.forward
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
+    py::object py_module = py::cast(module);
+    if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
+      return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
+    std::shared_ptr<SugaredValue> result;
+    for(py::handle module : py_module) {
+      py::object obj = py::reinterpret_borrow<py::object>(module);
+      auto r = py::cast<std::shared_ptr<Module>>(obj);
+      auto m = std::make_shared<ModuleValue>(r);
+      result = m->attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, 1);
+      auto value = result->asValue(loc, caller);
+      if(TupleType* tt = value->type()->cast<TupleType>()) {
+        throw ErrorReport(loc) << "expected 1 output for single module in _ConstModuleList, but " << std::to_string(tt->elements().size()) << " found";
+      }
+      inputs = at::ArrayRef<NamedValue>(NamedValue(loc, "", value));
+    }
+    return result;
   }
 
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {

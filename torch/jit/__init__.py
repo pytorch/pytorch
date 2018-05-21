@@ -1,7 +1,7 @@
 import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
-from torch.nn import Module, ModuleList, ParameterList, Parameter
+from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
@@ -578,7 +578,7 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
             return super(ScriptModule, self).__setattr__(attr, value)
         if hasattr(self, attr):
             raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-        if isinstance(value, ModuleList):
+        if isinstance(value, ModuleList) or isinstance(value, Sequential):
             # special case for list of modules. Modules need to be registered with their
             # parent module. To do this, we create a ConstModuleList, which is itself a module, that
             # contains each of these modules as submodules. The ConstModuleList then
@@ -707,6 +707,15 @@ class _ConstModuleList(ScriptModule):
         keys = super(_ConstModuleList, self).__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
+
+    def forward(self, inputs):
+        for m in list(self._modules.values()):
+            if(isinstance(inputs, tuple)):
+                raise RuntimeError(("expected 1 output for single module in {} but {} found")
+                                   .format(type(self), len(inputs)))
+            inputs = m(inputs)
+        return inputs
+
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
