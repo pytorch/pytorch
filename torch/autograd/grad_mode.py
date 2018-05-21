@@ -1,4 +1,5 @@
 import torch
+import functools
 
 
 class no_grad(object):
@@ -39,11 +40,10 @@ class no_grad(object):
         return False
 
     def __call__(self, func):
+        @functools.wraps(func)
         def decorate_no_grad(*args, **kwargs):
-            torch._C.set_grad_enabled(False)
-            result = func(*args, **kwargs)
-            torch._C.set_grad_enabled(self.prev)
-            return result
+            with self:
+                return func(*args, **kwargs)
         return decorate_no_grad
 
 
@@ -87,11 +87,10 @@ class enable_grad(object):
         return False
 
     def __call__(self, func):
+        @functools.wraps(func)
         def decorate_enable_grad(*args, **kwargs):
-            torch._C.set_grad_enabled(True)
-            result = func(*args, **kwargs)
-            torch._C.set_grad_enabled(self.prev)
-            return result
+            with self:
+                return func(*args, **kwargs)
         return decorate_enable_grad
 
 
@@ -138,8 +137,8 @@ class set_grad_enabled(object):
         return False
 
     def __call__(self, func):
+        @functools.wraps(func)
         def decorate_set_grad_enabled(*args, **kwargs):
-            result = func(*args, **kwargs)
-            torch._C.set_grad_enabled(self.prev)
-            return result
+            with self:
+                return func(*args, **kwargs)
         return decorate_set_grad_enabled
