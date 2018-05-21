@@ -168,7 +168,6 @@ add_custom_command(
   DEPENDS
   "${CAFFE2_INSTALL_SHARE_DIR}/ATen/Declarations.yaml"
   "${CAFFE2_INSTALL_INCLUDE_DIR}/THNN/generic/THNN.h"
-  "${CAFFE2_INSTALL_INCLUDE_DIR}/THCUNN/generic/THCUNN.h"
   "${TOOLS_PATH}/autograd/templates/VariableType.h"
   "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
   "${TOOLS_PATH}/autograd/templates/Functions.h"
