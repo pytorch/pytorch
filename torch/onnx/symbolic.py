@@ -206,37 +206,24 @@ def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
-def mean(g, self, dim=None, keepdim=None):
-    if dim is None and keepdim is None:
-        return g.op("Mean", self)
-    # NB: ONNX's default is different from PyTorch's
-    if keepdim is None:
-        keepdim = 0
-    return g.op("ReduceMean", self, axes_i=[dim], keepdims_i=keepdim)
+def _reduce_op_symbolic(onnx_op_name):
+    def symbolic(g, self, dim=None, keepdim=None):
+        params = {}
+        if dim is not None:
+            if isinstance(dim, numbers.Number):
+                dim = [dim]
+            params['axes_i'] = dim
+        params['keepdims_i'] = int(bool(keepdim))
+        return g.op(onnx_op_name, self, **params)
+    return symbolic
 
-
-def sum(g, self, dim=None, keepdim=None):
-    if dim is None and keepdim is None:
-        return g.op("Sum", self)
-    if keepdim is None:
-        keepdim = 0
-    if isinstance(dim, numbers.Number):
-        dim = [dim]
-    return g.op("ReduceSum", self, axes_i=dim, keepdims_i=keepdim)
+mean = _reduce_op_symbolic('ReduceMean')
+sum = _reduce_op_symbolic('ReduceSum')
+prod = _reduce_op_symbolic('ReduceProd')
 
 
 def cumsum(g, input, dim):
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
-
-
-def prod(g, self, dim=None, keepdim=None):
-    if dim is None:
-        dims = None
-    else:
-        dims = [dim]
-    if keepdim is None:
-        keepdim = 0
-    return g.op("ReduceProd", self, axes_i=dims, keepdims_i=keepdim)
 
 
 def t(g, self):
