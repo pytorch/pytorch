@@ -57,7 +57,7 @@ public:
         tmp_values, reinterpret_cast<const float*>(ptr), count * sizeof(float));
     return _mm256_loadu_ps(tmp_values);
   }
-  void store(void* ptr, int64_t count = size) const {
+  void storeu(void* ptr, int64_t count = size) const {
     if (count == size) {
       _mm256_storeu_ps(reinterpret_cast<float*>(ptr), values);
     } else {
@@ -67,12 +67,23 @@ public:
     }
   }
   Vec256<float> map(float (*f)(float)) const {
-    __at_align32__ float tmp[8];
-    store(tmp);
-    for (int64_t i = 0; i < 8; i++) {
+    __at_align32__ float tmp[size];
+    storeu(tmp);
+    for (int64_t i = 0; i < size; i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
+  }
+  float operator [](int idx) const {
+    __at_align32__ float tmp_values[size];
+    storeu(tmp_values);
+    return tmp_values[idx];
+  }
+  void set_value(int64_t idx, float value) {
+    __at_align32__ float tmp_values[size];
+    storeu(tmp_values);
+    tmp_values[idx] = value;
+    loadu(tmp_values);
   }
   Vec256<float> abs() const {
     auto mask = _mm256_set1_ps(-0.f);

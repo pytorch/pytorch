@@ -11,14 +11,14 @@ inline scalar_t vec_reduce_all(
     int64_t size) {
   using Vec = vec256::Vec256<scalar_t>;
   scalar_t acc_arr[Vec::size];
-  acc_vec.store(acc_arr);
+  acc_vec.storeu(acc_arr);
   for (int64_t i = 1; i < size; i++) {
     scalar_t acc_arr_next[Vec::size];
     acc_arr_next[0] = acc_arr[i];
     Vec acc_vec_next = Vec::loadu(acc_arr_next);
     acc_vec = vec_fun(acc_vec, acc_vec_next);
   }
-  acc_vec.store(acc_arr);
+  acc_vec.storeu(acc_arr);
   return acc_arr[0];
 }
 
@@ -105,11 +105,11 @@ inline void map(
   int64_t d = 0;
   for (; d < size - (size % Vec::size); d += Vec::size) {
     Vec output_vec = vec_fun(Vec::loadu(input_data + d));
-    output_vec.store(output_data + d);
+    output_vec.storeu(output_data + d);
   }
   if (size - d > 0) {
     Vec output_vec = vec_fun(Vec::loadu(input_data + d, size - d));
-    output_vec.store(output_data + d, size - d);
+    output_vec.storeu(output_data + d, size - d);
   }
 }
 
@@ -126,13 +126,13 @@ inline void map2(
     Vec data_vec = Vec::loadu(input_data + d);
     Vec data_vec2 = Vec::loadu(input_data2 + d);
     Vec output_vec = vec_fun(data_vec, data_vec2);
-    output_vec.store(output_data + d);
+    output_vec.storeu(output_data + d);
   }
   if (size - d > 0) {
     Vec data_vec = Vec::loadu(input_data + d, size - d);
     Vec data_vec2 = Vec::loadu(input_data2 + d, size - d);
     Vec output_vec = vec_fun(data_vec, data_vec2);
-    output_vec.store(output_data + d, size - d);
+    output_vec.storeu(output_data + d, size - d);
   }
 }
 

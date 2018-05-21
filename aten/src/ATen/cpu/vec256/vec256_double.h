@@ -52,7 +52,7 @@ public:
         count * sizeof(double));
     return _mm256_load_pd(tmp_values);
   }
-  void store(void* ptr, int count = size) const {
+  void storeu(void* ptr, int count = size) const {
     if (count == size) {
       _mm256_storeu_pd(reinterpret_cast<double*>(ptr), values);
     } else {
@@ -62,12 +62,23 @@ public:
     }
   }
   Vec256<double> map(double (*f)(double)) const {
-    __at_align32__ double tmp[4];
-    store(tmp);
-    for (int64_t i = 0; i < 4; i++) {
+    __at_align32__ double tmp[size];
+    storeu(tmp);
+    for (int64_t i = 0; i < size; i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
+  }
+  double operator [](int idx) const {
+    __at_align32__ double tmp_values[size];
+    storeu(tmp_values);
+    return tmp_values[idx];
+  }
+  void set_value(int64_t idx, double value) {
+    __at_align32__ double tmp_values[size];
+    storeu(tmp_values);
+    tmp_values[idx] = value;
+    loadu(tmp_values);
   }
   Vec256<double> abs() const {
     auto mask = _mm256_set1_pd(-0.f);
