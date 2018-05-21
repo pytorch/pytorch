@@ -106,13 +106,10 @@ void PythonOp::cloneFrom(Node * other_) {
   this->cconv = other->cconv;
   Py_INCREF(other->pyobj.get());
   this->pyobj = THPObjectPtr(other->pyobj.get());
-  this->var_flags = other->var_flags;
   for(auto & sa : other->scalar_args) {
     Py_INCREF(sa.get());
     this->scalar_args.emplace_back(sa.get());
   }
-  this->tracing_autograd_python_function =
-      other->tracing_autograd_python_function;
 }
 
 }} // namespace torch::jit

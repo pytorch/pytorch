@@ -49,7 +49,7 @@ std::shared_ptr<torch::jit::Graph> torch::jit::tracer::createGraphByTracing(
         py::function func,
         tracer::variable_list trace_inputs,
         size_t num_func_inputs) {
-  auto enter_info = tracer::enter(std::move(trace_inputs), 1, false);
+  auto enter_info = tracer::enter(std::move(trace_inputs), 1);
   py::tuple py_inputs(num_func_inputs);
   for(size_t i = 0; i < num_func_inputs; ++i) {
     py_inputs[i] = py::cast(enter_info.second[i]);
@@ -206,7 +206,6 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
                                   std::string arg_types,
                                   at::ArrayRef<Variable> inputs,
                                   pyobj_list scalar_args) {
-  std::vector<VariableFlags> var_flags = fmap(inputs, &VariableFlags::of);
   THPObjectPtr apply(PyObject_GetAttrString(pyobj.get(), "apply"));
   if(!apply) {
     throw python_error();
@@ -215,9 +214,7 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
     return graph.createPythonOp(
         std::move(apply),
         arg_types,
-        std::move(var_flags),
-        std::move(scalar_args),
-        state->creates_handles);
+        std::move(scalar_args));
   });
 }
 #endif
