@@ -222,7 +222,7 @@ TEST_CASE("module/parameters") {
   TestModule module;
 
   SECTION("has correct number of parameters") {
-    REQUIRE(module.parameters().size() == 5);
+    REQUIRE(module.parameters().size() == 3);
   }
 
   SECTION("contains parameters with the correct name") {
@@ -230,7 +230,5 @@ TEST_CASE("module/parameters") {
     REQUIRE(parameters.count("a"));
     REQUIRE(parameters.count("b"));
     REQUIRE(parameters.count("c"));
-    REQUIRE(parameters.count("d"));
-    REQUIRE(parameters.count("e"));
   }
 }

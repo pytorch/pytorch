@@ -2,7 +2,8 @@
 
 #include <cstdint>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 BatchNorm::BatchNorm(int64_t features) : features_(features) {}
 
@@ -19,11 +20,11 @@ void BatchNorm::reset() {
   if (stateful_) {
     // TODO: create distinction between parameters and buffers and make these
     // gradient-less buffers
-    register_parameter(
+    register_buffer(
         "running_mean",
         &BatchNorm::running_mean_,
         at::CPU(at::kFloat).zeros({features_}));
-    register_parameter(
+    register_buffer(
         "running_variance",
         &BatchNorm::running_variance_,
         at::CPU(at::kFloat).ones({features_}));
@@ -56,4 +57,5 @@ variable_list BatchNorm::forward(variable_list inputs) {
 
   return variable_list({output});
 }
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

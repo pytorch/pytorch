@@ -124,6 +124,18 @@ class Module {
         autograd::make_variable(tensor, /*requires_grad=*/true);
   }
 
+  template <typename Derived>
+  void register_buffer(
+      const std::string& name,
+      Variable Derived::*variable,
+      Tensor tensor) {
+    check_name("Parameter", name);
+    const auto pair = parameters_.emplace(name, variable);
+    AT_CHECK(pair.second, "Parameter " + name + " has already been registered");
+    (pair.first->second)(static_cast<Derived*>(this)) =
+        autograd::make_variable(tensor, /*requires_grad=*/false);
+  }
+
   template <typename Getter, typename ConstGetter>
   void register_parameter(
       const std::string& name,
