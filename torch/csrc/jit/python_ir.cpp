@@ -70,7 +70,7 @@ void initPythonIRBindings(PyObject * module_) {
       std::string cconv(inputs.size(), 't');
       func.attr("symbolic") = symbolic;
       Node* new_node = g.insertNode(g.createPythonOp(
-        THPObjectPtr(func.release().ptr()), cconv, {}, {}, false));
+        THPObjectPtr(func.release().ptr()), cconv, {}));
       for (auto i : inputs)
         new_node->addInput(i);
       std::vector<Value*> outputs;
