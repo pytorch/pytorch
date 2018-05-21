@@ -42,14 +42,6 @@ def iter_tensors(x, only_requiring_grad=False):
                 yield result
 
 
-def contiguous_detach(input):
-    if isinstance(input, torch.Tensor):
-        return input.contiguous().detach().requires_grad_(input.requires_grad)
-    elif isinstance(input, Iterable):
-        return type(input)(contiguous_detach(e) for e in input)
-    return input
-
-
 # `input` is input to `fn`
 # `target` is the Tensors wrt whom Jacobians are calculated (default=`input`)
 #

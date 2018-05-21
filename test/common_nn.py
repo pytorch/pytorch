@@ -7,7 +7,7 @@ from itertools import product
 import torch
 import torch.cuda
 from common import TestCase, to_gpu, freeze_rng_state, is_iterable
-from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, contiguous_detach
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 import torch.backends.cudnn
 
 # tarfile module tries to obtain a file object name in python 3.3
@@ -783,7 +783,6 @@ class NNTestCase(TestCase):
             return self._forward(module, input).detach()
 
         res = tuple()
-        input = contiguous_detach(input)
         if jacobian_input:
             res += get_numerical_jacobian(fw, input, eps=1e-6),
         if jacobian_parameters:

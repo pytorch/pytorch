@@ -8,7 +8,7 @@ import torch
 import torch.legacy.nn as nn
 from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
     module_tests, criterion_tests, TEST_CUDA, PRECISION
-from torch.autograd.gradcheck import get_numerical_jacobian, contiguous_detach
+from torch.autograd.gradcheck import get_numerical_jacobian
 from common import to_gpu, freeze_rng_state, run_tests
 from torch.autograd import Variable
 
@@ -661,7 +661,6 @@ class TestNN(NNTestCase):
             return out
 
         res = tuple()
-        input = contiguous_detach(input)
         if jacobian_input:
             input = require_grad(input)
             res += get_numerical_jacobian(fw, input, eps=1e-6),
