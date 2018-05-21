@@ -488,6 +488,7 @@ void Col2Im(
 template <typename T, class Context>
 void BiasCHW(
   const T* bias,
+  const T* bias_multiplier,
   const int bias_channels,
   const int image_size,
   T* image,

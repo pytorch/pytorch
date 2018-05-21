@@ -102,8 +102,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       // Bias term
       if (InputSize() == 3) {
         const T* bias_data = Input(BIAS).template data<T>();
-#if !defined(__ARM_NEON__) && !defined(__ARM_NEON)
         const T* bm_data = bias_multiplier_.template data<T>();
+#if !defined(__ARM_NEON__) && !defined(__ARM_NEON)
         math::Gemm<T, Context>(
             CblasNoTrans,
             CblasNoTrans,
@@ -119,6 +119,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 #else
         math::BiasCHW<T, Context>(
             bias_data,
+            bm_data,
             C,
             output_image_size,
             Ydata,
