@@ -245,7 +245,7 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         def randn_like(x):
             y = torch.testing.randn_like(x if x.is_floating_point() else x.double(), requires_grad=True)
             if gen_non_contig_grad_outputs:
-                y = torch.testing.make_non_contiguous(y)
+                y = torch.testing.make_non_contiguous(y).requires_grad_()
             return y
         outputs = _as_tuple(func(*inputs))
         grad_outputs_gen = (randn_like(x) for x in outputs)
