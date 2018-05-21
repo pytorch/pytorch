@@ -127,7 +127,9 @@ struct Reduction {
     });
 
     if (cols_rounded != cols) {
+#if !defined(__APPLE__)
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
       scalar_t buf[WIDTH];
 
       // Initializes the entire (tiny) array to avoid uninitialized warnings
