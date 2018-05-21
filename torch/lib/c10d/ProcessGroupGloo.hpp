@@ -195,7 +195,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
   void runLoop(void);
 
-  void runSingle(WorkType work);
+  void runSingle(std::unique_lock<std::mutex>& lock, WorkType work);
 
   void createAlgorithm(AlgorithmEntry& entry);
 

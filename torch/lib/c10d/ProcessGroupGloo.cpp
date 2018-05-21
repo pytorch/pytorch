@@ -207,13 +207,13 @@ void ProcessGroupGloo::runLoop(void) {
       createAlgorithm(*entry);
     }
 
-    lock.unlock();
-    runSingle(std::move(tuple));
-    lock.lock();
+    runSingle(lock, std::move(tuple));
   }
 }
 
-void ProcessGroupGloo::runSingle(WorkType tuple) {
+void ProcessGroupGloo::runSingle(std::unique_lock<std::mutex>& lock, WorkType tuple) {
+  lock.unlock();
+
   auto& entry = std::get<0>(tuple);
   auto& work = std::get<1>(tuple);
 
@@ -225,7 +225,7 @@ void ProcessGroupGloo::runSingle(WorkType tuple) {
   }
 
   // Return entry to cache
-  std::unique_lock<std::mutex> lock(m_);
+  lock.lock();
   cache_[entry->key] = std::move(entry);
   cacheCV_.notify_all();
 }
