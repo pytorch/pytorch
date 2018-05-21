@@ -10,12 +10,21 @@ class no_grad(object):
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`.
 
+    Also functions as a decorator.
+
+
     Example::
 
         >>> x = torch.tensor([1], requires_grad=True)
         >>> with torch.no_grad():
         ...   y = x * 2
         >>> y.requires_grad
+        False
+        >>> @torch.no_grad()
+        ... def doubler(x):
+        ...     return x * 2
+        >>> z = doubler(x)
+        >>> z.requires_grad
         False
     """
 
@@ -29,12 +38,22 @@ class no_grad(object):
         torch.set_grad_enabled(self.prev)
         return False
 
+    def __call__(self, func):
+        def decorate_no_grad(*args, **kwargs):
+            torch._C.set_grad_enabled(False)
+            result = func(*args, **kwargs)
+            torch._C.set_grad_enabled(self.prev)
+            return result
+        return decorate_no_grad
+
 
 class enable_grad(object):
     r"""Context-manager that enables gradient calculation.
 
     Enables gradient calculation inside a :class:`~no_grad` context. This has
     no effect outside of :class:`~no_grad`.
+
+    Also functions as a decorator.
 
 
     Example::
@@ -47,6 +66,13 @@ class enable_grad(object):
         True
         >>> y.backward()
         >>> x.grad
+        >>> @torch.enable_grad()
+        ... def doubler(x):
+        ...     return x * 2
+        >>> with torch.no_grad:
+        ...     z = doubler(x)
+        >>> z.requires_grad
+        True
 
     """
 
@@ -60,12 +86,20 @@ class enable_grad(object):
         torch.set_grad_enabled(self.prev)
         return False
 
+    def __call__(self, func):
+        def decorate_enable_grad(*args, **kwargs):
+            torch._C.set_grad_enabled(True)
+            result = func(*args, **kwargs)
+            torch._C.set_grad_enabled(self.prev)
+            return result
+        return decorate_enable_grad
+
 
 class set_grad_enabled(object):
     r"""Context-manager that sets gradient calculation to on or off.
 
     ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
-    It can be used as a context-manager or as a function.
+    It can be used as a context-manager, as a function, or as a decorator.
 
     Arguments:
         mode (bool): Flag whether to enable grad (``True``), or disable
@@ -81,11 +115,11 @@ class set_grad_enabled(object):
         ...   y = x * 2
         >>> y.requires_grad
         False
-        >>> set_grad_enabled(True)
+        >>> torch.set_grad_enabled(True)
         >>> y = x * 2
         >>> y.requires_grad
         True
-        >>> set_grad_enabled(False)
+        >>> torch.set_grad_enabled(False)
         >>> y = x * 2
         >>> y.requires_grad
         False
@@ -102,3 +136,11 @@ class set_grad_enabled(object):
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
         return False
+
+    def __call__(self, func):
+        def decorate_set_grad_enabled(*args, **kwargs):
+            result = func(*args, **kwargs)
+            torch._C.set_grad_enabled(self.prev)
+            return result
+        return decorate_set_grad_enabled
+
