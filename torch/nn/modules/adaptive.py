@@ -148,7 +148,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         batch_size = target.size(0)
 
         output = input.new_zeros(batch_size)
-        gather_inds = target.new_zeros(batch_size)
+        gather_inds = target.new_empty(batch_size)
 
         cutoff_values = [0] + self.cutoffs
         for i in range(len(cutoff_values) - 1):
@@ -166,7 +166,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
                 gather_inds.index_copy_(0, row_indices, target[target_mask])
 
             else:
-                relative_target = target[target_mask] - cutoff_values[i]
+                relative_target = target[target_mask] - low_idx
                 input_subset = input.index_select(0, row_indices)
 
                 cluster_output = self.tail[i - 1](input_subset)
@@ -184,8 +184,8 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             raise RuntimeError("Target values should be in [0, {}], "
                                "but values in range [{}, {}] "
                                "were found. ".format(self.n_classes - 1,
-                                                     int(target.min()),
-                                                     int(target.max())))
+                                                     target.min().item(),
+                                                     target.max().item()))
 
         head_output = self.head(input)
         head_logprob = log_softmax(head_output, dim=1)
@@ -212,18 +212,18 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         """
 
         with torch.no_grad():
-            out = input.new_zeros((input.size(0), self.n_classes))
+            out = input.new_empty((input.size(0), self.n_classes))
 
             head_output = self.head(input)
             head_logprob = log_softmax(head_output, dim=1)
 
-            out[:, :self.shortlist_size] += head_logprob[:, :self.shortlist_size]
+            out[:, :self.shortlist_size] = head_logprob[:, :self.shortlist_size]
 
             for i, (start_idx, stop_idx) in enumerate(zip(self.cutoffs, self.cutoffs[1:])):
                 cluster_output = self.tail[i](input)
                 cluster_logprob = log_softmax(cluster_output, dim=1)
                 output_logprob = cluster_logprob + head_logprob[:, self.shortlist_size + i].unsqueeze(1)
 
-                out[:, start_idx:stop_idx] += output_logprob
+                out[:, start_idx:stop_idx] = output_logprob
 
         return out
