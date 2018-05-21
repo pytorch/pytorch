@@ -83,6 +83,7 @@
 #     we will search for libraries in these paths
 
 
+from distutils import sysconfig
 from setuptools import setup, Extension, distutils, Command, find_packages
 import setuptools.command.build_ext
 import setuptools.command.install
@@ -100,6 +101,7 @@ import os
 import json
 import glob
 import importlib
+import errno
 
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
@@ -186,6 +188,8 @@ for key, value in cfg_vars.items():
 ################################################################################
 # Custom build commands
 ################################################################################
+
+cwd = os.path.dirname(os.path.abspath(__file__))
 
 dep_libs = [
     'nccl', 'ATen',
@@ -473,6 +477,40 @@ class build_ext(build_ext_parent):
 
             self.copy_file(export_lib, target_lib)
 
+    def build_extension(self, ext):
+        if ext.name == 'torch._C':
+            cmake_build_dir = os.path.join(self.build_lib, 'torch')
+            try:
+                os.makedirs(cmake_build_dir)
+            except OSError as e:
+                if e.errno != errno.EEXIST:
+                    raise
+
+            cmake_cmd = [
+                'cmake',
+                '-DNO_API=ON',
+                '-DFULL_BUILD=ON',
+                '-DATEN_PATH=' + os.path.join(cwd, 'aten'),
+                '-DATEN_BUILD_PATH=' + os.path.join(cwd, 'aten', 'build'),
+                '-DNANOPB_BUILD_PATH=' + lib_path,
+                '-DTORCH_DEP_LIB_PATH=' + lib_path,
+                '-DPYTHON_EXECUTABLE:FILEPATH={}'.format(sys.executable),
+                '-DPYTHON_INCLUDE_DIR={}'.format(sysconfig.get_python_inc()),
+                '-DWITH_NUMPY=ON',
+                '-DWITH_DISTRIBUTED=ON',
+                '-DNO_CUDA=' + ('OFF' if WITH_CUDA else 'ON'),
+                '-DWITH_NCCL=ON',
+                '-DCUDA_LIB_PATH=/usr/local/cuda/lib64'
+            ]
+            if WITH_NINJA:
+                cmake_cmd.extend(['-G', 'Ninja'])
+            cmake_cmd.append(os.path.join(cwd, 'tools', 'cpp_build', 'libtorch'))
+            subprocess.check_call(cmake_cmd, cwd=cmake_build_dir)
+            subprocess.check_call('ninja' if WITH_NINJA else 'make -j', shell=True, cwd=cmake_build_dir)
+        else:
+            # It's an old-style class in Python 2.7...
+            setuptools.command.build_ext.build_ext.build_extension(self, ext)
+
 
 class build(distutils.command.build.build):
     sub_commands = [
@@ -552,7 +590,6 @@ else:
     if check_env_flag('WERROR'):
         extra_compile_args.append('-Werror')
 
-cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 
