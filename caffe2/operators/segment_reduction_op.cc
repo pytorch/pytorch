@@ -54,6 +54,32 @@ REGISTER_CPU_OPERATOR(
         SumReducerDef::template ReducerGradient<float, CPUContext>,
         true /*GradientNeedIndices*/>);
 
+// registering 3 input version
+// gradient of SparseLengthsMean
+OPERATOR_SCHEMA(SparseLengthsIndicesInGradientMeanGradient)
+    .NumInputs(3)
+    .NumOutputs(1);
+REGISTER_CPU_OPERATOR(
+    SparseLengthsIndicesInGradientMeanGradient,
+    AbstractLengthsGradientOp<
+        float,
+        int,
+        CPUContext,
+        MeanReducerDef::template ReducerGradient<float, CPUContext>,
+        true /*GradientNeedIndices*/>);
+// gradient of LengthsMean
+OPERATOR_SCHEMA(LengthsIndicesInGradientMeanGradient)
+    .NumInputs(3)
+    .NumOutputs(1);
+REGISTER_CPU_OPERATOR(
+    LengthsIndicesInGradientMeanGradient,
+    AbstractLengthsGradientOp<
+        float,
+        int,
+        CPUContext,
+        MeanReducerDef::template ReducerGradient<float, CPUContext>,
+        true /*GradientNeedIndices*/>);
+
 namespace {
 
 template <typename Def>
@@ -183,7 +209,7 @@ REGISTER_SEGMENT_DEF(
 REGISTER_SEGMENT_DEF(
     LengthsMean,
     LengthsMeanGradient,
-    AbstractLengthsDef<float, int, CPUContext, MeanReducerDef, false>);
+    AbstractLengthsDef<float, int, CPUContext, MeanReducerDef, true>);
 
 REGISTER_SEGMENT_DEF(
     ReduceFrontWeightedSum,
@@ -242,7 +268,12 @@ REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
 REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
     SparseLengthsMean,
     SparseLengthsMeanGradient,
-    AbstractSparseLengthsDef<float, int, CPUContext, MeanReducerDef>);
+    AbstractSparseLengthsDef<
+        float,
+        int,
+        CPUContext,
+        MeanReducerDef,
+        true /*GradientNeedIndices*/>)
 
 // Auxiliary output gradients are currently implemented only for Lengths version
 #define REGISTER_GRADIENT_WITH_MAIN_INPUT(gradient_name, ...)        \

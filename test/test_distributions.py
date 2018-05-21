@@ -1877,7 +1877,9 @@ class TestDistributions(TestCase):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
-                samples = torch.tensor(dist.sample().data, requires_grad=True)
+                samples = torch.tensor(dist.sample().data)
+                if samples.dtype.is_floating_point:
+                    samples.requires_grad_()
                 try:
                     cdfs = dist.cdf(samples)
                     pdfs = dist.log_prob(samples).exp()

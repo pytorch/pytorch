@@ -336,6 +336,8 @@ struct PreprocessGraph {
 // which are annoying to handle since 99% of values are at::Tensor anyway
 // instead we create a fake subclass of TensorImpl that can be subclassed
 // to hold arbitrary things
+// Note: this is currently unused but will probably be useful in the future,
+// so we keep it around
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
@@ -365,75 +367,6 @@ public:
   }
 };
 
-
-// Dummy function is the last function that the autograd engine calls
-// when evaluating Eval nodes. Its input tensors are the outputs that the
-// Eval node needs to produce.
-// We interscept these values using an Autograd callback. So the function itself
-// never runs.
-struct DummyFunction : autograd::Function {
-  virtual autograd::variable_list apply(const autograd::variable_list& inputs) override {
-    throw std::logic_error("DummyFunction::apply() called, but it should be blocked by a callback returning false");
-  }
-};
-
-// An AutogradHandle holds the information needed to run an Autograd backward pass
-// after running a forward operator (such as PythonOp, CppOp, or for double-backwards another Eval Op)
-// The EvalOperation uses AutogradHandle to perform this operation.
-struct AutogradHandle : public ContainerTensor {
-
-  // The inputs of DummyFunction are the gradients of the forward passes
-  // inputs, and the _outputs_ of the run of the Autograd engine computing backward.
-  // there is one entry in this list for each forward input that requires
-  // gradients
-  std::shared_ptr<DummyFunction> forward_inputs;
-
-  // there is one entry in this list for each output of the forward pass
-  // that represents the location in the backwaard pass where the gradient
-  // of this output should be inserted at the beginning of the backward pass
-  autograd::edge_list forward_outputs;
-};
-
-// HandleBuilder is used to construct the correct Autograd Handle objects
-// for use in a future stage.
-// It is used even when the future stage does not require a handle since
-// it also performs the conversions between Tensor and Variable, which
-// behave differently depending on whether a future handle needs to be
-// created.
-struct HandleBuilder {
-  HandleBuilder(bool requires_handle) {
-    if(requires_handle) {
-      handle = new AutogradHandle();
-      handle->forward_inputs = std::make_shared<DummyFunction>();
-    }
-  }
-  autograd::Variable addInput(at::Tensor && input_, const VariableFlags & flags_) {
-    autograd::Variable& input = static_cast<autograd::Variable&>(input_);
-    if(handle && flags_.requires_grad) {
-      auto variable = autograd::make_variable(input.data(), /*requires_grad=*/false);
-      autograd::create_gradient_edge(variable, handle->forward_inputs);
-      return variable;
-    } else {
-      return autograd::make_variable(input.data(), /*requires_grad=*/false);
-    }
-  }
-  at::Tensor addOutput(const autograd::Variable & output) {
-    if(handle) {
-      handle->forward_outputs.push_back(output.gradient_edge());
-    }
-    return output.detach();
-  }
-  void writeTo(Stack & outputs) {
-    // outputs takes ownership of handle
-    if(handle) {
-      outputs.push_back(at::Tensor(handle, /*retain=*/false));
-      handle = nullptr;
-    }
-  }
-private:
-  AutogradHandle* handle = nullptr;
-};
-
 bool hasHandleOutput(Node * n) {
   if(n->outputs().size() == 0)
     return false;
@@ -444,8 +377,7 @@ bool hasHandleOutput(Node * n) {
 #ifndef NO_PYTHON
 Operation createPythonOperation(PythonOp* op) {
   py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
-  bool tracing_autograd_python_function = op->tracing_autograd_python_function;
-  bool has_handle = hasHandleOutput(op);
+  JIT_ASSERT(!hasHandleOutput(op));
   size_t num_inputs = 0;
   for(auto arg_type : op->cconv) {
     if(arg_type == 't')
@@ -457,100 +389,49 @@ Operation createPythonOperation(PythonOp* op) {
     size_t i = 0;
     size_t next_scalar = 0;
     size_t next_tensor = 0;
-    HandleBuilder builder(has_handle);
-    // Note: The first branch here should be considered deprecated and will
-    // probably be removed in the future.
-    //
-    // tracing_autograd_python_function indicates that we need to hook this
-    // PythonOp up to autograd with the HandleBuilder
-    if (tracing_autograd_python_function) {
-      for (auto arg_type : op->cconv) {
-        if (arg_type == 's') {
-          py_inputs[i] = py::reinterpret_borrow<py::object>(
-              op->scalar_args[next_scalar++].get());
-        } else if (arg_type == 't') {
-          py_inputs[i] = py::reinterpret_steal<py::object>(
-              THPVariable_Wrap(builder.addInput(
-                  std::move(peek(stack, next_tensor, num_inputs)),
-                  op->var_flags.at(next_tensor))));
-          next_tensor++;
-        }
-        i++;
+    for (auto arg_type : op->cconv) {
+      if (arg_type == 's') {
+        py_inputs[i] = py::reinterpret_borrow<py::object>(
+            op->scalar_args[next_scalar++].get());
+      } else if (arg_type == 't') {
+        auto var = peek(stack, next_tensor, num_inputs);
+        py_inputs[i] =
+            py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
+        next_tensor++;
       }
-      drop(stack, num_inputs);
-      py::object py_outputs(func(*py_inputs));
-      auto num_outputs = op->outputs().size();
-      auto addOutput = [&](py::handle entry) {
-        if (!THPVariable_Check(entry.ptr())) {
-          throw std::runtime_error(
-              "Function.apply returned a non-Variable output");
-        }
-        THPVariable* var = (THPVariable*)entry.ptr();
-        stack.push_back(builder.addOutput(var->cdata));
-      };
-      if (!PyTuple_Check(py_outputs.ptr())) {
-        if (num_outputs != 1) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        addOutput(py_outputs);
-      } else {
-        auto output_tuple = py::tuple(py_outputs);
-        if (output_tuple.size() != num_outputs) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        for (py::handle entry : output_tuple) {
-          addOutput(entry);
-        }
-      }
-      builder.writeTo(stack);
-      return 0;
-    } else {
-      for (auto arg_type : op->cconv) {
-        if (arg_type == 's') {
-          py_inputs[i] = py::reinterpret_borrow<py::object>(
-              op->scalar_args[next_scalar++].get());
-        } else if (arg_type == 't') {
-          auto var = peek(stack, next_tensor, num_inputs);
-          py_inputs[i] =
-              py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
-          next_tensor++;
-        }
-        i++;
-      }
-      drop(stack, num_inputs);
-      py::object py_outputs(func(*py_inputs));
-
-      auto num_outputs = op->outputs().size();
-      auto addOutput = [&](py::handle entry) {
-        if (!THPVariable_Check(entry.ptr())) {
-          throw std::runtime_error(
-              "Function application returned a non-Variable output");
-        }
-        THPVariable* var = (THPVariable*)entry.ptr();
-        auto cdata = var->cdata;
-        stack.push_back(std::move(cdata));
-      };
-
-      if (!PyTuple_Check(py_outputs.ptr())) {
-        if (num_outputs != 1) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        addOutput(py_outputs);
-      } else {
-        auto output_tuple = py::tuple(py_outputs);
-        if (output_tuple.size() != num_outputs) {
-          throw std::runtime_error(
-              "Function application returned the wrong number of outputs.");
-        }
-        for (py::handle entry : py::tuple(py_outputs)) {
-          addOutput(entry);
-        }
-      }
-      return 0;
+      i++;
     }
+    drop(stack, num_inputs);
+    py::object py_outputs(func(*py_inputs));
+
+    auto num_outputs = op->outputs().size();
+    auto addOutput = [&](py::handle entry) {
+      if (!THPVariable_Check(entry.ptr())) {
+        throw std::runtime_error(
+            "Function application returned a non-Variable output");
+      }
+      THPVariable* var = (THPVariable*)entry.ptr();
+      auto cdata = var->cdata;
+      stack.push_back(std::move(cdata));
+    };
+
+    if (!PyTuple_Check(py_outputs.ptr())) {
+      if (num_outputs != 1) {
+        throw std::runtime_error(
+            "Function.apply returned the wrong number of outputs.");
+      }
+      addOutput(py_outputs);
+    } else {
+      auto output_tuple = py::tuple(py_outputs);
+      if (output_tuple.size() != num_outputs) {
+        throw std::runtime_error(
+            "Function application returned the wrong number of outputs.");
+      }
+      for (py::handle entry : py::tuple(py_outputs)) {
+        addOutput(entry);
+      }
+    }
+    return 0;
   };
 }
 #else
@@ -564,55 +445,18 @@ Operation createPythonOperation(PythonOp* op) {
 
 Operation createCppOperation(CppOp* op) {
   std::shared_ptr<autograd::Function> func = op->fn;
-  bool has_handle = hasHandleOutput(op);
+  JIT_ASSERT(!hasHandleOutput(op));
   auto num_inputs = op->inputs().size();
   return [=](Stack & stack) {
-    HandleBuilder builder(has_handle);
     autograd::variable_list v_inputs;
     for(size_t i = 0; i < num_inputs; i++) {
-      v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
+      v_inputs.push_back(std::move(peek(stack, i, num_inputs)));
     }
     drop(stack, num_inputs);
     autograd::variable_list v_outputs = (*func)(v_inputs);
     for(auto & output : v_outputs) {
-      stack.push_back(builder.addOutput(output));
+      stack.push_back(output);
     }
-    builder.writeTo(stack);
-    return 0;
-  };
-}
-
-Operation createEvalOperation(CppOp * op) {
-  bool has_handle_output = hasHandleOutput(op);
-  auto num_inputs = op->inputs().size();
-  return [=](Stack & stack) {
-    at::Tensor handle_t = std::move(stack.back());
-    AutogradHandle * handle_in = dynamic_cast<AutogradHandle*>(handle_t.get());
-    JIT_ASSERT(handle_in);
-    HandleBuilder builder(has_handle_output);
-    auto& engine = torch::autograd::Engine::getDefaultEngine();
-    autograd::variable_list v_inputs;
-    for(size_t i = 0; i < num_inputs - 1; i++) {
-      v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
-    }
-    drop(stack, num_inputs);
-    // TODO: handle create_graph appropriately
-    bool create_graph = true;
-    // note: node handle_in->use_count() == 1 means that we are guarenteed that we have the only
-    // only copy of the handle. This might make it seem it is ok to pass keep_graph=False.
-    // However, it is possible for 'copied_next_fns' to grab functions used by _other_ handles,
-    // and these functions will be executed in this run. Since these other handles
-    // may still be alive, it is not safe to release the graph
-    // TODO: we could cache this list in AutogradHandle (it's read only)
-    autograd::edge_list output_edges;
-    const auto num_inputs = handle_in->forward_inputs->num_inputs();
-    output_edges.reserve(num_inputs);
-    for (uint32_t i = 0; i < num_inputs; ++i)
-      output_edges.emplace_back(handle_in->forward_inputs, i);
-    auto values = engine.execute(handle_in->forward_outputs, v_inputs, true, create_graph, output_edges);
-    for(auto & v : values)
-      stack.push_back(builder.addOutput(v));
-    builder.writeTo(stack);
     return 0;
   };
 }
@@ -623,11 +467,8 @@ Operation getOperation(jit::Node* node) {
   IR_IFM(node, PythonOp)
     return createPythonOperation(value);
   IR_ELSEIFM(CppOp)
-    if(dynamic_cast<autograd::Eval*>(value->fn.get())) {
-      return createEvalOperation(value);
-    } else {
-      return createCppOperation(value);
-    }
+    JIT_ASSERT(!dynamic_cast<autograd::Eval*>(value->fn.get()));
+    return createCppOperation(value);
   IR_ELSEIF(FusionGroup)
     auto fusion_fn = sharedFusionCompiler().getOrCompile(value);
     auto num_inputs = value->inputs().size();

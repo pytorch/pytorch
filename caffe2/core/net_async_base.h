@@ -13,6 +13,14 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/thread_pool.h"
 
+CAFFE2_DECLARE_int(caffe2_streams_per_gpu);
+CAFFE2_DECLARE_bool(caffe2_net_async_finish_chain);
+CAFFE2_DECLARE_int(caffe2_net_async_max_gpus);
+CAFFE2_DECLARE_int(caffe2_net_async_max_numa_nodes);
+CAFFE2_DECLARE_int(caffe2_net_async_cpu_pool_size);
+CAFFE2_DECLARE_bool(caffe2_net_async_check_stream_status);
+CAFFE2_DECLARE_bool(caffe2_net_async_use_single_pool);
+
 namespace caffe2 {
 
 class AsyncNetExecutorHelper;
@@ -62,6 +70,8 @@ class AsyncNetBase : public NetBase {
   void finalizeEvents();
 
   bool isStreamFree(int task_id, int stream_id) const;
+
+  virtual void reset();
 
   // Operator/task graph
   std::vector<OperatorBase*> operators_;
