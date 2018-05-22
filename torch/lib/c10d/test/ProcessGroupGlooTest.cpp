@@ -200,9 +200,14 @@ class CollectiveTest {
 
   void start(int rank, int size) {
     auto store = std::make_shared<::c10d::FileStore>(path_);
+
+    // Use tiny timeout to make this test run fast
+    ::c10d::ProcessGroupGloo::Options options;
+    options.timeout = std::chrono::milliseconds(50);
+
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
         new ::c10d::ProcessGroupGloo(store, rank, size));
-    pg_->initialize();
+    pg_->initialize(options);
   }
 
  protected:

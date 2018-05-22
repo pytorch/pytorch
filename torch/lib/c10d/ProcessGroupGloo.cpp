@@ -45,7 +45,7 @@ class GlooStore : public ::gloo::rendezvous::Store {
   GlooStore(const std::shared_ptr<::c10d::Store>& store) : store_(store) {}
 
   void set(const std::string& key, const std::vector<char>& value) override {
-    std::vector<unsigned char> tmp(value.begin(), value.end());
+    std::vector<uint8_t> tmp(value.begin(), value.end());
     store_->set(key, tmp);
   }
 
@@ -94,12 +94,16 @@ bool ProcessGroupGloo::WorkGloo::isCompleted() const {
   return completed_;
 }
 
+bool ProcessGroupGloo::WorkGloo::isSuccess() const {
+  return !ex_;
+}
+
 bool ProcessGroupGloo::WorkGloo::wait() {
   std::unique_lock<std::mutex> lock(m_);
   while (!completed_) {
     cv_.wait(lock);
   }
-  return !ex_;
+  return isSuccess();
 }
 
 const std::exception& ProcessGroupGloo::WorkGloo::exception() const {
@@ -141,12 +145,12 @@ ProcessGroupGloo::~ProcessGroupGloo() {
 
 void ProcessGroupGloo::initialize() {
   Options options;
-  options.timeout = std::chrono::milliseconds(100);
+  options.timeout = std::chrono::milliseconds(10000);
   options.threads = 2;
   initialize(options);
 }
 
-void ProcessGroupGloo::initialize(Options& options) {
+void ProcessGroupGloo::initialize(Options options) {
   auto& devices = options.devices;
   if (devices.empty()) {
     devices.push_back(::gloo::transport::tcp::CreateDevice("localhost"));
@@ -197,37 +201,35 @@ void ProcessGroupGloo::runLoop(void) {
     queue_.pop_front();
     queueConsumeCV_.notify_one();
 
-    auto& entry = std::get<0>(tuple);
-    auto& work = std::get<1>(tuple);
-
     // Continue holding onto the lock; this ensures that we serialize
     // creation of Gloo algorithm instances for the context associated
     // with this process group.
+    auto& entry = std::get<0>(tuple);
     if (!entry->algorithm) {
       createAlgorithm(*entry);
     }
 
-    runSingle(lock, std::move(tuple));
+    lock.unlock();
+    runSingle(std::move(tuple));
+    lock.lock();
   }
 }
 
-void ProcessGroupGloo::runSingle(std::unique_lock<std::mutex>& lock, WorkType tuple) {
-  lock.unlock();
-
+void ProcessGroupGloo::runSingle(WorkType tuple) {
   auto& entry = std::get<0>(tuple);
   auto& work = std::get<1>(tuple);
 
   try {
-    entry->run(entry);
+    entry->run();
     work->finish();
   } catch (const ::gloo::Exception& ex) {
     work->finishWithException(ex);
   }
 
-  // Return entry to cache
-  lock.lock();
-  cache_[entry->key] = std::move(entry);
-  cacheCV_.notify_all();
+  // Unblock anyone waiting for this algorithm entry
+  std::unique_lock<std::mutex> lock(entry->m);
+  entry->busy = false;
+  entry->cv.notify_one();
 }
 
 void ProcessGroupGloo::createAlgorithm(AlgorithmEntry& entry) {
@@ -274,16 +276,10 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 }
 
 // Constructs an AlgorithmEntry instance, except for the algorithm
-// itself. It allocates temporary input/output tensors, CUDA streams
-// (if applicable), etcetera. These are lazily allocated and reused
-// for collective calls with the same signature.
-//
-// They cannot be allocated asynchronously because the collective
-// functions need them before queueing their asynchronous work. For
-// example, to work with asynchronous CUDA code, the collective call
-// needs to issue an asynchronous memory copy, and a call to
-// cudaStreamWaitEvent to make it wait for the asynchronous execution
-// of the collective call to complete.
+// itself. It allocates the temporary input/output tensors necessary
+// to have a fixed address to pass to the Gloo algorithms. The
+// AlgorithmEntry is lazily allocated and reused for collective calls
+// with the same signature.
 //
 // Construction of the Gloo algorithm itself it delayed until a thread
 // picks up the work, because it performs I/O and can fail. Any I/O
@@ -297,45 +293,40 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   auto& srcSizes = key.srcSizes;
   entry->src.resize(srcSizes.size());
   for (int i = 0; i < srcSizes.size(); i++) {
-    entry->src[i] = at::zeros(*key.type, at::IntList(srcSizes[i]));
+    entry->src[i] = key.type->tensor(srcSizes[i]);
   }
 
   return entry;
 }
 
-EntryType ProcessGroupGloo::checkout(const AlgorithmKey& key) {
-  std::unique_lock<std::mutex> lock(m_);
-
-  // Initialize number of entries for this key.
-  if (cacheCreated_.count(key) == 0) {
-    cacheCreated_.emplace(key, 0);
-  }
+AlgorithmEntry* ProcessGroupGloo::checkout(const AlgorithmKey& key) {
+  auto it = cache_.find(key);
 
   // If there is no entry for this key yet, it must be the first time
   // we see and can create a new entry. Use hard limit of 1 instance
   // per key until we add support for a dynamic limit.
-  if (cacheCreated_[key] < 1) {
-    cacheCreated_[key]++;
-    return construct(key);
-  }
-
-  // Optionally wait for entry to be returned to the cache.
-  auto it = cache_.find(key);
-  while (it == cache_.end()) {
-    cacheCV_.wait(lock);
+  if (it == cache_.end()) {
+    cache_[key] = construct(key);
     it = cache_.find(key);
   }
 
-  // Grab entry from the cache and return it.
-  auto entry = std::move(it->second);
-  cache_.erase(key);
-  return entry;
+  auto& entry = it->second;
+
+  // Ensure entry is not in use
+  std::unique_lock<std::mutex> lock(entry->m);
+  while (entry->busy) {
+      entry->cv.wait(lock);
+  }
+
+  // Mark entry in use
+  entry->busy = true;
+  return entry.get();
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::enqueue(EntryType entry) {
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::enqueue(AlgorithmEntry* entry) {
   auto work = std::make_shared<WorkGloo>();
-  std::unique_lock<std::mutex> lock(m_);
-  queue_.push_back(std::make_tuple(std::move(entry), work));
+  std::unique_lock<std::mutex> lock(queueMutex_);
+  queue_.push_back(std::make_tuple(entry, work));
   queueProduceCV_.notify_one();
   return work;
 }
@@ -353,7 +344,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   key.srcRank = opts.rootRank;
   key.srcTensor = opts.rootTensor;
 
-  // Retrieve (create or wait for) cache entry
+  // Retrieve (create or wait for) pointer to cache entry
   auto entry = checkout(key);
 
   // Only copy root tensor
@@ -362,14 +353,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   }
 
   // Define how to run the algorithm and copy back results
-  entry->run = [tensors](EntryType& entry) mutable {
+  entry->run = [=]() mutable {
     entry->algorithm->run();
     for (int i = 0; i < tensors.size(); i++) {
       tensors[i].copy_(entry->src[i]);
     }
   };
 
-  return enqueue(std::move(entry));
+  return enqueue(entry);
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
@@ -393,14 +384,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   }
 
   // Define how to run the algorithm and copy back results
-  entry->run = [tensors](EntryType& entry) mutable {
+  entry->run = [=]() mutable {
     entry->algorithm->run();
     for (int i = 0; i < tensors.size(); i++) {
       tensors[i].copy_(entry->src[i]);
     }
   };
 
-  return enqueue(std::move(entry));
+  return enqueue(entry);
 }
 
 } // namespace c10d

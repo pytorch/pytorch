@@ -72,12 +72,19 @@ struct AlgorithmEntry {
   std::unique_ptr<::gloo::Algorithm> algorithm;
   std::vector<at::Tensor> src;
   std::vector<at::Tensor> dst;
-  std::function<void(std::unique_ptr<AlgorithmEntry>&)> run;
+  std::function<void()> run;
 
-  // Default constructor must be specified
+  // Used to synchronize between calling thread and worker threads.
+  std::mutex m;
+  std::condition_variable cv;
+  bool busy = false;
+
+  // Default constructor must be specified.
   AlgorithmEntry() = default;
 
-  // Must not be copyable
+  // Must not be copyable.
+  // This is implied by the std::unique_ptr member field, but serves
+  // as documentation in case it ever is removed.
   AlgorithmEntry& operator=(const AlgorithmEntry&) = delete;
   AlgorithmEntry(const AlgorithmEntry&) = delete;
 };
@@ -132,6 +139,10 @@ class ProcessGroupGloo : public ProcessGroup {
     // Checks if request has completed. Non-blocking operation.
     bool isCompleted() const override;
 
+    // Returns if the work completed successfully.
+    // If false, the exception function can be called to get details.
+    bool isSuccess() const override;
+
     // Waits until request completes. Blocking operation.
     // Returns false if the work completed with an exception.
     bool wait() override;
@@ -172,7 +183,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
   void initialize();
 
-  void initialize(Options& options);
+  void initialize(Options options);
 
   void destroy();
 
@@ -187,7 +198,7 @@ class ProcessGroupGloo : public ProcessGroup {
  protected:
   using KeyType = AlgorithmKey;
   using EntryType = std::unique_ptr<AlgorithmEntry>;
-  using WorkType = std::tuple<EntryType, std::shared_ptr<WorkGloo>>;
+  using WorkType = std::tuple<AlgorithmEntry*, std::shared_ptr<WorkGloo>>;
 
   std::unique_ptr<::gloo::rendezvous::Store> store_;
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
@@ -196,7 +207,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
   void runLoop(void);
 
-  void runSingle(std::unique_lock<std::mutex>& lock, WorkType work);
+  void runSingle(WorkType work);
 
   void createAlgorithm(AlgorithmEntry& entry);
 
@@ -206,18 +217,20 @@ class ProcessGroupGloo : public ProcessGroup {
   template <typename T>
   void createBroadcast(AlgorithmEntry& entry);
 
+  // Construct creates AlgorithmEntry for specified key.
   EntryType construct(const KeyType& key);
 
-  EntryType checkout(const KeyType& key);
+  // Checkout constructs new AlgorithmEntry or returns existing one.
+  AlgorithmEntry* checkout(const KeyType& key);
 
   std::mutex m_;
-  std::unordered_map<KeyType, int> cacheCreated_;
   std::unordered_map<KeyType, EntryType> cache_;
   std::condition_variable cacheCV_;
 
-  std::shared_ptr<Work> enqueue(EntryType entry);
+  std::shared_ptr<Work> enqueue(AlgorithmEntry* entry);
 
   std::deque<WorkType> queue_;
+  std::mutex queueMutex_;
   std::condition_variable queueProduceCV_;
   std::condition_variable queueConsumeCV_;
 };

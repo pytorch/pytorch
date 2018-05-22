@@ -30,28 +30,6 @@ namespace c10d {
 // process group to find each other (referred to as rendezvous from
 // hereon)
 //
-// Note on usage with CUDA tensors:
-//
-// Operations on CUDA tensors are assumed to be executed
-// asynchronously. Therefore they may have not yet executed when the
-// tensors are passed to a collective function. The collective
-// functions themselves should not block, so access to these tensors
-// must be done asynchronously, as well as signaling completion of the
-// collective function. We want to enable the following pattern:
-//
-//   z = at::sum(x, y);
-//   work = pg.allreduce(z)
-//   // Do something with z
-//
-// To do so, we execute the work associated with the collective
-// function on a separate CUDA stream. Upon completing, this stream
-// notifies the stream that produced the tensor in z
-// (cudaEventRecord). Before returning from the collective function,
-// it adds an asychronous wait for the internal stream
-// (cudaEventSynchronize). This way we retain the ability to write
-// sequential code that executes asynchronously, without requiring the
-// caller to perform explicit synchronization.
-//
 class ProcessGroup {
  public:
   class Work {
@@ -60,6 +38,10 @@ class ProcessGroup {
 
     // Checks if request has completed. Non-blocking operation.
     virtual bool isCompleted() const = 0;
+
+    // Returns if the work completed successfully.
+    // If false, the exception function can be called to get details.
+    virtual bool isSuccess() const = 0;
 
     // Waits until request completes. Blocking operation.
     // Returns false if the work completed with an exception.

@@ -14,19 +14,26 @@ if(NOT Gloo_FOUND)
   message(FATAL_ERROR "Gloo not found")
 endif()
 
-add_library(store Utils.cpp Store.cpp FileStore.cpp TCPStore.cpp)
-target_compile_options(store PUBLIC "-std=c++11")
-target_include_directories(store PUBLIC ${ATEN_INCLUDE_DIR})
+set(C10D_SRCS
+  Utils.cpp
+  Store.cpp
+  FileStore.cpp
+  TCPStore.cpp
+  ProcessGroup.cpp
+  )
 
-add_library(process_group ProcessGroup.cpp)
-target_compile_options(process_group PUBLIC "-std=c++11")
-target_include_directories(process_group PUBLIC ${ATEN_INCLUDE_DIR})
-target_link_libraries(process_group PUBLIC ${ATEN_LIBRARIES})
+add_library(c10d ${C10D_SRCS})
+target_compile_options(c10d PUBLIC "-std=c++11")
+target_include_directories(c10d PUBLIC ${ATEN_INCLUDE_DIR})
+target_link_libraries(c10d PUBLIC ${ATEN_LIBRARIES})
 
-add_library(process_group_gloo ProcessGroupGloo.cpp)
-target_compile_options(process_group_gloo PUBLIC "-std=c++11")
-target_include_directories(process_group PUBLIC ${GLOO_INCLUDE_DIR})
-target_link_libraries(process_group_gloo PUBLIC process_group ${GLOO_LIBRARIES})
+set(C10D_GLOO_SRCS
+  ProcessGroupGloo.cpp
+  )
+
+add_library(c10d_gloo ${C10D_GLOO_SRCS})
+target_include_directories(c10d_gloo PUBLIC ${GLOO_INCLUDE_DIR})
+target_link_libraries(c10d_gloo PUBLIC c10d ${GLOO_LIBRARIES})
 
 add_subdirectory(example)
 

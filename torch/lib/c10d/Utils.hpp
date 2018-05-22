@@ -72,6 +72,20 @@ MAKE_HASHABLE(::c10d::ReduceOp, static_cast<std::uint8_t>(t));
 
 namespace c10d {
 
+// Turns at::IntList into "(1, 2, 3, 4)".
+inline std::string toString(at::IntList l) {
+  std::stringstream ss;
+  ss << "(";
+  for (int i = 0; i < l.size(); i++) {
+    if (i > 0) {
+      ss << ", ";
+    }
+    ss << l[i];
+  }
+  ss << ")";
+  return ss.str();
+}
+
 inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure we have at least one tensor
   if (tensors.size() == 0) {
@@ -83,10 +97,16 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   auto sizes = tensors[0].sizes();
   for (auto i = 1; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
-      throw std::invalid_argument("argument contains mixed types");
+      const std::string expected = type.toString();
+      const std::string actual = tensors[i].type().toString();
+      throw std::invalid_argument(
+        "argument contains mixed types (" + expected + " and " + actual + ")");
     }
     if (!tensors[i].sizes().equals(sizes)) {
-      throw std::invalid_argument("argument contains mixed sizes");
+      const auto expected = toString(sizes);
+      const auto actual = toString(tensors[i].sizes());
+      throw std::invalid_argument(
+        "argument contains mixed sizes (" + expected + " and " + actual + ")");
     }
   }
 }
