@@ -22,15 +22,18 @@ namespace torch {
 namespace autograd {
 struct Function;
 } // namespace autograd
-namespace jit { namespace tracer {
+namespace jit {
+namespace tracer {
 // Has to be forward declared because tracer_state.h has a dependency on
 // variable.h.
 struct ValueTracingStateElem;
 using ValueTracingState = std::list<ValueTracingStateElem>;
-}} // namespace jit::tracer
+} // namespace tracer
+} // namespace jit
 } // namespace torch
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                                Variable
@@ -98,8 +101,10 @@ struct Variable : public at::Tensor {
 
   /// Creates a `Variable` that is a *view* of another (*base*) variable.
   /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
-  friend Variable
-  make_variable_view(Variable base, at::Tensor data, Edge gradient_edge);
+  friend Variable make_variable_view(
+      Variable base,
+      at::Tensor data,
+      Edge gradient_edge);
 
   /// Creates a `Variable` from the given `Tensor`. `requires_grad` should be
   /// set only for leaves, and determines whether the `Variable` will accumulate
@@ -340,6 +345,12 @@ struct Variable::Impl : public at::TensorImpl {
 
   /// Sets the type of the Variable.
   void set_data(Tensor new_data) override;
+
+  /// Computes the gradient of current tensor w.r.t. graph leaves.
+  void backward(
+      at::optional<Tensor> gradient,
+      bool keep_graph,
+      bool create_graph) override;
 
   // Make this field public so we can access it from `Variable`.
   using at::TensorImpl::type_;
@@ -601,4 +612,5 @@ inline Variable::Impl* Variable::get() const noexcept {
   TORCH_ASSERTM(defined(), "Called Variable::get() on an undefined Variable");
   return static_cast<Variable::Impl*>(pImpl);
 }
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

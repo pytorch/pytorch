@@ -16,7 +16,7 @@ TEST_CASE("misc") {
     auto y = model->forward({x})[0];
     Variable s = y.sum();
 
-    backward(s);
+    s.backward();
     REQUIRE(!model->parameters()["weight"].grad().defined());
   }
 
