@@ -13,7 +13,7 @@
 #include <curand_mtgp32_host.h>
 #include <curand_mtgp32dc_p_11213.h>
 
-#define MAX_NUM_BLOCKS 200 
+#define MAX_NUM_BLOCKS 200
 #define BLOCK_SIZE 256
 
 
@@ -170,6 +170,7 @@ __global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
 
 // NOTE: curand_uniform is (0, 1] and we want [a, b)
 GENERATE_KERNEL2(generate_uniform, float, float a, float b, float, curand_uniform, reverse_bounds(x) * (b-a) + a)
+GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, curand_uniform, reverse_bounds(x) * (b-a) + a)
 GENERATE_KERNEL2(generate_uniform, double, double a, double b, double, curand_uniform_double, reverse_bounds(x) * (b-a) + a)
 
 GENERATE_KERNEL2(generate_normal, float, double mean, double stdv, float, curand_normal, (x * stdv) + mean)
