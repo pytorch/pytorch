@@ -1806,7 +1806,7 @@ class TestAutograd(TestCase):
         @torch.set_grad_enabled(True)
         def doubler_with(x):
             return x * 2
-        
+
         torch.set_grad_enabled(False)
         y = doubler_with(x)
         self.assertTrue(y.requires_grad)
