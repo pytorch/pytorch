@@ -253,16 +253,18 @@ struct ModuleValue : public SugaredValue {
     if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
       return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
     std::shared_ptr<SugaredValue> result;
+    NamedValue namedvalue(loc, "", inputs.data()->value);
     for(py::handle module : py_module) {
+      if(TupleType* tt = inputs.data()->value->type()->cast<TupleType>()) {
+        throw ErrorReport(loc) << "expected 1 input for single module in _ConstModuleList, but " << std::to_string(tt->elements().size()) << " found";
+      }
       py::object obj = py::reinterpret_borrow<py::object>(module);
       auto r = py::cast<std::shared_ptr<Module>>(obj);
       auto m = std::make_shared<ModuleValue>(r);
       result = m->attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, 1);
       auto value = result->asValue(loc, caller);
-      if(TupleType* tt = value->type()->cast<TupleType>()) {
-        throw ErrorReport(loc) << "expected 1 output for single module in _ConstModuleList, but " << std::to_string(tt->elements().size()) << " found";
-      }
-      inputs = at::ArrayRef<NamedValue>(NamedValue(loc, "", value));
+      namedvalue = NamedValue(loc, "", value);
+      inputs = at::ArrayRef<NamedValue>(namedvalue);
     }
     return result;
   }

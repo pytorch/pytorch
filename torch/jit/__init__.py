@@ -711,7 +711,7 @@ class _ConstModuleList(ScriptModule):
     def forward(self, inputs):
         for m in list(self._modules.values()):
             if(isinstance(inputs, tuple)):
-                raise RuntimeError(("expected 1 output for single module in {} but {} found")
+                raise RuntimeError(("expected 1 input for single module in {} but {} found")
                                    .format(type(self), len(inputs)))
             inputs = m(inputs)
         return inputs
