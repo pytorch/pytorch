@@ -475,7 +475,7 @@ else()
   INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
   find_package(CUDA 5.5 REQUIRED)
   add_subdirectory(src/THC)
-  #add_subdirectory(src/THCUNN)
+  add_subdirectory(src/THCUNN)
   #add_subdirectory(src/THCS)
 endif()
 

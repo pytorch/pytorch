@@ -143,7 +143,7 @@ backends = ['CPU']
 if not options.no_cuda:
     backends.append('CUDA')
 
-densities = ['Dense', 'Sparse']
+densities = ['Dense']
 
 # scalar_name, c_type, accreal, th_scalar_type, is_floating_type
 scalar_types = [
@@ -242,7 +242,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['th_headers'] = [
             '#include <THC/THC.h>',
             '#include <THC/THCTensor.hpp>',
-            #'#include <THCUNN/THCUNN.h>',
+            '#include <THCUNN/THCUNN.h>',
             '#undef THNN_',
             '#undef THCIndexTensor_',
             #'#include <THCS/THCS.h>',
@@ -383,7 +383,7 @@ def generate_outputs():
                     for file in cwrap_files
                     for d in cwrap_parser.parse(file)]
 
-    declarations += nn_parse.run(nn_files)
+    #declarations += nn_parse.run(nn_files)
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
     for fname, env in generators.items():
