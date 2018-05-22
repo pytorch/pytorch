@@ -27,7 +27,7 @@ namespace jit { namespace tracer {
 // variable.h.
 struct ValueTracingStateElem;
 using ValueTracingState = std::list<ValueTracingStateElem>;
-}} // namespace jit::tracer
+} // namespace jit::tracer
 } // namespace torch
 
 namespace torch { namespace autograd {
@@ -609,4 +609,4 @@ inline Variable::Impl* Variable::get() const noexcept {
   TORCH_ASSERTM(defined(), "Called Variable::get() on an undefined Variable");
   return static_cast<Variable::Impl*>(pImpl);
 }
-}} // namespace torch::autograd
+} // namespace torch::autograd

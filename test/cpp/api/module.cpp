@@ -176,7 +176,7 @@ TEST_CASE("module/clone") {
 
   SECTION("Cloning preserves external references") {
     struct TestModel : public CloneableModule<TestModel> {
-      void reset() override {
+      void reset() {
         register_parameter(
             "weight",
             &TestModel::weight,
