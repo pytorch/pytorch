@@ -4980,14 +4980,18 @@ class TestNN(NNTestCase):
 
         # argmax in shortlist
         asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2.)
-        asfm.head.weight.data[:asfm.shortlist_size, :] += 100.
+        asfm.head.weight.data.abs_()
+        asfm.head.bias.data.abs_()
+        asfm.head.weight.data[asfm.shortlist_size:, :].zero_()
 
         out = asfm.predict(x)
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
 
         # argmax outside of shortlist
         asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2.)
-        asfm.head.weight.data[asfm.shortlist_size:, :] += 100.
+        asfm.head.weight.data.abs_()
+        asfm.head.bias.data.abs_()
+        asfm.head.weight.data[:asfm.shortlist_size, :].zero_()
 
         out = asfm.predict(x)
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
@@ -4997,11 +5001,11 @@ class TestNN(NNTestCase):
         asfm.head.weight.data.abs_()
         asfm.head.bias.data.abs_()
 
-        x[:32, :4].zero_()
-        x[32:, 4:].zero_()
+        x[:32, :asfm.shortlist_size].zero_()
+        x[32:, asfm.shortlist_size:].zero_()
 
-        asfm.head.weight.data[:asfm.shortlist_size, 4:].zero_()
-        asfm.head.weight.data[asfm.shortlist_size:, :4].zero_()
+        asfm.head.weight.data[:asfm.shortlist_size, asfm.shortlist_size:].zero_()
+        asfm.head.weight.data[asfm.shortlist_size:, :asfm.shortlist_size].zero_()
 
         out = asfm.predict(x)
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
