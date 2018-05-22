@@ -1,3 +1,6 @@
+#ifndef THNN_OMP_OVERHEAD_THRESHOLD
+#define THNN_OMP_OVERHEAD_THRESHOLD 5000
+#endif
 #ifndef TH_GENERIC_FILE
 #define TH_GENERIC_FILE "generic/Sqrt.c"
 #else
@@ -27,9 +30,30 @@ void THNN_(Sqrt_updateGradInput)(
       !THTensor_(isContiguous)(gradOutput) ||
       !THTensor_(isContiguous)(gradInput))
   {
-    TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, output,
-      *gradInput_data = (*output_data == 0.0) ? 0.0 : (0.5 * (*gradOutput_data / *output_data));
-    );
+    int serial_path = 0;
+#ifdef _OPENMP
+    int inOMP = omp_in_parallel();
+    if (inOMP) {
+      serial_path = 1;
+    } else {
+      int64_t gradInput_size = THTensor_(nElement)(gradInput);
+      int gradInput_contig = THTensor_(isContiguous)(gradInput);
+      int gradOutput_contig = THTensor_(isContiguous)(gradOutput);
+      int output_contig = THTensor_(isContiguous)(output);
+      TH_TENSOR_APPLY3_OMP(gradInput_size, gradInput_contig, gradOutput_contig, output_contig,
+        real, gradInput, real, gradOutput, real, output,
+        *gradInput_data = (*output_data == 0.0) ? 0.0 : (0.5 * (*gradOutput_data / *output_data));,
+        THNN_OMP_OVERHEAD_THRESHOLD
+      );
+    }
+#else
+    serial_path = 1;
+#endif
+    if (serial_path) {
+      TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, output,
+        *gradInput_data = (*output_data == 0.0) ? 0.0 : (0.5 * (*gradOutput_data / *output_data));
+      );
+    }
   }
   else
   {
@@ -48,4 +72,5 @@ void THNN_(Sqrt_updateGradInput)(
   }
 }
 
+#undef THNN_OMP_OVERHEAD_THRESHOLD
 #endif
