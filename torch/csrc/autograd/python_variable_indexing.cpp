@@ -75,6 +75,10 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
     // TODO: implement negative step
     throw ValueError("negative step not yet supported");
   }
+  if (start >= stop) {
+    // TODO: implement 0-length slicing
+    throw ValueError("slices of length 0 not yet supported");
+  }
   if (!ensure_view && start == 0 && stop == length && step == 1) {
     return self;
   }
