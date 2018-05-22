@@ -4975,6 +4975,37 @@ class TestNN(NNTestCase):
             self.assertEqual(out, logprob_out.gather(1, y.unsqueeze(1)).squeeze())
             self.assertEqual(loss, F.nll_loss(logprob_out, y))
 
+        # predict
+        x = torch.randn(64, 8).abs_()
+
+        # argmax in shortlist
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2.)
+        asfm.head.weight.data[:asfm.shortlist_size, :] += 100.
+
+        out = asfm.predict(x)
+        self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
+
+        # argmax outside of shortlist
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2.)
+        asfm.head.weight.data[asfm.shortlist_size:, :] += 100.
+
+        out = asfm.predict(x)
+        self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
+
+        # half of the argmax in shortlist, half in clusters
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2.)
+        asfm.head.weight.data.abs_()
+        asfm.head.bias.data.abs_()
+
+        x[:32, :4].zero_()
+        x[32:, 4:].zero_()
+
+        asfm.head.weight.data[:asfm.shortlist_size, 4:].zero_()
+        asfm.head.weight.data[asfm.shortlist_size:, :4].zero_()
+
+        out = asfm.predict(x)
+        self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
+
 
 class TestNNInit(TestCase):
     def setUp(self):
