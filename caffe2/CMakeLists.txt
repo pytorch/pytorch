@@ -3,9 +3,6 @@ include(../cmake/Codegen.cmake)
 
 # ---[ Declare source file lists
 
-# ---[ Shared build
-add_subdirectory(proto)
-
 # ---[ ATen build
 if(BUILD_ATEN)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
@@ -52,6 +49,7 @@ endif()
 if(BUILD_CAFFE2)
   # Note: the folders that are being commented out have not been properly
   # addressed yet.
+  add_subdirectory(proto)
   add_subdirectory(core)
   add_subdirectory(utils)
   add_subdirectory(contrib)
