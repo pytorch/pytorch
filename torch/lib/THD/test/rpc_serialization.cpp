@@ -18,7 +18,7 @@ constexpr ptrdiff_t STORAGE_SIZE = 10;
 constexpr size_t VEC_SIZE = 3;
 
 int main() {
-  THLongStorage *storage1 = THLongStorage_newWithSize(STORAGE_SIZE);
+  at::LongStorageImpl *storage1 = THLongStorage_newWithSize(STORAGE_SIZE);
   int64_t *data = storage1->data;
   for (int64_t i = 0; i < STORAGE_SIZE; i++)
     data[i] = i;
@@ -47,7 +47,7 @@ int main() {
   assert(arg4 == LLONG_MAX);
 
   assert(peekType(msg) == thpp::Type::LONG_STORAGE);
-  THLongStorage *storage2 = unpackTHLongStorage(msg);
+  at::LongStorageImpl *storage2 = unpackTHLongStorage(msg);
   assert(storage2->size == STORAGE_SIZE);
   for (int64_t i = 0; i < STORAGE_SIZE; i++)
     assert(storage2->data[i] == i);

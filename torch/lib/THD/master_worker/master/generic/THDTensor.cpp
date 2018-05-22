@@ -53,14 +53,14 @@ int64_t THDTensor_(stride)(const THDTensor *self, int dim) {
   return self->stride[dim];
 }
 
-THLongStorage *THDTensor_(newSizeOf)(THDTensor *self) {
-  THLongStorage *size = THLongStorage_newWithSize(self->nDimension);
+at::LongStorageImpl *THDTensor_(newSizeOf)(THDTensor *self) {
+  at::LongStorageImpl *size = THLongStorage_newWithSize(self->nDimension);
   THLongStorage_rawCopy(size, self->size);
   return size;
 }
 
-THLongStorage *THDTensor_(newStrideOf)(THDTensor *self) {
-  THLongStorage *stride = THLongStorage_newWithSize(self->nDimension);
+at::LongStorageImpl *THDTensor_(newStrideOf)(THDTensor *self) {
+  at::LongStorageImpl *stride = THLongStorage_newWithSize(self->nDimension);
   THLongStorage_rawCopy(stride, self->stride);
   return stride;
 }
@@ -110,7 +110,7 @@ THDTensor *THDTensor_(newWithTensor)(THDTensor *self) {
   return tensor;
 }
 
-THDTensor *THDTensor_(newWithSize)(THLongStorage *size, THLongStorage *stride) {
+THDTensor *THDTensor_(newWithSize)(at::LongStorageImpl *size, at::LongStorageImpl *stride) {
   THDTensor* tensor = THDTensor_(_alloc)();
   if (size && stride)
     THArgCheck(THLongStorage_size(size) == THLongStorage_size(stride), 4, "inconsistent size");
@@ -130,28 +130,28 @@ THDTensor *THDTensor_(newWithSize)(THLongStorage *size, THLongStorage *stride) {
 }
 
 THDTensor *THDTensor_(newWithSize1d)(int64_t size0) {
-  THLongStorage *size = THLongStorage_newWithSize1(size0);
+  at::LongStorageImpl *size = THLongStorage_newWithSize1(size0);
   THDTensor *tensor = THDTensor_(newWithSize)(size, NULL);
   THLongStorage_free(size);
   return tensor;
 }
 
 THDTensor *THDTensor_(newWithSize2d)(int64_t size0, int64_t size1) {
-  THLongStorage *size = THLongStorage_newWithSize2(size0, size1);
+  at::LongStorageImpl *size = THLongStorage_newWithSize2(size0, size1);
   THDTensor *tensor = THDTensor_(newWithSize)(size, NULL);
   THLongStorage_free(size);
   return tensor;
 }
 
 THDTensor *THDTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2) {
-  THLongStorage *size = THLongStorage_newWithSize3(size0, size1, size2);
+  at::LongStorageImpl *size = THLongStorage_newWithSize3(size0, size1, size2);
   THDTensor *tensor = THDTensor_(newWithSize)(size, NULL);
   THLongStorage_free(size);
   return tensor;
 }
 
 THDTensor *THDTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, int64_t size3) {
-  THLongStorage *size = THLongStorage_newWithSize4(size0, size1, size2, size3);
+  at::LongStorageImpl *size = THLongStorage_newWithSize4(size0, size1, size2, size3);
   THDTensor *tensor = THDTensor_(newWithSize)(size, NULL);
   THLongStorage_free(size);
   return tensor;
@@ -159,7 +159,7 @@ THDTensor *THDTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2
 
 
 THDTensor *THDTensor_(newWithStorage)(THDStorage *storage, ptrdiff_t storageOffset,
-                                      THLongStorage *size, THLongStorage *stride) {
+                                      at::LongStorageImpl *size, at::LongStorageImpl *stride) {
   THDTensor* tensor = THDTensor_(_alloc)();
   THDTensor_(_set)(
     tensor,
@@ -186,8 +186,8 @@ THDTensor *THDTensor_(newWithStorage)(THDStorage *storage, ptrdiff_t storageOffs
 
 THDTensor *THDTensor_(newWithStorage1d)(THDStorage *storage, ptrdiff_t storageOffset,
                                         int64_t size0, int64_t stride0) {
-  THLongStorage *size = THLongStorage_newWithSize1(size0);
-  THLongStorage *stride = THLongStorage_newWithSize1(stride0);
+  at::LongStorageImpl *size = THLongStorage_newWithSize1(size0);
+  at::LongStorageImpl *stride = THLongStorage_newWithSize1(stride0);
   THDTensor *tensor = THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
   THLongStorage_free(size);
   THLongStorage_free(stride);
@@ -196,8 +196,8 @@ THDTensor *THDTensor_(newWithStorage1d)(THDStorage *storage, ptrdiff_t storageOf
 
 THDTensor *THDTensor_(newWithStorage2d)(THDStorage *storage, ptrdiff_t storageOffset,
                                         int64_t size0, int64_t stride0, int64_t size1, int64_t stride1) {
-  THLongStorage *size = THLongStorage_newWithSize2(size0, size1);
-  THLongStorage *stride = THLongStorage_newWithSize2(stride0, stride1);
+  at::LongStorageImpl *size = THLongStorage_newWithSize2(size0, size1);
+  at::LongStorageImpl *stride = THLongStorage_newWithSize2(stride0, stride1);
   THDTensor *tensor = THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
   THLongStorage_free(size);
   THLongStorage_free(stride);
@@ -207,8 +207,8 @@ THDTensor *THDTensor_(newWithStorage2d)(THDStorage *storage, ptrdiff_t storageOf
 THDTensor *THDTensor_(newWithStorage3d)(THDStorage *storage, ptrdiff_t storageOffset,
                                         int64_t size0, int64_t stride0, int64_t size1, int64_t stride1,
                                         int64_t size2, int64_t stride2) {
-  THLongStorage *size = THLongStorage_newWithSize3(size0, size1, size2);
-  THLongStorage *stride = THLongStorage_newWithSize3(stride0, stride1, stride2);
+  at::LongStorageImpl *size = THLongStorage_newWithSize3(size0, size1, size2);
+  at::LongStorageImpl *stride = THLongStorage_newWithSize3(stride0, stride1, stride2);
   THDTensor *tensor = THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
   THLongStorage_free(size);
   THLongStorage_free(stride);
@@ -218,8 +218,8 @@ THDTensor *THDTensor_(newWithStorage3d)(THDStorage *storage, ptrdiff_t storageOf
 THDTensor *THDTensor_(newWithStorage4d)(THDStorage *storage, ptrdiff_t storageOffset,
                                         int64_t size0, int64_t stride0, int64_t size1, int64_t stride1,
                                         int64_t size2, int64_t stride2, int64_t size3, int64_t stride3) {
-  THLongStorage *size = THLongStorage_newWithSize4(size0, size1, size2, size3);
-  THLongStorage *stride = THLongStorage_newWithSize4(stride0, stride1, stride2, stride3);
+  at::LongStorageImpl *size = THLongStorage_newWithSize4(size0, size1, size2, size3);
+  at::LongStorageImpl *stride = THLongStorage_newWithSize4(stride0, stride1, stride2, stride3);
   THDTensor *tensor = THDTensor_(newWithStorage)(storage, storageOffset, size, stride);
   THLongStorage_free(size);
   THLongStorage_free(stride);
@@ -274,19 +274,19 @@ THDTensor *THDTensor_(newUnfold)(THDTensor *tensor, int dimension, int64_t size,
   return self;
 }
 
-THDTensor *THDTensor_(newView)(THDTensor *tensor, THLongStorage *size) {
+THDTensor *THDTensor_(newView)(THDTensor *tensor, at::LongStorageImpl *size) {
   // TODO
   THError("newView not implemented");
   return nullptr;
 }
 
-THDTensor *THDTensor_(newExpand)(THDTensor *tensor, THLongStorage *size) {
+THDTensor *THDTensor_(newExpand)(THDTensor *tensor, at::LongStorageImpl *size) {
   // TODO
   THError("newExpand not implemented");
   return nullptr;
 }
 
-void THDTensor_(resize)(THDTensor *tensor, THLongStorage *size, THLongStorage *stride) {
+void THDTensor_(resize)(THDTensor *tensor, at::LongStorageImpl *size, at::LongStorageImpl *stride) {
   THArgCheck(size != NULL, 2, "invalid size");
   if (stride)
     THArgCheck(THLongStorage_size(stride) == THLongStorage_size(size), 3, "invalid stride");
@@ -413,8 +413,8 @@ void THDTensor_(set)(THDTensor *self, THDTensor *src) {
 }
 
 void THDTensor_(setStorage)(THDTensor *self, THDStorage *storage,
-                            ptrdiff_t storageOffset, THLongStorage *size,
-                            THLongStorage *stride) {
+                            ptrdiff_t storageOffset, at::LongStorageImpl *size,
+                            at::LongStorageImpl *stride) {
   masterCommandChannel->sendMessage(
     packMessage(
       Functions::tensorSetStorage,
@@ -804,7 +804,7 @@ int THDTensor_(isSetTo)(const THDTensor *self, const THDTensor *src) {
   return 0;
 }
 
-int THDTensor_(isSize)(const THDTensor *self, const THLongStorage *dims) {
+int THDTensor_(isSize)(const THDTensor *self, const at::LongStorageImpl *dims) {
   if (self->nDimension != THLongStorage_size(dims))
     return 0;
   for (std::size_t d = 0; d < self->nDimension; d++)
@@ -1181,7 +1181,7 @@ void THDTensor_(sum)(THDTensor *self, THDTensor *src, int dimension, int keepdim
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
-  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  at::LongStorageImpl *dim = THDTensor_(newSizeOf)(src);
   THLongStorage_set(dim, dimension, 1);
   THDTensor_(resize)(self, dim, NULL);
   THLongStorage_free(dim);
@@ -1200,7 +1200,7 @@ void THDTensor_(prod)(THDTensor *self, THDTensor *src, int dimension, int keepdi
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
-  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  at::LongStorageImpl *dim = THDTensor_(newSizeOf)(src);
   THLongStorage_set(dim, dimension, 1);
   THDTensor_(resize)(self, dim, NULL);
   THLongStorage_free(dim);

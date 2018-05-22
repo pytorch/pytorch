@@ -457,9 +457,9 @@ include_directories(
   ${CMAKE_CURRENT_BINARY_DIR}/src/THC
   # sparse
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THS
-  #${CMAKE_CURRENT_SOURCE_DIR}/src/THCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/THCS
   ${CMAKE_CURRENT_BINARY_DIR}/src/THS
-  #${CMAKE_CURRENT_BINARY_DIR}/src/THCS
+  ${CMAKE_CURRENT_BINARY_DIR}/src/THCS
 
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_BINARY_DIR}/src)
@@ -476,7 +476,7 @@ else()
   find_package(CUDA 5.5 REQUIRED)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
-  #add_subdirectory(src/THCS)
+  add_subdirectory(src/THCS)
 endif()
 
 IF (NOT NO_CUDA)

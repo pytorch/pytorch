@@ -143,7 +143,7 @@ backends = ['CPU']
 if not options.no_cuda:
     backends.append('CUDA')
 
-densities = ['Dense']
+densities = ['Dense', 'Sparse']
 
 # scalar_name, c_type, accreal, th_scalar_type, is_floating_type
 scalar_types = [
@@ -245,8 +245,8 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             '#include <THCUNN/THCUNN.h>',
             '#undef THNN_',
             '#undef THCIndexTensor_',
-            #'#include <THCS/THCS.h>',
-            #'#include <THCS/THCSTensor.hpp>',
+            '#include <THCS/THCS.h>',
+            '#include <THCS/THCSTensor.hpp>',
             '#undef THCIndexTensor_',
         ]
         env['extra_cuda_headers'] = ['#include <ATen/cuda/CUDAHalf.cuh>']
@@ -268,8 +268,8 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             '#include <TH/THTensor.hpp>',
             '#include <THNN/THNN.h>',
             '#undef THNN_',
-            #'#include <THS/THS.h>',
-            #'#include <THS/THSTensor.hpp>',
+            '#include <THS/THS.h>',
+            '#include <THS/THSTensor.hpp>',
         ]
         env['extra_cuda_headers'] = []
         env['THType'] = scalar_name

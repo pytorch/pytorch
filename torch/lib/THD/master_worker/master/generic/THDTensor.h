@@ -26,8 +26,8 @@ THD_API ptrdiff_t THDTensor_(storageOffset)(const THDTensor *self);
 THD_API int THDTensor_(nDimension)(const THDTensor *self);
 THD_API int64_t THDTensor_(size)(const THDTensor *self, int dim);
 THD_API int64_t THDTensor_(stride)(const THDTensor *self, int dim);
-THD_API THLongStorage *THDTensor_(newSizeOf)(THDTensor *self);
-THD_API THLongStorage *THDTensor_(newStrideOf)(THDTensor *self);
+THD_API at::LongStorageImpl *THDTensor_(newSizeOf)(THDTensor *self);
+THD_API at::LongStorageImpl *THDTensor_(newStrideOf)(THDTensor *self);
 
 THD_API void THDTensor_(setFlag)(THDTensor *self, char flag);
 THD_API void THDTensor_(clearFlag)(THDTensor *self, char flag);
@@ -39,8 +39,8 @@ THD_API THDTensor *THDTensor_(newWithTensor)(THDTensor *tensor);
 /* stride might be NULL */
 THD_API THDTensor *THDTensor_(newWithStorage)(THDStorage *storage_,
                                               ptrdiff_t storageOffset_,
-                                              THLongStorage *size_,
-                                              THLongStorage *stride_);
+                                              at::LongStorageImpl *size_,
+                                              at::LongStorageImpl *stride_);
 THD_API THDTensor *THDTensor_(newWithStorage1d)(THDStorage *storage_,
                                                 ptrdiff_t storageOffset_,
                                                 int64_t size0_, int64_t stride0_);
@@ -61,8 +61,8 @@ THD_API THDTensor *THDTensor_(newWithStorage4d)(THDStorage *storage_,
                                                 int64_t size3_, int64_t stride3_);
 
 /* stride might be NULL */
-THD_API THDTensor *THDTensor_(newWithSize)(THLongStorage *size_,
-                                           THLongStorage *stride_);
+THD_API THDTensor *THDTensor_(newWithSize)(at::LongStorageImpl *size_,
+                                           at::LongStorageImpl *stride_);
 THD_API THDTensor *THDTensor_(newWithSize1d)(int64_t size0_);
 THD_API THDTensor *THDTensor_(newWithSize2d)(int64_t size0_, int64_t size1_);
 THD_API THDTensor *THDTensor_(newWithSize3d)(int64_t size0_, int64_t size1_,
@@ -80,11 +80,11 @@ THD_API THDTensor *THDTensor_(newTranspose)(THDTensor *tensor, int dimension1_,
                                             int dimension2_);
 THD_API THDTensor *THDTensor_(newUnfold)(THDTensor *tensor, int dimension_,
                                          int64_t size_, int64_t step_);
-THD_API THDTensor *THDTensor_(newView)(THDTensor *tensor, THLongStorage *size);
-THD_API THDTensor *THDTensor_(newExpand)(THDTensor *tensor, THLongStorage *size);
+THD_API THDTensor *THDTensor_(newView)(THDTensor *tensor, at::LongStorageImpl *size);
+THD_API THDTensor *THDTensor_(newExpand)(THDTensor *tensor, at::LongStorageImpl *size);
 
-THD_API void THDTensor_(resize)(THDTensor *tensor, THLongStorage *size,
-                                THLongStorage *stride);
+THD_API void THDTensor_(resize)(THDTensor *tensor, at::LongStorageImpl *size,
+                                at::LongStorageImpl *stride);
 THD_API void THDTensor_(resizeAs)(THDTensor *tensor, THDTensor *src);
 THD_API void THDTensor_(resize1d)(THDTensor *tensor, int64_t size0_);
 THD_API void THDTensor_(resize2d)(THDTensor *tensor, int64_t size0_, int64_t size1_);
@@ -98,8 +98,8 @@ THD_API void THDTensor_(resize5d)(THDTensor *tensor, int64_t size0_, int64_t siz
 THD_API void THDTensor_(set)(THDTensor *self, THDTensor *src);
 THD_API void THDTensor_(setStorage)(THDTensor *self, THDStorage *storage_,
                                     ptrdiff_t storageOffset_,
-                                    THLongStorage *size_,
-                                    THLongStorage *stride_);
+                                    at::LongStorageImpl *size_,
+                                    at::LongStorageImpl *stride_);
 THD_API void THDTensor_(setStorage1d)(THDTensor *self, THDStorage *storage_,
                                       ptrdiff_t storageOffset_,
                                       int64_t size0_, int64_t stride0_);
@@ -136,7 +136,7 @@ TH_API void THDTensor_(unsqueeze1d)(THDTensor *self, THDTensor *src, int dimensi
 THD_API int THDTensor_(isContiguous)(const THDTensor *self);
 THD_API int THDTensor_(isSameSizeAs)(const THDTensor *self, const THDTensor *src);
 THD_API int THDTensor_(isSetTo)(const THDTensor *self, const THDTensor *src);
-THD_API int THDTensor_(isSize)(const THDTensor *self, const THLongStorage *dims);
+THD_API int THDTensor_(isSize)(const THDTensor *self, const at::LongStorageImpl *dims);
 THD_API ptrdiff_t THDTensor_(nElement)(const THDTensor *self);
 
 THD_API void THDTensor_(retain)(THDTensor *self);
