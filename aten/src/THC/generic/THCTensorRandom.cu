@@ -380,14 +380,14 @@ THC_API void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor 
           );
 }
 
-THC_API void THCTensor_(rand)(THCState *state, THCTensor *r_, THLongStorage *size)
+THC_API void THCTensor_(rand)(THCState *state, THCTensor *r_, at::LongStorageImpl *size)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THCTensor_(resize)(state, r_, size, NULL);
   THCTensor_(uniform)(state, r_, 0, 1);
 }
 
-void THCTensor_(randn)(THCState *state, THCTensor *r_, THLongStorage *size)
+void THCTensor_(randn)(THCState *state, THCTensor *r_, at::LongStorageImpl *size)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THCTensor_(resize)(state, r_, size, NULL);

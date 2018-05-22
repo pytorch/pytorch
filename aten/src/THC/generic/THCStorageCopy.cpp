@@ -2,25 +2,25 @@
 #define THC_GENERIC_FILE "generic/THCStorageCopy.cpp"
 #else
 
-void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *src)
+void THCStorage_(copyCPU)(THCState *state, at::CUDAStorageImpl *self, at::StorageImpl *src)
 {
-  THArgCheck(self->size == src->size, 2, "size does not match");
+  THArgCheck(self->size() == src->size(), 2, "size does not match");
   cudaStream_t stream = THCState_getCurrentStream(state);
-  THCudaCheck(cudaMemcpyAsync(self->data,
-                              src->data,
-                              self->size * sizeof(real),
+  THCudaCheck(cudaMemcpyAsync(self->data<real>(),
+                              src->data<real>(),
+                              self->size() * sizeof(real),
                               cudaMemcpyHostToDevice,
                               stream));
   THCudaCheck(cudaStreamSynchronize(stream));
 }
 
 #define TH_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC)                          \
-void THCStorage_(copy##TYPEC)(THCState *state, THCStorage *self, struct TH##TYPEC##Storage *src)  \
+void THCStorage_(copy##TYPEC)(THCState *state, at::CUDAStorageImpl *self, at::TYPEC##StorageImpl *src)  \
 {                                                                      \
   THCTensor* selfTensor =                                              \
-      THCTensor_(newWithStorage1d)(state, self, 0, self->size, 1);     \
+      THCTensor_(newWithStorage1d)(state, self, 0, self->size(), 1);   \
   struct TH##TYPEC##Tensor* srcTensor =                                \
-      TH##TYPEC##Tensor_newWithStorage1d(src, 0, src->size, 1);        \
+      TH##TYPEC##Tensor_newWithStorage1d(src, 0, src->size(), 1);      \
   THCTensor_(copy##TYPEC)(state, selfTensor, srcTensor);               \
   TH##TYPEC##Tensor_free(srcTensor);                                   \
   THCTensor_(free)(state, selfTensor);                                 \
@@ -34,25 +34,25 @@ TH_CUDA_STORAGE_IMPLEMENT_COPY(Float)
 TH_CUDA_STORAGE_IMPLEMENT_COPY(Half)
 TH_CUDA_STORAGE_IMPLEMENT_COPY(Double)
 
-void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *src)
+void THStorage_(copyCuda)(THCState *state, at::StorageImpl *self, at::CUDAStorageImpl *src)
 {
-  THArgCheck(self->size == src->size, 2, "size does not match");
+  THArgCheck(self->size() == src->size(), 2, "size does not match");
   cudaStream_t stream = THCState_getCurrentStream(state);
-  THCudaCheck(cudaMemcpyAsync(self->data,
-                              src->data,
-                              self->size * sizeof(real),
+  THCudaCheck(cudaMemcpyAsync(self->data<real>(),
+                              src->data<real>(),
+                              self->size() * sizeof(real),
                               cudaMemcpyDeviceToHost,
                               stream));
   THCudaCheck(cudaStreamSynchronize(stream));
 }
 
 #define TH_CUDA_STORAGE_IMPLEMENT_COPYTO(TYPEC)                             \
-void TH_CONCAT_4(TH,TYPEC,Storage_copyCuda,Real)(THCState *state, TH##TYPEC##Storage *self, struct THCStorage *src) \
+void TH_CONCAT_4(TH,TYPEC,Storage_copyCuda,Real)(THCState *state, at::TYPEC##StorageImpl *self, at::CUDAStorageImpl *src) \
 {                                                                           \
   TH##TYPEC##Tensor* selfTensor =                                           \
-      TH##TYPEC##Tensor_newWithStorage1d(self, 0, self->size, 1);           \
+      TH##TYPEC##Tensor_newWithStorage1d(self, 0, self->size(), 1);         \
   struct THCTensor* srcTensor =                                             \
-      THCTensor_(newWithStorage1d)(state, src, 0, src->size, 1);            \
+      THCTensor_(newWithStorage1d)(state, src, 0, src->size(), 1);          \
   TH_CONCAT_4(TH,TYPEC,Tensor_copyCuda,Real)(state, selfTensor, srcTensor); \
   THCTensor_(free)(state, srcTensor);                                       \
   TH##TYPEC##Tensor_free(selfTensor);                                   \

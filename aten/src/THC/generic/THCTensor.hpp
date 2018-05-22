@@ -8,7 +8,7 @@ typedef struct THCTensor
     int64_t *stride;
     int nDimension;
 
-    THCStorage *storage;
+    at::CUDAStorageImpl *storage;
     ptrdiff_t storageOffset;
     std::atomic<int> refcount;
 

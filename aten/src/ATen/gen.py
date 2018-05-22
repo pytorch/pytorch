@@ -242,11 +242,11 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['th_headers'] = [
             '#include <THC/THC.h>',
             '#include <THC/THCTensor.hpp>',
-            '#include <THCUNN/THCUNN.h>',
+            #'#include <THCUNN/THCUNN.h>',
             '#undef THNN_',
             '#undef THCIndexTensor_',
-            '#include <THCS/THCS.h>',
-            '#include <THCS/THCSTensor.hpp>',
+            #'#include <THCS/THCS.h>',
+            #'#include <THCS/THCSTensor.hpp>',
             '#undef THCIndexTensor_',
         ]
         env['extra_cuda_headers'] = ['#include <ATen/cuda/CUDAHalf.cuh>']
@@ -260,7 +260,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['THIndexTensor'] = 'THCudaLongTensor'
         env['state'] = ['context->thc_state']
         env['isCUDA'] = 'true'
-        env['storage_device'] = 'return storage->device;'
+        env['storage_device'] = 'return storage->device();'
         env['Generator'] = 'CUDAGenerator'
     else:
         env['th_headers'] = [
@@ -268,8 +268,8 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             '#include <TH/THTensor.hpp>',
             '#include <THNN/THNN.h>',
             '#undef THNN_',
-            '#include <THS/THS.h>',
-            '#include <THS/THSTensor.hpp>',
+            #'#include <THS/THS.h>',
+            #'#include <THS/THSTensor.hpp>',
         ]
         env['extra_cuda_headers'] = []
         env['THType'] = scalar_name

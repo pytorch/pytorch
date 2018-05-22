@@ -53,6 +53,10 @@ TH_API real THStorage_(get)(const at::StorageImpl *, ptrdiff_t);
 
 TH_API at::StorageImpl * THStorage_(new)(void);
 TH_API at::StorageImpl * THStorage_(newWithSize)(ptrdiff_t size);
+TH_API at::StorageImpl * THStorage_(newWithSize1)(real);
+TH_API at::StorageImpl * THStorage_(newWithSize2)(real, real);	
+TH_API at::StorageImpl * THStorage_(newWithSize3)(real, real, real);	
+TH_API at::StorageImpl * THStorage_(newWithSize4)(real, real, real, real);
 TH_API at::StorageImpl * THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags);
 
 /* takes ownership of data */

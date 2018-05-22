@@ -39,7 +39,7 @@ protected:
 
 public:
   StorageImpl(void* data, int64_t size, char flag, THAllocator *allocator, void *allocatorContext)
-    : data_(data), size_(size), flag_(flag), allocator_(allocator), allocatorContext_(allocatorContext) {}
+    : data_(data), size_(size), flag_(flag), allocator_(allocator), allocatorContext_(allocatorContext), refcount(1) {}
 
   StorageImpl(const StorageImpl&) = delete;
   StorageImpl& operator=(const StorageImpl&) = delete;

@@ -14,7 +14,11 @@ struct Allocator;
 struct ${Storage} final : public Storage {
 public:
   explicit ${Storage}(Context* context);
+#if ${isCUDA}
+  ${Storage}(Context* context, CUDAStorageImpl *wrapped);
+#else
   ${Storage}(Context* context, StorageImpl *wrapped);
+#endif
   ${Storage}(Context* context, std::size_t size);
   ${Storage}(Context* context, std::size_t size, std::unique_ptr<Allocator> allocator);
   ${Storage}(Context* context,
@@ -40,7 +44,7 @@ public:
   virtual void clear_flag(char flag) override;
 
   virtual Type& type() const override;
-  virtual int getDevice() const override;
+  virtual int64_t getDevice() const override;
   virtual const char * toString() const override;
 
   static const char * typeString();
@@ -48,7 +52,11 @@ public:
 
 protected:
   friend struct ${Type};
+  #if ${isCUDA}
+  CUDAStorageImpl *storage;
+  #else
   StorageImpl *storage;
+  #endif
   Context* context;
 };
 

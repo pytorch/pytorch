@@ -36,7 +36,7 @@ THCTensor_(zero)(THCState *state, THCTensor *self_)
 }
 
 THC_API void
-THCTensor_(zeros)(THCState *state, THCTensor *r_, THLongStorage *size)
+THCTensor_(zeros)(THCState *state, THCTensor *r_, at::LongStorageImpl *size)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THCTensor_(resize)(state, r_, size, NULL);
@@ -52,7 +52,7 @@ THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
 }
 
 THC_API void
-THCTensor_(ones)(THCState *state, THCTensor *r_, THLongStorage *size)
+THCTensor_(ones)(THCState *state, THCTensor *r_, at::LongStorageImpl *size)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THCTensor_(resize)(state, r_, size, NULL);
@@ -68,7 +68,7 @@ THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
 }
 
 THC_API void
-THCTensor_(reshape)(THCState *state, THCTensor *r_, THCTensor *t, THLongStorage *size)
+THCTensor_(reshape)(THCState *state, THCTensor *r_, THCTensor *t, at::LongStorageImpl *size)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, t));
   THCTensor_(resize)(state, r_, size, NULL);
@@ -115,7 +115,7 @@ inline void THCTensor_(check_shape_except_dim)(THCState *state,
 void THCTensor_(catArray)(THCState *state, THCTensor *result,
 			  THCTensor **inputs, int numInputs, int dimension)
 {
-  THLongStorage *size;
+  at::LongStorageImpl *size;
   int i, j, cohortMax;
   int64_t offset;
   bool hasEmptyInput = false;
@@ -174,7 +174,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     if (dim == cat_dimension) {
       result_dim_size = cat_dim_size;
     }
-    size->data[dim] = result_dim_size;
+    size->data<int64_t>()[dim] = result_dim_size;
   }
   THCTensor_(resize)(state, result, size, NULL);
   THLongStorage_free(size);

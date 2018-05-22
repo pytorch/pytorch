@@ -256,7 +256,7 @@ THC_API int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_
   // 1 if the two tensors are equal at a position, otherwise 0. If the minimum value
   // in this buffer is 1, the two tensors are equal, otherwise they are not
 
-  THLongStorage *size = THCTensor_(newSizeOf)(state, self_);
+  at::LongStorageImpl *size = THCTensor_(newSizeOf)(state, self_);
   THCudaByteTensor *buf = THCudaByteTensor_newWithSize(state, size, NULL);
 
   if (!THC_pointwiseApply3(state, buf, self_, src_, TensorEQOp<real, unsigned char>())) {

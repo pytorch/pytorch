@@ -12,7 +12,11 @@ namespace at {
 ${Storage}::${Storage}(Context* context):
     storage(${THStorage}_new(${state})), context(context) {}
 
+#if ${isCUDA}
+${Storage}::${Storage}(Context* context, CUDAStorageImpl* storage):
+#else
 ${Storage}::${Storage}(Context* context, StorageImpl* storage):
+#endif
     storage(storage), context(context) {}
 
 ${Storage}::${Storage}(Context* context, std::size_t storage_size)
@@ -174,7 +178,7 @@ void ${Storage}::clear_flag(char flag) {
   ${THStorage}_clearFlag(${state,} storage, flag);
 }
 
-int ${Storage}::getDevice() const {
+int64_t ${Storage}::getDevice() const {
   ${storage_device} //storage->device;
 }
 

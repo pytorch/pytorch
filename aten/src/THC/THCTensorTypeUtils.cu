@@ -39,7 +39,7 @@ TensorUtils<TENSOR_TYPE>::newContiguous(THCState* state,                \
   return TENSOR_TYPE##_newContiguous(state, t);                         \
 }                                                                       \
                                                                         \
-THLongStorage*                                                          \
+at::LongStorageImpl*                                                          \
 TensorUtils<TENSOR_TYPE>::newSizeOf(THCState* state,                    \
                                     TENSOR_TYPE* t) {                   \
   return TENSOR_TYPE##_newSizeOf(state, t);                             \
@@ -67,8 +67,8 @@ TensorUtils<TENSOR_TYPE>::freeCopyTo(THCState* state,                   \
 void                                                                    \
 TensorUtils<TENSOR_TYPE>::resize(THCState* state,                       \
                                  TENSOR_TYPE* out,                      \
-                                 THLongStorage* sizes,                  \
-                                 THLongStorage* strides) {              \
+                                 at::LongStorageImpl* sizes,                  \
+                                 at::LongStorageImpl* strides) {              \
   TENSOR_TYPE##_resize(state, out, sizes, strides);                     \
 }                                                                       \
                                                                         \

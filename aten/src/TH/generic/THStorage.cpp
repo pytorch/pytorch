@@ -49,6 +49,40 @@ at::StorageImpl * THStorage_(newWithMapping)(const char *filename, ptrdiff_t siz
   return new at::StorageImpl(data, size, flag, &THMapAllocator, ctx);
 }
 
+at::StorageImpl * THStorage_(newWithSize1)(real data0)
+{
+  at::StorageImpl *self = THStorage_(newWithSize)(1);
+  self->data<real>()[0] = data0;
+  return self;
+}
+
+at::StorageImpl * THStorage_(newWithSize2)(real data0, real data1)
+{
+  at::StorageImpl *self = THStorage_(newWithSize)(2);
+  self->data<real>()[0] = data0;
+  self->data<real>()[1] = data1;
+  return self;
+}
+
+at::StorageImpl * THStorage_(newWithSize3)(real data0, real data1, real data2)
+{
+  at::StorageImpl *self = THStorage_(newWithSize)(3);
+  self->data<real>()[0] = data0;
+  self->data<real>()[1] = data1;
+  self->data<real>()[2] = data2;
+  return self;
+}
+
+at::StorageImpl * THStorage_(newWithSize4)(real data0, real data1, real data2, real data3)
+{
+  at::StorageImpl *self = THStorage_(newWithSize)(4);
+  self->data<real>()[0] = data0;
+  self->data<real>()[1] = data1;
+  self->data<real>()[2] = data2;
+  self->data<real>()[3] = data3;
+  return self;
+}
+
 void THStorage_(setFlag)(at::StorageImpl *storage, const char flag)
 {
   storage->flag() |= flag;

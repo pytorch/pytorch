@@ -80,7 +80,7 @@ THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
 
   TensorUtils<THCTensor>::preserveReduceDimSemantics(
       state, self_, THCTensor_(nDimension)(state, src), dimension, keepdim);
-  THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
+  at::LongStorageImpl *dim = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(dim, dimension, 1);
   THCTensor_(resize)(state, self_, dim, NULL);
   THLongStorage_free(dim);
@@ -109,7 +109,7 @@ THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
 
   TensorUtils<THCTensor>::preserveReduceDimSemantics(
       state, self_, THCTensor_(nDimension)(state, src), dimension, keepdim);
-  THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
+  at::LongStorageImpl *dim = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(dim, dimension, 1);
   THCTensor_(resize)(state, self_, dim, NULL);
   THLongStorage_free(dim);
@@ -359,7 +359,7 @@ THCTensor_(medianall)(THCState *state, THCTensor *self) {
   nelem = THCTensor_(nElement)(state, self);
   k = (nelem-1) >> 1;
 
-  THLongStorage *size = THLongStorage_newWithSize1(nelem);
+  at::LongStorageImpl *size = THLongStorage_newWithSize1(nelem);
   THCTensor *view = THCTensor_(newView)(state, self, size);
 
   THLongStorage_free(size);

@@ -2,19 +2,19 @@
 #define THC_GENERIC_FILE "generic/THCStorageCopy.cu"
 #else
 
-void THCStorage_(rawCopy)(THCState *state, THCStorage *self, real *src)
+void THCStorage_(rawCopy)(THCState *state, at::CUDAStorageImpl *self, real *src)
 {
-  THCudaCheck(cudaMemcpyAsync(self->data, src, self->size * sizeof(real), cudaMemcpyDeviceToDevice, THCState_getCurrentStream(state)));
+  THCudaCheck(cudaMemcpyAsync(self->data<real>(), src, self->size() * sizeof(real), cudaMemcpyDeviceToDevice, THCState_getCurrentStream(state)));
 }
 
 // conversions are delegated to THCTensor implementation
 #define THC_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC,TYPECUDA)                                 \
-void THCStorage_(copyCuda##TYPEC)(THCState *state, THCStorage *self, struct THCuda##TYPECUDA##Storage *src)  \
+void THCStorage_(copyCuda##TYPEC)(THCState *state, at::CUDAStorageImpl *self, at::CUDA##TYPECUDA##StorageImpl *src)  \
 {                                                                                       \
-  THArgCheck(self->size == src->size, 2, "size does not match");                        \
-  THCTensor* selfTensor = THCTensor_(newWithStorage1d)(state, self, 0, self->size, 1);  \
+  THArgCheck(self->size() == src->size(), 2, "size does not match");                        \
+  THCTensor* selfTensor = THCTensor_(newWithStorage1d)(state, self, 0, self->size(), 1);  \
   struct THCuda##TYPECUDA##Tensor* srcTensor =                                          \
-      THCuda##TYPECUDA##Tensor_newWithStorage1d(state, src, 0, src->size, 1);           \
+      THCuda##TYPECUDA##Tensor_newWithStorage1d(state, src, 0, src->size(), 1);         \
   THCTensor_(copyCuda##TYPEC)(state, selfTensor, srcTensor);                            \
   THCuda##TYPECUDA##Tensor_free(state, srcTensor);                                      \
   THCTensor_(free)(state, selfTensor);                                                  \
@@ -33,12 +33,12 @@ THC_CUDA_STORAGE_IMPLEMENT_COPY(Half,Half)
 
 #undef THC_CUDA_STORAGE_IMPLEMENT_COPY
 
-void THCStorage_(copyCuda)(THCState *state, THCStorage *self, THCStorage *src)
+void THCStorage_(copyCuda)(THCState *state, at::CUDAStorageImpl *self, at::CUDAStorageImpl *src)
 {
   THCStorage_(TH_CONCAT_2(copyCuda, Real))(state, self, src);
 }
 
-void THCStorage_(copy)(THCState *state, THCStorage *self, THCStorage *src)
+void THCStorage_(copy)(THCState *state, at::CUDAStorageImpl *self, at::CUDAStorageImpl *src)
 {
   THCStorage_(copyCuda)(state, self, src);
 }

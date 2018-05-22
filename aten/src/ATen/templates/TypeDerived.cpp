@@ -63,8 +63,13 @@ Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
 }
 std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)
+#if ${isCUDA}
+    ${THStorage}_retain(${state,} (CUDAStorageImpl*) th_pointer);
+  return std::unique_ptr<Storage>(new ${Storage}(context, (CUDAStorageImpl*) th_pointer));
+#else
     ${THStorage}_retain(${state,} (StorageImpl*) th_pointer);
   return std::unique_ptr<Storage>(new ${Storage}(context, (StorageImpl*) th_pointer));
+#endif
 }
 std::unique_ptr<Generator> ${Type}::generator() const {
   return std::unique_ptr<Generator>(new ${Generator}(context));

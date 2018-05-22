@@ -22,7 +22,7 @@ THC_API void THCTensor_(topk)(THCState* state,
 
   // Build the output size, which is the dim being selected set to
   // size k
-  THLongStorage* topKSize = THCTensor_(newSizeOf)(state, input);
+  at::LongStorageImpl* topKSize = THCTensor_(newSizeOf)(state, input);
   THLongStorage_set(topKSize, dim, k);
   THCTensor_(resize)(state, topK, topKSize, NULL);
   THCudaLongTensor_resize(state, indices, topKSize, NULL);
