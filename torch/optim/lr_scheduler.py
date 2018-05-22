@@ -23,7 +23,7 @@ class _LRScheduler(object):
         self.last_epoch = last_epoch
 
     def __getstate__(self):
-        return self.state_dict()
+        return self.__dict__
 
     def __setstate__(self, state):
         self.load_state_dict(state)
