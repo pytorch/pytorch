@@ -194,6 +194,24 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         return _ASMoutput(output, loss)
 
+    def _get_full_log_prob(self, input, head_output):
+        """ Given input tensor, and output of `self.head`,
+        compute the log of the full distribution """
+
+        out = input.new_empty((head_output.size(0), self.n_classes))
+        head_logprob = log_softmax(head_output, dim=1)
+
+        out[:, :self.shortlist_size] = head_logprob[:, :self.shortlist_size]
+
+        for i, (start_idx, stop_idx) in enumerate(zip(self.cutoffs, self.cutoffs[1:])):
+            cluster_output = self.tail[i](input)
+            cluster_logprob = log_softmax(cluster_output, dim=1)
+            output_logprob = cluster_logprob + head_logprob[:, self.shortlist_size + i].unsqueeze(1)
+
+            out[:, start_idx:stop_idx] = output_logprob
+
+        return out
+
     def log_prob(self, input):
         """ Computes log probabilities for all :math:`n\_classes`
 
@@ -213,24 +231,6 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         head_output = self.head(input)
         return self._get_full_log_prob(input, head_output)
-
-    def _get_full_log_prob(self, input, head_output):
-        """ Given input tensor, and output of `self.head`,
-        compute the log of the full distribution """
-
-        out = input.new_empty((head_output.size(0), self.n_classes))
-        head_logprob = log_softmax(head_output, dim=1)
-
-        out[:, :self.shortlist_size] = head_logprob[:, :self.shortlist_size]
-
-        for i, (start_idx, stop_idx) in enumerate(zip(self.cutoffs, self.cutoffs[1:])):
-            cluster_output = self.tail[i](input)
-            cluster_logprob = log_softmax(cluster_output, dim=1)
-            output_logprob = cluster_logprob + head_logprob[:, self.shortlist_size + i].unsqueeze(1)
-
-            out[:, start_idx:stop_idx] = output_logprob
-
-        return out
 
     def predict(self, input):
         """ This is equivalent to `self.log_pob(input).argmax(dim=1)`,
