@@ -13,6 +13,8 @@
 #include <gloo/rendezvous/store.h>
 #include <gloo/transport/device.h>
 
+#include <torch/csrc/utils/hash.h>
+
 #include "ProcessGroup.hpp"
 #include "Store.hpp"
 #include "Types.hpp"
@@ -50,6 +52,20 @@ struct AlgorithmKey {
   int srcTensor = -1;
   int dstTensor = -1;
   ReduceOp reduceOp = ReduceOp::UNUSED;
+
+  // This function is called by torch::hash<AlgorithmKey>
+  static std::size_t hash(const AlgorithmKey& k) {
+    return torch::get_hash(k.collectiveType,
+                           k.type,
+                           k.devices,
+                           k.srcSizes,
+                           k.dstSizes,
+                           k.srcRank,
+                           k.dstRank,
+                           k.srcTensor,
+                           k.dstTensor,
+                           k.reduceOp);
+  }
 };
 
 // AlgorithmEntry is the state associated with a single algorithm instance.
@@ -90,19 +106,6 @@ struct AlgorithmEntry {
 };
 
 } // namespace c10d
-
-MAKE_HASHABLE(
-    ::c10d::AlgorithmKey,
-    t.collectiveType,
-    t.type,
-    t.devices,
-    t.srcSizes,
-    t.dstSizes,
-    t.srcRank,
-    t.dstRank,
-    t.srcTensor,
-    t.dstTensor,
-    t.reduceOp);
 
 namespace c10d {
 
@@ -193,6 +196,7 @@ class ProcessGroupGloo : public ProcessGroup {
  protected:
   using KeyType = AlgorithmKey;
   using EntryType = std::unique_ptr<AlgorithmEntry>;
+  using HashType = torch::hash<AlgorithmKey>;
   using WorkType = std::tuple<AlgorithmEntry*, std::shared_ptr<WorkGloo>>;
 
   std::unique_ptr<::gloo::rendezvous::Store> store_;
@@ -218,9 +222,7 @@ class ProcessGroupGloo : public ProcessGroup {
   // Checkout constructs new AlgorithmEntry or returns existing one.
   AlgorithmEntry* checkout(const KeyType& key);
 
-  std::mutex m_;
-  std::unordered_map<KeyType, EntryType> cache_;
-  std::condition_variable cacheCV_;
+  std::unordered_map<KeyType, EntryType, HashType> cache_;
 
   std::shared_ptr<Work> enqueue(AlgorithmEntry* entry);
 

@@ -27,6 +27,9 @@ target_compile_options(c10d PUBLIC "-std=c++11")
 target_include_directories(c10d PUBLIC ${ATEN_INCLUDE_DIR})
 target_link_libraries(c10d PUBLIC ${ATEN_LIBRARIES})
 
+# For torch/csrc/utils/hash.h and torch/csrc/utils/functional.h
+target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
+
 set(C10D_GLOO_SRCS
   ProcessGroupGloo.cpp
   )

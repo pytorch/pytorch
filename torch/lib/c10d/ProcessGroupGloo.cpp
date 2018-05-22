@@ -156,7 +156,7 @@ ProcessGroupGloo::ProcessGroupGloo(
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
-  std::unique_lock<std::mutex> lock(m_);
+  std::unique_lock<std::mutex> lock(queueMutex_);
   while (!queue_.empty()) {
     queueConsumeCV_.wait(lock);
   }
@@ -175,7 +175,7 @@ ProcessGroupGloo::~ProcessGroupGloo() {
 }
 
 void ProcessGroupGloo::runLoop(void) {
-  std::unique_lock<std::mutex> lock(m_);
+  std::unique_lock<std::mutex> lock(queueMutex_);
 
   while (!stop_) {
     if (queue_.empty()) {
