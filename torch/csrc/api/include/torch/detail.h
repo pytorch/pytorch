@@ -14,10 +14,10 @@
 #define TORCH_AUTOGRAD_OPTIMIZER_CLASS(Type) \
   class Type : public torch::Optimizer_CRTP<Type>
 #define TORCH_AUTOGRAD_KWARG(CLS, TYP, NAME, DEFAULT, OPTION) \
-  TYP NAME##_ = DEFAULT;                                      \
-  CLS& NAME(TYP x = OPTION) {                                 \
-    NAME##_ = x;                                              \
-    return *this;                                             \
+  TYP NAME##_ = DEFAULT;                                \
+  CLS& NAME(TYP x = OPTION) {                           \
+    NAME##_ = x;                                        \
+    return *this;                                       \
   }
 
 namespace {
@@ -26,6 +26,10 @@ using IntVec = decltype(std::declval<at::IntList>().vec());
 } // namespace
 
 namespace torch {
+namespace detail {
+extern tag::Engine engine;
+}
+
 namespace nn {
 class Module;
 } // namespace nn
@@ -35,6 +39,8 @@ using Variable = tag::Variable;
 using variable_list = tag::variable_list;
 using Tensor = at::Tensor;
 using Optimizer = std::shared_ptr<OptimizerImpl>;
+
+void backward(Tensor loss, bool keep_graph = false);
 
 inline Variable Var(at::Tensor data, bool requires_grad = true) {
   return tag::make_variable(data, requires_grad);

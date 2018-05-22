@@ -189,7 +189,7 @@ TEST_CASE("serialization") {
     while (running_loss > 0.1) {
       Variable loss = getLoss(model, 4);
       optim->zero_grad();
-      loss.backward();
+      backward(loss);
       optim->step();
 
       running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
@@ -229,7 +229,7 @@ TEST_CASE("serialization") {
     auto step = [&](Optimizer optim, std::shared_ptr<Module> model) {
       optim->zero_grad();
       auto y = model->forward({x})[0].sum();
-      y.backward();
+      backward(y);
       optim->step();
     };
 
@@ -300,7 +300,7 @@ TEST_CASE("serialization_cuda", "[cuda]") {
     while (running_loss > 0.1) {
       Variable loss = getLoss(model, 4);
       optim->zero_grad();
-      loss.backward();
+      backward(loss);
       optim->step();
 
       running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;

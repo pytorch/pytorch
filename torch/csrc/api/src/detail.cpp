@@ -8,6 +8,24 @@
 #include "torch/detail.h"
 
 namespace torch {
+namespace detail {
+tag::Engine engine;
+}
+
+void backward(Variable loss, bool keep_graph) {
+  tag::edge_list edgelst;
+  tag::variable_list varlst;
+  edgelst.emplace_back(loss.grad_fn(), loss.output_nr());
+  varlst.emplace_back(Var(at::ones_like(loss.data()), false));
+  // create_graph should be set to true when we want to support double bwd
+  detail::engine.execute(edgelst, varlst, keep_graph, false);
+}
+
+void backward(Tensor loss, bool keep_graph) {
+  Variable tmp(loss);
+  backward(tmp, keep_graph);
+}
+
 void setSeed(uint64_t seed) {
   // TODO: Move this to at::Context
   at::globalContext().defaultGenerator(at::Backend::CPU).manualSeed(seed);

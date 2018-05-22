@@ -11,9 +11,6 @@ class Scalar;
 struct Type;
 struct Storage;
 struct Tensor;
-
-template<typename T>
-class optional;
 } // namespace at
 
 namespace at {
@@ -73,11 +70,6 @@ struct TensorImpl : public Retainable {
   AT_API virtual void detach_() {
     AT_ERROR("detach_ is not implemented for Tensor");
   }
-
-  AT_API virtual void backward(
-      at::optional<Tensor> gradient,
-      bool keep_graph,
-      bool create_graph);
 
   AT_API virtual void set_data(Tensor new_data);
 
