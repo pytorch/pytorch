@@ -149,14 +149,6 @@ struct Tensor : public detail::TensorBase {
     pImpl->detach_();
   }
 
-  /// Computes the gradient of current tensor w.r.t. graph leaves.
-  void backward(
-      at::optional<Tensor> gradient = at::nullopt,
-      bool keep_graph = false,
-      bool create_graph = false) {
-    pImpl->backward(std::move(gradient), keep_graph, create_graph);
-  }
-
   friend void detail::set_data(Tensor& tensor, Tensor new_data);
 
   // STOP.  Thinking of adding a method here, which only makes use
@@ -166,10 +158,10 @@ struct Tensor : public detail::TensorBase {
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
 
-  template <typename F, typename... Args>
+  template <typename F, typename... Args> 
   auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
     return func(*this, std::forward<Args>(params)...);
-  }
+  } 
 };
 
 namespace detail {
