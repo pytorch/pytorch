@@ -45,8 +45,8 @@ TEST_CASE("module/training-mode") {
 
 TEST_CASE("module/zero-grad") {
   auto model = Linear(3, 4).build();
-  auto weights = Var(at::ones(at::CPU(at::kFloat), {8, 3}));
-  auto loss = model->forward({weights}).front().sum();
+  auto weight = Var(at::ones(at::CPU(at::kFloat), {8, 3}));
+  auto loss = model->forward({weight}).front().sum();
   backward(loss);
   for (auto& parameter : model->parameters()) {
     Variable grad = parameter.second.grad();
@@ -145,9 +145,9 @@ TEST_CASE("module/clone") {
   SECTION("Cloning creates distinct parameters") {
     struct TestModel : public CloneableModule<TestModel> {
       TestModel() {
-        add(Linear(10, 3).build(), "l1");
-        add(Linear(3, 5).build(), "l2");
-        add(Linear(5, 100).build(), "l3");
+        register_module("l1", &TestModel::l1, Linear(10, 3).build());
+        register_module("l2", &TestModel::l2, Linear(3, 5).build());
+        register_module("l3", &TestModel::l3, Linear(5, 100).build());
       }
 
       void reset() override {}
@@ -155,6 +155,8 @@ TEST_CASE("module/clone") {
       variable_list forward(variable_list input) override {
         return input;
       }
+
+      std::shared_ptr<Linear> l1, l2, l3;
     };
 
     auto model = TestModel().build();
@@ -163,6 +165,7 @@ TEST_CASE("module/clone") {
     auto m1param = model->parameters();
     auto m2param = model2->parameters();
     for (auto& param : m1param) {
+      REQUIRE(!pointer_equal(param.second, m2param[param.first]));
       REQUIRE(param.second.allclose(m2param[param.first]));
       param.second.data().mul_(2);
     }
@@ -174,23 +177,58 @@ TEST_CASE("module/clone") {
   SECTION("Cloning preserves external references") {
     struct TestModel : public CloneableModule<TestModel> {
       void reset() {
-        weights = add(Var(at::ones(at::CPU(at::kFloat), {4, 4})), "weight");
+        register_parameter(
+            "weight",
+            &TestModel::weight,
+            at::ones(at::CPU(at::kFloat), {4, 4}));
       }
 
       variable_list forward(variable_list input) override {
         return input;
       }
 
-      Variable weights;
+      Variable weight;
     };
 
     auto model = TestModel().build();
-    REQUIRE(pointer_equal(model->weights, model->parameters_["weight"]));
+    REQUIRE(pointer_equal(model->weight, model->param("weight")));
 
     auto model2 = std::dynamic_pointer_cast<TestModel>(
         std::shared_ptr<Module>(model->clone()));
-    REQUIRE(!pointer_equal(model2->weights, model->weights));
-    REQUIRE(pointer_equal(model2->weights, model2->parameters_["weight"]));
-    REQUIRE(!pointer_equal(model2->weights, model->parameters_["weight"]));
+    REQUIRE(!pointer_equal(model2->weight, model->weight));
+    REQUIRE(pointer_equal(model2->weight, model2->param("weight")));
+    REQUIRE(!pointer_equal(model2->weight, model->param("weight")));
+  }
+}
+
+TEST_CASE("module/parameters") {
+  struct TestModule : Module {
+    TestModule() {
+      register_parameter(
+          "a", &TestModule::a, at::zeros(at::CPU(at::kFloat), {2, 2}));
+      register_parameter(
+          "b", &TestModule::b, at::ones(at::CPU(at::kFloat), {2, 2}));
+      register_parameter(
+          "c", &TestModule::c, at::ones(at::CPU(at::kFloat), {2, 2}) * 2);
+    }
+
+    variable_list forward(variable_list) override {
+      return {};
+    }
+
+    Variable a, b, c;
+  };
+
+  TestModule module;
+
+  SECTION("has correct number of parameters") {
+    REQUIRE(module.parameters().size() == 3);
+  }
+
+  SECTION("contains parameters with the correct name") {
+    auto parameters = module.parameters();
+    REQUIRE(parameters.count("a"));
+    REQUIRE(parameters.count("b"));
+    REQUIRE(parameters.count("c"));
   }
 }

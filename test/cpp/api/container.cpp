@@ -8,27 +8,34 @@ using namespace torch::nn;
 class TestModel : public Module {
  public:
   TestModel() {
-    add(Linear(10, 3).build(), "l1");
-    add(Linear(3, 5).build(), "l2");
-    add(Linear(5, 100).build(), "l3");
+    register_module("l1", &TestModel::l1, Linear(10, 3).build());
+    register_module("l2", &TestModel::l2, Linear(3, 5).build());
+    register_module("l3", &TestModel::l3, Linear(5, 100).build());
   }
 
   variable_list forward(variable_list input) override {
     return input;
-  };
+  }
+
+  std::shared_ptr<Linear> l1, l2, l3;
 };
 
 class NestedModel : public Module {
  public:
   NestedModel() {
-    add(Linear(5, 20).build(), "l1");
-    add(std::make_shared<TestModel>(), "test");
-    add(Var(at::CPU(at::kFloat).tensor({3, 2, 21}), false), "param");
+    register_module("l1", &NestedModel::l1, Linear(5, 20).build());
+    register_module("test", &NestedModel::t, std::make_shared<TestModel>());
+    register_parameter(
+        "param", &NestedModel::param_, at::CPU(at::kFloat).tensor({3, 2, 21}));
   }
 
   variable_list forward(variable_list input) override {
     return input;
   };
+
+  Variable param_;
+  std::shared_ptr<Linear> l1;
+  std::shared_ptr<TestModel> t;
 };
 
 TEST_CASE("containers") {
@@ -97,8 +104,7 @@ TEST_CASE("containers") {
       }
 
       REQUIRE(
-          model->parameters().at("weight").grad().numel() ==
-          3 * 2 * 3 * 3 * 3);
+          model->parameters().at("weight").grad().numel() == 3 * 2 * 3 * 3 * 3);
     }
   }
   SECTION("linear") {
@@ -137,7 +143,7 @@ TEST_CASE("containers") {
     }
 
     SECTION("simple") {
-      auto model = std::make_shared<SimpleContainer>();
+      auto model = std::make_shared<Sequential>();
       auto l1 = model->add(Linear(10, 3).build(), "l1");
       auto l2 = model->add(Linear(3, 5).build(), "l2");
       auto l3 = model->add(Linear(5, 100).build(), "l3");
