@@ -383,7 +383,7 @@ def generate_outputs():
                     for file in cwrap_files
                     for d in cwrap_parser.parse(file)]
 
-    #declarations += nn_parse.run(nn_files)
+    declarations += nn_parse.run(nn_files)
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
     for fname, env in generators.items():
