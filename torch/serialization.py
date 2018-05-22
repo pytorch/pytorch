@@ -454,19 +454,18 @@ def _load(f, map_location, pickle_module):
 
     f_is_real_file = _is_real_file(f)
 
-    if not hasattr(f, 'seek'):
-        raise RuntimeError("You can only torch.load from a file that is seekable. \
-        Please read the file into a seekable file on disk using request.urlretrieve \
-        or a string buffer like io.BytesIO and try to load from it instead.")
-
-    if f_is_real_file and f.tell() == 0:
-        # legacy_load requires that f has fileno()
-        # only if offset is zero we can attempt the legacy tar file loader
-        try:
-            return legacy_load(f)
-        except tarfile.TarError:
-            # if not a tarfile, reset file offset and proceed
-            f.seek(0)
+    try:
+        if f_is_real_file and f.tell() == 0:
+            # legacy_load requires that f has fileno()
+            # only if offset is zero we can attempt the legacy tar file loader
+            try:
+                return legacy_load(f)
+            except tarfile.TarError:
+                # if not a tarfile, reset file offset and proceed
+                f.seek(0)
+    except (io.UnsupportedOperation, AttributeError):
+        raise RuntimeError("You can only torch.load from a file that is seekable. " +
+                            "Please pre-load the data into a buffer like io.BytesIO and try to load from it instead.")
 
     magic_number = pickle_module.load(f)
     if magic_number != MAGIC_NUMBER:
