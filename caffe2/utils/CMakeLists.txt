@@ -44,6 +44,7 @@ set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS}
 
 set(LIB_SOURCES_CPU
         C++17.cpp
+        Metaprogramming.cpp
         TypeList.cpp
         TypeTraits.cpp
         )
@@ -53,6 +54,7 @@ set(LIB_SOURCES_GPU
         )
 
 set(TEST_SOURCES_CPU
+        Metaprogramming_test.cpp
         TypeList_test.cpp
         TypeTraits_test.cpp
         )
