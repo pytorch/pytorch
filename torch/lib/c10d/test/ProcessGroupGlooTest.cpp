@@ -116,8 +116,7 @@ class SignalTest {
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
 
-    ::c10d::ProcessGroupGloo pg(store, rank, size);
-    pg.initialize(options);
+    ::c10d::ProcessGroupGloo pg(store, rank, size, options);
 
     // Initialize tensor list
     std::vector<at::Tensor> tensors = {
@@ -134,7 +133,6 @@ class SignalTest {
       sem_.post();
     }
 
-    pg.destroy();
     return std::move(work);
   }
 
@@ -183,12 +181,6 @@ class CollectiveTest {
 
   CollectiveTest(const std::string& path) : path_(path) {}
 
-  ~CollectiveTest() {
-    if (pg_) {
-      pg_->destroy();
-    }
-  }
-
   CollectiveTest(CollectiveTest&& other) {
     path_ = std::move(other.path_);
     pg_ = std::move(other.pg_);
@@ -206,8 +198,7 @@ class CollectiveTest {
     options.timeout = std::chrono::milliseconds(50);
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
-        new ::c10d::ProcessGroupGloo(store, rank, size));
-    pg_->initialize(options);
+        new ::c10d::ProcessGroupGloo(store, rank, size, options));
   }
 
  protected:

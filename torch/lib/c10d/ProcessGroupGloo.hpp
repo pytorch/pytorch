@@ -177,15 +177,10 @@ class ProcessGroupGloo : public ProcessGroup {
   explicit ProcessGroupGloo(
       const std::shared_ptr<Store>& store,
       int rank,
-      int size);
+      int size,
+      Options options = Options());
 
   virtual ~ProcessGroupGloo();
-
-  void initialize();
-
-  void initialize(Options options);
-
-  void destroy();
 
   std::shared_ptr<Work> broadcast(
       std::vector<at::Tensor>& data,

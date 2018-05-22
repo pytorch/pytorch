@@ -8,7 +8,6 @@ int main(int argc, char** argv) {
   int size = atoi(getenv("SIZE"));
   auto store = std::make_shared<FileStore>("/tmp/c10d_example");
   ProcessGroupGloo pg(store, rank, size);
-  pg.initialize();
 
   // Create some tensors
   const auto ntensors = 10;
@@ -29,8 +28,4 @@ int main(int argc, char** argv) {
   for (auto& work : pending) {
     work->wait();
   }
-
-  // Explicitly destroy process group
-  // This is not done from its destructor
-  pg.destroy();
 }

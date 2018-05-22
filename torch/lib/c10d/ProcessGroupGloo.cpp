@@ -129,28 +129,14 @@ void ProcessGroupGloo::WorkGloo::finishWithException(
 }
 
 ProcessGroupGloo::Options::Options()
-    : timeout(std::chrono::milliseconds(10 * 1000)), threads(1) {}
+    : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
     int rank,
-    int size)
-    : ProcessGroup(rank, size), store_(new GlooStore(store)), stop_(false) {}
-
-ProcessGroupGloo::~ProcessGroupGloo() {
-  // Require this process group to be explicitly shut down prior to being
-  // destructed. This is the easiest way to guarantee clean shutdown
-  // and avoid blocking/throwing in a destructor.
-}
-
-void ProcessGroupGloo::initialize() {
-  Options options;
-  options.timeout = std::chrono::milliseconds(10000);
-  options.threads = 2;
-  initialize(options);
-}
-
-void ProcessGroupGloo::initialize(Options options) {
+    int size,
+    Options options)
+    : ProcessGroup(rank, size), store_(new GlooStore(store)), stop_(false) {
   auto& devices = options.devices;
   if (devices.empty()) {
     devices.push_back(::gloo::transport::tcp::CreateDevice("localhost"));
@@ -169,7 +155,7 @@ void ProcessGroupGloo::initialize(Options options) {
   }
 }
 
-void ProcessGroupGloo::destroy() {
+ProcessGroupGloo::~ProcessGroupGloo() {
   std::unique_lock<std::mutex> lock(m_);
   while (!queue_.empty()) {
     queueConsumeCV_.wait(lock);
