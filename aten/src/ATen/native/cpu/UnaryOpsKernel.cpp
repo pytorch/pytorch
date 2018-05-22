@@ -17,7 +17,11 @@ template <class scalar_t, class F>
 static void parallel_apply(Tensor& result, const Tensor& self, F f) {
   internal::init_tbb_num_threads();
 
+#ifdef __PPC64__
+  static tbb::simple_partitioner ap;
+#else
   static tbb::affinity_partitioner ap;
+#endif
 
   auto arr_out = result.data<scalar_t>();
   auto arr_in = self.data<scalar_t>();

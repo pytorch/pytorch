@@ -34,7 +34,11 @@ T parallel_reduce(
   internal::init_tbb_num_threads();
 
   T result_;
+#ifdef __PPC64__
+  static tbb::simple_partitioner ap;
+#else
   static tbb::affinity_partitioner ap;
+#endif
   if (end - start < internal::TBB_GRAIN_SIZE) {
     result_ = f(data, start, end, init_);
   } else {
@@ -60,7 +64,11 @@ void parallel_reduce_2d(
     T* outarr_) {
   internal::init_tbb_num_threads();
 
+#ifdef __PPC64__
+  static tbb::simple_partitioner ap;
+#else
   static tbb::affinity_partitioner ap;
+#endif
 
   size_t max_i_ =
       (numel && num_rows && num_cols) ? numel / (num_rows * num_cols) : 0;

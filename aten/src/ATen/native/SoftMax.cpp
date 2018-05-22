@@ -11,7 +11,11 @@ namespace at {
 namespace native {
 namespace {
 
+#ifdef __PPC64__
+static tbb::simple_partitioner ap;
+#else
 static tbb::affinity_partitioner ap;
+#endif
 
 template <typename scalar_t, bool LogSoftMax>
 void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {

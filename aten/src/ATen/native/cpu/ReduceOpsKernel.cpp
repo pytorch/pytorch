@@ -28,7 +28,11 @@ static void parallel_for(int64_t end, int64_t step, bool parallelize, F func) {
   }
 }
 
+#ifdef __PPC64__
+static tbb::simple_partitioner ap;
+#else
 static tbb::affinity_partitioner ap;
+#endif
 
 // Vectorized reduction defined by reduce operation `Op` with identity `ident`.
 // The reduction is built on top of reduce128, which reduces down a column

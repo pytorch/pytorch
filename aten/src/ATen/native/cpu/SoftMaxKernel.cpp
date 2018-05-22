@@ -22,7 +22,11 @@
 namespace at { namespace native {
 namespace {
 
+#ifdef __PPC64__
+static tbb::simple_partitioner ap;
+#else
 static tbb::affinity_partitioner ap;
+#endif
 
 template <typename scalar_t>
 inline void _vec_log_softmax_lastdim(
