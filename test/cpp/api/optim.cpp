@@ -30,7 +30,7 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
       for (auto& layer : *model)
         x = layer->forward({x})[0].sigmoid_();
       Variable loss = at::binary_cross_entropy(x, target);
-      loss.backward();
+      backward(loss);
       return at::Scalar(loss.data());
     };
 
