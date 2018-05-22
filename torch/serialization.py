@@ -455,7 +455,9 @@ def _load(f, map_location, pickle_module):
     f_is_real_file = _is_real_file(f)
 
     if not hasattr(f, 'seek'):
-        raise RuntimeError("You can only torch.load from a file that is seekable. Please read the file into a seekable file on disk using request.urlretrieve or a string buffer like io.BytesIO and try to load from it instead.")
+        raise RuntimeError("You can only torch.load from a file that is seekable. \
+        Please read the file into a seekable file on disk using request.urlretrieve \
+        or a string buffer like io.BytesIO and try to load from it instead.")
 
     if f_is_real_file and f.tell() == 0:
         # legacy_load requires that f has fileno()
