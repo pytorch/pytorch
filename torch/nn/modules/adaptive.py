@@ -211,9 +211,14 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         """
 
-        out = input.new_empty((input.size(0), self.n_classes))
-
         head_output = self.head(input)
+        return self._get_full_log_prob(input, head_output)
+
+    def _get_full_log_prob(self, input, head_output):
+        """ Given input tensor, and output of `self.head`,
+        compute the log of the full distribution """
+
+        out = input.new_empty((head_output.size(0), self.n_classes))
         head_logprob = log_softmax(head_output, dim=1)
 
         out[:, :self.shortlist_size] = head_logprob[:, :self.shortlist_size]
@@ -226,3 +231,36 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             out[:, start_idx:stop_idx] = output_logprob
 
         return out
+
+    def predict(self, input):
+        """ This is equivalent to `self.log_pob(input).argmax(dim=1)`,
+        but is more efficient in some cases.
+
+        Args:
+            input (Tensor): a minibatch of examples
+
+        Returns:
+            output (Tensor): a class with the highest probability for each example
+
+        Shape:
+            - Input: :math:`(N, in\_features)`
+            - Output: :math:`(N)`
+        """
+
+        head_output = self.head(input)
+        output = torch.argmax(head_output, dim=1)
+        not_in_shortlist = (output >= self.shortlist_size)
+        all_in_shortlist = not (not_in_shortlist.any())
+
+        if all_in_shortlist:
+            return output
+
+        elif not_in_shortlist.all():
+            log_prob = self._get_full_log_prob(input, head_output)
+            return torch.argmax(log_prob, dim=1)
+
+        else:
+            log_prob = self._get_full_log_prob(input[not_in_shortlist],
+                                               head_output[not_in_shortlist])
+            output[not_in_shortlist] = torch.argmax(log_prob, dim=1)
+            return output
