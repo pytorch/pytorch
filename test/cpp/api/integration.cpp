@@ -209,7 +209,7 @@ bool test_mnist(
       Variable loss = at::nll_loss(x, y);
 
       optim->zero_grad();
-      backward(loss);
+      loss.backward();
       optim->step();
     }
   }
@@ -284,7 +284,7 @@ TEST_CASE("integration") {
       auto loss = at::stack(policy_loss).sum() + at::stack(value_loss).sum();
 
       optim->zero_grad();
-      backward(loss);
+      loss.backward();
       optim->step();
 
       rewards.clear();
