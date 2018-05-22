@@ -22,18 +22,15 @@ namespace torch {
 namespace autograd {
 struct Function;
 } // namespace autograd
-namespace jit {
-namespace tracer {
+namespace jit { namespace tracer {
 // Has to be forward declared because tracer_state.h has a dependency on
 // variable.h.
 struct ValueTracingStateElem;
 using ValueTracingState = std::list<ValueTracingStateElem>;
-} // namespace tracer
-} // namespace jit
+} // namespace jit::tracer
 } // namespace torch
 
-namespace torch {
-namespace autograd {
+namespace torch { namespace autograd {
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                                Variable
@@ -612,5 +609,4 @@ inline Variable::Impl* Variable::get() const noexcept {
   TORCH_ASSERTM(defined(), "Called Variable::get() on an undefined Variable");
   return static_cast<Variable::Impl*>(pImpl);
 }
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
