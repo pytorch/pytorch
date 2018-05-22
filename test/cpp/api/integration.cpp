@@ -221,7 +221,7 @@ TEST_CASE("integration") {
     std::cerr
         << "Training episodic policy gradient with a critic for up to 3000"
            " episodes, rest your eyes for a bit!\n";
-    auto model = std::make_shared<SimpleContainer>();
+    auto model = std::make_shared<Sequential>();
     auto linear = model->add(Linear(4, 128).build(), "linear");
     auto policyHead = model->add(Linear(128, 2).build(), "policy");
     auto valueHead = model->add(Linear(128, 1).build(), "action");
@@ -320,7 +320,7 @@ TEST_CASE("integration") {
 }
 
 TEST_CASE("integration/mnist", "[cuda]") {
-  auto model = std::make_shared<SimpleContainer>();
+  auto model = std::make_shared<Sequential>();
   auto conv1 = model->add(Conv2d(1, 10, 5).build(), "conv1");
   auto conv2 = model->add(Conv2d(10, 20, 5).build(), "conv2");
   auto drop = Dropout(0.3).build();
@@ -355,7 +355,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
 }
 
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
-  auto model = std::make_shared<SimpleContainer>();
+  auto model = std::make_shared<Sequential>();
   auto conv1 = model->add(Conv2d(1, 10, 5).build(), "conv1");
   auto batchnorm2d =
       model->add(BatchNorm(10).stateful(true).build(), "batchnorm2d");

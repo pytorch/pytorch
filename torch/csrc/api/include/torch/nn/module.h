@@ -1,8 +1,10 @@
 #pragma once
 
-#include <torch/csrc/autograd/variable.h>
-
 #include "torch/detail.h"
+
+#include <torch/detail/member_ref.h>
+
+#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/optional.h>
 
@@ -11,7 +13,8 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 class Module {
  public:
@@ -61,9 +64,6 @@ class Module {
   /// Recursively zeros out the `grad` values of all parameters.
   virtual void zero_grad();
 
-  std::unordered_map<std::string, std::shared_ptr<nn::Module>> children_;
-  std::unordered_map<std::string, Variable> parameters_;
-
   template <class Archive>
   void save(Archive& ar) const {
     auto params = parameters();
@@ -87,13 +87,80 @@ class Module {
   }
 
  protected:
-  std::shared_ptr<nn::Module> add(
-      std::shared_ptr<nn::Module>,
-      std::string const&);
-  // Be careful when registering Tensors that are not variables
-  Variable& add(Variable, std::string const&);
+  using ModulePtr = std::shared_ptr<nn::Module>;
+
+  template <typename Derived, typename M>
+  void register_module(
+      const std::string& name,
+      std::shared_ptr<M> Derived::*module,
+      std::shared_ptr<M> new_module) {
+    check_name("Module", name);
+    auto base_module =
+        reinterpret_cast<std::shared_ptr<nn::Module> Derived::*>(module);
+    const auto pair = children_.emplace(name, base_module);
+    AT_CHECK(pair.second, "Module " + name + " has already been registered");
+    (pair.first->second)(static_cast<Derived*>(this)) = std::move(new_module);
+  }
+
+  // Hack for Sequential, should remove/figure out to do this better
+  template <typename Derived>
+  void register_module(
+      const std::string& name,
+      std::vector<std::shared_ptr<Module>> Derived::*modules,
+      size_t index) {
+    const auto pair = children_.insert({name, {modules, index}});
+    AT_CHECK(pair.second, "Module " + name + " has already been registered");
+  }
+
+  template <typename Derived>
+  void register_parameter(
+      const std::string& name,
+      Variable Derived::*variable,
+      Tensor tensor) {
+    check_name("Parameter", name);
+    const auto pair = parameters_.emplace(name, variable);
+    AT_CHECK(pair.second, "Parameter " + name + " has already been registered");
+    (pair.first->second)(static_cast<Derived*>(this)) =
+        autograd::make_variable(tensor, /*requires_grad=*/true);
+  }
+
+  template <typename Derived>
+  void register_buffer(
+      const std::string& name,
+      Variable Derived::*variable,
+      Tensor tensor) {
+    check_name("Parameter", name);
+    const auto pair = parameters_.emplace(name, variable);
+    AT_CHECK(pair.second, "Parameter " + name + " has already been registered");
+    (pair.first->second)(static_cast<Derived*>(this)) =
+        autograd::make_variable(tensor, /*requires_grad=*/false);
+  }
+
+  template <typename Getter, typename ConstGetter>
+  void register_parameter(
+      const std::string& name,
+      Getter getter,
+      ConstGetter const_getter) {
+    check_name("Parameter", name);
+    const auto pair = parameters_.insert(
+        {name, {std::move(getter), std::move(const_getter)}});
+    AT_CHECK(pair.second, "Parameter " + name + " has already been registered");
+  }
+
+  void check_name(const std::string& type, const std::string& name) {
+    AT_CHECK(!name.empty(), type + " name must not be empty");
+    AT_CHECK(
+        name.find('.') == std::string::npos,
+        type + " name '" + name + "' contains a dot, which is not permitted");
+  }
 
  private:
+  template <typename Derived>
+  friend class CloneableModule;
+
+  std::unordered_map<std::string, detail::MemberRef<Variable>> parameters_;
+  std::unordered_map<std::string, detail::MemberRef<ModulePtr>> children_;
+
   /// The module's name (e.g. "LSTM").
   mutable at::optional<std::string> name_;
 
@@ -127,19 +194,20 @@ class CloneableModule : public Module {
   /// original module.
   std::shared_ptr<Module> clone() const override {
     auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
-    ptr->parameters_.clear();
-    ptr->reset();
-    for (auto& parameter : ptr->parameters_) {
-      parameter.second.data().copy_(
-          this->parameters_.at(parameter.first).data());
+    for (auto& pair : ptr->parameters_) {
+      auto& parameter = pair.second(ptr.get());
+      auto& original = this->parameters_.at(pair.first)(this);
+      parameter = at::empty_like(original);
+      parameter.data().copy_(original.data());
     }
     for (auto& child : ptr->children_) {
-      child.second = this->children_.at(child.first)->clone();
+      child.second(ptr.get()) = this->children_.at(child.first)(this)->clone();
     }
     return ptr;
   }
 };
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch
 
 #define TORCH_ATTR(T, name)                         \
   auto name(const T& new_##name)->decltype(*this) { \
