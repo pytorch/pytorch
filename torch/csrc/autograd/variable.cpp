@@ -112,7 +112,7 @@ void Variable::Impl::detach_() {
 }
 
 void Variable::Impl::backward(
-    at::optional<Tensor> gradient,
+    at::optional<at::Tensor> gradient,
     bool keep_graph,
     bool create_graph) {
   std::vector<Edge> edges;

@@ -345,7 +345,7 @@ struct Variable::Impl : public at::TensorImpl {
 
   /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
-      at::optional<Tensor> gradient,
+      at::optional<at::Tensor> gradient,
       bool keep_graph,
       bool create_graph) override;
 

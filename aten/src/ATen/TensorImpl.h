@@ -5,15 +5,13 @@
 
 #include "ATen/Retainable.h"
 #include "ATen/ScalarType.h"
+#include "ATen/optional.h"
 
 namespace at {
 class Scalar;
 struct Type;
 struct Storage;
 struct Tensor;
-
-template<typename T>
-class optional;
 } // namespace at
 
 namespace at {
