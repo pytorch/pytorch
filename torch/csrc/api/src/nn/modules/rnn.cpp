@@ -17,7 +17,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 namespace {
 Variable linear(Tensor x, Tensor w, Tensor b) {
   if (x.ndimension() == 2 && b.defined()) {
@@ -55,26 +56,37 @@ void RNNBase<Derived>::reset() {
     dropout_module_ = Dropout(dropout_).build();
   }
 
+  ihw_.resize(layers_);
+  hhw_.resize(layers_);
+  ihb_.resize(layers_);
+  hhb_.resize(layers_);
+
   const int64_t gate_size = hidden_size_ * number_of_gates_;
 
   for (int64_t layer = 0; layer < layers_; ++layer) {
     const int64_t input_size = (layer == 0) ? input_size_ : hidden_size_;
-    ihw_.push_back(this->add(
-        Var(at::CPU(at::kFloat).empty({gate_size, input_size})),
-        "weight_ih_l" + std::to_string(layer)));
-    hhw_.push_back(this->add(
-        Var(at::CPU(at::kFloat).empty({gate_size, hidden_size_})),
-        "weight_hh_l" + std::to_string(layer)));
+    register_parameter(
+        "weight_ih_l",
+        layer,
+        &RNNBase::ihw_,
+        at::CPU(at::kFloat).empty({gate_size, input_size}));
+    register_parameter(
+        "weight_hh_l",
+        layer,
+        &RNNBase::hhw_,
+        at::CPU(at::kFloat).empty({gate_size, hidden_size_}));
+
     if (with_bias_) {
-      ihb_.push_back(this->add(
-          Var(at::CPU(at::kFloat).empty({gate_size})),
-          "bias_ih_l" + std::to_string(layer)));
-      hhb_.push_back(this->add(
-          Var(at::CPU(at::kFloat).empty({gate_size})),
-          "bias_hh_l" + std::to_string(layer)));
-    } else {
-      ihb_.emplace_back();
-      hhb_.emplace_back();
+      register_parameter(
+          "bias_ih_l",
+          layer,
+          &RNNBase::ihb_,
+          at::CPU(at::kFloat).empty({gate_size}));
+      register_parameter(
+          "bias_hh_l",
+          layer,
+          &RNNBase::hhb_,
+          at::CPU(at::kFloat).empty({gate_size}));
     }
   }
   flatten_parameters_for_cudnn();
@@ -108,6 +120,24 @@ std::vector<Tensor> RNNBase<Derived>::flat_weights() const {
     }
   }
   return flat;
+}
+
+template <typename Derived>
+void RNNBase<Derived>::register_parameter(
+    const std::string& name,
+    int64_t layer,
+    std::vector<Variable> RNNBase::*variables,
+    Tensor tensor) {
+  (this->*variables)[layer] =
+      autograd::make_variable(tensor, /*requires_grad=*/true);
+  register_parameter(
+      name + std::to_string(layer),
+      [variables, layer](void* self) -> Variable& {
+        return (static_cast<RNNBase*>(self)->*variables)[layer];
+      },
+      [variables, layer](const void* self) -> const Variable& {
+        return (static_cast<const RNNBase*>(self)->*variables)[layer];
+      });
 }
 
 template <typename Derived>
@@ -361,4 +391,5 @@ variable_list RNN::cell_forward(variable_list inputs, int64_t layer) {
 
   return {at::stack(activation_function_(h))};
 }
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch
