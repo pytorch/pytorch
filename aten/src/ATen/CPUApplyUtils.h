@@ -266,9 +266,13 @@ apply_kernel(int64_t numel, int64_t offset, const Op& op, Args... iters) {
   }
   if (offset > 0)
     forward(offset, iters...);
-  for (int64_t i = 0; i < numel;) {
-    int64_t size = max_iterate_size(iters...);
-    size = std::min(size, numel - i);
+  int64_t size = std::min(numel, max_iterate_size(iters...));
+  op(size, iters.data_..., iters.strides_[iters.dim_ - 1]...);
+  iterate(size, iters...);
+  iterate_overflow(iters...);
+  int64_t i = size;
+  size = std::min(numel, max_iterate_size(iters...));
+  for (; i < numel;) {
     op(size, iters.data_..., iters.strides_[iters.dim_ - 1]...);
     iterate(size, iters...);
     i += size;

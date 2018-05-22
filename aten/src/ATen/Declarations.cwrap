@@ -74,7 +74,7 @@
           default: NULL
 ]]
 [[
-  name: _fill_
+  name: _th_fill_
   return: self
   cname: fill
   options:
@@ -160,20 +160,20 @@
     - THTensor* self
 ]]
 [[
-  name: _th_contiguous
-  cname: newContiguous
-  return: THTensor*
-  arguments:
-    - THTensor* self
-]]
-[[
-  name: _th_clone
+  name: clone
   cname: newClone
   return: THTensor*
   aten_sparse: True
   cpu_half: True
   arguments:
     - THTensor* self
+]]
+[[    
+  name: contiguous    
+  cname: newContiguous    
+  return: THTensor*    
+  arguments:    
+    - THTensor* self    
 ]]
 [[
   name: view
@@ -1053,7 +1053,7 @@
     - THTensor* self
 ]]
 [[
-  name: _abs
+  name: _th_abs
   cname: abs
   types:
     - floating_point
@@ -1076,7 +1076,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   cname: sigmoid
   variants:
@@ -1089,7 +1088,7 @@
     - THTensor* self
 ]]
 [[
-  name: _log
+  name: _th_log
   cname: log
   types:
     - floating_point
@@ -1105,7 +1104,7 @@
     - THTensor* self
 ]]
 [[
-  name: _log10
+  name: _th_log10
   cname: log10
   types:
     - floating_point
@@ -1122,7 +1121,7 @@
     - THTensor* self
 ]]
 [[
-  name: _log1p
+  name: _th_log1p
   cname: log1p
   types:
     - floating_point
@@ -1138,7 +1137,7 @@
     - THTensor* self
 ]]
 [[
-  name: _log2
+  name: _th_log2
   cname: log2
   types:
     - floating_point
@@ -1244,7 +1243,7 @@
     - THTensor* self
 ]]
 [[
-  name: _exp
+  name: _th_exp
   cname: exp
   types:
     - floating_point
@@ -1260,7 +1259,7 @@
     - THTensor* self
 ]]
 [[
-  name: _expm1
+  name: _th_expm1
   cname: expm1
   types:
     - floating_point
@@ -1276,7 +1275,7 @@
     - THTensor* self
 ]]
 [[
-  name: _cos
+  name: _th_cos
   cname: cos
   types:
     - floating_point
@@ -1292,7 +1291,7 @@
     - THTensor* self
 ]]
 [[
-  name: _acos
+  name: _th_acos
   cname: acos
   types:
     - floating_point
@@ -1308,7 +1307,7 @@
     - THTensor* self
 ]]
 [[
-  name: _cosh
+  name: _th_cosh
   cname: cosh
   types:
     - floating_point
@@ -1324,7 +1323,7 @@
     - THTensor* self
 ]]
 [[
-  name: _sin
+  name: _th_sin
   cname: sin
   types:
     - floating_point
@@ -1340,7 +1339,7 @@
     - THTensor* self
 ]]
 [[
-  name: _asin
+  name: _th_asin
   cname: asin
   types:
     - floating_point
@@ -1356,7 +1355,7 @@
     - THTensor* self
 ]]
 [[
-  name: _sinh
+  name: _th_sinh
   cname: sinh
   types:
     - floating_point
@@ -1372,7 +1371,7 @@
     - THTensor* self
 ]]
 [[
-  name: _tan
+  name: _th_tan
   cname: tan
   types:
     - floating_point
@@ -1388,7 +1387,7 @@
     - THTensor* self
 ]]
 [[
-  name: _atan
+  name: _th_atan
   cname: atan
   types:
     - floating_point
@@ -1420,7 +1419,7 @@
     - THTensor* self
 ]]
 [[
-  name: _erf
+  name: _th_erf
   cname: erf
   types:
     - floating_point
@@ -1436,8 +1435,20 @@
     - THTensor* self
 ]]
 [[
-  name: _erfinv
+  name: erfinv_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: erfinv
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+[[
+  name: erfinv
   types:
     - floating_point
   backends:
@@ -1453,7 +1464,7 @@
     - THTensor* self
 ]]
 [[
-  name: _sqrt
+  name: _th_sqrt
   cname: sqrt
   types:
     - floating_point
@@ -1469,7 +1480,7 @@
     - THTensor* self
 ]]
 [[
-  name: _rsqrt
+  name: _th_rsqrt
   cname: rsqrt
   types:
     - floating_point
@@ -1485,7 +1496,7 @@
     - THTensor* self
 ]]
 [[
-  name: _ceil
+  name: _th_ceil
   cname: ceil
   types:
     - floating_point
@@ -1501,7 +1512,7 @@
     - THTensor* self
 ]]
 [[
-  name: _floor
+  name: _th_floor
   cname: floor
   types:
     - floating_point
@@ -1517,7 +1528,7 @@
     - THTensor* self
 ]]
 [[
-  name: _round
+  name: _th_round
   cname: round
   types:
     - floating_point
@@ -1533,7 +1544,7 @@
     - THTensor* self
 ]]
 [[
-  name: _trunc
+  name: _th_trunc
   cname: trunc
   types:
     - floating_point
@@ -1554,7 +1565,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1764,7 +1774,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1781,7 +1790,6 @@
   name: _th_neg
   cname: neg
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -2071,8 +2079,7 @@
       wrap_dim: self
 ]]
 [[
-  name: _sign
-  cname: sign
+  name: sign
   variants:
     - method
     - function
@@ -2080,6 +2087,14 @@
   arguments:
     - arg: THTensor* result
       output: True
+    - THTensor* self
+]]
+[[
+  name: sign_
+  cname: sign
+  return: self
+  arguments:
+    - THTensor* self
     - THTensor* self
 ]]
 [[
@@ -2367,7 +2382,7 @@
         - THTensor* other
 ]]
 [[
-  name: _clamp_
+  name: _th_clamp_
   cname: clamp
   variants:
     - method
@@ -2380,7 +2395,7 @@
     - real max
 ]]
 [[
-  name: _clamp_min_
+  name: _th_clamp_min_
   cname: cmaxValue
   variants:
     - method
@@ -2392,7 +2407,7 @@
     - real min
 ]]
 [[
-  name: _clamp_max_
+  name: _th_clamp_max_
   cname: cminValue
   variants:
     - method

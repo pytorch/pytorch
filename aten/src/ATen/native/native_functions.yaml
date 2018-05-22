@@ -200,22 +200,38 @@
 - func: clamp(Tensor self, Scalar min, Scalar max) -> Tensor
 
 - func: clamp_(Tensor self, Scalar min, Scalar max) -> Tensor
+  dispatch:
+    CPU: _clamp__cpu
+    CUDA: _clamp__cuda
 
 - func: clamp_out(Tensor result, Tensor self, Scalar min, Scalar max) -> Tensor
+  dispatch:
+    CPU: _clamp_out_cpu
+    CUDA: _clamp_out_cuda
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
 
 - func: clamp_max_(Tensor self, Scalar max) -> Tensor
+  dispatch:
+    CPU: _clamp_max__cpu
+    CUDA: _clamp_max__cuda
 
 - func: clamp_max_out(Tensor result, Tensor self, Scalar max) -> Tensor
+  dispatch:
+    CPU: _clamp_max_out_cpu
+    CUDA: _clamp_max_out_cuda
 
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
 
 - func: clamp_min_(Tensor self, Scalar min) -> Tensor
+  dispatch:
+    CPU: _clamp_min__cpu
+    CUDA: _clamp_min__cuda
 
 - func: clamp_min_out(Tensor result, Tensor self, Scalar min) -> Tensor
-
-- func: clone(Tensor self) -> Tensor
+  dispatch:
+    CPU: _clamp_min_out_cpu
+    CUDA: _clamp_min_out_cuda
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups) -> Tensor
   variants: function
@@ -282,11 +298,6 @@
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
-
-- func: contiguous(Tensor self) -> Tensor
-  dispatch:
-    CPU: _contiguous_cpu
-    CUDA: _contiguous_cuda
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
   return:
@@ -490,19 +501,6 @@
     CPU: _erf_out_cpu
     CUDA: _erf_out_cuda
 
-- func: erfinv(Tensor self) -> Tensor
-
-- func: erfinv_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _erfinv__cpu
-    CUDA: _erfinv__cuda
-
-- func: erfinv_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _erfinv_out_cpu
-    CUDA: _erfinv_out_cuda
-
 - func: exp(Tensor self) -> Tensor
 
 - func: exp_(Tensor self) -> Tensor
@@ -570,6 +568,9 @@
 - func: frac(Tensor self) -> Tensor
 
 - func: frac_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _frac__cpu
+    CUDA: _frac__cuda
 
 - func: frac_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -786,6 +787,9 @@
 - func: neg(Tensor self) -> Tensor
 
 - func: neg_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _neg__cpu
+    CUDA: _neg__cuda
 
 - func: neg_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -889,6 +893,9 @@
 - func: reciprocal(Tensor self) -> Tensor
 
 - func: reciprocal_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _reciprocal__cpu
+    CUDA: _reciprocal__cuda
 
 - func: reciprocal_out(Tensor result, Tensor self) -> Tensor
   variants: function
@@ -960,19 +967,15 @@
 - func: sigmoid(Tensor self) -> Tensor
 
 - func: sigmoid_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _sigmoid__cpu
+    CUDA: _sigmoid__cuda
 
 - func: sigmoid_out(Tensor result, Tensor self) -> Tensor
   variants: function
   dispatch:
     CPU: _sigmoid_out_cpu
     CUDA: _sigmoid_out_cuda
-
-- func: sign(Tensor self) -> Tensor
-
-- func: sign_(Tensor self) -> Tensor
-
-- func: sign_out(Tensor result, Tensor self) -> Tensor
-  variants: function
 
 - func: sin(Tensor self) -> Tensor
 

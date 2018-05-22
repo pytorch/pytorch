@@ -115,12 +115,12 @@ struct Reduction {
     static_assert(sizeof(acc) == 128, "accumulator should be 128 bytes");
     for (int64_t row = 0; row != rows; row++) {
       for (int j = 0; j != 4; j++) {
-        auto val = Vec::loadu(&data[row * stride + j * Vec::size]);
+        auto val = Vec::load(&data[row * stride + j * Vec::size]);
         acc[j] = Reduce()(acc[j], val);
       }
     }
     for (int j = 0; j != 4; j++) {
-      acc[j].storeu(&out[j * Vec::size]);
+      acc[j].store(&out[j * Vec::size]);
     }
   }
 

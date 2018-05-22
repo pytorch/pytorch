@@ -3447,7 +3447,8 @@ class TestNN(NNTestCase):
                 return var
             return torch.cat([var, var.new_zeros(length - var.size(0), *var.size()[1:])])
 
-        lengths = [10, 10, 6, 2, 2, 1, 1]
+        # lengths = [10, 10, 6, 2, 2, 1, 1]
+        lengths = [2, 2]
         max_length = lengths[0]
         x_leaf = torch.randn(max_length, len(lengths), 3, device=device, dtype=dtype, requires_grad=True)
         lstm = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to(device, dtype)

@@ -23,18 +23,20 @@
 
 namespace at { namespace native {
 
-Tensor& _fill__cpu(Tensor& self, Scalar value_) {
+Tensor& _fill__cpu(Tensor& self_, Scalar value_) {
+  Tensor self = sort_strides(self_);                          
   fillImpl(self, value_);
-  return self;
+  return self_;
 }
 
-Tensor& _fill__cpu(Tensor& self, const Tensor& value__) {
+Tensor& _fill__cpu(Tensor& self_, const Tensor& value__) {
   Tensor value_ = value__;
   if (value_.dim() == 0)
     value_ = value_.view(1);
   Scalar value(value_[0]);
+  Tensor self = sort_strides(self_);                          
   fillImpl(self, value);
-  return self;
+  return self_;
 }
 
 Tensor& zero_(Tensor& self) {
@@ -46,142 +48,55 @@ Tensor& zero_(Tensor& self) {
   return self;
 }
 
-Tensor sign(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  result.resize_(self.sizes());
-  return native::sign_out(result, self);
-}
-
-Tensor& sign_(Tensor& self) {
-  return native::sign_out(self, self);
-}
-
-Tensor& sign_out(Tensor& result, const Tensor& self) {
-  result.copy_(_sign(self));
-  return result;
-}
-
 Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
   Tensor result = self.type().tensor();
+  return clamp_out(result, self, min, max);
+}
+
+Tensor& _clamp__cpu(Tensor& self_, Scalar min, Scalar max) {
+  Tensor self = sort_strides(self_);                          
+  clamp_Impl(self, min, max);
+  return self_;
+}
+
+Tensor& _clamp_out_cpu(Tensor& result, const Tensor& self, Scalar min, Scalar max) {
   result.resize_(self.sizes());
-  return native::clamp_out(result, self, min, max);
-}
-
-Tensor& clamp_(Tensor& self, Scalar min, Scalar max) {
-  return native::clamp_out(self, self, min, max);
-}
-
-Tensor& clamp_out(Tensor& result, const Tensor& self, Scalar min, Scalar max) {
   clampImpl(result, self, min, max);
   return result;
 }
 
 Tensor clamp_max(const Tensor& self, Scalar max) {
   Tensor result = self.type().tensor();
+  return clamp_max_out(result, self, max);
+}
+
+Tensor& _clamp_max__cpu(Tensor& self_, Scalar max) {
+   Tensor self = sort_strides(self_);                          
+   clampMax_Impl(self, max);
+   return self_;
+}
+
+Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
   result.resize_(self.sizes());
-  return native::clamp_max_out(result, self, max);
-}
-
-Tensor& clamp_max_(Tensor& self, Scalar max) {
-  return native::clamp_max_out(self, self, max);
-}
-
-Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
   clampMaxImpl(result, self, max);
   return result;
 }
 
 Tensor clamp_min(const Tensor& self, Scalar min) {
   Tensor result = self.type().tensor();
+  return clamp_min_out(result, self, min);
+}
+
+Tensor& _clamp_min__cpu(Tensor& self_, Scalar min) {
+  Tensor self = sort_strides(self_);                          
+  clampMin_Impl(self, min);
+  return self_;
+}
+
+Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   result.resize_(self.sizes());
-  return native::clamp_min_out(result, self, min);
-}
-
-Tensor& clamp_min_(Tensor& self, Scalar min) {
-  return native::clamp_min_out(self, self, min);
-}
-
-Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
   clampMinImpl(result, self, min);
   return result;
-}
-
-Tensor frac(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return frac_out(result, self);
-}
-
-Tensor& frac_(Tensor& self) {
-  return frac_out(self, self);
-}
-
-Tensor& _frac_out_cpu(Tensor& result, const Tensor& self) {
-  result.resize_(self.sizes());
-  return at::_th_frac_out(result, self);
-}
-
-Tensor erfinv(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return erfinv_out(result, self);
-}
-
-Tensor& _erfinv__cpu(Tensor& self) {
-  return _erfinv_out_cpu(self, self);
-}
-
-Tensor& _erfinv_out_cpu(Tensor& result, const Tensor& self) {
-  result.resize_(self.sizes());
-  return at::_erfinv_out(result, self);
-}
-
-Tensor sigmoid(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return sigmoid_out(result, self);
-}
-
-Tensor& sigmoid_(Tensor& self) {
-  return sigmoid_out(self, self);
-}
-
-Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
-  result.resize_(self.sizes());
-  return at::_th_sigmoid_out(result, self);
-}
-
-Tensor clone(const Tensor& self) {
-  return self.type()._th_clone(self);
-}
-
-Tensor _contiguous_cpu(const Tensor& self) {
-  return self.type()._th_contiguous(self);
-}
-
-Tensor neg(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return neg_out(result, self);
-}
-
-Tensor& neg_(Tensor& self) {
-  return neg_out(self, self);
-}
-
-Tensor& _neg_out_cpu(Tensor& result, const Tensor& self) {
-  result.resize_(self.sizes());
-  return at::_th_neg_out(result, self);
-}
-
-Tensor reciprocal(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return reciprocal_out(result, self);
-}
-
-Tensor& reciprocal_(Tensor& self) {
-  return reciprocal_out(self, self);
-}
-
-Tensor& _reciprocal_out_cpu(Tensor& result, const Tensor& self) {
-  result.resize_(self.sizes());
-  return at::_th_reciprocal_out(result, self);
 }
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding
@@ -194,7 +109,7 @@ Tensor& _reciprocal_out_cpu(Tensor& result, const Tensor& self) {
                                                                 \
   Tensor& _##op##__cpu(Tensor& self_) {                         \
     Tensor self = sort_strides(self_);                          \
-    _##op##_out_cpu(self, self);                                \
+    op##_Impl(self);                                            \
     return self_;                                               \
   }                                                             \
                                                                 \
@@ -214,12 +129,16 @@ IMPLEMENT_UNARY_OP(cosh)
 IMPLEMENT_UNARY_OP(erf)
 IMPLEMENT_UNARY_OP(exp)
 IMPLEMENT_UNARY_OP(expm1)
+IMPLEMENT_UNARY_OP(frac)
 IMPLEMENT_UNARY_OP(floor)
 IMPLEMENT_UNARY_OP(log)
 IMPLEMENT_UNARY_OP(log10)
 IMPLEMENT_UNARY_OP(log1p)
 IMPLEMENT_UNARY_OP(log2)
+IMPLEMENT_UNARY_OP(neg)
+IMPLEMENT_UNARY_OP(reciprocal)
 IMPLEMENT_UNARY_OP(round)
+IMPLEMENT_UNARY_OP(sigmoid)
 IMPLEMENT_UNARY_OP(sin)
 IMPLEMENT_UNARY_OP(sinh)
 IMPLEMENT_UNARY_OP(sqrt)
