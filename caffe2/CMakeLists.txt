@@ -182,6 +182,8 @@ target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
 target_include_directories(caffe2 INTERFACE $<INSTALL_INTERFACE:include>)
 target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
+# Set standard properties on the target
+aten_set_target_props(caffe2)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
@@ -220,6 +222,9 @@ if(USE_CUDA OR USE_ROCM)
   # linking; libculibos and cublas must be last.
   target_link_libraries(
       caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+
+  # Set standard properties on the target
+  aten_set_target_props(caffe2_gpu)
 
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)

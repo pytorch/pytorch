@@ -157,3 +157,16 @@ function(aten_compile_options libname)
     target_compile_options(${libname} PRIVATE -Werror)
   endif()
 endfunction()
+
+
+##############################################################################
+# Set ATen target properties.
+# Usage:
+#   aten_set_target_props(lib_name)
+function(aten_set_target_props libname)
+  if(MSVC AND AT_MKL_MT)
+    set_target_properties(${libname} PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
+  endif()
+endfunction()

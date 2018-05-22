@@ -159,38 +159,9 @@ IF(UNIX)
   ENDIF(HAVE_MALLOC_USABLE_SIZE)
 ENDIF(UNIX)
 
-IF(NOT MSVC)
+if(NOT MSVC)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS m)
-ELSE(NOT MSVC)
-  IF(AT_MKL_MT)
-    set_target_properties(ATen_cpu PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(ATen_cpu PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(ATen_cpu PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
-    if(NOT NO_CUDA OR WITH_ROCM)
-      set_target_properties(ATen_cuda PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
-      set_target_properties(ATen_cuda PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
-      set_target_properties(ATen_cuda PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
-    endif()
-  ENDIF(AT_MKL_MT)
-ENDIF(NOT MSVC)
-
-# Is __thread supported?
-IF(NOT MSVC)
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS m)
-ELSE()
-  if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
-    IF(AT_MKL_MT)
-      set_target_properties(ATen_cpu PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
-      set_target_properties(ATen_cpu PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
-      set_target_properties(ATen_cpu PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
-      if(NOT NO_CUDA OR WITH_ROCM)
-        set_target_properties(ATen_cuda PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
-        set_target_properties(ATen_cuda PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
-        set_target_properties(ATen_cuda PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
-      endif()
-    ENDIF(AT_MKL_MT)
-  endif()
-ENDIF(NOT MSVC)
+endif()
 
 if(MKLDNN_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${MKLDNN_LIBRARIES})
@@ -306,6 +277,8 @@ else()
   target_link_libraries(ATen_cpu PUBLIC ${ATen_CPU_DEPENDENCY_LIBS})
   target_link_libraries(ATen_cpu PRIVATE ATEN_CPU_FILES_GEN_LIB)
   caffe2_interface_library(ATen_cpu ATen_cpu_library)
+  # Set standard properties on the target
+  aten_set_target_props(ATen_cpu)
 
   # Make sure these don't get built by parent
   set(ATen_CPU_SRCS)
@@ -342,6 +315,9 @@ if(NOT NO_CUDA OR WITH_ROCM)
     # linking; libculibos and cublas must be last.
     target_link_libraries(
         ATen_cuda PUBLIC ATen_cpu ${ATen_PUBLIC_CUDA_DEPENDENCY_LIBS})
+
+    # Set standard properties on the target
+    aten_set_target_props(ATen_cuda)
 
     caffe2_interface_library(ATen_cuda ATen_cuda_library)
 
