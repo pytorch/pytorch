@@ -2,6 +2,7 @@
 
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/autograd/functions/tensor.h"
@@ -20,7 +21,8 @@
 #include <string>
 #include <vector>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
     : TensorImpl(VariableType::getType(data)),
       data_(std::move(data)),
@@ -109,6 +111,22 @@ void Variable::Impl::detach_() {
   output_nr_ = 0;
 }
 
+void Variable::Impl::backward(
+    at::optional<Tensor> gradient,
+    bool keep_graph,
+    bool create_graph) {
+  std::vector<Edge> edges;
+  edges.emplace_back(grad_fn_, output_nr_);
+
+  std::vector<Variable> inputs;
+  if (!gradient.has_value()) {
+    gradient = make_variable(at::ones_like(data_), /*requires_grad=*/false);
+  }
+  inputs.push_back(std::move(as_variable_ref(*gradient)));
+
+  Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
+}
+
 void Variable::Impl::set_data(Tensor new_data) {
   data_ = std::move(new_data);
   if (data_.type() != *type_) {
@@ -180,4 +198,5 @@ void Variable::set_tracing_state(
 jit::tracer::ValueTracingState& Variable::tracing_state() const noexcept {
   return *get()->tracing_state_;
 }
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch
