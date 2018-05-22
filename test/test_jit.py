@@ -1741,10 +1741,6 @@ class TestScript(TestCase):
                     v = m(v)
                 return v
 
-            @torch.jit.script_method
-            def forward2(self, v):
-                return self.mods(v)
-
         i = torch.Tensor(2)
         m = M()
         o = m(i)
@@ -1752,9 +1748,6 @@ class TestScript(TestCase):
         for sub in m.mods:
             v = sub(v)
         self.assertEqual(o, v)
-
-        o2 = m.forward2(i)
-        self.assertEqual(o2, v)
 
     def test_script_module_const_submodule_fail(self):
         class Sub(torch.jit.ScriptModule):

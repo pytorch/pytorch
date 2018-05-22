@@ -250,7 +250,7 @@ struct ModuleValue : public SugaredValue {
   // call module.forward
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     py::object py_module = py::cast(module);
-    if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
+    if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstSequential")))
       return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
     std::shared_ptr<SugaredValue> result;
     // namedvalue needs to be creted before the for-loop

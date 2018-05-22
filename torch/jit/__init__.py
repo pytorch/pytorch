@@ -578,12 +578,14 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
             return super(ScriptModule, self).__setattr__(attr, value)
         if hasattr(self, attr):
             raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-        if isinstance(value, ModuleList) or isinstance(value, Sequential):
+        if isinstance(value, ModuleList):
             # special case for list of modules. Modules need to be registered with their
             # parent module. To do this, we create a ConstModuleList, which is itself a module, that
             # contains each of these modules as submodules. The ConstModuleList then
             # is set as an attribute of the parent module.
             super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
+        elif isinstance(value, Sequential):
+            super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
         else:
             super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
 
@@ -708,6 +710,8 @@ class _ConstModuleList(ScriptModule):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
+
+class _ConstSequential(_ConstModuleList):
     def forward(self, inputs):
         for m in list(self._modules.values()):
             if(isinstance(inputs, tuple)):
@@ -715,7 +719,6 @@ class _ConstModuleList(ScriptModule):
                                    .format(type(self), len(inputs)))
             inputs = m(inputs)
         return inputs
-
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
