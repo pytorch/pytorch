@@ -16,7 +16,7 @@ TEST_CASE("misc") {
     auto y = model->forward({x})[0];
     Variable s = y.sum();
 
-    s.backward();
+    backward(s);
     REQUIRE(!model->parameters()["weight"].grad().defined());
   }
 
@@ -43,28 +43,6 @@ TEST_CASE("misc_cuda", "[cuda]") {
     auto l_inf = (x1.data() - x2.data()).abs().max().toCFloat();
     REQUIRE(l_inf < 1e-10);
   }
-}
-
-TEST_CASE("autograd") {
-  auto x = autograd::make_variable(
-      at::randn(at::CPU(at::kFloat), {3, 3}), /*requires_grad=*/true);
-  auto y = autograd::make_variable(
-      at::randn(at::CPU(at::kFloat), {3, 3}), /*requires_grad=*/false);
-  auto z = x * y;
-  SECTION("derivatives of zero-dim tensors") {
-    z.sum().backward();
-    REQUIRE(x.grad().allclose(y));
-  }
-  SECTION("derivatives of tensors") {
-    z.backward();
-    REQUIRE(x.grad().allclose(y));
-  }
-  SECTION("custom gradient inputs") {
-    z.sum().backward(
-        autograd::make_variable(at::ones(at::CPU(at::kFloat), {1}) * 2));
-    REQUIRE(x.grad().allclose(y * 2));
-  }
-  // Assume everything else is safe from PyTorch tests.
 }
 
 TEST_CASE("expanding-array") {
