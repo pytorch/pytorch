@@ -55,16 +55,17 @@ struct AlgorithmKey {
 
   // This function is called by torch::hash<AlgorithmKey>
   static std::size_t hash(const AlgorithmKey& k) {
-    return torch::get_hash(k.collectiveType,
-                           k.type,
-                           k.devices,
-                           k.srcSizes,
-                           k.dstSizes,
-                           k.srcRank,
-                           k.dstRank,
-                           k.srcTensor,
-                           k.dstTensor,
-                           k.reduceOp);
+    return torch::get_hash(
+        k.collectiveType,
+        k.type,
+        k.devices,
+        k.srcSizes,
+        k.dstSizes,
+        k.srcRank,
+        k.dstRank,
+        k.srcTensor,
+        k.dstTensor,
+        k.reduceOp);
   }
 };
 

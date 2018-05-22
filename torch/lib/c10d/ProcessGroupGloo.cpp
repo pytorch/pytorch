@@ -301,7 +301,7 @@ AlgorithmEntry* ProcessGroupGloo::checkout(const AlgorithmKey& key) {
   // Ensure entry is not in use
   std::unique_lock<std::mutex> lock(entry->m);
   while (entry->busy) {
-      entry->cv.wait(lock);
+    entry->cv.wait(lock);
   }
 
   // Mark entry in use
@@ -309,7 +309,8 @@ AlgorithmEntry* ProcessGroupGloo::checkout(const AlgorithmKey& key) {
   return entry.get();
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::enqueue(AlgorithmEntry* entry) {
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::enqueue(
+    AlgorithmEntry* entry) {
   auto work = std::make_shared<WorkGloo>();
   std::unique_lock<std::mutex> lock(queueMutex_);
   queue_.push_back(std::make_tuple(entry, work));
