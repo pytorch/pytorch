@@ -253,6 +253,11 @@ struct ModuleValue : public SugaredValue {
     if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
       return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
     std::shared_ptr<SugaredValue> result;
+    // namedvalue needs to be creted before the for-loop
+    // If creating namedvalue in the for loop instead:
+    //   inputs = at::ArrayRef<NamedValue>(NamedValue(loc, "", value));
+    // there will be an Error: AddressSanitizer: stack-use-after-scope in pr/pytorch-linux-xenial-py3-clang5-asan,
+    // because NamedValue instance will be destructed when leaving the for-loop, but inputs(at::ArrayRef<NamedValue>) will be used in next iteration
     NamedValue namedvalue(loc, "", inputs.data()->value);
     for(py::handle module : py_module) {
       if(TupleType* tt = inputs.data()->value->type()->cast<TupleType>()) {
