@@ -29,6 +29,7 @@ if (NOT __NCCL_INCLUDED)
         "CXX=${CMAKE_CXX_COMPILER}"
         "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
         "NVCC=${CUDA_NVCC_EXECUTABLE}"
+        "VERBOSE=0"
       BUILD_BYPRODUCTS "${nccl_PREFIX}/build/lib/libnccl_static.a"
       INSTALL_COMMAND ""
       )

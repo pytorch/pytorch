@@ -52,6 +52,14 @@ if (BUILD_ATEN)
 
   FILE(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp")
 
+  IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
+    SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
+    SET(VCOMP_LIB "vcomp")
+  ELSE()
+    SET(MSVC_OPT_FLAG " ")
+    SET(VCOMP_LIB "vcompd")
+  ENDIF()
+
   LIST(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
   IF(MSVC)
     LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}")
