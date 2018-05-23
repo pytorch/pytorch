@@ -121,6 +121,10 @@ ENDIF()
 # Find the HIP package, set the HIP paths, load the HIP CMake.
 IF(WITH_ROCM)
   include(LoadHIP)
+  if (NOT PYTORCH_FOUND_HIP)
+    MESSAGE(FATAL_ERROR
+      "Could not find HIP installation")
+  endif()
 ENDIF()
 
 IF(MSVC)
