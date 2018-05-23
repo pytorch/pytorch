@@ -155,7 +155,7 @@ struct Tensor : public detail::TensorBase {
       at::optional<Tensor> gradient = at::nullopt,
       bool keep_graph = false,
       bool create_graph = false) {
-    pImpl->backward(std::move(gradient), keep_graph, create_graph);
+    pImpl->backward(gradient, keep_graph, create_graph);
   }
 
   friend void detail::set_data(Tensor& tensor, Tensor new_data);
