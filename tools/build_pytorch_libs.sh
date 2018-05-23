@@ -228,6 +228,7 @@ function build_caffe2() {
       -DBUILD_ATEN=ON \
       -DBUILD_PYTHON=OFF \
       -DBUILD_BINARY=OFF \
+      -DBUILD_SHARED_LIBS=ON \
       -DUSE_CUDA=$WITH_CUDA \
       -DUSE_ROCM=$WITH_ROCM \
       -DUSE_NNPACK=$WITH_NNPACK \
