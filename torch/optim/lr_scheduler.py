@@ -22,12 +22,6 @@ class _LRScheduler(object):
         self.step(last_epoch + 1)
         self.last_epoch = last_epoch
 
-    def __getstate__(self):
-        return self.state_dict()
-
-    def __setstate__(self, state):
-        self.load_state_dict(state)
-
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
 
