@@ -1,3 +1,4 @@
+// @generated
 #pragma once
 
 $th_headers

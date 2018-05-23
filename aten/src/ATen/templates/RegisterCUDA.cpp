@@ -1,3 +1,4 @@
+// @generated
 #include <ATen/Type.h>
 #include <ATen/Context.h>
 #include <ATen/detail/VariableHooksInterface.h>
