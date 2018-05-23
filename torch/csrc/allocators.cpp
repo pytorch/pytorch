@@ -53,7 +53,7 @@ THAllocator THObjectPtrAllocator = {
   free_wrapper<ObjectPtrAllocator>,
 };
 
-THAllocator THStorageWeakRefAllocator = {
+THAllocator THWStorageWeakRefAllocator = {
   malloc_wrapper<StorageWeakRefAllocator>,
   realloc_wrapper<StorageWeakRefAllocator>,
   free_wrapper<StorageWeakRefAllocator>,

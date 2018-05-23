@@ -133,7 +133,7 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 
-#define THStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
+#define THWStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
 #define THTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
 #define THPStoragePtr TH_CONCAT_3(THP,Real,StoragePtr)
 #define THPTensorPtr  TH_CONCAT_3(THP,Real,TensorPtr)

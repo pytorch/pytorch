@@ -62,7 +62,7 @@ public:
 #endif
 
 extern THAllocator THObjectPtrAllocator;
-extern THAllocator THStorageWeakRefAllocator;
+extern THAllocator THWStorageWeakRefAllocator;
 #ifdef WITH_CUDA
 extern THCDeviceAllocator THCStorageWeakRefAllocator;
 #endif
