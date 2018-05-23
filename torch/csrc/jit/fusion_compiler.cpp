@@ -8,6 +8,7 @@
 
 #include "ATen/ATen.h"
 #ifdef WITH_CUDA
+#include "THC/THC.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
 #include <cuda.h>
@@ -550,13 +551,19 @@ protected:
      // it is possible that this is the first cuda call on this thread
      // so make sure we initialize the Driver API's context
      // cudaFree(0) accomplishes this.
-     cudaFree(0);
-
+     CUcontext pctx = 0;
+     TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
+     if (!pctx) {
+        std::unique_lock<std::mutex> cudaFreeMutexLock(
+            *(THCCachingAllocator_getCudaFreeMutex()));
+        cudaFree(0);
+     }
+     CUstream stream = at::globalContext().getCurrentCUDAStream();
      TORCH_CU_CHECK(cuLaunchKernel(
        function,
        numBlocks, 1, 1,
        blockSize, 1, 1,
-       0, nullptr,
+       0, stream,
        arguments,
        nullptr));
   }
