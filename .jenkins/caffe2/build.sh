@@ -131,6 +131,10 @@ case "${BUILD_ENVIRONMENT}" in
     # Ensure the ccache symlink can still find the real nvcc binary.
     export PATH="/usr/local/cuda/bin:$PATH"
     ;;
+  *-rocm*)
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+    export HCC_AMDGPU_TARGET=gfx900
 esac
 
 # Try to include Redis support for Linux builds
