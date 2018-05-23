@@ -8,6 +8,7 @@ from common import TestCase, run_tests, IS_WINDOWS
 from common_cuda import TEST_CUDA, TEST_MULTIGPU
 
 
+nGPUs = torch.cuda.device_count()
 if not TEST_CUDA:
     print('CUDA not available, skipping tests')
     TestCase = object  # noqa: F811
