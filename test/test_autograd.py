@@ -687,9 +687,19 @@ class TestAutograd(TestCase):
         y = Variable(torch.ones(5, 5) * 4)
         with torch.no_grad():
             w = x + y
+
+        @torch.no_grad()
+        def adder(x, y):
+            return x + y
+
+        z = adder(x, y)
+
         self.assertFalse(w.requires_grad)
         self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
         self.assertIsNone(w.grad_fn)
+        self.assertFalse(z.requires_grad)
+        self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
+        self.assertIsNone(z.grad_fn)
 
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
