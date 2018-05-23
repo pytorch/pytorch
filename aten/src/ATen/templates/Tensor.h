@@ -154,9 +154,7 @@ struct Tensor : public detail::TensorBase {
   void backward(
       at::optional<Tensor> gradient = at::nullopt,
       bool keep_graph = false,
-      bool create_graph = false) {
-    pImpl->backward(gradient, keep_graph, create_graph);
-  }
+      bool create_graph = false);
 
   friend void detail::set_data(Tensor& tensor, Tensor new_data);
 

@@ -26,4 +26,11 @@ void TensorImpl::backward(
 void TensorImpl::set_data(Tensor new_data) {
   AT_ERROR("set_type is not implemented for Tensor");
 }
+
+void Tensor::backward(
+    at::optional<Tensor> gradient,
+    bool keep_graph,
+    bool create_graph) {
+  pImpl->backward(std::move(gradient), keep_graph, create_graph);
+}
 } // namespace at
