@@ -254,7 +254,7 @@ struct ModuleValue : public SugaredValue {
 
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
     py::object py_module = py::cast(module);
-    if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")) and !py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstSequential")))
+    if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")) && !py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstSequential")))
       return SugaredValue::asTuple(loc, m);
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(py::handle module : py_module) {
