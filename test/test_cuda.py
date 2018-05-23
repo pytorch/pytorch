@@ -1412,7 +1412,6 @@ class TestCuda(TestCase):
     @unittest.skipIf(sys.version_info[0] == 2,
                      "spawn start method is not supported in Python 2, \
                      but we need it for creating another process with CUDA")
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
         self._spawn_method(test_method, torch.Tensor([0, -1]))
