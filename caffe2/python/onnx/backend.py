@@ -335,9 +335,9 @@ class Caffe2Backend(Backend):
         initial_states_sliced = []
         for initial_state, name_suffix in initial_states_and_names:
             initial_states_sliced.append(
-                init_net.Slice(initial_state, name + name_suffix,
-                               starts=[direction_offset + 0, 0, 0],
-                               ends  =[direction_offset + 1,-1,-1]))
+                pred_mh.net.Slice(initial_state, name + name_suffix,
+                                  starts=[direction_offset + 0, 0, 0],
+                                  ends  =[direction_offset + 1,-1,-1]))
 
         if direction_offset == 1:
             if sequence_lens is not None:
@@ -901,8 +901,6 @@ class Caffe2Backend(Backend):
 
     @classmethod
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
-
-
         device_option = get_device_option(Device(device))
 
         init_model = cls.optimize_onnx(onnx_model, init=True)
@@ -919,6 +917,13 @@ class Caffe2Backend(Backend):
 
         cls._dummy_name.reset(cls._all_names_in_graph(init_model.graph) | cls._all_names_in_graph(pred_model.graph))
 
+        # If the input model contains initializers, then it's safe to
+        # move some computation into the init net. Note that isn't the
+        # same as include_initializers, which is about whether we
+        # choose to directly embed any initializers into our output
+        # net.
+        has_initializers = len(onnx_model.graph.initializer) != 0
+
         success = True
         for net, model in ( (init_net, init_model), (pred_net, pred_model) ):
             net.device_option.CopyFrom(device_option)
@@ -930,7 +935,7 @@ class Caffe2Backend(Backend):
                     success = False
                     print('ONNX FATAL:', e)
                     continue
-                (init_net if include_initializers else net).op.extend(c2ops.init_ops)
+                (init_net if has_initializers else net).op.extend(c2ops.init_ops)
                 net.op.extend(c2ops.ops)
                 net.external_input.extend(c2ops.interface_blobs)
             net.external_output.extend(
