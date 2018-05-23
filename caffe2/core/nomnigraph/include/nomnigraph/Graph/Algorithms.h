@@ -12,23 +12,16 @@
 #ifndef NOM_GRAPH_ALGORITHMS_H
 #define NOM_GRAPH_ALGORITHMS_H
 
-#include "nomnigraph/Graph/Graph.h"
-
 #include <assert.h>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace nom {
-namespace algorithm {
-
-/// \brief Tarjans algorithm.  Does not modify the graph.
-template <typename T, typename U>
-std::vector<Subgraph<T, U>> tarjans(Graph<T, U>* g);
+#include "nomnigraph/Graph/BinaryMatchImpl.h"
+#include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Graph/TarjansImpl.h"
 
-template <typename T, typename U, typename F>
-std::vector<Subgraph<T, U>> binaryMatch(Graph<T, U>* g, F condition);
-#include "nomnigraph/Graph/BinaryMatchImpl.h"
+namespace nom {
+namespace algorithm {
 
 /// \brief Helper for dominator tree finding.
 template <typename G>
@@ -64,7 +57,7 @@ void reachable(
 ///   if newnode has inedge, delete it
 ///   draw edge from parent to child
 template <typename G>
-Graph<typename G::NodeRef, int> dominatorTree(
+Graph<typename G::NodeRef> dominatorTree(
     G* g,
     typename G::NodeRef source = nullptr) {
   assert(
@@ -82,10 +75,10 @@ Graph<typename G::NodeRef, int> dominatorTree(
   }
 
   std::unordered_set<typename G::NodeRef> allNodes;
-  Graph<typename G::NodeRef, int> tree;
+  Graph<typename G::NodeRef> tree;
   std::unordered_map<
       typename G::NodeRef,
-      typename Graph<typename G::NodeRef, int>::NodeRef>
+      typename Graph<typename G::NodeRef>::NodeRef>
       mapToTreeNode;
   std::unordered_map<
       typename G::NodeRef,
@@ -119,7 +112,7 @@ Graph<typename G::NodeRef, int> dominatorTree(
   nextPass.insert(source);
 
   while (nextPass.size()) {
-    for (auto parent_iter = nextPass.begin(); parent_iter != nextPass.end(); ) {
+    for (auto parent_iter = nextPass.begin(); parent_iter != nextPass.end();) {
       auto parent = *parent_iter;
       for (auto child : dominatorMap[parent]) {
         while (mapToTreeNode[child]->getInEdges().size()) {
