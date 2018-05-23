@@ -30,31 +30,45 @@ bool pointer_equal(Tensor first, Tensor second) {
   return first.data<float>() == second.data<float>();
 }
 
+struct TestModule : public CloneableModule<TestModule> {
+  void reset() override {
+    weight =
+        register_parameter("weight", at::ones(at::CPU(at::kFloat), {4, 4}));
+  }
+
+  variable_list forward(variable_list input) override {
+    return input;
+  }
+
+  Variable weight;
+  int value = 0;
+};
+
 TEST_CASE("module/training-mode") {
-  auto model = Linear(3, 4).build();
-  REQUIRE(model->is_training());
+  auto module = Linear(3, 4).build();
+  REQUIRE(module->is_training());
   SECTION("Enable eval mode") {
-    model->eval();
-    REQUIRE(!model->is_training());
+    module->eval();
+    REQUIRE(!module->is_training());
   }
   SECTION("Enable train mode") {
-    model->train();
-    REQUIRE(model->is_training());
+    module->train();
+    REQUIRE(module->is_training());
   }
 }
 
 TEST_CASE("module/zero-grad") {
-  auto model = Linear(3, 4).build();
+  auto module = Linear(3, 4).build();
   auto weight = Var(at::ones(at::CPU(at::kFloat), {8, 3}));
-  auto loss = model->forward({weight}).front().sum();
+  auto loss = module->forward({weight}).front().sum();
   backward(loss);
-  for (auto& parameter : model->parameters()) {
+  for (auto& parameter : module->parameters()) {
     Variable grad = parameter.second.grad();
     REQUIRE(grad.defined());
     REQUIRE(grad.sum().toCFloat() != 0);
   }
-  model->zero_grad();
-  for (auto& parameter : model->parameters()) {
+  module->zero_grad();
+  for (auto& parameter : module->parameters()) {
     Variable grad = parameter.second.grad();
     REQUIRE(grad.defined());
     REQUIRE(grad.sum().toCFloat() == 0);
@@ -75,40 +89,40 @@ TEST_CASE("module/name") {
 }
 
 TEST_CASE("module/conversions", "[cuda]") {
-  auto model = LSTM(128, 64).layers(3).dropout(0.2).build();
+  auto module = LSTM(128, 64).layers(3).dropout(0.2).build();
   SECTION("starts as float on CPU") {
-    for (auto& parameter : model->parameters()) {
+    for (auto& parameter : module->parameters()) {
       REQUIRE(parameter.second.type().backend() == at::kCPU);
       REQUIRE(parameter.second.type().scalarType() == at::kFloat);
     }
   }
   SECTION("to(CUDA)") {
-    model->cuda();
-    for (auto& parameter : model->parameters()) {
+    module->cuda();
+    for (auto& parameter : module->parameters()) {
       REQUIRE(parameter.second.type().backend() == at::kCUDA);
     }
   }
   SECTION("to(CPU)") {
-    model->to(at::kCPU);
-    for (auto& parameter : model->parameters()) {
+    module->to(at::kCPU);
+    for (auto& parameter : module->parameters()) {
       REQUIRE(parameter.second.type().backend() == at::kCPU);
     }
   }
   SECTION("to(Int)") {
-    model->to(at::kInt);
-    for (auto& parameter : model->parameters()) {
+    module->to(at::kInt);
+    for (auto& parameter : module->parameters()) {
       REQUIRE(parameter.second.type().scalarType() == at::kInt);
     }
   }
   SECTION("to(Double)") {
-    model->to(at::kDouble);
-    for (auto& parameter : model->parameters()) {
+    module->to(at::kDouble);
+    for (auto& parameter : module->parameters()) {
       REQUIRE(parameter.second.type().scalarType() == at::kDouble);
     }
   }
   SECTION("to(CUDA(Float))") {
-    model->to(at::CUDA(at::kFloat));
-    for (auto& parameter : model->parameters()) {
+    module->to(at::CUDA(at::kFloat));
+    for (auto& parameter : module->parameters()) {
       REQUIRE(parameter.second.type().backend() == at::kCUDA);
       REQUIRE(parameter.second.type().scalarType() == at::kFloat);
     }
@@ -143,14 +157,12 @@ TEST_CASE("module/clone") {
   }
 
   SECTION("Cloning creates distinct parameters") {
-    struct TestModel : public CloneableModule<TestModel> {
-      TestModel() {
-        register_module("l1", &TestModel::l1, Linear(10, 3).build());
-        register_module("l2", &TestModel::l2, Linear(3, 5).build());
-        register_module("l3", &TestModel::l3, Linear(5, 100).build());
+    struct TestModule : public CloneableModule<TestModule> {
+      void reset() override {
+        l1 = register_module("l1", Linear(10, 3).build());
+        l2 = register_module("l2", Linear(3, 5).build());
+        l3 = register_module("l3", Linear(5, 100).build());
       }
-
-      void reset() override {}
 
       variable_list forward(variable_list input) override {
         return input;
@@ -159,11 +171,11 @@ TEST_CASE("module/clone") {
       std::shared_ptr<Linear> l1, l2, l3;
     };
 
-    auto model = TestModel().build();
+    auto module = TestModule().build();
 
-    auto model2 = model->clone();
-    auto m1param = model->parameters();
-    auto m2param = model2->parameters();
+    auto module2 = module->clone();
+    auto m1param = module->parameters();
+    auto m2param = module2->parameters();
     for (auto& param : m1param) {
       REQUIRE(!pointer_equal(param.second, m2param[param.first]));
       REQUIRE(param.second.allclose(m2param[param.first]));
@@ -175,41 +187,51 @@ TEST_CASE("module/clone") {
   }
 
   SECTION("Cloning preserves external references") {
-    struct TestModel : public CloneableModule<TestModel> {
-      void reset() {
-        register_parameter(
-            "weight",
-            &TestModel::weight,
-            at::ones(at::CPU(at::kFloat), {4, 4}));
-      }
+    auto module = TestModule().build();
+    module->weight.data() += 1;
+    REQUIRE(pointer_equal(module->weight, module->param("weight")));
+    REQUIRE(module->weight.allclose(module->param("weight")));
 
-      variable_list forward(variable_list input) override {
-        return input;
-      }
+    auto module2 = std::dynamic_pointer_cast<TestModule>(
+        std::shared_ptr<Module>(module->clone()));
+    REQUIRE(!pointer_equal(module2->weight, module->weight));
+    REQUIRE(pointer_equal(module2->weight, module2->param("weight")));
+    REQUIRE(module2->weight.allclose(module2->param("weight")));
+    REQUIRE(module2->weight.allclose(module->weight));
+    REQUIRE(!pointer_equal(module2->weight, module->param("weight")));
+  }
 
-      Variable weight;
+  SECTION("Cloning copies the values of variables of submodules") {
+    struct NestedModule : public CloneableModule<NestedModule> {
+      void reset() override {
+        module = register_module("module", TestModule().build());
+      }
+      variable_list forward(variable_list inputs) override {
+        return inputs;
+      }
+      std::shared_ptr<TestModule> module;
     };
 
-    auto model = TestModel().build();
-    REQUIRE(pointer_equal(model->weight, model->param("weight")));
+    auto a = NestedModule().build();
+    a->module->weight.data() += 1;
+    a->module->value = 123;
 
-    auto model2 = std::dynamic_pointer_cast<TestModel>(
-        std::shared_ptr<Module>(model->clone()));
-    REQUIRE(!pointer_equal(model2->weight, model->weight));
-    REQUIRE(pointer_equal(model2->weight, model2->param("weight")));
-    REQUIRE(!pointer_equal(model2->weight, model->param("weight")));
+    auto b = std::static_pointer_cast<NestedModule>(a->clone());
+
+    REQUIRE(!pointer_equal(b->module->weight, a->module->weight));
+    REQUIRE(pointer_equal(b->module->weight, b->module->param("weight")));
+    REQUIRE(b->module->param("weight").allclose(a->module->weight));
+    REQUIRE(b->module->weight.allclose(a->module->weight));
+    REQUIRE(b->module->value == a->module->value);
   }
 }
 
 TEST_CASE("module/parameters") {
   struct TestModule : Module {
     TestModule() {
-      register_parameter(
-          "a", &TestModule::a, at::zeros(at::CPU(at::kFloat), {2, 2}));
-      register_parameter(
-          "b", &TestModule::b, at::ones(at::CPU(at::kFloat), {2, 2}));
-      register_parameter(
-          "c", &TestModule::c, at::ones(at::CPU(at::kFloat), {2, 2}) * 2);
+      a = register_parameter("a", at::zeros(at::CPU(at::kFloat), {2, 2}));
+      b = register_parameter("b", at::ones(at::CPU(at::kFloat), {2, 2}));
+      c = register_parameter("c", at::ones(at::CPU(at::kFloat), {2, 2}) * 2);
     }
 
     variable_list forward(variable_list) override {

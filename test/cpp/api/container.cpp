@@ -8,9 +8,9 @@ using namespace torch::nn;
 class TestModel : public Module {
  public:
   TestModel() {
-    register_module("l1", &TestModel::l1, Linear(10, 3).build());
-    register_module("l2", &TestModel::l2, Linear(3, 5).build());
-    register_module("l3", &TestModel::l3, Linear(5, 100).build());
+    l1 = register_module("l1", Linear(10, 3).build());
+    l2 = register_module("l2", Linear(3, 5).build());
+    l3 = register_module("l3", Linear(5, 100).build());
   }
 
   variable_list forward(variable_list input) override {
@@ -23,10 +23,10 @@ class TestModel : public Module {
 class NestedModel : public Module {
  public:
   NestedModel() {
-    register_module("l1", &NestedModel::l1, Linear(5, 20).build());
-    register_module("test", &NestedModel::t, std::make_shared<TestModel>());
-    register_parameter(
-        "param", &NestedModel::param_, at::CPU(at::kFloat).tensor({3, 2, 21}));
+    l1 = register_module("l1", Linear(5, 20).build());
+    t = register_module("test", std::make_shared<TestModel>());
+    param_ =
+        register_parameter("param", at::CPU(at::kFloat).tensor({3, 2, 21}));
   }
 
   variable_list forward(variable_list input) override {

@@ -57,14 +57,6 @@ class RNNBase : public CloneableModule<Derived> {
   void flatten_parameters_for_cudnn();
   std::vector<Tensor> flat_weights() const;
 
-  using CloneableModule<Derived>::register_parameter;
-
-  void register_parameter(
-      const std::string& name,
-      int64_t layer,
-      std::vector<Variable> RNNBase::*variables,
-      Tensor tensor);
-
   std::vector<Variable> ihw_;
   std::vector<Variable> ihb_;
   std::vector<Variable> hhw_;
