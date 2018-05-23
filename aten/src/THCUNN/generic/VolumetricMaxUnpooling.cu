@@ -135,8 +135,6 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
     THCIndexTensor *old_indices = indices;
     indices = THCIndexTensor_(newFoldBatchDim)(state, indices);
     THCIndexTensor_(free)(state, old_indices);
-  } else {
-    THCTensor_(retain)(state, output);
   }
 
   real* outputData = THCTensor_(data)(state, output);
