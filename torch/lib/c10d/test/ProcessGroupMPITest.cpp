@@ -1,16 +1,15 @@
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
-#include <thread>
-#include <cstdlib>
 #include <string>
-#include <iostream>
+#include <thread>
 
 #include "ProcessGroupMPI.hpp"
 
 // Create the MPI process group
 std::unique_ptr<::c10d::ProcessGroupMPI> createProcessGroup() {
-  auto pg = std::unique_ptr<::c10d::ProcessGroupMPI>(
-      new ::c10d::ProcessGroupMPI());
+  auto pg =
+      std::unique_ptr<::c10d::ProcessGroupMPI>(new ::c10d::ProcessGroupMPI());
   return pg;
 }
 
@@ -33,8 +32,7 @@ void testAllreduce(int iter = 1000) {
   for (auto& work : works) {
     // Wait for work to complete
     if (!work->wait()) {
-      std::cerr << "Exception received: "
-                << work->exception().what()
+      std::cerr << "Exception received: " << work->exception().what()
                 << std::endl;
       pg->abort();
     }
@@ -65,7 +63,7 @@ void testBroadcast(int iter = 10000) {
       auto tensor = at::ones(at::CPU(at::kFloat), {16, 16}) * i;
       allTensors[i] = std::vector<at::Tensor>({tensor});
     } else {
-      auto tensor = at::zeros(at::CPU(at::kFloat), {16, 16}) ;
+      auto tensor = at::zeros(at::CPU(at::kFloat), {16, 16});
       allTensors[i] = std::vector<at::Tensor>({tensor});
     }
   }
@@ -80,8 +78,7 @@ void testBroadcast(int iter = 10000) {
   for (auto& work : works) {
     // Wait for work to complete
     if (!work->wait()) {
-      std::cerr << "Exception received: "
-                << work->exception().what()
+      std::cerr << "Exception received: " << work->exception().what()
                 << std::endl;
       pg->abort();
     }

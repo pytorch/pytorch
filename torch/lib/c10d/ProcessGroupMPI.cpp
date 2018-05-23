@@ -1,42 +1,41 @@
 #include "ProcessGroupMPI.hpp"
 
-#include "mpi-ext.h" // Needed for CUDA-sware check
-#include <map>
 #include <iostream>
+#include <map>
+#include "mpi-ext.h" // Needed for CUDA-sware check
 
 namespace c10d {
 
-#define MPI_CHECK(cmd) do {                                \
-  int mpiStatus = cmd;                                     \
-  if (mpiStatus != MPI_SUCCESS) {                          \
-    std::string err = "MPI error in: " +                   \
-                      std::string(__FILE__) + ":" +        \
-                      std::to_string(__LINE__) +           \
-                      ", with error code: " +              \
-                      std::to_string(mpiStatus);           \
-    std::cerr << err << std::endl;                         \
-    throw std::runtime_error(err);                         \
-  }                                                        \
-} while (0)
+#define MPI_CHECK(cmd)                                                   \
+  do {                                                                   \
+    int mpiStatus = cmd;                                                 \
+    if (mpiStatus != MPI_SUCCESS) {                                      \
+      std::string err = "MPI error in: " + std::string(__FILE__) + ":" + \
+          std::to_string(__LINE__) +                                     \
+          ", with error code: " + std::to_string(mpiStatus);             \
+      std::cerr << err << std::endl;                                     \
+      throw std::runtime_error(err);                                     \
+    }                                                                    \
+  } while (0)
 
 namespace {
 
 // Op mapping
 std::map<ReduceOp, MPI_Op> mpiOp = {
-  {ReduceOp::MIN, MPI_MIN},
-  {ReduceOp::MAX, MPI_MAX},
-  {ReduceOp::SUM, MPI_SUM},
-  {ReduceOp::PRODUCT, MPI_PROD},
+    {ReduceOp::MIN, MPI_MIN},
+    {ReduceOp::MAX, MPI_MAX},
+    {ReduceOp::SUM, MPI_SUM},
+    {ReduceOp::PRODUCT, MPI_PROD},
 };
 // Type mapping
 std::map<at::ScalarType, MPI_Datatype> mpiDatatype = {
-  {at::kByte, MPI_UNSIGNED_CHAR},
-  {at::kChar, MPI_CHAR},
-  {at::kDouble, MPI_DOUBLE},
-  {at::kFloat, MPI_FLOAT},
-  {at::kInt, MPI_INT},
-  {at::kLong, MPI_LONG},
-  {at::kShort, MPI_SHORT},
+    {at::kByte, MPI_UNSIGNED_CHAR},
+    {at::kChar, MPI_CHAR},
+    {at::kDouble, MPI_DOUBLE},
+    {at::kFloat, MPI_FLOAT},
+    {at::kInt, MPI_INT},
+    {at::kLong, MPI_LONG},
+    {at::kShort, MPI_SHORT},
 };
 
 // Checking CUDA-aware MPI support
@@ -58,7 +57,6 @@ void mpiExit() {
 }
 
 } // namespace
-
 
 // ProcessGroupMPI::WorkMPI
 ProcessGroupMPI::WorkMPI::WorkMPI() : completed_(false) {}
@@ -115,23 +113,19 @@ int ProcessGroupMPI::mpiThreadSupport_ = 0;
 bool ProcessGroupMPI::mpiInitialized_ = false;
 std::mutex ProcessGroupMPI::pgGlobalMutex_;
 
-ProcessGroupMPI::ProcessGroupMPI()
-: ProcessGroup(-1, 0)
-, stop_(false)
-{
+ProcessGroupMPI::ProcessGroupMPI() : ProcessGroup(-1, 0), stop_(false) {
   // Initialize MPI environment
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
   // We only want to initialize once
   if (!mpiInitialized_) {
-    MPI_CHECK(MPI_Init_thread(nullptr,
-                              nullptr,
-                              MPI_THREAD_MULTIPLE,
-                              &mpiThreadSupport_));
+    MPI_CHECK(MPI_Init_thread(
+        nullptr, nullptr, MPI_THREAD_MULTIPLE, &mpiThreadSupport_));
     if (mpiThreadSupport_ < MPI_THREAD_SERIALIZED) {
-      throw std::runtime_error("Used MPI implementation doesn't have the "
-                               "minimum level of threading support: "
-                               "MPI_THREAD_SERIALIZED. This is required by "
-                               "c10d package");
+      throw std::runtime_error(
+          "Used MPI implementation doesn't have the "
+          "minimum level of threading support: "
+          "MPI_THREAD_SERIALIZED. This is required by "
+          "c10d package");
     }
     if (std::atexit(mpiExit)) {
       throw std::runtime_error("Fail to register the MPI exit handler");
@@ -144,10 +138,11 @@ ProcessGroupMPI::ProcessGroupMPI()
   MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank_));
 
   if (mpiThreadSupport_ != MPI_THREAD_MULTIPLE && numProcessGroups_ >= 1) {
-    throw std::runtime_error("More than one process group created, "
-                             "this is not supported due to the used MPI "
-                             "implementation doesn't provide the full support "
-                             "of multi-threading");
+    throw std::runtime_error(
+        "More than one process group created, "
+        "this is not supported due to the used MPI "
+        "implementation doesn't provide the full support "
+        "of multi-threading");
   }
   // increase the total PG count
   ++numProcessGroups_;
@@ -229,15 +224,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
 void ProcessGroupMPI::checkSingleTensor(
     const std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
-    throw std::runtime_error("MPI process group only supports a single "
-                             "tensor op");
+    throw std::runtime_error(
+        "MPI process group only supports a single "
+        "tensor op");
   }
   if (!tensors[0].is_contiguous()) {
     throw std::runtime_error("input tensor has to be contiguous");
   }
   if (tensors[0].is_cuda() && !cudaAwareMpiCheck()) {
-    throw std::runtime_error("CUDA tensor detected and the MPI used doesn't "
-                             "have CUDA-aware MPI support");
+    throw std::runtime_error(
+        "CUDA tensor detected and the MPI used doesn't "
+        "have CUDA-aware MPI support");
   }
 }
 
@@ -246,15 +243,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
     const BroadcastOptions& opts) {
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-    [opts](std::unique_ptr<WorkEntry>& entry) {
-    auto data = (*entry->src)[0];
-    MPI_CHECK(MPI_Bcast(data.data_ptr(),
-                        data.numel(),
-                        mpiDatatype.at(data.type().scalarType()),
-                        opts.rootRank,
-                        MPI_COMM_WORLD));
-
-  };
+      [opts](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (*entry->src)[0];
+        MPI_CHECK(MPI_Bcast(
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            opts.rootRank,
+            MPI_COMM_WORLD));
+      };
   auto entry = std::unique_ptr<WorkEntry>(
       new WorkEntry(&tensors, nullptr, std::move(runFunc)));
   return enqueue(std::move(entry));
@@ -265,15 +262,16 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
     const AllreduceOptions& opts) {
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-    [opts](std::unique_ptr<WorkEntry>& entry) {
-    auto data = (*entry->src)[0];
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,
-                            data.data_ptr(),
-                            data.numel(),
-                            mpiDatatype.at(data.type().scalarType()),
-                            mpiOp.at(opts.reduceOp),
-                            MPI_COMM_WORLD));
-  };
+      [opts](std::unique_ptr<WorkEntry>& entry) {
+        auto data = (*entry->src)[0];
+        MPI_CHECK(MPI_Allreduce(
+            MPI_IN_PLACE,
+            data.data_ptr(),
+            data.numel(),
+            mpiDatatype.at(data.type().scalarType()),
+            mpiOp.at(opts.reduceOp),
+            MPI_COMM_WORLD));
+      };
   auto entry = std::unique_ptr<WorkEntry>(
       new WorkEntry(&tensors, nullptr, std::move(runFunc)));
   return enqueue(std::move(entry));

@@ -1,18 +1,18 @@
 #pragma once
 
 #include "ProcessGroup.hpp"
-#include "Utils.hpp"
 #include "Types.hpp"
+#include "Utils.hpp"
 
 #include <mpi.h>
 
-#include <vector>
-#include <deque>
-#include <memory>
-#include <exception>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <exception>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 namespace c10d {
 
@@ -20,11 +20,11 @@ namespace c10d {
 // It include the source Tensor list and destination Tensor list, as well as
 // The actual run function that will operate either on src or dst or both.
 struct WorkEntry {
-
-  explicit WorkEntry(std::vector<at::Tensor>* src,
-                     std::vector<at::Tensor>* dst,
-                     std::function<void(std::unique_ptr<WorkEntry>&)> run):
-    src(src), dst(dst), run(run) {}
+  explicit WorkEntry(
+      std::vector<at::Tensor>* src,
+      std::vector<at::Tensor>* dst,
+      std::function<void(std::unique_ptr<WorkEntry>&)> run)
+      : src(src), dst(dst), run(run) {}
 
   // Not copyable
   WorkEntry(const WorkEntry&) = delete;
@@ -62,9 +62,7 @@ struct WorkEntry {
 // CUDA tensor can be supported if the MPI used is CUDA-aware MPI, and
 // ProcessGroupMPI will automatically detect this support.
 class ProcessGroupMPI : public ProcessGroup {
-
  public:
-
   class WorkMPI : public ProcessGroup::Work {
    public:
     WorkMPI();
@@ -114,11 +112,9 @@ class ProcessGroupMPI : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-
  protected:
-
-  using WorkType = std::tuple<std::unique_ptr<WorkEntry>,
-                              std::shared_ptr<WorkMPI>>;
+  using WorkType =
+      std::tuple<std::unique_ptr<WorkEntry>, std::shared_ptr<WorkMPI>>;
   // Worker thread loop
   void runLoop();
   // Helper function that is called by the destructor
