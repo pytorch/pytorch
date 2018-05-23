@@ -55,6 +55,8 @@ std::string DeviceTypeName(const int32_t& d) {
       return "MKLDNN";
     case IDEEP:
       return "IDEEP";
+    case HIP:
+      return "HIP";
     default:
       CAFFE_THROW(
           "Unknown device: ",
@@ -76,6 +78,8 @@ int DeviceId(const DeviceOption& option) {
       return option.cuda_gpu_id();
     case MKLDNN:
       return option.numa_node_id();
+    case HIP:
+      return option.hip_gpu_id();
     default:
       CAFFE_THROW("Unknown device id for device type: ", option.device_type());
   }
@@ -85,6 +89,7 @@ bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
   return (
       lhs.device_type() == rhs.device_type() &&
       lhs.cuda_gpu_id() == rhs.cuda_gpu_id() &&
+      lhs.hip_gpu_id() == rhs.hip_gpu_id() &&
       lhs.node_name() == rhs.node_name() &&
       lhs.numa_node_id() == rhs.numa_node_id());
 }
