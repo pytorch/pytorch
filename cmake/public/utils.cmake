@@ -27,9 +27,8 @@ macro(caffe2_interface_library SRC DST)
           ${DST} INTERFACE -WHOLEARCHIVE:$<TARGET_FILE:${SRC}>)
     else()
       # Assume everything else is like gcc
-      target_link_libraries(
-          ${DST} INTERFACE
-          "-Wl,--whole-archive $<TARGET_FILE:${SRC}> -Wl,--no-whole-archive")
+      target_link_libraries(${DST} INTERFACE
+          "-Wl,--whole-archive,$<TARGET_FILE:${SRC}> -Wl,--no-whole-archive")
     endif()
     # Link all interface link libraries of the src target as well.
     # For static library, we need to explicitly depend on all the libraries
@@ -52,8 +51,8 @@ macro(caffe2_interface_library SRC DST)
         $<TARGET_PROPERTY:${SRC},LINK_LIBRARIES>)
   elseif(${__src_target_type} STREQUAL "SHARED_LIBRARY")
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
-      target_link_libraries(
-          ${DST} INTERFACE -Wl,--no-as-needed ${SRC} -Wl,--as-needed)
+      target_link_libraries(${DST} INTERFACE
+          "-Wl,--no-as-needed,$<TARGET_FILE:${SRC}> -Wl,--as-needed")
     else()
       target_link_libraries(${DST} INTERFACE ${SRC})
     endif()
