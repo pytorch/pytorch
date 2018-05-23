@@ -2,37 +2,25 @@
 
 #include <poll.h>
 #include <unistd.h>
-#include <system_error>
 #include <algorithm>
+#include <system_error>
 
 namespace c10d {
 
 namespace {
 
-enum class QueryType : uint8_t {
-  SET,
-  GET,
-  ADD,
-  CHECK,
-  WAIT
-};
+enum class QueryType : uint8_t { SET, GET, ADD, CHECK, WAIT };
 
-enum class CheckResponseType : uint8_t {
-  READY,
-  NOT_READY
-};
+enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
-enum class WaitResponseType : uint8_t {
-  STOP_WAITING
-};
+enum class WaitResponseType : uint8_t { STOP_WAITING };
 
 } // anonymous namespace
 
 // TCPStoreDaemon class methods
 // Simply start the daemon thread
-TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket) :
-  storeListenSocket_(storeListenSocket)
-{
+TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
+    : storeListenSocket_(storeListenSocket) {
   daemonThread_ = std::thread(&TCPStoreDaemon::run, this);
 }
 
@@ -62,14 +50,15 @@ void TCPStoreDaemon::join() {
 void TCPStoreDaemon::run() {
   // Create the control pipe
   if (pipe(controlPipeFd_.data()) == -1) {
-    throw std::runtime_error("Failed to create the control pipe to start the "
-                             "TCPStoreDaemon run");
+    throw std::runtime_error(
+        "Failed to create the control pipe to start the "
+        "TCPStoreDaemon run");
   }
 
   std::vector<struct pollfd> fds;
-  fds.push_back({ .fd = storeListenSocket_, .events = POLLIN });
+  fds.push_back({.fd = storeListenSocket_, .events = POLLIN});
   // Push the read end of the pipe to signal the stopping of the daemon run
-  fds.push_back({ .fd = controlPipeFd_[0], .events = POLLHUP });
+  fds.push_back({.fd = controlPipeFd_[0], .events = POLLHUP});
 
   // receive the queries
   bool finished = false;
@@ -84,21 +73,25 @@ void TCPStoreDaemon::run() {
     // accept new connections.
     if (fds[0].revents != 0) {
       if (fds[0].revents ^ POLLIN) {
-        throw std::system_error(ECONNABORTED, std::system_category(),
+        throw std::system_error(
+            ECONNABORTED,
+            std::system_category(),
             "Unexpected poll revent on the master's listening socket: " +
-            std::to_string(fds[0].revents));
+                std::to_string(fds[0].revents));
       }
       int sockFd = std::get<0>(tcputil::accept(storeListenSocket_));
       sockets_.push_back(sockFd);
-      fds.push_back({ .fd = sockFd, .events = POLLIN });
+      fds.push_back({.fd = sockFd, .events = POLLIN});
     }
     // The pipe receives an event which tells us to shutdown the daemon
     if (fds[1].revents != 0) {
       // Will be POLLUP when the pipe is closed
       if (fds[1].revents ^ POLLHUP) {
-        throw std::system_error(ECONNABORTED, std::system_category(),
+        throw std::system_error(
+            ECONNABORTED,
+            std::system_category(),
             "Unexpected poll revent on the control pipe's reading fd: " +
-            std::to_string(fds[1].revents));
+                std::to_string(fds[1].revents));
       }
       finished = true;
       break;
@@ -112,10 +105,11 @@ void TCPStoreDaemon::run() {
       }
 
       if (fds[fdIdx].revents ^ POLLIN) {
-        throw std::system_error(ECONNABORTED, std::system_category(),
-            "Unexpected poll revent: " +
-            std::to_string(fds[fdIdx].revents) + " on socket: " +
-            std::to_string(fds[fdIdx].fd));
+        throw std::system_error(
+            ECONNABORTED,
+            std::system_category(),
+            "Unexpected poll revent: " + std::to_string(fds[fdIdx].revents) +
+                " on socket: " + std::to_string(fds[fdIdx].fd));
       }
       // Now query the socket that has the event
       try {
@@ -131,8 +125,8 @@ void TCPStoreDaemon::run() {
         ::close(fds[fdIdx].fd);
 
         // Remove all the tracking state of the close FD
-        for (auto it = waitingSockets_.begin(); it != waitingSockets_.end(); ) {
-          for (auto vecIt = it->second.begin(); vecIt != it->second.end(); ) {
+        for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
+          for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
             if (*vecIt == fds[fdIdx].fd) {
               vecIt = it->second.erase(vecIt);
             } else {
@@ -145,7 +139,7 @@ void TCPStoreDaemon::run() {
             ++it;
           }
         }
-        for (auto it = keysAwaited_.begin(); it != keysAwaited_.end(); ) {
+        for (auto it = keysAwaited_.begin(); it != keysAwaited_.end();) {
           if (it->first == fds[fdIdx].fd) {
             it = keysAwaited_.erase(it);
           } else {
@@ -203,8 +197,8 @@ void TCPStoreDaemon::wakeupWaitingClients(const std::string& key) {
   if (socketsToWait != waitingSockets_.end()) {
     for (int socket : socketsToWait->second) {
       if (--keysAwaited_[socket] == 0) {
-        tcputil::sendValue<WaitResponseType>(socket,
-                                             WaitResponseType::STOP_WAITING);
+        tcputil::sendValue<WaitResponseType>(
+            socket, WaitResponseType::STOP_WAITING);
       }
     }
     waitingSockets_.erase(socketsToWait);
@@ -264,8 +258,8 @@ void TCPStoreDaemon::waitHandler(int socket) {
     keys[i] = tcputil::recvString(socket);
   }
   if (checkKeys(keys)) {
-    tcputil::sendValue<WaitResponseType>(socket,
-                                         WaitResponseType::STOP_WAITING);
+    tcputil::sendValue<WaitResponseType>(
+        socket, WaitResponseType::STOP_WAITING);
   } else {
     for (auto& key : keys) {
       waitingSockets_[key].push_back(socket);
@@ -275,27 +269,25 @@ void TCPStoreDaemon::waitHandler(int socket) {
 }
 
 bool TCPStoreDaemon::checkKeys(const std::vector<std::string>& keys) const {
-  return std::all_of(keys.begin(), keys.end(),
-      [this](const std::string& s) {
-      return tcpStore_.count(s) > 0;
-      });
+  return std::all_of(keys.begin(), keys.end(), [this](const std::string& s) {
+    return tcpStore_.count(s) > 0;
+  });
 }
 
 // TCPStore class methods
-TCPStore::TCPStore(const std::string& masterAddr,
-                   PortType masterPort,
-                   bool isServer)
- : isServer_(isServer)
- , tcpStoreAddr_(masterAddr)
- , tcpStorePort_(masterPort)
-{
+TCPStore::TCPStore(
+    const std::string& masterAddr,
+    PortType masterPort,
+    bool isServer)
+    : isServer_(isServer),
+      tcpStoreAddr_(masterAddr),
+      tcpStorePort_(masterPort) {
   if (isServer_) {
     // Opening up the listening socket
     std::tie(masterListenSocket_, std::ignore) = tcputil::listen(masterPort);
     // Now start the daemon
     tcpStoreDaemon_ = std::unique_ptr<TCPStoreDaemon>(
-        new TCPStoreDaemon(masterListenSocket_)
-    );
+        new TCPStoreDaemon(masterListenSocket_));
   }
   // Connect to the daemon
   storeSocket_ = tcputil::connect(tcpStoreAddr_, tcpStorePort_);
@@ -348,17 +340,19 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   }
 }
 
-void TCPStore::wait(const std::vector<std::string>& keys,
-                    const std::chrono::milliseconds& timeout) {
+void TCPStore::wait(
+    const std::vector<std::string>& keys,
+    const std::chrono::milliseconds& timeout) {
   // Set the socket timeout if there is a wait timeout
   if (timeout != kNoTimeout) {
     struct timeval timeoutTV = {.tv_sec = timeout.count() / 1000,
                                 .tv_usec = (timeout.count() % 1000) * 1000};
-    SYSCHECK(::setsockopt(storeSocket_,
-                          SOL_SOCKET,
-                          SO_RCVTIMEO,
-                          reinterpret_cast<char*>(&timeoutTV),
-                          sizeof(timeoutTV)));
+    SYSCHECK(::setsockopt(
+        storeSocket_,
+        SOL_SOCKET,
+        SO_RCVTIMEO,
+        reinterpret_cast<char*>(&timeoutTV),
+        sizeof(timeoutTV)));
   }
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::WAIT);
   SizeType nkeys = keys.size();

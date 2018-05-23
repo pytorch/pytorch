@@ -10,16 +10,13 @@
 namespace c10d {
 
 class TCPStoreDaemon {
-
  public:
-
   explicit TCPStoreDaemon(int storeListenSocket);
   ~TCPStoreDaemon();
 
   void join();
 
  protected:
-
   void run();
   void stop();
 
@@ -32,7 +29,7 @@ class TCPStoreDaemon {
   void waitHandler(int socket);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
-  void wakeupWaitingClients(const std::string &key);
+  void wakeupWaitingClients(const std::string& key);
 
   std::thread daemonThread_;
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
@@ -43,22 +40,19 @@ class TCPStoreDaemon {
 
   std::vector<int> sockets_;
   int storeListenSocket_;
-  std::vector<int> controlPipeFd_ {-1, -1};
+  std::vector<int> controlPipeFd_{-1, -1};
 };
 
 class TCPStore : public Store {
-
  public:
-
-  explicit TCPStore(const std::string& masterAddr,
-                    PortType masterPort,
-                    bool isServer = false);
+  explicit TCPStore(
+      const std::string& masterAddr,
+      PortType masterPort,
+      bool isServer = false);
 
   virtual ~TCPStore();
 
-  void set(
-      const std::string& key,
-      const std::vector<uint8_t>& value) override;
+  void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
   std::vector<uint8_t> get(const std::string& key) override;
 
@@ -71,7 +65,6 @@ class TCPStore : public Store {
       const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
 
  protected:
-
   bool isServer_;
   int storeSocket_ = -1;
   int masterListenSocket_ = -1;
