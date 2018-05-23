@@ -33,6 +33,9 @@ void testAllreduce(int iter = 1000) {
   for (auto& work : works) {
     // Wait for work to complete
     if (!work->wait()) {
+      std::cerr << "Exception received: "
+                << work->exception().what()
+                << std::endl;
       pg->abort();
     }
   }
@@ -77,6 +80,9 @@ void testBroadcast(int iter = 10000) {
   for (auto& work : works) {
     // Wait for work to complete
     if (!work->wait()) {
+      std::cerr << "Exception received: "
+                << work->exception().what()
+                << std::endl;
       pg->abort();
     }
   }
@@ -96,9 +102,6 @@ void testBroadcast(int iter = 10000) {
 int main(int argc, char** argv) {
   testAllreduce();
   testBroadcast();
-
-  // Needs to be called at the end
-  ::c10d::ProcessGroupMPI::finalize();
 
   std::cout << "Test successful" << std::endl;
   return EXIT_SUCCESS;

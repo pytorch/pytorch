@@ -9,6 +9,7 @@
 #include <vector>
 #include <deque>
 #include <memory>
+#include <exception>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -85,13 +86,13 @@ class ProcessGroupMPI : public ProcessGroup {
 
    protected:
     void finish();
-    void finishWithException(const std::exception& ex);
+    void finishWithException(std::exception_ptr caughtWorkException);
 
     std::mutex workMutex_;
     std::condition_variable workCV_;
     std::atomic<bool> completed_;
 
-    std::unique_ptr<std::exception> ex_;
+    std::exception_ptr workException_;
 
     friend class ProcessGroupMPI;
   };
@@ -113,16 +114,11 @@ class ProcessGroupMPI : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  // Finalize the MPI program, needs to be called at the very end of the program
-  static void finalize();
 
  protected:
 
   using WorkType = std::tuple<std::unique_ptr<WorkEntry>,
                               std::shared_ptr<WorkMPI>>;
-  // Helper that initialize the MPI threads in the main thread
-  // Also checks for MPI thread support.
-  void initMPI();
   // Worker thread loop
   void runLoop();
   // Helper function that is called by the destructor

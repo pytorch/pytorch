@@ -1,5 +1,6 @@
 #include "ProcessGroupMPI.hpp"
 
+#include "mpi-ext.h" // Needed for CUDA-sware check
 #include <map>
 #include <iostream>
 
@@ -40,14 +41,6 @@ std::map<at::ScalarType, MPI_Datatype> mpiDatatype = {
 
 // Checking CUDA-aware MPI support
 bool cudaAwareMpiCheck() {
-#if defined(MPIX_CUDA_AWARE_SUPPORT) && MPIX_CUDA_AWARE_SUPPORT
-// Compile time check
-#elif defined(MPIX_CUDA_AWARE_SUPPORT) && !MPIX_CUDA_AWARE_SUPPORT
-  return false;
-#else
-  return false;
-#endif /* MPIX_CUDA_AWARE_SUPPORT */
-
 // Run time check
 #if defined(MPIX_CUDA_AWARE_SUPPORT)
   if (MPIX_Query_cuda_support() == 1) {
@@ -55,9 +48,13 @@ bool cudaAwareMpiCheck() {
   } else {
     return false;
   }
-#else /* !defined(MPIX_CUDA_AWARE_SUPPORT) */
+#else // !defined(MPIX_CUDA_AWARE_SUPPORT)
   return false;
-#endif /* MPIX_CUDA_AWARE_SUPPORT */
+#endif // MPIX_CUDA_AWARE_SUPPORT
+}
+
+void mpiExit() {
+  MPI_CHECK(MPI_Finalize());
 }
 
 } // namespace
@@ -73,7 +70,7 @@ bool ProcessGroupMPI::WorkMPI::isCompleted() const {
 }
 
 bool ProcessGroupMPI::WorkMPI::isSuccess() const {
-  return !ex_;
+  return !workException_;
 }
 
 bool ProcessGroupMPI::WorkMPI::wait() {
@@ -93,17 +90,21 @@ void ProcessGroupMPI::WorkMPI::finish() {
 }
 
 void ProcessGroupMPI::WorkMPI::finishWithException(
-    const std::exception& ex) {
+    std::exception_ptr caughtWorkException) {
   {
     std::unique_lock<std::mutex> lock(workMutex_);
     completed_ = true;
-    ex_ = std::unique_ptr<std::exception>(new std::exception(ex));
+    workException_ = caughtWorkException;
   }
   workCV_.notify_all();
 }
 
 const std::exception& ProcessGroupMPI::WorkMPI::exception() const {
-  return *ex_;
+  try {
+    std::rethrow_exception(workException_);
+  } catch (const std::exception& e) {
+    return e;
+  }
 }
 
 // ProcessGroupMPI
@@ -118,45 +119,29 @@ ProcessGroupMPI::ProcessGroupMPI()
 : ProcessGroup(-1, 0)
 , stop_(false)
 {
-  initMPI();
-  workerThread_ = std::thread(&ProcessGroupMPI::runLoop, this);
-}
-
-ProcessGroupMPI::~ProcessGroupMPI() {
-  destroy();
-}
-
-void ProcessGroupMPI::initMPI() {
+  // Initialize MPI environment
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
   // We only want to initialize once
-  try {
-    if (!mpiInitialized_) {
-      MPI_CHECK(MPI_Init_thread(nullptr,
-                                nullptr,
-                                MPI_THREAD_MULTIPLE,
-                                &mpiThreadSupport_));
-      if (mpiThreadSupport_ < MPI_THREAD_SERIALIZED) {
-        throw std::runtime_error("Used MPI implementation doesn't have the "
-                                 "minimum level of threading support: "
-                                 "MPI_THREAD_SERIALIZED. This is required by "
-                                 "c10d package");
-      }
-      if (mpiThreadSupport_ != MPI_THREAD_MULTIPLE) {
-        std::cerr << "WARNING: Used MPI implementation doesn't support "
-                  << "multithreading, so distributed cannot support more "
-                  << "than one process group work."
-                  << std::endl;
-      }
-      mpiInitialized_ = true;
+  if (!mpiInitialized_) {
+    MPI_CHECK(MPI_Init_thread(nullptr,
+                              nullptr,
+                              MPI_THREAD_MULTIPLE,
+                              &mpiThreadSupport_));
+    if (mpiThreadSupport_ < MPI_THREAD_SERIALIZED) {
+      throw std::runtime_error("Used MPI implementation doesn't have the "
+                               "minimum level of threading support: "
+                               "MPI_THREAD_SERIALIZED. This is required by "
+                               "c10d package");
     }
-
-    // Update the world size and rank
-    MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &size_));
-    MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank_));
-
-  } catch (...) {
-    MPI_CHECK(MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE));
+    if (std::atexit(mpiExit)) {
+      throw std::runtime_error("Fail to register the MPI exit handler");
+    }
+    mpiInitialized_ = true;
   }
+
+  // Update the world size and rank
+  MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &size_));
+  MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank_));
 
   if (mpiThreadSupport_ != MPI_THREAD_MULTIPLE && numProcessGroups_ >= 1) {
     throw std::runtime_error("More than one process group created, "
@@ -166,6 +151,13 @@ void ProcessGroupMPI::initMPI() {
   }
   // increase the total PG count
   ++numProcessGroups_;
+
+  // Start the worker thread accepting MPI calls
+  workerThread_ = std::thread(&ProcessGroupMPI::runLoop, this);
+}
+
+ProcessGroupMPI::~ProcessGroupMPI() {
+  destroy();
 }
 
 void ProcessGroupMPI::destroy() {
@@ -195,10 +187,6 @@ void ProcessGroupMPI::abort() {
   MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
 }
 
-void ProcessGroupMPI::finalize() {
-  MPI_CHECK(MPI_Finalize());
-}
-
 void ProcessGroupMPI::runLoop() {
   std::unique_lock<std::mutex> lock(pgMutex_);
 
@@ -221,8 +209,8 @@ void ProcessGroupMPI::runLoop() {
     try {
       workEntry->run(workEntry);
       work->finish();
-    } catch (const std::exception& ex) {
-      work->finishWithException(ex);
+    } catch (...) {
+      work->finishWithException(std::current_exception());
     }
 
     lock.lock();
@@ -258,7 +246,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
     const BroadcastOptions& opts) {
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-    [&opts](std::unique_ptr<WorkEntry>& entry) {
+    [opts](std::unique_ptr<WorkEntry>& entry) {
     auto data = (*entry->src)[0];
     MPI_CHECK(MPI_Bcast(data.data_ptr(),
                         data.numel(),
@@ -268,7 +256,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
 
   };
   auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(&tensors, nullptr, runFunc));
+      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
   return enqueue(std::move(entry));
 }
 
@@ -277,7 +265,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
     const AllreduceOptions& opts) {
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-    [&opts](std::unique_ptr<WorkEntry>& entry) {
+    [opts](std::unique_ptr<WorkEntry>& entry) {
     auto data = (*entry->src)[0];
     MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,
                             data.data_ptr(),
@@ -287,7 +275,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
                             MPI_COMM_WORLD));
   };
   auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(&tensors, nullptr, runFunc));
+      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
   return enqueue(std::move(entry));
 }
 
