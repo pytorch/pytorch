@@ -1414,7 +1414,7 @@ class TestCuda(TestCase):
                      but we need it for creating another process with CUDA")
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_multinomial_invalid_probs_cuda(self):
-        test_method = TestTorch._test_multinomial_invalid_probs_cuda
+        test_method = TestCuda._test_multinomial_invalid_probs_cuda
         self._spawn_method(test_method, torch.Tensor([0, -1]))
         self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
         self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
