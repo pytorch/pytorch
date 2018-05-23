@@ -7,6 +7,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 curl https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o $PWD/miniconda3.sh
 rm -rf $PWD/miniconda3
 bash $PWD/miniconda3.sh -b -p $PWD/miniconda3
+export DYLD_LIBRARY_PATH="$PWD/miniconda3/lib:$DYLD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$PWD/miniconda3/lib:$LD_LIBRARY_PATH"
 export PATH="$PWD/miniconda3/bin:$PATH"
 source $PWD/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
