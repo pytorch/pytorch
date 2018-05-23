@@ -71,8 +71,8 @@ class ProcessGroup {
       const AllreduceOptions& opts = AllreduceOptions()) = 0;
 
  protected:
-  const int rank_;
-  const int size_;
+  int rank_;
+  int size_;
 };
 
 } // namespace c10d
