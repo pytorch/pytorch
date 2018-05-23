@@ -2843,30 +2843,6 @@ class TestTorch(TestCase):
         self.assertEqual(res1.numel(), 0)
         self.assertEqual(res2.numel(), 0)
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_randperm_cuda(self):
-        cuda = torch.device('cuda:0')
-
-        # For small inputs, randperm is offloaded to CPU instead
-        with torch.random.fork_rng(devices=[0]):
-            res1 = torch.randperm(100, device=cuda)
-        res2 = torch.cuda.LongTensor()
-        torch.randperm(100, out=res2, device=cuda)
-        self.assertEqual(res1, res2, 0)
-
-        with torch.random.fork_rng(devices=[0]):
-            res1 = torch.randperm(100000, device=cuda)
-        res2 = torch.cuda.LongTensor()
-        torch.randperm(100000, out=res2, device=cuda)
-        self.assertEqual(res1, res2, 0)
-
-        # randperm of 0 elements is an empty tensor
-        res1 = torch.randperm(0, device=cuda)
-        res2 = torch.cuda.LongTensor(5)
-        torch.randperm(0, out=res2, device=cuda)
-        self.assertEqual(res1.numel(), 0)
-        self.assertEqual(res2.numel(), 0)
-
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36
         t = torch.FloatTensor(200)
