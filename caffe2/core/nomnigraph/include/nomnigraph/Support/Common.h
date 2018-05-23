@@ -14,7 +14,10 @@
 #include <functional>
 #include <list>
 
-template <typename T>
+// Implements accessors for a generic type T. If the type is not
+// specified (i.e., void template type) then the partial specification
+// gives an empty type.
+template <typename T = void>
 class StorageType {
  public:
   StorageType(T&& data) : Data(std::move(data)) {}
@@ -34,6 +37,9 @@ class StorageType {
  private:
   T Data;
 };
+
+template <>
+class StorageType<> {};
 
 /// \brief This class enables a listener pattern.
 /// It is to be used with a "curious recursive pattern"
