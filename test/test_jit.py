@@ -903,6 +903,27 @@ class TestJit(TestCase):
         fn(x)
         fn(y)
 
+    def test_decompose_addmm(self):
+        @torch.jit.script
+        def addmm(mat, mat1, mat2, alpha, beta):
+            a = mat.addmm(mat1, mat2)
+            b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
+            c = mat.addmm(mat1, mat2, alpha=4.20, beta=-1.0)
+            d = mat.addmm(mat1, mat2, alpha=alpha, beta=beta)
+
+            return a + b + c + d
+
+        mat = torch.randn(2, 2)
+        mat1 = torch.randn(2, 4)
+        mat2 = torch.randn(4, 2)
+        alpha = torch.FloatTensor([123.0])
+        beta = torch.FloatTensor([321.0])
+
+        out_ref = addmm(mat, mat1, mat2, alpha, beta)
+        self.run_pass('decompose_addmm', addmm.graph)
+        out_test = addmm(mat, mat1, mat2, alpha, beta)
+        self.assertEqual(out_ref, out_test)
+        self.assertExpectedGraph(addmm.graph)
 
 class TestScript(TestCase):
 

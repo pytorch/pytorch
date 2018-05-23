@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
+#include "torch/csrc/jit/passes/decompose_addmm.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
@@ -418,6 +419,9 @@ private:
     // decisions to insert/remove undefs nodes and to work before
     // we propagate input shapes.
 
+    // Decompose addmm nodes to add + mm, so expands can be inserted and
+    // gradients accumulated on the backward pass
+    DecomposeAddmm(g);
     // clean up replaceIfUndef nodes
     specializeUndef(*g, spec);
     // clean up additions resulting from nodes that were in fact undefined
