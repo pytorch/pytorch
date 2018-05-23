@@ -96,9 +96,12 @@ if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   exit 0
 fi
 
-# Run cmake from ./build directory
-mkdir -p ./build
-cd ./build
+# Run cmake from ./build_caffe2 directory so it doesn't conflict with
+# standard PyTorch build directory. Eventually these won't need to
+# be separate.
+rm -rf build_caffe2
+mkdir build_caffe2
+cd ./build_caffe2
 
 INSTALL_PREFIX="/usr/local/caffe2"
 CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
