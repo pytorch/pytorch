@@ -369,7 +369,7 @@ class TestJit(TestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     def test_fuse_last_device(self):
-        device = 'cuda:' + str(torch.cuda.device_count() - 1)
+        device = 'cuda:' + str(1)
         x = torch.tensor([0.4], dtype=torch.float, device=device)
         y = torch.tensor([0.7], dtype=torch.float, device=device)
 
