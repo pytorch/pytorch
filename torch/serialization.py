@@ -463,9 +463,9 @@ def _load(f, map_location, pickle_module):
             except tarfile.TarError:
                 # if not a tarfile, reset file offset and proceed
                 f.seek(0)
-    except (io.UnsupportedOperation, AttributeError):
-        raise RuntimeError("You can only torch.load from a file that is seekable. " +
-                            "Please pre-load the data into a buffer like io.BytesIO and try to load from it instead.")
+    except (io.UnsupportedOperation, AttributeError) as e:
+        raise type(e)(str(e) + ". You can only torch.load from a file that is seekable. " +
+        "Please pre-load the data into a buffer like io.BytesIO and try to load from it instead.")
 
     magic_number = pickle_module.load(f)
     if magic_number != MAGIC_NUMBER:
