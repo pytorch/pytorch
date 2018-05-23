@@ -31,7 +31,10 @@ python test/run_test.py --verbose
 CPP_BUILD="$PWD/../cpp-build"
 WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$CPP_BUILD"
 
-export DYLD_LIBRARY_PATH="$PWD/miniconda3/lib:$DYLD_LIBRARY_PATH"
-export LD_LIBRARY_PATH="$PWD/miniconda3/lib:$LD_LIBRARY_PATH"
 python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+
+# Unfortunately it seems like the test can't load from miniconda3
+# without these paths being set
+export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
 "$CPP_BUILD"/libtorch/bin/test_api
