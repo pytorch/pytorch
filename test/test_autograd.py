@@ -1796,21 +1796,6 @@ class TestAutograd(TestCase):
             y = x * 2
         self.assertTrue(y.requires_grad)
 
-        @torch.set_grad_enabled(False)
-        def doubler_without(x):
-            return x * 2
-
-        y = doubler_without(x)
-        self.assertFalse(y.requires_grad)
-
-        @torch.set_grad_enabled(True)
-        def doubler_with(x):
-            return x * 2
-
-        torch.set_grad_enabled(False)
-        y = doubler_with(x)
-        self.assertTrue(y.requires_grad)
-
     def test_reentrant(self):
         y_data = torch.randn(2, 2)
 

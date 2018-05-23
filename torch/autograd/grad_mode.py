@@ -98,7 +98,7 @@ class set_grad_enabled(object):
     r"""Context-manager that sets gradient calculation to on or off.
 
     ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
-    It can be used as a context-manager, as a function, or as a decorator.
+    It can be used as a context-manager or as a function.
 
     Arguments:
         mode (bool): Flag whether to enable grad (``True``), or disable
@@ -135,10 +135,3 @@ class set_grad_enabled(object):
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
         return False
-
-    def __call__(self, func):
-        @functools.wraps(func)
-        def decorate_set_grad_enabled(*args, **kwargs):
-            with self:
-                return func(*args, **kwargs)
-        return decorate_set_grad_enabled
