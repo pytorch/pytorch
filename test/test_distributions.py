@@ -880,7 +880,6 @@ class TestDistributions(TestCase):
         self.assertEqual(Multinomial(total_count, p).sample((6,)).size(), (6, 2, 3))
         set_rng_seed(0)
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
-        p.grad.zero_()
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
 
         # sample check for extreme value of probs
