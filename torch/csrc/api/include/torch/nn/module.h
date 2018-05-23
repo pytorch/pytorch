@@ -155,7 +155,7 @@ class CloneableModule : public Module {
   }
 
  private:
-  void clone_(Module& other) {
+  void clone_(Module& other) final override {
     // Here we are *pretty* certain that `other's` type is `Derived` (because it
     // was registered under the same name as `this`), but you never know what
     // crazy things `reset()` does, so `dynamic_cast` just to be safe.
