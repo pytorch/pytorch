@@ -1,3 +1,4 @@
+// @generated
 #include "ATen/${Storage}.h"
 #include "ATen/Half.h"
 #include "ATen/Allocator.h"

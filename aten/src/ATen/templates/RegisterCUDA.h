@@ -1,3 +1,4 @@
+// @generated
 #pragma once
 
 namespace at {

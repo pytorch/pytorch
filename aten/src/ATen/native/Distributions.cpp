@@ -121,10 +121,10 @@ Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
   return native::bernoulli_(result, p, gen);
 }
 
-Tensor bernoulli(const Tensor& self, Generator* gen) {
+Tensor bernoulli(const Tensor& self) {
   Tensor result = self.type().tensor();
   result.resize_(self.sizes());
-  return native::bernoulli(result, self, gen);
+  return native::bernoulli(result, self, nullptr);
 }
 
 Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
@@ -159,8 +159,8 @@ Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
   return native::bernoulli_(self, probs, gen);
 }
 
-Tensor& bernoulli_(Tensor& self, Generator* gen) {
-  return native::bernoulli_(self, 0.5, gen);
+Tensor& bernoulli_(Tensor& self) {
+  return native::bernoulli_(self, 0.5, nullptr);
 }
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
