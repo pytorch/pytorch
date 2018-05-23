@@ -30,7 +30,7 @@ template <
     typename EqualityClass = NodeEqualityDefault<typename G::NodeRef>>
 class Match {
  public:
-  using SubgraphType = Subgraph<typename G::NodeType, typename G::EdgeType>;
+  using SubgraphType = typename G::SubgraphType;
 
   Match(G& g) : MatchGraph(g) {
     // First we sort both the matching graph topologically.

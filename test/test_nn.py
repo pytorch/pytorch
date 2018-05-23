@@ -51,7 +51,7 @@ dtype2prec = {torch.float: 1e-5,
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
-# update test/run_test.sh to list it, otherwise it will NOT be run in
+# update test/run_test.py to list it, otherwise it will NOT be run in
 # CI.
 
 
@@ -1281,6 +1281,16 @@ class TestNN(NNTestCase):
             scale = compare_scaling(grads)
             self.assertEqual(scale, 1)
 
+        # Should accept a single Tensor as input
+        p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
+        g = torch.arange(1., 101).view(10, 10)
+        p1._grad = g.clone()
+        p2._grad = g.clone()
+        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
+            clip_grad_norm_(p1, max_norm, norm_type=norm_type)
+            clip_grad_norm_([p2], max_norm, norm_type=norm_type)
+            self.assertEqual(p1.grad, p2.grad)
+
     def test_clip_grad_value(self):
         l = nn.Linear(10, 10)
         clip_value = 2.5
@@ -1294,6 +1304,15 @@ class TestNN(NNTestCase):
         for p in filter(lambda p: p.grad is not None, l.parameters()):
             self.assertLessEqual(p.grad.data.max(), clip_value)
             self.assertGreaterEqual(p.grad.data.min(), -clip_value)
+
+        # Should accept a single Tensor as input
+        p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
+        g = torch.arange(-50., 50).view(10, 10).div_(5)
+        p1._grad = g.clone()
+        p2._grad = g.clone()
+        clip_grad_value_(p1, clip_value)
+        clip_grad_value_([p2], clip_value)
+        self.assertEqual(p1.grad, p2.grad)
 
     def test_parameters_to_vector(self):
         conv1 = nn.Conv2d(3, 10, 5)

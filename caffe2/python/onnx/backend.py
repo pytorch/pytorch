@@ -880,21 +880,6 @@ class Caffe2Backend(Backend):
         return names
 
     @classmethod
-    def _graph_to_graph(cls, c2_net, onnx_model, device_option):
-        net.device_option.CopyFrom(device_option)
-        for node in model.graph.node:
-            try:
-                c2ops = cls._onnx_node_to_caffe2_op(
-                    init_model, pred_model, node, opset_version)
-            except Exception as e:
-                success = False
-                print('ONNX FATAL:', e)
-                continue
-            (init_net if includse_initializers else net).op.extend(c2ops.init_ops)
-            net.op.extend(c2ops.ops)
-            net.external_input.extend(c2ops.interface_blobs)
-
-    @classmethod
     def _graph_to_net(cls, onnx_graph, opset_version):
         net = caffe2_pb2.NetDef()
         for node in onnx_graph.node:
