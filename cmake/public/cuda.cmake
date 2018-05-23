@@ -299,7 +299,10 @@ function(caffe2_select_nvcc_arch_flags out_variable)
     unset(CUDA_ARCH_PTX CACHE)
   endif()
 
-  if(${CUDA_ARCH_NAME} STREQUAL "Kepler")
+  if(${TORCH_CUDA_ARCH_LIST})
+    # Pass CUDA architecture directly
+    set(__cuda_arch_bin ${TORCH_CUDA_ARCH_LIST})
+  elseif(${CUDA_ARCH_NAME} STREQUAL "Kepler")
     set(__cuda_arch_bin "30 35")
   elseif(${CUDA_ARCH_NAME} STREQUAL "Maxwell")
     set(__cuda_arch_bin "50")
