@@ -267,7 +267,7 @@ if(AT_LINK_STYLE STREQUAL "INTERFACE")
   # Source code can't be added to an interface library, so it is
   # passed back to be compiled into the containing library
   add_library(ATen_cpu INTERFACE)
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB ATen_cpu)
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB)
 else()
   add_library(ATen_cpu ${AT_LINK_STYLE} ${ATen_CPU_SRCS})
   target_include_directories(ATen_cpu INTERFACE $<INSTALL_INTERFACE:include>)
@@ -287,7 +287,7 @@ if(NOT NO_CUDA OR WITH_ROCM)
     # Source code can't be added to an interface library, so it is
     # passed back to be compiled into the containing library
     add_library(ATen_cuda INTERFACE)
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB ATen_cuda)
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
     set(ATen_CUDA_SRCS ${all_cuda_cpp})
   else()
     # A hack to deal with cuda library dependencies and modern CMake: the

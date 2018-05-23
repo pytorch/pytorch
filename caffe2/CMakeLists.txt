@@ -223,11 +223,11 @@ if(USE_CUDA OR USE_ROCM)
 
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)
+  set_target_properties(caffe2_gpu PROPERTIES VERSION 1 SOVERSION 1)
 
+  install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
-  set_target_properties(caffe2_gpu PROPERTIES VERSION 1 SOVERSION 1)
-  install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
 endif()
 
 # ---[ Check if warnings should be errors.
