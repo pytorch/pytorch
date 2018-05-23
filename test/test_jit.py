@@ -1860,7 +1860,7 @@ class TestScript(TestCase):
             def forward(self, x):
                 return self.someseq(x)
 
-        with self.assertRaisesRegex(RuntimeError, r"expected 1 input for single module in .* 3 found"):
+        with self.assertRaisesRegex(RuntimeError, "(Tensor, Tensor, Tensor)"):
             hs = HaveSequential()
             i = torch.Tensor(2)
             hs(i)

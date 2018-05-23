@@ -711,14 +711,31 @@ class _ConstModuleList(ScriptModule):
         return keys
 
 
-class _ConstSequential(_ConstModuleList):
-    def forward(self, inputs):
-        for m in list(self._modules.values()):
-            if(isinstance(inputs, tuple)):
-                raise RuntimeError(("expected 1 input for single module in {} but {} found")
-                                   .format(type(self), len(inputs)))
-            inputs = m(inputs)
-        return inputs
+class _ConstSequential(ScriptModule):
+    __constants__ = ['mods']
+
+    def __init__(self, mods):
+        super(_ConstSequential, self).__init__(False)
+        self.mods = ModuleList(list(mods._modules.values()))
+
+    def __getitem__(self, idx):
+        return self.mods.__getitem__(idx)
+
+    def __len__(self):
+        return self.mods.__len__()
+
+    def __iter__(self):
+        return self.mods.__iter__()
+
+    def __dir__(self):
+        return self.mods.__dir__()
+
+    @script_method
+    def forward(self, input):
+        for m in self.mods:
+            input = m(input)
+        return input
+
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

@@ -249,34 +249,12 @@ struct ModuleValue : public SugaredValue {
 
   // call module.forward
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    py::object py_module = py::cast(module);
-    if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstSequential")))
-      return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
-    std::shared_ptr<SugaredValue> result;
-    // namedvalue needs to be creted before the for-loop
-    // If creating namedvalue in the for loop instead:
-    //   inputs = at::ArrayRef<NamedValue>(NamedValue(loc, "", value));
-    // there will be an Error: AddressSanitizer: stack-use-after-scope in pr/pytorch-linux-xenial-py3-clang5-asan,
-    // because NamedValue instance will be destructed when leaving the for-loop, but inputs(at::ArrayRef<NamedValue>) will be used in next iteration
-    NamedValue namedvalue(loc, "", inputs.data()->value);
-    for(py::handle module : py_module) {
-      if(TupleType* tt = inputs.data()->value->type()->cast<TupleType>()) {
-        throw ErrorReport(loc) << "expected 1 input for single module in _ConstModuleList, but " << std::to_string(tt->elements().size()) << " found";
-      }
-      py::object obj = py::reinterpret_borrow<py::object>(module);
-      auto r = py::cast<std::shared_ptr<Module>>(obj);
-      auto m = std::make_shared<ModuleValue>(r);
-      result = m->attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, 1);
-      auto value = result->asValue(loc, caller);
-      namedvalue = NamedValue(loc, "", value);
-      inputs = at::ArrayRef<NamedValue>(namedvalue);
-    }
-    return result;
+    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
     py::object py_module = py::cast(module);
-    if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
+    if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")) and !py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstSequential")))
       return SugaredValue::asTuple(loc, m);
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(py::handle module : py_module) {
