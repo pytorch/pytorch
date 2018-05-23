@@ -170,6 +170,10 @@ endif(MKLDNN_FOUND)
 list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
 
 if(NOT MSVC)
+  # Preserve values for the main build
+  set(__aten_sleef_build_shared_libs ${BUILD_SHARED_LIBS})
+  set(__aten_sleef_build_tests ${BUILD_TESTS})
+
   set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build sleef static" FORCE)
   set(BUILD_DFT OFF CACHE BOOL "Don't build sleef DFT lib" FORCE)
   set(BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
@@ -179,6 +183,10 @@ if(NOT MSVC)
   list(APPEND ATen_CPU_INCLUDE SYSTEM ${CMAKE_BINARY_DIR}/include)
   link_directories(${CMAKE_BINARY_DIR}/sleef/lib)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS sleef)
+
+  # Set these back. TODO: Use SLEEF_ to pass these instead
+  set(BUILD_SHARED_LIBS ${__aten_sleef_build_shared_libs} CACHE BOOL "Build shared libs" FORCE)
+  set(BUILD_TESTS ${__aten_sleef_build_tests} CACHE BOOL "Build tests" FORCE)
 endif()
 
 IF(NOT NO_CUDA)
