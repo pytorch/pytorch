@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/aten_schema.h"
 #include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/utils/device.h"
 
 namespace torch { namespace jit {
 
