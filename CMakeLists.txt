@@ -151,9 +151,7 @@ endif()
 
 # ---[ Special code path for MKL module
 if (NOT BUILD_ATEN)
-  if (${BLAS} STREQUAL "MKL")
-    set(USE_MKL_IDEEP_OR_MKLML ON)
-  endif()
+  set(USE_MKL_IDEEP_OR_MKLML ON)
 endif()
 
 # ---[ CMake scripts + modules
