@@ -357,18 +357,21 @@ if (TORCH_BUILD_TEST)
     set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
 
     add_executable(test_api
+      ${TORCH_API_TEST_DIR}/any.cpp
       ${TORCH_API_TEST_DIR}/container.cpp
       ${TORCH_API_TEST_DIR}/integration.cpp
       ${TORCH_API_TEST_DIR}/main.cpp
       ${TORCH_API_TEST_DIR}/misc.cpp
       ${TORCH_API_TEST_DIR}/module.cpp
       ${TORCH_API_TEST_DIR}/optim.cpp
+      ${TORCH_API_TEST_DIR}/sequential.cpp
       ${TORCH_API_TEST_DIR}/rnn.cpp
-      ${TORCH_API_TEST_DIR}/serialization.cpp)
+      ${TORCH_API_TEST_DIR}/serialization.cpp
+      ${TORCH_API_TEST_DIR}/static.cpp)
 
-    target_include_directories(test_api
-      PUBLIC
-      "${TORCH_SRC_DIR}/../third_party/catch/single_include")
+      target_include_directories(test_api
+        PUBLIC
+        "${TORCH_SRC_DIR}/../third_party/catch/single_include")
 
     target_link_libraries(test_api torch)
   endif()

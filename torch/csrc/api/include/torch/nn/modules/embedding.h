@@ -13,7 +13,7 @@ class Embedding : public torch::nn::CloneableModule<Embedding> {
 
   void reset() override;
 
-  variable_list forward(variable_list) override;
+  variable_list forward(variable_list);
 
   TORCH_ATTR(int64_t, count);
   TORCH_ATTR(int64_t, dimension);
