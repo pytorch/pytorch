@@ -11,7 +11,8 @@
 #include <typeinfo>
 #include <unordered_map>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 Module::Module(std::string name) : name_(std::move(name)) {}
 
@@ -46,13 +47,13 @@ std::map<std::string, Variable> Module::parameters() const {
   std::map<std::string, Variable> ret;
   for (const auto& pair : children_) {
     auto& name = pair.first;
-    auto& child = pair.second(this);
+    auto& child = pair.second;
     for (auto& p : child->parameters()) {
       ret[name + "." + p.first] = p.second;
     }
   }
   for (const auto& pair : parameters_) {
-    ret[pair.first] = pair.second(this);
+    ret[pair.first] = pair.second;
   }
   return ret;
 }
@@ -72,7 +73,7 @@ Variable& Module::param(std::string const& name) {
       throw std::runtime_error("No such child: " + child_name);
     }
 
-    container = it->second(container).get();
+    container = it->second.get();
     begin = dot_pos + 1; // Skip the dot
   }
 
@@ -81,19 +82,19 @@ Variable& Module::param(std::string const& name) {
   if (it == container->parameters_.end()) {
     throw std::runtime_error("No such param: " + param_name);
   }
-  return it->second(container);
+  return it->second;
 }
 
 void Module::train() {
   for (auto& pair : children_) {
-    pair.second(this)->train();
+    pair.second->train();
   }
   is_training_ = true;
 }
 
 void Module::eval() {
   for (auto& pair : children_) {
-    pair.second(this)->eval();
+    pair.second->eval();
   }
   is_training_ = false;
 }
@@ -108,10 +109,10 @@ void Module::cpu() {
 
 void Module::to(at::Type& type) {
   for (auto& child : children_) {
-    child.second(this)->to(type);
+    child.second->to(type);
   }
   for (auto& pair : parameters_) {
-    auto parameter = pair.second(this);
+    auto parameter = pair.second;
     at::detail::set_data(parameter, parameter.data().toType(type));
     AT_ASSERT(parameter.data().type() == type);
     AT_ASSERT(&parameter.type() == autograd::VariableType::getType(type));
@@ -120,10 +121,10 @@ void Module::to(at::Type& type) {
 
 void Module::to(at::ScalarType scalar_type) {
   for (auto& child : children_) {
-    child.second(this)->to(scalar_type);
+    child.second->to(scalar_type);
   }
   for (auto& pair : parameters_) {
-    auto parameter = pair.second(this);
+    auto parameter = pair.second;
     auto& new_type = parameter.data().type().toScalarType(scalar_type);
     at::detail::set_data(parameter, parameter.data().toType(new_type));
     AT_ASSERT(parameter.data().type().scalarType() == scalar_type);
@@ -133,10 +134,10 @@ void Module::to(at::ScalarType scalar_type) {
 
 void Module::to(at::Backend backend) {
   for (auto& child : children_) {
-    child.second(this)->to(backend);
+    child.second->to(backend);
   }
   for (auto& pair : parameters_) {
-    auto parameter = pair.second(this);
+    auto parameter = pair.second;
     auto& new_type = parameter.data().type().toBackend(backend);
     at::detail::set_data(parameter, parameter.data().toType(new_type));
     AT_ASSERT(parameter.data().type().backend() == backend);
@@ -150,10 +151,29 @@ bool Module::is_training() const noexcept {
 
 void Module::zero_grad() {
   for (auto& child : children_) {
-    child.second(this)->zero_grad();
+    child.second->zero_grad();
   }
   for (auto& pair : parameters_) {
-    pair.second(this).grad().zero_();
+    pair.second.grad().zero_();
   }
 }
-}} // namespace torch::nn
+
+Variable Module::register_parameter(
+    const std::string& name,
+    at::Tensor tensor) {
+  auto variable = autograd::make_variable(tensor, /*requires_grad=*/true);
+  const auto pair = parameters_.emplace(name, std::move(variable));
+  AT_CHECK(pair.second, "Parameter has already been registered");
+  return pair.first->second;
+}
+
+Variable Module::register_buffer(const std::string& name, at::Tensor tensor) {
+  auto variable = autograd::make_variable(tensor, /*requires_grad=*/false);
+  const auto pair = parameters_.emplace(name, std::move(variable));
+  AT_CHECK(pair.second, "Parameter has already been registered");
+  return pair.first->second;
+}
+
+void Module::clone_(Module& other) {}
+} // namespace nn
+} // namespace torch

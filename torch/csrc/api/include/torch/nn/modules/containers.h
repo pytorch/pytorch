@@ -5,7 +5,8 @@
 
 #include <torch/csrc/autograd/variable.h>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 template <class Derived>
 class ContainerListImpl : public Module {
@@ -23,9 +24,8 @@ class ContainerListImpl : public Module {
   }
 
   ContainerListImpl<Derived>& append(std::shared_ptr<Module> m) {
-    modules_.push_back(m);
-    register_module(
-        std::to_string(size() - 1), &ContainerListImpl::modules_, size() - 1);
+    modules_.push_back(
+        register_module(std::to_string(size() - 1), std::move(m)));
     return *this;
   }
 
@@ -70,9 +70,9 @@ class Sequential : public ContainerListImpl<Sequential> {
     if (name == "") {
       name = std::to_string(size());
     }
-    modules_.push_back(m);
-    register_module(name, &Sequential::modules_, size() - 1);
+    modules_.push_back(register_module(name, std::move(m)));
     return *this;
   }
 };
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch
