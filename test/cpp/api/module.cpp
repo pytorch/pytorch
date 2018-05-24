@@ -171,11 +171,10 @@ TEST_CASE("module/clone") {
   SECTION("Cloning preserves external references") {
     struct TestModel : public CloneableModule<TestModel> {
       void reset() override {
-        register_parameter(
-            "weight",
-            &TestModel::weight,
-            at::ones(at::CPU(at::kFloat), {4, 4}));
+        weight =
+            register_parameter("weight", at::ones(at::CPU(at::kFloat), {4, 4}));
       }
+      Variable weight;
     };
     auto module = TestModule().build();
     module->weight.data() += 1;

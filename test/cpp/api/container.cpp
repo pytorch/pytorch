@@ -137,7 +137,7 @@ TEST_CASE("containers") {
     x = l2->forward({x})[0].clamp_min(0);
     x = l3->forward({x})[0].clamp_min(0);
 
-    backward(x);
+    x.backward();
     REQUIRE(x.ndimension() == 2);
     REQUIRE(x.size(0) == 1000);
     REQUIRE(x.size(1) == 100);

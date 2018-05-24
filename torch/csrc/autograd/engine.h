@@ -14,13 +14,11 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch { namespace autograd {
 struct ReadyQueue;
 struct FunctionTask;
 struct GraphTask;
-} // namespace autograd
-} // namespace torch
+}} // namespace torch::autograd
 
 namespace torch { namespace autograd {
 // A single instance of this struct should be created through the whole process lifetime.

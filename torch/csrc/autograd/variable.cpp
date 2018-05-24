@@ -21,8 +21,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch { namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
     : TensorImpl(VariableType::getType(data)),
       data_(std::move(data)),
@@ -112,7 +111,7 @@ void Variable::Impl::detach_() {
 }
 
 void Variable::Impl::backward(
-    at::optional<at::Tensor> gradient,
+    at::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) {
   std::vector<Edge> edges;
@@ -198,5 +197,4 @@ void Variable::set_tracing_state(
 jit::tracer::ValueTracingState& Variable::tracing_state() const noexcept {
   return *get()->tracing_state_;
 }
-} // namespace autograd
-} // namespace torch
+}} // namespace torch::autograd
