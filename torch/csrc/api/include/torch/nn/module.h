@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 
 namespace torch {
@@ -29,8 +30,15 @@ class Module {
   /// Returns the name of the `Module`.
   const std::string& name() const noexcept;
 
-  virtual variable_list forward(variable_list) = 0;
   virtual std::shared_ptr<Module> clone() const;
+
+  // Only construct parameters in initialize_parameters, and
+  // containers in initialize_containers. Most of the time, the containers are
+  // the only thing you need to add.
+  // You are guaranteed that containers are added before parameters.
+  virtual void initialize_containers() {}
+  virtual void initialize_parameters() {}
+  virtual void reset_parameters() {}
 
   std::map<std::string, Variable> parameters() const;
   Variable& param(std::string const&);

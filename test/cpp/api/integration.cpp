@@ -4,10 +4,13 @@
 
 #include <ATen/Error.h>
 
+#include <test/cpp/api/util.h>
+
 using namespace torch;
 using namespace torch::nn;
 
 #include <iostream>
+#include <random>
 
 class CartPole {
   // Translated from openai/gym's cartpole.py
@@ -109,7 +112,7 @@ bool test_mnist(
     FILE* fp_;
 
     explicit MNIST_Reader(const char* path) {
-      fp_ = fopen(path, "rb");
+      fp_ = fopen(path, "rbe");
       if (!fp_)
         throw std::runtime_error("failed to open file");
     }
@@ -168,7 +171,7 @@ bool test_mnist(
     auto a_data = data.accessor<int64_t, 1>();
 
     for (int i = 0; i < label_count; ++i) {
-      a_data[i] = long(rd.read_byte());
+      a_data[i] = static_cast<int64_t>(rd.read_byte());
     }
     return data.toBackend(useGPU ? at::kCUDA : at::kCPU);
   };
@@ -182,12 +185,15 @@ bool test_mnist(
     model->cuda();
   }
 
+  std::random_device device;
+  std::mt19937 generator(device());
+
   for (auto epoch = 0U; epoch < num_epochs; epoch++) {
     auto shuffled_inds = std::vector<int>(trdata.size(0));
     for (int i = 0; i < trdata.size(0); i++) {
       shuffled_inds[i] = i;
     }
-    std::random_shuffle(shuffled_inds.begin(), shuffled_inds.end());
+    std::shuffle(shuffled_inds.begin(), shuffled_inds.end(), generator);
 
     auto inp = (useGPU ? at::CUDA : at::CPU)(at::kFloat)
                    .tensor({batch_size, 1, trdata.size(2), trdata.size(3)});
@@ -211,7 +217,7 @@ bool test_mnist(
   no_grad_guard guard;
   auto result = std::get<1>(forward_op(Var(tedata, false)).max(1));
   Variable correct = (result == Var(telabel)).toType(at::kFloat);
-  std::cout << "Num correct: " << correct.data().sum().toCFloat() << " out of "
+  std::cout << "Num correct: " << correct.data().sum().toCFloat() << " out of"
             << telabel.size(0) << std::endl;
   return correct.data().sum().toCFloat() > telabel.size(0) * 0.8;
 };
@@ -221,7 +227,7 @@ TEST_CASE("integration") {
     std::cerr
         << "Training episodic policy gradient with a critic for up to 3000"
            " episodes, rest your eyes for a bit!\n";
-    auto model = std::make_shared<Sequential>();
+    auto model = std::make_shared<SimpleContainer>();
     auto linear = model->add(Linear(4, 128).build(), "linear");
     auto policyHead = model->add(Linear(128, 2).build(), "policy");
     auto valueHead = model->add(Linear(128, 1).build(), "action");
@@ -248,7 +254,7 @@ TEST_CASE("integration") {
       // This should probably be actually implemented in autogradpp...
       auto p = probs / probs.sum(-1, true);
       auto log_prob = p[action].log();
-      saved_log_probs.push_back(log_prob);
+      saved_log_probs.emplace_back(log_prob);
       saved_values.push_back(value);
       return action;
     };
@@ -320,7 +326,7 @@ TEST_CASE("integration") {
 }
 
 TEST_CASE("integration/mnist", "[cuda]") {
-  auto model = std::make_shared<Sequential>();
+  auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5).build(), "conv1");
   auto conv2 = model->add(Conv2d(10, 20, 5).build(), "conv2");
   auto drop = Dropout(0.3).build();
@@ -355,7 +361,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
 }
 
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
-  auto model = std::make_shared<Sequential>();
+  auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5).build(), "conv1");
   auto batchnorm2d =
       model->add(BatchNorm(10).stateful(true).build(), "batchnorm2d");

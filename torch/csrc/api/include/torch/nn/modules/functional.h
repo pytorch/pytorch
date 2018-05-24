@@ -17,7 +17,7 @@ class Functional : public torch::nn::CloneableModule<Functional> {
 
   void reset() override;
 
-  variable_list forward(variable_list input) override;
+  variable_list forward(variable_list input);
 
   TORCH_ATTR(Function, function);
 };

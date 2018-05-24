@@ -18,7 +18,7 @@ class DropoutBase : public torch::nn::CloneableModule<T> {
 
   void reset() override;
 
-  variable_list forward(variable_list input) override;
+  variable_list forward(variable_list input);
 
   TORCH_ATTR(double, rate) = 0.5;
 

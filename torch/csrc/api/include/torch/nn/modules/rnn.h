@@ -20,6 +20,7 @@ class Dropout;
 
 namespace torch {
 namespace nn {
+
 template <typename Derived>
 class RNNBase : public CloneableModule<Derived> {
  public:
@@ -36,7 +37,7 @@ class RNNBase : public CloneableModule<Derived> {
 
   void reset() override;
 
-  variable_list forward(variable_list) override;
+  variable_list forward(variable_list);
 
   void to(at::Type& type) override;
   void to(at::ScalarType scalar_type) override;
