@@ -13,23 +13,22 @@ import unittest
 
 
 class TestTrigonometricOp(hu.HypothesisTestCase):
-    @given(X=hu.tensor(elements=st.floats(min_value=-0.7, max_value=0.7)))
-    def test_acos(self, X):
-        self.assertTrigonometricChecks("Acos", X, lambda x: (np.arccos(X),))
+    @given(X=hu.tensor(elements=st.floats(min_value=-0.7, max_value=0.7)), **hu.gcs)
+    def test_acos(self, X, gc, dc):
+        self.assertTrigonometricChecks("Acos", X, lambda x: (np.arccos(X),), gc, dc)
 
-    @given(X=hu.tensor(elements=st.floats(min_value=-0.7, max_value=0.7)))
-    def test_asin(self, X):
-        self.assertTrigonometricChecks("Asin", X, lambda x: (np.arcsin(X),))
+    @given(X=hu.tensor(elements=st.floats(min_value=-0.7, max_value=0.7)), **hu.gcs)
+    def test_asin(self, X, gc, dc):
+        self.assertTrigonometricChecks("Asin", X, lambda x: (np.arcsin(X),), gc, dc)
 
-    @given(X=hu.tensor(elements=st.floats(min_value=-100, max_value=100)))
-    def test_atan(self, X):
-        self.assertTrigonometricChecks("Atan", X, lambda x: (np.arctan(X),))
+    @given(X=hu.tensor(elements=st.floats(min_value=-100, max_value=100)), **hu.gcs)
+    def test_atan(self, X, gc, dc):
+        self.assertTrigonometricChecks("Atan", X, lambda x: (np.arctan(X),), gc, dc)
 
-    @given(X=hu.tensor(elements=st.floats(min_value=-0.5, max_value=0.5)))
-    def test_tan(self, X):
-        self.assertTrigonometricChecks("Tan", X, lambda x: (np.tan(X),))
+    @given(X=hu.tensor(elements=st.floats(min_value=-0.5, max_value=0.5)), **hu.gcs)
+    def test_tan(self, X, gc, dc):
+        self.assertTrigonometricChecks("Tan", X, lambda x: (np.tan(X),), gc, dc)
 
-    @given(**hu.gcs)
     def assertTrigonometricChecks(self, op_name, input, reference, gc, dc):
         op = core.CreateOperator(op_name, ["X"], ["Y"])
         self.assertReferenceChecks(gc, op, [input], reference)
