@@ -160,16 +160,6 @@ if (USE_ATEN)
     set(BUILD_ATEN ${USE_ATEN})
 endif()
 
-# Use MKLML and IDEEP by default for MKL
-if("${BLAS_SET_BY_USER}" AND "${BLAS}" STREQUAL MKL)
-  if(NOT USE_IDEEP_SET_BY_USER)
-    set(USE_IDEEP ON)
-  endif()
-  if(NOT USE_MKLML_SET_BY_USER)
-    set(USE_MKLML ON)
-  endif()
-endif()
-
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 

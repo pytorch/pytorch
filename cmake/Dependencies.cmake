@@ -84,6 +84,14 @@ elseif(BLAS STREQUAL "OpenBLAS")
   endif()
 # MKL
 elseif(BLAS STREQUAL "MKL")
+  # Use MKLML and IDEEP by default for MKL
+  if(NOT USE_IDEEP_SET_BY_USER)
+    set(USE_IDEEP ON)
+  endif()
+  if(NOT USE_MKLML_SET_BY_USER)
+    set(USE_MKLML ON)
+  endif()
+
   if(BLAS_SET_BY_USER)
     find_package(MKL REQUIRED)
   else()
