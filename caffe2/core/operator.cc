@@ -302,13 +302,6 @@ CAFFE_DEFINE_REGISTRY(
 CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CUDA, CUDAOperatorRegistry);
 
 CAFFE_DEFINE_REGISTRY(
-    HIPOperatorRegistry,
-    OperatorBase,
-    const OperatorDef&,
-    Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::HIP, HIPOperatorRegistry);
-
-CAFFE_DEFINE_REGISTRY(
     GradientRegistry,
     GradientMakerBase,
     const OperatorDef&, const vector<GradientWrapper>&);
@@ -599,10 +592,6 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
 
       if (blob_device.device_type() == CUDA &&
           blob_device.cuda_gpu_id() != op_device.cuda_gpu_id()) {
-        mismatches[blob_name] = std::make_pair(op_device, blob_device);
-      }
-      else if (blob_device.device_type() == HIP &&
-          blob_device.hip_gpu_id() != op_device.hip_gpu_id()) {
         mismatches[blob_name] = std::make_pair(op_device, blob_device);
       }
     }

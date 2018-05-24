@@ -40,7 +40,6 @@ function (caffe2_print_configuration_summary)
 
   message(STATUS "  USE_ASAN              : ${USE_ASAN}")
   message(STATUS "  USE_CUDA              : ${USE_CUDA}")
-  message(STATUS "  USE_HIP               : ${USE_HIP}")
   if(${USE_CUDA})
     message(STATUS "    CUDA static link    : ${CAFFE2_STATIC_LINK_CUDA}")
     message(STATUS "    USE_CUDNN           : ${USE_CUDNN}")
