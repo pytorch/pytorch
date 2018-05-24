@@ -76,10 +76,10 @@ public:
   int64_t& operator[](int idx)  = delete;
 };
 template <>
-Vec256<int64_t> map(int64_t (*f)(int64_t), Vec256<int64_t> x) = delete;
+Vec256<int64_t> inline map(int64_t (*f)(int64_t), Vec256<int64_t> x) = delete;
 
 template <>
-Vec256<int64_t> abs(Vec256<int64_t> x) {
+Vec256<int64_t> inline abs(Vec256<int64_t> x) {
   auto zero = _mm256_set1_epi64x(0);
   auto is_larger = _mm256_cmpgt_epi64(zero, x);
   auto inverse = _mm256_xor_si256(x, is_larger);
@@ -141,10 +141,10 @@ public:
 };
 
 template <>
-Vec256<int32_t> map(int32_t (*f)(int32_t), Vec256<int32_t> x) = delete;
+Vec256<int32_t> inline map(int32_t (*f)(int32_t), Vec256<int32_t> x) = delete;
 
 template <>
-Vec256<int32_t> abs(Vec256<int32_t> x) {
+Vec256<int32_t> inline abs(Vec256<int32_t> x) {
   return _mm256_abs_epi32(x);
 }
 
@@ -253,10 +253,10 @@ public:
 };
 
 template <>
-Vec256<int16_t> map(int16_t (*f)(int16_t), Vec256<int16_t> x) = delete;
+Vec256<int16_t> inline map(int16_t (*f)(int16_t), Vec256<int16_t> x) = delete;
 
 template <>
-Vec256<int16_t> abs(Vec256<int16_t> x) {
+Vec256<int16_t> inline abs(Vec256<int16_t> x) {
   return _mm256_abs_epi16(x);
 }
 

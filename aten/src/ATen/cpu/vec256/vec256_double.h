@@ -97,113 +97,113 @@ Vec256<double> inline min(const Vec256<double>& a, const Vec256<double>& b) {
 }
 
 template <>
-Vec256<double> map(double (*f)(double), Vec256<double> x) = delete;
+Vec256<double> inline map(double (*f)(double), Vec256<double> x) = delete;
 
 template <>
-Vec256<double> abs(Vec256<double> x) {
+Vec256<double> inline abs(Vec256<double> x) {
   auto mask = _mm256_set1_pd(-0.f);
   return _mm256_andnot_pd(mask, x);
 }
 
 template <>
-Vec256<double> acos(Vec256<double> x) {
+Vec256<double> inline acos(Vec256<double> x) {
   return Vec256<double>(Sleef_acosd4_u10(x));
 }
 
 template <>
-Vec256<double> asin(Vec256<double> x) {
+Vec256<double> inline asin(Vec256<double> x) {
   return Vec256<double>(Sleef_asind4_u10(x));
 }
 
 template <>
-Vec256<double> atan(Vec256<double> x) {
+Vec256<double> inline atan(Vec256<double> x) {
   return Vec256<double>(Sleef_atand4_u10(x));
 }
 
 template <>
-Vec256<double> erf(Vec256<double> x) {
+Vec256<double> inline erf(Vec256<double> x) {
   return Vec256<double>(Sleef_erfd4_u10(x));
 }
 
 template <>
-Vec256<double> exp(Vec256<double> x) {
+Vec256<double> inline exp(Vec256<double> x) {
   return Vec256<double>(Sleef_expd4_u10(x));
 }
 
 template <>
-Vec256<double> expm1(Vec256<double> x) {
+Vec256<double> inline expm1(Vec256<double> x) {
   return Vec256<double>(Sleef_expm1d4_u10(x));
 }
 
 template <>
-Vec256<double> log(Vec256<double> x) {
+Vec256<double> inline log(Vec256<double> x) {
   return Vec256<double>(Sleef_logd4_u10(x));
 }
 
 template <>
-Vec256<double> log2(Vec256<double> x) {
+Vec256<double> inline log2(Vec256<double> x) {
   return Vec256<double>(Sleef_log2d4_u10(x));
 }
 
 template <>
-Vec256<double> log10(Vec256<double> x) {
+Vec256<double> inline log10(Vec256<double> x) {
   return Vec256<double>(Sleef_log10d4_u10(x));
 }
 
 template <>
-Vec256<double> log1p(Vec256<double> x) {
+Vec256<double> inline log1p(Vec256<double> x) {
   return Vec256<double>(Sleef_log1pd4_u10(x));
 }
 
 template <>
-Vec256<double> sin(Vec256<double> x) = delete;
+Vec256<double> inline sin(Vec256<double> x) = delete;
 
 template <>
-Vec256<double> cos(Vec256<double> x) = delete;
+Vec256<double> inline cos(Vec256<double> x) = delete;
 
 template <>
-Vec256<double> ceil(Vec256<double> x) {
+Vec256<double> inline ceil(Vec256<double> x) {
   return _mm256_ceil_pd(x);
 }
 
 template <>
-Vec256<double> floor(Vec256<double> x) {
+Vec256<double> inline floor(Vec256<double> x) {
   return _mm256_floor_pd(x);
 }
 
 template <>
-Vec256<double> round(Vec256<double> x) {
+Vec256<double> inline round(Vec256<double> x) {
   return _mm256_round_pd(
       x, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
 }
 
 template <>
-Vec256<double> tanh(Vec256<double> x) {
+Vec256<double> inline tanh(Vec256<double> x) {
   return Vec256<double>(Sleef_tanhd4_u10(x));
 }
 
 template <>
-Vec256<double> trunc(Vec256<double> x) {
+Vec256<double> inline trunc(Vec256<double> x) {
   return _mm256_round_pd(x, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
 }
 
 template <>
-Vec256<double> sqrt(Vec256<double> x) {
+Vec256<double> inline sqrt(Vec256<double> x) {
   return _mm256_sqrt_pd(x);
 }
 
 template <>
-Vec256<double> reciprocal(Vec256<double> x) {
+Vec256<double> inline reciprocal(Vec256<double> x) {
   return _mm256_div_pd(_mm256_set1_pd(1), x);
 }
 
 template <>
-Vec256<double> rsqrt(Vec256<double> x) {
+Vec256<double> inline rsqrt(Vec256<double> x) {
   return reciprocal(sqrt(x));
 }
 
 template <>
-Vec256<double> sigmoid(Vec256<double> x) {
+Vec256<double> inline sigmoid(Vec256<double> x) {
   return _mm256_div_pd(
       _mm256_set1_pd(1),
       _mm256_add_pd(

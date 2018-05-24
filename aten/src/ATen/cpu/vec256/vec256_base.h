@@ -76,7 +76,7 @@ public:
     return values[idx];
   }
 };
-template <class T>Vec256<T> map(T (*f)(T), Vec256<T> x) {
+template <class T>Vec256<T> inline map(T (*f)(T), Vec256<T> x) {
   Vec256<T> ret;
   for (int64_t i = 0; i != Vec256<T>::size; i++) {
     ret[i] = f(x[i]);
@@ -84,7 +84,7 @@ template <class T>Vec256<T> map(T (*f)(T), Vec256<T> x) {
   return ret;
 }
 
-template <class T>Vec256<T> abs(Vec256<T> x) {
+template <class T>Vec256<T> inline abs(Vec256<T> x) {
   Vec256<T> ret;
   for (int64_t i = 0; i < Vec256<T>::size; i++) {
     ret[i] = x[i] < 0 ? -x[i] : x[i];
@@ -93,92 +93,92 @@ template <class T>Vec256<T> abs(Vec256<T> x) {
 }
 
 template <class T>
-Vec256<T> acos(Vec256<T> x) {
+Vec256<T> inline acos(Vec256<T> x) {
   return map(std::acos, x);
 }
 
 template <class T>
-Vec256<T> asin(Vec256<T> x) {
+Vec256<T> inline asin(Vec256<T> x) {
   return map(std::asin, x);
 }
 
 template <class T>
-Vec256<T> atan(Vec256<T> x) {
+Vec256<T> inline atan(Vec256<T> x) {
   return map(std::atan, x);
 }
 
 template <class T>
-Vec256<T> erf(Vec256<T> x) {
+Vec256<T> inline erf(Vec256<T> x) {
   return map(std::erf, x);
 }
 
 template <class T>
-Vec256<T> exp(Vec256<T> x) {
+Vec256<T> inline exp(Vec256<T> x) {
   return map(std::exp, x);
 }
 
 template <class T>
-Vec256<T> expm1(Vec256<T> x) {
+Vec256<T> inline expm1(Vec256<T> x) {
   return map(std::expm1, x);
 }
 
 template <class T>
-Vec256<T> log(Vec256<T> x) {
+Vec256<T> inline log(Vec256<T> x) {
   return map(std::log, x);
 }
 
 template <class T>
-Vec256<T> log10(Vec256<T> x) {
+Vec256<T> inline log10(Vec256<T> x) {
   return map(std::log10, x);
 }
 
 template <class T>
-Vec256<T> log1p(Vec256<T> x) {
+Vec256<T> inline log1p(Vec256<T> x) {
   return map(std::log1p, x);
 }
 
 template <class T>
-Vec256<T> log2(Vec256<T> x) {
+Vec256<T> inline log2(Vec256<T> x) {
   return map(std::log2, x);
 }
 
 template <class T>
-Vec256<T> ceil(Vec256<T> x) {
+Vec256<T> inline ceil(Vec256<T> x) {
   return map(std::ceil, x);
 }
 
 template <class T>
-Vec256<T> cos(Vec256<T> x) {
+Vec256<T> inline cos(Vec256<T> x) {
   return map(std::cos, x);
 }
 
 template <class T>
-Vec256<T> floor(Vec256<T> x) {
+Vec256<T> inline floor(Vec256<T> x) {
   return map(std::floor, x);
 }
 
 template <class T>
-Vec256<T> round(Vec256<T> x) {
+Vec256<T> inline round(Vec256<T> x) {
   return map(std::round, x);
 }
 
 template <class T>
-Vec256<T> sin(Vec256<T> x) {
+Vec256<T> inline sin(Vec256<T> x) {
   return map(std::sin, x);
 }
 
 template <class T>
-Vec256<T> sqrt(Vec256<T> x) {
+Vec256<T> inline sqrt(Vec256<T> x) {
   return map(std::sqrt, x);
 }
 
 template <class T>
-Vec256<T> neg(Vec256<T> x) {
+Vec256<T> inline neg(Vec256<T> x) {
   return Vec256<T>(0) - x;
 }
 
 template <class T>
-Vec256<T> reciprocal(Vec256<T> x) {
+Vec256<T> inline reciprocal(Vec256<T> x) {
   Vec256<T> ret;
   for (int64_t i = 0; i < Vec256<T>::size; i++) {
     ret[i] = 1 / x[i];
@@ -187,12 +187,12 @@ Vec256<T> reciprocal(Vec256<T> x) {
 }
 
 template <class T>
-Vec256<T> rsqrt(Vec256<T> x) {
+Vec256<T> inline rsqrt(Vec256<T> x) {
   return reciprocal(sqrt(x));
 }
 
 template <class T>
-Vec256<T> sigmoid(Vec256<T> x) {
+Vec256<T> inline sigmoid(Vec256<T> x) {
   Vec256<T> ret;
   for (int64_t i = 0; i < Vec256<T>::size; i++) {
     ret[i] = ((T)1.0) / (((T)1.0) + std::exp(-x[i]));
@@ -201,17 +201,17 @@ Vec256<T> sigmoid(Vec256<T> x) {
 }
 
 template <class T>
-Vec256<T> tanh(Vec256<T> x) {
+Vec256<T> inline tanh(Vec256<T> x) {
   return map(std::tanh, x);
 }
 
 template <class T>
-Vec256<T> trunc(Vec256<T> x) {
+Vec256<T> inline trunc(Vec256<T> x) {
   return map(std::trunc, x);
 }
 
 template <class T>
-Vec256<T> frac(Vec256<T> x) {
+Vec256<T> inline frac(Vec256<T> x) {
   return x - trunc(x);
 }
 
