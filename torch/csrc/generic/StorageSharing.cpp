@@ -9,16 +9,16 @@ static PyObject * THPStorage_(sharedDecref)(THPStorage *self)
   HANDLE_TH_ERRORS
 #ifndef THC_GENERIC_FILE
   libshm_context *ctx = NULL;
-  THWStorage *storage = self->cdata;
-  if (storage->allocator == &THManagedSharedAllocator) {
-    ctx = (libshm_context*)storage->allocatorContext;
-  } else if (storage->allocator == &THWStorageWeakRefAllocator) {
-    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
+  THWStorageImpl *storage = self->cdata;
+  if (storage->allocator() == &THManagedSharedAllocator) {
+    ctx = (libshm_context*)storage->allocatorContext();
+  } else if (storage->allocator() == &THWStorageWeakRefAllocator) {
+    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext());
     if (allocator_obj->allocator == &THManagedSharedAllocator)
       ctx = (libshm_context*)allocator_obj->allocatorContext;
   }
   if (ctx)
-    THRefcountedMapAllocator_decref(ctx->th_context, storage->data);
+    THRefcountedMapAllocator_decref(ctx->th_context, storage->data<real>());
 #endif
   Py_INCREF(self);
   return (PyObject *)self;
@@ -30,27 +30,27 @@ static PyObject * THPStorage_(sharedIncref)(THPStorage *self)
   HANDLE_TH_ERRORS
 #ifndef THC_GENERIC_FILE
   libshm_context *ctx = NULL;
-  THWStorage *storage = self->cdata;
-  if (storage->allocator == &THManagedSharedAllocator) {
-    ctx = (libshm_context*)storage->allocatorContext;
-  } else if (storage->allocator == &THWStorageWeakRefAllocator) {
-    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
+  THWStorageImpl *storage = self->cdata;
+  if (storage->allocator() == &THManagedSharedAllocator) {
+    ctx = (libshm_context*)storage->allocatorContext();
+  } else if (storage->allocator() == &THWStorageWeakRefAllocator) {
+    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext());
     if (allocator_obj->allocator == &THManagedSharedAllocator)
       ctx = (libshm_context*)allocator_obj->allocatorContext;
   }
   if (ctx)
-    THRefcountedMapAllocator_incref(ctx->th_context, storage->data);
+    THRefcountedMapAllocator_incref(ctx->th_context, storage->data<real>());
 #endif
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(newTHView)(THWStorage *base, ptrdiff_t offset, size_t size)
+static PyObject * THPStorage_(newTHView)(THWStorageImpl *base, ptrdiff_t offset, size_t size)
 {
-  void *data = (char*)base->data + offset;
+  void *data = base->data<char>() + offset;
   THWStoragePtr view(THWStorage_(newWithData)(LIBRARY_STATE (real*)data, size));
-  view->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
-  view->view = base;
+  view->setFlag(TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW);
+  view->setView(base);
   THWStorage_(retain)(LIBRARY_STATE base);
   return THPStorage_(New)(view.release());
 }
@@ -69,7 +69,7 @@ static std::string THPStorage_(__newHandle)() {
   return handle;
 }
 
-static THWStorage* THPStorage_(newFilenameStorage)(ptrdiff_t size)
+static THWStorageImpl* THPStorage_(newFilenameStorage)(ptrdiff_t size)
 {
   int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
   std::string handle = THPStorage_(__newHandle)();
@@ -91,21 +91,21 @@ static PyObject * THPStorage_(pyNewFilenameStorage)(PyObject *_unused, PyObject 
 static PyObject * THPStorage_(shareFilename)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  THWStorage *storage = self->cdata;
+  THWStorageImpl *storage = self->cdata;
   libshm_context *ctx;
   // Storage is already in shared memory, just return a handle
-  if (storage->allocator == &THManagedSharedAllocator) {
-    ctx = (libshm_context*)storage->allocatorContext;
-  } else if (storage->allocator == &THWStorageWeakRefAllocator) {
-    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
+  if (storage->allocator() == &THManagedSharedAllocator) {
+    ctx = (libshm_context*)storage->allocatorContext();
+  } else if (storage->allocator() == &THWStorageWeakRefAllocator) {
+    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext());
     ctx = (libshm_context*)allocator_obj->allocatorContext;
   } else {
     // TODO: retry on collision
     // TODO: free GIL - but remember to reacquire it when an exception is thrown
-    THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->size));
+    THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->size()));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
-    ctx = (libshm_context*)storage->allocatorContext;
+    ctx = (libshm_context*)storage->allocatorContext();
   }
 
   THPObjectPtr manager_handle(PyBytes_FromString(ctx->manager_handle));
@@ -113,7 +113,7 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self)
   THPObjectPtr storage_handle(
     PyBytes_FromString(THMapAllocatorContext_filename(ctx->th_context)));
   if (!storage_handle) return NULL;
-  THPObjectPtr size(PyLong_FromLong(storage->size));
+  THPObjectPtr size(PyLong_FromLong(storage->size()));
   if (!size) return NULL;
 
   THPObjectPtr tuple(PyTuple_New(3));
@@ -148,7 +148,7 @@ static PyObject * THPStorage_(newSharedFilename)(PyObject *_unused, PyObject *ar
   END_HANDLE_TH_ERRORS
 }
 
-static THWStorage* THPStorage_(newFdStorage)(ptrdiff_t size)
+static THWStorageImpl* THPStorage_(newFdStorage)(ptrdiff_t size)
 {
   int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM |
               TH_ALLOCATOR_MAPPED_EXCLUSIVE |
@@ -173,24 +173,24 @@ static PyObject * THPStorage_(pyNewFdStorage)(PyObject *_unused, PyObject *args)
 static PyObject * THPStorage_(shareFd)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  THWStorage *storage = self->cdata;
+  THWStorageImpl *storage = self->cdata;
   THMapAllocatorContext *ctx;
   // Storage is already in shared memory, just return a handle
-  if (storage->allocator == &THMapAllocator) {
-    ctx = (THMapAllocatorContext*)storage->allocatorContext;
-  } else if (storage->allocator == &THWStorageWeakRefAllocator) {
-    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
+  if (storage->allocator() == &THMapAllocator) {
+    ctx = (THMapAllocatorContext*)storage->allocatorContext();
+  } else if (storage->allocator() == &THWStorageWeakRefAllocator) {
+    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext());
     ctx = (THMapAllocatorContext*)allocator_obj->allocatorContext;
   } else {
-    THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->size));
+    THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->size()));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
-    ctx = (THMapAllocatorContext*)storage->allocatorContext;
+    ctx = (THMapAllocatorContext*)storage->allocatorContext();
   }
 
   THPObjectPtr storage_handle(PyLong_FromLong(THMapAllocatorContext_fd(ctx)));
   if (!storage_handle) return NULL;
-  THPObjectPtr size(PyLong_FromLong(storage->size));
+  THPObjectPtr size(PyLong_FromLong(storage->size()));
   if (!size) return NULL;
 
   THPObjectPtr tuple(PyTuple_New(2));
@@ -235,19 +235,19 @@ static PyObject * THPStorage_(newSharedFd)(PyObject *_unused, PyObject *args)
 static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  THWStorage *storage = self->cdata;
-  AutoGPU gpu_guard(storage->device);
+  THWStorageImpl *storage = self->cdata;
+  AutoGPU gpu_guard(storage->device());
   THPObjectPtr tuple(PyTuple_New(5));
-  THPObjectPtr device(PyLong_FromLong(storage->device));
+  THPObjectPtr device(PyLong_FromLong(storage->device()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
-  THPObjectPtr size(PyLong_FromLong(storage->size));
+  THPObjectPtr size(PyLong_FromLong(storage->size()));
   THPObjectPtr _offset(PyLong_FromLong(0));
-  THPObjectPtr view_size(PyLong_FromLong(storage->size));
-  if (storage->data) {
+  THPObjectPtr view_size(PyLong_FromLong(storage->size()));
+  if (storage->data<real>()) {
     size_t base_size;
-    void *base_ptr = THCCachingAllocator_getBaseAllocation(storage->data, &base_size);
-    ptrdiff_t offset = (char*)storage->data - (char*)base_ptr;
+    void *base_ptr = THCCachingAllocator_getBaseAllocation(storage->data<real>(), &base_size);
+    ptrdiff_t offset = storage->data<char>() - (char*)base_ptr;
 
     cudaIpcMemHandle_t handle;
     THCudaCheck(cudaIpcGetMemHandle(&handle, base_ptr));
@@ -305,7 +305,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 
   THWStoragePtr base(THWStorage_(newWithDataAndAllocator)(
       LIBRARY_STATE (real*)devPtr, storage_size, &THCIpcAllocator, (void*)device));
-  base->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_FREEMEM;
+  base->setFlag(TH_STORAGE_REFCOUNTED | TH_STORAGE_FREEMEM);
 
   if (offset != 0 || view_size != storage_size) {
     return THPStorage_(newTHView)(base.get(), offset, view_size);
@@ -322,18 +322,18 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 // responsible for clearing the weak reference.
 static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *weak_ref_class) {
   HANDLE_TH_ERRORS
-  THWStorage* storage = self->cdata;
-  while (storage->flag & TH_STORAGE_VIEW) {
-    storage = storage->view;
+  THWStorageImpl* storage = self->cdata;
+  while (storage->flag() & TH_STORAGE_VIEW) {
+    storage = storage->view();
   }
   bool hasWeakAllocator;
 #ifdef THC_GENERIC_FILE
-  hasWeakAllocator = storage->allocator == &THCStorageWeakRefAllocator;
+  hasWeakAllocator = storage->allocator() == &THCStorageWeakRefAllocator;
 #else
-  hasWeakAllocator = storage->allocator == &THWStorageWeakRefAllocator;
+  hasWeakAllocator = storage->allocator() == &THWStorageWeakRefAllocator;
 #endif
   if (hasWeakAllocator) {
-    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
+    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext());
     Py_INCREF(allocator_obj->object.get());
     return allocator_obj->object.get();
   }
@@ -343,13 +343,13 @@ static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *weak_ref_clas
   THPObjectPtr ref(PyObject_Call(weak_ref_class, args, NULL));
   if (!ref) return NULL;
 #ifdef THC_GENERIC_FILE
-  storage->allocatorContext = new CudaStorageWeakRefAllocator(
-        ref.get(), storage->allocator, storage->allocatorContext);
-  storage->allocator = &THCStorageWeakRefAllocator;
+  storage->setAllocatorContext(new CudaStorageWeakRefAllocator(
+        ref.get(), storage->allocator(), storage->allocatorContext()));
+  storage->setAllocator(&THCStorageWeakRefAllocator);
 #else
-  storage->allocatorContext = new StorageWeakRefAllocator(
-        ref.get(), storage->allocator, storage->allocatorContext);
-  storage->allocator = &THWStorageWeakRefAllocator;
+  storage->setAllocatorContext(new StorageWeakRefAllocator(
+        ref.get(), storage->allocator(), storage->allocatorContext()));
+  storage->setAllocator(&THWStorageWeakRefAllocator);
 #endif
   return ref.release();
   END_HANDLE_TH_ERRORS
@@ -366,7 +366,7 @@ PyObject * THPStorage_(newWithWeakPtr)(PyObject *_unused, PyObject *arg)
   }
   THPUtils_assert(THPUtils_checkLong(ref.get()),
       "_new_with_weak_ptr(): arg.cdata must be an 'int'");
-  THWStorage *storage = (THWStorage*)PyLong_AsVoidPtr(ref.get());
+  THWStorageImpl *storage = (THWStorageImpl*)PyLong_AsVoidPtr(ref.get());
   if (THWStorage_(retainIfLive)(LIBRARY_STATE storage)) {
     return THPStorage_(New)(storage);
   }
@@ -379,11 +379,11 @@ PyObject * THPStorage_(sharedFd)(THPStorage *self)
   HANDLE_TH_ERRORS
   THMapAllocatorContext *ctx = NULL;
 #ifndef THC_GENERIC_FILE
-  THWStorage *storage = self->cdata;
-  if (storage->allocator == &THMapAllocator) {
-    ctx = (THMapAllocatorContext*)storage->allocatorContext;
-  } else if (storage->allocator == &THWStorageWeakRefAllocator) {
-    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
+  THWStorageImpl *storage = self->cdata;
+  if (storage->allocator() == &THMapAllocator) {
+    ctx = (THMapAllocatorContext*)storage->allocatorContext();
+  } else if (storage->allocator() == &THWStorageWeakRefAllocator) {
+    auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext());
     if (allocator_obj->allocator == &THMapAllocator) {
       ctx = (THMapAllocatorContext*)allocator_obj->allocatorContext;
     }
@@ -414,7 +414,7 @@ PyObject * THPStorage_(isShared)(THPStorage *self)
 #ifdef THC_GENERIC_FILE
   Py_RETURN_TRUE;
 #else
-  void *allocator = self->cdata->allocator;
+  void *allocator = self->cdata->allocator();
   if (allocator == &THMapAllocator ||
       allocator == &THWStorageWeakRefAllocator ||
       allocator == &THManagedSharedAllocator) {

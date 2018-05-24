@@ -4,10 +4,10 @@
 
 struct THPStorage {
   PyObject_HEAD
-  THWStorage *cdata;
+  THWStorageImpl *cdata;
 };
 
-THP_API PyObject * THPStorage_(New)(THWStorage *ptr);
+THP_API PyObject * THPStorage_(New)(THWStorageImpl *ptr);
 extern PyObject *THPStorageClass;
 
 #ifdef _THP_CORE
@@ -17,10 +17,10 @@ bool THPStorage_(init)(PyObject *module);
 void THPStorage_(postInit)(PyObject *module);
 
 extern PyTypeObject THPStorageType;
-template <> struct THPTypeInfo<THWStorage> {
-  static PyTypeObject* pyType() { return &THPStorageType; }
-  static THWStorage* cdata(PyObject* p) { return ((THPStorage*)p)->cdata; }
-};
+//template <> struct THPTypeInfo<THWStorageImpl> {
+//  static PyTypeObject* pyType() { return &THPStorageType; }
+//  static THWStorageImpl* cdata(PyObject* p) { return ((THPStorage*)p)->cdata; }
+//};
 #endif
 
 #endif

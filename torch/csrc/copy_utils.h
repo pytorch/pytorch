@@ -54,15 +54,18 @@ inline PyObject * THPStorageCopyMethod(const THPCopyList& v, PyObject *self, PyO
   return self;
 }
 
-template <typename StorageDst, typename StorageSrc>
+template <typename PStorageDst, typename PStorageSrc, typename StorageDst, typename StorageSrc>
 void THPInsertStorageCopyFunction(
+  PyTypeObject *srcType,
   THPCopyList& copyList,
   void (*copyFunc)(LIBRARY_STATE_TYPE StorageDst* x, StorageSrc* z),
   bool non_blocking=false)
 {
   auto wrapper = [copyFunc](PyObject* dst_, PyObject* src_, bool broadcast) {
-    StorageDst* dst = THPTypeInfo<StorageDst>::cdata(dst_);
-    StorageSrc* src = THPTypeInfo<StorageSrc>::cdata(src_);
+    auto dst = ((PStorageDst*)dst_)->cdata;
+    auto src = ((PStorageSrc*)src_)->cdata;
+    //StorageDst* dst = THPTypeInfo<StorageDst>::cdata(dst_);
+    //StorageSrc* src = THPTypeInfo<StorageSrc>::cdata(src_);
 
     PyThreadState *_save = NULL;
     try {
@@ -77,6 +80,5 @@ void THPInsertStorageCopyFunction(
     }
   };
 
-  PyTypeObject* srcType = THPTypeInfo<StorageSrc>::pyType();
   copyList.push_back({ srcType, wrapper, non_blocking, false });
 }

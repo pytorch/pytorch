@@ -5,7 +5,7 @@
 #define SYSCHECK(call) { ssize_t __result = call; if (__result < 0) throw std::system_error((int) __result, std::system_category()); }
 
 template <class io>
-void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
+void THPStorage_(writeFileRaw)(THWStorageImpl *self, io fd)
 {
   real *data;
   int64_t size = THWStorage_(size)(LIBRARY_STATE self);
@@ -59,11 +59,11 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
   }
 }
 
-template void THPStorage_(writeFileRaw<int>)(THWStorage *self, int fd);
-template void THPStorage_(writeFileRaw<PyObject*>)(THWStorage *self, PyObject* fd);
+template void THPStorage_(writeFileRaw<int>)(THWStorageImpl *self, int fd);
+template void THPStorage_(writeFileRaw<PyObject*>)(THWStorageImpl *self, PyObject* fd);
 
 template <class io>
-THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
+THWStorageImpl * THPStorage_(readFileRaw)(io file, THWStorageImpl *_storage)
 {
   real *data;
   int64_t size;
@@ -139,8 +139,8 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
   return storage.release();
 }
 
-template THWStorage* THPStorage_(readFileRaw<int>)(int fd, THWStorage* storage);
-template THWStorage* THPStorage_(readFileRaw<PyObject*>)(PyObject* fd, THWStorage* storage);
+template THWStorageImpl* THPStorage_(readFileRaw<int>)(int fd, THWStorageImpl* storage);
+template THWStorageImpl* THPStorage_(readFileRaw<PyObject*>)(PyObject* fd, THWStorageImpl* storage);
 
 #undef SYSCHECK
 

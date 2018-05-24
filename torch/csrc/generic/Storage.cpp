@@ -4,7 +4,7 @@
 
 PyObject *THPStorageClass = NULL;
 
-PyObject * THPStorage_(New)(THWStorage *ptr)
+PyObject * THPStorage_(New)(THWStorageImpl *ptr)
 {
   TORCH_ASSERT(ptr);
   PyTypeObject *type = (PyTypeObject *)THPStorageClass;
@@ -23,7 +23,7 @@ static void THPStorage_(dealloc)(THPStorage* self)
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static THWStorage* THPStorage_(newWithAllocator)(int64_t size, THAllocator* allocator)
+static THWStorageImpl* THPStorage_(newWithAllocator)(int64_t size, THAllocator* allocator)
 {
 #if defined(THC_GENERIC_FILE) || defined(THD_GENERIC_FILE)
   THPUtils_setError(THPStorageStr " does not support custom allocators");
@@ -55,7 +55,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     if (num_args == 0) {
       PyObject *cdata_ptr = PyDict_GetItemString(kwargs, "cdata");
       if (num_kwargs == 1 && cdata_ptr && THPUtils_checkLong(cdata_ptr)) {
-        THWStorage *ptr = (THWStorage*)PyLong_AsVoidPtr(cdata_ptr);
+        THWStorageImpl *ptr = (THWStorageImpl*)PyLong_AsVoidPtr(cdata_ptr);
         self->cdata = ptr;
         return (PyObject*)self.release();
       }
@@ -93,7 +93,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     return NULL;
 #else
     THPStorage *storage_arg = (THPStorage *)first_arg;
-    int64_t numel = storage_arg->cdata->size;
+    int64_t numel = storage_arg->cdata->size();
     int64_t offset = 0;
 
     if (num_args >= 2) {
@@ -117,10 +117,10 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         "%" PRId64 ", but the viewed storage has only %" PRId64 " element(s) after offset %" PRId64,
         size, numel - offset, offset);
 
-    real *data_ptr = storage_arg->cdata->data + offset;
+    real *data_ptr = storage_arg->cdata->data<real>() + offset;
     THWStoragePtr storage(THWStorage_(newWithData)(LIBRARY_STATE data_ptr, size));
-    storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
-    storage->view = storage_arg->cdata;
+    storage->setFlag(TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW);
+    storage->setView(storage_arg->cdata);
     THWStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
     self->cdata = storage.release();
     return (PyObject*)self.release();
@@ -142,7 +142,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         item = PySequence_GetItem(first_arg, i);
         real value = THPUtils_(unpackReal)(item.get());
 #if !defined(THC_GENERIC_FILE)
-        self->cdata->data[i] = value;
+        self->cdata->data<real>()[i] = value;
 #else
         // TODO: this might be slow - consider batched updates?
         THCStorage_(set)(LIBRARY_STATE self->cdata, i, value);
@@ -189,9 +189,9 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     int64_t nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
       nindex += THWStorage_(size)(LIBRARY_STATE self->cdata);
-    if (nindex < 0 || nindex >= self->cdata->size) {
+    if (nindex < 0 || nindex >= self->cdata->size()) {
       PyErr_Format(PyExc_IndexError, "index %" PRId64 " out of range for storage of "
-              "size %" PRId64, (int64_t) nindex, (int64_t) self->cdata->size);
+              "size %" PRId64, (int64_t) nindex, (int64_t) self->cdata->size());
       return NULL;
     }
     real value = THWStorage_(get)(LIBRARY_STATE self->cdata, nindex);
@@ -214,8 +214,8 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 
     real *data = THWStorage_(data)(LIBRARY_STATE self->cdata);
     THWStoragePtr new_storage(THWStorage_(newWithData)(LIBRARY_STATE data + start, slicelength));
-    new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
-    new_storage->view = self->cdata;
+    new_storage->setFlag(TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW);
+    new_storage->setView(self->cdata);
     THWStorage_(retain)(LIBRARY_STATE self->cdata);
 
     PyObject *_ret = THPStorage_(New)(new_storage);
@@ -327,40 +327,42 @@ void THPStorage_(initCopyMethods)()
 #ifndef THD_GENERIC_FILE
   auto& h = THWStorage_(copy_functions);
   // copy from CPU types
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyByte));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyChar));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyShort));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyInt));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyLong));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyHalf));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyFloat));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyDouble));
+  THPInsertStorageCopyFunction<THPStorage, THPByteStorage>(&THPByteStorageType,       h, &THWStorage_(copyByte));
+  THPInsertStorageCopyFunction<THPStorage, THPCharStorage>(&THPCharStorageType,       h, &THWStorage_(copyChar));
+  THPInsertStorageCopyFunction<THPStorage, THPShortStorage>(&THPShortStorageType,     h, &THWStorage_(copyShort));
+  THPInsertStorageCopyFunction<THPStorage, THPIntStorage>(&THPIntStorageType,         h, &THWStorage_(copyInt));
+  THPInsertStorageCopyFunction<THPStorage, THPLongStorage>(&THPLongStorageType,       h, &THWStorage_(copyLong));
+  THPInsertStorageCopyFunction<THPStorage, THPHalfStorage>(&THPHalfStorageType,       h, &THWStorage_(copyHalf));
+  THPInsertStorageCopyFunction<THPStorage, THPFloatStorage>(&THPFloatStorageType,     h, &THWStorage_(copyFloat));
+  THPInsertStorageCopyFunction<THPStorage, THPDoubleStorage>(&THPDoubleStorageType,   h, &THWStorage_(copyDouble));
 #ifdef THC_GENERIC_FILE
   // copy from GPU types
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyCudaByte));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyCudaChar));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyCudaShort));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyCudaInt));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyCudaLong));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyCudaFloat));
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyCudaDouble));
+  THPInsertStorageCopyFunction<THPStorage, THCPByteStorage>(&THCPByteStorageType,     h, &THWStorage_(copyCudaByte));
+  THPInsertStorageCopyFunction<THPStorage, THCPCharStorage>(&THCPCharStorageType,     h, &THWStorage_(copyCudaChar));
+  THPInsertStorageCopyFunction<THPStorage, THCPShortStorage>(&THCPShortStorageType,   h, &THWStorage_(copyCudaShort));
+  THPInsertStorageCopyFunction<THPStorage, THCPIntStorage>(&THCPIntStorageType,       h, &THWStorage_(copyCudaInt));
+  THPInsertStorageCopyFunction<THPStorage, THCPLongStorage>(&THCPLongStorageType,     h, &THWStorage_(copyCudaLong));
+  THPInsertStorageCopyFunction<THPStorage, THCPFloatStorage>(&THCPFloatStorageType,   h, &THWStorage_(copyCudaFloat));
+  THPInsertStorageCopyFunction<THPStorage, THCPDoubleStorage>(&THCPDoubleStorageType, h, &THWStorage_(copyCudaDouble));
 #ifdef CUDA_HALF_TENSOR
-  THPInsertStorageCopyFunction(h, &THWStorage_(copyCudaHalf));
+  THPInsertStorageCopyFunction<THPStorage, THCPHalfStorage>(&THCPHalfStorageType,     h, &THWStorage_(copyCudaHalf));
 #endif
   // add CPU <- GPU copies to base type
+  #define THPCpuStorage TH_CONCAT_3(THP, Real, Storage)
   #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
   extern THPCopyList THCpuStorage_(copy_functions);
   auto& b = THCpuStorage_(copy_functions);
-  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaByte));
-  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaChar));
-  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaShort));
-  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaInt));
-  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaLong));
-  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaFloat));
-  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaDouble));
+  THPInsertStorageCopyFunction<THPCpuStorage, THCPByteStorage>(&THCPByteStorageType, b, &THCpuStorage_(copyCudaByte));
+  /*THPInsertStorageCopyFunction<THPStorage, THCPCharStorage>(&THCPCharStorageType, b, &THCpuStorage_(copyCudaChar));
+  THPInsertStorageCopyFunction<THPStorage, THCPShortStorage>(&THCPShortStorageType, b, &THCpuStorage_(copyCudaShort));
+  THPInsertStorageCopyFunction<THPStorage, THCPIntStorage>(&THCPIntStorageType, b, &THCpuStorage_(copyCudaInt));
+  THPInsertStorageCopyFunction<THPStorage, THCPLongStorage>(&THCPLongStorageType, b, &THCpuStorage_(copyCudaLong));
+  THPInsertStorageCopyFunction<THPStorage, THCPFloatStorage>(&THCPFloatStorageType, b, &THCpuStorage_(copyCudaFloat));
+  THPInsertStorageCopyFunction<THPStorage, THCPDoubleStorage>(&THCPDoubleStorageType, b, &THCpuStorage_(copyCudaDouble));*/
 #ifdef CUDA_HALF_TENSOR
-  THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaHalf));
+  //THPInsertStorageCopyFunction<THPStorage, THCPHalfStorage>(&THCPHalfStorageType, b, &THCpuStorage_(copyCudaHalf));
 #endif
+  #undef THCpuStorage
   #undef THCpuStorage_
 #endif
 #endif // !defined(THD_GENERIC_FILE)
