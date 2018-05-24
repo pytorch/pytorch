@@ -12,10 +12,10 @@ namespace repr {
 /// \brief A basic block holds a reference to a subgraph
 /// of the data flow graph as well as an ordering on instruction
 /// execution.  Basic blocks are used for control flow analysis.
-template <typename T, typename U>
+template <typename T, typename... U>
 class BasicBlock {
  public:
-  using NodeRef = typename Subgraph<T, U>::NodeRef;
+  using NodeRef = typename Subgraph<T, U...>::NodeRef;
   BasicBlock() {}
   ~BasicBlock() {
     for (auto pair : callbacks) {
@@ -60,6 +60,17 @@ class BasicBlock {
     trackNode(newInstr);
   }
 
+  void moveInstructionBefore(NodeRef instr1, NodeRef instr2) {
+    assert(hasInstruction(instr1) && "Instruction not in basic block.");
+    assert(hasInstruction(instr2) && "Instruction not in basic block.");
+    auto it1 =
+        std::find(std::begin(Instructions), std::end(Instructions), instr1);
+    auto it2 =
+        std::find(std::begin(Instructions), std::end(Instructions), instr2);
+    Instructions.erase(it1);
+    Instructions.insert(it2, instr1);
+  }
+
   void deleteInstruction(NodeRef instr) {
     assert(hasInstruction(instr) && "Instruction not in basic block.");
     Instructions.erase(
@@ -69,11 +80,11 @@ class BasicBlock {
   }
 
  private:
-  Subgraph<T, U> Nodes;
+  Subgraph<T, U...> Nodes;
   std::vector<NodeRef> Instructions;
   // Because we reference a dataflow graph, we need to register callbacks
   // for when the dataflow graph is modified.
-  std::unordered_map<NodeRef, typename Notifier<Node<T, U>>::Callback*>
+  std::unordered_map<NodeRef, typename Notifier<Node<T, U...>>::Callback*>
       callbacks;
 };
 
@@ -86,19 +97,19 @@ struct ControlFlowGraphImpl {
       sizeof(ControlFlowGraphImpl),
       "Template parameter G in "
       "ControlFlowGraph<G> must be of "
-      "type Graph<T, U>.");
+      "type Graph<T, U...>.");
 };
 
-template <typename T, typename U>
-struct ControlFlowGraphImpl<Graph<T, U>> {
-  using type = Graph<std::unique_ptr<BasicBlock<T, U>>, int>;
-  using bbType = BasicBlock<T, U>;
+template <typename T, typename... U>
+struct ControlFlowGraphImpl<Graph<T, U...>> {
+  using type = Graph<std::unique_ptr<BasicBlock<T, U...>>, int>;
+  using bbType = BasicBlock<T, U...>;
 };
 
 /// \brief Control flow graph is a graph of basic blocks that
 /// can be used as an analysis tool.
 ///
-/// \note G Must be of type Graph<T, U>.
+/// \note G Must be of type Graph<T, U...>.
 template <typename G>
 class ControlFlowGraph : public ControlFlowGraphImpl<G>::type {
  public:

@@ -207,7 +207,8 @@ class Caffe2Backend(Backend):
     # opset_version if you don't want this to version.
     @classmethod
     def run_node(cls, node, inputs, device='CPU', opset_version=_known_opset_version, outputs_info=None):
-        super(Caffe2Backend, cls).run_node(node, inputs, device=device, outputs_info=outputs_info)
+        super(Caffe2Backend, cls).run_node(node, inputs, device=device,
+                                           outputs_info=outputs_info, opset_version=opset_version)
 
         device_option = get_device_option(Device(device))
         ws = Workspace()
@@ -348,8 +349,7 @@ class Caffe2Backend(Backend):
                 seq_len = pred_mh.net.Slice(input_shape, name + '/seq_len_slice', starts=[0], ends=[1])
                 dummy_sequence_lens = pred_mh.net.Tile([seq_len, batch_size], name + '/dummy_sequence_lens', axis=0)
                 pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, cls.dummy_name()], shape=[-1])
-                seq_lens_for_reverse = dummy_sequence_lens
-
+                seq_lens_for_reverse = pred_mh.net.Cast(dummy_sequence_lens, name + '/seq_lens_for_reverse', to=core.DataType.INT32)
         reform(Bi, Br, W_, R_, name, hidden_size, init_net)
 
         if direction_offset == 1:
@@ -407,13 +407,20 @@ class Caffe2Backend(Backend):
                                  pred_model.graph.input,
                                  pred_model.graph.value_info):
             if x.name == W:
-                input_size = x.type.tensor_type.shape.dim[1].dim_value
+                input_size = x.type.tensor_type.shape.dim[2].dim_value
                 break
         else:
             raise RuntimeError("best-effort shape inference for RNN/GRU/LSTM failed")
 
         init_net = core.Net("init-net")
         pred_mh = ModelHelper()
+
+        init_net.Reshape(W, [W, cls.dummy_name()], shape=[1,-1,0])
+        init_net.Squeeze(W, W, dims=[0])
+        init_net.Reshape(R, [R, cls.dummy_name()], shape=[1,-1,0])
+        init_net.Squeeze(R, R, dims=[0])
+        init_net.Reshape(B, [B, cls.dummy_name()], shape=[1,-1])
+        init_net.Squeeze(B, B, dims=[0])
 
         if n.op_type == 'RNN':
             def reform(*args):
@@ -481,22 +488,24 @@ class Caffe2Backend(Backend):
             for i in range(1, len(outputs)):
                 pred_mh.net.Copy(outputs[i], n.outputs[i])
 
-            pred_mh.net = pred_mh.net.Clone(
-                "dummy-clone-net", blob_remap={ outputs[0]: n.outputs[0] }
-            )
+            if sequence_lens is not None:
+                pred_mh.net.VariableLengthSequencePadding(
+                    [outputs[0], sequence_lens], [outputs[0]])
+            pred_mh.net.ExpandDims([outputs[0]], [n.outputs[0]], dims=[1])
         elif direction == 'bidirectional':
             outputs_f = make_rnn(0)
             outputs_b = make_rnn(1)
 
-            pred_mh.net.Concat([outputs_f[0], outputs_b[0]],
-                               [n.outputs[0], cls.dummy_name()], axis=2)
+            concatted_output, _ = pred_mh.net.Concat(
+                [outputs_f[0], outputs_b[0]], [cls.dummy_name(), cls.dummy_name()], axis=2)
+            if sequence_lens is not None:
+                pred_mh.net.VariableLengthSequencePadding(
+                    [concatted_output, sequence_lens], [concatted_output])
+            unsqueezed_output = pred_mh.net.ExpandDims([concatted_output], [cls.dummy_name()], dims=[1])
+            pred_mh.net.Reshape(unsqueezed_output, [n.outputs[0], cls.dummy_name()], shape=[0,2,0,-1])
             for i in range(1, len(n.outputs)):
                 pred_mh.net.Concat([outputs_f[i], outputs_b[i]],
                                    [n.outputs[i], cls.dummy_name()], axis=0)
-
-        if sequence_lens is not None:
-            pred_mh.net.VariableLengthSequencePadding(
-                [n.outputs[0], sequence_lens], [n.outputs[0]])
 
         return Caffe2Ops(list(pred_mh.Proto().op),
                          list(init_net.Proto().op),
@@ -870,21 +879,6 @@ class Caffe2Backend(Backend):
             names.update(node.input)
             names.update(node.output)
         return names
-
-    @classmethod
-    def _graph_to_graph(cls, c2_net, onnx_model, device_option):
-        net.device_option.CopyFrom(device_option)
-        for node in model.graph.node:
-            try:
-                c2ops = cls._onnx_node_to_caffe2_op(
-                    init_model, pred_model, node, opset_version)
-            except Exception as e:
-                success = False
-                print('ONNX FATAL:', e)
-                continue
-            (init_net if includse_initializers else net).op.extend(c2ops.init_ops)
-            net.op.extend(c2ops.ops)
-            net.external_input.extend(c2ops.interface_blobs)
 
     @classmethod
     def _graph_to_net(cls, onnx_graph, opset_version):

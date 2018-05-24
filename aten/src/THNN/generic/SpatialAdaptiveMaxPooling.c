@@ -54,7 +54,7 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
           for(iw = 0; iw < kW; iw++)
           {
             real val = *(ip + ih*istrideH + iw*istrideW);
-            if (val > maxval)
+            if ((val > maxval) || isnan(val))
             {
               maxval = val;
               maxindex = (ih+istartH)*isizeW + (iw+istartW);

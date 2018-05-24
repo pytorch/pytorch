@@ -257,7 +257,11 @@ class ExprBuilder(Builder):
         ast.Sub: '-',
         ast.Mult: '*',
         ast.Div: '/',
+        ast.Pow: '**',
     }
+
+    if not PY2:
+        binop_map[ast.MatMult] = '@'
 
     unop_map = {
         ast.Not: 'not',

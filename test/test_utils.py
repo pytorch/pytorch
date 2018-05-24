@@ -20,7 +20,7 @@ from torch.utils.trainer.plugins.plugin import Plugin
 from torch.utils.serialization import load_lua
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS
+from common import IS_WINDOWS, IS_PPC
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -361,6 +361,7 @@ class TestFFI(TestCase):
 
     @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
     @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
+    @unittest.skipIf(IS_PPC, "skip for ppc64le due to incompatible exception handling")
     def test_cpu(self):
         create_extension(
             name='test_extensions.cpulib',
@@ -646,21 +647,21 @@ class TestCollectEnv(TestCase):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count('\n') >= 17)
 
-    @unittest.skipIf('BUILD_ENVIRONMENT' not in os.environ.keys(), 'CI-only test')
-    def test_expect(self):
-        info_output = get_pretty_env_info()
+    # @unittest.skipIf('BUILD_ENVIRONMENT' not in os.environ.keys(), 'CI-only test')
+    # def test_expect(self):
+    #     info_output = get_pretty_env_info()
 
-        ci_build_envs = [
-            'pytorch-linux-trusty-py2.7',
-            'pytorch-linux-xenial-cuda9-cudnn7-py3',
-            'pytorch-macos-10.13-py3',
-            'pytorch-win-ws2016-cuda9-cudnn7-py3'
-        ]
-        build_env = os.environ['BUILD_ENVIRONMENT']
-        if build_env not in ci_build_envs:
-            return
+    #     ci_build_envs = [
+    #         'pytorch-linux-trusty-py2.7',
+    #         'pytorch-linux-xenial-cuda9-cudnn7-py3',
+    #         'pytorch-macos-10.13-py3',
+    #         'pytorch-win-ws2016-cuda9-cudnn7-py3'
+    #     ]
+    #     build_env = os.environ['BUILD_ENVIRONMENT']
+    #     if build_env not in ci_build_envs:
+    #         return
 
-        self.assertExpectedOutput(info_output, build_env)
+    #     self.assertExpectedOutput(info_output, build_env)
 
 
 class TestONNXUtils(TestCase):

@@ -122,10 +122,6 @@ Tensor _prod_cpu(const Tensor &self) {
   return self._prodall();
 }
 
-Tensor _sum_cuda(const Tensor &self_) { return self_._sumall(); }
-
-Tensor _prod_cuda(const Tensor &self_) { return self_._prodall(); }
-
 // \ALL REDUCE ################################################################
 
 // DIM REDUCE #################################################################
@@ -224,16 +220,6 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
   return at::_th_prod_out(result, self, dim, keepdim);
 }
 
-Tensor &_sum_out_cuda(Tensor &result, const Tensor &self, int64_t dim,
-                      bool keepdim) {
-  return at::_th_sum_out(result, self, dim, keepdim);
-}
-
-Tensor &_prod_out_cuda(Tensor &result, const Tensor &self, int64_t dim,
-                       bool keepdim) {
-  return at::_th_prod_out(result, self, dim, keepdim);
-}
-
 static inline Tensor sum(const Tensor &self, IntList dim_, bool keepdim, optional<ScalarType> dtype) {
   return at::_sum(integer_upcast(self, dtype), dim_, keepdim);
 }
@@ -276,6 +262,23 @@ Tensor _prod(const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   Tensor result = self.type().tensor();
   return at::_prod_out(result, self, dim, keepdim);
+}
+
+Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool keepdim) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+  auto maxes = at::max_values(self, dim, true);
+  result = at::where((maxes == INFINITY).__or__(maxes == -INFINITY),
+		     maxes,
+		     maxes + at::log(at::sum(at::exp(self - maxes), dim, true)));
+  if (! keepdim)
+    result.squeeze_(dim);
+  return result;
+}
+
+Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+  Tensor result = self.type().tensor();
+  return at::native::logsumexp_out(result, self, dim, keepdim);
 }
 
 // \DIM REDUCE ################################################################
@@ -327,7 +330,7 @@ inline Tensor& reduce_multi_associative_out(Tensor &result, const Tensor &self, 
 
 Tensor& _sum_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   if (self.is_cuda()) {
-    return _sum_out_cuda(result, self, dim, keepdim);
+    return at::_sum_cuda_out(result, self, dim, keepdim);
   }
   else {
     return _sum_out_cpu(result, self, dim, keepdim);

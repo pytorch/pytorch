@@ -1,4 +1,4 @@
-#include "aten_dispatch.h"
+#include "torch/csrc/jit/aten_dispatch.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/tensor_conversions.h"
@@ -27,7 +27,7 @@ namespace {
 // pack takes the return values of aten functions pushes them onto the stack
 template<typename T>
 void pack(Stack & stack, T&& v) {
-  stack.push_back(as_tensor(std::move(v)));
+  stack.push_back(as_variable(std::move(v)));
 }
 template<>
 void pack(Stack & stack, Tensor&& v) {
@@ -86,7 +86,6 @@ std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   std::copy(vec.begin(), vec.end(), res.begin());
   return res;
 }
-
 
 using operator_constructor = std::function<TensorOp(jit::Node*)>;
 std::unordered_map<std::string, operator_constructor> constructors = {

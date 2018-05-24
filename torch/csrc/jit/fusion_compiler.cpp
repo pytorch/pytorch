@@ -4,8 +4,11 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/variable_tensor_functions.h"
+
 #include "ATen/ATen.h"
 #ifdef WITH_CUDA
+#include "THC/THC.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
 #include <cuda.h>
@@ -473,7 +476,7 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector
   outputs.clear();
   outputs.reserve(outputDescriptors().size());
   for(auto & od : outputDescriptors()) {
-    outputs.push_back(at::getType(backend(),od.scalar_type).tensor());
+    outputs.push_back(torch::getType(backend(),od.scalar_type).tensor());
   }
   launch_with_tensors(inputs, outputs);
 }
@@ -548,13 +551,19 @@ protected:
      // it is possible that this is the first cuda call on this thread
      // so make sure we initialize the Driver API's context
      // cudaFree(0) accomplishes this.
-     cudaFree(0);
-
+     CUcontext pctx = 0;
+     TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
+     if (!pctx) {
+        std::unique_lock<std::mutex> cudaFreeMutexLock(
+            *(THCCachingAllocator_getCudaFreeMutex()));
+        cudaFree(0);
+     }
+     CUstream stream = at::globalContext().getCurrentCUDAStream();
      TORCH_CU_CHECK(cuLaunchKernel(
        function,
        numBlocks, 1, 1,
        blockSize, 1, 1,
-       0, nullptr,
+       0, stream,
        arguments,
        nullptr));
   }
@@ -667,7 +676,7 @@ static void runCompiler(FusionCompilerConfig & config, const std::string & cpp_f
     config.openmp = false; // disable for future compiles
     return runCompiler(config, cpp_file, so_file);
   }
-  JIT_ASSERT(r == 0);
+  JIT_ASSERTM(r == 0, "Failed to compile a fused CPU kernel");
 }
 
 
@@ -694,7 +703,6 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     cpp_file.sync();
     runCompiler(config, cpp_file.name(), so_file.name());
     if(config.debug) {
-      std::cout << compilation_unit << "\n";
       disas(so_file.name());
     }
     so_lib.reset(new DynamicLibrary(so_file.name().c_str()));

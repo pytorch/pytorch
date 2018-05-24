@@ -1,3 +1,4 @@
+// @generated
 // included as 'TensorDenseOrSparse' in TensorDerived.cpp
 IntList ${Tensor}::strides() const {
  AT_ERROR("Sparse tensors do not have strides.");

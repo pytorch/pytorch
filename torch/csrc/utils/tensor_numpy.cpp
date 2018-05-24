@@ -96,6 +96,11 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   // NumPy strides use bytes. Torch strides use element counts.
   auto element_size_in_bytes = PyArray_ITEMSIZE(array);
   for (auto& stride : strides) {
+    if (stride%element_size_in_bytes != 0) {
+      throw ValueError(
+        "given numpy array strides not a multiple of the element byte size. "
+        "Copy the numpy array to reallocate the memory.");
+    }
     stride /= element_size_in_bytes;
   }
 

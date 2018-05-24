@@ -149,47 +149,6 @@
     - THBoolTensor* mask
 ]]
 [[
-  name: transpose
-  variants:
-    - method
-    - function
-  cname: newTranspose
-  aten_sparse: True
-  cpu_half: True
-  auto_gpu: False
-  return: THTensor*
-  arguments:
-    - THTensor* self
-    - arg: long dim0
-      wrap_dim: self
-    - arg: long dim1
-      wrap_dim: self
-]]
-[[
-  name: t
-  cname: newTranspose
-  cpu_half: True
-  aten_sparse: True
-  variants:
-    - method
-    - function
-  auto_gpu: False
-  return: THTensor*
-  before_call: |
-    if (self.is_sparse) {
-      int64_t nDimI = arg_self->nDimensionI;
-      int64_t nDimV = arg_self->nDimensionV;
-      THPUtils_assert(nDimI == 2 && nDimV == 0, "t() expects a 2D sparse tensor, but self is %ldD indices and %ldD values", nDimI, nDimV);
-    } else {
-      long ndim = arg_self->nDimension;
-      THPUtils_assert(ndim == 2, "t() expects a 2D tensor, but self is %ldD", ndim);
-    }
-  arguments:
-    - THTensor* self
-    - CONSTANT 0
-    - CONSTANT 1
-]]
-[[
   name: nonzero
   variants:
     - method
@@ -3004,7 +2963,8 @@
     - THTensor* tensor2
 ]]
 [[
-  name: gesv
+  name: _gesv_single
+  cname: gesv
   types:
     - Float
     - Double
@@ -3609,7 +3569,7 @@
     - double p
 ]]
 [[
-  name: bernoulli
+  name: _th_bernoulli
   types:
     - Float
     - Double

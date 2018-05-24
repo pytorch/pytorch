@@ -20,6 +20,12 @@ def parse_kwargs(desc):
     return {desc.split(' ')[0]: desc for desc in kwargs}
 
 
+reduceops_common_args = parse_kwargs("""
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+""")
+
 factory_common_args = parse_kwargs("""
     out (Tensor, optional): the output tensor
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -902,7 +908,7 @@ Example::
 
 add_docstr(torch.cumprod,
            r"""
-cumprod(input, dim, out=None) -> Tensor
+cumprod(input, dim, dtype=None) -> Tensor
 
 Returns the cumulative product of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -916,7 +922,7 @@ a vector of size N, with elements.
 Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -932,7 +938,7 @@ Example::
     >>> torch.cumprod(a, dim=0)
     tensor([ 0.6001,  0.1241, -0.0238, -0.0233, -0.0157, -0.0000, -0.0000,
              0.0000, -0.0000, -0.0000])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.cumsum,
            r"""
@@ -950,7 +956,7 @@ a vector of size N, with elements.
 Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -961,7 +967,7 @@ Example::
     >>> torch.cumsum(a, dim=0)
     tensor([-0.8286, -1.3175, -0.8020,  0.0423,  0.2289,  0.0537, -2.0058,
             -1.8209, -2.9780, -3.4022])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.diag,
            r"""
@@ -1257,8 +1263,9 @@ Args:
            sorted list of all indices appearing exactly once in the left hand side.
            The indices not apprearing in the output are summed over after multiplying the operands
            entries.
-           `einsum` does not implement diagonals (multiple occurences of a single index for one tensor,
-           e.g. `ii->i`) and ellipses (`...`).
+           If an index appears several times for the same operand, a diagonal is taken.
+           Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
+           the ellipsis dimensions are at the beginning of the output.
     operands (list of Tensors): The operands to compute the Einstein sum of.
            Note that the operands are passed as a list, not as individual arguments.
 
@@ -1294,12 +1301,20 @@ Examples::
             [[ 2.8153,  1.8787, -4.3839, -1.2112],
              [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
+    >>> A = torch.randn(3, 3)
+    >>> torch.einsum('ii->i', (A,)) # diagonal
+    tensor([-0.7825,  0.8291, -0.1936])
 
+    >>> A = torch.randn(4, 3, 3)
+    >>> torch.einsum('...ii->...i', (A,)) # batch diagonal
+    tensor([[-1.0864,  0.7292,  0.0569],
+            [-0.9725, -1.0270,  0.6493],
+            [ 0.5832, -1.1716, -1.5084],
+            [ 0.4041, -1.1690,  0.8570]])
 
-
-
-
-
+    >>> A = torch.randn(2, 3, 4, 5)
+    >>> torch.einsum('...ij->...ji', (A,)).shape # batch permute
+    torch.Size([2, 3, 5, 4])
 """)
 
 add_docstr(torch.eq,
@@ -1713,7 +1728,7 @@ Example::
 
 add_docstr(torch.gesv,
            r"""
-gesv(B, A, out=None) -> (Tensor, Tensor)
+torch.gesv(B, A) -> (Tensor, Tensor)
 
 This function returns the solution to the system of linear
 equations represented by :math:`AX = B` and the LU factorization of
@@ -1721,21 +1736,28 @@ A, in order as a tuple `X, LU`.
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
-:attr:`A` has to be a square and non-singular matrix (2-D tensor).
+`torch.gesv(B, A)` can take in 2D inputs `B, A` or inputs that are
+batches of 2D matrices. If the inputs are batches, then returns
+batched outputs `X, LU`.
 
-If `A` is an :math:`(m \times m)` matrix and `B` is :math:`(m \times k)`,
-the result `LU` is :math:`(m \times m)` and `X` is :math:`(m \times k)`.
+.. note::
+
+    The `out` keyword only supports 2D matrix inputs, that is,
+    `B, A` must be 2D matrices.
 
 .. note::
 
     Irrespective of the original strides, the returned matrices
-    `X` and `LU` will be transposed, i.e. with strides `(1, m)`
-    instead of `(m, 1)`.
+    `X` and `LU` will be transposed, i.e. with strides like
+    `B.contiguous().transpose(-1, -2).strides()` and
+    `A.contiguous().transpose(-1, -2).strides()` respectively.
 
 Args:
-    B (Tensor): input matrix of :math:`(m \times k)` dimensions
-    A (Tensor): input square matrix of :math:`(m \times m)` dimensions
-    out (Tensor, optional): optional output matrix
+    B (Tensor): input matrix of size :math:`(*, m, k)` , where `*`
+    is zero or more batch dimensions.
+    A (Tensor): input square matrix of size :math:`(*, m, m)`, where
+    `*` is zero or more batch dimensions.
+    out ((Tensor, Tensor), optional): optional output tuple.
 
 Example::
 
@@ -1751,6 +1773,15 @@ Example::
     >>> torch.dist(B, torch.mm(A, X))
     tensor(1.00000e-06 *
            7.0977)
+
+    >>> # Batched solver example
+    >>> A = torch.randn(2, 3, 1, 4, 4)
+    >>> B = torch.randn(2, 3, 1, 4, 6)
+    >>> X, LU = torch.gesv(B, A)
+    >>> torch.dist(B, A.matmul(X))
+    tensor(1.00000e-06 *
+       3.6386)
+
 """)
 
 add_docstr(torch.get_default_dtype,
@@ -2153,6 +2184,36 @@ Example::
     >>> torch.logspace(start=0.1, end=1.0, steps=5)
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
 """.format(**factory_common_args))
+
+add_docstr(torch.logsumexp,
+           r"""
+logsumexp(input, dim, keepdim=False, out=None)
+
+Returns the log of summed exponentials of each row of the :attr:`input`
+tensor in the given dimension :attr:`dim`. The computation is numerically
+stabilized.
+
+For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
+
+           :math:`\text{logsumexp}(x)_{i} = \log \sum_j \exp(x_ij).`
+
+If :attr:`keepdim` is ``True``, the output tensor is of the same size
+as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
+the output tensor having 1 fewer dimension than :attr:`input`.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int or tuple of ints): the dimension or dimensions to reduce
+    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    out (Tensor, optional): the output tensor
+
+
+Example::
+    >>> a = torch.randn(3, 3)
+    >>> torch.logsumexp(a, 1)
+    tensor([ 0.8442,  1.4322,  0.8711])
+""")
 
 add_docstr(torch.lt,
            r"""
@@ -3234,12 +3295,13 @@ Example::
 
 add_docstr(torch.prod,
            r"""
-.. function:: prod(input) -> Tensor
+.. function:: prod(input, dtype=None) -> Tensor
 
 Returns the product of all elements in the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
+    {dtype}
 
 Example::
 
@@ -3249,7 +3311,7 @@ Example::
     >>> torch.prod(a)
     tensor(0.6902)
 
-.. function:: prod(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: prod(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the product of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
@@ -3263,7 +3325,7 @@ Args:
     input (Tensor): the input tensor
     dim (int): the dimension to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -3275,7 +3337,7 @@ Example::
             [ 1.1131, -1.0629]])
     >>> torch.prod(a, 1)
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.pstrf, r"""
 pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
@@ -3436,9 +3498,9 @@ Example::
     tensor([ 4.,  3.,  4.])
 
 
-    >>> torch.randint(3, 10, (2,2), dtype=torch.long)
-    tensor([[ 8,  3],
-            [ 3,  9]])
+    >>> torch.randint(10, (2,2))
+    tensor([[ 0.,  2.],
+            [ 5.,  5.]])
 
 
     >>> torch.randint(3, 10, (2,2))
@@ -4076,12 +4138,13 @@ Example::
 
 add_docstr(torch.sum,
            r"""
-.. function:: sum(input) -> Tensor
+.. function:: sum(input, dtype=None) -> Tensor
 
 Returns the sum of all elements in the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
+    {dtype}
 
 Example::
 
@@ -4091,7 +4154,7 @@ Example::
     >>> torch.sum(a)
     tensor(-0.5475)
 
-.. function:: sum(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
@@ -4106,7 +4169,7 @@ Args:
     input (Tensor): the input tensor
     dim (int or tuple of ints): the dimension or dimensions to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -4121,7 +4184,7 @@ Example::
     >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
     >>> torch.sum(b, (2, 1))
     tensor([  435.,  1335.,  2235.,  3135.])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.svd,
            r"""
@@ -4242,7 +4305,7 @@ Examples::
 
 add_docstr(torch.t,
            r"""
-t(input, out=None) -> Tensor
+t(input) -> Tensor
 
 Expects :attr:`input` to be a matrix (2-D tensor) and transposes dimensions 0
 and 1.
@@ -4251,7 +4314,6 @@ Can be seen as a short-hand function for :meth:`transpose(input, 0, 1)`
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -4386,7 +4448,7 @@ Example::
 
 add_docstr(torch.transpose,
            r"""
-transpose(input, dim0, dim1, out=None) -> Tensor
+transpose(input, dim0, dim1) -> Tensor
 
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
@@ -4399,7 +4461,6 @@ Args:
     input (Tensor): the input tensor
     dim0 (int): the first dimension to be transposed
     dim1 (int): the second dimension to be transposed
-    out (Tensor, optional): the output tensor
 
 Example::
 

@@ -36,6 +36,11 @@ CAFFE2_DEFINE_bool(
     true,
     "Select next non-busy stream");
 
+CAFFE2_DEFINE_bool(
+    caffe2_net_async_use_single_pool,
+    false,
+    "Use single pool for all devices");
+
 namespace caffe2 {
 
 thread_local std::vector<int> AsyncNetBase::stream_counters_;
@@ -74,6 +79,16 @@ AsyncNetBase::AsyncNetBase(
   }
 }
 
+void AsyncNetBase::handleRunError() {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
+  if (caught_exception_) {
+    std::rethrow_exception(caught_exception_);
+  }
+#endif // CAFFE2_USE_EXCEPTION_PTR
+  NetBase::handleRunError();
+}
+
 bool AsyncNetBase::RunAsync() {
   tracing::startIter(tracer_);
   for (auto& op : GetOperators()) {
@@ -99,7 +114,12 @@ std::shared_ptr<TaskThreadPool> AsyncNetBase::pool_getter(
 
 std::shared_ptr<TaskThreadPool> AsyncNetBase::pool(
     const DeviceOption& device_option) {
-  if (device_option.device_type() == CPU) {
+  if (FLAGS_caffe2_net_async_use_single_pool) {
+    return pool_getter(cpu_pools_, CPU, -1, num_workers_);
+  }
+  if (device_option.device_type() == CPU ||
+      device_option.device_type() == MKLDNN ||
+      device_option.device_type() == IDEEP) {
     auto numa_node_id = device_option.numa_node_id();
     CAFFE_ENFORCE(
         numa_node_id >= -1 &&
@@ -131,8 +151,8 @@ int AsyncNetBase::stream(int task_id) {
     do {
       stream_id = stream_counters_[gpu_id]++;
       stream_counters_[gpu_id] %= FLAGS_caffe2_streams_per_gpu;
-    } while (!isStreamFree(task_id, stream_id) &&
-             FLAGS_caffe2_net_async_check_stream_status);
+    } while (FLAGS_caffe2_net_async_check_stream_status &&
+             !isStreamFree(task_id, stream_id));
   }
   return stream_id;
 }
@@ -145,7 +165,8 @@ bool AsyncNetBase::isStreamFree(int task_id, int stream_id) const {
 
 bool AsyncNetBase::canSchedule(
     int task_id,
-    const std::vector<EventStatus>* status) {
+    const std::vector<EventStatus>* status,
+    bool* parent_failed) {
   auto first_child_op_id = chains_[task_id].front();
   for (auto parent_id : parents(task_id)) {
     auto last_parent_op_id = chains_[parent_id].back();
@@ -155,6 +176,11 @@ bool AsyncNetBase::canSchedule(
     } else {
       parent_status = operators_[last_parent_op_id]->event().Query();
     }
+
+    if (parent_status == EventStatus::EVENT_FAILED && parent_failed) {
+      *parent_failed = true;
+    }
+
     bool can_schedule = Event::CanSchedule(
         operators_[last_parent_op_id]->event().GetType(),
         parent_status,
@@ -210,7 +236,32 @@ void AsyncNetBase::asyncWait(
   first_op->WaitEvents(events, stream_id);
 }
 
+void AsyncNetBase::reset() {
+  for (auto& op : GetOperators()) {
+    op->ResetEvent();
+  }
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
+  caught_exception_ = nullptr;
+#endif // CAFFE2_USE_EXCEPTION_PTR
+}
+
+void AsyncNetBase::storeExceptionPtr() {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
+  if (!caught_exception_) {
+    caught_exception_ = std::current_exception();
+  }
+#endif // CAFFE2_USE_EXCEPTION_PTR
+}
+
 void AsyncNetBase::run(int task_id, int stream_id) {
+  // Optionally insert async wait ops,
+  // skip when using --caffe2_net_async_finish_chain -
+  // all parents are guaranteed to be finished
+  if (!FLAGS_caffe2_net_async_finish_chain) {
+    asyncWait(task_id, stream_id, parents(task_id));
+  }
   std::string err_msg;
   for (auto& op_id : chains_[task_id]) {
     auto& op = operators_[op_id];
@@ -224,13 +275,29 @@ void AsyncNetBase::run(int task_id, int stream_id) {
           stream_id);
       CAFFE_ENFORCE(op->RunAsync(stream_id), "Failed to execute an op");
     } catch (const std::exception& e) {
-      CAFFE_THROW(
-          std::string(e.what()) + ",  op " +
-          (op->has_debug_def() ? op->type() : " unknown"));
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+      storeExceptionPtr();
+#endif // CAFFE2_USE_EXCEPTION_PTR
+      auto err_msg = std::string(e.what()) + ",  op " +
+          (op->has_debug_def() ? op->type() : " unknown");
+      if (query(task_id) == EventStatus::EVENT_INITIALIZED) {
+        // mark the chain's event as failed,
+        // not throwing because event is in initialized state
+        event(task_id).SetFinished(err_msg.c_str());
+      }
+      LOG(ERROR) << err_msg;
+      throw;
     } catch (...) {
-      CAFFE_THROW(
-          "Failed to execute task: unknown error,  op " +
-          (op->has_debug_def() ? op->type() : " unknown"));
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+      storeExceptionPtr();
+#endif // CAFFE2_USE_EXCEPTION_PTR
+      auto err_msg = "Failed to execute task: unknown error,  op " +
+          (op->has_debug_def() ? op->type() : " unknown");
+      if (query(task_id) == EventStatus::EVENT_INITIALIZED) {
+        event(task_id).SetFinished(err_msg.c_str());
+      }
+      LOG(ERROR) << err_msg;
+      throw;
     }
   }
 

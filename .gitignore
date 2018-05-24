@@ -14,6 +14,7 @@ torch.egg-info/
 */**/__pycache__
 aten/build/
 aten/src/ATen/Config.h
+aten/src/ATen/cuda/CUDAConfig.h
 third_party/build/
 torch/version.py
 torch/csrc/generic/TensorMethods.cpp
@@ -24,6 +25,9 @@ torch/lib/*.lib
 torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/build
+torch/lib/cmake
+torch/lib/pkgconfig
+torch/lib/protoc
 torch/lib/tmp_install
 torch/lib/include
 torch/lib/torch_shm_manager
@@ -64,6 +68,7 @@ test/cpp/api/mnist
 *.swn
 *.swo
 *.swp
+*.swm
 *~
 
 # macOS dir files
@@ -148,7 +153,7 @@ build
 build_host_protoc
 build_android
 build_ios
-build_*
+/build_*
 .build_debug/*
 .build_release/*
 distribute/*

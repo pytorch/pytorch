@@ -23,28 +23,30 @@
 #include <assert.h>
 #include <stdio.h>
 
-#define DEBUG_PRINT(...) ;
+#define DEBUG_PRINT(...)
 
 namespace nom {
 
-template <typename T, typename U = T>
+template <typename T, typename... U>
 class Graph;
 
-template <typename T, typename U = T>
+template <typename T, typename... U>
 class Node;
 
-template <typename T, typename U = T>
-class Edge : public StorageType<U> {
+// Template types:
+//   T   : Data stored within a node.
+//   U...: Data stored within an edge. When this type is not
+//         specified, an empty StorageType is used. If it is
+//         specified, only a single type should be given (as supported
+//         by the underlying StorageType class).
+
+// \brief Edge within a Graph.
+template <typename T, typename... U>
+class Edge : public StorageType<U...> {
  public:
-  using NodeRef = typename Graph<T, U>::NodeRef;
-  using EdgeRef = typename Graph<T, U>::EdgeRef;
-
-  Edge(NodeRef tail, NodeRef head) : Tail(tail), Head(head) {
-    DEBUG_PRINT("Creating instance of Edge: %p\n", this);
-  }
-
-  Edge(NodeRef tail, NodeRef head, U&& data)
-      : StorageType<U>(std::move(data)), Tail(tail), Head(head) {
+  using NodeRef = typename Graph<T, U...>::NodeRef;
+  Edge(NodeRef tail, NodeRef head, U... args)
+      : StorageType<U...>(std::forward<U...>(args)...), Tail(tail), Head(head) {
     DEBUG_PRINT("Creating instance of Edge: %p\n", this);
   }
 
@@ -66,21 +68,22 @@ class Edge : public StorageType<U> {
  private:
   NodeRef Tail;
   NodeRef Head;
-  friend class Graph<T, U>;
+  friend class Graph<T, U...>;
 };
 
-template <typename T, typename U /* optional */>
-class Node : public StorageType<T>, public Notifier<Node<T, U>> {
+// \brief Node within a Graph.
+template <typename T, typename... U>
+class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
  public:
+  using NodeRef = typename Graph<T, U...>::NodeRef;
+  using EdgeRef = typename Graph<T, U...>::EdgeRef;
+
   /// \brief Create a node with data.
   explicit Node(T&& data) : StorageType<T>(std::move(data)) {
     DEBUG_PRINT("Creating instance of Node: %p\n", this);
   }
   /// \brief Create an empty node.
   explicit Node() : StorageType<T>() {}
-
-  using NodeRef = typename Graph<T, U>::NodeRef;
-  using EdgeRef = typename Graph<T, U>::EdgeRef;
 
   /// \brief Adds an edge by reference to known in-edges.
   /// \p e A reference to an edge that will be added as an in-edge.
@@ -98,7 +101,9 @@ class Node : public StorageType<T>, public Notifier<Node<T, U>> {
   /// \p e A reference to an edge that will be removed from in-edges.
   void removeInEdge(EdgeRef e) {
     auto iter = std::find(inEdges.begin(), inEdges.end(), e);
-    assert(iter != inEdges.end() && "Attempted to remove edge that isn't connected to this node");
+    assert(
+        iter != inEdges.end() &&
+        "Attempted to remove edge that isn't connected to this node");
     inEdges.erase(iter);
   }
 
@@ -106,7 +111,9 @@ class Node : public StorageType<T>, public Notifier<Node<T, U>> {
   /// \p e A reference to an edge that will be removed from out-edges.
   void removeOutEdge(EdgeRef e) {
     auto iter = std::find(outEdges.begin(), outEdges.end(), e);
-    assert(iter != outEdges.end() && "Attempted to remove edge that isn't connected to this node");
+    assert(
+        iter != outEdges.end() &&
+        "Attempted to remove edge that isn't connected to this node");
     outEdges.erase(iter);
   }
 
@@ -117,10 +124,18 @@ class Node : public StorageType<T>, public Notifier<Node<T, U>> {
     return inEdges;
   }
 
+  void setInEdges(std::vector<EdgeRef> es) {
+    inEdges = es;
+  }
+
+  void setOutEdges(std::vector<EdgeRef> es) {
+    outEdges = es;
+  }
+
  protected:
   std::vector<EdgeRef> inEdges;
   std::vector<EdgeRef> outEdges;
-  friend class Graph<T, U>;
+  friend class Graph<T, U...>;
 };
 
 /// \brief Effectively a constant reference to a graph.
@@ -132,15 +147,15 @@ class Node : public StorageType<T>, public Notifier<Node<T, U>> {
 /// helper rather than a fact to be exploited.  There are no deleters,
 /// for example.
 ///
-template <typename T, typename U = T>
+template <typename T, typename... U>
 class Subgraph {
  public:
   Subgraph() {
     DEBUG_PRINT("Creating instance of Subgraph: %p\n", this);
   }
 
-  using NodeRef = typename Graph<T, U>::NodeRef;
-  using EdgeRef = typename Graph<T, U>::EdgeRef;
+  using NodeRef = typename Graph<T, U...>::NodeRef;
+  using EdgeRef = typename Graph<T, U...>::EdgeRef;
 
   void addNode(NodeRef n) {
     Nodes.insert(n);
@@ -189,9 +204,13 @@ class Subgraph {
 ///
 /// Everything is owned by the graph to simplify storage concerns.
 ///
-template <typename T, typename U /* optional */>
+template <typename T, typename... U>
 class Graph {
  public:
+  using SubgraphType = Subgraph<T, U...>;
+  using NodeRef = Node<T, U...>*;
+  using EdgeRef = Edge<T, U...>*;
+
   Graph() {
     DEBUG_PRINT("Creating instance of Graph: %p\n", this);
   }
@@ -200,22 +219,17 @@ class Graph {
   Graph& operator=(Graph&&) = default;
   ~Graph() {}
 
-  using NodeRef = Node<T, U>*;
-  using EdgeRef = Edge<T, U>*;
-  using NodeType = T;
-  using EdgeType = U;
-
   /// \brief Creates a node and retains ownership of it.
   /// \p data An rvalue of the data being held in the node.
   /// \return A reference to the node created.
   NodeRef createNode(T&& data) {
-    Nodes.emplace_back(Node<T, U>(std::move(data)));
+    Nodes.emplace_back(Node<T, U...>(std::move(data)));
     DEBUG_PRINT("Creating node (%p)\n", &Nodes.back());
     return &Nodes.back();
   }
 
-  void swapNode(NodeRef node, Graph<T, U>& otherGraph) {
-    std::list<Node<T, U>>& otherNodes = otherGraph.Nodes;
+  void importNode(NodeRef node, Graph<T, U...>& otherGraph) {
+    std::list<Node<T, U...>>& otherNodes = otherGraph.Nodes;
     for (auto it = Nodes.begin(); it != Nodes.end(); ++it) {
       if (&(*it) == node) {
         otherNodes.splice(otherNodes.end(), Nodes, it, ++it);
@@ -224,8 +238,8 @@ class Graph {
     }
   }
 
-  void swapEdge(EdgeRef edge, Graph<T, U>& otherGraph) {
-    std::list<Edge<T, U>>& otherEdges = otherGraph.Edges;
+  void importEdge(EdgeRef edge, Graph<T, U...>& otherGraph) {
+    std::list<Edge<T, U...>>& otherEdges = otherGraph.Edges;
     for (auto it = Edges.begin(); it != Edges.end(); ++it) {
       if (&(*it) == edge) {
         otherEdges.splice(otherEdges.end(), Edges, it, ++it);
@@ -234,8 +248,34 @@ class Graph {
     }
   }
 
+  void swapNodes(NodeRef n1, NodeRef n2) {
+    // First rectify the edges
+    for (auto& inEdge : n1->getInEdges()) {
+      inEdge->setHead(n2);
+    }
+    for (auto& outEdge : n1->getOutEdges()) {
+      outEdge->setTail(n2);
+    }
+    for (auto& inEdge : n2->getInEdges()) {
+      inEdge->setHead(n1);
+    }
+    for (auto& outEdge : n2->getOutEdges()) {
+      outEdge->setTail(n1);
+    }
+    // Then simply copy the edge vectors around
+    auto n1InEdges = n1->getInEdges();
+    auto n1OutEdges = n1->getOutEdges();
+    auto n2InEdges = n2->getInEdges();
+    auto n2OutEdges = n2->getOutEdges();
+
+    n1->setOutEdges(n2OutEdges);
+    n1->setInEdges(n2InEdges);
+    n2->setOutEdges(n1OutEdges);
+    n2->setInEdges(n1InEdges);
+  }
+
   NodeRef createNode() {
-    Nodes.emplace_back(Node<T, U>());
+    Nodes.emplace_back(Node<T, U...>());
     DEBUG_PRINT("Creating node (%p)\n", &Nodes.back());
     return &Nodes.back();
   }
@@ -274,19 +314,11 @@ class Graph {
   /// \p tail The node that will have this edge as an out-edge.
   /// \p head The node that will have this edge as an in-edge.
   /// \return A reference to the edge created.
-  EdgeRef createEdge(NodeRef tail, NodeRef head) {
+  EdgeRef createEdge(NodeRef tail, NodeRef head, U... data) {
     DEBUG_PRINT("Creating edge (%p -> %p)\n", tail, head);
-    Edges.emplace_back(Edge<T, U>(tail, head));
-    EdgeRef e = &Edges.back();
-    head->addInEdge(e);
-    tail->addOutEdge(e);
-    return e;
-  }
-
-  EdgeRef createEdge(NodeRef tail, NodeRef head, U&& data) {
-    DEBUG_PRINT("Creating edge (%p -> %p)\n", tail, head);
-    Edges.emplace_back(Edge<T, U>(tail, head, std::move(data)));
-    EdgeRef e = &Edges.back();
+    this->Edges.emplace_back(
+        Edge<T, U...>(tail, head, std::forward<U...>(data)...));
+    EdgeRef e = &this->Edges.back();
     head->addInEdge(e);
     tail->addOutEdge(e);
     return e;
@@ -372,9 +404,9 @@ class Graph {
     }
   }
 
- private:
-  std::list<Node<T, U>> Nodes;
-  std::list<Edge<T, U>> Edges;
+ protected:
+  std::list<Node<T, U...>> Nodes;
+  std::list<Edge<T, U...>> Edges;
 };
 
 } // namespace nom

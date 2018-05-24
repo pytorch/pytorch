@@ -71,7 +71,7 @@ class Uniform(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         result = (value - self.low) / (self.high - self.low)
-        return result
+        return result.clamp(min=0, max=1)
 
     def icdf(self, value):
         if self._validate_args:

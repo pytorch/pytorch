@@ -138,7 +138,7 @@
   batch1: grad.bmm(batch2.transpose(1, 2)) * alpha
   batch2: batch1.transpose(1, 2).bmm(grad) * alpha
 
-- name: bernoulli(Tensor self, Generator generator)
+- name: bernoulli(Tensor self, double p, Generator generator)
   self: zeros_like(grad)
 
 - name: bmm(Tensor self, Tensor mat2)
@@ -243,7 +243,7 @@
 - name: expm1(Tensor self)
   self: grad * (result + 1)
 
-- name: expand(Tensor self, IntList size)
+- name: expand(Tensor self, IntList size, *, bool implicit)
   self: reduce_to(grad, self.sizes())
 
 - name: exponential_(Tensor self, double lambd, Generator generator)
@@ -293,9 +293,13 @@
   self: grad.mv(vec2)
   vec2: grad.t().mv(self)
 
-- name: gesv(Tensor self, Tensor A)
-  self: std::get<0>(gesv(grad, A.t()))
-  A: -at::mm(std::get<0>(gesv(grad, A.t())), solution.t())
+- name: _gesv_single(Tensor self, Tensor A)
+  self: gesv_backward_self(grad, self, A)
+  A: gesv_backward_A(grad, self, A, solution)
+
+- name: _gesv_helper(Tensor self, Tensor A)
+  self: gesv_backward_self(grad, self, A)
+  A: gesv_backward_A(grad, self, A, result0)
 
 - name: gt_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -368,6 +372,9 @@
 
 - name: log_normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
+
+- name: logsumexp(Tensor self, int64_t dim, bool keepdim)
+  self: logsumexp_backward(grad, self, result, dim, keepdim)
 
 - name: lt_(Tensor self, Scalar other)
   self: zeros_like(self)

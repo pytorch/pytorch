@@ -24,7 +24,7 @@ make -j
 which tries to replicate PyTorch's MNIST model + training loop
 - The principled way to write a model is probably something like 
 ```
-AUTOGRAD_CONTAINER_CLASS(MyModel) {
+TORCH_AUTOGRAD_CONTAINER_CLASS(MyModel) {
   // This does a 2D convolution, followed by global sum pooling, followed by a linear.
  public:
   void initialize_containers() override {

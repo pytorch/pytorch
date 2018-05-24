@@ -9,7 +9,7 @@ class _InstanceNorm(_BatchNorm):
             num_features, eps, momentum, affine, track_running_stats)
 
     def _check_input_dim(self, input):
-        return NotImplemented
+        raise NotImplementedError
 
     def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs):
         try:

@@ -19,7 +19,7 @@ int main(int argc, char* argv[]) {
   if (!torch::hasCuda()) {
     std::cerr << "CUDA not available. Disabling CUDA tests" << std::endl;
     // ~ disables the [cuda] tag.
-    session.configData().testsOrTags.push_back("~[cuda]");
+    session.configData().testsOrTags.emplace_back("~[cuda]");
   }
 
   return session.run();

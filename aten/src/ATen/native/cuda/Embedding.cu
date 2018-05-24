@@ -12,6 +12,7 @@
 #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
+
 #include <THCUNN/THCHalfAutoNumerics.cuh>
 
 #include <thrust/execution_policy.h>
@@ -169,15 +170,15 @@ __global__ void renorm_kernel(
     } else if (norm_type == 2) {
       v += x * x;
     } else {
-      v += std::pow(x, norm_type);
+      v += THCNumerics<accscalar_t>::pow(x, norm_type);
     }
   }
 
-  using Op = ReduceAdd<accscalar_t, accscalar_t>;
+  using Op = ReduceAdd<accscalar_t>;
   v = reduceBlock<accscalar_t>(sdata, blockDim.x, v, Op(), 0);
 
   if (tid == 0) {
-    sdata[0] = std::pow(v, scalar_cast<accscalar_t>(1.0 / norm_type));
+    sdata[0] = THCNumerics<accscalar_t>::pow(v, scalar_cast<accscalar_t>(1.0 / norm_type));
   }
   __syncthreads();
 

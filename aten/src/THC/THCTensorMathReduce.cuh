@@ -16,330 +16,232 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
-// Reduction operators that support `half`, unlike Thrust
-template <typename InT, typename AccT>
+/*
+Reductions that (only) operate on accumulate types. 
+*/
+
+template <typename T>
 struct ReduceAdd {
-  inline __device__ AccT operator()(AccT a, InT b) const {
-    return a + (AccT) b;
+  inline __device__ T operator()(const T a, const T b) const {
+    return THCNumerics<T>::add(a, b);
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
-template <>
-struct ReduceAdd<half, half> {
-  inline __device__ half operator()(half a, half b) const {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    return __hadd(a, b);
-#else
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return __float2half(fa + fb);
-#endif
-  }
-};
-
-template <>
-struct ReduceAdd<half, float> {
-  inline __device__ float operator()(float a, half b) const {
-    return a + __half2float(b);
-  }
-};
-#endif // CUDA_HALF_TENSOR
-
-template <typename InT, typename AccT>
+template <typename T>
 struct ReduceMultiply {
-  inline __device__ AccT operator()(AccT a, InT b) const {
-    return a * (AccT) b;
+  inline __device__ T operator()(const T a, const T b) const {
+    return THCNumerics<T>::mul(a, b);
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
-template <>
-struct ReduceMultiply<half, half> {
-  inline __device__ half operator()(half a, half b) const {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    return __hmul(a, b);
-#else
-    float fa = __half2float(a);
-    float fb = __half2float(b);
-    return __float2half(fa * fb);
-#endif
+template <typename T>
+struct ReduceDivide {
+  ReduceDivide(const T _divisor): divisor{_divisor} {}
+
+  inline __device__ T operator()(const T x) const {
+    return THCNumerics<T>::div(x, divisor);
   }
+
+  const T divisor;
 };
 
-template <>
-struct ReduceMultiply<half, float> {
-  inline __device__ float operator()(float a, half b) const {
-    return a * __half2float(b);
-  }
-};
-#endif // CUDA_HALF_TENSOR
+template <typename T>
+struct ReducePow {
+  ReducePow(const T _exponent): exponent{_exponent} {}
 
-template <typename ResT, typename ArgT>
+  inline __device__ T operator()(const T x) const {
+    return THCNumerics<T>::pow(x, exponent);
+  }
+
+  const T exponent;
+};
+
+template <typename T>
 struct SquareFunctor {
-    SquareFunctor(ResT mean): mean_(mean) {}
+    SquareFunctor(const T _mean): mean{_mean} {}
 
-    inline __device__ ResT operator()(ArgT x) const {
-      return (((ResT) x) - mean_) * (((ResT) x) - mean_);
+    inline __device__ T operator()(const T x) const {
+      return THCNumerics<T>::mul(
+        THCNumerics<T>::sub(x, mean),
+        THCNumerics<T>::sub(x, mean)
+        );
     }
 
-    const ResT mean_;
+    const T mean;
 };
-
-#ifdef CUDA_HALF_TENSOR
-template <typename ResT>
-struct SquareFunctor<ResT, half> {
-    SquareFunctor(ResT mean): mean_(mean) {}
-
-    inline __device__ ResT operator()(half x) const {
-      return THCNumerics<ResT>::mul(
-        THCNumerics<ResT>::sub(mean_, ScalarConvert<half, ResT>::to(x)),
-        THCNumerics<ResT>::sub(mean_, ScalarConvert<half, ResT>::to(x))
-      );
-    }
-
-    const ResT mean_;
-};
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct ReduceMin {
   inline __device__ T operator()(T a, T b) const {
-    return (THCNumerics<T>::lt(a, b) ||
-            THCNumerics<T>::isnan(a)) ? a : b;
+    return (THCNumerics<T>::lt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
   }
 };
 
 template <typename T>
 struct ReduceMax {
   inline __device__ T operator()(T a, T b) const {
-    return (THCNumerics<T>::gt(a, b) ||
-            THCNumerics<T>::isnan(a)) ? a : b;
+    return (THCNumerics<T>::gt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
   }
 };
-
-template <typename InT, typename AccT>
-struct ReduceMaxTo {
-  inline __device__ AccT operator()(InT a, InT b) const {
-    return ScalarConvert<InT, AccT>::to(
-      (THCNumerics<InT>::gt(a, b) || THCNumerics<InT>::isnan(a)) ? a : b);
-  }
-};
-
-#ifdef CUDA_HALF_TENSOR
-template <>
-struct ReduceMaxTo<half, float> {
-  inline __device__ float operator()(float a, half b) const {
-    float b_f = __half2float(b);
-    return ((THCNumerics<float>::gt(a, b_f) ||
-             THCNumerics<float>::isnan(a)) ? a : b_f);
-  }
-};
-#endif // CUDA_HALF_TENSOR
 
 struct LogicalAll {
-  inline __device__ unsigned char operator()(unsigned char x,
-                                             unsigned char y) const {
+  inline __device__ unsigned char operator()(const unsigned char x,
+                                             const unsigned char y) const {
     return (x && y);
   }
 };
 
 struct LogicalAny {
-  inline __device__ unsigned char operator()(unsigned char x,
-                                             unsigned char y) const {
+  inline __device__ unsigned char operator()(const unsigned char x,
+                                             const unsigned char y) const {
     return (x || y);
   }
 };
 
-template<typename Real>
- inline __device__ Real THCMax(const Real a, const Real b) {
-    return THCNumerics<Real>::gt(a, b) ? a : b;
+template<typename T>
+inline __device__ T THCMax(const T a, const T b) {
+  return THCNumerics<T>::gt(a, b) ? a : b;
 }
 
-template<typename Real>
-__global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrdiff_t size, const Real maxnorm)
-{
-  __shared__ Real buffer[32];
+template<typename T, typename AccT>
+__global__ void THCTensor_kernel_renorm(T *data, 
+                                        const AccT value, 
+                                        const ptrdiff_t size, 
+                                        const AccT maxnorm) {
+  __shared__ AccT buffer[32];
   int64_t tx = threadIdx.x;
   int64_t bx = blockIdx.x;
   int64_t step = blockDim.x;
-  Real *row = data + size*bx;
+  T *row = data + size * bx;
 
-  buffer[tx] = ScalarConvert<int, Real>::to(0);
-  Real norm;
+  buffer[tx] = scalar_cast<AccT>(0);
+  AccT norm;
 
-  if (THCNumerics<Real>::eq(value, ScalarConvert<float, Real>::to(INFINITY))) {
+  if (THCNumerics<AccT>::eq(value, scalar_cast<AccT, float>(INFINITY))) {
     // get norm of axis
-    for (ptrdiff_t i=tx; i<size; i+=step)
-    {
-      buffer[tx] = THCMax<Real>(
-        buffer[tx],
-	THCNumerics<Real>::abs(row[i])
-      );
+    for (ptrdiff_t i = tx; i < size; i += step) {
+      const AccT val = scalar_cast<AccT>(row[i]);
+      buffer[tx] = THCMax<AccT>(buffer[tx], THCNumerics<AccT>::abs(val));
     }
     // add (reduce)
-    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
-    {
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
       __syncthreads();
       if (tx < stride)
-        buffer[tx] = THCMax<Real>(buffer[tx], buffer[tx+stride]);
+        buffer[tx] = THCMax<AccT>(buffer[tx], buffer[tx+stride]);
     }
     // clip norms
     __syncthreads();
     norm = buffer[0];
   } else {
     // get norm of axis
-    for (ptrdiff_t i=tx; i<size; i+=step)
-    {
-      buffer[tx] = THCNumerics<Real>::add(
+    for (ptrdiff_t i = tx; i < size; i += step) {
+      const AccT val = scalar_cast<AccT>(row[i]);
+      buffer[tx] = THCNumerics<AccT>::add( 
         buffer[tx],
-        THCNumerics<Real>::pow(
-          THCNumerics<Real>::abs(row[i]),
-          value)
+        THCNumerics<AccT>::pow(THCNumerics<AccT>::abs(val), value)
       );
     }
     // add (reduce)
-    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
-    {
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
       __syncthreads();
       if (tx < stride)
-        buffer[tx] = THCNumerics<Real>::add(buffer[tx], buffer[tx+stride]);
+        buffer[tx] = THCNumerics<AccT>::add(buffer[tx], buffer[tx+stride]);
     }
     // clip norms
     __syncthreads();
-    norm = THCNumerics<Real>::pow(buffer[0], THCNumerics<Real>::cinv(value));
+    norm = THCNumerics<AccT>::pow(buffer[0], THCNumerics<AccT>::cinv(value));
   }
 
-  if (THCNumerics<Real>::gt(norm, maxnorm))
-  {
-    norm = THCNumerics<Real>::div(
+  if (THCNumerics<AccT>::gt(norm, maxnorm)) {
+    norm = THCNumerics<AccT>::div(
       maxnorm,
-      THCNumerics<Real>::add(
-        norm,
-        ScalarConvert<float, Real>::to(1e-7)
-      )
+      THCNumerics<AccT>::add(norm, scalar_cast<AccT>(1e-7))
     );
     // renormalize
-    for (ptrdiff_t i=tx; i<size; i+=step)
-    {
-      row[i] = THCNumerics<Real>::mul(row[i], norm);
+    for (ptrdiff_t i = tx; i < size; i += step) {
+      const AccT val = scalar_cast<AccT>(row[i]);
+      row[i] = scalar_cast<T>(THCNumerics<AccT>::mul(val, norm));
     }
   }
 }
 
 template <typename T>
-struct TensorNonZeroOp
-{
+struct TensorNonZeroOp {
   TensorNonZeroOp() {}
-  __host__ __device__ T operator()(T lhs) const {
-    if (THCNumerics<T>::eq(lhs, ScalarConvert<float, T>::to(0.0))) {
-      return ScalarConvert<int, T>::to(0);
-    } else {
-      return ScalarConvert<int, T>::to(1);
-    }
+
+  __host__ __device__ T operator()(const T lhs) const {
+    const T zero = scalar_cast<T>(0);
+    if (THCNumerics<T>::eq(lhs, zero)) return zero;
+      
+    return scalar_cast<T>(1);
   }
 };
 
 template <typename T, int StaticExp>
-struct TensorNormOp
-{
-  TensorNormOp(T exp) : exponent(exp) {}
+struct TensorNormOp {
+  TensorNormOp(T _exponent) : exponent{_exponent} {}
 
-  __host__ __device__ T operator()(T x) const {
-    if (StaticExp == 1) {
-      return (T) fabsf((float) x);
-    } else if (StaticExp == 2) {
-      return x * x;
-    } else {
-      return (T) powf(fabsf((float) x), (float) exponent);
+  __host__ __device__ T operator()(const T x) const {
+    switch (StaticExp) {
+      case 1: return THCNumerics<T>::abs(x);
+      case 2: return THCNumerics<T>::mul(x, x);
+      default: return THCNumerics<T>::pow(THCNumerics<T>::abs(x), exponent);
     }
   }
 
   const T exponent;
 };
 
-template <int StaticExp>
-struct TensorNormOp<double, StaticExp>
-{
-  TensorNormOp(double exp) : exponent(exp) {}
+/*
+  Fuses conversions and a TensorDistOp. Needed for Thrust.
+*/
+template <typename T, typename AccT>
+struct ThrustTensorDistOp {
+  ThrustTensorDistOp(AccT _exponent) : exponent{_exponent} {}
 
-  __host__ __device__ double operator()(double x) const {
-    if (StaticExp == 1) {
-      return fabs(x);
-    } else if (StaticExp == 2) {
-      return x * x;
-    } else {
-      return pow(fabs(x), exponent);
-    }
+  __host__ __device__ AccT operator()(T _x, T _y) const {
+    const AccT x = scalar_cast<AccT>(_x);
+    const AccT y = scalar_cast<AccT>(_y);
+    return THCNumerics<AccT>::pow(
+      THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y)), 
+      exponent);
   }
 
-  const double exponent;
-};
-
-#ifdef CUDA_HALF_TENSOR
-template <int StaticExp>
-struct TensorNormOp<half, StaticExp>
-{
-  TensorNormOp(half exp) : exponent(exp) {}
-
-  __host__ __device__ half operator()(half x) const {
-    if (StaticExp == 1) {
-      return THCNumerics<half>::abs(x);
-    } else if (StaticExp == 2) {
-      return THCNumerics<half>::mul(x, x);
-    } else {
-      return THCNumerics<half>::pow(THCNumerics<half>::abs(x), exponent);
-    }
-  }
-
-  const half exponent;
-};
-#endif
-
-template <typename Tacc, typename T>
-struct TensorDistOp
-{
-  TensorDistOp(Tacc exp) : exponent(exp) {}
-
-  __host__ __device__ Tacc operator()(T x, T y) const {
-    Tacc xr = ScalarConvert<T, Tacc>::to(x);
-    Tacc yr = ScalarConvert<T, Tacc>::to(y);
-    return THCNumerics<Tacc>::pow(
-      THCNumerics<Tacc>::abs(THCNumerics<Tacc>::sub(xr, yr)),
-      exponent
-    );
-  }
-
-  const Tacc exponent;
+  const AccT exponent;
 };
 
 #include <thrust/functional.h>
 
 // Given the sum of values and the sum of squares, compute the variance or standard deviation.
-template<typename Real, bool flag, bool apply_sqrt>
-__forceinline__ __device__ Real THCTensor_computeVar(Real sum, Real sum2, unsigned row_size) {
-  Real rs2 = ScalarConvert<unsigned, Real>::to(row_size);
-  Real rs2m = ScalarConvert<unsigned, Real>::to(row_size - 1);
-  Real zero = ScalarConvert<int, Real>::to(0);
+template<typename T, bool flag, bool apply_sqrt>
+__forceinline__ __device__ T THCTensor_computeVar(
+  T sum, 
+  T sum2, 
+  const unsigned row_size) {
+
+  T rs2 = scalar_cast<T>(row_size);
+  T rs2m = scalar_cast<T>(row_size - 1);
+  T zero = scalar_cast<T>(0);
+
   if (flag) {
-    sum = THCNumerics<Real>::div(sum, rs2);
-    sum2 = THCNumerics<Real>::div(sum2, rs2);
-    sum2 = THCNumerics<Real>::sub(sum2, THCNumerics<Real>::mul(sum, sum));
-    sum2 = (THCNumerics<Real>::lt(sum2, zero) ? zero : sum2);
+    sum = THCNumerics<T>::div(sum, rs2);
+    sum2 = THCNumerics<T>::div(sum2, rs2);
+    sum2 = THCNumerics<T>::sub(sum2, THCNumerics<T>::mul(sum, sum));
+    sum2 = (THCNumerics<T>::lt(sum2, zero) ? zero : sum2);
+  } else {
+    sum = THCNumerics<T>::div(sum, rs2);
+    sum2 = THCNumerics<T>::div(sum2, rs2m);
+    sum2 = THCNumerics<T>::sub(sum2,
+      THCNumerics<T>::mul(
+        THCNumerics<T>::div(rs2 ,rs2m),
+        THCNumerics<T>::mul(sum, sum)));
+    sum2 = (THCNumerics<T>::lt(sum2, zero) ? zero : sum2);
   }
-  else {
-    sum = THCNumerics<Real>::div(sum, rs2);
-    sum2 = THCNumerics<Real>::div(sum2, rs2m);
-    sum2 = THCNumerics<Real>::sub(sum2,
-      THCNumerics<Real>::mul(
-        THCNumerics<Real>::div(rs2 ,rs2m),
-        THCNumerics<Real>::mul(sum, sum)));
-    sum2 = (THCNumerics<Real>::lt(sum2, zero) ? zero : sum2);
-  }
+
   if (apply_sqrt)
-    return THCNumerics<Real>::sqrt(sum2);
-  else
-    return sum2;
+    return THCNumerics<T>::sqrt(sum2);
+  
+  return sum2;
 }
 
 /* Compute the variance (or standard deviation) along an outer dimension of a tensor.
@@ -355,40 +257,39 @@ __forceinline__ __device__ Real THCTensor_computeVar(Real sum, Real sum2, unsign
  * outer dimensions, which contains several "inner rows").
  * Each thread processes a single inner row at a time.
  */
-template<typename Real, typename Accreal, bool flag, bool apply_sqrt>
-__global__ void THCTensor_kernel_varOuterDim(Real *tgt, Real *src_, unsigned num_orows, unsigned num_irows, unsigned row_size)
-{
+template<typename T, typename AccT, bool flag, bool apply_sqrt>
+__global__ void THCTensor_kernel_varOuterDim(T *tgt, T *src_, unsigned num_orows, unsigned num_irows, unsigned row_size) {
   for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
-      Real *src = src_ + orow * row_size * num_irows + irow;
-      Accreal mean = ScalarConvert<int, Accreal>::to(0);
-      Accreal m2 = ScalarConvert<int, Accreal>::to(0);
+      T *src = src_ + orow * row_size * num_irows + irow;
+      AccT mean = scalar_cast<AccT>(0);
+      AccT m2 = scalar_cast<AccT>(0);
 
       for (unsigned col = 0; col < row_size; ++col) {
-        Accreal val = ScalarConvert<Real, Accreal>::to(*src);
-        Accreal delta = THCNumerics<Accreal>::sub(val, mean);
-        mean = THCNumerics<Accreal>::add(mean,
-            THCNumerics<Accreal>::div(delta, ScalarConvert<int, Accreal>::to(col + 1)));
-        Accreal delta2 = THCNumerics<Accreal>::sub(val, mean);
-        m2 = THCNumerics<Accreal>::add(m2,
-            THCNumerics<Accreal>::mul(delta, delta2));
+        AccT val = scalar_cast<AccT>(*src);
+        AccT delta = THCNumerics<AccT>::sub(val, mean);
+        mean = THCNumerics<AccT>::add(mean,
+            THCNumerics<AccT>::div(delta, scalar_cast<AccT>(col + 1)));
+        AccT delta2 = THCNumerics<AccT>::sub(val, mean);
+        m2 = THCNumerics<AccT>::add(m2,
+            THCNumerics<AccT>::mul(delta, delta2));
         src += num_irows;
       }
-      
+
       if (flag) {
-        m2 = THCNumerics<Accreal>::div(m2, ScalarConvert<int, Accreal>::to(row_size));
+        m2 = THCNumerics<AccT>::div(m2, scalar_cast<AccT>(row_size));
       } else {
-        m2 = THCNumerics<Accreal>::div(m2, ScalarConvert<int, Accreal>::to(row_size - 1));
+        m2 = THCNumerics<AccT>::div(m2, scalar_cast<AccT>(row_size - 1));
       }
-      tgt[orow * num_irows + irow] = ScalarConvert<Accreal, Real>::to(
-          apply_sqrt ? THCNumerics<Accreal>::sqrt(m2) : m2);
+
+      tgt[orow * num_irows + irow] = scalar_cast<T>(
+          apply_sqrt ? THCNumerics<AccT>::sqrt(m2) : m2);
     }
   }
 }
 
-template<typename TensorTypeK, typename Real, typename Accreal, bool apply_sqrt>
-__host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int64_t dimension, int flag)
-{
+template<typename TensorTypeK, typename T, typename AccT, bool apply_sqrt>
+__host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int64_t dimension, int flag) {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
@@ -407,16 +308,15 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
   dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
 
   if (flag) {
-    THCTensor_kernel_varOuterDim<Real, Accreal, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    THCTensor_kernel_varOuterDim<T, AccT, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
   } else {
-    THCTensor_kernel_varOuterDim<Real, Accreal, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    THCTensor_kernel_varOuterDim<T, AccT, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
   }
+
   cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess) {
-    THError(cudaGetErrorString(errcode));
-  }
+  if (errcode != cudaSuccess) THError(cudaGetErrorString(errcode));
 }
 
 /* Compute the variance (or standard deviation) of the innermost dimension of a tensor.
@@ -441,15 +341,14 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
  *
  * This implementation assumes that each block has been launched with 16 x 32 threads.
  */
-template<typename Real, typename Accreal, bool flag, bool apply_sqrt>
-__global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned num_rows, unsigned row_size)
-{
+template<typename T, typename AccT, bool flag, bool apply_sqrt>
+__global__ void THCTensor_kernel_varInnermostDim(T *tgt, T *src_, unsigned num_rows, unsigned row_size) {
   /*
    * Each block computes the var/std of blockDim.y (32) rows at once.
    * One can visualize the computation as a 16 (x) by 32 (y) grid.
    * - Each of the 32 rows of the block is responsible for the computation
-   *   of one input row. 
-   * - Each row has 16 columns; the variance computation of one input row is 
+   *   of one input row.
+   * - Each row has 16 columns; the variance computation of one input row is
    *   split between 16 threads.
    * - Each of those 16 threads handles the accumulation of 1/16 of the input
    *   row's data.
@@ -460,56 +359,56 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
     /*
      * Compute local mean, local M2 via Welford's algorithm for this thread.
      */
-    Accreal acc_zero = ScalarConvert<int, Accreal>::to(0);
-    Accreal local_mean = acc_zero;
-    Accreal local_M2 = acc_zero;
+    AccT acc_zero = scalar_cast<AccT>(0);
+    AccT local_mean = acc_zero;
+    AccT local_M2 = acc_zero;
     unsigned count = 0;
 
     if (row < num_rows) {
-      Real *src = src_ + row * row_size;
+      T *src = src_ + row * row_size;
 
       for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
         ++count;
-        Accreal val = ScalarConvert<Real, Accreal>::to(src[col]);
-        Accreal delta = THCNumerics<Accreal>::sub(val, local_mean);
-        local_mean = THCNumerics<Accreal>::add(
+        AccT val = scalar_cast<AccT>(src[col]);
+        AccT delta = THCNumerics<AccT>::sub(val, local_mean);
+        local_mean = THCNumerics<AccT>::add(
             local_mean,
-            THCNumerics<Accreal>::div(delta, ScalarConvert<int, Accreal>::to(count)));
-        Accreal delta2 = THCNumerics<Accreal>::sub(val, local_mean);
-        local_M2 = THCNumerics<Accreal>::add(
+            THCNumerics<AccT>::div(delta, scalar_cast<AccT>(count)));
+        AccT delta2 = THCNumerics<AccT>::sub(val, local_mean);
+        local_M2 = THCNumerics<AccT>::add(
             local_M2,
-            THCNumerics<Accreal>::mul(delta, delta2));
+            THCNumerics<AccT>::mul(delta, delta2));
       }
     }
 
-    Accreal local_sum =
-        THCNumerics<Accreal>::mul(local_mean, ScalarConvert<int, Accreal>::to(count));
+    AccT local_sum =
+        THCNumerics<AccT>::mul(local_mean, scalar_cast<AccT>(count));
 
     /*
      * We are reducing across each row of 16 threads to find the true sum of the
-     * entire input row. The warp shfl xor loop ultimately gives each thread the 
+     * entire input row. The warp shfl xor loop ultimately gives each thread the
      * true sum.
      */
     for (unsigned lane_mask = 8; lane_mask > 0; lane_mask >>= 1) {
-      local_sum = THCNumerics<Accreal>::add(local_sum, 
+      local_sum = THCNumerics<AccT>::add(local_sum, 
           WARP_SHFL_XOR((row < num_rows) ? local_sum : acc_zero, lane_mask, 16));
     }
-    Accreal true_mean = THCNumerics<Accreal>::div(local_sum, 
-        ScalarConvert<int, Accreal>::to(row_size));
+    AccT true_mean = THCNumerics<AccT>::div(local_sum, 
+      scalar_cast<AccT>(row_size));
 
     /*
      * Adjust each local_M2 according to the following:
      *   adjusted_M2 = local_M2 + mean_diff * mean_diff * count
      * The sum of these adjusted M2s is equal to the overall M2.
      */
-    Accreal adjusted_M2 = acc_zero;
+    AccT adjusted_M2 = acc_zero;
     if (row < num_rows) {
-      Accreal mean_diff = THCNumerics<Accreal>::sub(true_mean, local_mean);
-      adjusted_M2 = THCNumerics<Accreal>::add(
+      AccT mean_diff = THCNumerics<AccT>::sub(true_mean, local_mean);
+      adjusted_M2 = THCNumerics<AccT>::add(
           local_M2,
-          THCNumerics<Accreal>::mul(
-              THCNumerics<Accreal>::mul(mean_diff, mean_diff),
-              ScalarConvert<int, Accreal>::to(count)));
+          THCNumerics<AccT>::mul(
+              THCNumerics<AccT>::mul(mean_diff, mean_diff),
+              scalar_cast<AccT>(count)));
     }
 
     /*
@@ -517,27 +416,26 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
      * the total sum, which is equal to the M2 for the entire input row.
      */
     for (unsigned s = 8; s >= 1; s >>= 1) {
-      adjusted_M2 = THCNumerics<Accreal>::add(adjusted_M2, 
+      adjusted_M2 = THCNumerics<AccT>::add(adjusted_M2, 
           WARP_SHFL_DOWN((row < num_rows) ? adjusted_M2 : acc_zero, s, 16));
     }
 
     if (row < num_rows && threadIdx.x == 0) {
-      Accreal M2 = adjusted_M2;
-      Accreal variance;
+      AccT M2 = adjusted_M2;
+      AccT variance;
       if (flag) {
-        variance = THCNumerics<Accreal>::div(M2, ScalarConvert<int, Accreal>::to(row_size));
+        variance = THCNumerics<AccT>::div(M2, scalar_cast<AccT>(row_size));
       } else {
-        variance = THCNumerics<Accreal>::div(M2, ScalarConvert<int, Accreal>::to(row_size - 1));
+        variance = THCNumerics<AccT>::div(M2, scalar_cast<AccT>(row_size - 1));
       }
-      tgt[row] = ScalarConvert<Accreal, Real>::to(
-          apply_sqrt ? THCNumerics<Accreal>::sqrt(variance) : variance);
+      tgt[row] = scalar_cast<T>(
+          apply_sqrt ? THCNumerics<AccT>::sqrt(variance) : variance);
     }
   }
 }
 
-template<typename TensorTypeK, typename Real, typename Accreal, bool apply_sqrt>
-__host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int flag)
-{
+template<typename TensorTypeK, typename T, typename AccT, bool apply_sqrt>
+__host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int flag) {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
   // Treat all outer dimensions as a single dimension.
   unsigned num_rows = 1;
@@ -551,16 +449,15 @@ __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, Tenso
   dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
 
   if (flag) {
-    THCTensor_kernel_varInnermostDim<Real, Accreal, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    THCTensor_kernel_varInnermostDim<T, AccT, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
   } else {
-    THCTensor_kernel_varInnermostDim<Real, Accreal, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    THCTensor_kernel_varInnermostDim<T, AccT, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
   }
+
   cudaError errcode = cudaGetLastError();
-  if (errcode != cudaSuccess) {
-    THError(cudaGetErrorString(errcode));
-  }
+  if (errcode != cudaSuccess) THError(cudaGetErrorString(errcode));
 }
 
 

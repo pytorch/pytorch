@@ -87,14 +87,22 @@ void deleteFunction(Function* function);
 struct Function : std::enable_shared_from_this<Function> {
  public:
   /// Construct a new `Function` with `num_inputs` inputs and the given
-  /// `next_edges`.
+  /// `next_edges`. sequence_nr is a (currently THE) hint to prioritization
+  /// in the backward() pass, with higher sequence numbers prioritized
+  /// before lower sequence numbers.
+  explicit Function(
+      uint32_t num_inputs,
+      uint64_t sequence_nr,
+      edge_list&& next_edges = edge_list())
+      : sequence_nr_(sequence_nr),
+      num_inputs_(num_inputs),
+      next_edges_(std::move(next_edges)) {}
+
   explicit Function(
       uint32_t num_inputs = 0,
       edge_list&& next_edges = edge_list())
-      : sequence_nr_(next_sequence_nr_++),
-        num_inputs_(num_inputs),
-        next_edges_(std::move(next_edges)) {}
-
+      : Function(num_inputs, next_sequence_nr_++, std::move(next_edges)) {}
+  
   /// Functions are neither copyable nor moveable.
   Function(const Function& other) = delete;
   Function(Function&& other) = delete;

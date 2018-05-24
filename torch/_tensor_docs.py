@@ -599,14 +599,14 @@ Args:
 
 add_docstr_all('cumprod',
                r"""
-cumprod(dim) -> Tensor
+cumprod(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumprod`
 """)
 
 add_docstr_all('cumsum',
                r"""
-cumsum(dim) -> Tensor
+cumsum(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumsum`
 """)
@@ -887,17 +887,6 @@ histc(bins=100, min=0, max=0) -> Tensor
 See :func:`torch.histc`
 """)
 
-add_docstr_all('index',
-               r"""
-index(m) -> Tensor
-
-Selects elements from :attr:`self` tensor using a binary mask or along a given
-dimension. The expression ``tensor.index(m)`` is equivalent to ``tensor[m]``.
-
-Args:
-    m (int or ByteTensor or slice): the dimension or mask used to select elements
-""")
-
 add_docstr_all('index_add_',
                r"""
 index_add_(dim, index, tensor) -> Tensor
@@ -1141,6 +1130,13 @@ the underlying normal distribution, and not of the returned distribution:
 .. math::
 
     f(x) = \\dfrac{1}{x \\sigma \\sqrt{2\\pi}}\ e^{-\\dfrac{(\\ln x - \\mu)^2}{2\\sigma^2}}
+""")
+
+add_docstr_all('logsumexp',
+               r"""
+logsumexp(dim, keepdim=False) -> Tensor
+
+See :func:`torch.logsumexp`
 """)
 
 add_docstr_all('lt',
@@ -1400,6 +1396,24 @@ ormqr(input2, input3, left=True, transpose=False) -> Tensor
 See :func:`torch.ormqr`
 """)
 
+
+add_docstr_all('permute',
+               r"""
+permute(*dims) -> Tensor
+
+Permute the dimensions of this tensor.
+
+Args:
+    *dims (int...): The desired ordering of dimensions
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> x.permute(2, 0, 1).size()
+    torch.Size([5, 2, 3])
+""")
+
 add_docstr_all('potrf',
                r"""
 potrf(upper=True) -> Tensor
@@ -1437,7 +1451,7 @@ In-place version of :meth:`~Tensor.pow`
 
 add_docstr_all('prod',
                r"""
-prod(dim=None, keepdim=False) -> Tensor
+prod(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.prod`
 """)
@@ -1684,8 +1698,8 @@ For a 3-D tensor, :attr:`self` is updated as::
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
 :attr:`self`, :attr:`index` and :attr:`src` should have same number of
-dimensions. It is also required that `index->size[d] <= src->size[d]` for all
-dimension `d`, and that `index->size[d] <= real->size[d]` for all dimensions
+dimensions. It is also required that `index.size(d) <= src.size(d)` for all
+dimensions `d`, and that `index.size(d) <= self.size(d)` for all dimensions
 `d != dim`.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
@@ -1693,7 +1707,6 @@ between `0` and `(self.size(dim) -1)` inclusive, and all values in a row along
 the specified dimension :attr:`dim` must be unique.
 
 Args:
-    input (Tensor): the source tensor
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter
     src (Tensor or float): the source element(s) to scatter
@@ -1937,7 +1950,7 @@ In-place version of :meth:`~Tensor.sub`
 
 add_docstr_all('sum',
                r"""
-sum(dim=None, keepdim=False) -> Tensor
+sum(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.sum`
 """)

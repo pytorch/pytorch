@@ -89,9 +89,7 @@ static PyTypeObject* getPyTypeObject(const at::Storage& storage)
 
 at::Type& getType(at::ScalarType scalarType, const THPLayout& layout, const DeviceType& deviceType) {
   at::Backend backend = get_backend(deviceType == DeviceType::CUDA, !layout.is_strided);
-  // use type_registry rather than context.getType() because getType throws exceptions.
-  auto baseType = at::globalContext().type_registry[static_cast<int>(backend)]
-                                                   [static_cast<int>(scalarType)].get();
+  auto baseType = at::globalContext().getTypeOpt(backend, scalarType);
   if (!baseType) {
     std::ostringstream oss;
     oss << "Error attempting to use dtype " << getDtype(scalarType)->name << " with layout " << layout.name

@@ -64,10 +64,11 @@ FeatureSpec = namedtuple(
         'feature_ids',
         'feature_is_request_only',
         'desired_hash_size',
+        'feature_to_index',
     ]
 )
 
-FeatureSpec.__new__.__defaults__ = (None, None, None, None, None)
+FeatureSpec.__new__.__defaults__ = (None, None, None, None, None, None)
 
 
 class Metadata(
@@ -720,6 +721,15 @@ class Scalar(Field):
             )
 
         self._original_dtype = dtype
+        # Numpy will collapse a shape of 1 into an unindexed data array (shape = ()),
+        # which betrays the docstring of this class (which expects shape = (1,)).
+        # >>> import numpy as np
+        # >> np.dtype((np.int32, 1))
+        # dtype('int32')
+        # >>> np.dtype((np.int32, 5))
+        # dtype(('<i4', (5,)))
+        if dtype is not None and isinstance(dtype, tuple) and dtype[1] == 1:
+            dtype = (dtype[0], (1,))
         if dtype is not None:
             dtype = np.dtype(dtype)
         # If blob is not None and it is not a BlobReference, we assume that

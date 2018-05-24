@@ -4,6 +4,9 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/argument_spec.h"
+#include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/named_value.h"
+
 #include <ATen/optional.h>
 #include <functional>
 
@@ -61,7 +64,7 @@ struct Method {
   // adding any extra parameters necessary to do this call
 
   // defined here to keep details of member_input handling confined to this class
-  std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<Value*> inputs);
+  std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
   // if this isn't yet defined, run its method_creator function
   void ensure_defined();
 
@@ -121,6 +124,10 @@ struct Method {
     return member_inputs;
   }
 
+  Method& setSchema(FunctionSchema schema_) {
+    schema.reset(new FunctionSchema(std::move(schema_)));
+    return *this;
+  }
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
@@ -151,6 +158,9 @@ private:
   // is first called.
   // this is used by the compiler so that it can construct methods out of order
   std::function<void(Method&)> method_creator;
+
+  // if absent, then we generate a default schema based on the graph
+  std::unique_ptr<FunctionSchema> schema;
 };
 
 struct Module;

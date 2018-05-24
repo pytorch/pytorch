@@ -122,6 +122,9 @@ IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
+# Check if ROCM is enabled
+WITH_ROCM = check_env_flag('WITH_ROCM')
+
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
 if max_jobs is not None:
@@ -185,7 +188,7 @@ for key, value in cfg_vars.items():
 ################################################################################
 
 dep_libs = [
-    'nccl', 'ATen',
+    'nccl', 'caffe2',
     'libshm', 'libshm_windows', 'gloo', 'THD', 'nanopb',
 ]
 
@@ -218,6 +221,8 @@ def build_libs(libs):
     if WITH_CUDA:
         my_env["CUDA_BIN_PATH"] = CUDA_HOME
         build_libs_cmd += ['--with-cuda']
+    if WITH_ROCM:
+        build_libs_cmd += ['--with-rocm']
     if WITH_NNPACK:
         build_libs_cmd += ['--with-nnpack']
     if WITH_CUDNN:
@@ -237,6 +242,7 @@ def build_libs(libs):
         build_libs_cmd += ['--with-distributed-mw']
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
+        print("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
         sys.exit(1)
 
 missing_pydep = '''
@@ -281,7 +287,7 @@ class build_deps(Command):
         libs = []
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
-        libs += ['ATen', 'nanopb']
+        libs += ['caffe2', 'nanopb']
         if IS_WINDOWS:
             libs += ['libshm_windows']
         else:
@@ -312,8 +318,7 @@ class build_deps(Command):
         self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
         self.copy_tree('third_party/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
-        self.copy_file('torch/csrc/api/include/torch/python.h',
-                       'torch/lib/include/torch/python.h')
+        self.copy_file('torch/csrc/torch.h', 'torch/lib/include/torch/torch.h')
 
 
 build_dep_cmds = {}
@@ -567,7 +572,9 @@ include_dirs += [
 library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
-ATEN_LIB = os.path.join(lib_path, 'libATen.so')
+CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.so')]
+if WITH_CUDA or WITH_ROCM:
+    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 
@@ -575,11 +582,15 @@ NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if IS_DARWIN:
-    ATEN_LIB = os.path.join(lib_path, 'libATen.dylib')
+    CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.dylib')]
+    if WITH_CUDA or WITH_ROCM:
+        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_gpu.dylib'))
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
-    ATEN_LIB = os.path.join(lib_path, 'ATen.lib')
+    CAFFE2_LIBS = [os.path.join(lib_path, 'caffe2.lib')]
+    if WITH_CUDA or WITH_ROCM:
+        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
     if DEBUG:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
     else:
@@ -587,7 +598,7 @@ if IS_WINDOWS:
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [ATEN_LIB, NANOPB_STATIC_LIB]
+main_link_args = CAFFE2_LIBS + [NANOPB_STATIC_LIB]
 main_sources = [
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
@@ -602,7 +613,7 @@ main_sources = [
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/assertions.cpp",
     "torch/csrc/byte_order.cpp",
-    "torch/csrc/api/src/python.cpp",
+    "torch/csrc/torch.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/device.cpp",
@@ -638,14 +649,13 @@ main_sources = [
     "torch/csrc/jit/export.cpp",
     "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/autodiff.cpp",
-    "torch/csrc/jit/interpreter_autograd_function.cpp",
     "torch/csrc/jit/python_arg_flatten.cpp",
-    "torch/csrc/jit/python_compiled_function.cpp",
     "torch/csrc/jit/variable_flags.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
+    "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/lower_tuples.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
@@ -655,12 +665,14 @@ main_sources = [
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
     "torch/csrc/jit/generated/aten_dispatch.cpp",
+    "torch/csrc/jit/generated/aten_schema.cpp",
     "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/script/init.cpp",
     "torch/csrc/jit/script/python_tree_views.cpp",
     "torch/csrc/autograd/init.cpp",
+    "torch/csrc/autograd/aten_variable_hooks.cpp",
     "torch/csrc/autograd/grad_mode.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
@@ -759,6 +771,34 @@ if WITH_CUDA:
         "torch/csrc/nn/THCUNN.cpp",
     ]
 
+if WITH_ROCM:
+    rocm_include_path = '/opt/rocm/include'
+    hcc_include_path = '/opt/rocm/hcc/include'
+    hipblas_include_path = '/opt/rocm/hipblas/include'
+    hipsparse_include_path = '/opt/rocm/hcsparse/include'
+    hip_lib_path = '/opt/rocm/hip/lib'
+    hcc_lib_path = '/opt/rocm/hcc/lib'
+    include_dirs.append(rocm_include_path)
+    include_dirs.append(hcc_include_path)
+    include_dirs.append(hipblas_include_path)
+    include_dirs.append(hipsparse_include_path)
+    include_dirs.append(tmp_install_path + "/include/THCUNN")
+    extra_link_args.append('-L' + hip_lib_path)
+    extra_link_args.append('-Wl,-rpath,' + hip_lib_path)
+    extra_compile_args += ['-DWITH_ROCM']
+    extra_compile_args += ['-D__HIP_PLATFORM_HCC__']
+
+    main_sources += [
+        "torch/csrc/cuda/Module.cpp",
+        "torch/csrc/cuda/Storage.cpp",
+        "torch/csrc/cuda/Stream.cpp",
+        "torch/csrc/cuda/utils.cpp",
+        "torch/csrc/cuda/comm.cpp",
+        "torch/csrc/cuda/python_comm.cpp",
+        "torch/csrc/cuda/serialization.cpp",
+        "torch/csrc/nn/THCUNN.cpp",
+    ]
+
 if WITH_NCCL:
     if WITH_SYSTEM_NCCL:
         main_link_args += [NCCL_SYSTEM_LIB]
@@ -814,7 +854,7 @@ extensions.append(C)
 if not IS_WINDOWS:
     DL = Extension("torch._dl",
                    sources=["torch/csrc/dl.c"],
-                   language='c',
+                   language='c'
                    )
     extensions.append(DL)
 
@@ -886,8 +926,10 @@ if __name__ == '__main__':
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
+                'lib/include/ATen/detail/*.h',
                 'lib/include/ATen/cuda/*.h',
                 'lib/include/ATen/cuda/*.cuh',
+                'lib/include/ATen/cuda/detail/*.h',
                 'lib/include/ATen/cudnn/*.h',
                 'lib/include/ATen/cuda/detail/*.cuh',
                 'lib/include/pybind11/*.h',
@@ -903,6 +945,6 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/jit/*.h',
                 'lib/include/torch/csrc/utils/*.h',
                 'lib/include/torch/csrc/cuda/*.h',
-                'lib/include/torch/python.h',
+                'lib/include/torch/torch.h',
             ]
         })

@@ -17,7 +17,11 @@
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/helper.h"
 #include "caffe2/onnx/onnx_exporter.h"
+#include "caffe2/opt/converter.h"
+#include "caffe2/opt/fusion.h"
 #include "caffe2/opt/mobile.h"
+#include "caffe2/opt/optimize_ideep.h"
+#include "caffe2/opt/sink.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -781,7 +785,7 @@ void addObjectMethods(py::module& m) {
            const py::bytes& tensor_proto_str,
            const std::string& name="") -> py::bytes {
             caffe2::OperatorDef op;
-            onnx_c2::TensorProto tp;
+            ::ONNX_NAMESPACE::TensorProto tp;
             ParseProtoFromLargeString(tensor_proto_str, &tp);
             instance.BuildTensorFillingOp(&op, tp, name);
             std::string out;
@@ -1157,7 +1161,7 @@ void addGlobalMethods(py::module& m) {
           shapes.emplace_back(GetTensorShapeOfBlob(blob));
         }
         const auto c = schema->InferCost(def, shapes);
-        return std::make_tuple(c.flops, c.bytes_moved);
+        return std::make_tuple(c.flops, c.bytes_written);
       });
   m.def("run_net_once", [](const py::bytes& net_def) {
     CAFFE_ENFORCE(gWorkspace);
@@ -1482,11 +1486,41 @@ void addGlobalMethods(py::module& m) {
   // into a python interface in transformations.py
   // Prefix the transformation with transform_ to avoid clobbering the
   // function namespace.
+  m.def("transform_optimizeForIDEEP", [](py::bytes def) {
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+
+    auto nn = caffe2::convertToNNModule(proto);
+    opt::OptimizeForIdeep(&nn);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
+
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
 
   m.def("transform_addNNPACK", [](py::bytes def) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
-    auto new_proto = opt::addNNPACK(proto);
+
+    auto nn = caffe2::convertToNNModule(proto);
+    opt::addNNPACK(&nn);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
+
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
+
+  m.def("transform_fuseConvBN", [](py::bytes def) {
+    CAFFE_ENFORCE(gWorkspace);
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+
+    auto nn = caffe2::convertToNNModule(proto);
+    opt::fuseConvBN(&nn, gWorkspace);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn);
+
     std::string out;
     new_proto.SerializeToString(&out);
     return py::bytes(out);
@@ -1495,7 +1529,24 @@ void addGlobalMethods(py::module& m) {
   m.def("transform_fuseNNPACKConvRelu", [](py::bytes def) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
-    auto new_proto = opt::fuseNNPACKConvRelu(proto);
+
+    auto nn = caffe2::convertToNNModule(proto);
+    opt::fuseNNPACKConvRelu(&nn);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
+
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
+
+  m.def("transform_sinkMaxPool", [](py::bytes def) {
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+
+    auto nn = caffe2::convertToNNModule(proto);
+    opt::sinkMaxPool(&nn);
+    auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
+
     std::string out;
     new_proto.SerializeToString(&out);
     return py::bytes(out);

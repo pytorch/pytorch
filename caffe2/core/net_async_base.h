@@ -13,6 +13,14 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/thread_pool.h"
 
+CAFFE2_DECLARE_int(caffe2_streams_per_gpu);
+CAFFE2_DECLARE_bool(caffe2_net_async_finish_chain);
+CAFFE2_DECLARE_int(caffe2_net_async_max_gpus);
+CAFFE2_DECLARE_int(caffe2_net_async_max_numa_nodes);
+CAFFE2_DECLARE_int(caffe2_net_async_cpu_pool_size);
+CAFFE2_DECLARE_bool(caffe2_net_async_check_stream_status);
+CAFFE2_DECLARE_bool(caffe2_net_async_use_single_pool);
+
 namespace caffe2 {
 
 class AsyncNetExecutorHelper;
@@ -34,12 +42,15 @@ class AsyncNetBase : public NetBase {
     return operators_;
   }
 
+  void handleRunError() override;
+
   bool RunAsync() override;
 
  protected:
   bool canSchedule(
       int chain_id,
-      const std::vector<EventStatus>* status = nullptr);
+      const std::vector<EventStatus>* status = nullptr,
+      bool* parent_failed = nullptr);
 
   int tasksNum() const;
   Event& event(int task_id) const;
@@ -60,6 +71,8 @@ class AsyncNetBase : public NetBase {
 
   bool isStreamFree(int task_id, int stream_id) const;
 
+  virtual void reset();
+
   // Operator/task graph
   std::vector<OperatorBase*> operators_;
   std::vector<dag_utils::OperatorNode> operator_nodes_;
@@ -78,12 +91,19 @@ class AsyncNetBase : public NetBase {
   static thread_local std::vector<int> stream_counters_;
   int num_workers_;
 
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  // Mutex that protects caught_exception_
+  std::mutex exception_mutex_;
+  std::exception_ptr caught_exception_;
+#endif // CAFFE2_USE_EXCEPTION_PTR
   // Tracing
   std::shared_ptr<tracing::Tracer> tracer_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
+  void storeExceptionPtr();
+
   std::shared_ptr<TaskThreadPool>
   pool_getter(PoolsMap& pools, int device_type, int device_id, int pool_size);
 

@@ -206,37 +206,24 @@ def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
-def mean(g, self, dim=None, keepdim=None):
-    if dim is None and keepdim is None:
-        return g.op("Mean", self)
-    # NB: ONNX's default is different from PyTorch's
-    if keepdim is None:
-        keepdim = 0
-    return g.op("ReduceMean", self, axes_i=[dim], keepdims_i=keepdim)
+def _reduce_op_symbolic(onnx_op_name):
+    def symbolic(g, self, dim=None, keepdim=None):
+        params = {}
+        if dim is not None:
+            if isinstance(dim, numbers.Number):
+                dim = [dim]
+            params['axes_i'] = dim
+        params['keepdims_i'] = int(bool(keepdim))
+        return g.op(onnx_op_name, self, **params)
+    return symbolic
 
-
-def sum(g, self, dim=None, keepdim=None):
-    if dim is None and keepdim is None:
-        return g.op("Sum", self)
-    if keepdim is None:
-        keepdim = 0
-    if isinstance(dim, numbers.Number):
-        dim = [dim]
-    return g.op("ReduceSum", self, axes_i=dim, keepdims_i=keepdim)
+mean = _reduce_op_symbolic('ReduceMean')
+sum = _reduce_op_symbolic('ReduceSum')
+prod = _reduce_op_symbolic('ReduceProd')
 
 
 def cumsum(g, input, dim):
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
-
-
-def prod(g, self, dim=None, keepdim=None):
-    if dim is None:
-        dims = None
-    else:
-        dims = [dim]
-    if keepdim is None:
-        keepdim = 0
-    return g.op("ReduceProd", self, axes_i=dims, keepdims_i=keepdim)
 
 
 def t(g, self):
@@ -244,7 +231,7 @@ def t(g, self):
 
 
 # There is no translation for it, but we don't want to raise an error yet
-def expand(g, self, size):
+def expand(g, self, size, implicit):
     return None
 
 
@@ -522,6 +509,14 @@ def lt(g, input, other):
     return g.op("Less", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
 
 
+def ge(g, input, other):
+    return g.op("Not", lt(g, other, input))
+
+
+def le(g, input, other):
+    return g.op("Not", gt(g, other, input))
+
+
 def log_softmax(g, input, dim=None):
     return g.op("LogSoftmax", input, axis_i=dim)
 
@@ -623,7 +618,7 @@ def abs(g, self):
 
 
 def pow(g, self, exponent):
-    return g.op("Pow", self, exponent)
+    return g.op("Pow", self, _if_scalar_type_as(exponent, self), **_broadcast_if_scalar(exponent))
 
 
 def clamp(g, self, min, max):
@@ -762,11 +757,11 @@ def instance_norm(g, input, **kwargs):
 
 def RNN_symbolic_builder(cell_type, *args, **kwargs):
     if cell_type == 'LSTM':
-        return LSTM_symbolic_builder(*args, **kwargs)
+        return RNN_variant_symbolic_builder('LSTM', *args, **kwargs)
     elif cell_type == 'GRU':
-        return GRU_symbolic_builder(*args, **kwargs)
+        return RNN_variant_symbolic_builder('GRU', *args, **kwargs)
     elif cell_type.startswith('RNN_'):
-        return Elman_RNN_symbolic_builder(cell_type[4:], *args, **kwargs)
+        return RNN_variant_symbolic_builder('RNN', *args, nonlinearity=cell_type[4:], **kwargs)
     else:
         return lambda *args, **kwargs: _unimplemented("RNN", "cell type " + cell_type)
 
@@ -774,159 +769,6 @@ def RNN_symbolic_builder(cell_type, *args, **kwargs):
 def reform_weights(g, w, n, intervals):
     slices = [g.op('Slice', w, axes_i=[0], starts_i=[x * n], ends_i=[y * n]) for x, y in intervals]
     return g.op('Concat', *slices, axis_i=0)
-
-
-def Elman_RNN_symbolic_builder(
-        nonlinearity, input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    def symbolic(g, input, all_weights, h0, batch_sizes):
-        if batch_first:
-            return _unimplemented("RNN", "batch_first")
-        if dropout and kwargs['train']:
-            return _unimplemented("RNN", "dropout in training mode")
-
-        unidirectional = not bidirectional
-
-        prev_output = input
-        h_outs = []
-
-        sequence_lens = unused(g) if batch_sizes is None else batch_sizes
-
-        for i in range(num_layers):
-            if unidirectional:
-                weight_ih, weight_hh, bias_ih, bias_hh = all_weights[i]
-                bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
-            else:
-                weight_ih = g.op('Concat', all_weights[2 * i][0], all_weights[2 * i + 1][0], axis_i=0)
-                weight_hh = g.op('Concat', all_weights[2 * i][1], all_weights[2 * i + 1][1], axis_i=0)
-                bias_concat = g.op('Concat',
-                                   all_weights[2 * i][2],
-                                   all_weights[2 * i][3],
-                                   all_weights[2 * i + 1][2],
-                                   all_weights[2 * i + 1][3],
-                                   axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
-
-            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in]
-            extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
-            prev_output, h_out = g.op('RNN', *inputs, outputs=2,
-                                      hidden_size_i=hidden_size,
-                                      activations_s=[nonlinearity.lower()],
-                                      **extra_kwargs)
-            h_outs.append(h_out)
-        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
-        return prev_output, h_outs
-
-    return symbolic
-
-
-def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    def symbolic(g, input, all_weights, h0_and_c0, batch_sizes):
-        if batch_first:
-            return _unimplemented("LSTM", "batch_first")
-        if dropout and kwargs['train']:
-            return _unimplemented("RNN", "dropout in training mode")
-
-        unidirectional = not bidirectional
-
-        h0, c0 = h0_and_c0
-
-        prev_output = input
-        h_outs = []
-        c_outs = []
-
-        sequence_lens = unused(g) if batch_sizes is None else batch_sizes
-
-        for i in range(num_layers):
-            if unidirectional:
-                # pytorch is input, forget, cell, output.
-                # onnx is    input, output, forget, cell.
-                weight_ih, weight_hh, bias_ih, bias_hh = \
-                    [reform_weights(g, w, hidden_size, [(0, 1), (3, 4), (1, 3)]) for w in all_weights[i]]
-
-                bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
-                c_in = c0 if num_layers == 1 else g.op('Slice', c0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
-            else:
-                # pytorch is input, forget, cell, output.
-                # onnx is    input, output, forget, cell.
-                weight_ih_f, weight_hh_f, bias_ih_f, bias_hh_f = \
-                    [reform_weights(g, w, hidden_size, [(0, 1), (3, 4), (1, 3)]) for w in all_weights[2 * i]]
-                weight_ih_b, weight_hh_b, bias_ih_b, bias_hh_b = \
-                    [reform_weights(g, w, hidden_size, [(0, 1), (3, 4), (1, 3)]) for w in all_weights[2 * i + 1]]
-
-                weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
-                weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
-                bias_concat = g.op('Concat', bias_ih_f, bias_hh_f, bias_ih_b, bias_hh_b, axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
-                c_in = c0 if num_layers == 1 else g.op('Slice', c0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
-
-            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in, c_in]
-            extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
-            prev_output, h_out, c_out = g.op('LSTM', *inputs, outputs=3,
-                                             hidden_size_i=hidden_size,
-                                             **extra_kwargs)
-            h_outs.append(h_out)
-            c_outs.append(c_out)
-        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
-        c_outs = c_out if num_layers == 1 else g.op('Concat', *c_outs, axis_i=0)
-        return prev_output, h_outs, c_outs
-
-    return symbolic
-
-
-def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    def symbolic(g, input, all_weights, h0, batch_sizes):
-        if batch_first:
-            return _unimplemented("GRU", "batch_first")
-        if dropout and kwargs['train']:
-            return _unimplemented("RNN", "dropout in training mode")
-
-        unidirectional = not bidirectional
-
-        prev_output = input
-        h_outs = []
-
-        sequence_lens = unused(g) if batch_sizes is None else batch_sizes
-
-        for i in range(num_layers):
-            if unidirectional:
-                # pytorch is reset, input, hidden
-                # onnx is    input, reset, hidden
-                weight_ih, weight_hh, bias_ih, bias_hh = \
-                    [reform_weights(g, w, hidden_size, [(1, 2), (0, 1), (2, 3)]) for w in all_weights[i]]
-
-                bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
-            else:
-                # pytorch is reset, input, hidden
-                # onnx is    input, reset, hidden
-                weight_ih_f, weight_hh_f, bias_ih_f, bias_hh_f = \
-                    [reform_weights(g, w, hidden_size, [(1, 2), (0, 1), (2, 3)]) for w in all_weights[2 * i]]
-                weight_ih_b, weight_hh_b, bias_ih_b, bias_hh_b = \
-                    [reform_weights(g, w, hidden_size, [(1, 2), (0, 1), (2, 3)]) for w in all_weights[2 * i + 1]]
-
-                weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
-                weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
-                bias_concat = g.op('Concat', bias_ih_f, bias_hh_f, bias_ih_b, bias_hh_b, axis_i=0)
-
-                h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[2 * i], ends_i=[2 * i + 2])
-
-            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in]
-            extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
-            prev_output, h_out = g.op('GRU', *inputs, outputs=2,
-                                      hidden_size_i=hidden_size, linear_before_reset_i=1,
-                                      **extra_kwargs)
-            h_outs.append(h_out)
-        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
-        return prev_output, h_outs
-
-    return symbolic
 
 
 # WARNING: Here be dragons. i.e. this is a hack that should die in a fire
@@ -1037,3 +879,99 @@ def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens
         symbolic_flattened_wrapper
     )
     return tuple(o for o in outputs)
+
+
+def RNN_variant_symbolic_builder(
+        variant, input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
+    def symbolic(g, input, all_weights, initial_states, batch_sizes):
+        if batch_first:
+            return _unimplemented("RNN/GRU/LSTM", "batch_first")
+        if dropout and kwargs['train']:
+            return _unimplemented("RNN/GRU/LSTM", "dropout in training mode")
+
+        unidirectional = not bidirectional
+
+        prev_output = input
+
+        h_outs = []
+        if variant == 'RNN' or variant == 'GRU':
+            h0 = initial_states
+        elif variant == 'LSTM':
+            h0, c0 = initial_states
+            c_outs = []
+
+        sequence_lens = unused(g) if batch_sizes is None else batch_sizes
+
+        if variant == 'GRU':
+            # pytorch is reset, input, hidden
+            # onnx is    input, reset, hidden
+            reform_permutation = [(1, 2), (0, 1), (2, 3)]
+        elif variant == 'LSTM':
+            # pytorch is input, forget, cell, output.
+            # onnx is    input, output, forget, cell.
+            reform_permutation = [(0, 1), (3, 4), (1, 3)]
+
+        def transform_weights(layer_index):
+            if variant == 'RNN':
+                weight_ih, weight_hh, bias_ih, bias_hh = all_weights[layer_index]
+            elif variant == 'GRU' or variant == 'LSTM':
+                weight_ih, weight_hh, bias_ih, bias_hh = \
+                    [reform_weights(g, w, hidden_size, reform_permutation) for w in all_weights[layer_index]]
+            bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
+
+            return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh, bias_concat))
+
+        def retrieve_state(x, start, end):
+            return x if num_layers == 1 else g.op('Slice', x, axes_i=[0], starts_i=[start], ends_i=[end])
+
+        for i in range(num_layers):
+            if unidirectional:
+                weight_ih, weight_hh, bias_concat = transform_weights(i)
+                state_indices = i, i + 1
+            else:
+                weight_ih_f, weight_hh_f, bias_f = transform_weights(2 * i)
+                weight_ih_b, weight_hh_b, bias_b = transform_weights(2 * i + 1)
+
+                weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
+                weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
+                bias_concat = g.op('Concat', bias_f, bias_b, axis_i=0)
+
+                state_indices = 2 * i, 2 * i + 2
+
+            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens]
+
+            inputs.append(retrieve_state(h0, *state_indices))
+            if variant == 'LSTM':
+                inputs.append(retrieve_state(c0, *state_indices))
+
+            extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
+            if variant == 'RNN':
+                prev_output, h_out = g.op('RNN', *inputs, outputs=2,
+                                          hidden_size_i=hidden_size,
+                                          activations_s=[kwargs['nonlinearity'].lower()],
+                                          **extra_kwargs)
+            elif variant == 'GRU':
+                prev_output, h_out = g.op('GRU', *inputs, outputs=2,
+                                          hidden_size_i=hidden_size,
+                                          linear_before_reset_i=1,
+                                          **extra_kwargs)
+            elif variant == 'LSTM':
+                prev_output, h_out, c_out = g.op('LSTM', *inputs, outputs=3,
+                                                 hidden_size_i=hidden_size,
+                                                 **extra_kwargs)
+
+            if bidirectional:
+                prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 1, 0, -1])))
+            prev_output = g.op('Squeeze', prev_output, axes_i=[1])
+
+            h_outs.append(h_out)
+            if variant == 'LSTM':
+                c_outs.append(c_out)
+        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
+        if variant == 'RNN' or variant == 'GRU':
+            return prev_output, h_outs
+        elif variant == 'LSTM':
+            c_outs = c_out if num_layers == 1 else g.op('Concat', *c_outs, axis_i=0)
+            return prev_output, h_outs, c_outs
+
+    return symbolic

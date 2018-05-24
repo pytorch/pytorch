@@ -29,7 +29,7 @@ THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace {
 std::pair<uint64_t, uint64_t> next_philox_seed(at::Generator* gen, uint64_t increment) {
-  auto gen_ = THCRandom_getGenerator(at::globalContext().thc_state);
+  auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
   uint64_t offset = gen_->state.philox_seed_offset.fetch_add(increment);
   return std::make_pair(gen_->state.initial_seed, offset);
 }

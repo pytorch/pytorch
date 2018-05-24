@@ -14,6 +14,7 @@ from caffe2.python import \
 from caffe2.proto import caffe2_pb2
 
 import numpy as np
+import warnings
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nccl:nccl_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")
@@ -717,23 +718,23 @@ def _AddBarrierToModelNets(model, barrier_net_timeout_sec):
         # shards that are faster than others will begin training the next epoch
         # while stragglers are blocked on IO, and may timeout after 30 seconds
         # (_DEFAULT_TIMEOUT_SEC).
-        model._barrier_net = _CreateBarrierNet(model,
+        # We pass in model.param_init_net so that the barrier net can be run as
+        # part of the param_init_net.
+        model._barrier_net = _CreateBarrierNet(model, model.param_init_net,
                 "pre_training", barrier_net_timeout_sec)
         model._data_parallel_model_nets.insert(0, model._barrier_net)
 
 
-def _CreateBarrierNet(model, name_prefix, timeout_sec):
+def _CreateBarrierNet(model, init_net, name_prefix, timeout_sec):
     log.info("Creating barrier net")
     assert model._rendezvous['engine'] == 'GLOO', "Engine does not support barrier"
-    barrier_init_net = core.Net(name_prefix + "_barrier_init_net")
     comm_world = _CreateOrCloneCommonWorld(
-        barrier_init_net,
+        init_net,
         name_prefix + "_barrier_cw",
         rendezvous=model._rendezvous,
         status_blob=name_prefix + "_barrier_cw_status",
         timeout_sec=timeout_sec,
     )
-    workspace.RunNetOnce(barrier_init_net)
     barrier_net = core.Net(name_prefix + "_barrier_net")
     barrier_net.Barrier(
         inputs=[comm_world],
@@ -744,13 +745,23 @@ def _CreateBarrierNet(model, name_prefix, timeout_sec):
     return barrier_net
 
 
+# DEPRECATED: See warnings below.
 def Synchronize(model, timeout_sec=_DEFAULT_BARRIER_NET_TIMEOUT_SEC):
+    warnings.warn("The Synchronize API has been deprecated.  We now have a "
+            "barrier net which runs before training to ensure all hosts wait "
+            "before training starts.  The default timeout for the barrier is "
+            "300s and it can be overridden using the barrier_net_timeout_sec "
+            "parameter when calling Parallelize.",
+            category=DeprecationWarning, stacklevel=2)
     if model._rendezvous is None or model._rendezvous['num_shards'] <= 1:
         # Single host case
         return
 
     if model._sync_barrier_net is None:
-        model._sync_barrier_net = _CreateBarrierNet(model, "sync", timeout_sec)
+        barrier_init_net = core.Net("sync_barrier_init_net")
+        model._sync_barrier_net = _CreateBarrierNet(
+            model, barrier_init_net, "sync", timeout_sec)
+        workspace.RunNetOnce(barrier_init_net)
         workspace.CreateNet(model._sync_barrier_net)
         model._sync_barrier_net_timeout = timeout_sec
     assert model._sync_barrier_net_timeout == timeout_sec, \

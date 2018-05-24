@@ -817,6 +817,8 @@ class TestCuda(TestCase):
     def test_type_conversions_same_gpu(self):
         x = torch.randn(5, 5).cuda(1)
         self.assertEqual(x.int().get_device(), 1)
+        self.assertEqual(x.type(torch.int).get_device(), 1)
+        self.assertEqual(x.to(torch.int).get_device(), 1)
 
     def test_neg(self):
         TestTorch._test_neg(self, lambda t: t.cuda())
@@ -1320,6 +1322,14 @@ class TestCuda(TestCase):
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_gesv_batched(self):
+        TestTorch._test_gesv_batched(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_gesv_batched_dims(self):
+        TestTorch._test_gesv_batched_dims(self, lambda t: t.cuda())
+
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
 
@@ -1625,6 +1635,12 @@ class TestCuda(TestCase):
                    stride=a.stride())
         a += 5
         self.assertEqual(a, b)
+
+    def test_tiny_half_norm_(self):
+        a = torch.arange(25).cuda().float()
+        a /= 100000000
+        b = a.half()
+        self.assertGreater(b.norm().item(), 0)
 
 
 def load_ignore_file():

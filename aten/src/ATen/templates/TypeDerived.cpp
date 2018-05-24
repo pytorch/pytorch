@@ -1,3 +1,4 @@
+// @generated
 // required for old g++ to compile PRId64 macros, see
 // https://github.com/pytorch/pytorch/issues/3571
 // for context
@@ -24,9 +25,7 @@
 #include <sstream>
 
 #include "ATen/Config.h"
-#if AT_CUDA_ENABLED()
 $extra_cuda_headers
-#endif
 
 namespace at {
 
