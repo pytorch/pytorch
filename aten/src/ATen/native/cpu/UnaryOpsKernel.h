@@ -70,8 +70,6 @@ extern DispatchStub<unary_fn_> sin_Impl;
 extern DispatchStub<unary_fn_> sinh_Impl;
 extern DispatchStub<unary_fn_> tan_Impl;
 
-extern DispatchStub<void (*)(Tensor&, Scalar&)> fillImpl;
-
 extern DispatchStub<void (*)(Tensor&, const Tensor&, Scalar&, Scalar&)>
     clampImpl;
 extern DispatchStub<void (*)(Tensor&, const Tensor&, Scalar&)> clampMinImpl;
@@ -82,12 +80,14 @@ extern DispatchStub<void (*)(Tensor&, Scalar&)> clampMin_Impl;
 extern DispatchStub<void (*)(Tensor&, Scalar&)> clampMax_Impl;
 
 // Missing unary functions
-// digamma
 // clone
 // contiguous
+// digamma
 // erfinv
+// fill
 // lgamma
 // sign
+// zero
 
 } // namespace native
 } // namespace at

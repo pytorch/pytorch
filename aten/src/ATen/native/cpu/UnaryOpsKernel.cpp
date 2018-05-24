@@ -208,30 +208,6 @@ static void clamp_kernel(
     });
 }
 
-static void fill_kernel(Tensor& self, Scalar& value_) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "fill", [&] {
-    const scalar_t value = value_.to<scalar_t>();
-    CPU_tensor_parallel_kernel_apply1<scalar_t>(
-        self, [value](int64_t size, scalar_t* x, int64_t stridex) {
-          if (stridex == 1) {
-            using Vec = vec256::Vec256<scalar_t>;
-            int64_t i = 0;
-            Vec output_vec(value);
-            for (; i < size - (size % Vec::size); i += Vec::size) {
-              output_vec.store(x + i);
-            }
-            if (size - i > 0) {
-              output_vec.store(x + i, size - i);
-            }
-          } else {
-            for (int64_t i = 0; i < size; i++) {
-              x[stridex * i] = value;
-            }
-          }
-        });
-  });
-}
-
 #define IMPLEMENT_COMPUTEBOUND_KERNEL(types, op, opfn)                     \
   static void op##_kernel(Tensor& result, const Tensor& self) {            \
     AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                    \
@@ -364,7 +340,6 @@ REGISTER_DISPATCH(clampMin_Impl, &clamp_min__kernel);
 REGISTER_DISPATCH(clampImpl, &clamp_kernel);
 REGISTER_DISPATCH(clampMaxImpl, &clamp_max_kernel);
 REGISTER_DISPATCH(clampMinImpl, &clamp_min_kernel);
-REGISTER_DISPATCH(fillImpl, &fill_kernel);
 REGISTER_DISPATCH(frac_Impl, &frac__kernel);
 REGISTER_DISPATCH(fracImpl, &frac_kernel);
 REGISTER_DISPATCH(sigmoid_Impl, &sigmoid__kernel);

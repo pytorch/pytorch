@@ -542,16 +542,6 @@
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
-- func: fill_(Tensor self, Scalar value) -> Tensor
-  dispatch:
-    CPU: _fill__cpu
-    CUDA: _fill__cuda
-
-- func: fill_(Tensor self, Tensor value) -> Tensor
-  dispatch:
-    CPU: _fill__cpu
-    CUDA: _fill__cuda
-
 - func: floor(Tensor self) -> Tensor
 
 - func: floor_(Tensor self) -> Tensor
@@ -1220,8 +1210,6 @@
   dispatch:
     CPU: _s_where_cpu
     CUDA: _s_where_cuda
-
-- func: zero_(Tensor self) -> Tensor
 
 - func: zeros(Type dtype, IntList size) -> Tensor
   variants: function

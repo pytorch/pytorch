@@ -23,31 +23,6 @@
 
 namespace at { namespace native {
 
-Tensor& _fill__cpu(Tensor& self_, Scalar value_) {
-  Tensor self = sort_strides(self_);                          
-  fillImpl(self, value_);
-  return self_;
-}
-
-Tensor& _fill__cpu(Tensor& self_, const Tensor& value__) {
-  Tensor value_ = value__;
-  if (value_.dim() == 0)
-    value_ = value_.view(1);
-  Scalar value(value_[0]);
-  Tensor self = sort_strides(self_);                          
-  fillImpl(self, value);
-  return self_;
-}
-
-Tensor& zero_(Tensor& self) {
-  if (self.is_sparse()) {
-    self._th_zero_();
-  } else {
-    self.fill_(0);
-  }
-  return self;
-}
-
 Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
   Tensor result = self.type().tensor();
   return clamp_out(result, self, min, max);

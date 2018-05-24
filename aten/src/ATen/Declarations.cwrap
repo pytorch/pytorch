@@ -74,7 +74,7 @@
           default: NULL
 ]]
 [[
-  name: _th_fill_
+  name: fill_
   return: self
   cname: fill
   options:
@@ -1985,7 +1985,7 @@
       default: 0
 ]]
 [[    
-  name: _th_zero_
+  name: zero_
   return: self    
   cname: zero    
   aten_sparse: True    

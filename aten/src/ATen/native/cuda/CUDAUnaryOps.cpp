@@ -4,14 +4,6 @@ namespace at { namespace native {
 
 // These are just forwarding stubs
 
-Tensor& _fill__cuda(Tensor& self, Scalar value) {
-  return self._th_fill_(value);
-}
-
-Tensor& _fill__cuda(Tensor& self, const Tensor& value) {
-  return self._th_fill_(value);
-}
-
 Tensor& _clamp__cuda(Tensor& self, Scalar min, Scalar max) {
   return _th_clamp_(self, min, max);
 }
