@@ -64,7 +64,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   return true;
 };
 
-void check_lstm_sizes(variable_list tup) {
+void check_lstm_sizes(std::vector<Variable> tup) {
   // Expect the LSTM to have 64 outputs and 3 layers, with an input of batch
   // 10 and 16 time steps (10 x 16 x n)
 

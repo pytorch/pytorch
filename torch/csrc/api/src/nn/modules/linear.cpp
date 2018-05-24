@@ -22,19 +22,19 @@ void Linear::reset() {
   }
 }
 
-variable_list Linear::forward(variable_list input) {
+std::vector<Variable> Linear::forward(std::vector<Variable> input) {
   auto x = input[0];
   if (x.ndimension() == 2 && with_bias_) {
     // Fused op is marginally faster
     AT_ASSERT(x.size(1) == weight_.size(1));
-    return variable_list({at::addmm(bias_, x, weight_.t())});
+    return std::vector<Variable>({at::addmm(bias_, x, weight_.t())});
   }
 
   auto output = x.matmul(weight_.t());
   if (with_bias_) {
     output += bias_;
   }
-  return variable_list({output});
+  return std::vector<Variable>({output});
 }
 } // namespace nn
 } // namespace torch

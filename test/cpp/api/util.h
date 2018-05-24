@@ -12,7 +12,7 @@ namespace torch {
 // for experimental implementations
 class SimpleContainer : public nn::CloneableModule<SimpleContainer> {
  public:
-  virtual variable_list forward(variable_list) {
+  virtual std::vector<Variable> forward(std::vector<Variable>) {
     throw std::runtime_error(
         "SimpleContainer has no forward, maybe you"
         " wanted to subclass and override this function?");

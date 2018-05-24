@@ -4,6 +4,8 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/optimizers.h>
+#include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <test/cpp/api/util.h>
 
@@ -48,7 +50,7 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<Sequential> model) {
 
 TEST_CASE("optim") {
   std::srand(0);
-  setSeed(0);
+  torch::manual_seed(0);
   auto model = std::make_shared<Sequential>(
       SigmoidLinear(Linear(2, 8).build()), SigmoidLinear(Linear(8, 1).build()));
 

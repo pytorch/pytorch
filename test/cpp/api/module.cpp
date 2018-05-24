@@ -16,7 +16,7 @@ struct AGIUnit2 : nn::Module {
 };
 } // namespace test
 
-bool pointer_equal(Tensor first, Tensor second) {
+bool pointer_equal(at::Tensor first, at::Tensor second) {
   return first.data<float>() == second.data<float>();
 }
 
@@ -119,7 +119,7 @@ TEST_CASE("module/clone") {
   SECTION(
       "a module that does not override clone() throws when clone() is called") {
     struct UnCloneable : Module {
-      variable_list forward(variable_list) {
+      std::vector<Variable> forward(std::vector<Variable>) {
         return {};
       }
     };
@@ -131,7 +131,7 @@ TEST_CASE("module/clone") {
   SECTION(
       "a module that overrides clone() does not throw when clone() is called ") {
     struct Cloneable : Module {
-      variable_list forward(variable_list) {
+      std::vector<Variable> forward(std::vector<Variable>) {
         return {};
       }
       std::shared_ptr<Module> clone() const override {
