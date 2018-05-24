@@ -13,9 +13,12 @@
 // Glibc2.23 See https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280
 // Calling zeroupper when using AVX/AVX2 code resolves this.
 #if defined(__AVX__) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
-#define ZEROUPPER _mm256_zeroupper();
+#define DL_RUNTIME_BUG(opfn, type) \
+  volatile type x = (type)(1);     \
+  x = opfn(x);                     \
+  _mm256_zeroall();
 #else
-#define ZEROUPPER
+#define DL_RUNTIME_BUG(opfn, type)
 #endif
 
 namespace at {
@@ -27,16 +30,13 @@ inline void _parallel_vector_map_(
     VecOp vec_op,
     ScalarOp scalar_op,
     Tensor& self) {
+  DL_RUNTIME_BUG(scalar_op, scalar_t);
   CPU_tensor_parallel_kernel_apply1<scalar_t>(
-      self,
-      [vec_op, scalar_op](int64_t size,
-         scalar_t* x,
-         int64_t stridex) {
+      self, [vec_op, scalar_op](int64_t size, scalar_t* x, int64_t stridex) {
         if (stridex == 1) {
           vec256::map_(vec_op, x, size);
         } else {
           for (int64_t i = 0; i < size; i++) {
-            ZEROUPPER
             x[stridex * i] = scalar_op(x[i * stridex]);
           }
         }
@@ -49,19 +49,20 @@ inline void _parallel_vector_map(
     ScalarOp scalar_op,
     Tensor& result,
     const Tensor& self) {
+  DL_RUNTIME_BUG(scalar_op, scalar_t);
   CPU_tensor_parallel_kernel_apply2<scalar_t, scalar_t>(
       result,
       self,
-      [vec_op, scalar_op](int64_t size,
-         scalar_t* x,
-         scalar_t* y,
-         int64_t stridex,
-         int64_t stridey) {
+      [vec_op, scalar_op](
+          int64_t size,
+          scalar_t* x,
+          scalar_t* y,
+          int64_t stridex,
+          int64_t stridey) {
         if (stridex == 1 && stridey == 1) {
           vec256::map(vec_op, x, y, size);
         } else {
           for (int64_t i = 0; i < size; i++) {
-            ZEROUPPER
             x[stridex * i] = scalar_op(y[i * stridey]);
           }
         }
@@ -86,7 +87,8 @@ static void clamp_min__kernel(Tensor& self, Scalar& min_) {
     _parallel_vector_map_<scalar_t>(
         [min_val](const Vec& x) { return vec256::max(Vec(min_val), x); },
         [min_val](const scalar_t y) { return std::max(min_val, y); },
-        self);});
+        self);
+  });
 }
 
 static void clamp_max_kernel(Tensor& result, const Tensor& self, Scalar& max_) {
@@ -109,38 +111,41 @@ static void clamp_min_kernel(Tensor& result, const Tensor& self, Scalar& min_) {
         [min_val](const Vec& x) { return vec256::max(Vec(min_val), x); },
         [min_val](const scalar_t y) { return std::max(min_val, y); },
         result,
-        self);});
+        self);
+  });
 }
 
 static void sigmoid__kernel(Tensor& self) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "sigmoid_", [&] {
+    DL_RUNTIME_BUG(std::exp, scalar_t);
     using Vec = vec256::Vec256<scalar_t>;
     _parallel_vector_map_<scalar_t>(
         [](const Vec& x) { return vec256::sigmoid(x); },
         [](const scalar_t y_) {
           scalar_t y = -y_;
-          ZEROUPPER
           y = std::exp(y);
           y = ((scalar_t)1) + y;
           return ((scalar_t)1.0) / y;
         },
-        self);});
+        self);
+  });
 }
 
 static void sigmoid_kernel(Tensor& result, const Tensor& self) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "sigmoid", [&] {
+    DL_RUNTIME_BUG(std::exp, scalar_t);
     using Vec = vec256::Vec256<scalar_t>;
     _parallel_vector_map<scalar_t>(
         [](const Vec& x) { return vec256::sigmoid(x); },
         [](const scalar_t y_) {
           scalar_t y = -y_;
-          ZEROUPPER
           y = std::exp(y);
           y = ((scalar_t)1) + y;
           return ((scalar_t)1.0) / y;
         },
         result,
-        self);});
+        self);
+  });
 }
 
 static void frac__kernel(Tensor& self) {
@@ -164,25 +169,22 @@ static void frac_kernel(Tensor& result, const Tensor& self) {
   });
 }
 
-static void clamp__kernel(
-    Tensor& self,
-    Scalar& min_,
-    Scalar& max_) {
-    AT_DISPATCH_ALL_TYPES(self.type(), "clamp_", [&] {
-      const scalar_t min_val = min_.to<scalar_t>();
-      const scalar_t max_val = max_.to<scalar_t>();
-      using Vec = vec256::Vec256<scalar_t>;
-      _parallel_vector_map_<scalar_t>(
-          [min_val, max_val](const Vec& x) {
-            Vec max_vec = Vec(max_val);
-            Vec min_vec = Vec(min_val);
-            return at::vec256::max(min_vec, at::vec256::min(max_vec, x));
-          },
-          [min_val, max_val](const scalar_t x) {
-            return std::max(min_val, std::min(max_val, x));
-          },
-          self);
-    });
+static void clamp__kernel(Tensor& self, Scalar& min_, Scalar& max_) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "clamp_", [&] {
+    const scalar_t min_val = min_.to<scalar_t>();
+    const scalar_t max_val = max_.to<scalar_t>();
+    using Vec = vec256::Vec256<scalar_t>;
+    _parallel_vector_map_<scalar_t>(
+        [min_val, max_val](const Vec& x) {
+          Vec max_vec = Vec(max_val);
+          Vec min_vec = Vec(min_val);
+          return at::vec256::max(min_vec, at::vec256::min(max_vec, x));
+        },
+        [min_val, max_val](const scalar_t x) {
+          return std::max(min_val, std::min(max_val, x));
+        },
+        self);
+  });
 }
 
 static void clamp_kernel(
@@ -190,28 +192,29 @@ static void clamp_kernel(
     const Tensor& self,
     Scalar& min_,
     Scalar& max_) {
-    AT_DISPATCH_ALL_TYPES(self.type(), "clamp", [&] {
-      const scalar_t min_val = min_.to<scalar_t>();
-      const scalar_t max_val = max_.to<scalar_t>();
-      using Vec = vec256::Vec256<scalar_t>;
-      _parallel_vector_map<scalar_t>(
-          [min_val, max_val](const Vec& x) {
-            Vec max_vec = Vec(max_val);
-            Vec min_vec = Vec(min_val);
-            return at::vec256::max(min_vec, at::vec256::min(max_vec, x));
-          },
-          [min_val, max_val](const scalar_t y) {
-            return std::max(min_val, std::min(max_val, y));
-          },
-          result,
-          self);
-    });
+  AT_DISPATCH_ALL_TYPES(self.type(), "clamp", [&] {
+    const scalar_t min_val = min_.to<scalar_t>();
+    const scalar_t max_val = max_.to<scalar_t>();
+    using Vec = vec256::Vec256<scalar_t>;
+    _parallel_vector_map<scalar_t>(
+        [min_val, max_val](const Vec& x) {
+          Vec max_vec = Vec(max_val);
+          Vec min_vec = Vec(min_val);
+          return at::vec256::max(min_vec, at::vec256::min(max_vec, x));
+        },
+        [min_val, max_val](const scalar_t y) {
+          return std::max(min_val, std::min(max_val, y));
+        },
+        result,
+        self);
+  });
 }
 
 #define IMPLEMENT_COMPUTEBOUND_KERNEL(types, op, opfn)                     \
   static void op##_kernel(Tensor& result, const Tensor& self) {            \
     AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                    \
       static constexpr int WIDTH = 128 / sizeof(scalar_t);                 \
+      DL_RUNTIME_BUG(opfn, scalar_t);                                      \
       CPU_tensor_parallel_kernel_apply2<scalar_t, scalar_t>(               \
           result,                                                          \
           self,                                                            \
@@ -240,7 +243,6 @@ static void clamp_kernel(
                 }                                                          \
               }                                                            \
               for (; i < size; i++) {                                      \
-                ZEROUPPER                                                  \
                 x[stridex * i] = opfn(y[stridey * i]);                     \
               }                                                            \
             }                                                              \
@@ -250,6 +252,7 @@ static void clamp_kernel(
   static void op##__kernel(Tensor& self) {                                 \
     AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                    \
       static constexpr int WIDTH = 128 / sizeof(scalar_t);                 \
+      DL_RUNTIME_BUG(opfn, scalar_t);                                      \
       CPU_tensor_parallel_kernel_apply1<scalar_t>(                         \
           self, [](int64_t size, scalar_t* x, int64_t stridex) {           \
             using Vec = vec256::Vec256<scalar_t>;                          \
@@ -272,7 +275,6 @@ static void clamp_kernel(
                 }                                                          \
               }                                                            \
               for (; i < size; i++) {                                      \
-                ZEROUPPER                                                  \
                 x[stridex * i] = opfn(x[stridex * i]);                     \
               }                                                            \
             }                                                              \
@@ -288,10 +290,7 @@ static void clamp_kernel(
       using Vec = vec256::Vec256<scalar_t>;                     \
       _parallel_vector_map<scalar_t>(                           \
           [](const Vec& x) { return vec256::op(x); },           \
-          [](const scalar_t y) {                                \
-            ZEROUPPER                                           \
-            return opfn(y);                                     \
-          },                                                    \
+          [](const scalar_t y) { return opfn(y); },             \
           result,                                               \
           self);                                                \
     });                                                         \
@@ -301,35 +300,29 @@ static void clamp_kernel(
       using Vec = vec256::Vec256<scalar_t>;                     \
       _parallel_vector_map_<scalar_t>(                          \
           [](const Vec& x) { return vec256::op(x); },           \
-          [](const scalar_t y) {                                \
-            ZEROUPPER                                           \
-            return opfn(y);                                     \
-          },                                                    \
+          [](const scalar_t y) { return opfn(y); },             \
           self);                                                \
     });                                                         \
   }                                                             \
   REGISTER_DISPATCH(op##Impl, &op##_kernel)                     \
   REGISTER_DISPATCH(op##_Impl, &op##__kernel)
 
-#define IMPLEMENT_KERNEL_LOOP(types, op, opfn)                     \
-  static void op##_kernel(Tensor& result, const Tensor& self) {    \
-    AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {            \
-      CPU_tensor_parallel_apply2<scalar_t, scalar_t>(              \
-          result, self, [](scalar_t& x, scalar_t& y) {             \
-            ZEROUPPER                                              \
-            x = opfn(y);                                           \
-          });                                                      \
-    });                                                            \
-  }                                                                \
-  static void op##__kernel(Tensor& self) {                         \
-    AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {            \
-      CPU_tensor_parallel_apply1<scalar_t>(self, [](scalar_t& x) { \
-        ZEROUPPER                                                  \
-        x = opfn(x);                                               \
-      });                                                          \
-    });                                                            \
-  }                                                                \
-  REGISTER_DISPATCH(op##Impl, &op##_kernel)                        \
+#define IMPLEMENT_KERNEL_LOOP(types, op, opfn)                          \
+  static void op##_kernel(Tensor& result, const Tensor& self) {         \
+    AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                 \
+      DL_RUNTIME_BUG(opfn, scalar_t);                                   \
+      CPU_tensor_parallel_apply2<scalar_t, scalar_t>(                   \
+          result, self, [](scalar_t& x, scalar_t& y) { x = opfn(y); }); \
+    });                                                                 \
+  }                                                                     \
+  static void op##__kernel(Tensor& self) {                              \
+    AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                 \
+      DL_RUNTIME_BUG(opfn, scalar_t);                                   \
+      CPU_tensor_parallel_apply1<scalar_t>(                             \
+          self, [](scalar_t& x) { x = opfn(x); });                      \
+    });                                                                 \
+  }                                                                     \
+  REGISTER_DISPATCH(op##Impl, &op##_kernel)                             \
   REGISTER_DISPATCH(op##_Impl, &op##__kernel)
 
 } // anonymous namespace
@@ -359,7 +352,7 @@ IMPLEMENT_KERNEL(FLOATING, log10, std::log10)
 IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, log1p, std::log1p)
 IMPLEMENT_KERNEL(FLOATING, log2, std::log2)
 IMPLEMENT_KERNEL(ALL, neg, -)
-IMPLEMENT_KERNEL(FLOATING, reciprocal, 1 / )
+IMPLEMENT_KERNEL(FLOATING, reciprocal, 1 /)
 IMPLEMENT_KERNEL(FLOATING, round, std::round)
 IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, rsqrt, 1 / std::sqrt)
 IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, sqrt, std::sqrt)
@@ -372,4 +365,5 @@ IMPLEMENT_KERNEL_LOOP(FLOATING, sin, std::sin)
 IMPLEMENT_KERNEL_LOOP(FLOATING, sinh, std::sinh)
 IMPLEMENT_KERNEL_LOOP(FLOATING, tan, std::tan)
 
-}} // namespace at::native
+} // namespace native
+} // namespace at
