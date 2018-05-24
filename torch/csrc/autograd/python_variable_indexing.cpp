@@ -145,6 +145,11 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       result = applySelect(result, dim, THPUtils_unpackLong(obj));
     } else if (PySlice_Check(obj)) {
       result = applySlice(result, dim, obj);
+      if (result.numel() == 0) {
+        // sliced a dim to size 0, which isn't fully supported yet
+        // just return size 0 tensor for now
+        return result;
+      }
       dim++;
     } else if (obj == Py_Ellipsis) {
       dim += self.dim() - specified_dims;
