@@ -71,6 +71,10 @@ public:
     return flag_;  
   }
 
+  void setFlag(char _flag) {
+    flag_ = _flag;
+  }
+
   THCDeviceAllocator *allocator() {
     return allocator_;  
   }
@@ -79,12 +83,23 @@ public:
     return allocatorContext_;
   }
 
+  void setAllocator(THCDeviceAllocator * _allocator) {
+    allocator_ = _allocator;
+  }
+  void setAllocatorContext(void * _allocatorContext) {
+    allocatorContext_ = _allocatorContext;
+  }
+
   CUDAStorageImpl *view() {
     return view_;
   }
 
   CUDAStorageImpl *view() const {
     return view_;
+  }
+
+  void setView(CUDAStorageImpl * _view) {
+    view_ = _view;
   }
 
   int64_t device() const {

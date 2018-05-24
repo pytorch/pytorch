@@ -39,7 +39,7 @@ protected:
 
 public:
   StorageImpl(void* data, int64_t size, char flag, THAllocator *allocator, void *allocatorContext)
-    : data_(data), size_(size), flag_(flag), allocator_(allocator), allocatorContext_(allocatorContext), refcount(1) {}
+      : data_(data), size_(size), flag_(flag), allocator_(allocator), allocatorContext_(allocatorContext), refcount(1) {}
 
   StorageImpl(const StorageImpl&) = delete;
   StorageImpl& operator=(const StorageImpl&) = delete;
@@ -70,6 +70,10 @@ public:
     return flag_;  
   }
 
+  void setFlag(char _flag) {
+    flag_ = _flag;
+  }
+
   THAllocator *allocator() {
     return allocator_;  
   }
@@ -84,6 +88,17 @@ public:
 
   StorageImpl *view() const {
     return view_;
+  }
+
+  void setView(StorageImpl * _view) {
+    view_ = _view;
+  }
+
+  void setAllocator(THAllocator * _allocator) {
+    allocator_ = _allocator;
+  }
+  void setAllocatorContext(void * _allocatorContext) {
+    allocatorContext_ = _allocatorContext;
   }
 
   void resize(int64_t size, int64_t realsize) {
