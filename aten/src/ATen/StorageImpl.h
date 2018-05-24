@@ -33,16 +33,19 @@ protected:
   void *allocatorContext_;
   StorageImpl *view_;
 
-  StorageImpl(StorageImpl&&) = default;
-  ~StorageImpl() = default;
-  StorageImpl& operator=(StorageImpl&&) = default;
+  //StorageImpl(StorageImpl&&) = default;
+  //~StorageImpl() = default;
+  //StorageImpl& operator=(StorageImpl&&) = default;
 
 public:
+  // Rule of Five (make these constructors public)
+  StorageImpl(const StorageImpl&) = default;
+  StorageImpl(StorageImpl&&) = default;
+  ~StorageImpl() = default;
+  StorageImpl& operator=(const StorageImpl&) = default;
+  StorageImpl& operator=(StorageImpl&&) = default;
   StorageImpl(void* data, int64_t size, char flag, THAllocator *allocator, void *allocatorContext)
       : data_(data), size_(size), flag_(flag), allocator_(allocator), allocatorContext_(allocatorContext), refcount(1) {}
-
-  StorageImpl(const StorageImpl&) = delete;
-  StorageImpl& operator=(const StorageImpl&) = delete;
 
   const void *data_ptr() const {
     return data_;

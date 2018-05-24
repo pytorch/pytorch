@@ -34,16 +34,16 @@ protected:
   CUDAStorageImpl *view_;
   int64_t device_;
 
-  CUDAStorageImpl(CUDAStorageImpl&&) = default;
-  ~CUDAStorageImpl() = default;
-  CUDAStorageImpl& operator=(CUDAStorageImpl&&) = default;
 
 public:
+  // Rule of Five (make these constructors public)
+  CUDAStorageImpl(const CUDAStorageImpl&) = default;
+  CUDAStorageImpl(CUDAStorageImpl&&) = default;
+  ~CUDAStorageImpl() = default;
+  CUDAStorageImpl& operator=(const CUDAStorageImpl&) = default;
+  CUDAStorageImpl& operator=(CUDAStorageImpl&&) = default;
   CUDAStorageImpl(void* data, int64_t size, char flag, THCDeviceAllocator *allocator, void *allocatorContext, int64_t device)
     : data_(data), size_(size), flag_(flag), allocator_(allocator), allocatorContext_(allocatorContext), device_(device), refcount(1) {}
-
-  CUDAStorageImpl(const CUDAStorageImpl&) = delete;
-  CUDAStorageImpl& operator=(const CUDAStorageImpl&) = delete;
 
   const void *data_ptr() const {
     return data_;
