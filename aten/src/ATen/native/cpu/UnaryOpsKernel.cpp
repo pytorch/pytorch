@@ -8,10 +8,10 @@
 #include "ATen/cpu/vec256/vec256.h"
 #include "ATen/native/cpu/CapabilityDispatch.h"
 
-// [Note AVX-SSE transitions] In general we avoid calls into cmath for code
-// compiled with AVX/AVX2 This is because of SSE-AVX transitions and a bug in
-// Glibc2.23 See https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280
-// Calling zeroupper when using AVX/AVX2 code resolves this.
+// [Note AVX-SSE transitions]
+// There is a bug in Glibc2.23
+// https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
+// when using AVX/AVX2 code resolves this.
 #if defined(__AVX__) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
 #define DL_RUNTIME_BUG(opfn, type) \
   volatile type x = (type)(1);     \
@@ -33,13 +33,7 @@ inline void _parallel_vector_map_(
   DL_RUNTIME_BUG(scalar_op, scalar_t);
   CPU_tensor_parallel_kernel_apply1<scalar_t>(
       self, [vec_op, scalar_op](int64_t size, scalar_t* x, int64_t stridex) {
-        if (stridex == 1) {
-          vec256::map_(vec_op, x, size);
-        } else {
-          for (int64_t i = 0; i < size; i++) {
-            x[stridex * i] = scalar_op(x[i * stridex]);
-          }
-        }
+        vec256::map_(vec_op, x, size, stridex);
       });
 }
 
@@ -59,13 +53,7 @@ inline void _parallel_vector_map(
           scalar_t* y,
           int64_t stridex,
           int64_t stridey) {
-        if (stridex == 1 && stridey == 1) {
-          vec256::map(vec_op, x, y, size);
-        } else {
-          for (int64_t i = 0; i < size; i++) {
-            x[stridex * i] = scalar_op(y[i * stridey]);
-          }
-        }
+          vec256::map(vec_op, x, y, size, stridex, stridey);
       });
 }
 
@@ -210,80 +198,6 @@ static void clamp_kernel(
   });
 }
 
-#define IMPLEMENT_COMPUTEBOUND_KERNEL(types, op, opfn)                     \
-  static void op##_kernel(Tensor& result, const Tensor& self) {            \
-    AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                    \
-      static constexpr int WIDTH = 128 / sizeof(scalar_t);                 \
-      DL_RUNTIME_BUG(opfn, scalar_t);                                      \
-      CPU_tensor_parallel_kernel_apply2<scalar_t, scalar_t>(               \
-          result,                                                          \
-          self,                                                            \
-          [](int64_t size,                                                 \
-             scalar_t* x,                                                  \
-             scalar_t* y,                                                  \
-             int64_t stridex,                                              \
-             int64_t stridey) {                                            \
-            using Vec = vec256::Vec256<scalar_t>;                          \
-            if (stridex == 1 && stridey == 1) {                            \
-              vec256::map(                                                 \
-                  [](const Vec& x) { return vec256::op(x); }, x, y, size); \
-            } else {                                                       \
-              int64_t i = 0;                                               \
-              if (size > WIDTH) {                                          \
-                for (; i < size - size % WIDTH; i += WIDTH) {              \
-                  scalar_t buffer[WIDTH];                                  \
-                  for (int64_t j = 0; j < WIDTH; j++)                      \
-                    buffer[j] = y[stridey * (j + i)];                      \
-                  vec256::map_(                                            \
-                      [](const Vec& x) { return vec256::op(x); },          \
-                      buffer,                                              \
-                      WIDTH);                                              \
-                  for (int64_t j = 0; j < WIDTH; j++)                      \
-                    x[stridex * (j + i)] = buffer[j];                      \
-                }                                                          \
-              }                                                            \
-              for (; i < size; i++) {                                      \
-                x[stridex * i] = opfn(y[stridey * i]);                     \
-              }                                                            \
-            }                                                              \
-          });                                                              \
-    });                                                                    \
-  }                                                                        \
-  static void op##__kernel(Tensor& self) {                                 \
-    AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                    \
-      static constexpr int WIDTH = 128 / sizeof(scalar_t);                 \
-      DL_RUNTIME_BUG(opfn, scalar_t);                                      \
-      CPU_tensor_parallel_kernel_apply1<scalar_t>(                         \
-          self, [](int64_t size, scalar_t* x, int64_t stridex) {           \
-            using Vec = vec256::Vec256<scalar_t>;                          \
-            if (stridex == 1) {                                            \
-              vec256::map_(                                                \
-                  [](const Vec& x) { return vec256::op(x); }, x, size);    \
-            } else {                                                       \
-              int64_t i = 0;                                               \
-              if (size > WIDTH) {                                          \
-                for (; i < size - size % WIDTH; i += WIDTH) {              \
-                  scalar_t buffer[WIDTH];                                  \
-                  for (int64_t j = 0; j < WIDTH; j++)                      \
-                    buffer[j] = x[stridex * (j + i)];                      \
-                  vec256::map_(                                            \
-                      [](const Vec& x) { return vec256::op(x); },          \
-                      buffer,                                              \
-                      WIDTH);                                              \
-                  for (int64_t j = 0; j < WIDTH; j++)                      \
-                    x[stridex * (j + i)] = buffer[j];                      \
-                }                                                          \
-              }                                                            \
-              for (; i < size; i++) {                                      \
-                x[stridex * i] = opfn(x[stridex * i]);                     \
-              }                                                            \
-            }                                                              \
-          });                                                              \
-    });                                                                    \
-  }                                                                        \
-  REGISTER_DISPATCH(op##Impl, &op##_kernel)                                \
-  REGISTER_DISPATCH(op##_Impl, &op##__kernel)
-
 #define IMPLEMENT_KERNEL(types, op, opfn)                       \
   static void op##_kernel(Tensor& result, const Tensor& self) { \
     AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {         \
@@ -340,23 +254,23 @@ REGISTER_DISPATCH(sigmoidImpl, &sigmoid_kernel);
 
 IMPLEMENT_KERNEL(ALL, abs, std::abs)
 IMPLEMENT_KERNEL(FLOATING, acos, std::acos)
-IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, asin, std::asin)
-IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, atan, std::atan)
+IMPLEMENT_KERNEL(FLOATING, asin, std::asin)
+IMPLEMENT_KERNEL(FLOATING, atan, std::atan)
 IMPLEMENT_KERNEL(FLOATING, ceil, std::ceil)
 IMPLEMENT_KERNEL(FLOATING, erf, std::erf)
-IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, exp, std::exp)
-IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, expm1, std::expm1)
+IMPLEMENT_KERNEL(FLOATING, exp, std::exp)
+IMPLEMENT_KERNEL(FLOATING, expm1, std::expm1)
 IMPLEMENT_KERNEL(FLOATING, floor, std::floor)
 IMPLEMENT_KERNEL(FLOATING, log, std::log)
 IMPLEMENT_KERNEL(FLOATING, log10, std::log10)
-IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, log1p, std::log1p)
+IMPLEMENT_KERNEL(FLOATING, log1p, std::log1p)
 IMPLEMENT_KERNEL(FLOATING, log2, std::log2)
 IMPLEMENT_KERNEL(ALL, neg, -)
 IMPLEMENT_KERNEL(FLOATING, reciprocal, 1 /)
 IMPLEMENT_KERNEL(FLOATING, round, std::round)
-IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, rsqrt, 1 / std::sqrt)
-IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, sqrt, std::sqrt)
-IMPLEMENT_COMPUTEBOUND_KERNEL(FLOATING, tanh, std::tanh)
+IMPLEMENT_KERNEL(FLOATING, rsqrt, 1 / std::sqrt)
+IMPLEMENT_KERNEL(FLOATING, sqrt, std::sqrt)
+IMPLEMENT_KERNEL(FLOATING, tanh, std::tanh)
 IMPLEMENT_KERNEL(FLOATING, trunc, std::trunc)
 
 IMPLEMENT_KERNEL_LOOP(FLOATING, cos, std::cos)

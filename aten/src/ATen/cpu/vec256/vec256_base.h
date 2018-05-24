@@ -56,18 +56,26 @@ public:
     }
     return vec;
   }
-  static Vec256<T> load(const void* ptr) {
+  static Vec256<T> load(
+      const void* ptr,
+      int64_t count = size,
+      int64_t stride = 1) {
     Vec256 vec;
-    std::memcpy(vec.values, ptr, 32);
+    if (stride == 1) {
+      std::memcpy(vec.values, ptr, count * sizeof(T));
+    } else {
+      for (int64_t i = 0; i < count; i++)
+        vec.values[i] = reinterpret_cast<const T*>(ptr)[i * stride];
+    }
     return vec;
   }
-  static Vec256<T> load(const void* ptr, int64_t count) {
-    Vec256 vec;
-    std::memcpy(vec.values, ptr, count * sizeof(T));
-    return vec;
-  }
-  void store(void* ptr, int count = size) const {
-    std::memcpy(ptr, values, count * sizeof(T));
+  void store(void* ptr, int64_t count = size, int64_t stride = 1) const {
+    if (stride == 1) {
+      std::memcpy(ptr, values, count * sizeof(T));
+    } else {
+      for (int64_t i = 0; i < count; i++)
+        reinterpret_cast<T*>(ptr)[i * stride] = values[i];
+    }
   }
   const T& operator [](int idx) const {
     return values[idx];

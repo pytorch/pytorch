@@ -79,14 +79,19 @@ extern DispatchStub<void (*)(Tensor&, Scalar&, Scalar&)> clamp_Impl;
 extern DispatchStub<void (*)(Tensor&, Scalar&)> clampMin_Impl;
 extern DispatchStub<void (*)(Tensor&, Scalar&)> clampMax_Impl;
 
-// Missing unary functions
+// Missing vectorization for:
 // clone
 // contiguous
+// cos
+// cosh
 // digamma
 // erfinv
 // fill
 // lgamma
 // sign
+// sin
+// sinh
+// tan
 // zero
 
 } // namespace native

@@ -55,21 +55,35 @@ public:
     }
     return b;
   }
-  static Vec256<int64_t> load(const void* ptr) {
-    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
-  }
-  static Vec256<int64_t> load(const void* ptr, int64_t count) {
+  static Vec256<int64_t> load(
+      const void* ptr,
+      int64_t count = size,
+      int64_t stride = 1) {
+    if (count == size && stride == 1)
+      return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
     __at_align32__ int64_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
+    if (stride == 1) {
+      std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
+    } else {
+      for (int64_t i = 0; i < count; i++) {
+        tmp_values[i] = reinterpret_cast<const int64_t*>(ptr)[i * stride];
+      }
+    }
     return load(tmp_values);
   }
-  void store(void* ptr, int count = size) const {
-    if (count == size) {
+  void store(void* ptr, int64_t count = size, int64_t stride = 1) const {
+    if (count == size && stride == 1) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else {
       __at_align32__ int64_t tmp_values[size];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
+      if (stride == 1) {
+        std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
+      } else {
+        for (int64_t i = 0; i < count; i++) {
+          reinterpret_cast<int64_t*>(ptr)[i * stride] = tmp_values[i];
+        }
+      }
     }
   }
   const int64_t& operator[](int idx) const  = delete;
@@ -119,21 +133,35 @@ public:
     }
     return b;
   }
-  static Vec256<int32_t> load(const void* ptr) {
-    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
-  }
-  static Vec256<int32_t> load(const void* ptr, int32_t count) {
+  static Vec256<int32_t> load(
+      const void* ptr,
+      int64_t count = size,
+      int64_t stride = 1) {
+    if (count == size && stride == 1)
+      return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
     __at_align32__ int32_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
+    if (stride == 1) {
+      std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
+    } else {
+      for (int64_t i = 0; i < count; i++) {
+        tmp_values[i] = reinterpret_cast<const int32_t*>(ptr)[i * stride];
+      }
+    }
     return load(tmp_values);
   }
-  void store(void* ptr, int count = size) const {
-    if (count == size) {
+  void store(void* ptr, int64_t count = size, int64_t stride = 1) const {
+    if (count == size && stride == 1) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else {
       __at_align32__ int32_t tmp_values[size];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
+      if (stride == 1) {
+        std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
+      } else {
+        for (int64_t i = 0; i < count; i++) {
+          reinterpret_cast<int32_t*>(ptr)[i * stride] = tmp_values[i];
+        }
+      }
     }
   }
   const int32_t& operator[](int idx) const  = delete;
@@ -231,21 +259,35 @@ public:
     }
     return b;
   }
-  static Vec256<int16_t> load(const void* ptr) {
-    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
-  }
-  static Vec256<int16_t> load(const void* ptr, int16_t count) {
+  static Vec256<int16_t> load(
+      const void* ptr,
+      int64_t count = size,
+      int64_t stride = 1) {
+    if (count == size && stride == 1)
+      return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
     __at_align32__ int16_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    if (stride == 1) {
+      std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    } else {
+      for (int64_t i = 0; i < count; i++) {
+        tmp_values[i] = reinterpret_cast<const int16_t*>(ptr)[i * stride];
+      }
+    }
     return load(tmp_values);
   }
-  void store(void* ptr, int count = size) const {
-    if (count == size) {
+  void store(void* ptr, int64_t count = size, int64_t stride = 1) const {
+    if (count == size && stride == 1) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else {
       __at_align32__ int16_t tmp_values[size];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+      if (stride == 1) {
+        std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+      } else {
+        for (int64_t i = 0; i < count; i++) {
+          reinterpret_cast<int16_t*>(ptr)[i * stride] = tmp_values[i];
+        }
+      }
     }
   }
   const int16_t& operator[](int idx) const  = delete;

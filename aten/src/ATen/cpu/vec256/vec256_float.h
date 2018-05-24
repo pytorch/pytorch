@@ -50,21 +50,51 @@ public:
     }
     return b;
   }
-  static Vec256<float> load(const void* ptr, int64_t count = size) {
-    if (count == size)
+  static Vec256<float> load(const void* ptr, int64_t count = size, int64_t stride = 1) {
+    if (count == size && stride == 1)
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
+
+#ifdef __AVX2__
+    if(count == size) {
+      __m256i vindex = _mm256_set_epi32(
+          7 * stride,
+          6 * stride,
+          5 * stride,
+          4 * stride,
+          3 * stride,
+          2 * stride,
+          1 * stride,
+          0);
+      return _mm256_i32gather_ps(reinterpret_cast<const float*>(ptr), vindex, 1);
+    }
+#endif
+
     __at_align32__ float tmp_values[size];
-    std::memcpy(
-        tmp_values, reinterpret_cast<const float*>(ptr), count * sizeof(float));
-    return _mm256_loadu_ps(tmp_values);
+    if (stride == 1) {
+      std::memcpy(
+          tmp_values,
+          reinterpret_cast<const float*>(ptr),
+          count * sizeof(float));
+    } else {
+      for (int64_t i = 0; i < count; i++) {
+        tmp_values[i] = reinterpret_cast<const float*>(ptr)[i * stride];
+      }
+    }
+    return _mm256_load_ps(tmp_values);
   }
-  void store(void* ptr, int64_t count = size) const {
-    if (count == size) {
+  void store(void* ptr, int64_t count = size, int64_t stride = 1) const {
+    if (count == size && stride == 1) {
       _mm256_storeu_ps(reinterpret_cast<float*>(ptr), values);
     } else {
       float tmp_values[size];
       _mm256_storeu_ps(reinterpret_cast<float*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(float));
+      if (stride == 1) {
+        std::memcpy(ptr, tmp_values, count * sizeof(float));
+      } else {
+        for (int64_t i = 0; i < count; i++) {
+          reinterpret_cast<float*>(ptr)[i * stride] = tmp_values[i];
+        }
+      }
     }
   }
   const float& operator[](int idx) const  = delete;

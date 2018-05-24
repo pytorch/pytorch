@@ -99,16 +99,24 @@ template <typename scalar_t, typename Op>
 inline void map_(
     const Op& vec_fun,
     scalar_t* data,
-    int64_t size) {
+    int64_t size,
+    int64_t stride = 1) {
   using Vec = vec256::Vec256<scalar_t>;
   int64_t d = 0;
-  for (; d < size - (size % Vec::size); d += Vec::size) {
-    Vec output_vec = vec_fun(Vec::load(data + d));
-    output_vec.store(data + d);
+  if (stride == 1) {
+    for (; d < size - (size % Vec::size); d += Vec::size) {
+      Vec output_vec = vec_fun(Vec::load(data + d));
+      output_vec.store(data + d);
+    }
+  } else {
+    for (; d < size - (size % Vec::size); d += Vec::size) {
+      Vec output_vec = vec_fun(Vec::load(data + d, Vec::size, stride));
+      output_vec.store(data + d, Vec::size, stride);
+    }
   }
   if (size - d > 0) {
-    Vec output_vec = vec_fun(Vec::load(data + d, size - d));
-    output_vec.store(data + d, size - d);
+    Vec output_vec = vec_fun(Vec::load(data + d, size - d, stride));
+    output_vec.store(data + d, size - d, stride);
   }
 }
 
@@ -117,16 +125,25 @@ inline void map(
     const Op& vec_fun,
     scalar_t* output_data,
     scalar_t* input_data,
-    int64_t size) {
+    int64_t size,
+    int64_t stride_out = 1,
+    int64_t stride_in = 1) {
   using Vec = vec256::Vec256<scalar_t>;
   int64_t d = 0;
-  for (; d < size - (size % Vec::size); d += Vec::size) {
-    Vec output_vec = vec_fun(Vec::load(input_data + d));
-    output_vec.store(output_data + d);
+  if (stride_in == 1 && stride_out == 1) {
+    for (; d < size - (size % Vec::size); d += Vec::size) {
+      Vec output_vec = vec_fun(Vec::load(input_data + d));
+      output_vec.store(output_data + d);
+    }
+  } else {
+    for (; d < size - (size % Vec::size); d += Vec::size) {
+      Vec output_vec = vec_fun(Vec::load(input_data + d, Vec::size, stride_in));
+      output_vec.store(output_data + d, Vec::size, stride_out);
+    }
   }
   if (size - d > 0) {
-    Vec output_vec = vec_fun(Vec::load(input_data + d, size - d));
-    output_vec.store(output_data + d, size - d);
+    Vec output_vec = vec_fun(Vec::load(input_data + d, size - d, stride_in));
+    output_vec.store(output_data + d, size - d, stride_out);
   }
 }
 
