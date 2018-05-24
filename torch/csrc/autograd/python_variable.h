@@ -36,3 +36,6 @@ inline at::Tensor& THPVariable_UnpackData(PyObject* obj) {
   auto var = (THPVariable*)obj;
   return var->cdata.data();
 }
+
+PyObject *THPVariable_dtype(THPVariable *self);
+PyObject *THPVariable_device(THPVariable* self);

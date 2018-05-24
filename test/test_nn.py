@@ -1192,6 +1192,10 @@ class TestNN(NNTestCase):
             net.to([])
         with self.assertRaises(TypeError):
             net.to({}, non_blocking=True)
+        with self.assertRaises(TypeError):
+            net.to(torch.tensor(3, dtype=torch.long), non_blocking=True)
+        with self.assertRaises(TypeError):
+            net.to(cpu, torch.tensor(3, dtype=torch.long), non_blocking=True)
 
     def test_type(self):
         l = nn.Linear(10, 20)
@@ -1225,7 +1229,7 @@ class TestNN(NNTestCase):
             self.assertIsInstance(l.weight.data, torch.cuda.DoubleTensor)
             self.assertIsInstance(l.bias.data, torch.cuda.DoubleTensor)
             self.assertIsInstance(net.indices, torch.cuda.LongTensor)
-            net.to(device="cuda:0", dtype=torch.half)
+            net.to(torch.empty(1, device="cuda:0", dtype=torch.half))
             self.assertIsInstance(l.weight.data, torch.cuda.HalfTensor)
             self.assertIsInstance(l.bias.data, torch.cuda.HalfTensor)
             self.assertIsInstance(net.indices, torch.cuda.LongTensor)
@@ -1236,7 +1240,7 @@ class TestNN(NNTestCase):
         net.type(torch.FloatTensor)
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)
-        net.type(torch.DoubleTensor)
+        net.to(torch.DoubleTensor(1))
         self.assertIsInstance(l.weight.data, torch.DoubleTensor)
         self.assertIsInstance(l.bias.data, torch.DoubleTensor)
         if TEST_CUDA:
