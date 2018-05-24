@@ -20,8 +20,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const Tensor<Context>& X = Input(INPUT);
   auto& filter = Input(FILTER);
   Tensor<Context>* Y = Output(0);
-  const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
+  const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(
       filter.dim32(0) == M,
       "filter number must be equal to input channel number");

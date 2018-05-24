@@ -275,7 +275,6 @@ const std::unordered_set<std::string>& Caffe2Backend::get_rnn_operators()
 const std::unordered_map<std::string, std::string>&
 Caffe2Backend::get_renamed_operators() const {
   const static std::unordered_map<std::string, std::string> kRenamedOperators{
-      {"Caffe2ConvTranspose", "ConvTranspose"},
       {"GlobalMaxPool", "MaxPool"},
       {"GlobalAveragePool", "AveragePool"},
       {"Pad", "PadImage"},
