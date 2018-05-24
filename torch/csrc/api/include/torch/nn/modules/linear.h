@@ -6,7 +6,8 @@
 
 #include <cstdint>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 class Linear : public torch::nn::CloneableModule<Linear> {
  public:
@@ -23,4 +24,5 @@ class Linear : public torch::nn::CloneableModule<Linear> {
   TORCH_ATTR(Variable, bias);
 };
 
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch
