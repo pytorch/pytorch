@@ -18,7 +18,7 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
     Returns:
         Total norm of the parameters (viewed as a single vector).
     """
-    if torch.is_tensor(parameters):
+    if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     parameters = list(filter(lambda p: p.grad is not None, parameters))
     max_norm = float(max_norm)
@@ -61,7 +61,7 @@ def clip_grad_value_(parameters, clip_value):
         clip_value (float or int): maximum allowed value of the gradients
             The gradients are clipped in the range [-clip_value, clip_value]
     """
-    if torch.is_tensor(parameters):
+    if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     clip_value = float(clip_value)
     for p in filter(lambda p: p.grad is not None, parameters):
