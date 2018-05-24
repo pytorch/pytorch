@@ -336,9 +336,9 @@ class Caffe2Backend(Backend):
         initial_states_sliced = []
         for initial_state, name_suffix in initial_states_and_names:
             initial_states_sliced.append(
-                init_net.Slice(initial_state, name + name_suffix,
-                               starts=[direction_offset + 0, 0, 0],
-                               ends  =[direction_offset + 1,-1,-1]))
+                pred_mh.net.Slice(initial_state, name + name_suffix,
+                                  starts=[direction_offset + 0, 0, 0],
+                                  ends  =[direction_offset + 1,-1,-1]))
 
         if direction_offset == 1:
             if sequence_lens is not None:
@@ -412,8 +412,8 @@ class Caffe2Backend(Backend):
         else:
             raise RuntimeError("best-effort shape inference for RNN/GRU/LSTM failed")
 
-        init_net = core.Net("init-net")
         pred_mh = ModelHelper()
+        init_net = core.Net("init-net")
 
         init_net.Reshape(W, [W, cls.dummy_name()], shape=[1,-1,0])
         init_net.Squeeze(W, W, dims=[0])
@@ -507,9 +507,24 @@ class Caffe2Backend(Backend):
                 pred_mh.net.Concat([outputs_f[i], outputs_b[i]],
                                    [n.outputs[i], cls.dummy_name()], axis=0)
 
-        return Caffe2Ops(list(pred_mh.Proto().op),
-                         list(init_net.Proto().op),
-                         list(pred_mh.Proto().external_input))
+        # We want to decide whether to put all of our weight-reshaping
+        # operators in the init net or the predict net. We can put
+        # them in the init net iff the inputs to those operators are
+        # already available, either as graph initializers, or as the
+        # output of other operators in the init net. The latter case
+        # occurs, for example, when exporting from pytorch to onnx.
+        # In most production use, we expect has_initializers to be
+        # true.
+        initializers = {i.name for i in init_model.graph.initializer}
+        outputs = {output for node in init_model.graph.node for output in node.output}
+        has_initializers = all(x in initializers or x in outputs for x in (W, R, B))
+
+        pred_ops = []
+        init_ops = []
+        (init_ops if has_initializers else pred_ops).extend(init_net.Proto().op)
+        pred_ops.extend(pred_mh.Proto().op)
+
+        return Caffe2Ops(pred_ops, init_ops, list(pred_mh.Proto().external_input))
 
     @classmethod
     def _create_control_op(cls, init_model, pred_model, n, opset_version):
@@ -902,8 +917,6 @@ class Caffe2Backend(Backend):
 
     @classmethod
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
-
-
         device_option = get_device_option(Device(device))
 
         init_model = cls.optimize_onnx(onnx_model, init=True)
@@ -931,7 +944,7 @@ class Caffe2Backend(Backend):
                     success = False
                     print('ONNX FATAL:', e)
                     continue
-                (init_net if include_initializers else net).op.extend(c2ops.init_ops)
+                init_net.op.extend(c2ops.init_ops)
                 net.op.extend(c2ops.ops)
                 net.external_input.extend(c2ops.interface_blobs)
             net.external_output.extend(
