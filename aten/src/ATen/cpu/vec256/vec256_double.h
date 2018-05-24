@@ -2,7 +2,7 @@
 
 #include "intrinsics.h"
 #include "vec256_base.h"
-#ifdef __AVX__
+#if defined(__AVX__) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -10,7 +10,7 @@ namespace at {
 namespace vec256 {
 namespace {
 
-#ifdef __AVX__
+#if defined(__AVX__) && !defined(_MSC_VER)
 
 template <> class Vec256<double> {
 public:

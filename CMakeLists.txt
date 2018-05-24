@@ -44,10 +44,11 @@ option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_ATEN "Use ATen" OFF)
 option(USE_CUDA "Use CUDA" ON)
+option(USE_ROCM "Use ROCm" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
-    "USE_CUDA" OFF)  # New option
+    "USE_CUDA" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 cmake_dependent_option(
     USE_GFLAGS "Use GFLAGS" ON
@@ -58,7 +59,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo" ON
     "BUILD_CAFFE2" OFF)
-option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)  # New option
+option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)
 cmake_dependent_option(
     USE_LEVELDB "Use LEVELDB" ON
     "BUILD_CAFFE2" OFF)
@@ -77,7 +78,7 @@ cmake_dependent_option(
     "BUILD_CAFFE2" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
-option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)  # New option
+option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
 option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
@@ -104,13 +105,16 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_MKLML "Use MKLML interface in MKL BLAS" ON
     "BUILD_CAFFE2" OFF)
-option(USE_DISTRIBUTED "Use THD (distributed)" OFF)  # New option
-option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)  # New option
+option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
+option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
 
 # Legacy options, which we will eventually remove
 cmake_dependent_option(
     WITH_CUDA "Legacy CUDA" ON
     "USE_CUDA" OFF)
+cmake_dependent_option(
+    WITH_ROCM "Legacy ROCm" ON
+    "USE_ROCM" OFF)
 cmake_dependent_option(
     NO_CUDA "Legacy no CUDA" OFF
     "USE_CUDA" ON)
@@ -158,9 +162,18 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 enable_testing()
 
+# ---[ Build variables set within the cmake tree
+include(cmake/BuildVariables.cmake)
+set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should build.")
+
+# Set default build type
+if(NOT CMAKE_BUILD_TYPE)
+    message(STATUS "Build type not set - defaulting to Release")
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build from: Debug Release RelWithDebInfo MinSizeRel Coverage." FORCE)
+endif()
+
 # ---[ Misc checks to cope with various compiler modes
 include(cmake/MiscCheck.cmake)
-include(cmake/BuildVariables.cmake)
 
 # External projects
 include(ExternalProject)
@@ -169,14 +182,6 @@ include(ExternalProject)
 # TODO: merge the following 3 files into cmake/public/utils.cmake.
 include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
-
-set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should build.")
-
-# Set default build type
-if(NOT CMAKE_BUILD_TYPE)
-    message(STATUS "Build type not set - defaulting to Release")
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build from: Debug Release RelWithDebInfo MinSizeRel Coverage." FORCE)
-endif()
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
@@ -249,7 +254,9 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 # ---[ Old caffe protobuf
-add_subdirectory(caffe/proto)
+if(BUILD_CAFFE2)
+  add_subdirectory(caffe/proto)
+endif()
 
 # ---[ Main build
 add_subdirectory(caffe2)
@@ -313,7 +320,7 @@ if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
       "generate files that are not well tested.")
 endif()
 
-if (USE_CUDA)
+if (USE_CUDA OR USE_ROCM)
   # TODO: check if we should include other cuda dependency libraries
   # to the interface as well.
 
