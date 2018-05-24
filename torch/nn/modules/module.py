@@ -371,6 +371,7 @@ class Module(object):
                     return t.to(device, non_blocking=non_blocking)
 
         else:
+            # `dtype` is not None and is floating point type in this
             def convert(t):
                 if t.is_floating_point():
                     return t.to(dtype, non_blocking)

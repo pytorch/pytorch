@@ -558,31 +558,19 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
 static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "to(Device device, ScalarType dtype=None, bool non_blocking=False)",
-    "to(ScalarType dtype, bool non_blocking=False)",
-    "to(Tensor other, bool non_blocking=False)",
-  });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<3> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    auto device = r.device(0);
-    auto deviceAutoGPU = device.deviceInt64();
-    auto scalarType = r.scalartypeWithDefault(1, self_.type().scalarType());
+  auto parsed = parse_to_conversion(args, kwargs);
+  auto& device = std::get<0>(parsed);
+  auto& scalarType = std::get<1>(parsed);
+  auto non_blocking = std::get<2>(parsed);
+  if (device) {
+    auto deviceAutoGPU = device->deviceInt64();
     auto& layout = *torch::getLayout(self_.type().backend());
-    auto& type = torch::getType(scalarType, layout, device.type);
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, r.toBool(2)));
-  } else if (r.idx == 1) {
-    auto scalarType = r.scalartype(0);
-    auto& type = self_.type().toScalarType(scalarType);
+    auto& type = torch::getType(scalarType.value_or(self_.type().scalarType()), layout, device->type);
+    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, non_blocking));
+  } else {
+    auto& type = self_.type().toScalarType(*scalarType);
     return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
-  } else if (r.idx == 2) {
-    auto other = r.tensor(0);
-    auto& type = other.type();
-    auto deviceType = torch::getDeviceType(type);
-    auto deviceAutoGPU = (deviceType == DeviceType::CPU) ? -1 : other.get_device();
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, r.toBool(1)));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

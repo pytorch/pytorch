@@ -2,6 +2,8 @@
 
 // ${generated_comment}
 
+#include "torch/csrc/Device.h"
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
@@ -18,29 +20,14 @@ namespace torch { namespace autograd {
 static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "to(Device device, ScalarType dtype=None, bool non_blocking=False)",
-    "to(ScalarType dtype, bool non_blocking=False)",
-    "to(Tensor tensor, bool non_blocking=False)",
-  });
+  auto parsed = parse_to_conversion(args, kwargs);
+  auto& device = std::get<0>(parsed);
+  auto& scalarType = std::get<1>(parsed);
+  auto non_blocking = std::get<2>(parsed);
   PyObject *tuple = PyTuple_New(3);
-  if (!tuple) throw python_error();
-  ParsedArgs<3> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    PyTuple_SET_ITEM(tuple, 0, r.pyobject(0));
-    PyTuple_SET_ITEM(tuple, 1, r.pyobject(1));
-    PyTuple_SET_ITEM(tuple, 2, r.toBool(2) ? Py_True : Py_False);
-  } else if (r.idx == 1) {
-    PyTuple_SET_ITEM(tuple, 0, Py_None);
-    PyTuple_SET_ITEM(tuple, 1, r.pyobject(0));
-    PyTuple_SET_ITEM(tuple, 2, r.toBool(1) ? Py_True : Py_False);
-  } else if (r.idx == 2) {
-    auto tensor = reinterpret_cast<THPVariable*>(r.pyobject(0));
-    PyTuple_SET_ITEM(tuple, 0, THPVariable_device(tensor));
-    PyTuple_SET_ITEM(tuple, 1, THPVariable_dtype(tensor));
-    PyTuple_SET_ITEM(tuple, 2, r.toBool(1) ? Py_True : Py_False);
-  }
+  PyTuple_SET_ITEM(tuple, 0, device       ? THPDevice_New(*device) : Py_None);
+  PyTuple_SET_ITEM(tuple, 1, scalarType   ? torch::autograd::utils::wrap(torch::getDtype(*scalarType)) : Py_None);
+  PyTuple_SET_ITEM(tuple, 2, non_blocking ? Py_True : Py_False);
   return tuple;
   END_HANDLE_TH_ERRORS
 }

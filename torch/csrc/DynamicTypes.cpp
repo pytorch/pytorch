@@ -122,6 +122,16 @@ DeviceType getDeviceType(const at::Type& type) {
   return type.is_cuda() ? torch::DeviceType::CUDA : torch::DeviceType::CPU;
 }
 
+Device getDevice(const at::Tensor& tensor) {
+  if (tensor.type().is_cuda()) {
+    return torch::Device(torch::DeviceType::CUDA, tensor.get_device(), false);
+  }
+  else {
+    return torch::Device(torch::DeviceType::CPU, -1, true);
+  }
+}
+
+
 PyObject* createPyObject(const at::Storage& storage)
 {
   auto type = getPyTypeObject(storage);

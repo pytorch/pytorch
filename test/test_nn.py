@@ -1183,7 +1183,7 @@ class TestNN(NNTestCase):
         with self.assertRaises(TypeError):
             net.to(torch.long)
         with self.assertRaises(TypeError):
-            net.to(torch.double, True)
+            net.to(None, True)
         with self.assertRaises(TypeError):
             net.to(cpu, torch.long, True)
         with self.assertRaises(TypeError):
