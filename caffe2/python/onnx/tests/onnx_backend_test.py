@@ -35,6 +35,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_simple_rnn.*'  # Seems simple RNN case has some problem
                      '|test_gru.*'  # Seems GRU case has some problem
                      '|test_upsample.*'  # Upsample is redesigned in ONNX
+                     '|test_prelu.*'  # PRelu is not compliant with ONNX yet
                      '|test_operator_repeat.*'  # Tile is not compliant with ONNX yet
                      '|test_.*pool_.*same.*'  # Does not support pool same.
                      ')')
@@ -43,6 +44,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
 backend_test.exclude('(test_cast_.*'
                      '|test_Conv1d_.*cuda'
                      '|test_Conv3d_groups_cuda'
+                     '|test_rnn_seq_length'
                      '|test_operator_add.*_cuda'
                      '|test_operator_lstm_cuda'
                      '|test_operator_rnn.*_cuda)')
