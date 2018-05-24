@@ -207,7 +207,8 @@ class Caffe2Backend(Backend):
     # opset_version if you don't want this to version.
     @classmethod
     def run_node(cls, node, inputs, device='CPU', opset_version=_known_opset_version, outputs_info=None):
-        super(Caffe2Backend, cls).run_node(node, inputs, device=device, outputs_info=outputs_info)
+        super(Caffe2Backend, cls).run_node(node, inputs, device=device,
+                                           outputs_info=outputs_info, opset_version=opset_version)
 
         device_option = get_device_option(Device(device))
         ws = Workspace()
