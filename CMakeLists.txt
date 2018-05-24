@@ -109,10 +109,10 @@ option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_MKLDNN "Use MKLDNN" OFF)
 cmake_dependent_option(
-    USE_IDEEP "Use IDEEP interface in MKL BLAS" ON
+    USE_IDEEP "Use IDEEP interface in MKL BLAS" OFF
     "BUILD_CAFFE2" OFF)
 cmake_dependent_option(
-    USE_MKLML "Use MKLML interface in MKL BLAS" ON
+    USE_MKLML "Use MKLML interface in MKL BLAS" OFF
     "BUILD_CAFFE2" OFF)
 option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
 option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
