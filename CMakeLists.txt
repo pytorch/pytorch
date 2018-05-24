@@ -20,6 +20,12 @@ set(CAFFE2_VERSION
 #    endif()
 set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 
+# ---[ Mark if these flags were passed in by the user
+# TODO I think USE_CUDA needs to be added here as well
+if (BLAS)
+  set(BLAS_SET_BY_USER TRUE)
+endif()
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
