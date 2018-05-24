@@ -216,7 +216,7 @@ class CosineAnnealingLR(_LRScheduler):
                 (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
                 for base_lr in self.base_lrs]
 
-    
+
 class CosineAnnealingWithRestartsLR(_LRScheduler):
 
     r"""Set the learning rate of each parameter group using a cosine annealing
@@ -253,14 +253,14 @@ class CosineAnnealingWithRestartsLR(_LRScheduler):
         self.restarts = 0
         self.restarted_at = 0
         super().__init__(optimizer, last_epoch)
-    
+
     def restart(self):
         self.restart_every *= self.T_mult
         self.restarted_at = self.last_epoch
-    
+
     def cosine(self, base_lr):
         return self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.step_n / self.restart_every)) / 2
-    
+
     @property
     def step_n(self):
         return self.last_epoch - self.restarted_at
@@ -268,8 +268,8 @@ class CosineAnnealingWithRestartsLR(_LRScheduler):
     def get_lr(self):
         if self.step_n >= self.restart_every:
             self.restart()
-        return [self.cosine(base_lr) for base_lr in self.base_lrs]  
-  
+        return [self.cosine(base_lr) for base_lr in self.base_lrs]
+
 
 class ReduceLROnPlateau(object):
     """Reduce learning rate when a metric has stopped improving.
