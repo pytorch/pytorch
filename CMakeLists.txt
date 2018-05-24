@@ -21,12 +21,20 @@ set(CAFFE2_VERSION
 set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 
 # ---[ Mark if these flags were passed in by the user
+# NOTE: The arguments to the 'if' here must NOT be wrapped in "${}", or else
+# it will somehow fail the question when it is "MKL"
 # TODO I think USE_CUDA needs to be added here as well
-if (BLAS)
+if(DEFINED BLAS)
   set(BLAS_SET_BY_USER TRUE)
 else()
   message(STATUS "Not forcing any particular BLAS to be found")
   set(BLAS_SET_BY_USER FALSE)
+endif()
+if(DEFINED USE_IDEEP)
+  set(USE_IDEEP_SET_BY_USER TRUE)
+endif()
+if(DEFINED USE_MKLML)
+  set(USE_MKLML_SET_BY_USER TRUE)
 endif()
 
 # ---[ Options.
@@ -152,10 +160,13 @@ if (USE_ATEN)
     set(BUILD_ATEN ${USE_ATEN})
 endif()
 
-# ---[ Special code path for MKL module
-if (NOT BUILD_ATEN)
-  if ("${BLAS}" STREQUAL "MKL")
-    set(USE_MKL_IDEEP_OR_MKLML ON)
+# Use MKLML and IDEEP by default for MKL
+if("${BLAS_SET_BY_USER}" AND "${BLAS}" STREQUAL MKL)
+  if(NOT USE_IDEEP_SET_BY_USER)
+    set(USE_IDEEP ON)
+  endif()
+  if(NOT USE_MKLML_SET_BY_USER)
+    set(USE_MKLML ON)
   endif()
 endif()
 
