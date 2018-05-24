@@ -14,7 +14,7 @@ if (NOT __NCCL_INCLUDED)
     # we build nccl statically, but want to link it into the caffe shared library
     # this requires position-independent code
     if (UNIX)
-      set(NCCL_EXTRA_COMPILER_FLAGS "-fPIC")
+      set(NCCL_EXTRA_COMPILER_FLAGS "-Xcompiler -fPIC")
     endif()
 
     set(NCCL_CXX_FLAGS ${CMAKE_CXX_FLAGS} ${NCCL_EXTRA_COMPILER_FLAGS})
@@ -29,6 +29,7 @@ if (NOT __NCCL_INCLUDED)
         "CXX=${CMAKE_CXX_COMPILER}"
         "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
         "NVCC=${CUDA_NVCC_EXECUTABLE}"
+        "VERBOSE=0"
       BUILD_BYPRODUCTS "${nccl_PREFIX}/build/lib/libnccl_static.a"
       INSTALL_COMMAND ""
       )

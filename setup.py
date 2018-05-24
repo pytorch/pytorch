@@ -188,7 +188,7 @@ for key, value in cfg_vars.items():
 ################################################################################
 
 dep_libs = [
-    'nccl', 'ATen',
+    'nccl', 'caffe2',
     'libshm', 'libshm_windows', 'gloo', 'THD', 'nanopb',
 ]
 
@@ -242,6 +242,7 @@ def build_libs(libs):
         build_libs_cmd += ['--with-distributed-mw']
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
+        print("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
         sys.exit(1)
 
 missing_pydep = '''
@@ -286,7 +287,7 @@ class build_deps(Command):
         libs = []
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
-        libs += ['ATen', 'nanopb']
+        libs += ['caffe2', 'nanopb']
         if IS_WINDOWS:
             libs += ['libshm_windows']
         else:
@@ -571,9 +572,9 @@ include_dirs += [
 library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
-ATEN_LIBS = [os.path.join(lib_path, 'libATen_cpu.so')]
+CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.so')]
 if WITH_CUDA or WITH_ROCM:
-    ATEN_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libATen_cuda.so'), '-Wl,--as-needed'])
+    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 
@@ -581,15 +582,15 @@ NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if IS_DARWIN:
-    ATEN_LIBS = [os.path.join(lib_path, 'libATen_cpu.dylib')]
+    CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.dylib')]
     if WITH_CUDA or WITH_ROCM:
-        ATEN_LIBS.append(os.path.join(lib_path, 'libATen_cuda.dylib'))
+        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_gpu.dylib'))
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
-    ATEN_LIBS = [os.path.join(lib_path, 'ATen_cpu.lib')]
+    CAFFE2_LIBS = [os.path.join(lib_path, 'caffe2.lib')]
     if WITH_CUDA or WITH_ROCM:
-        ATEN_LIBS.append(os.path.join(lib_path, 'ATen_cuda.lib'))
+        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
     if DEBUG:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
     else:
@@ -597,7 +598,7 @@ if IS_WINDOWS:
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = ATEN_LIBS + [NANOPB_STATIC_LIB]
+main_link_args = CAFFE2_LIBS + [NANOPB_STATIC_LIB]
 main_sources = [
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
