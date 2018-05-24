@@ -65,27 +65,19 @@ void RNNBase<Derived>::reset() {
 
   for (int64_t layer = 0; layer < layers_; ++layer) {
     const int64_t input_size = (layer == 0) ? input_size_ : hidden_size_;
-    register_parameter(
-        "weight_ih_l",
-        layer,
-        &RNNBase::ihw_,
+    ihw_[layer] = this->register_parameter(
+        "weight_ih_l" + std::to_string(layer),
         at::CPU(at::kFloat).empty({gate_size, input_size}));
-    register_parameter(
-        "weight_hh_l",
-        layer,
-        &RNNBase::hhw_,
+    hhw_[layer] = this->register_parameter(
+        "weight_hh_l" + std::to_string(layer),
         at::CPU(at::kFloat).empty({gate_size, hidden_size_}));
 
     if (with_bias_) {
-      register_parameter(
-          "bias_ih_l",
-          layer,
-          &RNNBase::ihb_,
+      ihb_[layer] = this->register_parameter(
+          "bias_ih_l" + std::to_string(layer),
           at::CPU(at::kFloat).empty({gate_size}));
-      register_parameter(
-          "bias_hh_l",
-          layer,
-          &RNNBase::hhb_,
+      hhb_[layer] = this->register_parameter(
+          "bias_hh_l" + std::to_string(layer),
           at::CPU(at::kFloat).empty({gate_size}));
     }
   }
@@ -120,24 +112,6 @@ std::vector<Tensor> RNNBase<Derived>::flat_weights() const {
     }
   }
   return flat;
-}
-
-template <typename Derived>
-void RNNBase<Derived>::register_parameter(
-    const std::string& name,
-    int64_t layer,
-    std::vector<Variable> RNNBase::*variables,
-    Tensor tensor) {
-  (this->*variables)[layer] =
-      autograd::make_variable(tensor, /*requires_grad=*/true);
-  register_parameter(
-      name + std::to_string(layer),
-      [variables, layer](void* self) -> Variable& {
-        return (static_cast<RNNBase*>(self)->*variables)[layer];
-      },
-      [variables, layer](const void* self) -> const Variable& {
-        return (static_cast<const RNNBase*>(self)->*variables)[layer];
-      });
 }
 
 template <typename Derived>

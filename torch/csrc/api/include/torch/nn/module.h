@@ -2,8 +2,6 @@
 
 #include "torch/detail.h"
 
-#include <torch/detail/member_ref.h>
-
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/optional.h>
@@ -87,79 +85,26 @@ class Module {
   }
 
  protected:
-  using ModulePtr = std::shared_ptr<nn::Module>;
+  Variable register_parameter(const std::string& name, at::Tensor tensor);
+  Variable register_buffer(const std::string& name, at::Tensor tensor);
 
-  template <typename Derived, typename M>
-  void register_module(
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> register_module(
       const std::string& name,
-      std::shared_ptr<M> Derived::*module,
-      std::shared_ptr<M> new_module) {
-    check_name("Module", name);
-    auto base_module =
-        reinterpret_cast<std::shared_ptr<nn::Module> Derived::*>(module);
-    const auto pair = children_.emplace(name, base_module);
-    AT_CHECK(pair.second, "Module " + name + " has already been registered");
-    (pair.first->second)(static_cast<Derived*>(this)) = std::move(new_module);
-  }
-
-  // Hack for Sequential, should remove/figure out to do this better
-  template <typename Derived>
-  void register_module(
-      const std::string& name,
-      std::vector<std::shared_ptr<Module>> Derived::*modules,
-      size_t index) {
-    const auto pair = children_.insert({name, {modules, index}});
-    AT_CHECK(pair.second, "Module " + name + " has already been registered");
-  }
-
-  template <typename Derived>
-  void register_parameter(
-      const std::string& name,
-      Variable Derived::*variable,
-      Tensor tensor) {
-    check_name("Parameter", name);
-    const auto pair = parameters_.emplace(name, variable);
-    AT_CHECK(pair.second, "Parameter " + name + " has already been registered");
-    (pair.first->second)(static_cast<Derived*>(this)) =
-        autograd::make_variable(tensor, /*requires_grad=*/true);
-  }
-
-  template <typename Derived>
-  void register_buffer(
-      const std::string& name,
-      Variable Derived::*variable,
-      Tensor tensor) {
-    check_name("Parameter", name);
-    const auto pair = parameters_.emplace(name, variable);
-    AT_CHECK(pair.second, "Parameter " + name + " has already been registered");
-    (pair.first->second)(static_cast<Derived*>(this)) =
-        autograd::make_variable(tensor, /*requires_grad=*/false);
-  }
-
-  template <typename Getter, typename ConstGetter>
-  void register_parameter(
-      const std::string& name,
-      Getter getter,
-      ConstGetter const_getter) {
-    check_name("Parameter", name);
-    const auto pair = parameters_.insert(
-        {name, {std::move(getter), std::move(const_getter)}});
-    AT_CHECK(pair.second, "Parameter " + name + " has already been registered");
-  }
-
-  void check_name(const std::string& type, const std::string& name) {
-    AT_CHECK(!name.empty(), type + " name must not be empty");
-    AT_CHECK(
-        name.find('.') == std::string::npos,
-        type + " name '" + name + "' contains a dot, which is not permitted");
+      const std::shared_ptr<ModuleType>& module) {
+    const auto pair = children_.emplace(name, module);
+    AT_CHECK(pair.second, "Module has already been registered");
+    return module;
   }
 
  private:
   template <typename Derived>
   friend class CloneableModule;
 
-  std::unordered_map<std::string, detail::MemberRef<Variable>> parameters_;
-  std::unordered_map<std::string, detail::MemberRef<ModulePtr>> children_;
+  virtual void clone_(Module& other);
+
+  std::unordered_map<std::string, Variable> parameters_;
+  std::unordered_map<std::string, std::shared_ptr<Module>> children_;
 
   /// The module's name (e.g. "LSTM").
   mutable at::optional<std::string> name_;
@@ -193,17 +138,33 @@ class CloneableModule : public Module {
   /// and submodules in the cloned module are different from those in the
   /// original module.
   std::shared_ptr<Module> clone() const override {
-    auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
-    for (auto& pair : ptr->parameters_) {
-      auto& parameter = pair.second(ptr.get());
-      auto& original = this->parameters_.at(pair.first)(this);
-      parameter = at::empty_like(original);
-      parameter.data().copy_(original.data());
+    const auto& self = static_cast<const Derived&>(*this);
+    auto copy = std::make_shared<Derived>(self);
+    copy->parameters_.clear();
+    copy->children_.clear();
+    copy->reset();
+    for (auto& parameter : parameters_) {
+      copy->parameters_.at(parameter.first)
+          .data()
+          .copy_(parameter.second.data());
     }
-    for (auto& child : ptr->children_) {
-      child.second(ptr.get()) = this->children_.at(child.first)(this)->clone();
+    for (auto& child : children_) {
+      copy->children_.at(child.first)->clone_(*child.second);
     }
-    return ptr;
+    return copy;
+  }
+
+ private:
+  void clone_(Module& other) final override {
+    // Here we are *pretty* certain that `other's` type is `Derived` (because it
+    // was registered under the same name as `this`), but you never know what
+    // crazy things `reset()` does, so `dynamic_cast` just to be safe.
+    auto clone = std::dynamic_pointer_cast<Derived>(other.clone());
+    AT_CHECK(
+        clone != nullptr,
+        "Attempted to clone submodule, but it is of a "
+        "different type than the submodule it was to be cloned into");
+    static_cast<Derived&>(*this) = std::move(*clone);
   }
 };
 } // namespace nn

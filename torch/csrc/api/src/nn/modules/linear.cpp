@@ -5,17 +5,16 @@
 #include <cmath>
 #include <cstdint>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 Linear::Linear(size_t features_in, size_t features_out)
     : in_(features_in), out_(features_out) {}
 
 void Linear::reset() {
-  register_parameter(
-      "weight", &Linear::weight_, at::CPU(at::kFloat).empty({out_, in_}));
-  if (with_bias_) {
-    register_parameter("bias", &Linear::bias_, at::CPU(at::kFloat).empty(out_));
-  }
+  weight_ =
+      register_parameter("weight", at::CPU(at::kFloat).empty({out_, in_}));
+  bias_ = register_parameter("bias", at::CPU(at::kFloat).empty(out_));
 
   const auto stdv = 1.0 / std::sqrt(weight_.size(1));
   for (auto& p : parameters()) {
@@ -37,4 +36,5 @@ variable_list Linear::forward(variable_list input) {
   }
   return variable_list({output});
 }
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch
