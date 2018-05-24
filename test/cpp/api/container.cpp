@@ -2,6 +2,8 @@
 
 #include <torch/torch.h>
 
+#include <test/cpp/api/util.h>
+
 using namespace torch;
 using namespace torch::nn;
 
@@ -13,7 +15,7 @@ class TestModel : public Module {
     l3 = register_module("l3", Linear(5, 100).build());
   }
 
-  variable_list forward(variable_list input) override {
+  variable_list forward(variable_list input) {
     return input;
   }
 
@@ -29,7 +31,7 @@ class NestedModel : public Module {
         register_parameter("param", at::CPU(at::kFloat).tensor({3, 2, 21}));
   }
 
-  variable_list forward(variable_list input) override {
+  variable_list forward(variable_list input) {
     return input;
   };
 
@@ -122,43 +124,24 @@ TEST_CASE("containers") {
 
       REQUIRE(model->parameters().at("weight").grad().numel() == 2 * 5);
     }
+  }
 
-    SECTION("sequential") {
-      auto model = std::make_shared<ContainerList>();
-      model->append(Linear(10, 3).build());
-      model->append(Linear(3, 5).build());
-      model->append(Linear(5, 100).build());
+  SECTION("simple") {
+    auto model = std::make_shared<SimpleContainer>();
+    auto l1 = model->add(Linear(10, 3).build(), "l1");
+    auto l2 = model->add(Linear(3, 5).build(), "l2");
+    auto l3 = model->add(Linear(5, 100).build(), "l3");
 
-      auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
-      for (auto layer : *model) {
-        x = layer->forward({x})[0];
-        x = x.clamp_min(0); // relu
-      }
+    auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
+    x = l1->forward({x})[0].clamp_min(0);
+    x = l2->forward({x})[0].clamp_min(0);
+    x = l3->forward({x})[0].clamp_min(0);
 
-      backward(x);
-      REQUIRE(x.ndimension() == 2);
-      REQUIRE(x.size(0) == 1000);
-      REQUIRE(x.size(1) == 100);
-      REQUIRE(x.data().min().toCFloat() == 0);
-    }
-
-    SECTION("simple") {
-      auto model = std::make_shared<Sequential>();
-      auto l1 = model->add(Linear(10, 3).build(), "l1");
-      auto l2 = model->add(Linear(3, 5).build(), "l2");
-      auto l3 = model->add(Linear(5, 100).build(), "l3");
-
-      auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
-      x = l1->forward({x})[0].clamp_min(0);
-      x = l2->forward({x})[0].clamp_min(0);
-      x = l3->forward({x})[0].clamp_min(0);
-
-      backward(x);
-      REQUIRE(x.ndimension() == 2);
-      REQUIRE(x.size(0) == 1000);
-      REQUIRE(x.size(1) == 100);
-      REQUIRE(x.data().min().toCFloat() == 0);
-    }
+    backward(x);
+    REQUIRE(x.ndimension() == 2);
+    REQUIRE(x.size(0) == 1000);
+    REQUIRE(x.size(1) == 100);
+    REQUIRE(x.data().min().toCFloat() == 0);
   }
 
   SECTION("embedding") {
