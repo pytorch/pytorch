@@ -24,6 +24,9 @@ set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 # TODO I think USE_CUDA needs to be added here as well
 if (BLAS)
   set(BLAS_SET_BY_USER TRUE)
+else()
+  message(STATUS "Not forcing any particular BLAS to be found")
+  set(BLAS_SET_BY_USER FALSE)
 endif()
 
 # ---[ Options.
