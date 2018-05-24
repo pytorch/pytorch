@@ -56,7 +56,6 @@ endif()
 if (CAFFE2_WHITELISTED_FILES)
   caffe2_do_whitelist(Caffe2_CPU_SRCS CAFFE2_WHITELISTED_FILES)
   caffe2_do_whitelist(Caffe2_GPU_SRCS CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_HIP_SRCS CAFFE2_WHITELISTED_FILES)
 endif()
 
 # Debug messages - if you want to get a list of source files, enable the
@@ -72,11 +71,6 @@ if (FALSE)
     message(STATUS "  " ${tmp})
   endforeach()
 
-  message(STATUS "HIP sources: ")
-  foreach(tmp ${Caffe2_HIP_SRCS})
-    message(STATUS "  " ${tmp})
-  endforeach()
-
   message(STATUS "CPU test sources: ")
   foreach(tmp ${Caffe2_CPU_TEST_SRCS})
     message(STATUS "  " ${tmp})
@@ -84,11 +78,6 @@ if (FALSE)
 
   message(STATUS "GPU test sources: ")
   foreach(tmp ${Caffe2_GPU_TEST_SRCS})
-    message(STATUS "  " ${tmp})
-  endforeach()
-
-  message(STATUS "HIP test sources: ")
-  foreach(tmp ${Caffe2_HIP_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
 endif()
@@ -195,26 +184,6 @@ if(BUILD_CAFFE2)
     list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
     install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   endif()
-
-  # ---[ HIP library.
-  if(USE_HIP)
-    HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
-    set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
-
-    target_include_directories(
-      caffe2_hip PUBLIC ${Caffe2_HIP_INCLUDES})
-    target_include_directories(
-      caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
-
-    target_link_libraries(caffe2_hip PUBLIC caffe2)
-    target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
-
-    set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
-
-    caffe2_interface_library(caffe2_hip caffe2_hip_library)
-    list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
-    install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
-  endif()
 endif()
 
 # ---[ Test binaries.
@@ -223,9 +192,6 @@ if(BUILD_CAFFE2)
     set(Caffe2_ALL_TEST_SRCS ${Caffe2_CPU_TEST_SRCS})
     if (USE_CUDA)
       list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_GPU_TEST_SRCS})
-    endif()
-    if(USE_HIP)
-      list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_HIP_TEST_SRCS})
     endif()
 
     foreach(test_src ${Caffe2_ALL_TEST_SRCS})
@@ -238,18 +204,6 @@ if(BUILD_CAFFE2)
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       install(TARGETS ${test_name} DESTINATION test)
     endforeach()
-
-    if(USE_HIP)
-      foreach(test_src ${Caffe2_HIP_TEST_SRCS})
-        get_filename_component(test_name ${test_src} NAME_WE)
-        set_target_properties(${test_name} PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
-        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE HIP)
-        if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
-          target_compile_features(${test_name} PRIVATE cxx_range_for)
-        endif()
-      endforeach()
-    endif()
-
   endif()
 endif()
 
