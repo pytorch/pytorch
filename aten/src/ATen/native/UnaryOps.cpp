@@ -74,6 +74,26 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
+#define IMPLEMENT_KERNEL_LOOP(types, op, opfn)                          \
+  static void op##_Impl(Tensor& self) {                                 \
+    AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                 \
+      CPU_tensor_parallel_apply1<scalar_t>(                             \
+          self, [](scalar_t& x) { x = opfn(x); });                      \
+    });                                                                 \
+  }                                                                     \
+  static void op##Impl(Tensor& result, const Tensor& self) {            \
+    AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                 \
+      CPU_tensor_parallel_apply2<scalar_t, scalar_t>(                   \
+          result, self, [](scalar_t& x, scalar_t& y) { x = opfn(y); }); \
+    });                                                                 \
+  }
+
+IMPLEMENT_KERNEL_LOOP(FLOATING, cos, std::cos)
+IMPLEMENT_KERNEL_LOOP(FLOATING, cosh, std::cosh)
+IMPLEMENT_KERNEL_LOOP(FLOATING, sin, std::sin)
+IMPLEMENT_KERNEL_LOOP(FLOATING, sinh, std::sinh)
+IMPLEMENT_KERNEL_LOOP(FLOATING, tan, std::tan)
+
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 #define IMPLEMENT_UNARY_OP(op)                                  \

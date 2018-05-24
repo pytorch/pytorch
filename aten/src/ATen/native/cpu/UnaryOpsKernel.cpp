@@ -221,23 +221,6 @@ static void clamp_kernel(
   REGISTER_DISPATCH(op##Impl, &op##_kernel)                     \
   REGISTER_DISPATCH(op##_Impl, &op##__kernel)
 
-#define IMPLEMENT_KERNEL_LOOP(types, op, opfn)                          \
-  static void op##_kernel(Tensor& result, const Tensor& self) {         \
-    AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                 \
-      DL_RUNTIME_BUG(opfn, scalar_t);                                   \
-      CPU_tensor_parallel_apply2<scalar_t, scalar_t>(                   \
-          result, self, [](scalar_t& x, scalar_t& y) { x = opfn(y); }); \
-    });                                                                 \
-  }                                                                     \
-  static void op##__kernel(Tensor& self) {                              \
-    AT_DISPATCH_##types##_TYPES(self.type(), #op, [&] {                 \
-      DL_RUNTIME_BUG(opfn, scalar_t);                                   \
-      CPU_tensor_parallel_apply1<scalar_t>(                             \
-          self, [](scalar_t& x) { x = opfn(x); });                      \
-    });                                                                 \
-  }                                                                     \
-  REGISTER_DISPATCH(op##Impl, &op##_kernel)                             \
-  REGISTER_DISPATCH(op##_Impl, &op##__kernel)
 
 } // anonymous namespace
 
@@ -272,12 +255,6 @@ IMPLEMENT_KERNEL(FLOATING, rsqrt, 1 / std::sqrt)
 IMPLEMENT_KERNEL(FLOATING, sqrt, std::sqrt)
 IMPLEMENT_KERNEL(FLOATING, tanh, std::tanh)
 IMPLEMENT_KERNEL(FLOATING, trunc, std::trunc)
-
-IMPLEMENT_KERNEL_LOOP(FLOATING, cos, std::cos)
-IMPLEMENT_KERNEL_LOOP(FLOATING, cosh, std::cosh)
-IMPLEMENT_KERNEL_LOOP(FLOATING, sin, std::sin)
-IMPLEMENT_KERNEL_LOOP(FLOATING, sinh, std::sinh)
-IMPLEMENT_KERNEL_LOOP(FLOATING, tan, std::tan)
 
 } // namespace native
 } // namespace at

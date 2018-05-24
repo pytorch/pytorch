@@ -58,18 +58,6 @@ extern DispatchStub<unary_fn_> sqrt_Impl;
 extern DispatchStub<unary_fn_> tanh_Impl;
 extern DispatchStub<unary_fn_> trunc_Impl;
 
-extern DispatchStub<unary_fn> cosImpl;
-extern DispatchStub<unary_fn> coshImpl;
-extern DispatchStub<unary_fn> sinImpl;
-extern DispatchStub<unary_fn> sinhImpl;
-extern DispatchStub<unary_fn> tanImpl;
-
-extern DispatchStub<unary_fn_> cos_Impl;
-extern DispatchStub<unary_fn_> cosh_Impl;
-extern DispatchStub<unary_fn_> sin_Impl;
-extern DispatchStub<unary_fn_> sinh_Impl;
-extern DispatchStub<unary_fn_> tan_Impl;
-
 extern DispatchStub<void (*)(Tensor&, const Tensor&, Scalar&, Scalar&)>
     clampImpl;
 extern DispatchStub<void (*)(Tensor&, const Tensor&, Scalar&)> clampMinImpl;
