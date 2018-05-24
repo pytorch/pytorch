@@ -217,7 +217,7 @@ class CosineAnnealingLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
     
-class CosineAnnealingWithRestartsLR(torch.optim.lr_scheduler._LRScheduler):
+class CosineAnnealingWithRestartsLR(_LRScheduler):
 
     r"""Set the learning rate of each parameter group using a cosine annealing
     schedule, where :math:`\eta_{max}` is set to the initial lr and
