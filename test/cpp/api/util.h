@@ -24,19 +24,18 @@ class SimpleContainer : public nn::CloneableModule<SimpleContainer> {
   std::shared_ptr<Derived> add(
       std::shared_ptr<Derived> module,
       std::string name = std::string()) {
-    Module::add(module, std::move(name));
-    return module;
+    return Module::register_module(std::move(name), module);
   }
 };
 
 struct SigmoidLinear : nn::Module {
   SigmoidLinear(size_t in, size_t out) : linear(nn::Linear(in, out).build()) {
-    add(linear, "linear");
+    register_module("linear", linear);
   }
 
   explicit SigmoidLinear(std::shared_ptr<nn::Linear> linear_)
       : linear(std::move(linear_)) {
-    add(linear, "linear");
+    register_module("linear", linear);
   }
   Variable forward(Variable input) {
     return linear->forward({input}).front().sigmoid();

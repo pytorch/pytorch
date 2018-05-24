@@ -127,7 +127,7 @@ TEST_CASE("containers") {
   }
 
   SECTION("simple") {
-    auto model = std::make_shared<Sequential>();
+    auto model = std::make_shared<SimpleContainer>();
     auto l1 = model->add(Linear(10, 3).build(), "l1");
     auto l2 = model->add(Linear(3, 5).build(), "l2");
     auto l3 = model->add(Linear(5, 100).build(), "l3");

@@ -82,7 +82,7 @@ class Sequential : public CloneableModule<Sequential> {
         "Can only add modules with a forward() method to Sequential");
     modules_.push_back(std::make_shared<AnyModule>(std::move(module_ptr)));
     const auto index = modules_.size() - 1;
-    add(modules_[index]->ptr(), std::to_string(index));
+    register_module(std::to_string(index), modules_[index]->ptr());
   }
 
   /// Adds a new `Module` to the `Sequential` container, moving or copying it

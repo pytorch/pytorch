@@ -7,23 +7,12 @@ using namespace torch::nn;
 
 using Catch::StartsWith;
 
-struct AGIUnit : nn::Module {
-  variable_list forward(variable_list) {
-    return {};
-  }
-};
+struct AGIUnit : nn::Module {};
 
 namespace test {
-struct AGIUnit : nn::Module {
-  variable_list forward(variable_list) {
-    return {};
-  }
-};
+struct AGIUnit : nn::Module {};
 struct AGIUnit2 : nn::Module {
   AGIUnit2() : nn::Module("Foo") {}
-  variable_list forward(variable_list) {
-    return {};
-  }
 };
 } // namespace test
 
@@ -199,9 +188,6 @@ TEST_CASE("module/clone") {
       void reset() override {
         module = register_module("module", TestModule().build());
       }
-      variable_list forward(variable_list inputs) override {
-        return inputs;
-      }
       std::shared_ptr<TestModule> module;
     };
 
@@ -225,10 +211,6 @@ TEST_CASE("module/parameters") {
       a = register_parameter("a", at::zeros(at::CPU(at::kFloat), {2, 2}));
       b = register_parameter("b", at::ones(at::CPU(at::kFloat), {2, 2}));
       c = register_parameter("c", at::ones(at::CPU(at::kFloat), {2, 2}) * 2);
-    }
-
-    variable_list forward(variable_list) override {
-      return {};
     }
 
     Variable a, b, c;
