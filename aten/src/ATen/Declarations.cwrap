@@ -3751,7 +3751,7 @@
     if (nDimV == -1) {
       nDimV = self._values().dim() - 1;
     }
-    ${THTensor}_rawResize(${state,}self_->tensor, nDimI, nDimV, (*size_).data);
+    ${THTensor}_rawResize(${state,}self_->tensor, nDimI, nDimV, (*size_).data<int64_t>());
     self_->maybeScalar(size.size() == 0);
 ]]
 
