@@ -241,6 +241,9 @@ def build_libs(libs):
     if WITH_DISTRIBUTED_MW:
         build_libs_cmd += ['--with-distributed-mw']
 
+    if my_env["BUILD_CAFFE2_TOO"]:
+        build_libs_cmd += ['--with-full-caffe2']
+
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         print("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
         sys.exit(1)
