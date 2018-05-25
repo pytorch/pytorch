@@ -48,7 +48,7 @@ TEST_CASE("containers") {
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
-      backward(s);
+      s.backward();
       REQUIRE(y.ndimension() == 3);
       REQUIRE(s.ndimension() == 0);
       for (auto i = 0; i < 3; i++) {
@@ -64,7 +64,7 @@ TEST_CASE("containers") {
         auto y = model->forward({x})[0];
         Variable s = y.sum();
 
-        backward(s);
+        s.backward();
         REQUIRE(y.ndimension() == 4);
         REQUIRE(s.ndimension() == 0);
         for (auto i = 0; i < 4; i++) {
@@ -81,7 +81,7 @@ TEST_CASE("containers") {
         auto y = model->forward({x})[0];
         Variable s = y.sum();
 
-        backward(s);
+        s.backward();
         REQUIRE(y.ndimension() == 4);
         REQUIRE(s.ndimension() == 0);
         for (auto i = 0; i < 4; i++) {
@@ -98,7 +98,7 @@ TEST_CASE("containers") {
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
-      backward(s);
+      s.backward();
       REQUIRE(y.ndimension() == 5);
       REQUIRE(s.ndimension() == 0);
       for (auto i = 0; i < 5; i++) {
@@ -116,7 +116,7 @@ TEST_CASE("containers") {
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
-      backward(s);
+      s.backward();
       REQUIRE(y.ndimension() == 2);
       REQUIRE(s.ndimension() == 0);
       REQUIRE(y.size(0) == 10);
@@ -137,7 +137,7 @@ TEST_CASE("containers") {
     x = l2->forward({x})[0].clamp_min(0);
     x = l3->forward({x})[0].clamp_min(0);
 
-    backward(x);
+    x.backward();
     REQUIRE(x.ndimension() == 2);
     REQUIRE(x.size(0) == 1000);
     REQUIRE(x.size(1) == 100);
@@ -154,7 +154,7 @@ TEST_CASE("containers") {
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
-      backward(s);
+      s.backward();
       REQUIRE(y.ndimension() == 2);
       REQUIRE(s.ndimension() == 0);
       REQUIRE(y.size(0) == 10);
@@ -169,7 +169,7 @@ TEST_CASE("containers") {
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
-      backward(s);
+      s.backward();
       REQUIRE(y.ndimension() == 3);
       REQUIRE(y.size(0) == 2);
       REQUIRE(y.size(1) == 3);
@@ -182,7 +182,7 @@ TEST_CASE("containers") {
     Variable x = Var(at::CPU(at::kFloat).ones(100));
     Variable y = dropout->forward({x})[0];
 
-    backward(y);
+    y.backward();
     REQUIRE(y.ndimension() == 1);
     REQUIRE(y.size(0) == 100);
     // TODO: These two tests are flaky
@@ -237,7 +237,7 @@ TEST_CASE("containers_cuda", "[cuda]") {
     auto y = model->forward({x})[0];
     Variable s = y.sum();
 
-    backward(s);
+    s.backward();
     REQUIRE(y.ndimension() == 2);
     REQUIRE(s.ndimension() == 0);
     REQUIRE(y.size(0) == 10);
@@ -254,7 +254,7 @@ TEST_CASE("containers_cuda", "[cuda]") {
     auto y = model->forward({x})[0];
     Variable s = y.sum();
 
-    backward(s);
+    s.backward();
     REQUIRE(y.ndimension() == 2);
     REQUIRE(s.ndimension() == 0);
     REQUIRE(y.size(0) == 10);

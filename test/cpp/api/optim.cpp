@@ -29,9 +29,9 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<Sequential> model) {
     auto y = Var(lab, false);
     std::function<at::Scalar()> closure = [&]() -> at::Scalar {
       optim->zero_grad();
-      auto x = model->forward<Variable>(Var(inp));
+      auto x = model->forward(Var(inp));
       Variable loss = at::binary_cross_entropy(x, y);
-      backward(loss);
+      loss.backward();
       return at::Scalar(loss.data());
     };
 
