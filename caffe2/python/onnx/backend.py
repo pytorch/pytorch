@@ -501,8 +501,8 @@ class Caffe2Backend(Backend):
             if sequence_lens is not None:
                 pred_mh.net.VariableLengthSequencePadding(
                     [concatted_output, sequence_lens], [concatted_output])
-            unsqueezed_output = pred_mh.net.ExpandDims([concatted_output], [cls.dummy_name()], dims=[1])
-            pred_mh.net.Reshape(unsqueezed_output, [n.outputs[0], cls.dummy_name()], shape=[0,2,0,-1])
+            reshaped_output, _ = pred_mh.net.Reshape(concatted_output, [cls.dummy_name(), cls.dummy_name()], shape=[0,0,-1,2])
+            pred_mh.net.Transpose(reshaped_output, n.outputs[0], axes=[0,3,1,2])
             for i in range(1, len(n.outputs)):
                 pred_mh.net.Concat([outputs_f[i], outputs_b[i]],
                                    [n.outputs[i], cls.dummy_name()], axis=0)

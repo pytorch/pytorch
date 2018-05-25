@@ -221,14 +221,15 @@ void pushPackingPastRnn(Block *b) {
     if(rnn->owningBlock() != n->owningBlock())
       continue;
 
-    // The rnn is followed by a reshape (if bidirectional), and then
-    // by a squeeze (always).
+    // The rnn is followed by a transpose and a reshape (if
+    // bidirectional), or by a squeeze (if unidirectional).
     Node * next = rnn->outputs()[0]->uses()[0].user;
-    Node * squeeze = next->kind() == onnx::Reshape
-      ? next->outputs()[0]->uses()[0].user
-      : next
-      ;
-    if (squeeze->kind() != onnx::Squeeze) {
+    if (next->kind() == onnx::Transpose) {
+      next = next->outputs()[0]->uses()[0].user;
+      if (next->kind() != onnx::Reshape) {
+        continue;
+      }
+    } else if (next->kind() != onnx::Squeeze) {
       continue;
     }
 
@@ -241,14 +242,14 @@ void pushPackingPastRnn(Block *b) {
 
     // and insert new PackPadded after the RNN
     Node * newPackPadded = b->owningGraph()->create(prim::PackPadded, 2);
-    newPackPadded->insertAfter(squeeze);
+    newPackPadded->insertAfter(next);
 
     // make things consume from the new PackPadded
-    squeeze->outputs()[0]->replaceAllUsesWith(newPackPadded->outputs()[0]);
+    next->outputs()[0]->replaceAllUsesWith(newPackPadded->outputs()[0]);
     n->outputs()[1]->replaceAllUsesWith(newPackPadded->outputs()[1]);
 
     // setup the new PackPadded's inputs
-    newPackPadded->addInput(squeeze->outputs()[0]);
+    newPackPadded->addInput(next->outputs()[0]);
     newPackPadded->addInput(n->inputs()[1]);
 
     it.destroyCurrent();
