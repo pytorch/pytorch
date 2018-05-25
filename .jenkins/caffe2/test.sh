@@ -54,6 +54,10 @@ cd ${INSTALL_PREFIX}
 # C++ tests
 echo "Running C++ tests.."
 for test in $INSTALL_PREFIX/test/*; do
+  # Skip directories
+  if [[ -d $test ]]; then
+    continue
+  fi
   # Skip tests we know are hanging or bad
   case "$(basename "$test")" in
     mkl_utils_test)
