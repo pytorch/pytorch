@@ -21,8 +21,9 @@ class Embedding(Module):
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (bool, optional): if given, this will scale gradients by the frequency of
                                                 the words in the mini-batch.
-        sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+        sparse (bool, optional): If ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
                                     more details regarding sparse gradients.
+        _weight (Tensor, optional): If given, used as an initializer for the weight.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
