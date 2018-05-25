@@ -288,7 +288,7 @@ variable_list Eval::apply(const variable_list& inputs) {
   if (simple_graph) {
     outputs = (*simple_graph)(inputs);
   } else {
-    auto& engine = Engine::getDefaultEngine();
+    auto& engine = Engine::get_default_engine();
     auto exec_data = filterRoots(inputs);
     auto next_edges = fmap(
         placeholders,
