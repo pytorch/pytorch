@@ -92,6 +92,16 @@ class InitRegisterer {
  */
 bool GlobalInitAlreadyRun();
 
+class GlobalInitIsCalledGuard {
+ public:
+  GlobalInitIsCalledGuard() {
+    if (!GlobalInitAlreadyRun()) {
+      LOG(WARNING)
+          << "Caffe2 GlobalInit should be run before any other API calls.";
+    }
+  }
+};
+
 /**
  * @brief Initialize the global environment of caffe2.
  *

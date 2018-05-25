@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
@@ -35,6 +36,7 @@ NetBase::NetBase(
           def->external_output().end()),
       name_(def->name()),
       net_def_(def) {
+  static GlobalInitIsCalledGuard guard;
   // Check that node_name is empty for all ops
   for (const OperatorDef& op : def->op()) {
     if (op.has_device_option()) {
