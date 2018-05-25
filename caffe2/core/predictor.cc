@@ -1,5 +1,8 @@
 #include "caffe2/core/predictor.h"
+#ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
+#endif
+
 #include <unordered_set>
 #include "caffe2/core/init.h"
 
@@ -93,7 +96,11 @@ Predictor::Predictor(
   GlobalInit();
 
   if (optimization) {
+#ifdef CAFFE2_OPTIMIZER
     run_net_ = opt::optimize(run_net_, &ws_, optimization);
+#else
+    LOG(WARNING) << "Caffe2 is compiled without optimization passes.";
+#endif
   }
 
   // real model inputs can be fed later in run* functions
