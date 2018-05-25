@@ -1337,17 +1337,15 @@ private:
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
-    const auto& begin = at::Scalar(input_values[1]->node()->t(attr::value)).toInt();
-    const auto& end = at::Scalar(input_values[2]->node()->t(attr::value)).toInt();
+    Value* begin = input_values[1];
+    Value* end = input_values[2];
+    Value* zero_dim = emitConst(Const::create(loc, std::to_string(0)));
+    Value* one_step = emitConst(Const::create(loc, std::to_string(1)));
     return emitNode(
                Symbol::aten("slice"),
                loc,
-               {tensor},
-               1)
-               ->i_(attr::dim, 0)
-               ->i_(attr::step, 1)
-               ->i_(attr::start, begin)
-               ->i_(attr::end, end)->output();
+               {tensor, zero_dim, begin, end, one_step},
+               1)->output();
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
@@ -1357,9 +1355,9 @@ private:
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
-    Value *tensor = input_values[0];
-    auto dim_zero = emitConst(Const::create(loc, std::to_string(0)));
-    Value *idx = input_values[1];
+    Value* tensor = input_values[0];
+    Value* dim_zero = emitConst(Const::create(loc, std::to_string(0)));
+    Value* idx = input_values[1];
     return emitNode(
                Symbol::aten("select"),
                loc,
