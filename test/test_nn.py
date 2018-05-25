@@ -2051,18 +2051,18 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
     def test_load_error_msg(self):
+        expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
+                            "Please pre-load the data into a buffer like io.BytesIO and " +
+                            "try to load from it instead.")
         import sys
         if sys.version_info < (3,):
             import urllib
             resource = urllib.urlopen('https://download.pytorch.org/test_data/linear.pt')
+            self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
         else:
             import urllib.request
             resource = urllib.request.urlopen('https://download.pytorch.org/test_data/linear.pt')
-
-        expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
-                            "Please pre-load the data into a buffer like io.BytesIO and " +
-                            "try to load from it instead.")
-        self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
+            self.assertRaisesRegex(io.UnsupportedOperation, expected_err_msg, lambda: torch.load(resource))
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
