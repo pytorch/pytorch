@@ -88,6 +88,7 @@ echo "Running Python tests.."
   -m pytest \
   -x \
   -v \
+  -s \
   --junit-xml="$TEST_DIR/python/result.xml" \
   --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
   --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
