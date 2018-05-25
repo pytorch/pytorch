@@ -167,4 +167,39 @@ std::shared_ptr<TaskThreadPool> ExecutorHelper::GetPool(
   CAFFE_THROW("Not implemented");
 }
 
+std::vector<float> NetBase::TEST_Benchmark(
+    const int warmup_runs,
+    const int main_runs,
+    const bool run_individual) {
+  LOG(INFO) << "Starting benchmark, running warmup runs";
+  CAFFE_ENFORCE(
+      warmup_runs >= 0,
+      "Number of warm up runs should be non negative, provided ",
+      warmup_runs);
+  for (int run_idx = 0; run_idx < warmup_runs; ++run_idx) {
+    CAFFE_ENFORCE(Run(), "Warmup run ", run_idx, " has failed");
+  }
+
+  LOG(INFO) << "Running main runs";
+  CAFFE_ENFORCE(
+      main_runs >= 0,
+      "Number of main runs should be non negative, provided ",
+      main_runs);
+
+  Timer timer;
+  for (int run_idx = 0; run_idx < main_runs; ++run_idx) {
+    CAFFE_ENFORCE(Run(), "Main run ", run_idx, " has failed");
+  }
+  auto millis = timer.MilliSeconds();
+  LOG(INFO) << "Main runs finished. Milliseconds per iter: "
+            << millis / main_runs
+            << ". Iters per second: " << 1000.0 * main_runs / millis;
+
+  if (run_individual) {
+    LOG(INFO) << "Net does not support per-op benchmark; "
+                 "to run it, switch to a simple net type";
+  }
+  return std::vector<float>{millis / main_runs};
+}
+
 } // namespace caffe2
