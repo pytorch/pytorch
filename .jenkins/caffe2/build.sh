@@ -191,6 +191,10 @@ if [[ -n "$INTEGRATED" ]]; then
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
   pip install --user -v -b /tmp/pip_install_torch "file://${ROOT_DIR}#egg=torch"
+  mv "${ROOT_DIR}/setup.py" "${ROOT_DIR}/setup_pytorch.py"
+  mv "${ROOT_DIR}/setup_caffe2.py" "${ROOT_DIR}/setup.py"
+  pip install --user -v -b /tmp/pip_install_caffe2 "file://${ROOT_DIR}#egg=caffe2"
+  mv "${ROOT_DIR}/setup_pytorch.py" "${ROOT_DIR}/setup.py"
 fi
 
 report_compile_cache_stats
