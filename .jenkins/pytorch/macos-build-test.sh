@@ -3,16 +3,23 @@
 COMPACT_JOB_NAME=pytorch-macos-10.13-py3-build-test
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+export PATH="/usr/local/bin:$PATH"
+
 # Set up conda environment
-curl https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o $PWD/miniconda3.sh
-rm -rf $PWD/miniconda3
-bash $PWD/miniconda3.sh -b -p $PWD/miniconda3
-export PATH="$PWD/miniconda3/bin:$PATH"
-source $PWD/miniconda3/bin/activate
+export PYTORCH_ENV_DIR="${HOME}/pytorch-ci-env"
+# If a local installation of conda doesn't exist, we download and install conda
+if [ ! -d "${PYTORCH_ENV_DIR}/miniconda3" ]; then
+  mkdir -p ${PYTORCH_ENV_DIR}
+  curl https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o ${PYTORCH_ENV_DIR}/miniconda3.sh
+  bash ${PYTORCH_ENV_DIR}/miniconda3.sh -b -p ${PYTORCH_ENV_DIR}/miniconda3
+fi
+export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
+source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
+rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch
 
 git submodule update --init --recursive
-export CMAKE_PREFIX_PATH=$PWD/miniconda3/
+export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 
 # Build and test PyTorch
 export MACOSX_DEPLOYMENT_TARGET=10.9
@@ -20,25 +27,48 @@ export CXX=clang++
 export CC=clang
 # If we run too many parallel jobs, we will OOM
 export MAX_JOBS=2
-python setup.py install
-echo "Ninja version: $(ninja --version)"
-python test/run_test.py --verbose
 
-# C++ API
+export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 
-# NB: Install outside of source directory (at the same level as the root
-# pytorch folder) so that it doesn't get cleaned away prior to docker push.
-# But still clean it before we perform our own build.
-#
-CPP_BUILD="$PWD/../cpp-build"
-rm -rf $CPP_BUILD
-mkdir -p $CPP_BUILD
-WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$CPP_BUILD"
+if [[ "${JOB_BASE_NAME}" == *-build* ]]; then
+  python setup.py install
+fi
 
-python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+# Upload torch binaries when the build job is finished
+if [[ "${JOB_BASE_NAME}" == *-build ]]; then
+  7z a ${IMAGE_COMMIT_TAG}.7z ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch
+  aws s3 cp ${IMAGE_COMMIT_TAG}.7z s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z --acl public-read
+fi
 
-# Unfortunately it seems like the test can't load from miniconda3
-# without these paths being set
-export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
-export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-"$CPP_BUILD"/libtorch/bin/test_api
+# Download torch binaries in the test jobs
+if [[ "${JOB_BASE_NAME}" == *-test1 ]] || [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+  rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch
+  aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
+  7z x ${IMAGE_COMMIT_TAG}.7z -o"${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages"
+fi
+
+if [[ "${SHOULD_RUN_TEST1}" == "true" ]]; then
+  echo "Ninja version: $(ninja --version)"
+  python test/run_test.py --verbose
+fi
+
+if [[ "${SHOULD_RUN_TEST2}" == "true" ]]; then
+  # C++ API
+
+  # NB: Install outside of source directory (at the same level as the root
+  # pytorch folder) so that it doesn't get cleaned away prior to docker push.
+  # But still clean it before we perform our own build.
+  #
+  CPP_BUILD="$PWD/../cpp-build"
+  rm -rf $CPP_BUILD
+  mkdir -p $CPP_BUILD
+  WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$CPP_BUILD"
+
+  python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+
+  # Unfortunately it seems like the test can't load from miniconda3
+  # without these paths being set
+  export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
+  export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
+  "$CPP_BUILD"/libtorch/bin/test_api
+fi

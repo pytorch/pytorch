@@ -34,21 +34,6 @@ except botocore.exceptions.ClientError as e:
 
 EOL
 
-cat >ci_scripts/delete_image.py << EOL
-
-import os
-import boto3
-
-IMAGE_COMMIT_TAG = os.getenv('IMAGE_COMMIT_TAG')
-
-session = boto3.session.Session()
-s3 = session.resource('s3')
-BUCKET_NAME = 'ossci-windows-build'
-KEY = 'pytorch/'+IMAGE_COMMIT_TAG+'.7z'
-s3.Object(BUCKET_NAME, KEY).delete()
-
-EOL
-
 cat >ci_scripts/test_pytorch.bat <<EOL
 
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
@@ -78,8 +63,15 @@ cd test/
 python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
 
 7z x %IMAGE_COMMIT_TAG%.7z
-python run_test.py --verbose && python ..\\ci_scripts\\delete_image.py
 
+set SPLIT_TESTS=true
+
+IF "%SHOULD_RUN_TEST1%" == "true" (
+    python run_test.py --include nn --verbose
+)
+IF "%SHOULD_RUN_TEST2%" == "true" (
+    python run_test.py --exclude nn --verbose
+)
 EOL
 
 ci_scripts/test_pytorch.bat && echo "TEST PASSED"

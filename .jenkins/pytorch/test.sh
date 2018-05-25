@@ -27,44 +27,50 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
 fi
 
-time python test/run_test.py --verbose
-
-# Test ATen
-if [[ "$BUILD_ENVIRONMENT" != *asan* ]]; then
-  echo "Running ATen tests with pytorch lib"
-  TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
-  # NB: the ATen test binaries don't have RPATH set, so it's necessary to
-  # put the dynamic libraries somewhere were the dynamic linker can find them.
-  # This is a bit of a hack.
-  ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
-  ls build/bin
-  aten/tools/run_tests.sh build/bin
+if [[ "${SHOULD_RUN_TEST1}" == "true" ]]; then
+  time python test/run_test.py --include nn --verbose
 fi
 
-rm -rf ninja
+if [[ "${SHOULD_RUN_TEST2}" == "true" ]]; then
+  time python test/run_test.py --exclude nn --verbose
 
-echo "Installing torchvision at branch master"
-rm -rf vision
-# TODO: This git clone is bad, it means pushes to torchvision can break
-# PyTorch CI
-git clone https://github.com/pytorch/vision --quiet
-pushd vision
-# python setup.py install with a tqdm dependency is broken in the
-# Travis Python nightly (but not in latest Python nightlies, so
-# this should be a transient requirement...)
-# See https://github.com/pytorch/pytorch/issues/7525
-#time python setup.py install
-pip install .
-popd
+  # Test ATen
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]]; then
+    echo "Running ATen tests with pytorch lib"
+    TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
+    # NB: the ATen test binaries don't have RPATH set, so it's necessary to
+    # put the dynamic libraries somewhere were the dynamic linker can find them.
+    # This is a bit of a hack.
+    ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ls build/bin
+    aten/tools/run_tests.sh build/bin
+  fi
 
-if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-   echo "Testing libtorch with NO_PYTHON"
-   CPP_BUILD="$PWD/../cpp-build"
-   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-     "$CPP_BUILD"/libtorch/bin/test_jit
-   else
-     "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
-   fi
-   python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-   OMP_NUM_THREADS=2 "$CPP_BUILD"/libtorch/bin/test_api
+  rm -rf ninja
+
+  echo "Installing torchvision at branch master"
+  rm -rf vision
+  # TODO: This git clone is bad, it means pushes to torchvision can break
+  # PyTorch CI
+  git clone https://github.com/pytorch/vision --quiet
+  pushd vision
+  # python setup.py install with a tqdm dependency is broken in the
+  # Travis Python nightly (but not in latest Python nightlies, so
+  # this should be a transient requirement...)
+  # See https://github.com/pytorch/pytorch/issues/7525
+  #time python setup.py install
+  pip install .
+  popd
+
+  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+     echo "Testing libtorch with NO_PYTHON"
+     CPP_BUILD="$PWD/../cpp-build"
+     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+       "$CPP_BUILD"/libtorch/bin/test_jit
+     else
+       "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
+     fi
+     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+     OMP_NUM_THREADS=2 "$CPP_BUILD"/libtorch/bin/test_api
+  fi
 fi
