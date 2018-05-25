@@ -116,7 +116,7 @@ bool AsyncNetBase::RunAsync() {
   return DoRunAsync();
 }
 
-std::shared_ptr<TaskThreadPool> AsyncNetBase::pool_getter(
+TaskThreadPool* AsyncNetBase::pool_getter(
     PoolsMap& pools,
     int device_type,
     int device_id,
@@ -128,11 +128,10 @@ std::shared_ptr<TaskThreadPool> AsyncNetBase::pool_getter(
         DeviceTypeName(device_type), device_id, pool_size, use_per_net_pools_);
     pools[device_id][pool_size] = pool;
   }
-  return pool;
+  return pool.get();
 }
 
-std::shared_ptr<TaskThreadPool> AsyncNetBase::pool(
-    const DeviceOption& device_option) {
+TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (use_single_pool_) {
     return pool_getter(cpu_pools_, CPU, -1, num_workers_);
   }

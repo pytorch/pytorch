@@ -5,9 +5,7 @@ namespace caffe2 {
 AsyncSchedulingNet::AsyncSchedulingNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws)
-    : AsyncNetBase(net_def, ws), running_(false) {
-  reset();
-}
+    : AsyncNetBase(net_def, ws), running_(false) {}
 
 void AsyncSchedulingNet::reset() {
   AsyncNetBase::reset();
@@ -44,8 +42,6 @@ void AsyncSchedulingNet::schedule(int task_id) {
       }
     }
 
-    auto task_count = ++processed_tasks_num_;
-
     for (auto child_id : children(task_id)) {
       int parent_count = updateParentCount(child_id);
       if (parent_count == 0) {
@@ -67,8 +63,13 @@ void AsyncSchedulingNet::schedule(int task_id) {
       }
     }
 
-    if (task_count == tasksNum()) {
-      finalizeEvents();
+    // finishRun may cause waiters to wake up and destroy the net,
+    // before we call finishRun we need to make sure all other (finishing)
+    // tasks are done;
+    // Bumping and checking the counter after the task's job is done
+    auto tasks_num = tasksNum();
+    auto cur_processed_tasks = ++processed_tasks_num_;
+    if (cur_processed_tasks == tasks_num) {
       finishRun();
     }
   });
@@ -106,7 +107,8 @@ void AsyncSchedulingNet::finishRun() {
     std::unique_lock<std::mutex> lock(running_mutex_);
     running_ = false;
   }
-
+  // wait for scheduled ops and make sure all events are marked as finished
+  finalizeEvents();
   // notify observers and waiters
   StopAllObservers();
   running_cv_.notify_all();
@@ -131,7 +133,6 @@ bool AsyncSchedulingNet::RunAsync() {
     }
   } catch (const std::exception& e) {
     LOG(ERROR) << "Exception while starting an async run: " << e.what();
-    finalizeEvents();
     finishRun();
     return false;
   }
@@ -143,7 +144,9 @@ bool AsyncSchedulingNet::RunAsync() {
   return true;
 }
 
-AsyncSchedulingNet::~AsyncSchedulingNet() {}
+AsyncSchedulingNet::~AsyncSchedulingNet() {
+  Wait();
+}
 
 REGISTER_NET(async_scheduling, AsyncSchedulingNet);
 

@@ -60,13 +60,14 @@ class AsyncNetBase : public NetBase {
   const std::vector<int>& children(int task_id) const;
   const std::vector<int>& parents(int task_id) const;
   int num_ops(int task_id) const;
+
   void asyncWait(
       int task_id,
       int stream_id,
       const std::vector<int>& wait_task_ids) const;
   void run(int task_id, int stream_id);
   int stream(int task_id);
-  std::shared_ptr<TaskThreadPool> pool(const DeviceOption& device_option);
+  TaskThreadPool* pool(const DeviceOption& device_option);
 
   void finishTasks(const std::unordered_set<int>& task_ids);
   void finalizeEvents();
@@ -115,7 +116,7 @@ class AsyncNetBase : public NetBase {
  private:
   void storeExceptionPtr();
 
-  std::shared_ptr<TaskThreadPool>
+  TaskThreadPool*
   pool_getter(PoolsMap& pools, int device_type, int device_id, int pool_size);
 
   std::unique_ptr<AsyncNetExecutorHelper> helper_;
@@ -134,8 +135,7 @@ CAFFE_DECLARE_SHARED_REGISTRY(
 class AsyncNetExecutorHelper : public ExecutorHelper {
  public:
   explicit AsyncNetExecutorHelper(AsyncNetBase* net) : net_(net) {}
-  std::shared_ptr<TaskThreadPool> GetPool(
-      const DeviceOption& option) const override {
+  TaskThreadPool* GetPool(const DeviceOption& option) const override {
     return net_->pool(option);
   }
 

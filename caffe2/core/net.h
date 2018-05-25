@@ -130,8 +130,7 @@ class NetBase : public Observable<NetBase> {
 class ExecutorHelper {
  public:
   ExecutorHelper() {}
-  virtual std::shared_ptr<TaskThreadPool> GetPool(
-      const DeviceOption& option) const;
+  virtual TaskThreadPool* GetPool(const DeviceOption& option) const;
   virtual ~ExecutorHelper() {}
 };
 
