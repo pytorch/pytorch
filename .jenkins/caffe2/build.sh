@@ -159,6 +159,12 @@ fi
 # Use a speciallized onnx namespace in CI to catch hardcoded onnx namespace
 CMAKE_ARGS+=("-DONNX_NAMESPACE=ONNX_NAMESPACE_FOR_C2_CI")
 
+if [[ -n "$INTEGRATED" ]]; then
+    # TODO: This is a temporal hack to work around the issue that both
+    # caffe2 and pytorch have libcaffe2.so and crossfire at runtime.
+    CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
+fi
+
 # Configure
 ${CMAKE_BINARY} "${ROOT_DIR}" ${CMAKE_ARGS[*]} "$@"
 
@@ -191,10 +197,6 @@ if [[ -n "$INTEGRATED" ]]; then
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
   pip install --user -v -b /tmp/pip_install_torch "file://${ROOT_DIR}#egg=torch"
-  mv "${ROOT_DIR}/setup.py" "${ROOT_DIR}/setup_pytorch.py"
-  mv "${ROOT_DIR}/setup_caffe2.py" "${ROOT_DIR}/setup.py"
-  pip install --user -v -b /tmp/pip_install_caffe2 "file://${ROOT_DIR}#egg=caffe2"
-  mv "${ROOT_DIR}/setup_pytorch.py" "${ROOT_DIR}/setup.py"
 fi
 
 report_compile_cache_stats
