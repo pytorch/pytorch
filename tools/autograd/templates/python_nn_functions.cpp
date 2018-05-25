@@ -24,18 +24,19 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
-  PyObject *tuple = PyTuple_New(3);
-  PyTuple_SET_ITEM(tuple, 0, device       ? THPDevice_New(*device) : Py_None);
-  PyTuple_SET_ITEM(tuple, 1, scalarType   ? torch::autograd::utils::wrap(torch::getDtype(*scalarType)) : Py_None);
-  PyTuple_SET_ITEM(tuple, 2, non_blocking ? Py_True : Py_False);
-  return tuple;
+  auto tuple = THPObjectPtr{PyTuple_New(3)};
+  if (!tuple) throw python_error();
+  PyTuple_SET_ITEM(tuple.get(), 0, device       ? THPDevice_New(*device) : Py_None);
+  PyTuple_SET_ITEM(tuple.get(), 1, scalarType   ? torch::autograd::utils::wrap(torch::getDtype(*scalarType)): Py_None);
+  PyTuple_SET_ITEM(tuple.get(), 2, non_blocking ? Py_True : Py_False);
+  return tuple.release();
   END_HANDLE_TH_ERRORS
 }
 
 ${py_methods}
 
 static PyMethodDef nn_functions[] = {
-  {"_parse_to", (PyCFunction)THPVariable__parse_to, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"_parse_to", (PyCFunction)THPVariable__parse_to, METH_VARARGS | METH_KEYWORDS, nullptr},
   ${py_method_defs}
   {NULL}
 };
