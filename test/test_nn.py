@@ -377,6 +377,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def __init__(self, *args, **kwargs):
         super(NewCriterionTest, self).__init__(*args, **kwargs)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
+        self.check_grad_target = kwargs.get('check_grad_target', False)
 
     def _do_extra_tests(self, test_case, module, input, target):
         if not self.check_gradgrad:
@@ -386,12 +387,18 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
         params = tuple(x for x in module.parameters())
         if not isinstance(input, tuple):
-            inputs = (input,) + params
+            if self.check_grad_target:
+                inputs = (input, target,) + params
+            else:
+                inputs = (input,) + params
 
             def apply_fn(input, *params):
                 return module(input, target)
         else:
-            inputs = input + params
+            if self.check_grad_target:
+                inputs = input + target + params
+            else:
+                inputs = input + params
 
             def apply_fn(input1, input2, *params):
                 return module(input1, input2, target)
@@ -5440,6 +5447,7 @@ new_criterion_tests = [
             kldivloss_reference(i, t, get_size_average(m), reduce=True),
         check_no_size_average=True,
         desc='scalar',
+        check_grad_target=True,
     ),
     dict(
         module_name='MSELoss',
