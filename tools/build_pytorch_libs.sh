@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Shell script used to build the aten/*, caffe2/*, and third_party/*
-* dependencies prior to linking libraries and passing headers to the Python
+# dependencies prior to linking libraries and passing headers to the Python
 # extension compilation stage. This file is used from setup.py, but can also be
 # called standalone to compile the libraries outside of the overall PyTorch
 # build process.
