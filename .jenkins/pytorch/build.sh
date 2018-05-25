@@ -46,14 +46,14 @@ fi
 
 # Test C FFI plugins
 # cffi install doesn't work for Python 3.7
-if [[ "$BUILD_ENVIRONMENT" != *pynightly* ]]; then
+#if [[ "$BUILD_ENVIRONMENT" != *pynightly* ]]; then
   # TODO: Don't run this here
-  pip install cffi
-  git clone https://github.com/pytorch/extension-ffi.git
-  pushd extension-ffi/script
-  python build.py
-  popd
-fi
+#  pip install cffi
+#  git clone https://github.com/pytorch/extension-ffi.git
+#  pushd extension-ffi/script
+#  python build.py
+#  popd
+#fi
 
 # Test documentation build
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
