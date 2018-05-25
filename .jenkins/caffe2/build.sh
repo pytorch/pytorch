@@ -163,6 +163,7 @@ if [[ -n "$INTEGRATED" ]]; then
     # TODO: This is a temporal hack to work around the issue that both
     # caffe2 and pytorch have libcaffe2.so and crossfire at runtime.
     CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
+    CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
     CMAKE_ARGS+=("-DCAFFE2_LINK_LOCAL_PROTOBUF=OFF")
 fi
 
