@@ -53,9 +53,10 @@ cd ${INSTALL_PREFIX}
 
 # C++ tests
 echo "Running C++ tests.."
-for test in $INSTALL_PREFIX/test/*; do
+for test in $(find $INSTALL_PREFIX/test/); do
   # Skip directories
-  if [[ -d $test ]]; then
+  if [ $(dirname "${test}") == 'aten' ]; then
+    "$test" -r=xml -o "${test}.xml"
     continue
   fi
   # Skip tests we know are hanging or bad
