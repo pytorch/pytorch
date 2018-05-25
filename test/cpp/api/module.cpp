@@ -47,7 +47,7 @@ TEST_CASE("module/zero-grad") {
   auto module = Linear(3, 4).build();
   auto weight = Var(at::ones(at::CPU(at::kFloat), {8, 3}));
   auto loss = module->forward({weight}).front().sum();
-  backward(loss);
+  loss.backward();
   for (auto& parameter : module->parameters()) {
     Variable grad = parameter.second.grad();
     REQUIRE(grad.defined());
@@ -169,6 +169,13 @@ TEST_CASE("module/clone") {
   }
 
   SECTION("Cloning preserves external references") {
+    struct TestModel : public CloneableModule<TestModel> {
+      void reset() override {
+        weight =
+            register_parameter("weight", at::ones(at::CPU(at::kFloat), {4, 4}));
+      }
+      Variable weight;
+    };
     auto module = TestModule().build();
     module->weight.data() += 1;
     REQUIRE(pointer_equal(module->weight, module->param("weight")));

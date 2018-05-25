@@ -52,7 +52,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     Variable loss = at::mse_loss(x, y);
 
     optim->zero_grad();
-    backward(loss);
+    loss.backward();
     optim->step();
 
     running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
@@ -94,7 +94,7 @@ TEST_CASE("rnn") {
       auto tup = model->forward({x});
       auto y = x.mean();
 
-      backward(y);
+      y.backward();
       check_lstm_sizes(tup);
 
       auto next = model->forward({x, tup[1]});
@@ -197,7 +197,7 @@ TEST_CASE("rnn_cuda", "[cuda]") {
     auto tup = model->forward({x});
     auto y = x.mean();
 
-    backward(y);
+    y.backward();
     check_lstm_sizes(tup);
 
     auto next = model->forward({x, tup[1]});

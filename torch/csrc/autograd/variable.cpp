@@ -2,6 +2,7 @@
 
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/autograd/functions/tensor.h"
@@ -107,6 +108,22 @@ void Variable::Impl::detach_() {
   set_requires_grad(false);
   grad_fn_.reset();
   output_nr_ = 0;
+}
+
+void Variable::Impl::backward(
+    at::optional<Tensor> gradient,
+    bool keep_graph,
+    bool create_graph) {
+  std::vector<Edge> edges;
+  edges.emplace_back(grad_fn_, output_nr_);
+
+  std::vector<Variable> inputs;
+  if (!gradient.has_value()) {
+    gradient = make_variable(at::ones_like(data_), /*requires_grad=*/false);
+  }
+  inputs.push_back(std::move(as_variable_ref(*gradient)));
+
+  Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
 }
 
 void Variable::Impl::set_data(Tensor new_data) {
