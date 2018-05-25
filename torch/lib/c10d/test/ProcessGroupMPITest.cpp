@@ -6,15 +6,8 @@
 
 #include "ProcessGroupMPI.hpp"
 
-// Create the MPI process group
-std::unique_ptr<::c10d::ProcessGroupMPI> createProcessGroup() {
-  auto pg =
-      std::unique_ptr<::c10d::ProcessGroupMPI>(new ::c10d::ProcessGroupMPI());
-  return pg;
-}
-
 void testAllreduce(int iter = 1000) {
-  auto pg = createProcessGroup();
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   // Generate inputs
   std::vector<std::vector<at::Tensor>> allTensors(iter);
   for (auto i = 0; i < iter; ++i) {
@@ -54,7 +47,7 @@ void testAllreduce(int iter = 1000) {
 }
 
 void testBroadcast(int iter = 10000) {
-  auto pg = createProcessGroup();
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   // Generate inputs
   std::vector<std::vector<at::Tensor>> allTensors(iter);
 

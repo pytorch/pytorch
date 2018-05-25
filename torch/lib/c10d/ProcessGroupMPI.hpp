@@ -95,9 +95,8 @@ class ProcessGroupMPI : public ProcessGroup {
     friend class ProcessGroupMPI;
   };
 
-  // Constructor will initialize the MPI environment in the mainthread and
-  // spawn up the worker thread loop
-  ProcessGroupMPI();
+  // Constructor will spawn up the worker thread loop
+  explicit ProcessGroupMPI(int rank, int size);
 
   virtual ~ProcessGroupMPI();
 
@@ -112,6 +111,9 @@ class ProcessGroupMPI : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
+  // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
+  static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI();
+
  protected:
   using WorkType =
       std::tuple<std::unique_ptr<WorkEntry>, std::shared_ptr<WorkMPI>>;
@@ -121,8 +123,6 @@ class ProcessGroupMPI : public ProcessGroup {
   void destroy();
 
   std::shared_ptr<ProcessGroup::Work> enqueue(std::unique_ptr<WorkEntry> entry);
-  // Checking the input tensor's validity
-  void checkSingleTensor(const std::vector<at::Tensor>& tensors);
 
   bool stop_;
 
@@ -134,10 +134,12 @@ class ProcessGroupMPI : public ProcessGroup {
   std::condition_variable queueConsumeCV_;
 
   // Global states
+  static void initMPIOnce();
+  static std::once_flag onceFlagInitMPI;
+
   static std::mutex pgGlobalMutex_;
   static int numProcessGroups_;
   static int mpiThreadSupport_;
-  static bool mpiInitialized_;
 };
 
 } // namespace c10d

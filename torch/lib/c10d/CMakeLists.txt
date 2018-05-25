@@ -16,6 +16,7 @@ endif()
 
 find_package(MPI)
 if(MPI_FOUND)
+  MESSAGE(STATUS "MPI_INCLUDE_PATH: ${MPI_INCLUDE_PATH}")
   MESSAGE(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
 else()
   MESSAGE(STATUS "Not able to find MPI, will compile c10d without MPI support")

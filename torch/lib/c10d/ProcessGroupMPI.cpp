@@ -1,8 +1,7 @@
 #include "ProcessGroupMPI.hpp"
 
-#include <iostream>
+#include <mpi-ext.h> // Needed for CUDA-aware check
 #include <map>
-#include "mpi-ext.h" // Needed for CUDA-sware check
 
 namespace c10d {
 
@@ -13,7 +12,6 @@ namespace c10d {
       std::string err = "MPI error in: " + std::string(__FILE__) + ":" + \
           std::to_string(__LINE__) +                                     \
           ", with error code: " + std::to_string(mpiStatus);             \
-      std::cerr << err << std::endl;                                     \
       throw std::runtime_error(err);                                     \
     }                                                                    \
   } while (0)
@@ -50,6 +48,23 @@ bool cudaAwareMpiCheck() {
 #else // !defined(MPIX_CUDA_AWARE_SUPPORT)
   return false;
 #endif // MPIX_CUDA_AWARE_SUPPORT
+}
+
+// Checking the input tensor's validity
+void checkSingleTensor(const std::vector<at::Tensor>& tensors) {
+  if (tensors.size() != 1) {
+    throw std::runtime_error(
+        "MPI process group only supports a single "
+        "tensor op");
+  }
+  if (!tensors[0].is_contiguous()) {
+    throw std::runtime_error("input tensor has to be contiguous");
+  }
+  if (tensors[0].is_cuda() && !cudaAwareMpiCheck()) {
+    throw std::runtime_error(
+        "CUDA tensor detected and the MPI used doesn't "
+        "have CUDA-aware MPI support");
+  }
 }
 
 void mpiExit() {
@@ -105,19 +120,16 @@ const std::exception& ProcessGroupMPI::WorkMPI::exception() const {
   }
 }
 
-// ProcessGroupMPI
-
 // Static global states
 int ProcessGroupMPI::numProcessGroups_ = 0;
 int ProcessGroupMPI::mpiThreadSupport_ = 0;
-bool ProcessGroupMPI::mpiInitialized_ = false;
 std::mutex ProcessGroupMPI::pgGlobalMutex_;
+// We only want to initialize once
+std::once_flag ProcessGroupMPI::onceFlagInitMPI;
 
-ProcessGroupMPI::ProcessGroupMPI() : ProcessGroup(-1, 0), stop_(false) {
+void ProcessGroupMPI::initMPIOnce() {
   // Initialize MPI environment
-  std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
-  // We only want to initialize once
-  if (!mpiInitialized_) {
+  std::call_once(onceFlagInitMPI, []() {
     MPI_CHECK(MPI_Init_thread(
         nullptr, nullptr, MPI_THREAD_MULTIPLE, &mpiThreadSupport_));
     if (mpiThreadSupport_ < MPI_THREAD_SERIALIZED) {
@@ -130,12 +142,29 @@ ProcessGroupMPI::ProcessGroupMPI() : ProcessGroup(-1, 0), stop_(false) {
     if (std::atexit(mpiExit)) {
       throw std::runtime_error("Fail to register the MPI exit handler");
     }
-    mpiInitialized_ = true;
+  });
+}
+
+std::shared_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI() {
+  // Once initialization
+  initMPIOnce();
+
+  int rank = -1;
+  int size = -1;
+  // Update the world size and rank
+  MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &size));
+  MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
+
+  if (rank < 0 || size < 0) {
+    throw std::runtime_error("Failed to get the world_size / rank");
   }
 
-  // Update the world size and rank
-  MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &size_));
-  MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank_));
+  return std::make_shared<ProcessGroupMPI>(rank, size);
+}
+
+ProcessGroupMPI::ProcessGroupMPI(int rank, int size)
+    : ProcessGroup(rank, size), stop_(false) {
+  std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
 
   if (mpiThreadSupport_ != MPI_THREAD_MULTIPLE && numProcessGroups_ >= 1) {
     throw std::runtime_error(
@@ -146,6 +175,7 @@ ProcessGroupMPI::ProcessGroupMPI() : ProcessGroup(-1, 0), stop_(false) {
   }
   // increase the total PG count
   ++numProcessGroups_;
+  globalLock.unlock();
 
   // Start the worker thread accepting MPI calls
   workerThread_ = std::thread(&ProcessGroupMPI::runLoop, this);
@@ -221,23 +251,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
   return work;
 }
 
-void ProcessGroupMPI::checkSingleTensor(
-    const std::vector<at::Tensor>& tensors) {
-  if (tensors.size() != 1) {
-    throw std::runtime_error(
-        "MPI process group only supports a single "
-        "tensor op");
-  }
-  if (!tensors[0].is_contiguous()) {
-    throw std::runtime_error("input tensor has to be contiguous");
-  }
-  if (tensors[0].is_cuda() && !cudaAwareMpiCheck()) {
-    throw std::runtime_error(
-        "CUDA tensor detected and the MPI used doesn't "
-        "have CUDA-aware MPI support");
-  }
-}
-
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
@@ -277,5 +290,4 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
   return enqueue(std::move(entry));
 }
 
-// TODO, adding addtional MPI Ops.
 } // namespace c10d
