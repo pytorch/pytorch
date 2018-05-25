@@ -241,7 +241,7 @@ def build_libs(libs):
     if WITH_DISTRIBUTED_MW:
         build_libs_cmd += ['--with-distributed-mw']
 
-    if my_env["BUILD_CAFFE2_TOO"]:
+    if 'BUILD_CAFFE2_TOO' in my_env.keys():
         build_libs_cmd += ['--with-full-caffe2']
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
