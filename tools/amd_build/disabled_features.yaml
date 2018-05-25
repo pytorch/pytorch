@@ -1,5 +1,5 @@
 {
-  "disabled_hip_function_calls":
+  "disable_unsupported_hip_calls":
     [
       {
         "path": "aten/src/THC/generic/THCTensorSort.cu",
