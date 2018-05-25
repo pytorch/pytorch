@@ -133,4 +133,4 @@ std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool(
 
 } // namespace caffe2
 
-#endif // CAFFE2_CORE_NET_ASYNC_POLLING_H_
+#endif // CAFFE2_CORE_NET_ASYNC_BASE_H_

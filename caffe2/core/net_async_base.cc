@@ -1,4 +1,4 @@
-#include "caffe2/core/net_async_polling.h"
+#include "caffe2/core/net_async_base.h"
 
 #include "caffe2/core/net_async_tracing.h"
 #include "caffe2/core/operator.h"
