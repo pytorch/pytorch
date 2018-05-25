@@ -1357,15 +1357,14 @@ private:
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
-    Value* tensor = input_values[0];
-    const auto& idx = at::Scalar(input_values[1]->node()->t(attr::value)).toInt();
+    Value *tensor = input_values[0];
+    auto dim_zero = emitConst(Const::create(loc, std::to_string(0)));
+    Value *idx = input_values[1];
     return emitNode(
                Symbol::aten("select"),
                loc,
-               {tensor},
+               {tensor, dim_zero, idx},
                1)
-               ->i_(attr::dim, 0)
-               ->i_(attr::index, idx)
                ->output();
   }
 };

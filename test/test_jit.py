@@ -2790,6 +2790,15 @@ class TestScript(TestCase):
 
         self.checkScript(t2, (torch.zeros(1, 1, 2)))
 
+    def test_gather_dynamic_index(self):
+        def t(x):
+            gather1 = x[0]
+            var = 0
+            gather2 = x[0]
+            return gather1 + gather2
+
+        self.checkScript(t, (torch.zeros(1, 2, 3)))
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
