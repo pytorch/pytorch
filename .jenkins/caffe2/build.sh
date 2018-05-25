@@ -179,9 +179,9 @@ if [[ -z $INTEGRATED ]]; then
     echo "Don't know how to build on $(uname)"
     exit 1
   fi
-fi
 
-report_compile_cache_stats
+  report_compile_cache_stats
+fi
 
 # Install ONNX into a local directory
 pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
