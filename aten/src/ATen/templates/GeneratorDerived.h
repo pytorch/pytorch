@@ -1,5 +1,6 @@
-// @generated
 #pragma once
+
+// ${generated_comment}
 
 #include <$header>
 
