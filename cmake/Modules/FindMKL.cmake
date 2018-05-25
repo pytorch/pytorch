@@ -282,6 +282,7 @@ IF(NOT MKL_FIND_QUIETLY)
     MESSAGE(STATUS "MKL library found")
   ELSE(MKL_FOUND)
     MESSAGE(STATUS "MKL library not found")
+    return()
   ENDIF(MKL_FOUND)
 ENDIF(NOT MKL_FIND_QUIETLY)
 
