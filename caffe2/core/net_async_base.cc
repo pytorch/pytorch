@@ -77,8 +77,15 @@ AsyncNetBase::AsyncNetBase(
 
   events_.reserve(chains_.size());
   for (const auto& chain : chains_) {
-    const auto& op = operators_[chain.back()];
-    events_.push_back(&op->event());
+    const auto& last_op = operators_[chain.back()];
+    events_.push_back(&last_op->event());
+    for (const auto& op_id : chain) {
+      if (op_id == chain.back() || op_id == chain.front()) {
+        continue;
+      }
+      const auto& op = operators_[op_id];
+      op->DisableEvent();
+    }
   }
 
   num_workers_ = net_def->has_num_workers() ? net_def->num_workers() : -1;
