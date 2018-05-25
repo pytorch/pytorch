@@ -667,14 +667,12 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
 
 Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce) {
   if (!reduce) {
-    return grad_output.mul(target.log() + at::ones_like(target) - self).masked_fill_(target == 0, 0.);
+    return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
   }
-
-  auto norm = at::ones_like(target);
   if (size_average) {
-    norm = norm.div(norm.numel());
+    return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
   }
-  return grad_output.mul(target.log() + at::ones_like(target) - self).mul(norm).masked_fill_(target == 0, 0.);
+  return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
 }
 
 Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
