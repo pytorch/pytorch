@@ -2061,6 +2061,7 @@ class TestNN(NNTestCase):
             self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
         else:
             import urllib.request
+            import io
             resource = urllib.request.urlopen('https://download.pytorch.org/test_data/linear.pt')
             self.assertRaisesRegex(io.UnsupportedOperation, expected_err_msg, lambda: torch.load(resource))
 
