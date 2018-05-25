@@ -285,11 +285,6 @@ IF(NOT MKL_FIND_QUIETLY)
   ENDIF(MKL_FOUND)
 ENDIF(NOT MKL_FIND_QUIETLY)
 
-# MKLML is included in the MKL package
-if (USE_MKLML)
-  set(CAFFE2_USE_MKL 1)
-endif()
-
 if (USE_IDEEP) 
   set(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   set(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
