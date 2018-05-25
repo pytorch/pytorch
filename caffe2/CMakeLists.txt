@@ -23,7 +23,7 @@ if(BUILD_ATEN)
       --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
       --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
     DEPENDS
-    ATen_cpu
+    ATEN_CPU_FILES_GEN_TARGET
     ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
     ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
 

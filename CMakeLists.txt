@@ -20,6 +20,12 @@ set(CAFFE2_VERSION
 #    endif()
 set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 
+if(DEFINED BLAS)
+  set(BLAS_SET_BY_USER TRUE)
+else()
+  message(STATUS "Not forcing any particular BLAS to be found")
+  set(BLAS_SET_BY_USER FALSE)
+endif()
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
