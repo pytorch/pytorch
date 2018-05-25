@@ -554,7 +554,7 @@ TensorShapes InferBlobShapesAndTypesFromMap(
   for (const auto& blob : blob_dimensions) {
     TensorShape tp;
     for (auto d : blob.second) {
-      CAFFE_ENFORCE_GT(d, 0);
+      CAFFE_ENFORCE_GE(d, 0, blob.first);
       tp.add_dims(d);
     }
     blob_desc[blob.first] = tp;
