@@ -89,7 +89,6 @@ INSTALL(FILES
   THTensor.h
   THTensorApply.h
   THTensorDimApply.h
-  THTensorMacros.h
   THVector.h
   THHalf.h
   THTensor.hpp
