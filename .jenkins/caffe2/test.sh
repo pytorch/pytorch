@@ -55,6 +55,10 @@ cd ${INSTALL_PREFIX}
 echo "Running C++ tests.."
 for test in $(find $INSTALL_PREFIX/test/); do
   # Skip directories
+  if [[ -d $test ]]; then
+    continue
+  fi
+  # ATen tests
   if [ $(dirname "${test}") == 'aten' ]; then
     "$test" -r=xml -o "${test}.xml"
     continue
