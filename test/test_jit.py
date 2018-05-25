@@ -1847,6 +1847,82 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
 
+    def test_script_sequential_for(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.mods = nn.Sequential(Sub(), Sub(), Sub())
+
+            @torch.jit.script_method
+            def forward(self, v):
+                for m in self.mods:
+                    v = m(v)
+                return v
+
+            @torch.jit.script_method
+            def forward2(self, v):
+                return self.mods(v)
+
+        i = torch.Tensor(2)
+        m = M()
+        o = m(i)
+        v = i
+        for sub in m.mods:
+            v = sub(v)
+        self.assertEqual(o, v)
+
+        o2 = m.forward2(i)
+        self.assertEqual(o2, v)
+
+    def test_script_sequential_multi_output_fail(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class ReturnMulti(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ReturnMulti, self).__init__(False)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x, x, x
+
+        class HaveSequential(torch.jit.ScriptModule):
+            __constants__ = ['someseq']
+
+            def __init__(self):
+                super(HaveSequential, self).__init__(False)
+                self.someseq = nn.Sequential(
+                    Sub(),
+                    ReturnMulti(),
+                    Sub()
+                )
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.someseq(x)
+
+        with self.assertRaisesRegex(RuntimeError, "(Tensor, Tensor, Tensor)"):
+            hs = HaveSequential()
+            i = torch.Tensor(2)
+            hs(i)
+
     def test_constant_as_attr(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['dim']
