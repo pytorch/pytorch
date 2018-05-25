@@ -194,8 +194,11 @@ bool AsyncNetBase::canSchedule(
       parent_status = operators_[last_parent_op_id]->event().Query();
     }
 
-    if (parent_status == EventStatus::EVENT_FAILED && parent_failed) {
-      *parent_failed = true;
+    if (parent_status == EventStatus::EVENT_FAILED) {
+      if (parent_failed) {
+        *parent_failed = true;
+      }
+      return false;
     }
 
     bool can_schedule = Event::CanSchedule(
@@ -209,6 +212,17 @@ bool AsyncNetBase::canSchedule(
   }
 
   return true;
+}
+
+bool AsyncNetBase::canSchedule(int parent_id, int child_id) {
+  auto& parent_event = event(parent_id);
+  auto first_child_op_id = chains_[child_id].front();
+  auto* first_child_op = operators_[first_child_op_id];
+  return Event::CanSchedule(
+      parent_event.GetType(),
+      parent_event.Query(),
+      first_child_op->event().GetType(),
+      first_child_op->SupportsAsyncScheduling());
 }
 
 int AsyncNetBase::tasksNum() const {
@@ -235,6 +249,26 @@ const std::vector<int>& AsyncNetBase::parents(int task_id) const {
   return task_node.parents_;
 }
 
+int AsyncNetBase::getParentCount(int child_id) {
+  auto& child_ops = chains_[child_id];
+  auto& child_node = operator_nodes_[child_ops.front()];
+  return child_node.runtime_parent_count_.load();
+}
+
+int AsyncNetBase::updateParentCount(int child_id) {
+  auto& child_ops = chains_[child_id];
+  auto& child_node = operator_nodes_[child_ops.front()];
+  int parent_count = --child_node.runtime_parent_count_;
+  CAFFE_ENFORCE_GE(parent_count, 0);
+  return parent_count;
+}
+
+bool AsyncNetBase::testAndSetScheduled(int task_id) {
+  auto& task_ops = chains_[task_id];
+  auto& task_op_node = operator_nodes_[task_ops.front()];
+  return !task_op_node.scheduled_.test_and_set();
+}
+
 int AsyncNetBase::num_ops(int task_id) const {
   return chains_[task_id].size();
 }
@@ -256,6 +290,12 @@ void AsyncNetBase::asyncWait(
 void AsyncNetBase::reset() {
   for (auto& op : GetOperators()) {
     op->ResetEvent();
+  }
+  for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
+    auto& task_ops = chains_[task_id];
+    auto& task_op_node = operator_nodes_[task_ops.front()];
+    task_op_node.runtime_parent_count_ = parents(task_id).size();
+    task_op_node.scheduled_.clear();
   }
 #ifdef CAFFE2_USE_EXCEPTION_PTR
   std::unique_lock<std::mutex> exception_lock(exception_mutex_);

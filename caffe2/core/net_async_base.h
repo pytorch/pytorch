@@ -53,12 +53,16 @@ class AsyncNetBase : public NetBase {
       int chain_id,
       const std::vector<EventStatus>* status = nullptr,
       bool* parent_failed = nullptr);
+  bool canSchedule(int parent_id, int child_id);
 
   int tasksNum() const;
   Event& event(int task_id) const;
   EventStatus query(int task_id) const;
   const std::vector<int>& children(int task_id) const;
   const std::vector<int>& parents(int task_id) const;
+  int updateParentCount(int child_id);
+  int getParentCount(int child_id);
+  bool testAndSetScheduled(int task_id);
   int num_ops(int task_id) const;
 
   void asyncWait(

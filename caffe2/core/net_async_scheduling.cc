@@ -1,5 +1,10 @@
 #include "caffe2/core/net_async_scheduling.h"
 
+CAFFE2_DEFINE_bool(
+    caffe2_net_async_optimize_polling,
+    true,
+    "Use event callbacks whenever possible instead of polling");
+
 namespace caffe2 {
 
 AsyncSchedulingNet::AsyncSchedulingNet(
@@ -9,15 +14,8 @@ AsyncSchedulingNet::AsyncSchedulingNet(
 
 void AsyncSchedulingNet::reset() {
   AsyncNetBase::reset();
-
   processed_tasks_num_ = 0;
   success_ = true;
-
-  for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
-    auto& task_ops = chains_[task_id];
-    auto& task_op_node = operator_nodes_[task_ops.front()];
-    task_op_node.runtime_parent_count_ = parents(task_id).size();
-  }
 }
 
 void AsyncSchedulingNet::Wait() {
@@ -28,6 +26,9 @@ void AsyncSchedulingNet::Wait() {
 }
 
 void AsyncSchedulingNet::schedule(int task_id) {
+  if (!testAndSetScheduled(task_id)) {
+    return;
+  }
   const auto& device_option = event(task_id).GetDeviceOption();
   pool(device_option)->run([this, task_id]() {
     if (success_) {
@@ -55,10 +56,62 @@ void AsyncSchedulingNet::schedule(int task_id) {
             canSchedule(child_id)) {
           schedule(child_id);
         } else {
-          const auto& device_option = event(child_id).GetDeviceOption();
-          pool(device_option)
-              ->run(std::bind(
-                  &AsyncSchedulingNet::pollAndSchedule, this, child_id));
+          bool parent_failed = false;
+          bool parent_needs_polling = false;
+          std::vector<int> parents_with_callback;
+
+          for (auto parent_id : parents(child_id)) {
+            auto& parent_event = event(parent_id);
+            auto parent_status = parent_event.Query();
+
+            if (parent_status == EventStatus::EVENT_FAILED) {
+              parent_failed = true;
+              break;
+            } else if (parent_status == EventStatus::EVENT_SCHEDULED) {
+              // parent is not finished yet, check if this is blocking us
+              // from scheduling a child
+              if (!canSchedule(parent_id, child_id)) {
+                // we can't schedule a child because of this parent,
+                // check if parent supports callback
+                if (FLAGS_caffe2_net_async_optimize_polling &&
+                    parent_event.SupportsCallback()) {
+                  parents_with_callback.push_back(parent_id);
+                } else {
+                  parent_needs_polling = true;
+                  break;
+                }
+              }
+            } else if (parent_status != EventStatus::EVENT_SUCCESS) {
+              VLOG(1) << "Unexpected parent task state: " << parent_status
+                      << ", task id: " << child_id
+                      << ", parent task id: " << parent_id;
+              parent_failed = true;
+              break;
+            }
+          }
+
+          if (parent_failed) {
+            // one of parents failed, set failure flag and wrap up execution
+            success_ = false;
+            schedule(child_id);
+          } else if (parent_needs_polling) {
+            // some parents are blocking us from scheduling a child and don't
+            // support callbacks, using polling
+            const auto& child_device_option = event(child_id).GetDeviceOption();
+            pool(child_device_option)
+                ->run(std::bind(
+                    &AsyncSchedulingNet::pollAndSchedule, this, child_id));
+          } else if (!parents_with_callback.empty()) {
+            // some parents are blocking us from scheduling a child and they
+            // support callbacks
+            for (auto parent_id : parents_with_callback) {
+              event(parent_id).SetCallback(std::bind(
+                  &AsyncSchedulingNet::parentCallback, this, parent_id));
+            }
+          } else {
+            // we're ready to schedule a child
+            schedule(child_id);
+          }
         }
       }
     }
@@ -73,6 +126,20 @@ void AsyncSchedulingNet::schedule(int task_id) {
       finishRun();
     }
   });
+}
+
+void AsyncSchedulingNet::parentCallback(int parent_id) {
+  if (event(parent_id).Query() != EventStatus::EVENT_SUCCESS) {
+    success_ = false;
+  }
+  for (auto child_id : children(parent_id)) {
+    int parent_count = getParentCount(child_id);
+    if (parent_count == 0) {
+      if (!success_ || canSchedule(child_id)) {
+        schedule(child_id);
+      }
+    }
+  }
 }
 
 void AsyncSchedulingNet::pollAndSchedule(int task_id) {
@@ -92,14 +159,6 @@ void AsyncSchedulingNet::pollAndSchedule(int task_id) {
     pool(device_option)
         ->run(std::bind(&AsyncSchedulingNet::pollAndSchedule, this, task_id));
   }
-}
-
-int AsyncSchedulingNet::updateParentCount(int child_id) {
-  auto& child_ops = chains_[child_id];
-  auto& child_node = operator_nodes_[child_ops.front()];
-  int parent_count = --child_node.runtime_parent_count_;
-  CAFFE_ENFORCE_GE(parent_count, 0);
-  return parent_count;
 }
 
 void AsyncSchedulingNet::finishRun() {
