@@ -1,5 +1,7 @@
 #include "caffe2/core/net_async_scheduling.h"
 
+#include "caffe2/core/net_async_tracing.h"
+
 CAFFE2_DEFINE_bool(
     caffe2_net_async_optimize_polling,
     true,
@@ -184,6 +186,7 @@ bool AsyncSchedulingNet::RunAsync() {
     reset();
 
     StartAllObservers();
+    tracing::startIter(tracer_);
 
     for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
       if (parents(task_id).empty()) {
