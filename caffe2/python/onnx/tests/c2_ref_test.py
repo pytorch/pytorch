@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 
 import json
 import os
+import six
 import unittest
 
 from caffe2.python import core
@@ -24,7 +25,7 @@ import caffe2.python.onnx.backend as c2
 import numpy as np
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 
-from caffe2.python.onnx.tests.test_utils import TestCase, DownloadingTestCase
+from caffe2.python.onnx.tests.test_utils import DownloadingTestCase
 
 import caffe2.python._import_c_extension as C
 
@@ -43,9 +44,9 @@ class TestCaffe2Basic(DownloadingTestCase):
         b2.convert_node(node_def.SerializeToString())
 
         bad_node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"], foo=42, bar=56)
-        with self.assertRaisesRegexp(
-                RuntimeError,
-                "Don't know how to map unexpected argument (foo|bar)"):
+        with six.assertRaisesRegex(self,
+                                   RuntimeError,
+                                   "Don't know how to map unexpected argument (foo|bar)"):
             b2.convert_node(bad_node_def.SerializeToString())
 
     def test_relu_graph(self):
@@ -582,10 +583,11 @@ class TestCaffe2End2End(DownloadingTestCase):
         _, c2_outputs = c2_native_run_net(c2_init_net, c2_predict_net, inputs)
         del _
 
-        model = c2_onnx.caffe2_net_to_onnx_model(
-            predict_net=c2_predict_net,
-            init_net=c2_init_net,
-            value_info=json.load(open(os.path.join(model_dir, 'value_info.json'))))
+        with open(os.path.join(model_dir, 'value_info.json'), 'r') as value_info_conf:
+            model = c2_onnx.caffe2_net_to_onnx_model(
+                predict_net=c2_predict_net,
+                init_net=c2_init_net,
+                value_info=json.load(value_info_conf))
         c2_ir = c2.prepare(model)
         onnx_outputs = c2_ir.run(inputs)
         self.assertSameOutputs(c2_outputs, onnx_outputs, decimal=decimal)

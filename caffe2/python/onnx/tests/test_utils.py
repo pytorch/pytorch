@@ -12,7 +12,9 @@ import unittest
 import numpy as np
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 
+
 class TestCase(unittest.TestCase):
+
     def setUp(self):
         np.random.seed(seed=0)
 
@@ -52,4 +54,4 @@ class DownloadingTestCase(TestCase):
                 print("Abort: {reason}".format(reason=e))
                 print("Cleaning up...")
                 deleteDirectory(model_dir)
-                exit(1)
+                raise AssertionError("Test model downloading failed")

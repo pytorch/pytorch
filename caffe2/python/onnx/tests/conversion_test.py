@@ -6,6 +6,7 @@ from __future__ import division
 from __future__ import print_function
 
 import json
+import six
 import tempfile
 import textwrap
 import traceback
@@ -81,9 +82,9 @@ class TestConversion(TestCase):
         caffe2_net.flush()
 
         args = [caffe2_net.name, '--output', output.name]
-        self.assertRaisesRegexp(Exception,
-                                'value info',
-                                self._run_command, caffe2_to_onnx, args)
+        six.assertRaisesRegex(self, Exception,
+                              'value info',
+                              self._run_command, caffe2_to_onnx, args)
 
         args.extend([
             '--value-info',
