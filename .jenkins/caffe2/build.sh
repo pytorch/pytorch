@@ -66,7 +66,9 @@ CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
 CMAKE_ARGS+=("-DUSE_ZSTD=ON")
 
 if [[ $BUILD_ENVIRONMENT == *-aten-* ]]; then
-  CMAKE_ARGS+=("-DUSE_ATEN=ON")
+  if [[ CMAKE_ARGS != *USE_ATEN* ]] && [[ CMAKE_ARGS != *BUILD_ATEN* ]]; then
+    CMAKE_ARGS+=("-DBUILD_ATEN=ON")
+  fi
 fi
 
 # Run build script from scripts if applicable
