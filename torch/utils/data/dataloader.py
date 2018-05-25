@@ -245,7 +245,6 @@ class _DataLoaderIter(object):
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory and torch.cuda.is_available()
         self.timeout = loader.timeout
-        self.done_event = threading.Event()
 
         self.sample_iter = iter(self.batch_sampler)
 
@@ -271,7 +270,8 @@ class _DataLoaderIter(object):
                           self.worker_init_fn, i))
                 for i in range(self.num_workers)]
 
-            if self.pin_memory or self.timeout > 0:
+            if self.pin_memory:
+                self.done_event = threading.Event()
                 self.data_queue = queue.Queue()
                 if self.pin_memory:
                     maybe_device_id = torch.cuda.current_device()
@@ -369,22 +369,26 @@ class _DataLoaderIter(object):
         raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
-        try:
-            if not self.shutdown:
-                self.shutdown = True
-                self.done_event.set()
-                # Workers can't be waiting to put be cause their output queue
-                # is a multiprocessing.Queue and its .put is non-blocking.
-                for q in self.index_queues:
-                    q.put(None)
-                # done_event should be sufficient to exit worker_manager_thread,
-                # but be safe here and put another None
-                self.worker_result_queue.put(None)
-        finally:
-            # removes pids no matter what
+        if not self.shutdown:
+            self.shutdown = True
+            # removes pids
             if self.worker_pids_set:
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
+            # Workers can't be waiting to put be cause their output queue
+            # is a multiprocessing.Queue and its .put is non-blocking.
+            # They can only be waiting to get, so we put `None` here.
+            for q in self.index_queues:
+                q.put(None)
+            for w in self.workers:
+                w.join()
+            if hasattr(self, 'worker_manager_thread'):
+                self.done_event.set()
+                # `done_event` should be sufficient to exit the
+                # `worker_manager_thread`, but be safe here and put another
+                # `None`
+                self.worker_result_queue.put(None)
+                self.worker_manager_thread.join()
 
     def __del__(self):
         if self.num_workers > 0:
