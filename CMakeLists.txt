@@ -20,6 +20,12 @@ set(CAFFE2_VERSION
 #    endif()
 set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 
+if(DEFINED BLAS)
+  set(BLAS_SET_BY_USER TRUE)
+else()
+  message(STATUS "Not forcing any particular BLAS to be found")
+  set(BLAS_SET_BY_USER FALSE)
+endif()
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -100,10 +106,10 @@ option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_MKLDNN "Use MKLDNN" OFF)
 cmake_dependent_option(
-    USE_IDEEP "Use IDEEP interface in MKL BLAS" ON
+  USE_IDEEP "Use IDEEP interface in MKL BLAS" ON
     "BUILD_CAFFE2" OFF)
 cmake_dependent_option(
-    USE_MKLML "Use MKLML interface in MKL BLAS" ON
+  USE_MKLML "Use MKLML interface in MKL BLAS" ON
     "BUILD_CAFFE2" OFF)
 option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
 option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
@@ -141,11 +147,6 @@ cmake_dependent_option(
     "USE_GLOO_IBVERBS" OFF)
 if (USE_ATEN)
     set(BUILD_ATEN ${USE_ATEN})
-endif()
-
-# ---[ Special code path for MKL module
-if (NOT BUILD_ATEN)
-  set(USE_MKL_IDEEP_OR_MKLML ON)
 endif()
 
 # ---[ CMake scripts + modules
