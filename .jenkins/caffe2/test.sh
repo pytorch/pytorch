@@ -35,9 +35,16 @@ fi
 
 # Set PYTHONPATH and LD_LIBRARY_PATH so that python can find the installed
 # Caffe2. This shouldn't be done on Anaconda, as Anaconda should handle this.
-if [[ "$BUILD_ENVIRONMENT" != conda* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != conda* && -z $INTEGRATED ]]; then
   export PYTHONPATH="${PYTHONPATH}:$INSTALL_SITE_DIR"
   export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/lib"
+fi
+
+
+if [[ -n $INTEGRATED ]]; then
+  INSTALL_PREFIX="${HOME}/.local/lib/$PYTHON/site-packages/"
+  INSTALL_SITE_DIR="${HOME}/.local/${SITE_DIR}"
+  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/torch/lib"
 fi
 
 cd "$ROOT_DIR"
