@@ -54,14 +54,19 @@ cd ${INSTALL_PREFIX}
 # C++ tests
 echo "Running C++ tests.."
 for test in $INSTALL_PREFIX/test/*; do
+  report_file="$TEST_DIR"/cpp/$(basename "$test").xml
   # Skip tests we know are hanging or bad
   case "$(basename "$test")" in
     mkl_utils_test)
       continue
       ;;
+    apply_test)
+      "$test" -r=xml -o "$report_file"
+      ;;
+    *)
+      "$test" --gtest_output=xml:"$report_file"
+      ;;
   esac
-
-  "$test" --gtest_output=xml:"$TEST_DIR"/cpp/$(basename "$test").xml
 done
 
 # Get the relative path to where the caffe2 python module was installed
