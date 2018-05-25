@@ -15,11 +15,13 @@
 
 CAFFE2_DECLARE_int(caffe2_streams_per_gpu);
 CAFFE2_DECLARE_bool(caffe2_net_async_finish_chain);
+CAFFE2_DECLARE_bool(caffe2_net_async_always_schedule_child);
 CAFFE2_DECLARE_int(caffe2_net_async_max_gpus);
 CAFFE2_DECLARE_int(caffe2_net_async_max_numa_nodes);
 CAFFE2_DECLARE_int(caffe2_net_async_cpu_pool_size);
 CAFFE2_DECLARE_bool(caffe2_net_async_check_stream_status);
 CAFFE2_DECLARE_bool(caffe2_net_async_use_single_pool);
+CAFFE2_DECLARE_bool(caffe2_net_async_use_per_net_pools);
 
 namespace caffe2 {
 
@@ -99,6 +101,15 @@ class AsyncNetBase : public NetBase {
   // Tracing
   std::shared_ptr<tracing::Tracer> tracer_;
 
+  // execution mode flags
+  void computeExecutionModeFlags();
+  int streams_per_gpu_;
+  bool finish_chain_;
+  bool always_schedule_child_;
+  bool check_stream_status_;
+  bool use_single_pool_;
+  bool use_per_net_pools_;
+
   DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
@@ -113,7 +124,12 @@ class AsyncNetBase : public NetBase {
   friend class tracing::Tracer;
 };
 
-CAFFE_DECLARE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int);
+CAFFE_DECLARE_SHARED_REGISTRY(
+    ThreadPoolRegistry,
+    TaskThreadPool,
+    int,
+    int,
+    bool);
 
 class AsyncNetExecutorHelper : public ExecutorHelper {
  public:
@@ -127,9 +143,8 @@ class AsyncNetExecutorHelper : public ExecutorHelper {
   AsyncNetBase* net_;
 };
 
-std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool(
-    int numa_node_id,
-    int pool_size);
+std::shared_ptr<TaskThreadPool>
+GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new);
 
 } // namespace caffe2
 

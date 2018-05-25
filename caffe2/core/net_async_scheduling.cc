@@ -1,10 +1,5 @@
 #include "caffe2/core/net_async_scheduling.h"
 
-CAFFE2_DEFINE_bool(
-    caffe2_net_async_always_schedule_child,
-    false,
-    "Always schedule child chains from parent chain");
-
 namespace caffe2 {
 
 AsyncSchedulingNet::AsyncSchedulingNet(
@@ -39,7 +34,7 @@ void AsyncSchedulingNet::schedule(int task_id) {
   pool(device_option)->run([this, task_id]() {
     if (success_) {
       int stream_id = 0;
-      if (FLAGS_caffe2_streams_per_gpu > 1) {
+      if (streams_per_gpu_ > 1) {
         stream_id = stream(task_id);
       }
       try {
@@ -60,8 +55,8 @@ void AsyncSchedulingNet::schedule(int task_id) {
         // - --caffe2_net_async_finish_chain is set, in this case parents are
         //   guaranteed to be finished
         // - in all other cases, check parents with canSchedule
-        if (!success_ || FLAGS_caffe2_net_async_always_schedule_child ||
-            FLAGS_caffe2_net_async_finish_chain || canSchedule(child_id)) {
+        if (!success_ || always_schedule_child_ || finish_chain_ ||
+            canSchedule(child_id)) {
           schedule(child_id);
         } else {
           const auto& device_option = event(child_id).GetDeviceOption();
