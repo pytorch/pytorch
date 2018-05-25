@@ -226,7 +226,7 @@ class TestRNNExecutor(unittest.TestCase):
             non_exec_v = non_exec_ws[k]
             rnn_exec_v = rnn_exec_ws[k]
             if type(non_exec_v) is np.ndarray:
-                if not np.array_equal(non_exec_v, rnn_exec_v):
+                if not np.allclose(non_exec_v, rnn_exec_v):
                     print("Mismatch: {}".format(k))
                     nv = non_exec_v.flatten()
                     rv = rnn_exec_v.flatten()
