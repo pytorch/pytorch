@@ -26,9 +26,25 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   auto non_blocking = std::get<2>(parsed);
   auto tuple = THPObjectPtr{PyTuple_New(3)};
   if (!tuple) throw python_error();
-  PyTuple_SET_ITEM(tuple.get(), 0, device       ? THPDevice_New(*device) : Py_None);
-  PyTuple_SET_ITEM(tuple.get(), 1, scalarType   ? torch::autograd::utils::wrap(torch::getDtype(*scalarType)): Py_None);
-  PyTuple_SET_ITEM(tuple.get(), 2, non_blocking ? Py_True : Py_False);
+  if (device) {
+    PyTuple_SET_ITEM(tuple.get(), 0, THPDevice_New(*device));
+  } else {
+    Py_INCREF(Py_None);
+    PyTuple_SET_ITEM(tuple.get(), 0, Py_None);
+  }
+  if (scalarType) {
+    PyTuple_SET_ITEM(tuple.get(), 1, torch::autograd::utils::wrap(torch::getDtype(*scalarType)));
+  } else {
+    Py_INCREF(Py_None);
+    PyTuple_SET_ITEM(tuple.get(), 1, Py_None);
+  }
+  if (non_blocking) {
+    Py_INCREF(Py_True);
+    PyTuple_SET_ITEM(tuple.get(), 2, Py_True);
+  } else {
+    Py_INCREF(Py_False);
+    PyTuple_SET_ITEM(tuple.get(), 2, Py_False);
+  }
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }
