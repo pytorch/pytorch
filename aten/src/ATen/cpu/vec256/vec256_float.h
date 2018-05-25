@@ -107,7 +107,7 @@ Vec256<float> inline map(float (*f)(float), Vec256<float> x) = delete;
 
 template <>
 Vec256<float> inline abs(Vec256<float> x) {
-  auto mask = _mm256_set1_ps(-0.f);
+  auto mask = _mm256_set1_ps(((float)(-0.f)));
   return _mm256_andnot_ps(mask, x);
 }
 

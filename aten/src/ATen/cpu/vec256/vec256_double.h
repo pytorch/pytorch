@@ -46,13 +46,6 @@ public:
     if (count == size && stride == 1)
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
 
-#ifdef __AVX2__
-    if(count == size) {
-      __m128i vindex = _mm_set_epi32(3 * stride, 2 * stride, 1 * stride, 0);
-      return _mm256_i32gather_pd(reinterpret_cast<const double*>(ptr), vindex, 1);
-    }
-#endif
-
     __at_align32__ double tmp_values[size];
     if (stride == 1) {
       std::memcpy(
@@ -120,7 +113,7 @@ Vec256<double> inline map(double (*f)(double), Vec256<double> x) = delete;
 
 template <>
 Vec256<double> inline abs(Vec256<double> x) {
-  auto mask = _mm256_set1_pd(-0.f);
+  auto mask = _mm256_set1_pd(((double)(-0.)));
   return _mm256_andnot_pd(mask, x);
 }
 
