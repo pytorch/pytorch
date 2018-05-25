@@ -197,6 +197,9 @@ bool InitCaffeLogging(int* argc, char** argv) {
   return true;
 }
 
+void UpdateLoggingLevelsFromFlags() {
+}
+
 void ShowLogInfoToStderr() {
   FLAGS_caffe2_log_level = INFO;
 }
