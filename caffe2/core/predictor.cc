@@ -1,7 +1,7 @@
 #include "caffe2/core/predictor.h"
 #include "caffe2/opt/optimizer.h"
-
 #include <unordered_set>
+#include "caffe2/core/init.h"
 
 namespace caffe2 {
 
@@ -89,6 +89,8 @@ Predictor::Predictor(
   if (run_init) {
     CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
   }
+
+  GlobalInit();
 
   if (optimization) {
     run_net_ = opt::optimize(run_net_, &ws_, optimization);

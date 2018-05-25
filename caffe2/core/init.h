@@ -129,5 +129,13 @@ class GlobalInitIsCalledGuard {
  */
 bool GlobalInit(int* pargc, char*** argv);
 
+/**
+ * @brief Initialize the global environment without command line arguments
+ *
+ * This is a version of the GlobalInit where no argument is passed in.
+ * On mobile devices, use this global init, since we cannot pass the
+ * command line options to caffe2, no arguments are passed.
+ */
+bool GlobalInit();
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_INIT_H_

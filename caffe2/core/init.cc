@@ -3,6 +3,7 @@
 #include "caffe2/core/scope_guard.h"
 
 #include <iomanip>
+#include <mutex>
 
 CAFFE2_DEFINE_bool(
     caffe2_version,
@@ -41,6 +42,8 @@ bool GlobalInitAlreadyRun() {
 }
 
 bool GlobalInit(int* pargc, char*** pargv) {
+  static std::recursive_mutex init_mutex;
+  std::lock_guard<std::recursive_mutex> guard(init_mutex);
   internal::State& init_state = internal::GlobalInitState();
   static StaticLinkingProtector g_protector;
   bool success = true;
@@ -85,5 +88,16 @@ bool GlobalInit(int* pargc, char*** pargv) {
   CAFFE_ENFORCE(success, "Failed to run some init functions for caffe2.");
   // TODO: if we fail GlobalInit(), should we continue?
   return success;
+}
+
+bool GlobalInit() {
+  // This is a version of the GlobalInit where no argument is passed in.
+  // On mobile devices, use this global init, since we cannot pass the
+  // command line options to caffe2, no arguments are passed.
+  int mobile_argc = 1;
+  static char caffe2_name[] = "caffe2";
+  char* mobile_name = &caffe2_name[0];
+  char** mobile_argv = &mobile_name;
+  return ::caffe2::GlobalInit(&mobile_argc, &mobile_argv);
 }
 }  // namespace caffe2
