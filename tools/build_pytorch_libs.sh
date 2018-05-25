@@ -17,6 +17,7 @@ WITH_NNPACK=0
 WITH_MKLDNN=0
 WITH_GLOO_IBVERBS=0
 WITH_DISTRIBUTED_MW=0
+WITH_FULL_CAFFE2=OFF
 while [[ $# -gt 0 ]]; do
     case "$1" in
       --with-cuda)
@@ -36,6 +37,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --with-distributed-mw)
           WITH_DISTRIBUTED_MW=1
+          ;;
+      --with-full-caffe2)
+          WITH_FULL_CAFFE2=ON
           ;;
       *)
           break
@@ -224,10 +228,10 @@ function build_caffe2() {
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-      -DBUILD_CAFFE2=OFF \
+      -DBUILD_CAFFE2=$WITH_FULL_CAFFE2 \
       -DBUILD_ATEN=ON \
-      -DBUILD_PYTHON=OFF \
-      -DBUILD_BINARY=OFF \
+      -DBUILD_PYTHON=$WITH_FULL_CAFFE2 \
+      -DBUILD_BINARY=$WITH_FULL_CAFFE2 \
       -DBUILD_SHARED_LIBS=ON \
       -DUSE_CUDA=$WITH_CUDA \
       -DUSE_ROCM=$WITH_ROCM \

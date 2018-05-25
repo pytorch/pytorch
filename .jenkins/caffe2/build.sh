@@ -159,25 +159,29 @@ fi
 # Use a speciallized onnx namespace in CI to catch hardcoded onnx namespace
 CMAKE_ARGS+=("-DONNX_NAMESPACE=ONNX_NAMESPACE_FOR_C2_CI")
 
-# Configure
-${CMAKE_BINARY} "${ROOT_DIR}" ${CMAKE_ARGS[*]} "$@"
+# TODO get rid of this suuuper hacky workaround for building Pytorch and Caffe2
+# together
+if [[ -z $INTEGRATED ]]; then
+  # Configure
+  ${CMAKE_BINARY} "${ROOT_DIR}" ${CMAKE_ARGS[*]} "$@"
+  
+  # Build
+  # sccache will fail for CUDA builds if all cores are used for compiling
+  if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
+    MAX_JOBS=`expr $(nproc) - 1`
+  else
+    MAX_JOBS=$(nproc)
+  fi
+  
+  if [ "$(uname)" == "Linux" ]; then
+    make "-j${MAX_JOBS}" install
+  else
+    echo "Don't know how to build on $(uname)"
+    exit 1
+  fi
 
-# Build
-# sccache will fail for CUDA builds if all cores are used for compiling
-if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
-  MAX_JOBS=`expr $(nproc) - 1`
-else
-  MAX_JOBS=$(nproc)
+  report_compile_cache_stats
 fi
-
-if [ "$(uname)" == "Linux" ]; then
-  make "-j${MAX_JOBS}" install
-else
-  echo "Don't know how to build on $(uname)"
-  exit 1
-fi
-
-report_compile_cache_stats
 
 # Install ONNX into a local directory
 pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
@@ -190,7 +194,8 @@ if [[ -n "$INTEGRATED" ]]; then
   if [[ -n "${SCCACHE}" ]]; then
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
-  pip install --user -v -b /tmp/pip_install_torch "file://${ROOT_DIR}#egg=torch"
+  BUILD_CAFFE2_TOO=1 pip install --user -v -b /tmp/pip_install_torch "file://${ROOT_DIR}#egg=torch"
+  report_compile_cache_stats
 fi
 
 report_compile_cache_stats
