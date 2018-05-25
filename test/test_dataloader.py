@@ -489,7 +489,6 @@ class TestDataLoader(TestCase):
         for w in workers:
             w.join(JOIN_TIMEOUT)
             self.assertFalse(w.is_alive(), 'subprocess not terminated')
-            self.assertEqual(w.exitcode, 0)
         worker_manager_thread.join(JOIN_TIMEOUT)
         self.assertFalse(worker_manager_thread.is_alive())
 
