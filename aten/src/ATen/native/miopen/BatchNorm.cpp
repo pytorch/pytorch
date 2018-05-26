@@ -2,7 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 
-#if !AT_MIOPEN_ENABLED()
+#if !AT_MIOPEN_ENABLED
 
 namespace at { namespace native {
 

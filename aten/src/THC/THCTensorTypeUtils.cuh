@@ -155,7 +155,7 @@ struct ScalarNegate<half> {
     return __float2half(-__half2float(v));
 #endif
 #else
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     half out = v;
 #else
     __half_raw out = __half_raw(v);
@@ -180,7 +180,7 @@ struct ScalarInv<half> {
 };
 
 inline bool operator==(half a, half b) {
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
   return a.x == b.x;
 #else
   __half_raw araw, braw;
@@ -191,7 +191,7 @@ inline bool operator==(half a, half b) {
 }
 
 inline bool operator!=(half a, half b) {
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     return a.x != b.x;
 #else
   __half_raw araw, braw;

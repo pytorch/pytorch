@@ -103,7 +103,7 @@ static inline  __device__ void atomicAdd(half *address, half val) {
 
   do {
     assumed = old;
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     half hsum;
     hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
     hsum = THCNumerics<half>::add(hsum, val);
