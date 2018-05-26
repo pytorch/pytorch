@@ -5635,11 +5635,14 @@ class TestTorch(TestCase):
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 
- 	d = torch.randn(2, 2, 5, 8, 6, 2).type(torch.float64)
-	print(d.select(-1, -1).data[0][0][0])
-	print(d.select(-1, -1).stride())
-        print(d.select(-1, -1).numel())
-        print(d.select(-1, -1).data.abs()[0][0][0])
+        # One of
+        rec = torch.randn(2, 2, 3, 7, 6, 2).type(torch.float64).clamp(0, 1)
+        print(rec.numel())
+        val1 = rec.select(-1, -1).data[0][0][0].sum()
+        val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
+        print(val1)
+        print(val2)
+        self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
     def test_unbiased(self):
         tensor = torch.randn(100)

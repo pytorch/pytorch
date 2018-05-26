@@ -54,20 +54,20 @@ public:
     if (count == size && stride == 1)
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
 
-#ifdef __AVX2__
-    if(count == size) {
-      __m256i vindex = _mm256_set_epi32(
-          7 * stride,
-          6 * stride,
-          5 * stride,
-          4 * stride,
-          3 * stride,
-          2 * stride,
-          1 * stride,
-          0);
-      return _mm256_i32gather_ps(reinterpret_cast<const float*>(ptr), vindex, 1);
-    }
-#endif
+// #ifdef __AVX2__
+//     if(count == size) {
+//       __m256i vindex = _mm256_set_epi32(
+//           ((int32_t)7 * stride),
+//           ((int32_t)6 * stride),
+//           ((int32_t)5 * stride),
+//           ((int32_t)4 * stride),
+//           ((int32_t)3 * stride),
+//           ((int32_t)2 * stride),
+//           ((int32_t)1 * stride),
+//           0);
+//       return _mm256_i32gather_ps(reinterpret_cast<const float*>(ptr), vindex, 1);
+//     }
+// #endif
 
     __at_align32__ float tmp_values[size];
     if (stride == 1) {

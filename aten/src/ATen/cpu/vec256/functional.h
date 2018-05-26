@@ -103,20 +103,13 @@ inline void map_(
     int64_t stride = 1) {
   using Vec = vec256::Vec256<scalar_t>;
   int64_t d = 0;
-  if (stride == 1) {
-    for (; d < size - (size % Vec::size); d += Vec::size) {
-      Vec output_vec = vec_fun(Vec::load(data + d));
-      output_vec.store(data + d);
-    }
-  } else {
-    for (; d < size - (size % Vec::size); d += Vec::size) {
-      Vec output_vec = vec_fun(Vec::load(data + d, Vec::size, stride));
-      output_vec.store(data + d, Vec::size, stride);
-    }
+  for (; d < size - (size % Vec::size); d += Vec::size) {
+    Vec output_vec = vec_fun(Vec::load(data + d * stride, Vec::size, stride));
+    output_vec.store(data + d * stride, Vec::size, stride);
   }
   if (size - d > 0) {
-    Vec output_vec = vec_fun(Vec::load(data + d, size - d, stride));
-    output_vec.store(data + d, size - d, stride);
+    Vec output_vec = vec_fun(Vec::load(data + d * stride, size - d, stride));
+    output_vec.store(data + d * stride, size - d, stride);
   }
 }
 
@@ -130,20 +123,14 @@ inline void map(
     int64_t stride_in = 1) {
   using Vec = vec256::Vec256<scalar_t>;
   int64_t d = 0;
-  if (stride_in == 1 && stride_out == 1) {
-    for (; d < size - (size % Vec::size); d += Vec::size) {
-      Vec output_vec = vec_fun(Vec::load(input_data + d));
-      output_vec.store(output_data + d);
-    }
-  } else {
-    for (; d < size - (size % Vec::size); d += Vec::size) {
-      Vec output_vec = vec_fun(Vec::load(input_data + d, Vec::size, stride_in));
-      output_vec.store(output_data + d, Vec::size, stride_out);
-    }
+  for (; d < size - (size % Vec::size); d += Vec::size) {
+    Vec output_vec =
+        vec_fun(Vec::load(input_data + d * stride_in, Vec::size, stride_in));
+    output_vec.store(output_data + d * stride_out, Vec::size, stride_out);
   }
   if (size - d > 0) {
-    Vec output_vec = vec_fun(Vec::load(input_data + d, size - d, stride_in));
-    output_vec.store(output_data + d, size - d, stride_out);
+    Vec output_vec = vec_fun(Vec::load(input_data + d * stride_in, size - d, stride_in));
+    output_vec.store(output_data + d * stride_out, size - d, stride_out);
   }
 }
 

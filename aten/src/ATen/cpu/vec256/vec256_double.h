@@ -46,6 +46,13 @@ public:
     if (count == size && stride == 1)
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
 
+// #ifdef __AVX2__
+//     if(count == size) {
+//       __m256i vindex = _mm256_set_epi64x(3 * stride, 2 * stride, 1 * stride, 0);
+//       return _mm256_i64gather_pd(reinterpret_cast<const double*>(ptr), vindex, 1);
+//     }
+// #endif
+
     __at_align32__ double tmp_values[size];
     if (stride == 1) {
       std::memcpy(
