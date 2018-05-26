@@ -4,7 +4,12 @@
 #include <string>
 #include <thread>
 
+#include <unistd.h>
+
 #include "ProcessGroupMPI.hpp"
+
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
 
 void testAllreduce(int iter = 1000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
@@ -90,9 +95,19 @@ void testBroadcast(int iter = 10000) {
 }
 
 int main(int argc, char** argv) {
+#ifdef MPIEXEC
+  // If we are within an openmpi mpirun, then skip the exec
+  if (!std::getenv("OMPI_COMM_WORLD_SIZE")) {
+    std::cout << "Execute mpiexec from: " << STR(MPIEXEC) << std::endl;
+    execl(STR(MPIEXEC), "-np 2", argv[0]);
+  }
+
   testAllreduce();
   testBroadcast();
 
   std::cout << "Test successful" << std::endl;
+#else
+  std::cout << "MPI executable not found, skipping test" << std::endl;
+#endif
   return EXIT_SUCCESS;
 }
