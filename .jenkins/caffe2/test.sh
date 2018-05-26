@@ -56,7 +56,7 @@ echo "Running C++ tests.."
 gtest_reports_dir="${TEST_DIR}/cpp"
 junit_reports_dir="${TEST_DIR}/junit_reports"
 mkdir -p "$gtest_reports_dir" "$junit_reports_dir"
-for test in $(find -executable -type f "${INSTALL_PREFIX}/test"); do
+for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
   case "$test" in
     # skip tests we know are hanging or bad
     */mkl_utils_test)
