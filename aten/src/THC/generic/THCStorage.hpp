@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/THCStorage.hpp"
 #else
 
+#include "ATen/CUDAStorageImpl.h"
+
 typedef struct THCStorage
 {
     real *data;
@@ -10,7 +12,7 @@ typedef struct THCStorage
     char flag;
     THCDeviceAllocator *allocator;
     void *allocatorContext;
-    struct THCStorage *view;
+    struct at::CUDAStorageImpl *view;
     int device;
 } THCStorage;
 

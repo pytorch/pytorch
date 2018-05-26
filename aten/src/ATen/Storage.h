@@ -25,7 +25,7 @@ struct Storage {
   virtual Storage& resize(int64_t new_size) = 0;
 
   virtual Type & type() const = 0;
-  virtual int getDevice() const = 0;
+  virtual int64_t getDevice() const = 0;
   virtual const char * toString() const = 0;
 
   virtual Storage& fill(Scalar value) = 0;

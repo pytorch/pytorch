@@ -11,7 +11,11 @@ namespace at {
 ${Storage}::${Storage}(Context* context):
     storage(${THStorage}_new(${state})), context(context) {}
 
-${Storage}::${Storage}(Context* context, ${THStorage}* storage):
+#if ${isCUDA}
+${Storage}::${Storage}(Context* context, CUDAStorageImpl* storage):
+#else
+${Storage}::${Storage}(Context* context, StorageImpl* storage):
+#endif
     storage(storage), context(context) {}
 
 ${Storage}::${Storage}(Context* context, std::size_t storage_size)
@@ -107,15 +111,15 @@ std::size_t ${Storage}::elementSize() const {
 }
 
 std::size_t ${Storage}::size() const {
-  return storage->size;
+  return storage->size();
 }
 
 void* ${Storage}::data() {
-  return storage->data;
+  return storage->data_ptr();
 }
 
 const void* ${Storage}::data() const {
-  return storage->data;
+  return storage->data_ptr();
 }
 
 auto ${Storage}::retain() -> ${Storage}& {
@@ -162,7 +166,7 @@ auto ${Storage}::get(std::size_t ind) -> Scalar {
 auto ${Storage}::fast_get(std::size_t ind) -> Scalar {
   if(${isCUDA})
     throw std::runtime_error("unsupported operation 'fast_get'");
-  return static_cast<${ScalarType}>(${to_at_type}(storage->data[ind]));
+  return static_cast<${ScalarType}>(${to_at_type}(${THStorage}_data(${state,} storage)[ind]));
 }
 
 void ${Storage}::set_flag(char flag) {
@@ -173,7 +177,7 @@ void ${Storage}::clear_flag(char flag) {
   ${THStorage}_clearFlag(${state,} storage, flag);
 }
 
-int ${Storage}::getDevice() const {
+int64_t ${Storage}::getDevice() const {
   ${storage_device} //storage->device;
 }
 

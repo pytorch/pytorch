@@ -1,17 +1,19 @@
 #include "undef_macros.h"
 
-#define THStoragePtr THCStoragePtr
+#define THWStoragePtr THCStoragePtr
 #define THPStoragePtr THCPStoragePtr
 #define THTensorPtr THCTensorPtr
 #define THPTensorPtr THCPTensorPtr
 
-#define THStorage THCStorage
-#define THStorage_(NAME) THCStorage_(NAME)
+#define THWStorage THCStorage
+#define THWStorage_(NAME) THCStorage_(NAME)
+#define THWStorageImpl at::CUDAStorageImpl
 #define THTensor THCTensor
 #define THTensor_(NAME) THCTensor_(NAME)
 
 #define THPStorage_(NAME) TH_CONCAT_4(THCP,Real,Storage_,NAME)
 #define THPStorage THCPStorage
+//#define THPCpuStorage 
 #define THPStorageBaseStr THCPStorageBaseStr
 #define THPStorageStr THCPStorageStr
 #define THPStorageClass THCPStorageClass

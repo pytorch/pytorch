@@ -9,7 +9,7 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
                                            THCTensor* key,
                                            THCudaLongTensor* value,
                                            int dim, bool dir) {
-  THLongStorage *valueSize = THCudaLongTensor_newSizeOf(state, value);
+  at::LongStorageImpl *valueSize = THCudaLongTensor_newSizeOf(state, value);
   THArgCheck(THCTensor_(isSize)(state, key, valueSize), 2,
              "Key tensor must have same size as value tensor");
   THLongStorage_free(valueSize);
@@ -292,7 +292,7 @@ THC_API void THCTensor_(sort)(THCState* state,
 
   // Make sure sufficient output space is allocated
   THCTensor_(resizeAs)(state, sorted, input);
-  THLongStorage *inputSize = THCTensor_(newSizeOf)(state, input);
+  at::LongStorageImpl *inputSize = THCTensor_(newSizeOf)(state, input);
   THCudaLongTensor_resize(state, indices, inputSize, NULL);
   THLongStorage_free(inputSize);
 

@@ -65,7 +65,7 @@ of freeing it.  If that function holds on to a pointer to the object, it
 will `retain` it itself.
 
 ```
-  THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
+  at::LongStorageImpl *inferred_size = THLongStorage_newInferSize(size, numel);
   THTensor_(setStorage)(self, tensor->storage, tensor->storageOffset, inferred_size, NULL);
   THLongStorage_free(inferred_size);
 ```

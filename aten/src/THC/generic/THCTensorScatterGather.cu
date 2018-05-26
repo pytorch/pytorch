@@ -14,7 +14,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
 
   THArgCheck(THCudaLongTensor_nDimension(state, index) == THCTensor_(nDimension)(state, src), 4,
              "Index tensor must have same dimensions as input tensor");
-  THLongStorage *indexSize = THCudaLongTensor_newSizeOf(state, index);
+  at::LongStorageImpl *indexSize = THCudaLongTensor_newSizeOf(state, index);
   THArgCheck(THCTensor_(isSize)(state, tensor, indexSize), 4,
              "Index tensor must have the same size as output tensor.");
   THLongStorage_free(indexSize);
@@ -199,7 +199,7 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
              "Index tensor must have same dimensions as input tensor");
   THArgCheck(THCTensor_(nDimension)(state, src) == THCTensor_(nDimension)(state, tensor), 4,
              "Input tensor must have same dimensions as output tensor");
-  THLongStorage *indexDims = THCudaLongTensor_newSizeOf(state, index);
+  at::LongStorageImpl *indexDims = THCudaLongTensor_newSizeOf(state, index);
   THArgCheck(THCTensor_(isSize)(state, src, indexDims), 3,
              "Index tensor must have the same size as input tensor.");
   THLongStorage_free(indexDims);

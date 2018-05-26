@@ -24,11 +24,11 @@ enum class THLongStorageViewKind {
 // used as an argument where THSize and THStride are passed into TH
 class THLongStorageView {
 public:
-  operator THLongStorage*() {
-    if (storage.size == 0 && zero_dim_to_null) {
+  operator StorageImpl*() {
+    if (storage->size() == 0 && zero_dim_to_null) {
       return nullptr;
     }
-    return &storage;
+    return storage.get();
   }
 
   /*
@@ -50,8 +50,8 @@ public:
   : zero_dim_to_null(false)
   {
     // zero_dim_to_one converts an empty ArrayRef into [1]
-    // zero_dim_to_null converts an empty ArrayRef into a null THLongStorage
-    // noelem_to_empty makes an ArrayRef of [0] into an empty THLongStorage
+    // zero_dim_to_null converts an empty ArrayRef into a null StorageImpl
+    // noelem_to_empty makes an ArrayRef of [0] into an empty StorageImpl
     bool zero_dim_to_one = false;
     bool noelem_to_empty = false;
     switch (kind) {
@@ -68,28 +68,28 @@ public:
       case THLongStorageViewKind::LENGTH:
         break;
     }
+    const void *data;
+    int64_t size;
     if(zero_dim_to_one && ref.size() == 0) {
       // make storage of size 0 actually a 1-length storage with 1 element
       // so that our 0-dim tensors get allocated as 1-dim inside TH
       one = 1;
-      storage.data = &one;
-      storage.size = 1;
+      data = &one;
+      size = 1;
     } else if (noelem_to_empty && is_noelem_tensor_size(ref)) {
-      storage.data = (int64_t*)(ref.data());
-      storage.size = 0;
+      data = ref.data();
+      size = 0;
     }
     else {
-      storage.data = (int64_t*)(ref.data());
-      storage.size = ref.size();
+      data = ref.data();
+      size = ref.size();
     }
-    storage.refcount = 0;
-    storage.flag = 0;
-    storage.allocator = nullptr;
-    storage.allocatorContext = nullptr;
+    storage = std::unique_ptr<StorageImpl>(new StorageImpl((void*)data, size, 0, nullptr, nullptr));
   }
 private:
   int64_t one;
-  THLongStorage storage;
+  std::unique_ptr<StorageImpl> storage;
+
   bool zero_dim_to_null;
 };
 

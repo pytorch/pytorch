@@ -31,10 +31,10 @@ void THNN_(LookupTableBag_updateOutput)(
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
-  THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
-  THLongStorage *outputSize = THLongStorage_newWithSize(2);
-  outputSize->data[0] = numBags;
-  outputSize->data[1] = stride;
+  at::LongStorageImpl *inputSize = THCIndexTensor_(newSizeOf)(state, input);
+  at::LongStorageImpl *outputSize = THLongStorage_newWithSize(2);
+  outputSize->data<int64_t>()[0] = numBags;
+  outputSize->data<int64_t>()[1] = stride;
   THCTensor_(resize)(state, output, outputSize, NULL);
   THCTensor_(zero)(state, output);
   THCIndexTensor_(resize)(state, offset2bag, inputSize, NULL);
@@ -99,7 +99,7 @@ void THNN_(LookupTableBag_accGradParameters)(
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
-  THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
+  at::LongStorageImpl *inputSize = THCIndexTensor_(newSizeOf)(state, input);
   THCIndexTensor_(resize)(state, sortedIndices, inputSize, NULL);
   THCIndexTensor_(resize)(state, origIndices, inputSize, NULL);
   THLongStorage_free(inputSize);

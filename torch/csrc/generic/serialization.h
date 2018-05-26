@@ -3,9 +3,9 @@
 #else
 
 template <class io>
-void THPStorage_(writeFileRaw)(THStorage *self, io fd);
+void THPStorage_(writeFileRaw)(THWStorageImpl *self, io fd);
 
 template <class io>
-THStorage * THPStorage_(readFileRaw)(io fd, THStorage *storage);
+THWStorageImpl * THPStorage_(readFileRaw)(io fd, THWStorageImpl *storage);
 
 #endif

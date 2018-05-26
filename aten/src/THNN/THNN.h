@@ -20,7 +20,7 @@ typedef int32_t THInteger_t;
 typedef void THNNState;
 
 #define THNN_resizeAs_indices(I1, I2)                    \
-  THLongStorage *size2 = THIndexTensor_(newSizeOf)(I2);  \
+  at::LongStorageImpl *size2 = THIndexTensor_(newSizeOf)(I2);  \
   if (!THTensor_(isSize)(I1, size2))                     \
   { \
     THTensor_(resize)(I1, size2, NULL);                  \

@@ -37,7 +37,7 @@ IMPLEMENT_NEWFOREXPAND(CudaHalf, LIBRARY_STATE_NOARGS)
 #define IMPLEMENT_EXPAND(TYPEC, THC_STATE)                                         \
   template<>                                                                       \
   void expand(LIBRARY_STATE_TYPE TH##TYPEC##Tensor *r, TH##TYPEC##Tensor *tensor,  \
-              THLongStorage *sizes) {                                              \
+              at::LongStorageImpl *sizes) {                                              \
     TH##TYPEC##Tensor_expand(THC_STATE r, tensor, sizes);                          \
   }
 

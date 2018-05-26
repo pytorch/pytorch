@@ -11,18 +11,18 @@ TH_API int THSTensor_(nDimensionI)(const THSTensor *self);
 TH_API int THSTensor_(nDimensionV)(const THSTensor *self);
 TH_API int64_t THSTensor_(size)(const THSTensor *self, int dim);
 TH_API ptrdiff_t THSTensor_(nnz)(const THSTensor *self);
-TH_API THLongStorage *THSTensor_(newSizeOf)(THSTensor *self);
+TH_API at::LongStorageImpl *THSTensor_(newSizeOf)(THSTensor *self);
 TH_API THLongTensor *THSTensor_(newIndices)(const THSTensor *self);
 TH_API THTensor *THSTensor_(newValues)(const THSTensor *self);
 
 /**** creation methods ****/
 TH_API THSTensor *THSTensor_(new)(void);
 TH_API THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values);
-TH_API THSTensor *THSTensor_(newWithTensorAndSizeUnsafe)(THLongTensor *indices, THTensor *values, THLongStorage *sizes);
-TH_API THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongStorage *sizes);
+TH_API THSTensor *THSTensor_(newWithTensorAndSizeUnsafe)(THLongTensor *indices, THTensor *values, at::LongStorageImpl *sizes);
+TH_API THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, at::LongStorageImpl *sizes);
 
 // Note the second argument is ignored. It exists only to match the signature of THTensor_(new).
-TH_API THSTensor *THSTensor_(newWithSize)(THLongStorage *size_, THLongStorage *_ignored);
+TH_API THSTensor *THSTensor_(newWithSize)(at::LongStorageImpl *size_, at::LongStorageImpl *_ignored);
 TH_API THSTensor *THSTensor_(newWithSize1d)(int64_t size0_);
 TH_API THSTensor *THSTensor_(newWithSize2d)(int64_t size0_, int64_t size1_);
 TH_API THSTensor *THSTensor_(newWithSize3d)(int64_t size0_, int64_t size1_, int64_t size2_);
@@ -32,7 +32,7 @@ TH_API THSTensor *THSTensor_(newClone)(THSTensor *self);
 TH_API THSTensor *THSTensor_(newTranspose)(THSTensor *self, int dimension1_, int dimension2_);
 
 /**** reshaping methods ***/
-TH_API THSTensor *THSTensor_(resize)(THSTensor *self, THLongStorage *size);
+TH_API THSTensor *THSTensor_(resize)(THSTensor *self, at::LongStorageImpl *size);
 TH_API THSTensor *THSTensor_(resizeAs)(THSTensor *self, THSTensor *src);
 TH_API THSTensor *THSTensor_(resize1d)(THSTensor *self, int64_t size0);
 TH_API THSTensor *THSTensor_(resize2d)(THSTensor *self, int64_t size0, int64_t size1);

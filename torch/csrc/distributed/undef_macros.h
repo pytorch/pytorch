@@ -20,12 +20,12 @@
 #undef THPStorageClass
 #undef THPStorageType
 
-#undef THStorage
-#undef THStorage_
+#undef THWStorage
+#undef THWStorage_
 #undef THTensor
 #undef THTensor_
 
-#undef THStoragePtr
+#undef THWStoragePtr
 #undef THPStoragePtr
 #undef THTensorPtr
 #undef THPTensorPtr

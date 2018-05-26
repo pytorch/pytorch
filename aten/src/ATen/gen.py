@@ -266,7 +266,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['THIndexTensor'] = 'THCudaLongTensor'
         env['state'] = ['context->getTHCState()']
         env['isCUDA'] = 'true'
-        env['storage_device'] = 'return storage->device;'
+        env['storage_device'] = 'return storage->device();'
         env['Generator'] = 'CUDAGenerator'
     else:
         env['th_headers'] = [

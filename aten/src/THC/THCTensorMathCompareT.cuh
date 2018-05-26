@@ -56,7 +56,7 @@ void THC_logicalTensor(THCState *state,
                        TensorType *src1,
                        TensorType *src2,
                        Op op) {
-  THLongStorage* st = TensorUtils<TensorType>::newSizeOf(state, src1);
+  at::LongStorageImpl* st = TensorUtils<TensorType>::newSizeOf(state, src1);
   TensorUtils<TensorTypeOut>::resize(state, self_, st, NULL);
   THLongStorage_free(st);
 

@@ -35,8 +35,8 @@ THD_API void THDTensor_(indexAdd)(THDTensor *tensor, int dim, THDLongTensor *ind
 THD_API void THDTensor_(indexFill)(THDTensor *tensor, int dim, THDLongTensor *index, real val);
 
 
-THD_API void THDTensor_(zeros)(THDTensor *r_, THLongStorage *size);
-THD_API void THDTensor_(ones)(THDTensor *r_, THLongStorage *size);
+THD_API void THDTensor_(zeros)(THDTensor *r_, at::LongStorageImpl *size);
+THD_API void THDTensor_(ones)(THDTensor *r_, at::LongStorageImpl *size);
 THD_API ptrdiff_t THDTensor_(numel)(THDTensor *t);
 
 THD_API void THDTensor_(diag)(THDTensor *r_, THDTensor *t, int k);
@@ -130,9 +130,9 @@ THD_API accreal THDTensor_(normall)(THDTensor *t, real value);
 THD_API void THDTensor_(linspace)(THDTensor *r_, real a, real b, int64_t n);
 THD_API void THDTensor_(logspace)(THDTensor *r_, real a, real b, int64_t n);
 THD_API void THDTensor_(rand)(THDTensor *r_, THDGenerator *_generator,
-                              THLongStorage *size);
+                              at::LongStorageImpl *size);
 THD_API void THDTensor_(randn)(THDTensor *r_, THDGenerator *_generator,
-                               THLongStorage *size);
+                               at::LongStorageImpl *size);
 THD_API int THDTensor_(logicalAll)(THDTensor *self);
 THD_API int THDTensor_(logicalAny)(THDTensor *self);
 

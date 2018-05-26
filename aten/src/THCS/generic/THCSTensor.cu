@@ -21,7 +21,7 @@
 #define V_INFO(tensor) getTensorInfo<THCTensor, uint64_t>(state, tensor)
 
 THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
-  THLongStorage *size;
+  at::LongStorageImpl *size;
   THCTensor *dst;
 
   // set up the new tensor
@@ -158,7 +158,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
     THCIndexTensor_(free)(state, indicesSlice);
   }
   ////////////////////////////////////////////////////////////
-  THLongStorage *size = THCSTensor_(newSizeOf)(state, self);
+  at::LongStorageImpl *size = THCSTensor_(newSizeOf)(state, self);
   THCSTensor *dst = THCSTensor_(newWithTensorAndSize)(state, newIndices, newValues, size);
   THLongStorage_free(size);
 

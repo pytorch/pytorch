@@ -554,7 +554,7 @@ static void tensorLogspace(rpc::RPCMessage& raw_message) {
 static void tensorRand(rpc::RPCMessage& raw_message) {
   at::Tensor r = unpackRetrieveTensor(raw_message);
   at::Generator *_generator = unpackRetrieveGenerator(raw_message);
-  THLongStorage *size = unpackTHLongStorage(raw_message);
+  at::LongStorageImpl *size = unpackTHLongStorage(raw_message);
   finalize(raw_message);
   at::ArrayRef<int64_t> sizeRef(THLongStorage_data(size), THLongStorage_size(size));
   at::rand_out(r, sizeRef, _generator);
@@ -564,7 +564,7 @@ static void tensorRand(rpc::RPCMessage& raw_message) {
 static void tensorRandn(rpc::RPCMessage& raw_message) {
   at::Tensor r = unpackRetrieveTensor(raw_message);
   at::Generator *_generator = unpackRetrieveGenerator(raw_message);
-  THLongStorage *size = unpackTHLongStorage(raw_message);
+  at::LongStorageImpl *size = unpackTHLongStorage(raw_message);
   finalize(raw_message);
   at::ArrayRef<int64_t> sizeRef(THLongStorage_data(size), THLongStorage_size(size));
   at::randn_out(r, sizeRef, _generator);

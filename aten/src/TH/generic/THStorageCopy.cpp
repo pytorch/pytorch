@@ -2,52 +2,52 @@
 #define TH_GENERIC_FILE "generic/THStorageCopy.cpp"
 #else
 
-void THStorage_(rawCopy)(THStorage *storage, real *src)
+void THStorage_(rawCopy)(at::StorageImpl *storage, real *src)
 {
   ptrdiff_t i;
-  for(i = 0; i < storage->size; i++)
-    storage->data[i] = src[i];
+  for(i = 0; i < storage->size(); i++)
+    storage->data<real>()[i] = src[i];
 }
 
-void THStorage_(copy)(THStorage *storage, THStorage *src)
+void THStorage_(copy)(at::StorageImpl *storage, at::StorageImpl *src)
 {
-  THArgCheck(storage->size == src->size, 2, "size mismatch");
-  THStorage_(rawCopy)(storage, src->data);
+  THArgCheck(storage->size() == src->size(), 2, "size mismatch");
+  THStorage_(rawCopy)(storage, src->data<real>());
 }
 
 #define IMPLEMENT_THStorage_COPY(TYPENAMESRC) \
-void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage *src) \
+void THStorage_(copy##TYPENAMESRC)(at::StorageImpl *storage, at::TYPENAMESRC##StorageImpl *src) \
 { \
   ptrdiff_t i;                                                        \
-  for(i = 0; i < storage->size; i++)                                  \
-    storage->data[i] = (real)src->data[i];                            \
+  for(i = 0; i < storage->size(); i++)                                  \
+    storage->data<real>()[i] = static_cast<real>(TH##TYPENAMESRC##Storage_data(src)[i]);           \
 }
 
 #define IMPLEMENT_THStorage_COPY_FROM_HALF(TYPENAMESRC)		\
-void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage *src) \
+void THStorage_(copy##TYPENAMESRC)(at::StorageImpl *storage, at::TYPENAMESRC##StorageImpl *src) \
 { \
-  THArgCheck(storage->size == src->size, 2, "size mismatch"); \
+  THArgCheck(storage->size() == src->size(), 2, "size mismatch"); \
   ptrdiff_t i;								\
-  for(i = 0; i < storage->size; i++)					\
-    storage->data[i] = (real)TH_half2float(src->data[i]);		\
+  for(i = 0; i < storage->size(); i++)					\
+    storage->data<real>()[i] = (real)TH_half2float(TH##TYPENAMESRC##Storage_data(src)[i]);		\
 }
 
 #define IMPLEMENT_THStorage_COPY_TO_HALF(TYPENAMESRC)		\
-void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage *src) \
+void THStorage_(copy##TYPENAMESRC)(at::StorageImpl *storage, at::TYPENAMESRC##StorageImpl *src) \
 { \
-  THArgCheck(storage->size == src->size, 2, "size mismatch"); \
+  THArgCheck(storage->size() == src->size(), 2, "size mismatch"); \
   ptrdiff_t i;								\
-  for(i = 0; i < storage->size; i++)					\
-    storage->data[i] = TH_float2half((float)(src->data[i]));		\
+  for(i = 0; i < storage->size(); i++)					\
+    storage->data<real>()[i] = TH_float2half((float)(TH##TYPENAMESRC##Storage_data(src)[i]));		\
 }
 
 #define IMPLEMENT_THStorage_COPY_TO_FROM_HALF(TYPENAMESRC)		\
-void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage *src) \
+void THStorage_(copy##TYPENAMESRC)(at::StorageImpl *storage, at::TYPENAMESRC##StorageImpl *src) \
 { \
-  THArgCheck(storage->size == src->size, 2, "size mismatch"); \
+  THArgCheck(storage->size() == src->size(), 2, "size mismatch"); \
   ptrdiff_t i;								\
-  for(i = 0; i < storage->size; i++)					\
-    storage->data[i] = src->data[i];		\
+  for(i = 0; i < storage->size(); i++)					\
+    storage->data<real>()[i] = static_cast<real>(TH##TYPENAMESRC##Storage_data(src)[i]);		\
 }
 
 #ifndef TH_REAL_IS_HALF

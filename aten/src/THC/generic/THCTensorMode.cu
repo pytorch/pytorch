@@ -6,9 +6,9 @@ THC_API void THCTensor_(calculateMode)(THCState *state,
                                         THCTensor *values,
                                         THCudaLongTensor *indices,
                                         THCTensor *input,
-                                        THCudaLongStorage *sortBuffer,
+                                        at::CUDALongStorageImpl *sortBuffer,
                                         int dimension,
-                                        THLongStorage *position) {
+                                        at::LongStorageImpl *position) {
   THAssert(THCTensor_(isContiguous)(state, input));
 
   // Because the input is contiguous, we want to get a reference to the
@@ -133,9 +133,9 @@ THC_API void THCTensor_(dimApplyMode)(THCState *state,
                                THCTensor *values,
                                THCudaLongTensor *indices,
                                THCTensor *input,
-                               THCudaLongStorage *sortBuffer,
+                               at::CUDALongStorageImpl *sortBuffer,
                                int dimension,
-                               THLongStorage *position,
+                               at::LongStorageImpl *position,
                                int curDim) {
   int64_t ndim = THCTensor_(nDimension)(state, input);
 
@@ -146,7 +146,7 @@ THC_API void THCTensor_(dimApplyMode)(THCState *state,
   } else {
     // Loop through the values and recurse
     for (int i = 0; i < THCTensor_(size)(state, input, curDim); ++i) {
-      position->data[curDim] = i;
+      position->data<int64_t>()[curDim] = i;
       THCTensor_(dimApplyMode)(state, values, indices, input, sortBuffer, dimension, position, curDim + 1);
     }
   }
@@ -161,10 +161,10 @@ THC_API void THCTensor_(mode)(THCState *state,
                               THCTensor *input,
                               int dimension,
                               int keepdim) {
-  THLongStorage *dim;
+  at::LongStorageImpl *dim;
   THCTensor *transposed, *contiguous, *valuesTransposed;
-  THLongStorage *position;
-  THCudaLongStorage *sortBuffer;
+  at::LongStorageImpl *position;
+  at::CUDALongStorageImpl *sortBuffer;
   THCudaLongTensor *indicesTransposed;
   int64_t ndim, sliceSize, slices;
 

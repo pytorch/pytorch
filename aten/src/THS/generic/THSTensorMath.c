@@ -15,7 +15,7 @@ void THSTensor_(zero)(THSTensor *self) {
   self->nnz = 0;
 }
 
-void THSTensor_(zeros)(THSTensor *r_, THLongStorage *size)
+void THSTensor_(zeros)(THSTensor *r_, at::LongStorageImpl *size)
 {
   THSTensor_(resize)(r_, size);
   THSTensor_(zero)(r_);
@@ -554,7 +554,7 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
   int64_t k;
   THLongTensor  *indices = THSTensor_(newIndices)(sparse);
   THTensor      *values = THSTensor_(newValues)(sparse);
-  THLongStorage *storage = THSTensor_(newSizeOf)(sparse);
+  at::LongStorageImpl *storage = THSTensor_(newSizeOf)(sparse);
   int64_t       nDim = THTensor_(nDimension)(dense);
   int64_t       nDimI = THSTensor_(nDimensionI)(sparse);
 
@@ -580,7 +580,7 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
       for (int64_t d = 0; d < sparse->nDimensionI; d++) {
         index += r_->stride[d] * THTensor_fastGet2d(indices, d, k);
       }
-      r_->storage->data[index]  += value * THTensor_fastGet1d(values, k);
+      r_->storage->data<real>()[index]  += value * THTensor_fastGet1d(values, k);
     }
   }
 

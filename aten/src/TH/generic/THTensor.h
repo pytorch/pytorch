@@ -11,13 +11,13 @@ typedef struct THTensor THTensor;
 
 
 /**** access methods ****/
-TH_API THStorage* THTensor_(storage)(const THTensor *self);
+TH_API at::StorageImpl * THTensor_(storage)(const THTensor *self);
 TH_API ptrdiff_t THTensor_(storageOffset)(const THTensor *self);
 TH_API int THTensor_(nDimension)(const THTensor *self);
 TH_API int64_t THTensor_(size)(const THTensor *self, int dim);
 TH_API int64_t THTensor_(stride)(const THTensor *self, int dim);
-TH_API THLongStorage *THTensor_(newSizeOf)(THTensor *self);
-TH_API THLongStorage *THTensor_(newStrideOf)(THTensor *self);
+TH_API at::LongStorageImpl *THTensor_(newSizeOf)(THTensor *self);
+TH_API at::LongStorageImpl *THTensor_(newStrideOf)(THTensor *self);
 TH_API real *THTensor_(data)(const THTensor *self);
 
 TH_API void THTensor_(setFlag)(THTensor *self, const char flag);
@@ -28,24 +28,24 @@ TH_API void THTensor_(clearFlag)(THTensor *self, const char flag);
 TH_API THTensor *THTensor_(new)(void);
 TH_API THTensor *THTensor_(newWithTensor)(THTensor *tensor);
 /* stride might be NULL */
-TH_API THTensor *THTensor_(newWithStorage)(THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
-TH_API THTensor *THTensor_(newWithStorage1d)(THStorage *storage_, ptrdiff_t storageOffset_,
+TH_API THTensor *THTensor_(newWithStorage)(at::StorageImpl *storage_, ptrdiff_t storageOffset_, at::LongStorageImpl *size_, at::LongStorageImpl *stride_);
+TH_API THTensor *THTensor_(newWithStorage1d)(at::StorageImpl *storage_, ptrdiff_t storageOffset_,
                                 int64_t size0_, int64_t stride0_);
-TH_API THTensor *THTensor_(newWithStorage2d)(THStorage *storage_, ptrdiff_t storageOffset_,
+TH_API THTensor *THTensor_(newWithStorage2d)(at::StorageImpl *storage_, ptrdiff_t storageOffset_,
                                 int64_t size0_, int64_t stride0_,
                                 int64_t size1_, int64_t stride1_);
-TH_API THTensor *THTensor_(newWithStorage3d)(THStorage *storage_, ptrdiff_t storageOffset_,
+TH_API THTensor *THTensor_(newWithStorage3d)(at::StorageImpl *storage_, ptrdiff_t storageOffset_,
                                 int64_t size0_, int64_t stride0_,
                                 int64_t size1_, int64_t stride1_,
                                 int64_t size2_, int64_t stride2_);
-TH_API THTensor *THTensor_(newWithStorage4d)(THStorage *storage_, ptrdiff_t storageOffset_,
+TH_API THTensor *THTensor_(newWithStorage4d)(at::StorageImpl *storage_, ptrdiff_t storageOffset_,
                                 int64_t size0_, int64_t stride0_,
                                 int64_t size1_, int64_t stride1_,
                                 int64_t size2_, int64_t stride2_,
                                 int64_t size3_, int64_t stride3_);
 
 /* stride might be NULL */
-TH_API THTensor *THTensor_(newWithSize)(THLongStorage *size_, THLongStorage *stride_);
+TH_API THTensor *THTensor_(newWithSize)(at::LongStorageImpl *size_, at::LongStorageImpl *stride_);
 TH_API THTensor *THTensor_(newWithSize1d)(int64_t size0_);
 TH_API THTensor *THTensor_(newWithSize2d)(int64_t size0_, int64_t size1_);
 TH_API THTensor *THTensor_(newWithSize3d)(int64_t size0_, int64_t size1_, int64_t size2_);
@@ -57,12 +57,12 @@ TH_API THTensor *THTensor_(newSelect)(THTensor *tensor, int dimension_, int64_t 
 TH_API THTensor *THTensor_(newNarrow)(THTensor *tensor, int dimension_, int64_t firstIndex_, int64_t size_);
 TH_API THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimension2_);
 TH_API THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t size_, int64_t step_);
-TH_API THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size);
+TH_API THTensor *THTensor_(newView)(THTensor *tensor, at::LongStorageImpl *size);
 
 // resize* methods simply resize the storage. So they may not retain the current data at current indices.
 // This is especially likely to happen when the tensor is not contiguous. In general, if you still need the
 // values, unless you are doing some size and stride tricks, do not use resize*.
-TH_API void THTensor_(resize)(THTensor *tensor, THLongStorage *size, THLongStorage *stride);
+TH_API void THTensor_(resize)(THTensor *tensor, at::LongStorageImpl *size, at::LongStorageImpl *stride);
 TH_API void THTensor_(resizeAs)(THTensor *tensor, THTensor *src);
 TH_API void THTensor_(resizeNd)(THTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
 TH_API void THTensor_(resize1d)(THTensor *tensor, int64_t size0_);
@@ -72,18 +72,18 @@ TH_API void THTensor_(resize4d)(THTensor *tensor, int64_t size0_, int64_t size1_
 TH_API void THTensor_(resize5d)(THTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_, int64_t size3_, int64_t size4_);
 
 TH_API void THTensor_(set)(THTensor *self, THTensor *src);
-TH_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
-TH_API void THTensor_(setStorageNd)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, int nDimension, int64_t *size, int64_t *stride);
-TH_API void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
+TH_API void THTensor_(setStorage)(THTensor *self, at::StorageImpl *storage_, ptrdiff_t storageOffset_, at::LongStorageImpl *size_, at::LongStorageImpl *stride_);
+TH_API void THTensor_(setStorageNd)(THTensor *self, at::StorageImpl *storage_, ptrdiff_t storageOffset_, int nDimension, int64_t *size, int64_t *stride);
+TH_API void THTensor_(setStorage1d)(THTensor *self, at::StorageImpl *storage_, ptrdiff_t storageOffset_,
                                     int64_t size0_, int64_t stride0_);
-TH_API void THTensor_(setStorage2d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
+TH_API void THTensor_(setStorage2d)(THTensor *self, at::StorageImpl *storage_, ptrdiff_t storageOffset_,
                                     int64_t size0_, int64_t stride0_,
                                     int64_t size1_, int64_t stride1_);
-TH_API void THTensor_(setStorage3d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
+TH_API void THTensor_(setStorage3d)(THTensor *self, at::StorageImpl *storage_, ptrdiff_t storageOffset_,
                                     int64_t size0_, int64_t stride0_,
                                     int64_t size1_, int64_t stride1_,
                                     int64_t size2_, int64_t stride2_);
-TH_API void THTensor_(setStorage4d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
+TH_API void THTensor_(setStorage4d)(THTensor *self, at::StorageImpl *storage_, ptrdiff_t storageOffset_,
                                     int64_t size0_, int64_t stride0_,
                                     int64_t size1_, int64_t stride1_,
                                     int64_t size2_, int64_t stride2_,
@@ -101,7 +101,7 @@ TH_API void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension_
 TH_API int THTensor_(isContiguous)(const THTensor *self);
 TH_API int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor *src);
 TH_API int THTensor_(isSetTo)(const THTensor *self, const THTensor *src);
-TH_API int THTensor_(isSize)(const THTensor *self, const THLongStorage *dims);
+TH_API int THTensor_(isSize)(const THTensor *self, const at::LongStorageImpl *dims);
 TH_API ptrdiff_t THTensor_(nElement)(const THTensor *self);
 
 TH_API void THTensor_(retain)(THTensor *self);

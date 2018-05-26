@@ -161,7 +161,7 @@ static void THNN_(TemporalRowConvolution_updateOutput_frame)(
 	if (bias != NULL) {
 		for (i = 0; i < inputFrameSize; i++)
 			THVector_(fill)
-			        (output->storage->data + output->storageOffset
+			        (output->storage->data<real>() + output->storageOffset
 			        + output->stride[0] * i,
 			        THTensor_(get1d)(bias, i), nOutputFrame);
 	}
@@ -389,13 +389,13 @@ static void THNN_(TemporalRowConvolution_accGradParameters_frame)(
 		for (i = 0; i < gradBias->size[0]; i++) {
 			int64_t k;
 			real sum = 0;
-			real *data = gradOutput3d->storage->data
+			real *data = gradOutput3d->storage->data<real>()
 			             + gradOutput3d->storageOffset
 			             + i * gradOutput3d->stride[0];
 			for (k = 0; k < gradOutput3d->size[2]; k++) {
 				sum += data[k];
 			}
-			(gradBias->storage->data + gradBias->storageOffset)[i]
+			(gradBias->storage->data<real>() + gradBias->storageOffset)[i]
 			        += scale * sum;
 		}
 	}

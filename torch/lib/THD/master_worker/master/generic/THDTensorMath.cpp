@@ -70,7 +70,7 @@ void THDTensor_(max)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, i
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
-  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  at::LongStorageImpl *dim = THDTensor_(newSizeOf)(src);
   THLongStorage_set(dim, dimension, 1);
   THDTensor_(resize)(self, dim, NULL);
   THDLongTensor_resize(indices_, dim, NULL);
@@ -91,7 +91,7 @@ void THDTensor_(min)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, i
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
-  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  at::LongStorageImpl *dim = THDTensor_(newSizeOf)(src);
   THLongStorage_set(dim, dimension, 1);
   THDTensor_(resize)(self, dim, NULL);
   THDLongTensor_resize(indices_, dim, NULL);
@@ -112,7 +112,7 @@ void THDTensor_(kthvalue)(THDTensor *self, THDLongTensor *indices_, THDTensor *s
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
   THArgCheck(k > 0 && k <= src->size[dimension], 2, "selected index out of range");
 
-  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  at::LongStorageImpl *dim = THDTensor_(newSizeOf)(src);
   THLongStorage_set(dim, dimension, 1);
   THDTensor_(resize)(self, dim, NULL);
   THDLongTensor_resize(indices_, dim, NULL);
@@ -132,7 +132,7 @@ void THDTensor_(kthvalue)(THDTensor *self, THDLongTensor *indices_, THDTensor *s
 void THDTensor_(mode)(THDTensor *self, THDLongTensor *indices_, THDTensor *src, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < src->nDimension, 3, "dimension out of range");
 
-  THLongStorage *dim = THDTensor_(newSizeOf)(src);
+  at::LongStorageImpl *dim = THDTensor_(newSizeOf)(src);
   THLongStorage_set(dim, dimension, 1);
   THDTensor_(resize)(self, dim, NULL);
   THDLongTensor_resize(indices_, dim, NULL);
@@ -232,7 +232,7 @@ void THDTensor_(indexSelect)(THDTensor *tensor, THDTensor *src, int dim, THDLong
   THArgCheck(dim < src->nDimension, 4, "Indexing dim %d is out of bounds of tensor",
              dim + TH_INDEX_BASE);
   THArgCheck(src->nDimension > 0, 2, "Source tensor is empty");
-  THLongStorage *newSize = THLongStorage_newWithSize(src->nDimension);
+  at::LongStorageImpl *newSize = THLongStorage_newWithSize(src->nDimension);
   THLongStorage_rawCopy(newSize, src->size);
   THDTensor_(resize)(tensor, newSize, NULL);
   masterCommandChannel->sendMessage(
@@ -300,12 +300,12 @@ void THDTensor_(indexFill)(THDTensor *tensor, int dim, THDLongTensor *index, rea
   );
 }
 
-void THDTensor_(zeros)(THDTensor *tensor, THLongStorage *size) {
+void THDTensor_(zeros)(THDTensor *tensor, at::LongStorageImpl *size) {
   THDTensor_(resize)(tensor, size, nullptr);
   THDTensor_(zero)(tensor);
 }
 
-void THDTensor_(ones)(THDTensor *tensor, THLongStorage *size) {
+void THDTensor_(ones)(THDTensor *tensor, at::LongStorageImpl *size) {
   THDTensor_(resize)(tensor, size, nullptr);
   THDTensor_(fill)(tensor, 1);
 }
@@ -380,7 +380,7 @@ void THDTensor_(randperm)(THDTensor *r_, THDGenerator *_generator, int64_t n) {
   );
 }
 
-void THDTensor_(reshape)(THDTensor *r_, THDTensor *t, THLongStorage *size) {
+void THDTensor_(reshape)(THDTensor *r_, THDTensor *t, at::LongStorageImpl *size) {
   THDTensor_(resize)(r_, size, NULL);
   THDTensor_(copy)(r_, t);
 }
@@ -395,7 +395,7 @@ void THDTensor_(sort)(THDTensor *rt_, THDLongTensor *ri_,
   THDTensor_(copy)(rt_, t);
 
   {
-    THLongStorage *size = THDTensor_(newSizeOf)(t);
+    at::LongStorageImpl *size = THDTensor_(newSizeOf)(t);
     THDLongTensor_resize(ri_, size, NULL);
     THLongStorage_free(size);
   }
@@ -415,7 +415,7 @@ void THDTensor_(topk)(THDTensor *rt_, THDLongTensor *ri_,
   int64_t sliceSize = THDTensor_(size)(t, dim);
   THArgCheck(k > 0 && k <= sliceSize, 2, "k not in range for dimension");
 
-  THLongStorage *topKSize = THDTensor_(newSizeOf)(t);
+  at::LongStorageImpl *topKSize = THDTensor_(newSizeOf)(t);
   THLongStorage_set(topKSize, dim, k);
   THDTensor_(resize)(rt_, topKSize, NULL);
   THDLongTensor_resize(ri_, topKSize, NULL);
@@ -457,7 +457,7 @@ void THDTensor_(cat)(THDTensor *r_, THDTensor *ta, THDTensor *tb, int dimension)
 
 void THDTensor_(catArray)(THDTensor *result, THDTensor **inputs,
                           int numInputs, int dimension) {
-  THLongStorage *size;
+  at::LongStorageImpl *size;
   int64_t offset;
   int ndim = dimension + 1;
   int ldimension = dimension;
@@ -653,7 +653,7 @@ void THDTensor_(mean)(THDTensor *r_, THDTensor *t, int dimension, int keepdim) {
   THArgCheck(dimension >= 0 && dimension < THDTensor_(nDimension)(t), 2,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
-  THLongStorage *dim = THDTensor_(newSizeOf)(t);
+  at::LongStorageImpl *dim = THDTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
   THDTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
@@ -672,7 +672,7 @@ void THDTensor_(std)(THDTensor *r_, THDTensor *t, int dimension, int biased, int
   THArgCheck(dimension >= 0 && dimension < THDTensor_(nDimension)(t), 3,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
-  THLongStorage *dim = THDTensor_(newSizeOf)(t);
+  at::LongStorageImpl *dim = THDTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
   THDTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
@@ -691,7 +691,7 @@ void THDTensor_(var)(THDTensor *r_, THDTensor *t, int dimension, int biased, int
   THArgCheck(dimension >= 0 && dimension < THDTensor_(nDimension)(t), 3,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
-  THLongStorage *dim = THDTensor_(newSizeOf)(t);
+  at::LongStorageImpl *dim = THDTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
   THDTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
@@ -710,7 +710,7 @@ void THDTensor_(norm)(THDTensor *r_, THDTensor *t, real value, int dimension, in
   THArgCheck(dimension >= 0 && dimension < THDTensor_(nDimension)(t), 3,
              "invalid dimension %d", dimension + TH_INDEX_BASE);
 
-  THLongStorage *dim = THDTensor_(newSizeOf)(t);
+  at::LongStorageImpl *dim = THDTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
   THDTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
@@ -815,7 +815,7 @@ void THDTensor_(logspace)(THDTensor *r_, real a, real b, int64_t n) {
 }
 
 void THDTensor_(rand)(THDTensor *r_, THDGenerator *_generator,
-                      THLongStorage *size) {
+                      at::LongStorageImpl *size) {
   THDTensor_(resize)(r_, size, NULL);
 
   masterCommandChannel->sendMessage(
@@ -825,7 +825,7 @@ void THDTensor_(rand)(THDTensor *r_, THDGenerator *_generator,
 }
 
 void THDTensor_(randn)(THDTensor *r_, THDGenerator *_generator,
-                       THLongStorage *size) {
+                       at::LongStorageImpl *size) {
   THDTensor_(resize)(r_, size, NULL);
 
   masterCommandChannel->sendMessage(

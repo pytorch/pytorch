@@ -18,7 +18,7 @@ inline int GET_BLOCKS(const int N)
 }
 
 #define THCUNN_resizeAs_indices(STATE, I1, I2)              \
-  THLongStorage *size2 = THCTensor_(newSizeOf)(STATE, I2);  \
+  at::LongStorageImpl *size2 = THCTensor_(newSizeOf)(STATE, I2);  \
   if (!THCIndexTensor_(isSize)(STATE, I1, size2))           \
   { \
     THCudaLongTensor_resize(STATE, I1, size2, NULL);        \
@@ -36,7 +36,7 @@ inline int GET_BLOCKS(const int N)
 
 
 #define THCUNN_check_shape_indices(STATE, I1, I2)              \
-  THLongStorage *size2 = THCTensor_(newSizeOf)(STATE, I2);     \
+  at::LongStorageImpl *size2 = THCTensor_(newSizeOf)(STATE, I2);     \
   if (!THCIndexTensor_(isSize)(STATE, I1, size2))              \
   { \
        THCDescBuff s1 = THCIndexTensor_(sizeDesc)(STATE, I1);  \

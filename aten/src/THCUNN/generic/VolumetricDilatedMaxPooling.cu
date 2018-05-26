@@ -240,7 +240,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   THCDeviceTensor<real, 4> cudaOutput;
   cudaOutput = toDeviceTensor<real, 4>(state, output);
 
-  THLongStorage *indicesSize = THLongStorage_newWithSize(4);
+  at::LongStorageImpl *indicesSize = THLongStorage_newWithSize(4);
   int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
                             outputTime, outputHeight, outputWidth };
   THLongStorage_rawCopy(indicesSize, indicesSizeRaw);
@@ -365,7 +365,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   cudaGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
   real* gradInputData = THCTensor_(data)(state, gradInput);
 
-  THLongStorage *indicesSize = THLongStorage_newWithSize(4);
+  at::LongStorageImpl *indicesSize = THLongStorage_newWithSize(4);
   int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
                            outputTime, outputHeight, outputWidth };
   THLongStorage_rawCopy(indicesSize, indicesSizeRaw);

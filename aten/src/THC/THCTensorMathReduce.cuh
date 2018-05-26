@@ -660,7 +660,7 @@ THC_reduceDimIndex(THCState *state,
   TensorUtils<TensorTypeIndex>::preserveReduceDimSemantics(
       state, tgt2_, src_dims, dimension, keepdim);
 
-  THLongStorage *dim = TensorUtils<TensorTypeK>::newSizeOf(state, src);
+  at::LongStorageImpl *dim = TensorUtils<TensorTypeK>::newSizeOf(state, src);
   THLongStorage_set(dim, dimension, 1);
   TensorUtils<TensorTypeK>::resize(state, tgt1_, dim, NULL);
   TensorUtils<TensorTypeIndex>::resize(state, tgt2_, dim, NULL);

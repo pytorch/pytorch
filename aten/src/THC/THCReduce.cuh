@@ -345,7 +345,7 @@ bool THC_reduceDim(THCState* state,
       state, out, TensorUtils<TensorType>::getDims(state, in), dim, keepdim);
 
   // Resize out
-  THLongStorage* sizes = TensorUtils<TensorType>::newSizeOf(state, in);
+  at::LongStorageImpl* sizes = TensorUtils<TensorType>::newSizeOf(state, in);
   THLongStorage_set(sizes, dim, 1);
   TensorUtils<TensorType>::resize(state, out, sizes, NULL);
   THLongStorage_free(sizes);

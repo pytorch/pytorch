@@ -33,7 +33,7 @@ void THCSTensor_(zero)(THCState *state, THCSTensor *self) {
   self->nnz = 0;
 }
 
-void THCSTensor_(zeros)(THCState *state, THCSTensor *r_, THLongStorage *size)
+void THCSTensor_(zeros)(THCState *state, THCSTensor *r_, at::LongStorageImpl *size)
 {
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 1, r_));
   THCSTensor_(resize)(state, r_, size);
@@ -291,13 +291,13 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
 
     int64_t view_rows = 1;
     int64_t view_columns = 1;
-    THLongStorage *r_size = THCTensor_(newSizeOf)(state, r);
+    at::LongStorageImpl *r_size = THCTensor_(newSizeOf)(state, r);
     for (int i = 0; i < nDimI; i++)
-      view_rows *= r_size->data[i];
+      view_rows *= r_size->data<int64_t>()[i];
     for (int i = nDimI; i < nDim; i++)
-      view_columns *= r_size->data[i];
+      view_columns *= r_size->data<int64_t>()[i];
 
-    THLongStorage *r_view_size = THLongStorage_newWithSize2(view_rows, view_columns);
+    at::LongStorageImpl *r_view_size = THLongStorage_newWithSize2(view_rows, view_columns);
     THCTensor *r_view = THCTensor_(newView)(state, r, r_view_size);
     THCTensor_(resize2d)(state, values, nnz, view_columns);
 
@@ -484,11 +484,11 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
       (uint64_t)t_nnz, (uint64_t)s_nnz);
   THCudaCheck(cudaGetLastError());
 
-  THCudaLongStorage *resultNnz = THCudaLongStorage_newWithSize(state, 1);
+  at::CUDALongStorageImpl *resultNnz = THCudaLongStorage_newWithSize(state, 1);
   THCSTensor_indexSparseIntersectionKernel<uint64_t, real>
     <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
       I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-      (uint64_t)t_nnz, (uint64_t)s_nnz, (uint64_t*)resultNnz->data);
+      (uint64_t)t_nnz, (uint64_t)s_nnz, (uint64_t*)resultNnz->data<int64_t>());
   THCudaCheck(cudaGetLastError());
   r_->nnz = THCudaLongStorage_get(state, resultNnz, 0);
   THCudaLongStorage_free(state, resultNnz);

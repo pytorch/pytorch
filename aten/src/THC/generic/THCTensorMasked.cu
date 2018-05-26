@@ -25,7 +25,7 @@ THCTensor_(maskedFillByte)(THCState* state,
                            THCTensor *tensor, THByteTensor *mask, real value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
-  THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
+  at::LongStorageImpl* maskSizes = THByteTensor_newSizeOf(mask);
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, maskSizes, NULL);
   THLongStorage_free(maskSizes);
   THCudaByteTensor_copyByte(state, maskCuda, mask);
@@ -59,7 +59,7 @@ THCTensor_(maskedCopy)(THCState* state,
   // iterator prefix sums? Convert `mask` to the same datatype as what
   // we're accumulating the prefix sum in (int64_t) to get around it
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
-  THLongStorage* maskSizes = THCudaByteTensor_newSizeOf(state, mask);
+  at::LongStorageImpl* maskSizes = THCudaByteTensor_newSizeOf(state, mask);
   THCudaLongTensor_resize(state, maskLong, maskSizes, NULL);
   THCudaLongTensor_copyCudaByte(state, maskLong, mask);
 
@@ -105,7 +105,7 @@ THC_API void
 THCTensor_(maskedCopyByte)(THCState* state,
                            THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
-  THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
+  at::LongStorageImpl* maskSizes = THByteTensor_newSizeOf(mask);
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, maskSizes, NULL);
   THLongStorage_free(maskSizes);
   THCudaByteTensor_copyByte(state, maskCuda, mask);
@@ -134,7 +134,7 @@ THCTensor_(maskedSelect)(THCState* state,
   // iterator prefix sums? Convert `mask` to the same datatype as what
   // we're accumulating the prefix sum in (int64_t) to get around it
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
-  THLongStorage* maskSizes = THCudaByteTensor_newSizeOf(state, mask);
+  at::LongStorageImpl* maskSizes = THCudaByteTensor_newSizeOf(state, mask);
   THCudaLongTensor_resize(state, maskLong, maskSizes, NULL);
   THCudaLongTensor_copyCudaByte(state, maskLong, mask);
 
@@ -182,7 +182,7 @@ THCTensor_(maskedSelectByte)(THCState* state,
                              THCTensor *tensor, THCTensor *src, THByteTensor *mask)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
-  THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
+  at::LongStorageImpl* maskSizes = THByteTensor_newSizeOf(mask);
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, maskSizes, NULL);
   THLongStorage_free(maskSizes);
   THCudaByteTensor_copyByte(state, maskCuda, mask);

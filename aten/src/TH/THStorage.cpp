@@ -13,21 +13,21 @@
 #include "THGenerateHalfType.h"
 
 
-THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
-  return _THSizeDesc(size->data, size->size);
+THDescBuff THLongStorage_sizeDesc(const at::LongStorageImpl *size) {
+  return _THSizeDesc(size->data<int64_t>(), size->size());
 }
 
-THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElement)
+at::LongStorageImpl *THLongStorage_newInferSize(at::LongStorageImpl *size, ptrdiff_t nElement)
 {
-  ptrdiff_t total_size = (size->size > 0 ? 1 : 0);
+  ptrdiff_t total_size = (size->size() > 0 ? 1 : 0);
   ptrdiff_t dim_infer = -1;
   ptrdiff_t i;
-  for (i = 0; i < size->size; i++) {
-    if (size->data[i] == -1) {
+  for (i = 0; i < size->size(); i++) {
+    if (size->data<int64_t>()[i] == -1) {
       THArgCheck(dim_infer == -1, 1, "only one dimension can be inferred");
       dim_infer = i;
     } else {
-      total_size *= size->data[i];
+      total_size *= size->data<int64_t>()[i];
     }
   }
   if (dim_infer != -1) {
@@ -39,15 +39,15 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
     THArgCheck(nElement == total_size, 2,
         "size '%s' is invalid for input with %td elements", buf.str, nElement);
   }
-  THLongStorage* copy = THLongStorage_newWithSize(size->size);
+  at::LongStorageImpl* copy = THLongStorage_newWithSize(size->size());
   THLongStorage_copy(copy, size);
   if (dim_infer != -1) {
-    copy->data[dim_infer] = nElement / total_size;
+    copy->data<int64_t>()[dim_infer] = nElement / total_size;
   }
   return copy;
 }
 
-int THLongStorage_inferSize2(THLongStorage *output, int64_t *sizesA, int64_t dimsA, int64_t *sizesB, int64_t dimsB,
+int THLongStorage_inferSize2(at::LongStorageImpl *output, int64_t *sizesA, int64_t dimsA, int64_t *sizesB, int64_t dimsB,
                              char *error_buffer, int buffer_len) {
   THArgCheck(sizesA != NULL, 1, "sizesA must not be null");
   THArgCheck(sizesB != NULL, 2, "sizesB must not be null");
@@ -78,7 +78,7 @@ int THLongStorage_inferSize2(THLongStorage *output, int64_t *sizesA, int64_t dim
   return 0;
 }
 
-int THLongStorage_inferSizeN(THLongStorage *output, int n, int64_t **sizes, int64_t *dims,
+int THLongStorage_inferSizeN(at::LongStorageImpl *output, int n, int64_t **sizes, int64_t *dims,
                              char *error_buffer, int buffer_len) {
   THArgCheck(n > 0, 2, "n must be greater than 0");
   THArgCheck(sizes != NULL, 1, "sizes must not be null");
@@ -116,7 +116,7 @@ int THLongStorage_inferSizeN(THLongStorage *output, int n, int64_t **sizes, int6
 }
 
 int THLongStorage_inferExpandGeometry(int64_t *tensorSizes, int64_t *tensorStrides, int64_t tensorDim,
-                                        THLongStorage *sizes, int64_t **expandedSizes, int64_t **expandedStrides,
+                                        at::LongStorageImpl *sizes, int64_t **expandedSizes, int64_t **expandedStrides,
                                         char *error_buffer, int buffer_len) {
   ptrdiff_t ndim = THLongStorage_size(sizes);
 

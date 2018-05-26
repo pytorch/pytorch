@@ -529,7 +529,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   THArgCheck(dim < srcDims, 4, "Indexing dim is out of bounds");
   THArgCheck(srcDims > 0, 2, "Source tensor is empty");
 
-  THLongStorage *newSize;
+  at::LongStorageImpl *newSize;
 
   if (numIndices == 0) {
     newSize = THCTensor_(newSizeOf)(state, src);

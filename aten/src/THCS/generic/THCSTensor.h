@@ -10,17 +10,17 @@ THC_API int THCSTensor_(nDimensionI)(THCState *state, const THCSTensor *self);
 THC_API int THCSTensor_(nDimensionV)(THCState *state, const THCSTensor *self);
 THC_API int64_t THCSTensor_(size)(THCState *state, const THCSTensor *self, int dim);
 THC_API ptrdiff_t THCSTensor_(nnz)(THCState *state, const THCSTensor *self);
-THC_API THLongStorage *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self);
+THC_API at::LongStorageImpl  *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self);
 THC_API THCIndexTensor *THCSTensor_(newIndices)(THCState *state, const THCSTensor *self);
 THC_API THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self);
 
 /**** creation methods ****/
 THC_API THCSTensor *THCSTensor_(new)(THCState *state);
 THC_API THCSTensor *THCSTensor_(newWithTensor)(THCState *state, THCIndexTensor *indices, THCTensor *values);
-THC_API THCSTensor *THCSTensor_(newWithTensorAndSizeUnsafe)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes);
-THC_API THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes);
+THC_API THCSTensor *THCSTensor_(newWithTensorAndSizeUnsafe)(THCState *state, THCIndexTensor *indices, THCTensor *values, at::LongStorageImpl  *sizes);
+THC_API THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, at::LongStorageImpl  *sizes);
 
-THC_API THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size_, THLongStorage *_ignored);
+THC_API THCSTensor *THCSTensor_(newWithSize)(THCState *state, at::LongStorageImpl  *size_, at::LongStorageImpl  *_ignored);
 THC_API THCSTensor *THCSTensor_(newWithSize1d)(THCState *state, int64_t size0_);
 THC_API THCSTensor *THCSTensor_(newWithSize2d)(THCState *state, int64_t size0_, int64_t size1_);
 THC_API THCSTensor *THCSTensor_(newWithSize3d)(THCState *state, int64_t size0_, int64_t size1_, int64_t size2_);
@@ -32,7 +32,7 @@ THC_API THCSTensor *THCSTensor_(newTranspose)(THCState *state, THCSTensor *self,
 /**** reshaping methods ***/
 THC_API int THCSTensor_(isSameSizeAs)(THCState *state, const THCSTensor *self, const THCSTensor* src);
 THC_API int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, const THCTensor* src);
-THC_API THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, THLongStorage *size);
+THC_API THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, at::LongStorageImpl *size);
 THC_API THCSTensor *THCSTensor_(resizeAs)(THCState *state, THCSTensor *self, THCSTensor *src);
 THC_API THCSTensor *THCSTensor_(resize1d)(THCState *state, THCSTensor *self, int64_t size0);
 THC_API THCSTensor *THCSTensor_(resize2d)(THCState *state, THCSTensor *self, int64_t size0, int64_t size1);

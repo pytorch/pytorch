@@ -10,7 +10,7 @@ typedef struct THTensor
 
     // Note: storage->size may be greater than the recorded size
     // of a tensor
-    THStorage *storage;
+    at::StorageImpl *storage;
     ptrdiff_t storageOffset;
     std::atomic<int> refcount;
 
