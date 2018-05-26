@@ -75,7 +75,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
       }
 
       sum /= dim;
-      THTensor_fastSet1d(output, t, sum);
+      THTensor_(fastSet1d)(output, t, sum);
       input_data += dim;
     }
   }
@@ -201,7 +201,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   {
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
     for (t = 0; t < nframe * dim; t++) {
-      gradInput_data[t] *= THTensor_fastGet1d(gradOutput, 0);
+      gradInput_data[t] *= THTensor_(fastGet1d)(gradOutput, 0);
     }
   }
   else
@@ -211,7 +211,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
     {
       for (d = 0; d < dim; d++)
       {
-        gradInput_data[t * dim + d] *= THTensor_fastGet1d(gradOutput, t);
+        gradInput_data[t * dim + d] *= THTensor_(fastGet1d)(gradOutput, t);
       }
     }
   }
