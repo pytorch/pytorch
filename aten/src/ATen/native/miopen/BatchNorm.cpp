@@ -8,19 +8,19 @@ namespace at { namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
-std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
+std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input, const Tensor& weight,
     const Tensor& bias, const Tensor& running_mean, const Tensor& running_var,
     bool training, double exponential_average_factor, double epsilon) {
-  throw std::runtime_error("miopen_batch_norm: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_batch_norm: ATen not compiled with MIOpen support");
 }
 
-std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
+std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& input, const Tensor& grad_output, const Tensor& weight,
     const Tensor& running_mean, const Tensor& running_var,
     const Tensor& save_mean, const Tensor& save_var,
     double epsilon) {
-  throw std::runtime_error("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_batch_norm_backward: ATen not compiled with MIOpen support");
 }
 
 }}  // namespace at::native
@@ -47,7 +47,7 @@ Tensor expandScale(const Tensor& t, int64_t dim) {
 
 }  // namespace
 
-std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
+std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input_t, const Tensor& weight_t,
     const Tensor& bias_t, const Tensor& running_mean_t, const Tensor& running_var_t,
     bool training, double exponential_average_factor, double epsilon)
@@ -57,7 +57,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
             bias{ bias_t, "bias", 3 },
             running_mean{ running_mean_t, "running_mean", 4 },
             running_var{ running_var_t, "running_var", 5 };
-  CheckedFrom c = "miopen_batch_norm";
+  CheckedFrom c = "cudnn_batch_norm";
   setMIOpenStreamToCurrent();
 
   checkAllDefined(c, {input, weight, bias});
@@ -139,7 +139,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
 // NB: CuDNN only implements the backward algorithm for batchnorm
 // in training mode (evaluation mode batchnorm has a different algorithm),
 // which is why this doesn't accept a 'training' parameter.
-std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
+std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& input_t, const Tensor& grad_output_t, const Tensor& weight_t,
     // Unused: but we require them to be passed so that double backwards
     // has access
@@ -152,7 +152,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
             weight{ weight_t, "weight", 3 },
             save_mean{ save_mean_t, "save_mean", 4 },
             save_var{ save_var_t, "save_var", 5 };
-  CheckedFrom c = "miopen_batch_norm_backward";
+  CheckedFrom c = "cudnn_batch_norm_backward";
   setMIOpenStreamToCurrent();
 
   checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});

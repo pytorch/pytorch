@@ -51,8 +51,6 @@ cmake_policy(SET CMP0012 NEW)
 # Polyfill for upstream FindCUDA
 include(CMakeInitializeConfigs)
 
-#############################################
-
 set(ATen_CPU_SRCS)
 set(ATen_CPU_TEST_SRCS)
 set(ATen_CPU_INCLUDE)

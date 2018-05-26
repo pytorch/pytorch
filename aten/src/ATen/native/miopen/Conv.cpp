@@ -8,30 +8,30 @@ namespace at { namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
-at::Tensor miopen_convolution(
+at::Tensor cudnn_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_convolution: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_backward_input(
+at::Tensor cudnn_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution_backward_input: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_convolution_backward_input: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_backward_weight(
+at::Tensor cudnn_convolution_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution_backward_weight: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_convolution_backward_weight: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_backward_bias(
+at::Tensor cudnn_convolution_backward_bias(
     const at::Tensor& grad_output) {
-  throw std::runtime_error("miopen_convolution_backward_bias: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_convolution_backward_bias: ATen not compiled with MIOpen support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
@@ -41,32 +41,32 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
   throw std::runtime_error("miopen_convolution_backward: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_transpose(
+at::Tensor cudnn_convolution_transpose(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList output_padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution_transpose: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_convolution_transpose: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_transpose_backward_input(
+at::Tensor cudnn_convolution_transpose_backward_input(
     const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_convolution_transpose_backward: ATen not compiled with MIOpen support");
 }
 
-at::Tensor miopen_convolution_transpose_backward_weight(
+at::Tensor cudnn_convolution_transpose_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution_transpose_backward_weight: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_convolution_transpose_backward_weight: ATen not compiled with MIOpen support");
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backward(
+std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-  throw std::runtime_error("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_convolution_transpose_backward: ATen not compiled with MIOpen support");
 }
 
 }}
@@ -716,7 +716,7 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
 
 // The general strategy:
 //
-//    - miopen_convolution (Tensor)
+//    - cudnn_convolution (Tensor)
 //      Entry points for clients, takes bias
 //
 //    - miopen_convolution_forward (TensorArg)
@@ -817,7 +817,7 @@ Tensor miopen_convolution_forward(
   return *output;
 }
 
-Tensor miopen_convolution(
+Tensor cudnn_convolution(
     const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic)
@@ -827,7 +827,7 @@ Tensor miopen_convolution(
             bias   { bias_t,   "bias",   3 };
   //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
-  CheckedFrom c = "miopen_convolution";
+  CheckedFrom c = "cudnn_convolution";
   auto output_t = miopen_convolution_forward(
     c, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
   if (bias->defined()) {
@@ -838,7 +838,7 @@ Tensor miopen_convolution(
 
 // NB: output_padding not needed here, as there is no ambiguity to
 // resolve
-Tensor miopen_convolution_transpose_backward_input(
+Tensor cudnn_convolution_transpose_backward_input(
     const Tensor& grad_output_t, const Tensor& weight_t,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic)
@@ -848,11 +848,11 @@ Tensor miopen_convolution_transpose_backward_input(
   //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
   return miopen_convolution_forward(
-    "miopen_convolution_transpose_backward_input",
+    "cudnn_convolution_transpose_backward_input",
     grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backward(
+std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
@@ -861,13 +861,13 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::miopen_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    grad_input = at::cudnn_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
   }
   if (output_mask[1]) {
-    grad_weight = at::miopen_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+    grad_weight = at::cudnn_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
   }
   if (output_mask[2]) {
-    grad_bias = at::miopen_convolution_backward_bias(grad_output);
+    grad_bias = at::cudnn_convolution_backward_bias(grad_output);
   }
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
@@ -920,7 +920,7 @@ void raw_miopen_convolution_backward_input_out(
 // output_padding parameter.  Both of these interfaces are equivalent,
 // but they are differently convenient depending on the use case.
 
-Tensor miopen_convolution_backward_input(
+Tensor cudnn_convolution_backward_input(
     CheckedFrom c,
     IntList input_size, const TensorArg& grad_output, const TensorArg& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
@@ -953,11 +953,11 @@ Tensor miopen_convolution_transpose_forward(
 {
   auto input_size = conv_input_size(grad_output->sizes(), weight->sizes(),
                                     padding, output_padding, stride, dilation, groups);
-  return miopen_convolution_backward_input(c, input_size, grad_output, weight,
+  return cudnn_convolution_backward_input(c, input_size, grad_output, weight,
                                     padding, stride, dilation, groups, benchmark, deterministic);
 }
 
-Tensor miopen_convolution_backward_input(
+Tensor cudnn_convolution_backward_input(
     IntList input_size, const Tensor& grad_output_t, const Tensor& weight_t,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic)
@@ -966,8 +966,8 @@ Tensor miopen_convolution_backward_input(
             weight{ weight_t, "weight", 2 };
   //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
-  return miopen_convolution_backward_input(
-      "miopen_convolution_backward_input",
+  return cudnn_convolution_backward_input(
+      "cudnn_convolution_backward_input",
       input_size, grad_output, weight,
       padding, stride, dilation, groups, benchmark, deterministic);
 }
@@ -981,19 +981,19 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::miopen_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    grad_input = at::cudnn_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
   }
   if (output_mask[1]) {
-    grad_weight = at::miopen_convolution_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+    grad_weight = at::cudnn_convolution_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
   }
   if (output_mask[2]) {
-    grad_bias = at::miopen_convolution_backward_bias(grad_output);
+    grad_bias = at::cudnn_convolution_backward_bias(grad_output);
   }
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-Tensor miopen_convolution_transpose(
+Tensor cudnn_convolution_transpose(
     const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
     IntList padding, IntList output_padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic)
@@ -1001,7 +1001,7 @@ Tensor miopen_convolution_transpose(
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
-  CheckedFrom c = "miopen_convolution_transpose";
+  CheckedFrom c = "cudnn_convolution_transpose";
   auto output_t = miopen_convolution_transpose_forward(
     c, input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic);
   if (bias->defined()) {
@@ -1045,7 +1045,7 @@ void raw_miopen_convolution_backward_weight_out(
       args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size));
 }
 
-Tensor miopen_convolution_backward_weight(
+Tensor cudnn_convolution_backward_weight(
     CheckedFrom c,
     IntList weight_size, const TensorArg& grad_output, const TensorArg& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
@@ -1069,7 +1069,7 @@ Tensor miopen_convolution_backward_weight(
   return grad_weight_t;
 }
 
-Tensor miopen_convolution_backward_weight(
+Tensor cudnn_convolution_backward_weight(
     IntList weight_size,
     const Tensor& grad_output_t,
     const Tensor& input_t,
@@ -1080,13 +1080,13 @@ Tensor miopen_convolution_backward_weight(
             input{ input_t, "input", 2 };
   //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
-  return miopen_convolution_backward_weight(
-      "miopen_convolution_backward_weight",
+  return cudnn_convolution_backward_weight(
+      "cudnn_convolution_backward_weight",
       weight_size, grad_output, input,
       padding, stride, dilation, groups, benchmark, deterministic);
 }
 
-Tensor miopen_convolution_transpose_backward_weight(
+Tensor cudnn_convolution_transpose_backward_weight(
     IntList weight_size,
     const Tensor& grad_output_t,
     const Tensor& input_t,
@@ -1097,8 +1097,8 @@ Tensor miopen_convolution_transpose_backward_weight(
             input{ input_t, "input", 2 };
   //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
-  return miopen_convolution_backward_weight(
-      "miopen_convolution_backward_weight",
+  return cudnn_convolution_backward_weight(
+      "cudnn_convolution_backward_weight",
       weight_size, input, grad_output,
       padding, stride, dilation, groups, benchmark, deterministic);
 }
@@ -1109,7 +1109,7 @@ Tensor miopen_convolution_transpose_backward_weight(
 //
 // ---------------------------------------------------------------------
 
-Tensor miopen_convolution_backward_bias(
+Tensor cudnn_convolution_backward_bias(
     const Tensor& grad_output_t)
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
