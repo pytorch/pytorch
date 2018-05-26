@@ -545,7 +545,7 @@
   variants: function
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
-- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor) 
+- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
   dispatch:
     CPU: _gesv_helper_cpu
     CUDA: _gesv_helper_cuda
@@ -1062,6 +1062,11 @@
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
+
+- func: flip(Tensor self, IntList dims) -> Tensor
+  dispatch:
+    CPU: flip_cpu
+    CUDA: flip_cuda
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
   variants: function
