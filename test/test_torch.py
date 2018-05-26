@@ -5924,6 +5924,45 @@ class TestTorch(TestCase):
         self.assertEqual(perm, new)
         self.assertEqual(x.size(), orig)
 
+    @staticmethod
+    def _test_flip(self, use_cuda=False):
+        if use_cuda:
+            cuda = torch.device("cuda")
+            data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=cuda).view(2, 2, 2)
+            # large data testing
+            large_data = torch.arange(0, 100000000, device=cuda).view(10000, 10000)
+            large_data.flip([0, 1])
+        else:
+            data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2)
+
+        self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2), data.flip(0))
+        self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
+        self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
+
+        # not allow flip on the same dim more than once
+        self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 1))
+        # not allow empty list as input
+        self.assertRaises(TypeError, lambda: data.flip())
+        # not allow size of flip dim > total dims
+        self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 2, 3))
+        # not allow dim < 0
+        self.assertRaises(RuntimeError, lambda: data.flip(-1))
+        # not allow dim > max dim
+        self.assertRaises(RuntimeError, lambda: data.flip(3))
+
+        # test for non-contiguous case
+        if use_cuda:
+            expanded_data = torch.arange(1, 4, device=cuda).view(3, 1).expand(3, 2)
+            tranposed_data = torch.arange(1, 9, device=cuda).view(2, 2, 2).transpose(0, 1)
+        else:
+            expanded_data = torch.arange(1, 4).view(3, 1).expand(3, 2)
+            tranposed_data = torch.arange(1, 9).view(2, 2, 2).transpose(0, 1)
+        self.assertEqual(torch.tensor([3, 3, 2, 2, 1, 1]).view(3, 2), expanded_data.flip(0))
+        self.assertEqual(torch.tensor([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2), tranposed_data.flip(0, 1, 2))
+
+    def test_flip(self):
+        self._test_flip(self, use_cuda=False)
+
     def test_storage(self):
         v = torch.randn(3, 5)
         self.assertEqual(v.storage()[0], v.data[0][0])
