@@ -53,24 +53,23 @@ cd ${INSTALL_PREFIX}
 
 # C++ tests
 echo "Running C++ tests.."
-for test in $(find $INSTALL_PREFIX/test/); do
-  # Skip directories
-  if [[ -d $test ]]; then
-    continue
-  fi
-  # ATen tests
-  if [ $(dirname "${test}") == 'aten' ]; then
-    "$test" -r=xml -o "${test}.xml"
-    continue
-  fi
-  # Skip tests we know are hanging or bad
-  case "$(basename "$test")" in
-    mkl_utils_test)
+gtest_reports_dir="${TEST_DIR}/cpp"
+junit_reports_dir="${TEST_DIR}/junit_reports"
+mkdir -p "$gtest_reports_dir" "$junit_reports_dir"
+for test in $(find -executable -type f "${INSTALL_PREFIX}/test"); do
+  case "$test" in
+    # skip tests we know are hanging or bad
+    */mkl_utils_test)
       continue
       ;;
+    */aten/*)
+      # ATen uses test framework Catch2
+      "$test" -r=xml -o "${junit_reports_dir}/$(basename $test).xml"
+      ;;
+    *)
+      "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
+      ;;
   esac
-
-  "$test" --gtest_output=xml:"$TEST_DIR"/cpp/$(basename "$test").xml
 done
 
 # Get the relative path to where the caffe2 python module was installed
