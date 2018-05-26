@@ -89,7 +89,6 @@ INSTALL(FILES
   THTensor.h
   THTensorApply.h
   THTensorDimApply.h
-  THTensorMacros.h
   THVector.h
   THHalf.h
   THTensor.hpp
@@ -129,4 +128,5 @@ INSTALL(FILES
   # See Note [TH abstraction violation]
   generic/THStorage.hpp
   generic/THTensor.hpp
+  generic/THTensorFastGetSet.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")

@@ -20,8 +20,6 @@
 #include "generic/THTensorCopy.h"
 #include "THGenerateHalfType.h"
 
-#include "THTensorMacros.h"
-
 /* random numbers */
 #include "THRandom.h"
 #include "generic/THTensorRandom.h"
