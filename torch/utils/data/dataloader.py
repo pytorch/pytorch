@@ -83,7 +83,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     _set_worker_signal_handlers()
 
     torch.set_num_threads(1)
-    random.seed(int(seed))
+    random.seed(seed)
     torch.manual_seed(seed)
 
     if init_fn is not None:
@@ -246,7 +246,7 @@ class _DataLoaderIter(object):
 
         self.sample_iter = iter(self.batch_sampler)
 
-        base_seed = torch.LongTensor(1).random_()[0]
+        base_seed = int(torch.LongTensor(1).random_()[0])
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
