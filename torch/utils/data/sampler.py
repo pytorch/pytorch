@@ -136,7 +136,7 @@ class BatchSampler(Sampler):
     def __iter__(self):
         batch = []
         for idx in self.sampler:
-            batch.append(int(idx))
+            batch.append(idx)
             if len(batch) == self.batch_size:
                 yield batch
                 batch = []
