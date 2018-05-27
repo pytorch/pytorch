@@ -72,6 +72,95 @@ class TestBatchGatherOps(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [data, ind], 0, [0])
 
 
+class TestNdimGatherOps(hu.HypothesisTestCase):
+    @given(num=st.integers(3, 20),
+           index_num=st.integers(0, 10),
+           **hu.gcs)
+    def test_ndim_gather_ops(self, num, index_num, gc, dc):
+        # case: axis = 0
+        def ref_ndim_gather_0(data, ind):
+            if ind.size == 0:
+                return [np.zeros(
+                    (0, data.shape[1], data.shape[2])).astype(np.float32)]
+
+            output = [r for r in [data[i] for i in ind]]
+            return [output]
+
+        # case: axis = 1
+        def ref_ndim_gather_1(data, ind):
+            if ind.size == 0:
+                return [np.zeros(
+                    (data.shape[0], 0, data.shape[2])).astype(np.float32)]
+
+            output = []
+            for b in range(data.shape[0]):
+                output.append([r for r in [data[b][i] for i in ind]])
+            return [output]
+
+        # case: axis = 2
+        def ref_ndim_gather_2(data, ind):
+            if ind.size == 0:
+                return [np.zeros(
+                    (data.shape[0], data.shape[1], 0)).astype(np.float32)]
+
+            output = []
+            for b in range(data.shape[0]):
+                matrix = []
+                for c in range(data.shape[1]):
+                    matrix.append([data[b][c][i] for i in ind])
+                output.append(matrix)
+            return [output]
+
+        ref_ndim_gathers = [
+            ref_ndim_gather_0,
+            ref_ndim_gather_1,
+            ref_ndim_gather_2,
+        ]
+
+        data = np.random.random((
+            np.random.randint(2, num),
+            np.random.randint(2, num),
+            np.random.randint(2, num)
+        )).astype(np.float32)
+        for _axis in range(3):
+            ind = np.random.randint(
+                data.shape[_axis], size=(index_num, )).astype('int32')
+            op = core.CreateOperator(
+                'NdimGather',
+                ['data', 'ind'],
+                ['output'],
+                axis=_axis,
+            )
+            self.assertReferenceChecks(
+                gc, op, [data, ind], ref_ndim_gathers[_axis])
+            self.assertGradientChecks(gc, op, [data, ind], 0, [0])
+
+        # test with gather and batch_gather operators
+        self.ws.create_blob("data").feed(data)
+        gather_ops = ['Gather', 'BatchGather']
+        for _axis in range(len(gather_ops)):
+            ind = np.random.randint(
+                data.shape[_axis], size=(index_num, )).astype('int32')
+            self.ws.create_blob("ind").feed(ind)
+            self.ws.run(core.CreateOperator(
+                'NdimGather',
+                ['data', 'ind'],
+                ['output'],
+                axis=_axis,
+            ))
+            self.ws.run(core.CreateOperator(
+                gather_ops[_axis],
+                ['data', 'ind'],
+                ['gather_output'],
+            ))
+            np.testing.assert_allclose(
+                self.ws.blobs[("output")].fetch(),
+                self.ws.blobs[("gather_output")].fetch(),
+                rtol=1e-4,
+                atol=1e-4
+            )
+
+
 class TestGatherFused8BitRowwise(hu.HypothesisTestCase):
     @given(rows_num=st.integers(1, 10000),
            cols_num=st.integers(1, 128),
