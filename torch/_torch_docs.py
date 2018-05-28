@@ -1899,46 +1899,6 @@ Example::
             [-1.1734,  0.7230]])
 """)
 
-add_docstr(torch.slice,
-           r"""
-slice(input, dim=0, start=0, stop=9223372036854775807, step=1) -> Tensor
-   
-Returns a new tensor which slices the :attr:`input` tensor along dimension
-:attr:`dim` between the indices given by integer inputs :attr:`start` and 
-:attr:`stop` with the corresponding :attr:`step`, which is an integer.
-
-The returned tensor has the same number of dimensions as the original tensor
-(:attr:`input`). The size of the :attr:`dim`\ th dimension is given by
-
-    ``(min(stop, input.size(dim)) - start) // step + 1``
-
-Other dimensions have the same size as in the original tensor.
-   
-Args:
-   input (Tensor): the input tensor
-   dim (int, optional): the dimension in which we slice
-   start (int, optional): start index in the slice dimension
-   stop (int, optional): stop index in the slice dimension
-   step (int, optional): step size for the slice operation
-   
-Example::
-   
-    >>> x = torch.arange(16).view(4, 4)
-    >>> x
-    tensor([[  0,   1,   2,   3],
-            [  4,   5,   6,   7],
-            [  8,   9,  10,  11],
-            [ 12,  13,  14,  15]])
-    >>> torch.slice(x, 0, 0, 3, 2)
-    tensor([[  0,   1,   2,   3],
-            [  8,   9,  10,  11]])
-    >>> torch.slice(x, 1, 0, 3, 2)
-    tensor([[  0,   2],
-            [  4,   6],
-            [  8,  10],
-            [ 12,  14]])
-   """)
-
 add_docstr(torch.inverse,
            r"""
 inverse(input, out=None) -> Tensor
@@ -4010,6 +3970,47 @@ Example::
     tensor([ 0.5380, -0.8632, -0.1265,  0.9399])
     >>> torch.sinh(a)
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
+""")
+
+add_docstr(torch.slice,
+           r"""
+slice(input, dim=0, start=0, stop=9223372036854775807, step=1) -> Tensor
+
+Returns a new tensor which slices the :attr:`input` tensor along dimension
+:attr:`dim` between the indices given by integer inputs :attr:`start` and
+:attr:`stop` with the corresponding :attr:`step`, which is an integer.
+
+The returned tensor has the same number of dimensions as the original tensor
+(:attr:`input`). The size of the :attr:`dim`\ th dimension is given by
+
+``ceil((min(stop, input.size(dim)) - start) / step)``
+
+when `stop >= start`, and zero otherwise. Other dimensions have the same size 
+as in the original tensor. Negative steps are not supported.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int, optional): the dimension in which we slice
+    start (int, optional): start index in the slice dimension
+    stop (int, optional): stop index in the slice dimension
+    step (int, optional): step size for the slice operation
+
+Example::
+
+    >>> x = torch.arange(16).view(4, 4)
+    >>> x
+    tensor([[  0,   1,   2,   3],
+            [  4,   5,   6,   7],
+            [  8,   9,  10,  11],
+            [ 12,  13,  14,  15]])
+    >>> torch.slice(x, 0, 0, 3, 2)
+    tensor([[  0,   1,   2,   3],
+            [  8,   9,  10,  11]])
+    >>> torch.slice(x, 1, 0, 3, 2)
+    tensor([[  0,   2],
+            [  4,   6],
+            [  8,  10],
+            [ 12,  14]])
 """)
 
 add_docstr(torch.sort,
