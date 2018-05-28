@@ -121,7 +121,7 @@ class FrontendTypeError(FrontendError):
 
 def build_stmts(ctx, stmts):
     stmts = [build_stmt(ctx, s) for s in stmts]
-    return [s for s in stmts if s is not None]
+    return list(filter(None, stmts))
 
 
 def get_jit_ast(fn):
