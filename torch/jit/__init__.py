@@ -369,10 +369,7 @@ def _script_graph(fn, _frames_up=0):
 
 def script(fn, _frames_up=0):
     graph = _script_graph(fn, _frames_up=_frames_up + 1)
-
-    fn_attributes = {}
-    for i in functools.WRAPPER_ASSIGNMENTS:
-        fn_attributes[i] = getattr(fn, i)
+    fn_attributes = {i: getattr(fn, i) for i in functools.WRAPPER_ASSIGNMENTS}
     Wrapper = type('GraphExecutorWrapper', (torch._C.GraphExecutor, ), fn_attributes)
     return Wrapper(graph, True)
 
@@ -381,9 +378,7 @@ ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast')
 
 
 def script_method(fn):
-    fn_attributes = {}
-    for i in functools.WRAPPER_ASSIGNMENTS:
-        fn_attributes[i] = getattr(fn, i)
+    fn_attributes = {i: getattr(fn, i) for i in functools.WRAPPER_ASSIGNMENTS}
     Wrapper = type('ScriptMethodStubWrapper', (ScriptMethodStub, ), fn_attributes)
     return Wrapper(createResolutionCallback(frames_up=1), get_jit_ast(fn))
 
