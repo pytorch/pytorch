@@ -3985,7 +3985,7 @@ The returned tensor has the same number of dimensions as the original tensor
 
 ``ceil((min(stop, input.size(dim)) - start) / step)``
 
-when `stop >= start`, and zero otherwise. Other dimensions have the same size 
+when `stop >= start`, and zero otherwise. Other dimensions have the same size
 as in the original tensor. Negative steps are not supported.
 
 Args:
