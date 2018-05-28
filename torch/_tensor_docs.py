@@ -1835,6 +1835,13 @@ Example::
 
 """)
 
+add_docstr_all('slice',
+               r"""
+slice(dim, start, stop, step) -> Tensor
+
+See :func:`torch.slice`
+""")
+
 add_docstr_all('sort',
                r"""
 sort(dim=None, descending=False) -> (Tensor, LongTensor)
