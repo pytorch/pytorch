@@ -239,7 +239,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
             out = (out, )
         if loss_fn == torch.sum and len(out) != 1:
             raise ValueError(("Model returns {} outputs, but default loss function "
-                             "(torch.sum) can only handle a single output").format(len(out)))
+                              "(torch.sum) can only handle a single output").format(len(out)))
         out_vars, _ = _flatten(out)
         saved_outs = [v.data.clone() for v in out_vars]
         loss = loss_fn(*out)
@@ -369,14 +369,21 @@ def _script_graph(fn, _frames_up=0):
 
 def script(fn, _frames_up=0):
     graph = _script_graph(fn, _frames_up=_frames_up + 1)
-    return torch._C.GraphExecutor(graph, True)
+
+    @functools.wraps(fn, updated=())
+    class Wrapper(torch._C.GraphExecutor):
+        pass
+    return Wrapper(graph, True)
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast'))
 
 
 def script_method(fn):
-    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn))
+    @functools.wraps(fn, updated=())
+    class Wrapper(ScriptMethodStub):
+        pass
+    return Wrapper(createResolutionCallback(frames_up=1), get_jit_ast(fn))
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
