@@ -119,8 +119,9 @@ class FrontendTypeError(FrontendError):
     pass
 
 
-def build_stmts(statements):
-    return [s for s in statements if s is not None]
+def build_stmts(ctx, stmts):
+    stmts = [build_stmt(ctx, s) for s in stmts]
+    return [s for s in stmts if s is not None]
 
 
 def get_jit_ast(fn):
@@ -147,7 +148,7 @@ def build_def(ctx, py_def):
                        py_def.col_offset + len("def"))
     return Def(Ident(r, py_def.name),
                build_param_list(ctx, py_def.args),
-               build_stmts([build_stmt(ctx, stmt) for stmt in body]))
+               build_stmts(ctx, body))
 
 
 _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments, "
@@ -235,21 +236,21 @@ class StmtBuilder(Builder):
             raise NotSupportedError(None, "else branches of while loops aren't supported")
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("while"))
         return While(r, build_expr(ctx, stmt.test),
-                     build_stmts([build_stmt(ctx, s) for s in stmt.body]))
+                     build_stmts(ctx, stmt.body))
 
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
         return For(
             r, [StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)],
-            [build_expr(ctx, stmt.iter)], build_stmts([build_stmt(ctx, s) for s in stmt.body]))
+            [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
 
     @staticmethod
     def build_If(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("if"))
         return If(r, build_expr(ctx, stmt.test),
-                  build_stmts([build_stmt(ctx, s) for s in stmt.body]),
-                  build_stmts([build_stmt(ctx, s) for s in stmt.orelse]))
+                  build_stmts(ctx, stmt.body),
+                  build_stmts(ctx, stmt.orelse))
 
     @staticmethod
     def build_Print(ctx, stmt):
