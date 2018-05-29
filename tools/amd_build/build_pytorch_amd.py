@@ -62,7 +62,6 @@ for root, _directories, files in os.walk(os.path.join(out_dir, "torch")):
                 f.truncate()
                 f.flush()
                 os.fsync(f)
-    subprocess.Popen(["git", "apply", os.path.join(amd_build_dir, filename)], amd_build_dir=out_dir)
 
 # Execute the Hipify Script.
 subprocess.Popen(
