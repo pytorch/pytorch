@@ -144,39 +144,181 @@ OPERATOR_SCHEMA(UniformFill)
     .AllowInplace({{0, 0}})
     .TensorInferenceFunction(FillerTensorInference<>)
     .SetDoc(R"DOC(
-Fill the output tensor with FLOAT samples from uniform distribution [min, max].
+Fill the output tensor with float samples from uniform distribution [`min`, `max`].
 
-The range can be defined either by arguments or input blobs. If the range is
-given by input blobs, you also need to give the shape as input. When the range
-is given as arguments, this operator enforces min <= max. When the range is
-given as inputs, the constraint is not enforced. When MAX < MIN, the first
-dimension of the output is set to 0. This behavior is allowed so that
-dynamically sampling indices into a dynamically sized tensor is possible.
+- The range can be defined either by arguments or input blobs. `min` and `max` are inclusive.
+    - If the range is given by input blobs, you also need to give the shape as input.
+    - When the range is given as arguments, this operator enforces min <= max. When the range is given as inputs, the constraint is not enforced.
+    - When the range is given as inputs and max < min, the first dimension of the output is set to 0. This behavior is allowed so that dynamically sampling indices into a dynamically sized tensor is possible.
+- The shape of the output can be given as argument or input.
 
-The shape of the output can be given as argument or input.
+Github Links:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op_1 = core.CreateOperator(
+    "UniformFill",
+    [],
+    ["output"],
+    min=5.5,
+    max=10.5,
+    shape=(3,3)
+)
+
+op_2 = core.CreateOperator(
+    "UniformFill",
+    ["shape", "min", "max"],
+    ["output"],
+    input_as_shape=1
+)
+
+# Test arg-based op
+workspace.RunOperatorOnce(op_1)
+print("output (op_1):\n", workspace.FetchBlob("output"))
+
+# Test input-based op
+workspace.ResetWorkspace()
+workspace.FeedBlob("shape", np.array([5,5]))
+workspace.FeedBlob("min", np.array(13.8, dtype=np.float32))
+workspace.FeedBlob("max", np.array(19.3, dtype=np.float32))
+workspace.RunOperatorOnce(op_2)
+print("output (op_2):\n", workspace.FetchBlob("output"))
+
+```
+
+**Result**
+
+```
+
+output (op_1):
+ [[8.894862  8.225005  6.7890406]
+ [9.588293  7.1072135 7.7234955]
+ [8.210596  6.0202913 9.665462 ]]
+output (op_2):
+ [[18.965155 15.603871 15.038921 17.14872  18.134571]
+ [18.84237  17.845276 19.214737 16.970337 15.494069]
+ [18.754795 16.724329 15.311974 16.962536 18.60965 ]
+ [15.186268 15.264773 18.73341  19.077969 14.237255]
+ [15.917589 15.844325 16.248466 17.006554 17.502048]]
+
+```
+
+</details>
+
 )DOC")
-    .Arg("min", "minimum value, inclusive")
-    .Arg("max", "maximum value, inclusive")
-    .Arg("shape", "shape of the output, do not set when input_as_shape=1")
+    .Arg("min", "(*float*): minimum value, inclusive")
+    .Arg("max", "(*float*): maximum value, inclusive")
+    .Arg("shape", "(*Tuple(int)*): shape of the output, do not set when `input_as_shape`=1")
     .Arg(
         "input_as_shape",
-        "set to 1 to use the first input as shape. First input must be in CPU context.")
+        "(*int*): set to 1 to use the first input as shape; `shape` input must be in CPU context")
     .Input(
         0,
-        "SHAPE",
-        "1-D tensor of the shape of the output, "
-        "must be used with input_as_shape")
-    .Input(1, "MIN", "scalar blob of mininum value")
-    .Input(2, "MAX", "scalar blob of maximum value")
-    .Output(0, "OUTPUT", "output tensor");
+        "shape",
+        "(*Tensor`<int>`*): 1-D tensor of the shape of the output, must be used with `input_as_shape` argument")
+    .Input(1, "min", "(*Tensor`<float>`*): scalar tensor containing minimum value, inclusive")
+    .Input(2, "max", "(*Tensor`<float>`*): scalar tensor containing maximum value, inclusive")
+    .Output(0, "output", "(*Tensor`<float>`*): filled output tensor");
 OPERATOR_SCHEMA(UniformIntFill)
     .NumInputs({0, 1, 3})
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .TensorInferenceFunction(FillerTensorInference<>)
     .SetDoc(R"DOC(
-Like `UniformFill` but fill with INT32.
-)DOC");
+Fill the output tensor with int32 samples from uniform distribution [`min`, `max`].
+
+- The range can be defined either by arguments or input blobs. `min` and `max` are inclusive.
+    - If the range is given by input blobs, you also need to give the shape as input.
+    - When the range is given as arguments, this operator enforces min <= max. When the range is given as inputs, the constraint is not enforced.
+    - When the range is given as inputs and max < min, the first dimension of the output is set to 0. This behavior is allowed so that dynamically sampling indices into a dynamically sized tensor is possible.
+- The shape of the output can be given as argument or input.
+
+Github Links:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op_1 = core.CreateOperator(
+    "UniformIntFill",
+    [],
+    ["output"],
+    min=5,
+    max=10,
+    shape=(3,3)
+)
+
+op_2 = core.CreateOperator(
+    "UniformIntFill",
+    ["shape", "min", "max"],
+    ["output"],
+    input_as_shape=1
+)
+
+# Test arg-based op
+workspace.RunOperatorOnce(op_1)
+print("output (op_1):\n", workspace.FetchBlob("output"))
+
+# Test input-based op
+workspace.ResetWorkspace()
+workspace.FeedBlob("shape", np.array([5,5]))
+workspace.FeedBlob("min", np.array(13, dtype=np.int32))
+workspace.FeedBlob("max", np.array(19, dtype=np.int32))
+workspace.RunOperatorOnce(op_2)
+print("output (op_2):\n", workspace.FetchBlob("output"))
+
+```
+
+**Result**
+
+```
+
+output (op_1):
+ [[ 6 10  7]
+ [ 5 10  6]
+ [ 7  5 10]]
+output (op_2):
+ [[19 13 15 13 13]
+ [14 17 14 15 15]
+ [17 14 19 13 13]
+ [17 18 16 13 18]
+ [14 15 16 18 16]]
+
+```
+
+</details>
+
+    )DOC")
+    .Arg("min", "(*int*): minimum value, inclusive")
+    .Arg("max", "(*int*): maximum value, inclusive")
+    .Arg(
+        "shape",
+        "(*Tuple(int)*): shape of the output, do not set when `input_as_shape`=1")
+    .Arg(
+        "input_as_shape",
+        "(*int*): set to 1 to use the first input as shape; `shape` input must be in CPU context")
+    .Input(0, "shape", "(*Tensor`<int>`*): 1-D tensor of the shape of the output, must be used with `input_as_shape` argument")
+    .Input(1, "min", "(*Tensor`<int>`*): scalar tensor containing minimum value, inclusive")
+    .Input(2, "max", "(*Tensor`<int>`*): scalar tensor containing maximum value, inclusive")
+    .Output(0, "output", "(*Tensor`<int>`*): filled output tensor");
 OPERATOR_SCHEMA(UniqueUniformFill)
     .NumInputs(0, 2)
     .NumOutputs(1)
@@ -217,12 +359,145 @@ OPERATOR_SCHEMA(GaussianFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference<>);
+    .TensorInferenceFunction(FillerTensorInference<>)
+    .SetDoc(R"DOC(
+This op fills an output tensor with samples drawn from a normal distribution specified by the mean and standard deviation arguments. The output tensor shape is specified by the *shape* argument. However, if *input_as_shape* is set to *true*, then the *input* should be a 1D tensor containing the desired output shape (the dimensions specified in *extra_shape* will also be appended). In this case, the *shape* argument should **not** be set.
+
+*Note: cannot set the shape argument and pass in an input at the same time.*
+
+Github Links:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "GaussianFill",
+    [],
+    ["out"],
+    shape=[3,3],
+    mean=2.0,
+    std=1.1
+)
+
+workspace.RunOperatorOnce(op)
+print("Out:\n", workspace.FetchBlob("out"))
+
+```
+
+**Result**
+
+```
+
+Out:
+ [[1.2084167  2.3336504  2.827349  ]
+ [2.7108908  0.9374752  1.7173369 ]
+ [0.03320992 2.1775863  1.0894578 ]]
+
+```
+
+</details>
+
+)DOC")
+    .Arg(
+        "mean",
+        "*(type: float; default: 0.)* Mean of the distribution to draw from.")
+    .Arg(
+        "std",
+        "*(type: float; default: 1.)* Standard deviation of the distribution to draw from.")
+    .Arg(
+        "shape",
+        "*(type: [int])* Desired shape of the *output* tensor.")
+    .Arg(
+        "extra_shape",
+        "*(type: [int])* The additional dimensions appended at the end of the *shape* indicated by the input blob. Cannot set the *extra_shape* argument when there is no input blob.")
+    .Arg(
+        "input_as_shape",
+        "*(type: bool; default: False)* set to *True* to use the *input* as shape. First, input must be in CPU context.")
+    .Input(
+        0,
+        "input",
+        "(Optional) 1D tensor specifying the shape of the output. Must be used with *input_as_shape=True*")
+    .Output(
+        0,
+        "output",
+        "Output tensor of random values drawn from a normal distribution. If the shape argument is set, this is the shape specified, and if the *input* exists and *input_as_shape=True*, it is the shape specified by the *input* tensor.");
 OPERATOR_SCHEMA(XavierFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference<>);
+    .TensorInferenceFunction(FillerTensorInference<>)
+    .SetDoc(R"DOC(
+This op fills an output tensor with values sampled from a uniform distribution with the range determined by the desired shape of the output. Rather, than specifying the range of values manually, the novelty of Xavier Fill is that it automatically scales the range of the distribution it draws from based on the size of the desired output tensor. For more information check out the paper [Understanding the difficulty of training deep feedforward neural networks](http://proceedings.mlr.press/v9/glorot10a/glorot10a.pdf). The output tensor shape is specified by the *shape* argument. However, if *input_as_shape* is set to *true*, then the *input* should be a 1D tensor containing the desired output shape (the dimensions specified in *extra_shape* will also be appended). In this case, the *shape* argument should **not** be set.
+
+*Note: Do not set the shape argument and pass in an input at the same time.*
+
+Github Links:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "XavierFill",
+    [],
+    ["out"],
+    shape=[3,3],
+)
+
+workspace.RunOperatorOnce(op)
+print("Out:\n", workspace.FetchBlob("out"))
+
+```
+
+**Result**
+
+```
+
+Out:
+ [[-0.8412168   0.33207083 -0.88418937]
+ [ 0.43059897 -0.8340702   0.07781601]
+ [ 0.93261135 -0.24542928 -0.3980782 ]]
+
+```
+
+</details>
+
+)DOC")
+    .Arg(
+        "shape",
+        "*(type: [int])* Desired shape of the *output* tensor.")
+    .Arg(
+        "extra_shape",
+        "*(type: [int])* The additional dimensions appended at the end of the *shape* indicated by the input blob. Cannot set the *extra_shape* argument when there is no input blob.")
+    .Arg(
+        "input_as_shape",
+        "*(type: bool; default: False)* set to *True* to use the *input* as shape. First, input must be in CPU context.")
+    .Input(
+        0,
+        "input",
+        "(Optional) 1D tensor specifying the shape of the output. Must be used with *input_as_shape=True*")
+    .Output(
+        0,
+        "output",
+        "Output tensor of random values drawn from an automatically scaled uniform distribution, based on the size of the output tensor. If the shape argument is set, this is the shape specified by the shape argument, and if the *input* exists and *input_as_shape=True*, it is the shape specified by the *input* tensor.");
+
 OPERATOR_SCHEMA(MSRAFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -248,14 +523,55 @@ OPERATOR_SCHEMA(LengthsRangeFill)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Convert a length vector to a range sequence. For example, input=[4,3,1], the
-output would be [0,1,2,3,0,1,2,0].
+The *LengthsRangeFill* op takes a single input *lengths* and outputs a single tensor *range_sequence*. For each element of *lengths*, the op appends the range(0,lengths) vector to the end of *range_sequence*. For example, if input=[2,4,1], the output would be [0,1,0,1,2,3,0].
+
+Github Links:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LengthsRangeFill",
+    ["lengths"],
+    ["range_sequence"],
+)
+
+workspace.FeedBlob("lengths", np.array([2,4,1]).astype(np.int32))
+print("lengths:\n", workspace.FetchBlob("lengths"))
+
+workspace.RunOperatorOnce(op)
+print("range_sequence: \n", workspace.FetchBlob("range_sequence"))
+
+```
+
+**Result**
+
+```
+
+lengths:
+ [2 4 1]
+range_sequence:
+ [0 1 0 1 2 3 0]
+
+```
+
+</details>
+
 )DOC")
     .Input(0, "lengths", "1D tensor of int32 or int64 segment lengths.")
     .Output(
         0,
         "range_sequence",
-        "1D tensor whose size is the sum of `lengths`");
+        "1D tensor whose size is the sum of *lengths*");
 NO_GRADIENT(LengthsRangeFill);
 
 }  // namespace caffe2

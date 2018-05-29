@@ -270,9 +270,60 @@ OPERATOR_SCHEMA(OneHot)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given a sequence of indices, one for each example in a batch, returns a matrix
-where each inner dimension has the size of the index and has 1.0 in the index
-active in the given example, and 0.0 everywhere else.
+The *OneHot* op accepts two inputs *indices* and *index_size_tensor*, and produces a single output *one_hots*.  For each index in *indices* the op creates a one-hot row in *one_hots* of length *index_size_tensor* where all entries are zero except the entry at the index is 1. The size of *one_hots* is *len(indices)* x *index_size_tensor*.
+
+Github Links:
+
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/one_hot_ops.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/one_hot_ops.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "OneHot",
+    ["indices", "index_size_tensor"],
+    ["one_hots"],
+)
+
+workspace.FeedBlob("indices", np.array([0,1,2,3,4]).astype(np.long))
+print("indices:\n", workspace.FetchBlob("indices"))
+
+workspace.FeedBlob("index_size_tensor", np.array([5]).astype(np.long))
+print("index_size_tensor:\n", workspace.FetchBlob("index_size_tensor"))
+
+workspace.RunOperatorOnce(op)
+print("one_hots: \n", workspace.FetchBlob("one_hots"))
+
+```
+
+**Result**
+
+```
+
+indices:
+ [0 1 2 3 4]
+index_size_tensor:
+ [5]
+one_hots:
+ [[1. 0. 0. 0. 0.]
+ [0. 1. 0. 0. 0.]
+ [0. 0. 1. 0. 0.]
+ [0. 0. 0. 1. 0.]
+ [0. 0. 0. 0. 1.]]
+
+```
+
+</details>
+
 )DOC")
     .Input(0, "indices", "The active index for each example in the batch.")
     .Input(
