@@ -23,17 +23,59 @@ REGISTER_CPU_OPERATOR(SplitByLengths, SplitByLengthsOp<CPUContext>);
 OPERATOR_SCHEMA(Split)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
-    .Input(0, "input", "The tensor to split")
-    .Input(1, "split", "Optional list of output lengths (see also arg 'split')")
-    .Arg("axis", "Which axis to split on")
-    .Arg("split", "length of each output")
-    .Arg("order", "Either NHWC or NCWH, will split on C axis, defaults to NCHW")
+    .Input(0, "input", "(*Tensor*): tensor to split")
+    .Input(1, "split", "(*Tensor`<int>`*): [OPTIONAL] list of output lengths (see also arg `split`)")
+    .Arg("axis", "(*int*): axis to split on")
+    .Arg("split", "(*Tuple(int)*): length of each output")
+    .Arg("order", "(*string*): order of dimensions of input and output blobs; either \"NCHW\" or \"NHWC\"")
+    .Output(0,"[output_0, output_1, ...]","(*Tensor*): output tensor")
     .DeviceInferenceFunction(splitOpDevInfer)
     .SetDoc(R"DOC(
-Split a tensor into a list of tensors, along the specified
-'axis'. The lengths of the split can be specified using argument 'split' or
-optional second input blob to the operator. Otherwise, the tensor is split
-to equal sized parts.
+Split an `input` tensor into a list of tensors, along the axis specified by the `axis` dimension. The lengths of the split can be specified using argument `split` or optional second input blob to the operator. Otherwise, the tensor is split to equal sized parts.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/concat_split_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Split",
+    ["input"],
+    ["output_0","output_1","output_2"],
+    split=(3,2,4),
+    axis=0
+)
+
+workspace.FeedBlob("input", np.random.randint(10, size=(9)))
+print("input:", workspace.FetchBlob("input"))
+workspace.RunOperatorOnce(op)
+print("output_0:", workspace.FetchBlob("output_0"))
+print("output_1:", workspace.FetchBlob("output_1"))
+print("output_2:", workspace.FetchBlob("output_2"))
+
+```
+
+**Result**
+
+```
+
+input: [2 2 6 6 6 0 5 7 4]
+output_0: [2 2 6]
+output_1: [6 6]
+output_2: [0 5 7 4]
+
+```
+
+</details>
+
 )DOC")
     .InheritOnnxSchema("Split");
 

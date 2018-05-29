@@ -42,16 +42,59 @@ OPERATOR_SCHEMA(Softsign)
     .AllowInplace({{0, 0}})
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-Calculates the softsign (x/1+|x|) of the given input tensor element-wise. This
-operation can be done in an in-place fashion too, by providing the same input
-and output blobs.
+*Softsign* takes one input data tensor $X$ and produces one output data $Y,$ where the softsign function, $y = \frac{x}{1+ |x|}$, is applied to $X$ elementwise. This operation can be done in an in-place fashion too, by providing the same input and output blobs.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softsign_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Softsign",
+    ["X"],
+    ["Y"],
+)
+
+workspace.FeedBlob("X", np.random.randn(3, 3).astype(np.float32))
+print("X:\n", workspace.FetchBlob("X"), "\n")
+
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[-1.3060539   0.7242748  -1.9907674 ]
+ [-0.64802396 -0.03244735  0.7455406 ]
+ [-0.298492   -0.5774271   2.8364444 ]]
+
+Y:
+ [[-0.5663588   0.420046   -0.6656376 ]
+ [-0.39321268 -0.03142761  0.4271116 ]
+ [-0.2298759  -0.36605626  0.739342  ]]
+
+```
+
+</details>
+
+
 )DOC")
-    .Input(0, "input", "1-D input tensor")
-    .Output(
-        0,
-        "output",
-        "The softsign (x/1+|x|) values of the input tensor "
-        "computed element-wise")
+    .Input(0, "input", "Input data blob to be operated on.")
+    .Output(0,"output", "Output data blob with same shape as input")
     .InheritOnnxSchema("Softsign");
 
 OPERATOR_SCHEMA(SoftsignGradient)
