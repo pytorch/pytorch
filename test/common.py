@@ -10,6 +10,7 @@ import os
 import platform
 import re
 import gc
+import types
 import inspect
 import argparse
 import unittest
@@ -203,14 +204,14 @@ class TestCase(unittest.TestCase):
         #       passes or not. For the same reason, we can't wrap the `method`
         #       call in try-finally and always do the check.
         @wraps(method)
-        def wrapper(*args, **kwargs):
+        def wrapper(self, *args, **kwargs):
             befores = get_cuda_memory_usage()
             method(*args, **kwargs)
             afters = get_cuda_memory_usage()
             for i, (before, after) in enumerate(zip(befores, afters)):
                 self.assertEqual(before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
                                  self.id(), after - before, i))
-        return wrapper
+        return types.MethodType(wrapper, self)
 
     def setUp(self):
         set_rng_seed(SEED)
