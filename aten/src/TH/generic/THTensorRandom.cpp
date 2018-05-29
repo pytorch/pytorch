@@ -130,11 +130,21 @@ void iBernoulli_generate_copy(THTensor *self, THGenerator *_generator, const dou
 
 void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-
 #ifdef TH_BLAS_MKL
-  iBernoulli_generate_copy(self, _generator, p);
+  uint32_t eax, ebx, ecx, edx;
+  eax = 0;
+  ecx = 0x0;
+  cpuid(&eax, &ebx, &ecx, &edx);
+  uint32_t vendor = ebx;
+  if(vendor == 0x756E6547) { /*Intel*/
+    std::lock_guard<std::mutex> lock(_generator->mutex);
+    iBernoulli_generate_copy(self, _generator, p);
+  } else {
+    std::lock_guard<std::mutex> lock(_generator->mutex);
+    TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_bernoulli(_generator, p););
+  }
 #else
+  std::lock_guard<std::mutex> lock(_generator->mutex);
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_bernoulli(_generator, p););
 #endif
 }
