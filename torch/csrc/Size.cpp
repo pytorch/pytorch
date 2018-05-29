@@ -60,7 +60,10 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
       THPObjectPtr number(PyNumber_Index(item));
       if (number && THPUtils_checkLong(number.get())) {
         Py_INCREF(number.get());
-        PyTuple_SetItem(self, i, number.get());
+        auto status = PyTuple_SetItem(self, i, number.get());
+        if (status != 0) {
+          throw python_error();
+        }
         continue;
       }
       return PyErr_Format(PyExc_TypeError,
