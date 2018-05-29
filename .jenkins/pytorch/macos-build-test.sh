@@ -35,11 +35,10 @@ rm -rf $CPP_BUILD
 mkdir -p $CPP_BUILD
 WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$CPP_BUILD"
 
-# TODO; Enable tests on Mac as soon as possible
-#python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-#
-# # Unfortunately it seems like the test can't load from miniconda3
-# # without these paths being set
-# export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
-# export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-# "$CPP_BUILD"/libtorch/bin/test_api
+python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+
+# Unfortunately it seems like the test can't load from miniconda3
+# without these paths being set
+export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
+"$CPP_BUILD"/libtorch/bin/test_api
