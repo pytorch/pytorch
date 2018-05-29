@@ -299,7 +299,7 @@ function(caffe2_select_nvcc_arch_flags out_variable)
     unset(CUDA_ARCH_PTX CACHE)
   endif()
 
-  if(DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+  if($ENV{TORCH_CUDA_ARCH_LIST})
     # Pass CUDA architecture directly
     set(__cuda_arch_bin $ENV{TORCH_CUDA_ARCH_LIST})
     message(STATUS "Set CUDA arch from TORCH_CUDA_ARCH_LIST: ${__cuda_arch_bin}")
