@@ -175,7 +175,7 @@ class ProcessGroupGloo : public ProcessGroup {
     const std::exception& exception() const override;
 
    protected:
-    void finish(AlgorithmEntry* entry);
+    void finish(const AlgorithmEntry& entry);
     void finishWithException(const ::gloo::Exception& ex);
 
     std::mutex m_;

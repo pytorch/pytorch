@@ -90,7 +90,7 @@ class CUDAStream {
     return *this;
   }
 
-  cudaStream_t getStream();
+  cudaStream_t getStream() const;
 
   THCStream* getTHCStream() {
     return stream_;

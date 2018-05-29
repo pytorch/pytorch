@@ -154,20 +154,20 @@ const std::exception& ProcessGroupGloo::WorkGloo::exception() const {
   return *ex_;
 }
 
-void ProcessGroupGloo::WorkGloo::finish(AlgorithmEntry* entry) {
+void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
   {
     std::unique_lock<std::mutex> lock(m_);
     completed_ = true;
 
     // Populate devices and events so that we can later synchronize
     // with the operation associated with this work finishing.
-    devices_ = entry->key.devices;
+    devices_ = entry.key.devices;
     events_.resize(devices_.size());
     for (auto i = 0; i < devices_.size(); i++) {
       CUDADevice device(devices_[i]);
       events_[i] = CUDAEvent::create();
       const auto& event = events_[i].getEvent();
-      const auto& stream = entry->streams[i].getStream();
+      const auto& stream = entry.streams[i].getStream();
       C10D_CUDA_CHECK(cudaEventRecord(event, stream));
     }
   }
@@ -265,7 +265,7 @@ void ProcessGroupGloo::runSingle(WorkType tuple) {
 
   try {
     entry->run();
-    work->finish(entry);
+    work->finish(*entry);
   } catch (const ::gloo::Exception& ex) {
     work->finishWithException(ex);
   }

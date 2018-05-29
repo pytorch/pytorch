@@ -50,7 +50,7 @@ CUDAStream::~CUDAStream() {
   }
 }
 
-cudaStream_t CUDAStream::getStream() {
+cudaStream_t CUDAStream::getStream() const {
   return THCStream_stream(stream_);
 }
 
