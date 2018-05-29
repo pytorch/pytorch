@@ -6446,6 +6446,14 @@ class TestTorch(TestCase):
                 torch.device('cuda', torch.cuda.device_count() - 1)
             )
 
+    @unittest.skipIf(torch.cuda.is_available(), "Testing torch.load on CPU-only machine")
+    @unittest.skipIf(not PY3, "Test tensors were serialized using python 3")
+    def test_load_nonexistent_device(self):
+        error_msg = r'Attempting to deserialize object on a CUDA device'
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            fname = os.path.join(os.path.dirname(__file__), 'data/pi-cuda0.pt')
+            _ = torch.load(fname)
+
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)
         tensor = torch.randn(3, 5)
