@@ -233,7 +233,7 @@ struct THCCachingAllocator
       return insert_events(block);
     }
 
-    free_block(block);
+    mark_block_as_free(block);
     return cudaSuccess;
   }
 
@@ -241,11 +241,11 @@ struct THCCachingAllocator
   cudaError_t emptyCache()
   {
     std::lock_guard<std::mutex> lock(mutex);
-    cudaError_t err = free_blocks(large_blocks, large_blocks.begin(), large_blocks.end());
+    cudaError_t err = release_cached_blocks_between(large_blocks, large_blocks.begin(), large_blocks.end());
     if (err != cudaSuccess) {
       return err;
     }
-    err = free_blocks(small_blocks, small_blocks.begin(), small_blocks.end());
+    err = release_cached_blocks_between(small_blocks, small_blocks.begin(), small_blocks.end());
     if (err != cudaSuccess) {
       return err;
     }
@@ -312,18 +312,18 @@ struct THCCachingAllocator
   }
 
   /** moves a block into the free block list */
-  void free_block(Block* block)
+  void mark_block_as_free(Block* block)
   {
     THAssert(!block->allocated && block->event_count == 0);
     bool small = block->size <= kSmallAlloc;
     auto& free_blocks = small ? large_blocks : small_blocks;
-    try_merge_blocks(block, block->prev, free_blocks);
-    try_merge_blocks(block, block->next, free_blocks);
+    try_merge_free_blocks(block, block->prev, free_blocks);
+    try_merge_free_blocks(block, block->next, free_blocks);
     free_blocks.insert(block);
   }
 
   /** combine previously split blocks */
-  void try_merge_blocks(Block* dst, Block* src, FreeBlocks& free_blocks)
+  void try_merge_free_blocks(Block* dst, Block* src, FreeBlocks& free_blocks)
   {
     if (!src || src->allocated || src->event_count > 0) {
       return;
@@ -364,7 +364,7 @@ struct THCCachingAllocator
     cudaError_t err = cudaMalloc(devPtr, size);
     if (err != cudaSuccess) {
       cudaGetLastError();
-      err = free_cached_blocks(device);
+      err = empty_cache_on(device);
       if (err != cudaSuccess) {
         return err;
       }
@@ -376,27 +376,27 @@ struct THCCachingAllocator
     return cudaSuccess;
   }
 
-  cudaError_t free_cached_blocks(int device)
+  cudaError_t empty_cache_on(int device)
   {
     // Free all non-split cached blocks on device
     Block lower_bound(device, NULL, 0);
     Block upper_bound(device + 1, NULL, 0);
 
-    cudaError_t err = free_blocks(
+    cudaError_t err = release_cached_blocks_between(
         large_blocks,
         large_blocks.lower_bound(&lower_bound),
         large_blocks.lower_bound(&upper_bound));
     if (err != cudaSuccess) {
       return err;
     }
-    err = free_blocks(
+    err = release_cached_blocks_between(
         small_blocks,
         small_blocks.lower_bound(&lower_bound),
         small_blocks.lower_bound(&upper_bound));
     return err;
   }
 
-  cudaError_t free_blocks(FreeBlocks& blocks, FreeBlocks::iterator it, FreeBlocks::iterator end)
+  cudaError_t release_cached_blocks_between(FreeBlocks& blocks, FreeBlocks::iterator it, FreeBlocks::iterator end)
   {
     // Frees all non-split blocks between `it` and `end`
     std::lock_guard<std::mutex> lock(cuda_free_mutex);
@@ -483,7 +483,7 @@ struct THCCachingAllocator
 
       block->event_count--;
       if (block->event_count == 0) {
-        free_block(block);
+        mark_block_as_free(block);
       }
       cuda_events.pop_front();
     }
