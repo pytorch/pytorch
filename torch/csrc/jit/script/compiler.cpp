@@ -1328,6 +1328,37 @@ private:
     return n;
   }
 
+  void matchSchemaAndLiftConstantAttributes(
+      const SourceRange& loc,
+      Node* n,
+      std::vector<Value*> input_vals,
+      const std::string& name) {
+    std::vector<NamedValue> named_input_vals;
+    for (Value* inp : input_vals) {
+      named_input_vals.push_back(NamedValue(loc, "", inp));
+    }
+
+    // Match schema and lift constant attributes
+    auto variants = getOperatorSchema(name);
+    bool schema_valid = false;
+    std::stringstream failure_messages;
+    for (const FunctionSchema& schema : variants) {
+      if (tryMatchSchema(
+              schema, loc, *graph, named_input_vals, {}, failure_messages)) {
+        schema_valid = true;
+        liftConstantAttributes(schema, n);
+        break;
+      }
+    }
+
+    // none of the options worked
+    if (!schema_valid) {
+      throw ErrorReport(loc)
+          << "arguments for call are not valid:\n"
+          << prefixLine(failure_messages.str(), "  ") << "for call at";
+    }
+  }
+
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
   Value* emitSlice(
@@ -1339,13 +1370,18 @@ private:
     Value* tensor = input_values[0];
     Value* begin = input_values[1];
     Value* end = input_values[2];
-    Value* zero_dim = emitConst(Const::create(loc, std::to_string(0)));
-    Value* one_step = emitConst(Const::create(loc, std::to_string(1)));
-    return emitNode(
-               Symbol::aten("slice"),
-               loc,
-               {tensor, zero_dim, begin, end, one_step},
-               1)->output();
+    Value* dim =
+        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(0));
+    Value* step =
+        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(1));
+    std::vector<Value*> input_vals{tensor, dim, begin, end, step};
+    Value* sliced_val =
+        emitNode(Symbol::aten("slice"), loc, input_vals, 1)->output();
+
+    matchSchemaAndLiftConstantAttributes(
+        loc, sliced_val->node(), input_vals, "slice");
+
+    return sliced_val;
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
@@ -1356,14 +1392,15 @@ private:
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
-    Value* dim_zero = emitConst(Const::create(loc, std::to_string(0)));
+    Value* dim =
+        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(0));
     Value* idx = input_values[1];
-    return emitNode(
-               Symbol::aten("select"),
-               loc,
-               {tensor, dim_zero, idx},
-               1)
-               ->output();
+    std::vector<Value*> input_vals{tensor, dim, idx};
+    Value* gathered_val =
+        emitNode(Symbol::aten("select"), loc, input_vals, 1)->output();
+    matchSchemaAndLiftConstantAttributes(
+        loc, gathered_val->node(), input_vals, "select");
+    return gathered_val;
   }
 };
 
