@@ -22,7 +22,7 @@ SKIP_PYTHON_BINDINGS = [
     'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*',
-    'arange.*', 'range.*', '_gesv.*',
+    'arange.*', 'range.*', '_gesv.*', 'slice',
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
