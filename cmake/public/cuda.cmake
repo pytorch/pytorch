@@ -302,6 +302,8 @@ function(caffe2_select_nvcc_arch_flags out_variable)
   if($ENV{TORCH_CUDA_ARCH_LIST})
     # Pass CUDA architecture directly
     set(__cuda_arch_bin $ENV{TORCH_CUDA_ARCH_LIST})
+    string(REGEX REPLACE ";" " " __cuda_arch_bin "${__cuda_arch_bin}")
+    string(REGEX REPLACE "\\." "" __cuda_arch_bin "${__cuda_arch_bin}")
     message(STATUS "Set CUDA arch from TORCH_CUDA_ARCH_LIST: ${__cuda_arch_bin}")
   elseif(${CUDA_ARCH_NAME} STREQUAL "Kepler")
     set(__cuda_arch_bin "30 35")
