@@ -109,7 +109,13 @@ void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
     auto privateStream = entry->streams[i].getStream();
     auto startEvent = entry->startEvents[i].getEvent();
 
-    // Synchronize private stream with public stream
+    // Synchronize private stream with public stream.
+    //
+    // We must use the device guard to cover the case where the public
+    // stream is stream 0 and cudaEventRecord relies on the current
+    // device to find the right one.
+    //
+    CUDADevice deviceGuard(device);
     C10D_CUDA_CHECK(cudaEventRecord(startEvent, publicStream));
     C10D_CUDA_CHECK(cudaStreamWaitEvent(privateStream, startEvent, 0));
   }
@@ -117,7 +123,7 @@ void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
 
 } // namespace
 
-ProcessGroupGloo::WorkGloo::WorkGloo() : completed_(false) {}
+ProcessGroupGloo::WorkGloo::WorkGloo() : completed_(false), cuda_(false) {}
 
 ProcessGroupGloo::WorkGloo::~WorkGloo() {}
 
@@ -130,11 +136,13 @@ bool ProcessGroupGloo::WorkGloo::isSuccess() const {
 }
 
 void ProcessGroupGloo::WorkGloo::synchronize() {
-  auto thcState = ::at::globalContext().lazyInitCUDA();
-  for (auto i = 0; i < devices_.size(); i++) {
-    auto stream = THCState_getCurrentStreamOnDevice(thcState, devices_[i]);
-    auto event = events_[i].getEvent();
-    C10D_CUDA_CHECK(cudaStreamWaitEvent(stream, event, 0));
+  if (cuda_) {
+    auto thcState = ::at::globalContext().lazyInitCUDA();
+    for (auto i = 0; i < devices_.size(); i++) {
+      auto stream = THCState_getCurrentStreamOnDevice(thcState, devices_[i]);
+      auto event = events_[i].getEvent();
+      C10D_CUDA_CHECK(cudaStreamWaitEvent(stream, event, 0));
+    }
   }
 }
 
@@ -158,17 +166,20 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
   {
     std::unique_lock<std::mutex> lock(m_);
     completed_ = true;
+    cuda_ = entry.key.type->is_cuda();
 
     // Populate devices and events so that we can later synchronize
     // with the operation associated with this work finishing.
-    devices_ = entry.key.devices;
-    events_.resize(devices_.size());
-    for (auto i = 0; i < devices_.size(); i++) {
-      CUDADevice device(devices_[i]);
-      events_[i] = CUDAEvent::create();
-      const auto& event = events_[i].getEvent();
-      const auto& stream = entry.streams[i].getStream();
-      C10D_CUDA_CHECK(cudaEventRecord(event, stream));
+    if (cuda_) {
+      devices_ = entry.key.devices;
+      events_.resize(devices_.size());
+      for (auto i = 0; i < devices_.size(); i++) {
+        CUDADevice device(devices_[i]);
+        events_[i] = CUDAEvent::create();
+        const auto& event = events_[i].getEvent();
+        const auto& stream = entry.streams[i].getStream();
+        C10D_CUDA_CHECK(cudaEventRecord(event, stream));
+      }
     }
   }
   cv_.notify_all();

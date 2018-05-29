@@ -187,6 +187,7 @@ class ProcessGroupGloo : public ProcessGroup {
     // List of devices and events so that we can synchronize the
     // streams of the caller with the kernels that were launched
     // asynchronously to finish this operation.
+    bool cuda_;
     std::vector<int> devices_;
     std::vector<CUDAEvent> events_;
 
