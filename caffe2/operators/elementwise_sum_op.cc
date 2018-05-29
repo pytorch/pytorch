@@ -16,7 +16,7 @@ OpSchema::Cost CostInferenceForSum(
 REGISTER_CPU_OPERATOR(Sum, SumOp<CPUContext>);
 
 OPERATOR_SCHEMA(Sum)
-    .NumInputs(2, INT_MAX)
+    .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .CostInferenceFunction(CostInferenceForSum)
