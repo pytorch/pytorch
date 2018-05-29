@@ -84,13 +84,25 @@ class Observable {
 
   void StartAllObservers() {
     for (auto& observer : observers_list_) {
-      observer->Start();
+      try {
+        observer->Start();
+      } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception from observer: " << e.what();
+      } catch (...) {
+        LOG(ERROR) << "Exception from observer: unknown";
+      }
     }
   }
 
   void StopAllObservers() {
     for (auto& observer : observers_list_) {
-      observer->Stop();
+      try {
+        observer->Stop();
+      } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception from observer: " << e.what();
+      } catch (...) {
+        LOG(ERROR) << "Exception from observer: unknown";
+      }
     }
   }
 

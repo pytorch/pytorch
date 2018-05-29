@@ -21,7 +21,7 @@ class AsyncSchedulingNet : public AsyncNetBase {
   void schedule(int task_id);
   void reset() override;
   virtual void finishRun();
-  int updateParentCount(int child_id);
+  void parentCallback(int parent_id);
 
   std::mutex running_mutex_;
   std::condition_variable running_cv_;

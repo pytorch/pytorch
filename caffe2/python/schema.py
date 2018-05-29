@@ -237,7 +237,7 @@ class List(Field):
         return self.lengths.has_blobs() and self._items.has_blobs()
 
     def clone(self, keep_blobs=True):
-        return List(
+        return type(self)(
             _normalize_field(self._items, keep_blobs=keep_blobs),
             _normalize_field(self.lengths, keep_blobs=keep_blobs)
         )
@@ -383,7 +383,7 @@ class Struct(Field):
             (k, _normalize_field(v, keep_blobs=keep_blobs))
             for k, v in viewitems(self.fields)
         ]
-        return Struct(*normalized_fields)
+        return type(self)(*normalized_fields)
 
     def _get_field_by_nested_name(self, nested_name):
         names = nested_name.split(FIELD_SEPARATOR, 1)
