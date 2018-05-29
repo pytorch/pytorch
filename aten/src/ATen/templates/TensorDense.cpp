@@ -1,4 +1,3 @@
-// @generated
 // included as 'TensorDenseOrSparse' in TensorDerived.cpp
 
 IntList ${Tensor}::strides() const {
