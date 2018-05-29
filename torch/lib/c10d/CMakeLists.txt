@@ -14,6 +14,15 @@ if(NOT Gloo_FOUND)
   message(FATAL_ERROR "Gloo not found")
 endif()
 
+find_package(MPI)
+if(MPI_FOUND)
+  MESSAGE(STATUS "MPI_INCLUDE_PATH: ${MPI_INCLUDE_PATH}")
+  MESSAGE(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
+  MESSAGE(STATUS "MPIEXEC: ${MPIEXEC}")
+else()
+  MESSAGE(STATUS "Not able to find MPI, will compile c10d without MPI support")
+endif()
+
 set(C10D_SRCS
   Utils.cpp
   Store.cpp
@@ -37,6 +46,15 @@ set(C10D_GLOO_SRCS
 add_library(c10d_gloo ${C10D_GLOO_SRCS})
 target_include_directories(c10d_gloo PUBLIC ${GLOO_INCLUDE_DIR})
 target_link_libraries(c10d_gloo PUBLIC c10d ${GLOO_LIBRARIES})
+
+if(MPI_FOUND)
+  set(C10D_MPI_SRCS
+    ProcessGroupMPI.cpp
+  )
+  add_library(c10d_mpi ${C10D_MPI_SRCS})
+  target_include_directories(c10d_mpi PUBLIC ${MPI_INCLUDE_PATH})
+  target_link_libraries(c10d_mpi PUBLIC c10d ${MPI_LIBRARIES})
+endif()
 
 add_subdirectory(example)
 
