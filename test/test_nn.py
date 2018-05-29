@@ -3235,33 +3235,40 @@ class TestNN(NNTestCase):
             return torch.cat(
                 [tensor.data, tensor.data.new(
                     length - tensor.size(0), *tensor.size()[1:]).zero_()])
+
         # single dimensional
         a = torch.tensor([1, 2, 3])
         b = torch.tensor([4, 5])
         c = torch.tensor([6])
 
         # batch_first = true
+        expected = torch.tensor([[4, 5, 0], [1, 2, 3], [6, 0, 0]])
+        padded = rnn_utils.pad_sequence([b, a, c], True)
+        self.assertEqual(padded, expected)
+
+        # batch_first = false
+        padded = rnn_utils.pad_sequence([b, a, c])
+        self.assertEqual(padded, expected.transpose(0, 1))
+
+        # pad with non-zero value
+        expected = torch.tensor([[4, 5, 1], [1, 2, 3], [6, 1, 1]])
+        padded = rnn_utils.pad_sequence([b, a, c], True, 1)
+        self.assertEqual(padded, expected)
+
+        # Test pad sorted sequence
         expected = torch.tensor([[1, 2, 3], [4, 5, 0], [6, 0, 0]])
         padded = rnn_utils.pad_sequence([a, b, c], True)
         self.assertEqual(padded, expected)
 
-        # batch_first = false
-        padded = rnn_utils.pad_sequence([a, b, c])
-        self.assertEqual(padded, expected.transpose(0, 1))
-
-        # pad with non-zero value
-        expected = torch.tensor([[1, 2, 3], [4, 5, 1], [6, 1, 1]])
-        padded = rnn_utils.pad_sequence([a, b, c], True, 1)
-        self.assertEqual(padded, expected)
-
-        # more dimensional
+        # more dimensions
         maxlen = 9
         for num_dim in (0, 1, 2, 3):
             sequences = []
             trailing_dims = [4] * num_dim
-            for i in range(maxlen, 0, -1):
+            for i in range(1, maxlen + 1):
                 seq_len = i * i
                 sequences.append(torch.rand(seq_len, 5, *trailing_dims))
+            random.shuffle(sequences)
             expected = []
             for seq in sequences:
                 expected.append(pad(seq, maxlen * maxlen))
@@ -3273,10 +3280,6 @@ class TestNN(NNTestCase):
             # batch first = false
             padded = rnn_utils.pad_sequence(sequences)
             self.assertEqual(padded, expected.transpose(0, 1))
-
-        # unsorted sequences should raise exception
-        self.assertRaises(
-            ValueError, lambda: rnn_utils.pad_sequence([b, a, c], [2, 3, 1]))
 
     def test_pack_sequence(self):
         def _compatibility_test(sequences, lengths, batch_first):
