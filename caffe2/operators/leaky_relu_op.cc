@@ -39,17 +39,71 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(LeakyRelu)
     .NumInputs(1)
     .NumOutputs(1)
-    .Arg("alpha", "Coefficient of leakage, default value is 0.01")
+    .Arg("alpha", "*(type: float; default: 0.01)* Coefficient of leakage.")
     .AllowInplace({{0, 0}})
     .CostInferenceFunction(PointwiseCostInference<2>)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-LeakyRelu takes input data (Tensor<T>) and an argument alpha, and produces one
-output data (Tensor<T>) where the function `f(x) = alpha * x for x < 0`,
-`f(x) = x for x >= 0`, is applied to the data tensor elementwise.
+The *LeakyRelu* op takes one input tensor $X$ and an argument $alpha$, and produces one output tensor $Y$ of the same shape as $X.$ The op performs the element wise leaky relu operation, defined as
+
+$$y=LeakyRelu(x) =\begin{cases}\alpha x & x < 0\\x & otherwise\end{cases}$$
+
+The default value of *alpha* is 0.01.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/leaky_relu_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/leaky_relu_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LeakyRelu",
+    ["X"],
+    ["Y"],
+    alpha=0.01
+)
+
+workspace.FeedBlob("X", np.random.randn(3, 3).astype(np.float32))
+print("X:\n", workspace.FetchBlob("X"), "\n")
+
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[-0.91060215  0.09374836  2.1429708 ]
+ [-0.748983    0.19164062 -1.5130422 ]
+ [-0.29539835 -0.8530696   0.7673204 ]]
+
+Y:
+ [[-0.00910602  0.09374836  2.1429708 ]
+ [-0.00748983  0.19164062 -0.01513042]
+ [-0.00295398 -0.0085307   0.7673204 ]]
+
+```
+
+</details>
+
+
 )DOC")
-    .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor");
+    .Input(0, "X", "Input tensor of data to be operated on.")
+    .Output(0, "Y", "Output tensor, calculated as described above.");
+    
 OPERATOR_SCHEMA(LeakyReluGradient)
     .NumInputs(2)
     .NumOutputs(1)
