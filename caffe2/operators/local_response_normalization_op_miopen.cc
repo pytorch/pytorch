@@ -35,7 +35,6 @@ class MIOPEN_LRNOP final : public Operator<HIPContext>
           bias_(OperatorBase::GetSingleArgument<float>("bias", 1))
     {
         MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
-
         MIOPEN_ENFORCE(miopenCreateLRNDescriptor(&norm_desc_));
         MIOPEN_ENFORCE(miopenSetLRNDescriptor(norm_desc_, mode_, size_, alpha_, beta_, bias_));
     }
@@ -48,7 +47,6 @@ class MIOPEN_LRNOP final : public Operator<HIPContext>
 
     template <typename T, typename M>
     bool DoRunWithType();
-
     bool RunOnDevice() override;
 
     protected:
@@ -56,7 +54,6 @@ class MIOPEN_LRNOP final : public Operator<HIPContext>
     miopenTensorDescriptor_t data_desc_;
     miopenLRNDescriptor_t norm_desc_;
     vector<TIndex> miopen_input_dims_;
-
     const miopenLRNMode_t mode_;
     const int size_;
     const float alpha_;
@@ -79,7 +76,7 @@ class MIOPENLRNGradientOp final : public Operator<HIPContext>
           bias_(OperatorBase::GetSingleArgument<float>("bias", 1)),
           do_backward_(OperatorBase::GetSingleArgument<bool>("do_backward", false)),
           bwdLRNWs_(nullptr),
-          LRNBwdScratch(nullptr)
+          bwdLRNScratch_(nullptr)
     {
         MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
         MIOPEN_ENFORCE(miopenCreateLRNDescriptor(&norm_desc_));
@@ -96,16 +93,15 @@ class MIOPENLRNGradientOp final : public Operator<HIPContext>
             hipFree(bwdLRNWs_);
             bwdLRNWs_ = nullptr;
         }
-        if(LRNBwdScratch)
+        if(bwdLRNScratch_)
         {
-            hipFree(LRNBwdScratch);
-            LRNBwdScratch = nullptr;
+            hipFree(bwdLRNScratch_);
+            bwdLRNScratch_ = nullptr;
         }
     }
 
     template <typename T, typename M>
     bool DoRunWithType();
-
     bool RunOnDevice() override;
 
     protected:
@@ -113,7 +109,6 @@ class MIOPENLRNGradientOp final : public Operator<HIPContext>
     miopenTensorDescriptor_t data_desc_;
     miopenLRNDescriptor_t norm_desc_;
     vector<TIndex> miopen_input_dims_;
-
     const miopenLRNMode_t mode_;
     const int size_;
     const float alpha_;
@@ -121,7 +116,7 @@ class MIOPENLRNGradientOp final : public Operator<HIPContext>
     const float bias_;
     const bool do_backward_;
     float* bwdLRNWs_;
-    float* LRNBwdScratch;
+    float* bwdLRNScratch_;
     // Input: X, Y, dY
     // Output: dX
 };
@@ -212,9 +207,9 @@ bool MIOPENLRNGradientOp::DoRunWithType()
     }
 
     // Run fwd pass to populate workspace
-    if(LRNBwdScratch == nullptr)
+    if(bwdLRNScratch_ == nullptr)
     {
-        HIP_CHECK(hipMalloc(&LRNBwdScratch, X.size() * sizeof(float)));
+        HIP_CHECK(hipMalloc(&bwdLRNScratch_, X.size() * sizeof(float)));
     }
     MIOPEN_ENFORCE(miopenLRNForward(miopen_wrapper_.inline_miopen_handle(),
                                     norm_desc_,
@@ -223,11 +218,11 @@ bool MIOPENLRNGradientOp::DoRunWithType()
                                     X.template data<T>(),
                                     &beta_,
                                     data_desc_,
-                                    LRNBwdScratch,
+                                    bwdLRNScratch_,
                                     true,
                                     bwdLRNWs_));
 
-    // run the bwd computation
+    // Run the bwd computation
     MIOPEN_ENFORCE(miopenLRNBackward(miopen_wrapper_.inline_miopen_handle(),
                                      norm_desc_,
                                      &alpha_,
@@ -266,7 +261,6 @@ bool MIOPENLRNGradientOp::RunOnDevice()
     {
         CAFFE_THROW("Unsupported input type");
     }
-
     return false;
 }
 
