@@ -49,14 +49,62 @@ OPERATOR_SCHEMA(Elu)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 
-Elu takes one input data (Tensor<T>) and produces one output data
-(Tensor<T>) where the function `f(x) = alpha * (exp(x) - 1.) for x <
-0`, `f(x) = x for x >= 0`., is applied to the tensor elementwise.
+This op implements the exponential linear unit (ELU) activation function as described in [Fast and Accurate Deep Network Learning by Exponential Linear Units (ELUs)](https://arxiv.org/abs/1511.07289). The op takes an input tensor $X$ of arbitrary shape, computes the elementwise elu operation, and returns a vector $Y$ of the same shape as output. The alpha parameter may be passed as an argument, but defaults to 1. The elu operation is defined as
+
+$$y=f(x) =\begin{cases}\alpha(e^x-1) & x < 0 \\ x & otherwise\end{cases}$$
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elu_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elu_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Elu",
+    ["X"],
+    ["Y"],
+    alpha=1.1
+)
+
+workspace.FeedBlob("X", np.random.randn(3, 3).astype(np.float32))
+print("X:\n", workspace.FetchBlob("X"), "\n")
+
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[ 0.35339102  1.1860217  -0.10710736]
+ [-3.1173866  -0.1889988  -0.20330353]
+ [ 1.8525308  -0.368949    0.506277  ]]
+
+Y:
+ [[ 0.35339102  1.1860217  -0.11172786]
+ [-1.0513     -0.18943374 -0.20236646]
+ [ 1.8525308  -0.33939326  0.506277  ]]
+
+```
+
+</details>
 
 )DOC")
-    .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor")
+    .Input(0, "X", "1D input tensor of data to be operated on.")
+    .Output(0, "Y", "1D input tensor, calculated as described above.")
+    .Arg("alpha", "*(type: float; default: 1.0)* Defines alpha parameter used in calculation.")
     .InheritOnnxSchema("Elu");
+
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(EluGradient)
