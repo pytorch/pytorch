@@ -18,9 +18,7 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
   IDEEPConvFusionOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPConvPoolOpBase(operator_def, ws),
         fusion_type_(static_cast<FusionType>(
-            OperatorBase::GetSingleArgument<int>("fusion_type", 0))),
-        training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
+            OperatorBase::GetSingleArgument<int>("fusion_type", 0))) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
@@ -75,25 +73,10 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
         "*",
         group_);
 
-    bool weights_changed =
-        (cached_weights_descriptor_ != filter.get_descriptor());
-    if (weights_changed && !training_mode_) {
-      cached_weights_descriptor_ = filter.get_descriptor();
-      filter_ = filter;
-      auto expected_descriptor =
-          ideep::convolution_forward::expected_weights_descriptor(
-              filter.get_dims());
-      if (filter_.get_descriptor() != expected_descriptor) {
-        filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
-            expected_descriptor);
-        ideep::reorder::compute(filter, filter_);
-      }
-    }
-
     if (InputSize() > last_input()) {
       ideep::convolution_forward::compute(
           X,
-          training_mode_ ? filter : filter_,
+          filter,
           Input(BIAS_OR_INPUT_S),
           Y_dims_conv,
           *Y,
@@ -106,7 +89,7 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
     } else {
       ideep::convolution_forward::compute(
           X,
-          training_mode_ ? filter : filter_,
+          filter,
           Y_dims_conv,
           *Y,
           stride_,
@@ -128,10 +111,6 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
 
  private:
   FusionType fusion_type_;
-
-  bool training_mode_;
-  ideep::tensor filter_;
-  ideep::tensor::descriptor cached_weights_descriptor_;
 
   INPUT_TAGS(INPUT_X, FILTER, BIAS_OR_INPUT_S, INPUT_S);
   OUTPUT_TAGS(OUTPUT);
