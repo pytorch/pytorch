@@ -13,38 +13,227 @@ equal shape is specified by the argument "axis", and if it is not set, suffix
 matching is assumed. 1-dim expansion doesn't work yet.
 
 For example, the following tensor shapes are supported (with broadcast=1):
-
+```
   shape(A) = (2, 3, 4, 5), shape(B) = (,), i.e. B is a scalar
   shape(A) = (2, 3, 4, 5), shape(B) = (5,)
   shape(A) = (2, 3, 4, 5), shape(B) = (4, 5)
   shape(A) = (2, 3, 4, 5), shape(B) = (3, 4), with axis=1
   shape(A) = (2, 3, 4, 5), shape(B) = (2), with axis=0
-
+```
 Argument `broadcast=1` needs to be passed to enable broadcasting.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+
 )DOC";
 
-std::function<void(OpSchema&)> MathDocGenerator(const char* name) {
+const char* kAddExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Add",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", np.array([[1,2],[3,4]]))
+workspace.FeedBlob("B", np.array([[5,6],[7,8]]))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A:
+[[1 2]
+ [3 4]]
+B:
+[[5 6]
+ [7 8]]
+C:
+[[ 6  8]
+ [10 12]]
+
+```
+
+</details>
+
+)DOC";
+const char* kSubExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Sub",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", np.array([[10,12],[4,14]]))
+workspace.FeedBlob("B", np.array([[5,16],[1,19]]))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A:
+[[10 12]
+ [ 4 14]]
+B:
+[[ 5 16]
+ [ 1 19]]
+C:
+[[ 5 -4]
+ [ 3 -5]]
+
+```
+
+</details>
+
+)DOC";
+const char* kMulExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Mul",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", np.array([[1,2],[3,4]]))
+workspace.FeedBlob("B", np.array([[5,6],[7,8]]))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A:
+[[1 2]
+ [3 4]]
+B:
+[[5 6]
+ [7 8]]
+C:
+[[ 5 12]
+ [21 32]]
+
+```
+
+</details>
+
+)DOC";
+const char* kDivExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Div",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", np.array([[18,8],[2,9]]))
+workspace.FeedBlob("B", np.array([[9,2],[3,2]]))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A:
+[[18  8]
+ [ 2  9]]
+B:
+[[9 2]
+ [3 2]]
+C:
+[[2 4]
+ [0 4]]
+
+```
+
+</details>
+)DOC";
+
+std::function<void(OpSchema&)> MathDocGenerator(const char* name, const char* extra) {
   return [=](OpSchema& schema) {
     string doc = R"DOC(
 Performs element-wise binary {name} (with limited broadcast support).
-{broadcast_doc})DOC";
+{broadcast_doc}
+
+{extra}
+)DOC";
     ReplaceAll(doc, "{name}", name);
     ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
-    schema.Arg("broadcast", "Pass 1 to enable broadcasting");
+    schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting");
     schema.Arg(
         "axis",
-        "If set, defines the broadcast dimensions. See doc for details.");
+        "*(type: int; default: -1)* Axis to concatenate on.");
     schema.Input(
         0,
         "A",
-        "First operand, should share the type with the second operand.");
+        "*(type: Tensor`<float>`)* First operand, should share the type with the second operand.");
     schema.Input(
         1,
         "B",
-        "Second operand. With broadcasting can be of smaller size than A. "
-        "If broadcasting is disabled it should be of the same size.");
-    schema.Output(0, "C", "Result, has same dimensions and type as A");
+        "*(type: Tensor`<float>`)* Second operand. With broadcasting can be of smaller size than A. "
+        "If broadcasting is disabled it should be of the same size as A.");
+    schema.Output(0, "C", "*(type: Tensor`<float>`)* Output tensor with same dimensions and type as A");
   };
 }
 
@@ -54,7 +243,7 @@ OPERATOR_SCHEMA(Add)
     .AllowInplace({{0, 0}, {1, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
     .IdenticalTypeAndShapeOfInput(0)
-    .FillUsing(MathDocGenerator("addition"))
+    .FillUsing(MathDocGenerator("addition",kAddExample))
     .InheritOnnxSchema("Add");
 OPERATOR_SCHEMA(Sub)
     .NumInputs(2)
@@ -62,7 +251,7 @@ OPERATOR_SCHEMA(Sub)
     .AllowInplace({{0, 0}, {1, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
     .IdenticalTypeAndShapeOfInput(0)
-    .FillUsing(MathDocGenerator("subtraction"))
+    .FillUsing(MathDocGenerator("subtraction",kSubExample))
     .InheritOnnxSchema("Sub");
 OPERATOR_SCHEMA(Mul)
     .NumInputs(2)
@@ -70,7 +259,7 @@ OPERATOR_SCHEMA(Mul)
     .AllowInplace({{0, 0}, {1, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
     .IdenticalTypeAndShapeOfInput(0)
-    .FillUsing(MathDocGenerator("multiplication"))
+    .FillUsing(MathDocGenerator("multiplication",kMulExample))
     .InheritOnnxSchema("Mul");
 OPERATOR_SCHEMA(Div)
     .NumInputs(2)
@@ -78,7 +267,7 @@ OPERATOR_SCHEMA(Div)
     .AllowInplace({{0, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
     .IdenticalTypeAndShapeOfInput(0)
-    .FillUsing(MathDocGenerator("division"))
+    .FillUsing(MathDocGenerator("division",kDivExample))
     .InheritOnnxSchema("Div");
 OPERATOR_SCHEMA(DivGradient).NumInputs(3).NumOutputs(2).AllowInplace({{0, 0}});
 
@@ -93,11 +282,12 @@ It assumes that the first input
 has more dimensions than the second, and the dimensions of the second input is
 the contiguous subset of the dimensions of the first.
 For example, the following tensor shapes are supported:
-
+```
   shape(A) = (2, 3, 4, 5), shape(B) = (4, 5)
   shape(A) = (2, 3, 4, 5), shape(B) = (,), i.e. B is a scalar
   shape(A) = (2, 3, 4, 5), shape(B) = (3, 4), with axis=1
   shape(A) = (2, 3, 2, 5), shape(B) = (2), with axis=0
+```
     )DOC")
     .Arg(
         "axis",
@@ -273,87 +463,485 @@ class GetDivGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Div, GetDivGradient);
 
+
+const char* kLTExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LT",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", np.array([1, 5, 2, 9, 12, 3]))
+workspace.FeedBlob("B", np.array([1, 3, 4, 9, 12, 8]))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A: [ 1  5  2  9 12  3]
+B: [ 1  3  4  9 12  8]
+C: [False False  True False False  True]
+
+```
+
+</details>
+)DOC";
+
+const char* kLEExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LE",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", np.array([1, 5, 2, 9, 12, 3]))
+workspace.FeedBlob("B", np.array([1, 3, 4, 9, 12, 8]))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A: [ 1  5  2  9 12  3]
+B: [ 1  3  4  9 12  8]
+C: [ True False  True  True  True  True]
+
+```
+
+</details>
+)DOC";
+
+const char* kGTExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "GT",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", np.array([1, 5, 2, 9, 12, 3]))
+workspace.FeedBlob("B", np.array([1, 3, 4, 9, 12, 8]))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A: [ 1  5  2  9 12  3]
+B: [ 1  3  4  9 12  8]
+C: [False  True False False False False]
+
+```
+
+</details>
+)DOC";
+
+const char* kGEExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "GE",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", np.array([1, 5, 2, 9, 12, 3]))
+workspace.FeedBlob("B", np.array([1, 3, 4, 9, 12, 8]))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A: [ 1  5  2  9 12  3]
+B: [ 1  3  4  9 12  8]
+C: [ True  True False  True  True False]
+
+```
+
+</details>
+)DOC";
+
+const char* kEQExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "EQ",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", np.array([1, 5, 2, 9, 12, 3]))
+workspace.FeedBlob("B", np.array([1, 3, 4, 9, 12, 8]))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A: [ 1  5  2  9 12  3]
+B: [ 1  3  4  9 12  8]
+C: [ True False False  True  True False]
+
+```
+
+</details>
+)DOC";
+
 std::function<void(OpSchema&)> ComparisonDocGenerator(
     const char* name,
-    const char* desc) {
+    const char* desc,
+    const char* extra) {
   return [=](OpSchema& schema) {
     string doc = R"DOC(
-Performs element-wise {desc} comparison `{name}` (with limited broadcast support).
-{broadcast_doc})DOC";
+Performs element-wise {desc} comparison **{name}** (with limited broadcast support).
+
+{broadcast_doc}
+
+{extra}
+)DOC";
     ReplaceAll(doc, "{name}", name);
     ReplaceAll(doc, "{desc}", desc);
     ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
-    schema.Arg("broadcast", "Pass 1 to enable broadcasting");
+    schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
         "axis",
-        "If set, defines the broadcast dimensions. See doc for details.");
+        "*(type: int; default: -1)* Axis to concatenate on. If set, defines the broadcast dimensions.");
     schema.Input(
         0,
         "A",
-        "First operand, should share the type with the second operand.");
+        "*(type: Tensor`<bool>`)* First operand, should share the type with the second operand.");
     schema.Input(
         1,
         "B",
-        "Second operand. With broadcasting can be of smaller size than A. "
+        "*(type: Tensor`<bool>`)* Second operand. With broadcasting can be of smaller size than `A`. "
         "If broadcasting is disabled it should be of the same size.");
-    schema.Output(0, "C", "Result, has same dimensions and A and type `bool`");
+    schema.Output(0, "C", "*(type: Tensor`<bool>`)* Output tensor with same dimensions as `A`.");
   };
 }
 
-#define CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(name, symbol, desc) \
+#define CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(name, symbol, desc, extra) \
   OPERATOR_SCHEMA(name).NumInputs(2).NumOutputs(1).FillUsing(      \
-      ComparisonDocGenerator(symbol, desc));                       \
+      ComparisonDocGenerator(symbol, desc, extra));                       \
   SHOULD_NOT_DO_GRADIENT(name)
 
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LT, "<", "less than");
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LE, "<=", "less or equal than");
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GT, ">", "greater than");
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GE, ">=", "greater or equal than");
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(EQ, "==", "equality");
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LT, "<", "less than", kLTExample);
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LE, "<=", "less or equal than", kLEExample);
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GT, ">", "greater than", kGTExample);
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GE, ">=", "greater or equal than", kGEExample);
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(EQ, "==", "equality", kEQExample);
 
-std::function<void(OpSchema&)> LogicalDocGenerator(const char* name) {
+const char* kAndExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "And",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", (np.random.rand(3, 3) > 0.5))
+workspace.FeedBlob("B", (np.random.rand(3, 3) > 0.5))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A:
+ [[ True False False]
+ [False  True False]
+ [False False  True]]
+B:
+ [[ True False  True]
+ [False False False]
+ [False False False]]
+C:
+ [[ True False False]
+ [False False False]
+ [False False False]]
+
+```
+
+</details>
+)DOC";
+
+const char* kOrExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Or",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", (np.random.rand(3, 3) > 0.5))
+workspace.FeedBlob("B", (np.random.rand(3, 3) > 0.5))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A:
+[[False  True  True]
+ [False  True  True]
+ [ True  True  True]]
+B:
+[[False  True False]
+ [ True  True  True]
+ [False  True False]]
+C:
+[[False  True  True]
+ [ True  True  True]
+ [ True  True  True]]
+
+```
+
+</details>
+)DOC";
+
+const char* kXorExample = R"DOC(
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Xor",
+    ["A",  "B"],
+    ["C"],
+)
+
+workspace.FeedBlob("A", (np.random.rand(3, 3) > 0.5))
+workspace.FeedBlob("B", (np.random.rand(3, 3) > 0.5))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("C:", workspace.FetchBlob("C"))
+
+```
+
+**Result**
+
+```
+
+A:
+[[ True  True  True]
+ [False False  True]
+ [False  True False]]
+B:
+[[False False False]
+ [ True  True  True]
+ [False False False]]
+C:
+[[ True  True  True]
+ [ True  True False]
+ [False  True False]]
+
+```
+
+</details>
+)DOC";
+
+std::function<void(OpSchema&)> LogicalDocGenerator(const char* name, const char* extra) {
   return [=](OpSchema& schema) {
     string doc = R"DOC(
-Performs element-wise logical operation `{name}` (with limited broadcast support).
+Performs element-wise logical operation **{name}** (with limited broadcast support).
 Both input operands should be of type `bool`.
-{broadcast_doc})DOC";
+
+{broadcast_doc}
+
+{extra}
+    )DOC";
     ReplaceAll(doc, "{name}", name);
     ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
-    schema.Arg("broadcast", "Pass 1 to enable broadcasting");
+    schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
         "axis",
-        "If set, defines the broadcast dimensions. See doc for details.");
-    schema.Input(0, "A", "First operand.");
+        "*(type: int; default: -1)* Axis to concatenate on. If set, defines the broadcast dimensions.");
+    schema.Input(0, "A", "*(type: Tensor`<bool>`)* First operand.");
     schema.Input(
         1,
         "B",
-        "Second operand. With broadcasting can be of smaller size than A. "
+        "*(type: Tensor`<bool>`)* Second operand. With broadcasting can be of smaller size than `A`. "
         "If broadcasting is disabled it should be of the same size.");
-    schema.Output(0, "C", "Result, has same dimensions and A and type `bool`");
+    schema.Output(0, "C", "*(type: Tensor`<bool>`)* Output tensor of booleans. Has same dimensions as input `A`.");
   };
 }
 
-#define CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(name, symbol, onnx_schema) \
+#define CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(name, symbol, onnx_schema, extra) \
   OPERATOR_SCHEMA(name)                                   \
       .NumInputs(2)                                       \
       .NumOutputs(1)                                      \
       .AllowInplace({{0, 0}})                             \
-      .FillUsing(LogicalDocGenerator(symbol))             \
+      .FillUsing(LogicalDocGenerator(symbol,extra))       \
       .InheritOnnxSchema(onnx_schema);                    \
   SHOULD_NOT_DO_GRADIENT(name)
 
-CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Or, "or", "Or");
-CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(And, "and", "And");
-CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Xor, "xor", "Xor");
+CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Or, "or", "Or", kOrExample);
+CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(And, "and", "And", kAndExample);
+CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Xor, "xor", "Xor", kXorExample);
 
 OPERATOR_SCHEMA(Not)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc(R"DOC(Performs element-wise negation.)DOC")
-    .Input(0, "X", "Input tensor of type `bool`.")
-    .Output(0, "Y", "Output tensor of type `bool`.")
+    .SetDoc(R"DOC(
+Performs element-wise negation on input tensor `X`.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Not",
+    ["X"],
+    ["Y"],
+)
+
+workspace.FeedBlob("X", (np.random.rand(3, 3) > 0.5))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[ True False False]
+ [False False False]
+ [ True  True  True]]
+Y:
+[[False  True  True]
+ [ True  True  True]
+ [False False False]]
+
+```
+
+</details>
+
+    )DOC")
+    .Input(0, "X", "*(Tensor`<bool>`)* Input tensor.")
+    .Output(0, "Y", "*(Tensor`<bool>`)* Negated output tensor.")
     .InheritOnnxSchema("Not");
 SHOULD_NOT_DO_GRADIENT(Not);
 
