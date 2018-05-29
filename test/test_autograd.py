@@ -687,9 +687,19 @@ class TestAutograd(TestCase):
         y = Variable(torch.ones(5, 5) * 4)
         with torch.no_grad():
             w = x + y
+
+        @torch.no_grad()
+        def adder(x, y):
+            return x + y
+
+        z = adder(x, y)
+
         self.assertFalse(w.requires_grad)
         self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
         self.assertIsNone(w.grad_fn)
+        self.assertFalse(z.requires_grad)
+        self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
+        self.assertIsNone(z.grad_fn)
 
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
@@ -1774,7 +1784,7 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad.data, torch.ones(x.size()))
 
     def test_set_grad_enabled(self):
-        x = torch.tensor([1], requires_grad=True)
+        x = torch.tensor([1.], requires_grad=True)
         with torch.set_grad_enabled(False):
             y = x * 2
         self.assertFalse(y.requires_grad)
@@ -2738,6 +2748,7 @@ method_tests = [
     ('addcdiv', (), (0.5, (S, S, 1), (1, S)), 'scalar_scale_broadcast_lhs'),
     ('zero_', (S, S, S), NO_ARGS),
     ('zero_', (), NO_ARGS, 'scalar'),
+    ('logsumexp', (S, S), (1,)),
     ('norm', (S, S), (2,)),
     ('norm', (S, S), (0,), '0'),
     ('norm', (S, S), (0.5,), '0_5'),

@@ -6,8 +6,6 @@ void THPAutograd_initFunctions();
 
 namespace torch { namespace autograd {
 
-void initAutogradClosureBindings(PyObject* module);
-
 PyMethodDef* python_functions();
 
 }}

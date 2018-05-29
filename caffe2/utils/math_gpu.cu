@@ -38,7 +38,11 @@ namespace math {
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Exp, expf);
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Log, logf);
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cos, cosf);
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Acos, acosf);
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sin, sinf);
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Asin, asinf);
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tan, tanf);
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Atan, atanf);
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Abs, fabsf);
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqrt, sqrtf);
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, InvSqrt, rsqrtf);
@@ -265,6 +269,28 @@ void Gemm<float16, CUDAContext>(
     // fail
     CAFFE_THROW("Unsupported math type");
   }
+}
+
+template <>
+void BiasCHW<float, CUDAContext>(
+    const float* bias,
+    const float* bias_multiplier,
+    const int bias_channels,
+    const int image_size,
+    float* image,
+    CUDAContext* context) {
+  Gemm<float, CUDAContext>(
+      CblasNoTrans,
+      CblasNoTrans,
+      bias_channels,
+      image_size,
+      1,
+      1,
+      bias,
+      bias_multiplier,
+      1,
+      image,
+      context);
 }
 
 template <>

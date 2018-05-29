@@ -9,7 +9,7 @@
 #include <vector>
 #include <string>
 
-#include "third_party/nanopb/pb_decode.h"
+#include <pb_decode.h>
 
 namespace torch { namespace jit {
 

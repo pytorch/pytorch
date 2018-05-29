@@ -18,15 +18,19 @@ class TestAdam(hu.HypothesisTestCase):
 
     @staticmethod
     def ref_adam(param, mom1, mom2, grad, LR, ITER,
-                 beta1, beta2, epsilon):
+                 beta1, beta2, epsilon, output_grad=False):
         t = ITER + 1
-        corrected_local_rate = LR * np.sqrt(1 - np.power(beta2, t)) / \
+        corrected_local_rate = np.sqrt(1 - np.power(beta2, t)) / \
             (1 - np.power(beta1, t))
         mom1_out = (beta1 * mom1) + (1 - beta1) * grad
         mom2_out = (beta2 * mom2) + (1 - beta2) * np.square(grad)
-        param_out = param + corrected_local_rate * mom1_out / \
+        grad_out = corrected_local_rate * mom1_out / \
             (np.sqrt(mom2_out) + epsilon)
-        return param_out, mom1_out, mom2_out
+        param_out = param + LR * grad_out
+        if output_grad:
+            return param_out, mom1_out, mom2_out, grad_out
+        else:
+            return param_out, mom1_out, mom2_out
 
     @staticmethod
     def ref_row_wise_adam(param, mom1, mom2, grad, LR, ITER,
@@ -39,7 +43,6 @@ class TestAdam(hu.HypothesisTestCase):
         param_out = param + corrected_local_rate * mom1_out / \
             (np.sqrt(mom2_out) + epsilon)
         return (param_out, mom1_out, mom2_out)
-
 
     @given(inputs=hu.tensors(n=4),
            ITER=st.integers(min_value=0, max_value=10000),
@@ -72,6 +75,39 @@ class TestAdam(hu.HypothesisTestCase):
             functools.partial(
                 self.ref_adam,
                 beta1=beta1, beta2=beta2, epsilon=epsilon),
+            input_device_options=input_device_options)
+
+    @given(inputs=hu.tensors(n=4),
+           ITER=st.integers(min_value=0, max_value=10000),
+           LR=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
+           beta1=st.floats(min_value=0.01, max_value=0.99,
+                           allow_nan=False, allow_infinity=False),
+           beta2=st.floats(min_value=0.01, max_value=0.99,
+                           allow_nan=False, allow_infinity=False),
+           epsilon=st.floats(min_value=0.01, max_value=0.99,
+                             allow_nan=False, allow_infinity=False),
+           **hu.gcs_cpu_only)
+    def test_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
+        param, mom1, mom2, grad = inputs
+        ITER = np.array([ITER], dtype=np.int64)
+        LR = np.array([LR], dtype=np.float32)
+
+        op = core.CreateOperator(
+            "Adam",
+            ["param", "mom1", "mom2", "grad", "lr", "iter"],
+            ["output_param", "output_mom1", "output_mom2", "output_grad"],
+            beta1=beta1, beta2=beta2, epsilon=epsilon)
+
+        # Iter lives on the CPU
+        input_device_options = {'iter': hu.cpu_do}
+
+        self.assertReferenceChecks(
+            gc, op,
+            [param, mom1, mom2, grad, LR, ITER],
+            functools.partial(
+                self.ref_adam,
+                beta1=beta1, beta2=beta2, epsilon=epsilon, output_grad=True),
             input_device_options=input_device_options)
 
     @given(inputs=hu.tensors(n=4),
@@ -123,6 +159,7 @@ class TestAdam(hu.HypothesisTestCase):
             param_out = np.copy(param)
             mom1_out = np.copy(mom1)
             mom2_out = np.copy(mom2)
+
             for i, index in enumerate(indices):
                 param_out[index], mom1_out[index], mom2_out[index] = \
                     self.ref_adam(param[index], mom1[index], mom2[index],

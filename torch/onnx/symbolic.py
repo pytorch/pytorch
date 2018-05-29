@@ -206,37 +206,24 @@ def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
-def mean(g, self, dim=None, keepdim=None):
-    if dim is None and keepdim is None:
-        return g.op("Mean", self)
-    # NB: ONNX's default is different from PyTorch's
-    if keepdim is None:
-        keepdim = 0
-    return g.op("ReduceMean", self, axes_i=[dim], keepdims_i=keepdim)
+def _reduce_op_symbolic(onnx_op_name):
+    def symbolic(g, self, dim=None, keepdim=None):
+        params = {}
+        if dim is not None:
+            if isinstance(dim, numbers.Number):
+                dim = [dim]
+            params['axes_i'] = dim
+        params['keepdims_i'] = int(bool(keepdim))
+        return g.op(onnx_op_name, self, **params)
+    return symbolic
 
-
-def sum(g, self, dim=None, keepdim=None):
-    if dim is None and keepdim is None:
-        return g.op("Sum", self)
-    if keepdim is None:
-        keepdim = 0
-    if isinstance(dim, numbers.Number):
-        dim = [dim]
-    return g.op("ReduceSum", self, axes_i=dim, keepdims_i=keepdim)
+mean = _reduce_op_symbolic('ReduceMean')
+sum = _reduce_op_symbolic('ReduceSum')
+prod = _reduce_op_symbolic('ReduceProd')
 
 
 def cumsum(g, input, dim):
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
-
-
-def prod(g, self, dim=None, keepdim=None):
-    if dim is None:
-        dims = None
-    else:
-        dims = [dim]
-    if keepdim is None:
-        keepdim = 0
-    return g.op("ReduceProd", self, axes_i=dims, keepdims_i=keepdim)
 
 
 def t(g, self):
@@ -522,6 +509,14 @@ def lt(g, input, other):
     return g.op("Less", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
 
 
+def ge(g, input, other):
+    return g.op("Not", lt(g, other, input))
+
+
+def le(g, input, other):
+    return g.op("Not", gt(g, other, input))
+
+
 def log_softmax(g, input, dim=None):
     return g.op("LogSoftmax", input, axis_i=dim)
 
@@ -623,7 +618,7 @@ def abs(g, self):
 
 
 def pow(g, self, exponent):
-    return g.op("Pow", self, exponent)
+    return g.op("Pow", self, _if_scalar_type_as(exponent, self), **_broadcast_if_scalar(exponent))
 
 
 def clamp(g, self, min, max):
@@ -964,6 +959,20 @@ def RNN_variant_symbolic_builder(
                 prev_output, h_out, c_out = g.op('LSTM', *inputs, outputs=3,
                                                  hidden_size_i=hidden_size,
                                                  **extra_kwargs)
+
+            if bidirectional:
+                # The ONNX RNN/GRU/LSTM produce an output of dimensions
+                #   seq_len, num_directions, batch, hidden_size
+                # We have to convert to match pytorch's expected
+                #   seq_len, batch, hidden_size * num_directions
+                # by first moving num_directions to the end with
+                # Transpose, and then combining it with hidden_size
+                # with Reshape.
+                prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 3, 1])
+                prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 0, -1])))
+            else:
+                prev_output = g.op('Squeeze', prev_output, axes_i=[1])
+
             h_outs.append(h_out)
             if variant == 'LSTM':
                 c_outs.append(c_out)

@@ -55,6 +55,7 @@ OpSchema::Cost CostInferenceForFC(
     const OperatorDef& def,
     const vector<TensorShape>& in,
     bool pretransposed_weight) {
+  CAFFE_ENFORCE_EQ(in.size(), 3, "FC requires three inputs");
   struct OpSchema::Cost c;
   ArgumentHelper helper(def);
 
@@ -69,9 +70,11 @@ OpSchema::Cost CostInferenceForFC(
       ? size_from_dim_(canonical_axis_w, GetDimsVector(in[1]))
       : size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
 
+  const auto& X = in[0];
   c.flops = 2 * K * M * N + M * N;
-  c.bytes_moved = M * N * sizeof(float);
-  c.params_bytes = (K * N + N) * sizeof(float);
+  c.bytes_read = (K * (M + N) + N) * sizeof(X.data_type());
+  c.bytes_written = M * N * sizeof(X.data_type());
+  c.params_bytes = (K * N + N) * sizeof(X.data_type());
   return c;
 }
 
@@ -134,7 +137,7 @@ OpSchema::Cost CostInferenceForFCGradient(
   }
 
   c.flops = 2 * (M * N * K + M * N);
-  c.bytes_moved = (size_dW + size_db) * sizeof(float);
+  c.bytes_written = (size_dW + size_db) * sizeof(float);
   c.params_bytes = (K * N + N) * sizeof(float);
 
   if (out.size() == 3) {
@@ -145,7 +148,7 @@ OpSchema::Cost CostInferenceForFCGradient(
     }
 
     c.flops += M * N * K;
-    c.bytes_moved += size_dX * sizeof(float);
+    c.bytes_written += size_dX * sizeof(float);
   }
   return c;
 }

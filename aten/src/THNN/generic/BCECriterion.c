@@ -101,7 +101,7 @@ void THNN_(BCECriterion_updateGradInput)(
   TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
     real x = *input_data;
     real y = *target_data;
-    *gradInput_data = - norm * (y - x) / ((1. - x + EPS) * (x + EPS)) * THTensor_fastGet1d(gradOutput, 0);
+    *gradInput_data = - norm * (y - x) / ((1. - x + EPS) * (x + EPS)) * THTensor_(fastGet1d)(gradOutput, 0);
   );
 
   if(weights)
