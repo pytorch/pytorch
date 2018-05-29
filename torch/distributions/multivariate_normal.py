@@ -84,7 +84,7 @@ class MultivariateNormal(Distribution):
 
     The multivariate normal distribution can be parameterized either
     in terms of a positive definite covariance matrix :math:`\mathbf{\Sigma}`
-    or a positive definite precition matrix :math:`\mathbf{\Sigma}^{-1}`
+    or a positive definite precision matrix :math:`\mathbf{\Sigma}^{-1}`
     or a lower-triangular matrix :math:`\mathbf{L}` with positive-valued
     diagonal entries, such that
     :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`. This triangular matrix
