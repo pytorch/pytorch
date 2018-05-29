@@ -205,7 +205,7 @@ if(NOT MSVC)
   set(BUILD_TESTS ${__aten_sleef_build_tests} CACHE BOOL "Build tests" FORCE)
 endif()
 
-IF(NOT NO_CUDA)
+IF(NOT NO_CUDA AND NOT WITH_ROCM)
   IF ($ENV{ATEN_STATIC_CUDA})
     # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
     # we first have to build a fake lib that links with no device callbacks,
