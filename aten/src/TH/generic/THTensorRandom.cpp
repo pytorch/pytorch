@@ -132,11 +132,11 @@ void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p)
 {
 #ifdef TH_BLAS_MKL
   uint32_t eax, ebx, ecx, edx;
-  eax = 0;
+  eax = 0x0;
   ecx = 0x0;
   cpuid(&eax, &ebx, &ecx, &edx);
   uint32_t vendor = ebx;
-  if(vendor == 0x756E6547) { /*Intel*/
+  if(vendor == 0x756E6547) { /*Intel Vendor*/
     std::lock_guard<std::mutex> lock(_generator->mutex);
     iBernoulli_generate_copy(self, _generator, p);
   } else {
