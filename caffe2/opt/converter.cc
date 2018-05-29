@@ -85,6 +85,14 @@ std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
   return dilations;
 }
 
+int getGroup(std::map<std::string, caffe2::Argument> argMap) {
+  if (argMap.count("group")) {
+    assert(argMap["group"].has_i() && "Invalid group argument");
+    return static_cast<int>(argMap["group"].i());
+  }
+  return 1;
+}
+
 } // namespace
 
 namespace caffe2 {
@@ -95,7 +103,7 @@ convertToNeuralNetOperator(caffe2::OperatorDef* op) {
 
   std::unique_ptr<repr::NeuralNetOperator> nnOp;
 
-  if (op->type() == "Conv") {
+  if (op->type() == "Conv" || op->type() == "ConvFusion") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::Conv>(kernelShape);
     auto c = dyn_cast<repr::Conv>(nnOp.get());
@@ -103,6 +111,7 @@ convertToNeuralNetOperator(caffe2::OperatorDef* op) {
     c->setStrides(getStrides(argMap));
     c->setPads(getPads(argMap));
     c->setDilations(getDilations(argMap));
+    c->setGroup(getGroup(argMap));
 
   }
 
