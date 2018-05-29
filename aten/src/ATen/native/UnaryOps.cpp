@@ -24,14 +24,6 @@
 namespace at {
 namespace native {
 
-Tensor& fill_(Tensor& self, Scalar value) {
-  return self._fill_(value);
-}
-
-Tensor& fill_(Tensor& self, const Tensor& value) {
-  return self._fill_(value);
-}
-
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 #define IMPLEMENT_UNARY_OP_PREQUEL(op)                           \

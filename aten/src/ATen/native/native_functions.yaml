@@ -62,19 +62,6 @@
     CPU: _abs_out_cpu
     CUDA: _abs_out_cuda
 
-- func: acos(Tensor self) -> Tensor
-
-- func: acos_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _acos__cpu
-    CUDA: _acos__cuda
-
-- func: acos_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _acos_out_cpu
-    CUDA: _acos_out_cuda
-
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
 
@@ -122,32 +109,6 @@
 - func: argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 - func: argmin(Tensor self) -> Tensor
 - func: _argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
-
-- func: asin(Tensor self) -> Tensor
-
-- func: asin_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _asin__cpu
-    CUDA: _asin__cuda
-
-- func: asin_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _asin_out_cpu
-    CUDA: _asin_out_cuda
-
-- func: atan(Tensor self) -> Tensor
-
-- func: atan_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _atan__cpu
-    CUDA: _atan__cuda
-
-- func: atan_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _atan_out_cpu
-    CUDA: _atan_out_cuda
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
@@ -240,19 +201,6 @@
   dispatch:
     CPU: _cos_out_cpu
     CUDA: _cos_out_cuda
-
-- func: cosh(Tensor self) -> Tensor
-
-- func: cosh_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _cosh__cpu
-    CUDA: _cosh__cuda
-
-- func: cosh_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _cosh_out_cpu
-    CUDA: _cosh_out_cuda
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
@@ -446,19 +394,6 @@
   python_default_init:
     dtype: self.type()
 
-- func: erf(Tensor self) -> Tensor
-
-- func: erf_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _erf__cpu
-    CUDA: _erf__cuda
-
-- func: erf_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _erf_out_cpu
-    CUDA: _erf_out_cuda
-
 - func: exp(Tensor self) -> Tensor
 
 - func: exp_(Tensor self) -> Tensor
@@ -471,19 +406,6 @@
   dispatch:
     CPU: _exp_out_cpu
     CUDA: _exp_out_cuda
-
-- func: expm1(Tensor self) -> Tensor
-
-- func: expm1_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _expm1__cpu
-    CUDA: _expm1__cuda
-
-- func: expm1_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _expm1_out_cpu
-    CUDA: _expm1_out_cuda
 
 - func: expand(Tensor self, IntList size, *, bool implicit=false) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -499,10 +421,6 @@
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
-
-- func: fill_(Tensor self, Scalar value) -> Tensor
-
-- func: fill_(Tensor self, Tensor value) -> Tensor
 
 - func: floor(Tensor self) -> Tensor
 
@@ -613,45 +531,6 @@
   dispatch:
     CPU: _log_out_cpu
     CUDA: _log_out_cuda
-
-- func: log10(Tensor self) -> Tensor
-
-- func: log10_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _log10__cpu
-    CUDA: _log10__cuda
-
-- func: log10_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _log10_out_cpu
-    CUDA: _log10_out_cuda
-
-- func: log1p(Tensor self) -> Tensor
-
-- func: log1p_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _log1p__cpu
-    CUDA: _log1p__cuda
-
-- func: log1p_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _log1p_out_cpu
-    CUDA: _log1p_out_cuda
-
-- func: log2(Tensor self) -> Tensor
-
-- func: log2_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _log2__cpu
-    CUDA: _log2__cuda
-
-- func: log2_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _log2_out_cpu
-    CUDA: _log2_out_cuda
 
 - func: logdet(Tensor self) -> Tensor
 
@@ -845,19 +724,6 @@
 
 - func: relu_(Tensor self) -> Tensor
 
-- func: rsqrt(Tensor self) -> Tensor
-
-- func: rsqrt_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _rsqrt__cpu
-    CUDA: _rsqrt__cuda
-
-- func: rsqrt_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _rsqrt_out_cpu
-    CUDA: _rsqrt_out_cuda
-
 - func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
 
 - func: selu(Tensor self) -> Tensor
@@ -878,19 +744,6 @@
   dispatch:
     CPU: _sin_out_cpu
     CUDA: _sin_out_cuda
-
-- func: sinh(Tensor self) -> Tensor
-
-- func: sinh_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _sinh__cpu
-    CUDA: _sinh__cuda
-
-- func: sinh_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _sinh_out_cpu
-    CUDA: _sinh_out_cuda
 
 - func: size(Tensor self, int64_t dim) -> int64_t
 
@@ -1031,32 +884,6 @@
 
 - func: t_(Tensor self) -> Tensor
   variants: method
-
-- func: tan(Tensor self) -> Tensor
-
-- func: tan_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _tan__cpu
-    CUDA: _tan__cuda
-
-- func: tan_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _tan_out_cpu
-    CUDA: _tan_out_cuda
-
-- func: tanh(Tensor self) -> Tensor
-
-- func: tanh_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _tanh__cpu
-    CUDA: _tanh__cuda
-
-- func: tanh_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _tanh_out_cpu
-    CUDA: _tanh_out_cuda
 
 - func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
 
