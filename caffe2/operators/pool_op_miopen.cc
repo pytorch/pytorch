@@ -127,6 +127,10 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext>
         {
             return DoRunWithType<float, float>();
         }
+        else if(X.IsType<float16>())
+        {
+            return DoRunWithType<float16, float>();
+        }
         else
         {
             LOG(FATAL) << "Unsupported input types";
@@ -144,8 +148,6 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext>
     bool do_backward_;
     const float alpha_;
     const float beta_;
-
-    private:
 };
 
 class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext>
@@ -157,7 +159,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext>
           alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
           beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
           poolWsSize_(0),
-          poolBwdScratch(nullptr)
+          bwdPoolScratch_(nullptr)
     {
         MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bottom_desc_));
         MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_));
@@ -184,10 +186,10 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext>
         MIOPEN_ENFORCE(miopenDestroyPoolingDescriptor(pooling_desc_));
         poolWsSize_ = 0;
 
-        if(poolBwdScratch)
+        if(bwdPoolScratch_)
         {
-            hipFree(poolBwdScratch);
-            poolBwdScratch = nullptr;
+            hipFree(bwdPoolScratch_);
+            bwdPoolScratch_ = nullptr;
         }
     }
 
@@ -239,9 +241,9 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext>
             HIP_CHECK(hipMalloc(&poolWs_, poolWsSize_));
         }
 
-        if(poolBwdScratch == nullptr)
+        if(bwdPoolScratch_ == nullptr)
         {
-            HIP_CHECK(hipMalloc(&poolBwdScratch, Y.size() * sizeof(float)));
+            HIP_CHECK(hipMalloc(&bwdPoolScratch_, Y.size() * sizeof(float)));
         }
 
         // Carry out the pooling computation.
@@ -257,7 +259,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext>
                                             Xdata,
                                             &beta_,
                                             top_desc_,
-                                            poolBwdScratch,
+                                            bwdPoolScratch_,
                                             true,
                                             poolWs_,
                                             poolWsSize_));
@@ -291,6 +293,10 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext>
         {
             return DoRunWithType<float, float>();
         }
+        else if(X.IsType<float16>())
+        {
+            return DoRunWithType<float16, float>();
+        }
         else
         {
             LOG(FATAL) << "Unsupported input types";
@@ -307,7 +313,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext>
     miopenPoolingMode_t mode_;
     const float alpha_;
     const float beta_;
-    float* poolBwdScratch;
+    float* bwdPoolScratch_;
 };
 
 namespace {
