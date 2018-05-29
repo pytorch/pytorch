@@ -167,10 +167,6 @@ bool MIOPEN_LRNOP::RunOnDevice()
     {
         return DoRunWithType<float, float>();
     }
-    else if(X.IsType<float16>())
-    {
-        return DoRunWithType<float16, float>();
-    }
     else
     {
         CAFFE_THROW("Unsupported input type");
@@ -252,10 +248,6 @@ bool MIOPENLRNGradientOp::RunOnDevice()
     if(dY.IsType<float>())
     {
         return DoRunWithType<float, float>();
-    }
-    else if(dY.IsType<float16>())
-    {
-        return DoRunWithType<float16, float>();
     }
     else
     {

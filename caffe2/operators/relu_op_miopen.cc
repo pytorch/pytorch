@@ -99,10 +99,6 @@ class MIOPENReluOp final : public Operator<HIPContext>
         {
             return DoRunWithType<float>();
         }
-        else if(X.IsType<float16>())
-        {
-            return DoRunWithType<float16>();
-        }
         else
         {
             LOG(FATAL) << "Unsupported input types";
@@ -208,10 +204,6 @@ class MIOPENReluGradientOp final : public Operator<HIPContext>
         if(Y.IsType<float>())
         {
             return DoRunWithType<float>();
-        }
-        else if(Y.IsType<float16>())
-        {
-            return DoRunWithType<float16>();
         }
         else
         {
