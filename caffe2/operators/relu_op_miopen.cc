@@ -99,6 +99,10 @@ class MIOPENReluOp final : public Operator<HIPContext>
         {
             return DoRunWithType<float>();
         }
+        else if(X.IsType<float16>())
+        {
+            return DoRunWithType<float16>();
+        }
         else
         {
             LOG(FATAL) << "Unsupported input types";
@@ -189,12 +193,6 @@ class MIOPENReluGradientOp final : public Operator<HIPContext>
             data_desc_,
             dY.template data<T>(),
             data_desc_,
-            // Note: strictly speaking, we should be using the input data in this
-            // case, but for the ReLU case we rely on the underlying implementation
-            // that only the output is needed to calculate the Relu gradient. This
-            // will enable us to do memory optimization for in-place relu. To
-            // ensure this is correct, a unit test is provided at
-            // caffe2/python/operator_test/relu_op_test.py
             Y.template data<T>(),
             &beta_,
             data_desc_,
@@ -210,6 +208,10 @@ class MIOPENReluGradientOp final : public Operator<HIPContext>
         if(Y.IsType<float>())
         {
             return DoRunWithType<float>();
+        }
+        else if(Y.IsType<float16>())
+        {
+            return DoRunWithType<float16>();
         }
         else
         {
