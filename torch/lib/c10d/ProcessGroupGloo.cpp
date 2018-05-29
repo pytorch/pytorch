@@ -383,12 +383,10 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   if (key.type->is_cuda()) {
     entry->streams.resize(key.devices.size());
     entry->startEvents.resize(key.devices.size());
-    entry->finishEvents.resize(key.devices.size());
     for (auto i = 0; i < key.devices.size(); i++) {
       CUDADevice device(key.devices[i]);
       entry->streams[i] = CUDAStream::create();
       entry->startEvents[i] = CUDAEvent::create();
-      entry->finishEvents[i] = CUDAEvent::create();
     }
   }
 
@@ -456,17 +454,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     entry->run = [=]() mutable {
       entry->algorithm->run();
       for (auto i = 0; i < tensors.size(); i++) {
-        auto privateStream = entry->streams[i].getStream();
-        auto finishEvent = entry->finishEvents[i].getEvent();
-
         // The THCStreamGuard is a RAII wrapper for temporarily
         // overriding the current THCStream. This also sets the
         // current device to the stream's device.
         THCStreamGuard guard(thcState_, entry->streams[i]);
         tensors[i].copy_(entry->src[i]);
-
-        // Record event marking the completion of this operation
-        C10D_CUDA_CHECK(cudaEventRecord(finishEvent, privateStream));
       }
     };
   } else {
@@ -508,17 +500,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     entry->run = [=]() mutable {
       entry->algorithm->run();
       for (auto i = 0; i < tensors.size(); i++) {
-        auto privateStream = entry->streams[i].getStream();
-        auto finishEvent = entry->finishEvents[i].getEvent();
-
         // The THCStreamGuard is a RAII wrapper for temporarily
         // overriding the current THCStream. This also sets the
         // current device to the stream's device.
         THCStreamGuard guard(thcState_, entry->streams[i]);
         tensors[i].copy_(entry->src[i]);
-
-        // Record event marking the completion of this operation
-        C10D_CUDA_CHECK(cudaEventRecord(finishEvent, privateStream));
       }
     };
   } else {

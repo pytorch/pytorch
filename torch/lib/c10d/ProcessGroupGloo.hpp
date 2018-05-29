@@ -109,15 +109,12 @@ struct AlgorithmEntry {
   // true, the caller can launch new CUDA kernels and they will be
   // correctly sequenced.
   //
-  // To do so, we need to hold on to one stream and two events per
-  // tensor. The stream is passed down to the Gloo algorithm. The
-  // first event is used to record completion of the memory copy of
-  // the input tensor. The second event if used to record completion
-  // of the memory copy back to the output tensor.
+  // To do so, we need to hold on to a stream and an event per tensor.
+  // The stream is passed down to the Gloo algorithm. The event is
+  // used to record completion of the memory copy of the input tensor.
   //
   std::vector<CUDAStream> streams;
   std::vector<CUDAEvent> startEvents;
-  std::vector<CUDAEvent> finishEvents;
 
   // Used to synchronize between calling thread and worker threads.
   std::mutex m;
