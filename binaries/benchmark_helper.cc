@@ -25,6 +25,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/bench_utils.h"
 #include "caffe2/utils/string_utils.h"
 #include "observers/net_observer_reporter_print.h"
 #include "observers/observer_config.h"
@@ -69,12 +70,16 @@ void setDeviceType(caffe2::NetDef* net_def, caffe2::DeviceType& run_dev) {
 
 void setOperatorEngine(caffe2::NetDef* net_def, const string& backend) {
   if (backend != "builtin") {
-    string engine = backend == "nnpack" ? "NNPACK"
-                                        : backend == "eigen" ? "EIGEN"
-                                                             : backend == "mkl"
-                ? "MKLDNN"
-                : backend == "cuda" ? "CUDA"
-                                    : backend == "default" ? "" : "NONE";
+    string engine = backend == "nnpack"
+        ? "NNPACK"
+        : backend == "eigen" ? "EIGEN"
+                             : backend == "mkl" ? "MKLDNN"
+                                                : backend == "cuda"
+                    ? "CUDA"
+                    : backend == "dnnlowp" ? "DNNLOWP"
+                                           : backend == "dnnlowp_16"
+                            ? "DNNLOWP_16"
+                            : backend == "default" ? "" : "NONE";
     CAFFE_ENFORCE(engine != "NONE", "Backend is not supported");
     for (int i = 0; i < net_def->op_size(); i++) {
       caffe2::OperatorDef* op_def = net_def->mutable_op(i);
@@ -191,6 +196,7 @@ void runNetwork(
     CAFFE_ENFORCE(net->Run(), "Warmup run ", i, " has failed.");
   }
 
+  caffe2::wipe_cache();
   LOG(INFO) << "Main runs.";
   CAFFE_ENFORCE(
       iter >= 0,
@@ -200,9 +206,11 @@ void runNetwork(
   for (int i = 0; i < iter; ++i) {
     caffe2::ObserverConfig::initSampleRate(1, 1, 1, 0, warmup);
     CAFFE_ENFORCE(net->Run(), "Main run ", i, " has failed.");
+    caffe2::wipe_cache();
     if (run_individual) {
       caffe2::ObserverConfig::initSampleRate(1, 1, 1, 1, warmup);
       CAFFE_ENFORCE(net->Run(), "Main run ", i, " with operator has failed.");
+      caffe2::wipe_cache();
     }
   }
 }

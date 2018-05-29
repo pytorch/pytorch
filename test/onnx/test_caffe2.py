@@ -333,6 +333,25 @@ class TestCaffe2Backend(unittest.TestCase):
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
+    def test_rnn_init_predict_split(self):
+        model = nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 3, bidirectional=True)
+        seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=7)
+        seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+        input = [Variable(torch.randn(l, RNN_INPUT_SIZE)) for l in seq_lengths]
+        input = rnn_utils.pad_sequence(input)
+
+        # Test that we are correctly splitting between init and
+        # predict net. When we embed parameters, there should be more
+        # ops in the init net.
+        mp = onnx.ModelProto.FromString(do_export(model, input, export_params=self.embed_params)[0])
+        prepared = c2.prepare(mp, device='CPU')
+        if self.embed_params:
+            assert len(prepared.init_net.op) == 1038
+            assert len(prepared.predict_net.op) == 101
+        else:
+            assert len(prepared.init_net.op) == 27
+            assert len(prepared.predict_net.op) == 1112
+
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
         self.run_model_test(alexnet(), train=False, batch_size=BATCH_SIZE,
@@ -626,6 +645,32 @@ class TestCaffe2Backend(unittest.TestCase):
         m1 = Variable(torch.randn(3, 4))
         m2 = Variable(torch.randn(4, 5))
         self.run_model_test(MyModel(), train=False, input=(ma, m1, m2), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_sum(self):
+        shape = (3, 4, 5)
+        for params in [{}] + [{'dim': i} for i in range(len(shape))]:
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+
+                def forward(self, x):
+                    return torch.sum(x, **params)
+            x = Variable(torch.randn(*shape))
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_mean(self):
+        shape = (3, 4, 5)
+        for params in [{}] + [{'dim': i} for i in range(len(shape))]:
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+
+                def forward(self, x):
+                    return torch.mean(x, **params)
+            x = Variable(torch.randn(*shape))
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
+    # TODO: Add test cases for prod once Caffe2 has support for ReduceProd
 
     def test_softmax(self):
         for i in range(7)[2:]:

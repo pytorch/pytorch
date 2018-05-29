@@ -143,9 +143,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     return PackedSequence(data, batch_sizes)
 
 
-def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding_value=0.0, total_length=None):
-    if total_length is not None:
-        raise ValueError("_symbolic_pad_packed_sequence only supports total_length=None")
+def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding_value=0.0):
     # There currently is no PackPadded operator in ONNX. We rely on an
     # optimization pass to remove this later. It is an error if all
     # PackPadded operators cannot be optimized out.
@@ -153,6 +151,12 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding
     def _onnx_symbolic_pack_padded_sequence(g, input, lengths):
         if batch_first:
             input = g.op('Transpose', input, perm_i=[1, 0, 2])
+        if lengths.type().kind() != 'TensorType':
+            raise RuntimeError("Lengths must be a Tensor for ONNX export")
+        # We know it's a TensorType so this check is now safe.
+        if lengths.type().scalarType() != 'Int':
+            raise RuntimeError("ONNX export requires that the lengths passed "
+                               "to pack_padded_sequence must be of type Int")
         return g.op("prim::PackPadded", input, lengths, outputs=2)
 
     def pack_padded_sequence_trace_wrapper(input, lengths):
@@ -240,7 +244,10 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
     return output, torch.LongTensor(lengths)
 
 
-def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0):
+def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0, total_length=None):
+    # Ignore total_length as it is not supported in _symbolic_pad_packed_sequence
+    # It is only useful/used when training using data_parallel model, so
+    # It shouldn't be relevant for ONNX anyway
     def _onnx_symbolic_pad_packed_sequence(g, data, batch_sizes):
         data, lengths = g.op("prim::PadPacked", data, batch_sizes, outputs=2)
         if batch_first:

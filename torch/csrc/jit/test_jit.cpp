@@ -523,7 +523,7 @@ variable_list get_grad_outputs(const variable_list& vars) {
 std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_in) {
   std::shared_ptr<tracer::TracingState> state;
   variable_list trace_vars_in;
-  std::tie(state, trace_vars_in) = tracer::enter(vars_in, 1, true);
+  std::tie(state, trace_vars_in) = tracer::enter(vars_in, 1);
   auto trace_vars_out = test(trace_vars_in);
   tracer::exit(trace_vars_out);
   return state->graph;
@@ -531,7 +531,7 @@ std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_i
 
 variable_list grad(const variable_list& outputs, const variable_list& inputs, const variable_list& grad_outputs) {
   static const auto get_edge = [](const Variable& v) { return v.gradient_edge(); };
-  auto & engine = torch::autograd::Engine::getDefaultEngine();
+  auto & engine = torch::autograd::Engine::get_default_engine();
   return engine.execute(fmap(outputs, get_edge), grad_outputs, true, false, fmap(inputs, get_edge));
 }
 
@@ -572,13 +572,14 @@ void testADFormulas() {
   using VL = variable_list;
   static const var_meta_list binary_pointwise = {{2, 3, 4, 5}, {2, 3, 4, 5}};
   static const var_meta_list unary_pointwise  = {{2, 3, 4, 5}};
+  static const var_meta_list unary_pointwise_2d  = {{2, 3}};
   static const std::vector<ADTestSpec> ad_tests = {
     {"add",     binary_pointwise, [](const VL& v) -> VL { return {v[0] + v[1]}; }},
     {"sub",     binary_pointwise, [](const VL& v) -> VL { return {v[0] - v[1]}; }},
     {"mul",     binary_pointwise, [](const VL& v) -> VL { return {v[0] * v[1]}; }},
     {"sigmoid", unary_pointwise,  [](const VL& v) -> VL { return {v[0].sigmoid()}; }},
     {"tanh",    unary_pointwise,  [](const VL& v) -> VL { return {v[0].tanh()}; }},
-    {"t",       unary_pointwise,  [](const VL& v) -> VL { return {v[0].t()}; }},
+    {"t",       unary_pointwise_2d,  [](const VL& v) -> VL { return {v[0].t()}; }},
     {"mm",      {{10, 12}, {12, 15}}, [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
     {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(4, 1)); }},
     {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(3, 2)); }},

@@ -9,6 +9,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/utils/python_variables.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
@@ -23,6 +24,7 @@
 static const int MAX_DIMS = 128;
 
 using namespace at;
+using torch::autograd::utils::set_requires_grad;
 
 namespace torch { namespace utils {
 
@@ -96,6 +98,9 @@ static std::vector<int64_t> compute_sizes(PyObject* seq) {
     }
     if (length == 0) break;
     handle = THPObjectPtr(PySequence_GetItem(seq, 0));
+    if (!handle) {
+      throw ValueError("could not determine the shape of object type '%s'", Py_TYPE(seq)->tp_name);
+    }
     seq = handle.get();
   }
 
@@ -384,11 +389,6 @@ static const Type& typeWithDefault(PythonArgs& r, int64_t dtype_idx, int64_t dev
   auto types_device_type = torch::getDeviceType(type);
   auto device_type = r.isNone(device_idx) ? types_device_type : r.device(device_idx).type;
   return torch::getType(scalartype, *torch::getLayout(type.backend()), device_type);
-}
-
-static Tensor set_requires_grad(Tensor self, bool requires_grad) {
-  static_cast<torch::autograd::Variable&>(self).set_requires_grad(requires_grad);
-  return self;
 }
 
 Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {

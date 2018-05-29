@@ -235,6 +235,61 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
 Hope this helps, and thanks for considering to contribute.
 
+## Windows development tips
+
+Occasionally, you will write a patch which works on Linux, but fails CI on Windows.
+There are a few aspects in which MSVC (the Windows compiler toolchain we use) is stricter
+than Linux, which are worth keeping in mind when fixing these problems.
+
+1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
+   mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
+   `__declspec(dllimport)`.  We have codified this pattern into a set of macros
+   which follow the convention `*_API`, e.g., `AT_API` inside ATen. (Every separate
+   shared library needs a unique macro name, because symbol visibility is on a per
+   shared library basis.)
+   
+   The upshot is if you see an "unresolved external" error in your Windows build, this
+   is probably because you forgot to mark a function with `*_API`.  However, there is
+   one important counterexample to this principle: if you want a *templated* function
+   to be instantiated at the call site, do NOT mark it with `*_API` (if you do mark it,
+   you'll have to explicitly instantiate all of the specializations used by the call
+   sites.)
+
+2. If you link against a library, this does not make its dependencies transitively
+   visible. You must explicitly specify a link dependency against every library whose
+   symbols you use.  (This is different from Linux where in most environments,
+   transitive dependencies can be used to fulfill unresolved symbols.)
+
+3. If you have a Windows box (we have a few on EC2 which you can request access to) and
+   you want to run the build, the easiest way is to just run `.jenkins/pytorch/win-build.sh`.
+   If you need to rebuild, run `REBUILD=1 .jenkins/pytorch/win-build.sh` (this will avoid
+   blowing away your Conda environment.)  I recommend opening `cmd.exe`, and then running
+   `bash` to work in a bash shell (which will make various Linux commands available.)
+
+Even if you don't know anything about MSVC, you can use cmake to build simple programs on
+Windows; this can be helpful if you want to learn more about some peculiar linking behavior
+by reproducing it on a small example.  Here's a simple example cmake file that defines
+two dynamic libraries, one linking with the other:
+
+```
+project(myproject CXX)
+set(CMAKE_CXX_STANDARD 11)
+add_library(foo SHARED foo.cpp)
+add_library(bar SHARED bar.cpp)
+# NB: don't forget to __declspec(dllexport) at least one symbol from foo,
+# otherwise foo.lib will not be created.
+target_link_libraries(bar PUBLIC foo)
+```
+
+You can build it with:
+
+```
+mkdir build
+cd build
+cmake ..
+cmake --build .
+```
+
 ## Caffe2 notes
 
 In 2018, we merged Caffe2 into the PyTorch source repository.  While the

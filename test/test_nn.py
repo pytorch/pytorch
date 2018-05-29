@@ -51,7 +51,7 @@ dtype2prec = {torch.float: 1e-5,
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
-# update test/run_test.sh to list it, otherwise it will NOT be run in
+# update test/run_test.py to list it, otherwise it will NOT be run in
 # CI.
 
 
@@ -1281,6 +1281,16 @@ class TestNN(NNTestCase):
             scale = compare_scaling(grads)
             self.assertEqual(scale, 1)
 
+        # Should accept a single Tensor as input
+        p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
+        g = torch.arange(1., 101).view(10, 10)
+        p1._grad = g.clone()
+        p2._grad = g.clone()
+        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
+            clip_grad_norm_(p1, max_norm, norm_type=norm_type)
+            clip_grad_norm_([p2], max_norm, norm_type=norm_type)
+            self.assertEqual(p1.grad, p2.grad)
+
     def test_clip_grad_value(self):
         l = nn.Linear(10, 10)
         clip_value = 2.5
@@ -1294,6 +1304,15 @@ class TestNN(NNTestCase):
         for p in filter(lambda p: p.grad is not None, l.parameters()):
             self.assertLessEqual(p.grad.data.max(), clip_value)
             self.assertGreaterEqual(p.grad.data.min(), -clip_value)
+
+        # Should accept a single Tensor as input
+        p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
+        g = torch.arange(-50., 50).view(10, 10).div_(5)
+        p1._grad = g.clone()
+        p2._grad = g.clone()
+        clip_grad_value_(p1, clip_value)
+        clip_grad_value_([p2], clip_value)
+        self.assertEqual(p1.grad, p2.grad)
 
     def test_parameters_to_vector(self):
         conv1 = nn.Conv2d(3, 10, 5)
@@ -2046,7 +2065,7 @@ class TestNN(NNTestCase):
                                lambda: F.pad(torch.randn(1, 1, 2), (2, 1), mode='reflect'))
 
     def test_pad_scalar_error(self):
-        inputs = torch.tensor(0, requires_grad=True)
+        inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
@@ -2179,6 +2198,24 @@ class TestNN(NNTestCase):
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_AdaptiveMaxPool3d_indices_cuda(self, dtype=torch.float):
         self._test_maxpool_indices(3, adaptive=True, device="cuda", dtype=dtype)
+
+    @staticmethod
+    def _test_max_pool_nan(self, device, dtype=torch.float):
+        for adaptive in ['', 'adaptive_']:
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}max_pool{}d'.format(adaptive, num_dim)
+                fn = getattr(F, fn_name)
+                x = torch.full([1, 1] + num_dim * [3], float('nan'))
+                res = fn(x, 1 if adaptive else 3)
+                self.assertTrue(math.isnan(res.item()))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_max_pool_nan_cuda(self, dtype=torch.float):
+        self._test_max_pool_nan(self, device="cuda", dtype=dtype)
+
+    def test_max_pool_nan(self, dtype=torch.float):
+        self._test_max_pool_nan(self, device="cpu")
 
     def _test_scatter(self, tensor):
         x = torch.tensor(tensor, requires_grad=True)
@@ -3380,6 +3417,15 @@ class TestNN(NNTestCase):
                 hx, cx = lstm(input, (hx, cx))
 
             (hx + cx).sum().backward()
+
+    @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
+    def test_cudnn_rnn_dropout_states_device(self):
+        rnn = nn.RNN(10, 20, num_layers=2, dropout=.5)
+        device = 1
+        input = torch.randn(5, 4, 10).cuda(device)
+        rnn.cuda(device)
+        hx = torch.randn(2, 4, 20).cuda(device)
+        output = rnn(input, hx)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_cudnn_weight_format(self):
@@ -5035,6 +5081,19 @@ class TestNNInit(TestCase):
             with self.assertRaises(ValueError):
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3)
                 init.eye_(tensor)
+
+    def test_max_unpool(self):
+        # Test 1D
+        output, indices = F.max_pool1d(torch.randn([1, 1, 4]), 2, stride=2, return_indices=True)
+        self.assertEqual(F.max_unpool1d(output, indices, 2), F.max_unpool1d(output, indices, 2, stride=2))
+
+        # Test 2D
+        output, indices = F.max_pool2d(torch.randn([1, 1, 4, 4]), 2, stride=2, return_indices=True)
+        self.assertEqual(F.max_unpool2d(output, indices, 2), F.max_unpool2d(output, indices, 2, stride=2))
+
+        # Test 3D
+        output, indices = F.max_pool3d(torch.randn([4, 4, 4, 4, 4]), 2, stride=2, return_indices=True)
+        self.assertEqual(F.max_unpool3d(output, indices, 2), F.max_unpool3d(output, indices, 2, stride=2))
 
     def test_dirac_properties(self):
         for dims in [3, 4, 5]:

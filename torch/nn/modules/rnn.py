@@ -278,12 +278,20 @@ class RNN(RNNBase):
           Defaults to zero if not provided.
 
     Outputs: output, h_n
-        - **output** of shape `(seq_len, batch, hidden_size * num_directions)`: tensor
+        - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor
           containing the output features (`h_k`) from the last layer of the RNN,
           for each `k`.  If a :class:`torch.nn.utils.rnn.PackedSequence` has
           been given as the input, the output will also be a packed sequence.
+
+          For the unpacked case, the directions can be separated
+          using ``output.view(seq_len, batch, num_directions, hidden_size)``,
+          with forward and backward being direction `0` and `1` respectively.
+          Similarly, the directions can be separated in the packed case.
         - **h_n** (num_layers * num_directions, batch, hidden_size): tensor
           containing the hidden state for `k = seq_len`.
+
+          Like *output*, the layers can be separated using
+          ``h_n.view(num_layers, num_directions, batch, hidden_size)``.
 
     Attributes:
         weight_ih_l[k]: the learnable input-hidden weights of the k-th layer,
@@ -377,12 +385,20 @@ class LSTM(RNNBase):
 
 
     Outputs: output, (h_n, c_n)
-        - **output** of shape `(seq_len, batch, hidden_size * num_directions)`: tensor
+        - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor
           containing the output features `(h_t)` from the last layer of the LSTM,
           for each t. If a :class:`torch.nn.utils.rnn.PackedSequence` has been
           given as the input, the output will also be a packed sequence.
+
+          For the unpacked case, the directions can be separated
+          using ``output.view(seq_len, batch, num_directions, hidden_size)``,
+          with forward and backward being direction `0` and `1` respectively.
+          Similarly, the directions can be separated in the packed case.
         - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
-          containing the hidden state for `t = seq_len`
+          containing the hidden state for `t = seq_len`.
+
+          Like *output*, the layers can be separated using
+          ``h_n.view(num_layers, num_directions, batch, hidden_size)`` and similarly for *c_n*.
         - **c_n** (num_layers * num_directions, batch, hidden_size): tensor
           containing the cell state for `t = seq_len`
 
@@ -402,7 +418,7 @@ class LSTM(RNNBase):
         >>> input = torch.randn(5, 3, 10)
         >>> h0 = torch.randn(2, 3, 20)
         >>> c0 = torch.randn(2, 3, 20)
-        >>> output, hn = rnn(input, (h0, c0))
+        >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
 
     def __init__(self, *args, **kwargs):
@@ -457,12 +473,20 @@ class GRU(RNNBase):
           Defaults to zero if not provided.
 
     Outputs: output, h_n
-        - **output** of shape `(seq_len, batch, hidden_size * num_directions)`: tensor
+        - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor
           containing the output features h_t from the last layer of the GRU,
           for each t. If a :class:`torch.nn.utils.rnn.PackedSequence` has been
           given as the input, the output will also be a packed sequence.
+          For the unpacked case, the directions can be separated
+          using ``output.view(seq_len, batch, num_directions, hidden_size)``,
+          with forward and backward being direction `0` and `1` respectively.
+
+          Similarly, the directions can be separated in the packed case.
         - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the hidden state for `t = seq_len`
+
+          Like *output*, the layers can be separated using
+          ``h_n.view(num_layers, num_directions, batch, hidden_size)``.
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer

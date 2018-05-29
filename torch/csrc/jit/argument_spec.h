@@ -180,6 +180,7 @@ inline std::ostream& operator<<(std::ostream & out, const ArgumentSpec & spec) {
       out << ", ";
     out << spec.tensorInfo(i);
   }
+  out << "}";
   return out;
 }
 

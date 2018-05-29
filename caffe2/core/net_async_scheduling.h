@@ -15,21 +15,18 @@ class AsyncSchedulingNet : public AsyncNetBase {
   void Wait() override;
 
  protected:
-  bool DoRunAsync() override;
+  bool RunAsync() override;
 
   void pollAndSchedule(int task_id);
   void schedule(int task_id);
-  void reset();
+  void reset() override;
   virtual void finishRun();
-  int updateParentCount(int child_id);
+  void parentCallback(int parent_id);
 
   std::mutex running_mutex_;
   std::condition_variable running_cv_;
   std::atomic<bool> running_;
   std::atomic<bool> success_;
-
-  std::mutex cleanup_mutex_;
-  std::atomic<bool> cleanup_;
 
   std::atomic<int> processed_tasks_num_;
 

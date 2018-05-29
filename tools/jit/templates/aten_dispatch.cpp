@@ -1,4 +1,4 @@
-#include "aten_dispatch.h"
+#include "torch/csrc/jit/aten_dispatch.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/tensor_conversions.h"

@@ -57,14 +57,33 @@ vector<TensorShape> TensorInferenceForBatchOneHot(
       CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
 }
 
+vector<TensorShape> TensorInferenceForBucketBatchOneHot(
+    const OperatorDef& /* def */,
+    const vector<TensorShape>& in) {
+  std::vector<TIndex> output_dims(2);
+  output_dims[0] = in[0].dims(0); // N
+  output_dims[1] = in[1].dims(0) + in[2].dims(0); // vals.size() + length.size()
+  return vector<TensorShape>{
+      CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+}
+
 OpSchema::Cost CostInferenceForBatchOneHot(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
+  CAFFE_ENFORCE_EQ(in.size(), 3, "BatchOneHot requires three inputs");
   struct OpSchema::Cost c;
   const TensorShape output = TensorInferenceForBatchOneHot(def, in)[0];
 
+  const auto& data = in[0];
+  const auto& length = in[1];
+  const auto& values = in[2];
+
+  uint64_t nBytesData = nElemFromDim(data) * sizeof(data.data_type());
+  uint64_t nBytesLength = nElemFromDim(length) * sizeof(length.data_type());
+  uint64_t nBytesValues = nElemFromDim(values) * sizeof(values.data_type());
   c.flops = 0;
-  c.bytes_moved = output.dims(0) * output.dims(1) * sizeof(int32_t);
+  c.bytes_read = nBytesData + nBytesLength + nBytesValues;
+  c.bytes_written = nElemFromDim(output) * sizeof(output.data_type());
   c.params_bytes = 0;
   return c;
 }
@@ -219,7 +238,8 @@ For example
         0,
         "output",
         "output matrix that expands each input column with one hot encoding"
-        "based on the bucketization");
+        "based on the bucketization")
+    .TensorInferenceFunction(TensorInferenceForBucketBatchOneHot);
 
 OPERATOR_SCHEMA(BatchOneHot)
     .NumInputs(3)

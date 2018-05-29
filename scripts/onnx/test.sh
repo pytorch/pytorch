@@ -23,7 +23,7 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-pip install pytest
+pip install pytest torchvision
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
@@ -41,7 +41,6 @@ else
     PYTEST="pytest"
 fi
 
-cd "$top_dir"
 if [[ $PARALLEL == 1 ]]; then
     $PYTEST -n 3 "${test_paths[@]}"
 else

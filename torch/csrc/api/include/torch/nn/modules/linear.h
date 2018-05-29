@@ -6,19 +6,25 @@
 
 #include <cstdint>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 class Linear : public torch::nn::CloneableModule<Linear> {
  public:
-  Linear(uint32_t nin, uint32_t nout);
+  Linear(size_t features_in, size_t features_out);
 
-  variable_list forward(variable_list) override;
-  void reset_parameters() override;
-  void initialize_parameters() override;
+  void reset() override;
+
+  variable_list forward(variable_list);
+
   TORCH_AUTOGRAD_KWARG(Linear, bool, no_bias, false, true);
 
-  Variable weight, bias;
-  uint32_t nin, nout;
+  TORCH_ATTR(int64_t, in);
+  TORCH_ATTR(int64_t, out);
+  TORCH_ATTR(bool, with_bias) = true;
+  TORCH_ATTR(Variable, weight);
+  TORCH_ATTR(Variable, bias);
 };
 
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

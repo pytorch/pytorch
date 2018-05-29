@@ -145,6 +145,11 @@ bool InitCaffeLogging(int* argc, char** argv) {
     ::google::InstallFailureSignalHandler();
 #endif
   }
+  UpdateLoggingLevelsFromFlags();
+  return true;
+}
+
+void UpdateLoggingLevelsFromFlags() {
   // If caffe2_log_level is set and is lower than the min log level by glog,
   // we will transfer the caffe2_log_level setting to glog to override that.
   FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
@@ -156,7 +161,6 @@ bool InitCaffeLogging(int* argc, char** argv) {
   if (FLAGS_caffe2_log_level < 0) {
     FLAGS_v = std::min(FLAGS_v, -FLAGS_caffe2_log_level);
   }
-  return true;
 }
 
 void ShowLogInfoToStderr() {
@@ -191,6 +195,9 @@ bool InitCaffeLogging(int* argc, char** argv) {
     FLAGS_caffe2_log_level = FATAL;
   }
   return true;
+}
+
+void UpdateLoggingLevelsFromFlags() {
 }
 
 void ShowLogInfoToStderr() {

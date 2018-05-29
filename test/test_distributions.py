@@ -53,7 +53,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
-from torch.distributions.utils import _finfo, probs_to_logits, softmax
+from torch.distributions.utils import _finfo, probs_to_logits, softmax, lazy_property
 
 TEST_NUMPY = True
 try:
@@ -690,6 +690,31 @@ class TestDistributions(TestCase):
                 except NotImplementedError:
                     pass
 
+    def test_lazy_property_grad(self):
+        x = torch.randn(1, requires_grad=True)
+
+        class Dummy(object):
+            @lazy_property
+            def y(self):
+                return x + 1
+
+        def test():
+            x.grad = None
+            Dummy().y.backward()
+            self.assertEqual(x.grad, torch.ones(1))
+
+        test()
+        with torch.no_grad():
+            test()
+
+        mean = torch.randn(2)
+        cov = torch.eye(2, requires_grad=True)
+        distn = MultivariateNormal(mean, cov)
+        with torch.no_grad():
+            distn.scale_tril
+        distn.scale_tril.sum().backward()
+        self.assertIsNotNone(cov.grad)
+
     def test_has_examples(self):
         distributions_with_examples = set(e.Dist for e in EXAMPLES)
         for Dist in globals().values():
@@ -880,7 +905,6 @@ class TestDistributions(TestCase):
         self.assertEqual(Multinomial(total_count, p).sample((6,)).size(), (6, 2, 3))
         set_rng_seed(0)
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
-        p.grad.zero_()
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
 
         # sample check for extreme value of probs
@@ -1125,6 +1149,10 @@ class TestDistributions(TestCase):
         below_low = torch.tensor([-1.0])
         self.assertEqual(uniform.log_prob(above_high).item(), -float('inf'), allow_inf=True)
         self.assertEqual(uniform.log_prob(below_low).item(), -float('inf'), allow_inf=True)
+
+        # check cdf computation when value outside range
+        self.assertEqual(uniform.cdf(below_low).item(), 0)
+        self.assertEqual(uniform.cdf(above_high).item(), 1)
 
         set_rng_seed(1)
         self._gradcheck_log_prob(Uniform, (low, high))
@@ -1873,7 +1901,9 @@ class TestDistributions(TestCase):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
-                samples = torch.tensor(dist.sample().data, requires_grad=True)
+                samples = torch.tensor(dist.sample().data)
+                if samples.dtype.is_floating_point:
+                    samples.requires_grad_()
                 try:
                     cdfs = dist.cdf(samples)
                     pdfs = dist.log_prob(samples).exp()

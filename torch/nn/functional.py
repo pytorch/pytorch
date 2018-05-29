@@ -407,7 +407,7 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxUnpool1d` for details.
     """
     kernel_size = _single(kernel_size)
-    stride = _single(stride)
+    stride = _single(stride or kernel_size)
     padding = _single(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
@@ -421,7 +421,7 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxUnpool2d` for details.
     """
     kernel_size = _pair(kernel_size)
-    stride = _pair(stride)
+    stride = _pair(stride or kernel_size)
     padding = _pair(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
@@ -435,7 +435,7 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxUnpool3d` for details.
     """
     kernel_size = _triple(kernel_size)
-    stride = _triple(stride)
+    stride = _triple(stride or kernel_size)
     padding = _triple(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)

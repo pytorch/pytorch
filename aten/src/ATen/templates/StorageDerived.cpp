@@ -1,4 +1,7 @@
 #include "ATen/${Storage}.h"
+
+// ${generated_comment}
+
 #include "ATen/Half.h"
 #include "ATen/Allocator.h"
 

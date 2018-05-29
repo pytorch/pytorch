@@ -221,7 +221,7 @@ model_mapping = {
     'squeezenet': 'squeezenet_old',
     #'vgg16': 'vgg16',
     'vgg19': 'vgg19',
-    'zfnet': 'zfnet',
+    'zfnet512': 'zfnet512',
 }
 
 

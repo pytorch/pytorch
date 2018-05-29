@@ -487,7 +487,6 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
-  torch::autograd::initAutogradClosureBindings(module);
   torch::jit::initJITBindings(module);
   torch::onnx::initONNXBindings(module);
   torch::autograd::initNNFunctions(module);

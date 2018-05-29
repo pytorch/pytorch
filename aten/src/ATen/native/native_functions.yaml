@@ -152,9 +152,17 @@
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
 
+- func: bernoulli(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli(Tensor self, double p, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli(Tensor self) -> Tensor
+
 - func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
 
-- func: bernoulli_(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
+- func: bernoulli_(Tensor self, double p, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli_(Tensor self) -> Tensor
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
   variants: function
@@ -537,7 +545,7 @@
   variants: function
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
-- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor) 
+- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
   dispatch:
     CPU: _gesv_helper_cpu
     CUDA: _gesv_helper_cuda
@@ -662,6 +670,11 @@
   dispatch:
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
+
+- func: logsumexp(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: logsumexp_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
@@ -1014,6 +1027,8 @@
     CPU: _prod_out_cpu
     CUDA: _prod_out_cuda
 
+- func: t(Tensor self) -> Tensor
+
 - func: t_(Tensor self) -> Tensor
   variants: method
 
@@ -1042,6 +1057,8 @@
   dispatch:
     CPU: _tanh_out_cpu
     CUDA: _tanh_out_cuda
+
+- func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
