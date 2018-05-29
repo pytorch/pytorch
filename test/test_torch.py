@@ -6400,7 +6400,7 @@ class TestTorch(TestCase):
     def test_serialization_container_filelike(self):
         self._test_serialization_container('filelike', BytesIOContext)
 
-    def test_serialization_map_location(self):
+    def test_serialization_load_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
 
         def map_location(storage, loc):
@@ -6445,6 +6445,69 @@ class TestTorch(TestCase):
                 torch.cuda.FloatTensor,
                 torch.device('cuda', torch.cuda.device_count() - 1)
             )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "no CUDA")
+    def test_serialization_save_map_location(self):
+        def check(devices, map_location):
+            input_device, intended_device = devices
+            tensor = torch.randn(3, 4, device=input_device)
+            buf = io.BytesIO()
+            torch.save(tensor, buf, map_location=map_location)
+            buf.seek(0)
+            loaded_tensor = torch.load(buf)
+            self.assertEqual(loaded_tensor.device, torch.device(intended_device))
+            self.assertEqual(loaded_tensor.to(input_device), tensor)
+
+        def map_location_cpu(storage):
+            return torch.device('cpu:0')
+
+        def map_location_gpu0(storage):
+            return torch.device('cuda:0')
+
+        # Check mapping to CPU
+        check(('cuda:0', 'cpu'), 'cpu')
+        check(('cuda:0', 'cpu'), 'cpu:0')
+        check(('cuda:0', 'cpu'), torch.device('cpu'))
+        check(('cuda:0', 'cpu'), torch.device('cpu', 0))
+        check(('cuda:0', 'cpu'), map_location_cpu)
+        check(('cuda:0', 'cpu'), {'cuda:0': 'cpu:0'})
+
+        # Check mapping to GPU 0
+        check(('cpu', 'cuda:0'), 'cuda:0')
+        check(('cpu', 'cuda:0'), 'cuda')
+        check(('cpu', 'cuda:0'), torch.device('cuda'))
+        check(('cpu', 'cuda:0'), torch.device('cuda', 0))
+        check(('cpu', 'cuda:0'), map_location_gpu0)
+        check(('cpu', 'cuda:0'), {'cpu': 'cuda:0'})
+
+        # Check mapping to last gpu
+        last_gpu = 'cuda:{}'.format(torch.cuda.device_count() - 1)
+        check(('cpu', last_gpu), last_gpu)
+        check(('cuda:0', last_gpu), lambda s: last_gpu)
+        check(('cuda:0', last_gpu), {'cuda:0': last_gpu})
+
+        # Check dictionary works as intended
+        mapping = {'cuda:0': 'cpu', 'cpu': 'cuda:0'}
+        check(('cpu', 'cuda:0'), mapping)
+        check(('cuda:0', 'cpu'), mapping)
+
+        # Check dictionary works with cpu:0
+        mapping = {'cuda:0': 'cpu:0', 'cpu:0': 'cuda:0'}
+        check(('cpu', 'cuda:0'), mapping)
+        check(('cuda:0', 'cpu'), mapping)
+
+        # Check dictionary None works
+        mapping = {'cuda:0': 'cpu'}
+        check(('cpu', 'cpu'), mapping)
+        check(('cuda:0', 'cpu'), mapping)
+
+        # Check function None works
+        def map_location_default(storage):
+            return None
+
+        check(('cpu', 'cpu'), map_location_default)
+        check(('cuda:0', 'cuda:0'), map_location_default)
+        check((last_gpu, last_gpu), map_location_default)
 
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)

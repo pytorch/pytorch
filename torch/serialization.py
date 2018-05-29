@@ -49,6 +49,23 @@ def register_package(priority, tagger, deserializer):
     _package_registry.sort()
 
 
+def _device_to_tag(device):
+    '''
+    Maps a torch.device or a device-like string to a location tag.
+    If device-like string, verifies it and formats it.
+    '''
+    if isinstance(device, str):
+        device = torch.device(device)
+
+    if device.type == 'cpu':
+        # We save 'cpu' locations without their index.
+        return device.type
+    elif device.type == 'cuda':
+        idx = 0 if device.index is None else device.index
+        return '{}:{}'.format(device.type, idx)
+    raise RuntimeError('Unable to get location tag for: ' + device)
+
+
 def _cpu_tag(obj):
     if type(obj).__module__ == 'torch':
         return 'cpu'
@@ -134,10 +151,56 @@ def _is_real_file(f):
         return False
 
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
+def _save_location_fn(map_location):
+    def default_save_location(storage):
+        return location_tag(storage)
+
+    if map_location is None:
+        save_location = default_save_location
+    elif isinstance(map_location, dict):
+        sanitized_map = {}
+        for tag in map_location.keys():
+            sanitized_tag = _device_to_tag(tag)
+            sanitized_map[sanitized_tag] = map_location[tag]
+
+        def save_location(storage):
+            tag = location_tag(storage)
+            location = sanitized_map.get(tag, tag)
+            return _device_to_tag(location)
+    elif isinstance(map_location, _string_classes):
+        def save_location(storage):
+            return _device_to_tag(map_location)
+    elif isinstance(map_location, torch.device):
+        def save_location(storage):
+            return _device_to_tag(map_location)
+    else:
+        # map_location is a callable
+        def save_location(storage):
+            result = map_location(storage)
+            if result is None:
+                return default_save_location(storage)
+            return _device_to_tag(result)
+    return save_location
+
+
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, map_location=None):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
+
+    :attr:`map_location` is used to determine how to remap storage locations.
+    - If :attr:`map_location` is a callable, it should have the signature
+      (storage) -> torch.device or None. If ``map_location(storage) == None``,
+      then the storage is not remapped to another device.
+    - If :attr:`map_location` is a :class:`torch.device`, all storages are
+      remapped to this location.
+    - If :attr:`map_location` is a dict, it should be a mapping from location tags to
+      `torch.device`. It will be used to remap devices of the storages
+      (keys), to ones that specify where to put the storages (values).
+
+    .. note::
+        A (string) location tag may be used in place of a :class:`torch.device`
+        where mentioned above. 'cuda:0', 'cuda', 'cpu' are examples of location tags.
 
     Args:
         obj: saved object
@@ -145,6 +208,18 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
            containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
+        map_location: a function, torch.device, string or a dict specifying how
+            to remap storage locations.
+
+    .. note::
+        Using :attr:`map_location` does not change the devices your storages
+        currently reside on. Instead, it remaps the storage locations so that the
+        storages are recorded as existing on the desired devices.
+
+    .. note::
+        The function signature of :attr:`map_location` here is different from the
+        that used by :func:`torch.load`: here, :attr:`map_location` should return a
+        :class:`torch.device`.
 
     .. warning::
         If you are using Python 2, torch.save does NOT support StringIO.StringIO
@@ -157,14 +232,26 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         >>> # Save to file
         >>> x = torch.tensor([0, 1, 2, 3, 4])
         >>> torch.save(x, 'tensor.pt')
+
         >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
+
+        >>> # map_location
+        >>> t = torch.tensor([0, 1, 2, 3], device='cuda:1')
+        >>>
+        >>> # save the tensor to be loaded by default on the cpu device
+        >>> torch.save(t, 'tensor.pt', map_location='cpu')
+        >>>
+        >>> # save the tensor, mapping 'cuda:1' to 'cpu':
+        >>> map_location = { 'cuda:1': 'cpu' }
+        >>> torch.save(t, 'tensor.pt', map_location=map_location)
     """
-    return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module, pickle_protocol))
+    return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module,
+                                                    pickle_protocol, map_location))
 
 
-def _save(obj, f, pickle_module, pickle_protocol):
+def _save(obj, f, pickle_module, pickle_protocol, map_location):
     if sys.version_info[0] == 2:
         import StringIO
         if isinstance(f, StringIO.StringIO):
@@ -176,6 +263,8 @@ def _save(obj, f, pickle_module, pickle_protocol):
     import torch.nn as nn
     serialized_container_types = {}
     serialized_storages = {}
+
+    save_location = _save_location_fn(map_location)
 
     def persistent_id(obj):
         # FIXME: the docs say that persistent_id should only return a string
@@ -200,7 +289,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
             storage_type = normalize_storage_type(type(obj))
             root, offset = obj._root_storage()
             root_key = str(root._cdata)
-            location = location_tag(obj)
+            location = save_location(obj)
             serialized_storages[root_key] = root
             is_view = obj._cdata != root._cdata
             if is_view:
