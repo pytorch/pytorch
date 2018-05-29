@@ -25,6 +25,7 @@ class OptimizationPass {
  public:
   OptimizationPass(NNModule* nn) : nn_(nn) {}
   virtual void run() = 0;
+  virtual ~OptimizationPass() = 0;
 
  protected:
   NNModule* nn_;

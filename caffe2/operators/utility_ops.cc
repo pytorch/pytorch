@@ -482,6 +482,13 @@ trailing empty sequence lengths can't be properly recovered from segment ids.
 OPERATOR_SCHEMA(LengthsToRanges)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
+      out_shape.push_back(2);
+      return vector<TensorShape>{
+          CreateTensorShape(out_shape, in[0].data_type())};
+    })
     .SetDoc(R"DOC(
 Given a vector of segment lengths, calculates offsets of each segment and packs
 them next to the lengths. For the input vector of length N the output is a Nx2

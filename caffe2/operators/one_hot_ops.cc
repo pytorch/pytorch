@@ -57,6 +57,16 @@ vector<TensorShape> TensorInferenceForBatchOneHot(
       CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
 }
 
+vector<TensorShape> TensorInferenceForBucketBatchOneHot(
+    const OperatorDef& /* def */,
+    const vector<TensorShape>& in) {
+  std::vector<TIndex> output_dims(2);
+  output_dims[0] = in[0].dims(0); // N
+  output_dims[1] = in[1].dims(0) + in[2].dims(0); // vals.size() + length.size()
+  return vector<TensorShape>{
+      CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+}
+
 OpSchema::Cost CostInferenceForBatchOneHot(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
@@ -228,7 +238,8 @@ For example
         0,
         "output",
         "output matrix that expands each input column with one hot encoding"
-        "based on the bucketization");
+        "based on the bucketization")
+    .TensorInferenceFunction(TensorInferenceForBucketBatchOneHot);
 
 OPERATOR_SCHEMA(BatchOneHot)
     .NumInputs(3)
