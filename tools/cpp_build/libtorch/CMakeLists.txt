@@ -6,6 +6,7 @@ else()
   cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
   include(CMakeDependentOption)
   option(USE_CUDA "Use CUDA" ON)
+  option(TORCH_BUILD_TEST "Build torch test binaries" ON)
 
   # Legacy options, which we will eventually remove
   cmake_dependent_option(
@@ -17,13 +18,6 @@ else()
 endif()
 if (NOT USE_CUDA)
   set(NO_CUDA ON)
-endif()
-
-# TODO: Enable tests on Mac as soon as possible
-if (APPLE)
-  set(TORCH_BUILD_TEST OFF)
-else()
-  set(TORCH_BUILD_TEST ON)
 endif()
 
 cmake_policy(VERSION 3.0)
