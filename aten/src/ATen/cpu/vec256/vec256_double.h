@@ -109,6 +109,9 @@ public:
   Vec256<double> cos() const {
     return map(std::cos);
   }
+  Vec256<double> tanh() const {
+    return map(std::tanh);
+  }
   Vec256<double> ceil() const {
     return _mm256_ceil_pd(values);
   }
