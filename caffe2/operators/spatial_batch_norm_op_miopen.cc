@@ -245,12 +245,15 @@ bool MIOpenSpatialBNOp::DoRunWithType()
     }
     return true;
 }
-// TODO enable fp16 mode
 bool MIOpenSpatialBNOp::RunOnDevice()
 {
     if(Input(0).IsType<float>())
     {
         return DoRunWithType<float, float>();
+    }
+    if(Input(0).IsType<float16>())
+    {
+        return DoRunWithType<float16, float>();
     }
     else
     {
@@ -262,7 +265,6 @@ bool MIOpenSpatialBNOp::RunOnDevice()
 template <typename T, typename M>
 bool MIOpenSpatialBNGradientOp::DoRunWithType()
 {
-    // QoL
     typedef typename miopenTypeWrapper<T>::BNParamType BNParamType;
 
     auto& X     = Input(INPUT);
@@ -321,12 +323,15 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType()
                                                     saved_var_data));
     return true;
 }
-// TODO enable fp16
 bool MIOpenSpatialBNGradientOp::RunOnDevice()
 {
     if(Input(0).IsType<float>())
     {
         return DoRunWithType<float, float>();
+    }
+    if(Input(0).IsType<float16>())
+    {
+        return DoRunWithType<float16, float>();
     }
     else
     {
