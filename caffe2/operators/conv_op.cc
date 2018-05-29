@@ -120,6 +120,7 @@ and a bias blob and computes the output. {conv_doc})DOC";
         "Y",
         "Output data blob, of shape $(N, C_{out}, H_{out}, W_{out})$, that contains the result of the convolution."
       );
+      /*
     schema.Arg(
         "kernel",
         "*(type: int; default: 0)* Desired kernel size. If left at default the kernel size will be inferred from the input $filter$ blob.",
@@ -160,6 +161,7 @@ and a bias blob and computes the output. {conv_doc})DOC";
         "*(type: int; default: 0)*",
         0
     );
+    */
   };
 }
 REGISTER_CPU_OPERATOR(Conv, ConvOp<float, CPUContext>);
