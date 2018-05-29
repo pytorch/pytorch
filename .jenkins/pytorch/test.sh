@@ -25,6 +25,8 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # TODO: Figure out how to avoid hard-coding these paths
     export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
     export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
+    # Increase stack size, because ASAN red zones use more stack
+    ulimit -s 81920
 
     (cd test && python -c "import torch")
     echo "The next two invocations are expected to crash; if they don't that means ASAN is misconfigured"
