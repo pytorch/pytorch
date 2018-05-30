@@ -2,8 +2,8 @@
 
 #include "Store.hpp"
 
-#include <mutex>
 #include <condition_variable>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -32,19 +32,20 @@ class Semaphore {
   std::condition_variable cv_;
 };
 
-
-inline void set(Store& store,
-                const std::string& key,
-                const std::string& value) {
+inline void set(
+    Store& store,
+    const std::string& key,
+    const std::string& value) {
   std::vector<uint8_t> data(value.begin(), value.end());
   store.set(key, data);
 }
 
-inline void check(Store& store,
-                  const std::string& key,
-                  const std::string& expected) {
+inline void check(
+    Store& store,
+    const std::string& key,
+    const std::string& expected) {
   auto tmp = store.get(key);
-  auto actual = std::string((const char*) tmp.data(), tmp.size());
+  auto actual = std::string((const char*)tmp.data(), tmp.size());
   if (actual != expected) {
     throw std::runtime_error("Expected " + expected + ", got " + actual);
   }

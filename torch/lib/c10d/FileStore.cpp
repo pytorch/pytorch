@@ -1,11 +1,11 @@
 #include "FileStore.hpp"
 
 #include <assert.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <sys/file.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <chrono>
 #include <functional>
@@ -15,19 +15,16 @@
 #include <system_error>
 #include <thread>
 
-#define SYSASSERT(rv, ...)                                              \
-  if ((rv) < 0) {                                                       \
-    throw std::system_error(                                            \
-        errno,                                                          \
-        std::system_category(),                                         \
-        ##__VA_ARGS__);                                                 \
+#define SYSASSERT(rv, ...)                                                 \
+  if ((rv) < 0) {                                                          \
+    throw std::system_error(errno, std::system_category(), ##__VA_ARGS__); \
   }
 
 namespace c10d {
 
 namespace {
 
-template<typename F>
+template <typename F>
 typename std::result_of<F()>::type syscall(F fn) {
   while (true) {
     auto rv = fn();
@@ -121,7 +118,7 @@ class File {
     while (count > 0) {
       auto rv = syscall(std::bind(::write, fd_, buf, count));
       SYSASSERT(rv, "write");
-      buf = (uint8_t*) buf + count;
+      buf = (uint8_t*)buf + count;
       count -= rv;
     }
   }
@@ -130,7 +127,7 @@ class File {
     while (count > 0) {
       auto rv = syscall(std::bind(::read, fd_, buf, count));
       SYSASSERT(rv, "read");
-      buf = (uint8_t*) buf + count;
+      buf = (uint8_t*)buf + count;
       count -= rv;
     }
   }
@@ -189,14 +186,9 @@ off_t refresh(
 
 } // namespace
 
-FileStore::FileStore(const std::string& path)
-    : Store(),
-      path_(path),
-      pos_(0) {
-}
+FileStore::FileStore(const std::string& path) : Store(), path_(path), pos_(0) {}
 
-FileStore::~FileStore() {
-}
+FileStore::~FileStore() {}
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   File file(path_, O_RDWR | O_CREAT);
