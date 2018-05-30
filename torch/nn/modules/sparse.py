@@ -22,13 +22,14 @@ class Embedding(Module):
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
-        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See Notes for
-                                    more details regarding sparse gradients.
+        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
+                                 See Notes for more details regarding sparse gradients.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
 
     Shape:
+
         - Input: LongTensor of arbitrary shape containing the indices to extract
         - Output: `(*, embedding_dim)`, where `*` is the input shape
 
@@ -179,10 +180,11 @@ class EmbeddingBag(Module):
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
-        mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag. Default: ``"mean"``
-        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See Notes for
-                                    more details regarding sparse gradients. Note: this option is not supported when
-                                    ``mode="max"``.
+        mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+                                 Default: ``"mean"``
+        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See
+                                 Notes for more details regarding sparse gradients. Note: this option is not
+                                 supported when ``mode="max"``.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape ``(num_embeddings x embedding_dim)``
