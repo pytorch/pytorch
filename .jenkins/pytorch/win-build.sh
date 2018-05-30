@@ -70,6 +70,7 @@ set CUDNN_LIB_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\l
 set CUDA_TOOLKIT_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 
+:: Target only our CI GPU machine's CUDA arch to speed up the build
 set TORCH_CUDA_ARCH_LIST=5.2
 
 sccache --stop-server || set ERRORLEVEL=0
