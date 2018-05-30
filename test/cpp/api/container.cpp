@@ -1,6 +1,13 @@
 #include <catch.hpp>
 
-#include <torch/torch.h>
+#include <torch/nn/module.h>
+#include <torch/nn/modules/batchnorm.h>
+#include <torch/nn/modules/conv.h>
+#include <torch/nn/modules/dropout.h>
+#include <torch/nn/modules/embedding.h>
+#include <torch/nn/modules/functional.h>
+#include <torch/nn/modules/linear.h>
+#include <torch/tensor.h>
 
 #include <test/cpp/api/util.h>
 
@@ -15,7 +22,7 @@ class TestModel : public Module {
     l3 = register_module("l3", Linear(5, 100).build());
   }
 
-  variable_list forward(variable_list input) {
+  std::vector<Variable> forward(std::vector<Variable> input) {
     return input;
   }
 
@@ -31,7 +38,7 @@ class NestedModel : public Module {
         register_parameter("param", at::CPU(at::kFloat).tensor({3, 2, 21}));
   }
 
-  variable_list forward(variable_list input) {
+  std::vector<Variable> forward(std::vector<Variable> input) {
     return input;
   };
 
@@ -217,7 +224,7 @@ TEST_CASE("containers") {
   SECTION("functional") {
     bool was_called = false;
     // clang-format off
-    auto functional = Functional([&was_called](variable_list input) {
+    auto functional = Functional([&was_called](std::vector<Variable> input) {
       was_called = true;
       return input;
     }).build();

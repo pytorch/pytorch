@@ -14,7 +14,7 @@ void Embedding::reset() {
   table_.data().normal_(0, 1);
 }
 
-variable_list Embedding::forward(variable_list input) {
+std::vector<Variable> Embedding::forward(std::vector<Variable> input) {
   return {at::embedding(table_, /*indices=*/input[0])};
 }
 

@@ -244,7 +244,8 @@ set(TORCH_SRCS
 
 if (NOT NO_API)
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp

@@ -1,6 +1,7 @@
 #include <torch/nn/modules/rnn.h>
 
 #include <torch/nn/modules/dropout.h>
+#include <torch/utils.h>
 
 #include <ATen/Error.h>
 #include <ATen/optional.h>
@@ -20,7 +21,7 @@
 namespace torch {
 namespace nn {
 namespace {
-Variable linear(Tensor x, Tensor w, Tensor b) {
+Variable linear(at::Tensor x, at::Tensor w, at::Tensor b) {
   if (x.ndimension() == 2 && b.defined()) {
     // Fused op is marginally faster
     assert(x.size(1) == w.size(1));
@@ -90,8 +91,9 @@ void RNNBase<Derived>::reset() {
 }
 
 template <typename Derived>
-variable_list RNNBase<Derived>::forward(variable_list inputs) {
-  variable_list inp = {inputs[0], inputs.size() > 1 ? inputs[1] : Variable()};
+std::vector<Variable> RNNBase<Derived>::forward(std::vector<Variable> inputs) {
+  std::vector<Variable> inp = {inputs[0],
+                               inputs.size() > 1 ? inputs[1] : Variable()};
   if (cudnn_mode_.has_value() && at::cudnn_is_acceptable(inp[0]) &&
       dropout_ == 0) {
     return {CUDNN_forward(inp)};
@@ -101,8 +103,8 @@ variable_list RNNBase<Derived>::forward(variable_list inputs) {
 }
 
 template <typename Derived>
-std::vector<Tensor> RNNBase<Derived>::flat_weights() const {
-  std::vector<Tensor> flat;
+std::vector<at::Tensor> RNNBase<Derived>::flat_weights() const {
+  std::vector<at::Tensor> flat;
   for (int64_t layer = 0; layer < layers_; layer++) {
     flat.push_back(ihw_[layer]);
     flat.push_back(hhw_[layer]);
@@ -115,10 +117,11 @@ std::vector<Tensor> RNNBase<Derived>::flat_weights() const {
 }
 
 template <typename Derived>
-variable_list RNNBase<Derived>::autograd_forward(variable_list inputs) {
+std::vector<Variable> RNNBase<Derived>::autograd_forward(
+    std::vector<Variable> inputs) {
   auto inp = inputs[0];
 
-  std::vector<Tensor> state;
+  std::vector<at::Tensor> state;
   auto has_hidden = inputs[1].defined();
   auto layer_dimension = has_hidden ? inputs[1].ndimension() - 3 : -1;
   for (int64_t layer = 0; layer < layers_; layer++) {
@@ -149,7 +152,7 @@ variable_list RNNBase<Derived>::autograd_forward(variable_list inputs) {
   if (has_cell_state_) {
     state_output.transpose_(0, 1);
   }
-  return variable_list({output, state_output});
+  return std::vector<Variable>({output, state_output});
 }
 
 template <typename Derived>
@@ -178,7 +181,7 @@ void RNNBase<Derived>::flatten_parameters_for_cudnn() {
   }
 
   {
-    no_grad_guard guard;
+    NoGradGuard guard;
     flat_weights_ = at::_cudnn_rnn_flatten_weight(
         flat_weights(),
         /*weight_stride=*/with_bias_ ? 4 : 2,
@@ -195,7 +198,8 @@ void RNNBase<Derived>::flatten_parameters_for_cudnn() {
 }
 
 template <typename Derived>
-variable_list RNNBase<Derived>::CUDNN_forward(variable_list inputs) {
+std::vector<Variable> RNNBase<Derived>::CUDNN_forward(
+    std::vector<Variable> inputs) {
   auto x = inputs[0];
   Variable hx, cx;
   if (inputs[1].defined()) {
@@ -255,7 +259,7 @@ variable_list RNNBase<Derived>::CUDNN_forward(variable_list inputs) {
   }
 
   Variable output = std::get<0>(tup);
-  return variable_list({output, hidden_output});
+  return std::vector<Variable>({output, hidden_output});
 }
 
 template <typename Derived>
@@ -290,7 +294,9 @@ LSTM::LSTM(int64_t input_size, int64_t hidden_size)
           /*number_of_gates=*/4,
           /*has_cell_state=*/true) {}
 
-variable_list LSTM::cell_forward(variable_list inputs, int64_t layer) {
+std::vector<Variable> LSTM::cell_forward(
+    std::vector<Variable> inputs,
+    int64_t layer) {
   auto x = inputs[0];
   auto hid = inputs[1].defined() ? inputs[1]
                                  : x.type().zeros({2, x.size(0), hidden_size_});
@@ -317,7 +323,9 @@ variable_list LSTM::cell_forward(variable_list inputs, int64_t layer) {
 GRU::GRU(int64_t input_size, int64_t hidden_size)
     : RNNBase(input_size, hidden_size, CuDNNMode::GRU, /*number_of_gates=*/3) {}
 
-variable_list GRU::cell_forward(variable_list inputs, int64_t layer) {
+std::vector<Variable> GRU::cell_forward(
+    std::vector<Variable> inputs,
+    int64_t layer) {
   auto x = inputs[0];
   auto hx = inputs[1].defined() ? inputs[1]
                                 : x.type().zeros({x.size(0), hidden_size_});
@@ -355,7 +363,9 @@ RNN& RNN::relu() {
   return activation(Activation::ReLU);
 }
 
-variable_list RNN::cell_forward(variable_list inputs, int64_t layer) {
+std::vector<Variable> RNN::cell_forward(
+    std::vector<Variable> inputs,
+    int64_t layer) {
   auto x = inputs[0];
   auto hx = inputs[1].defined() ? inputs[1]
                                 : x.type().zeros({x.size(0), hidden_size_});

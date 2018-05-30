@@ -1,6 +1,11 @@
 #include <catch.hpp>
 
-#include <torch/torch.h>
+#include <torch/nn/modules/batchnorm.h>
+#include <torch/nn/modules/conv.h>
+#include <torch/nn/modules/dropout.h>
+#include <torch/nn/modules/linear.h>
+#include <torch/optimizers.h>
+#include <torch/utils.h>
 
 #include <ATen/Error.h>
 
@@ -214,7 +219,7 @@ bool test_mnist(
     }
   }
 
-  no_grad_guard guard;
+  NoGradGuard guard;
   auto result = std::get<1>(forward_op(Var(tedata, false)).max(1));
   Variable correct = (result == Var(telabel)).toType(at::kFloat);
   std::cout << "Num correct: " << correct.data().sum().toCFloat() << " out of"
@@ -237,7 +242,7 @@ TEST_CASE("integration") {
     std::vector<Variable> saved_values;
     std::vector<float> rewards;
 
-    auto forward = [&](variable_list inp) {
+    auto forward = [&](std::vector<Variable> inp) {
       auto x = linear->forward(inp)[0].clamp_min(0);
       Variable actions = policyHead->forward({x})[0];
       Variable value = valueHead->forward({x})[0];

@@ -35,7 +35,7 @@ class Conv : public torch::nn::CloneableModule<Derived> {
   class Conv##dimensions##d : public Conv<(dimensions), Conv##dimensions##d> { \
    public:                                                                     \
     using Conv<(dimensions), Conv##dimensions##d>::Conv;                       \
-    variable_list forward(variable_list);                                      \
+    std::vector<Variable> forward(std::vector<Variable>);                                      \
   }
 
 CONV_D(1);
