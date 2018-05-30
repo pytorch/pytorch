@@ -10,14 +10,14 @@ namespace torch { namespace nn {
 // Sequential.
 class Functional : public torch::nn::CloneableModule<Functional> {
  public:
-  using Function = std::function<variable_list(variable_list)>;
+  using Function = std::function<std::vector<Variable>(std::vector<Variable>)>;
 
   explicit Functional(Function function);
   explicit Functional(std::function<Variable(Variable)> function);
 
   void reset() override;
 
-  variable_list forward(variable_list input);
+  std::vector<Variable> forward(std::vector<Variable> input);
 
   TORCH_ATTR(Function, function);
 };

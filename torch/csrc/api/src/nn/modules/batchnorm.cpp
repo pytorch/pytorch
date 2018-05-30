@@ -1,5 +1,7 @@
 #include <torch/nn/modules/batchnorm.h>
 
+#include <torch/cuda.h>
+
 #include <cstdint>
 
 namespace torch {
@@ -22,7 +24,7 @@ void BatchNorm::reset() {
   }
 }
 
-variable_list BatchNorm::forward(variable_list inputs) {
+std::vector<Variable> BatchNorm::forward(std::vector<Variable> inputs) {
   auto& input = inputs[0];
   auto& running_mean_ = (stateful_ ? this->running_mean_ : inputs[1]);
   auto& running_variance_ = (stateful_ ? this->running_variance_ : inputs[2]);
@@ -44,9 +46,9 @@ variable_list BatchNorm::forward(variable_list inputs) {
       is_training(),
       momentum_,
       eps_,
-      hasCudnn());
+      torch::cuda::cudnn_is_available());
 
-  return variable_list({output});
+  return std::vector<Variable>({output});
 }
 } // namespace nn
 } // namespace torch

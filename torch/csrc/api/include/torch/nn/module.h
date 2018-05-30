@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/detail.h"
+#include <torch/tensor.h>
 
 #include <torch/csrc/autograd/variable.h>
 

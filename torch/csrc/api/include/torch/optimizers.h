@@ -1,10 +1,24 @@
 #pragma once
 
 #include <torch/nn/module.h>
-#include "torch/detail.h"
+#include <torch/tensor.h>
 
 #include "cereal/access.hpp"
 #include "cereal/cereal.hpp"
+
+#include <deque>
+#include <memory>
+#include <unordered_map>
+#include <vector>
+
+#define TORCH_AUTOGRAD_OPTIMIZER_CLASS(Type) \
+  class Type : public torch::Optimizer_CRTP<Type>
+#define TORCH_AUTOGRAD_KWARG(CLS, TYP, NAME, DEFAULT, OPTION) \
+  TYP NAME##_ = DEFAULT;                                      \
+  CLS& NAME(TYP x = OPTION) {                                 \
+    NAME##_ = x;                                              \
+    return *this;                                             \
+  }
 
 namespace torch {
 class OptimizerImpl {
@@ -65,7 +79,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(LBFGS) {
  private:
   friend class cereal::access;
   LBFGS() {}
-  Tensor gather_flat_grad();
+  at::Tensor gather_flat_grad();
   void add_grad(const at::Scalar& step_size, const at::Tensor& update);
 
   at::Tensor d, H_diag, prev_flat_grad;
@@ -85,7 +99,8 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(SGD) {
   TORCH_AUTOGRAD_KWARG(SGD, bool, nesterov, false, true);
   double lr_;
 
-  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
+  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss)
+      override;
 
   void init_state() override;
 
@@ -107,7 +122,8 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
   TORCH_AUTOGRAD_KWARG(Adagrad, double, lr_decay, 0, 0);
   TORCH_AUTOGRAD_KWARG(Adagrad, double, weight_decay, 0, 0);
   double lr_;
-  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
+  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss)
+      override;
   void init_state() override;
 
   template <class Archive>
@@ -134,7 +150,8 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(RMSprop) {
   TORCH_AUTOGRAD_KWARG(RMSprop, bool, centered, false, true);
 
   double lr_;
-  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
+  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss)
+      override;
   void init_state() override;
 
   template <class Archive>
@@ -162,7 +179,8 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adam) {
   TORCH_AUTOGRAD_KWARG(Adam, double, eps, 1e-8, 1e-8);
   TORCH_AUTOGRAD_KWARG(Adam, bool, amsgrad, false, true);
   double lr_;
-  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
+  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss)
+      override;
   void init_state() override;
 
   template <class Archive>
@@ -181,5 +199,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adam) {
   std::unordered_map<std::string, at::Tensor> exp_avg_sq_buffer_;
   std::unordered_map<std::string, at::Tensor> max_exp_avg_sq_buffer_;
 };
+
+using Optimizer = std::shared_ptr<OptimizerImpl>;
 
 } // namespace torch

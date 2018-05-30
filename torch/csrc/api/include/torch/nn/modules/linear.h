@@ -15,9 +15,7 @@ class Linear : public torch::nn::CloneableModule<Linear> {
 
   void reset() override;
 
-  variable_list forward(variable_list);
-
-  TORCH_AUTOGRAD_KWARG(Linear, bool, no_bias, false, true);
+  std::vector<Variable> forward(std::vector<Variable>);
 
   TORCH_ATTR(int64_t, in);
   TORCH_ATTR(int64_t, out);
