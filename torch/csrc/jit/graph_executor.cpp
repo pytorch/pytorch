@@ -421,6 +421,9 @@ private:
 
     // Decompose addmm nodes to add + mm, so expands can be inserted and
     // gradients accumulated on the backward pass
+    //
+    // In the future, if we need more passes like this, we should convert this
+    // into a generic canonicalization pass.
     DecomposeAddmm(g);
     // clean up replaceIfUndef nodes
     specializeUndef(*g, spec);
