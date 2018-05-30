@@ -646,6 +646,17 @@ class TestCaffe2Backend(unittest.TestCase):
         m2 = Variable(torch.randn(4, 5))
         self.run_model_test(MyModel(), train=False, input=(ma, m1, m2), batch_size=BATCH_SIZE, use_gpu=False)
 
+    # test for a pytorch optimization pass, see https://github.com/pytorch/pytorch/pull/7872
+    def test_consecutive_transposes(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x):
+                return x.transpose(1, 2).transpose(2, 3)
+        x = Variable(torch.randn(5, 6, 7, 8))
+        self.run_model_test(MyModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_sum(self):
         shape = (3, 4, 5)
         for params in [{}] + [{'dim': i} for i in range(len(shape))]:
