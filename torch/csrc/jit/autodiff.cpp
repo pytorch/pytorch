@@ -95,7 +95,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
             dmat2 = inputs.at(0).t().mm(grads.at(0));
           }
         } else {
-          dmat2 = grads.at(0).mm(inputs.at(1).t());
+          dmat2 = inputs.at(0).t().mm(grads.at(0));
         }
         return {dmat1, dmat2};
       }
