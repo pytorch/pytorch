@@ -903,6 +903,28 @@ class TestJit(TestCase):
         fn(x)
         fn(y)
 
+    def test_decompose_addmm(self):
+        @torch.jit.script
+        def addmm(mat, mat1, mat2, alpha, beta):
+            a = mat.addmm(mat1, mat2)
+            b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
+            c = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
+            d = mat.addmm(mat1, mat2, alpha=alpha, beta=beta)
+
+            return a + b + c + d
+
+        mat = torch.randn(2, 2)
+        mat1 = torch.randn(2, 4)
+        mat2 = torch.randn(4, 2)
+        alpha = torch.FloatTensor([123.0])
+        beta = torch.FloatTensor([321.0])
+
+        out_ref = addmm(mat, mat1, mat2, alpha, beta)
+        self.run_pass('decompose_addmm', addmm.graph)
+        out_test = addmm(mat, mat1, mat2, alpha, beta)
+        self.assertEqual(out_ref, out_test)
+        self.assertExpected(canonical(addmm.graph))
+
 
 class TestScript(TestCase):
 
@@ -2808,6 +2830,51 @@ class TestScript(TestCase):
             return slice1 + slice2
 
         self.checkScript(t, (torch.zeros(3, 2, 3),))
+
+    def test_addmm_grad(self):
+        """ This test checks several things:
+            1. An expand node was inserted before the addmm operating on the
+               bias term.
+            2. The fused form of addmm appears in the ultimate graph that's
+               executed.
+            3. A sum op was emitted for accumulating gradients along the 0th
+               (expanded) dimension of the bias term.
+            4. The correct symbolic representation for the backward pass of the
+               mm operator was emitted (x.t() -> mm)
+
+            TODO: we should actually check these conditions once we have a way
+            to dump the GraphExecutor state. Namely the processed forward graph
+            and the backward graph.
+        """
+        @torch.jit.script
+        def addmm_grad_test(b, x, w):
+            return torch.addmm(b, x, w)
+
+        # Initialize param and input values
+        w_init = torch.rand(2, 5)
+        b_init = torch.rand(5)
+        x = torch.rand(3, 2)
+
+        # Clone trainable params
+        b = b_init.clone()
+        b.requires_grad_()
+        w = w_init.clone()
+        w.requires_grad_()
+
+        # Test symbolic differentiation
+        y = addmm_grad_test(b, x, w)
+        y.sum().backward()
+
+        # clone params for autograd reference
+        b_ref = b_init.clone()
+        b_ref.requires_grad_()
+        w_ref = w_init.clone()
+        w_ref.requires_grad_()
+        y_ref = torch.addmm(b_ref, x, w_ref)
+        y_ref.sum().backward()
+
+        self.assertEqual(w.grad, w_ref.grad)
+        self.assertEqual(b.grad, b_ref.grad)
 
 
 # Smoke tests for export methods
