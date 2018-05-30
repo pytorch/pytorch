@@ -923,7 +923,7 @@ class TestJit(TestCase):
         self.run_pass('decompose_addmm', addmm.graph)
         out_test = addmm(mat, mat1, mat2, alpha, beta)
         self.assertEqual(out_ref, out_test)
-        self.assertExpectedGraph(addmm.graph)
+        self.assertExpected(canonical(addmm.graph))
 
 
 class TestScript(TestCase):
