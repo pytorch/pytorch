@@ -15,6 +15,7 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/decompose_addmm.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
@@ -83,7 +84,8 @@ void initJITBindings(PyObject *module) {
      return py::reinterpret_steal<py::object>(python::unflatten(vars, desc));
    })
    .def("_jit_pass_onnx_block", BlockToONNX)
-   .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops);
+   .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
+   .def("_jit_pass_decompose_addmm", DecomposeAddmm);
 
   py::class_<GraphExecutor>(m, "GraphExecutor")
       .def(
