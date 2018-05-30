@@ -1,7 +1,9 @@
 #include <catch.hpp>
 
 #include <torch/expanding_array.h>
-#include <torch/torch.h>
+#include <torch/nn/modules/linear.h>
+#include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <torch/csrc/utils/memory.h>
 
@@ -14,7 +16,7 @@ using Catch::StartsWith;
 
 TEST_CASE("misc") {
   SECTION("no_grad") {
-    no_grad_guard guard;
+    NoGradGuard guard;
     auto model = Linear(5, 2).build();
     auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);
     auto y = model->forward({x})[0];
@@ -26,9 +28,9 @@ TEST_CASE("misc") {
 
   SECTION("CPU random seed") {
     int size = 100;
-    setSeed(7);
+    torch::manual_seed(7);
     auto x1 = Var(at::CPU(at::kFloat).randn({size}));
-    setSeed(7);
+    torch::manual_seed(7);
     auto x2 = Var(at::CPU(at::kFloat).randn({size}));
 
     auto l_inf = (x1.data() - x2.data()).abs().max().toCFloat();
@@ -39,9 +41,9 @@ TEST_CASE("misc") {
 TEST_CASE("misc_cuda", "[cuda]") {
   SECTION("CUDA random seed") {
     int size = 100;
-    setSeed(7);
+    torch::manual_seed(7);
     auto x1 = Var(at::CUDA(at::kFloat).randn({size}));
-    setSeed(7);
+    torch::manual_seed(7);
     auto x2 = Var(at::CUDA(at::kFloat).randn({size}));
 
     auto l_inf = (x1.data() - x2.data()).abs().max().toCFloat();

@@ -4,6 +4,7 @@
 #include <torch/nn/modules/sequential.h>
 #include <torch/optimizers.h>
 #include <torch/serialization.h>
+#include <torch/tensor.h>
 
 #include <test/cpp/api/util.h>
 

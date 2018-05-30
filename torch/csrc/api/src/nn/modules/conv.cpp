@@ -59,7 +59,7 @@ void Conv<D, Derived>::reset() {
   }
 }
 
-variable_list Conv1d::forward(variable_list input) {
+std::vector<Variable> Conv1d::forward(std::vector<Variable> input) {
   AT_ASSERT(input.front().ndimension() == 3);
 
   if (transposed_) {
@@ -77,7 +77,7 @@ variable_list Conv1d::forward(variable_list input) {
       input.front(), weight_, bias_, stride_, padding_, dilation_, groups_)};
 }
 
-variable_list Conv2d::forward(variable_list input) {
+std::vector<Variable> Conv2d::forward(std::vector<Variable> input) {
   AT_ASSERT(input.front().ndimension() == 4);
 
   if (transposed_) {
@@ -95,7 +95,7 @@ variable_list Conv2d::forward(variable_list input) {
       input.front(), weight_, bias_, stride_, padding_, dilation_, groups_)};
 }
 
-variable_list Conv3d::forward(variable_list input) {
+std::vector<Variable> Conv3d::forward(std::vector<Variable> input) {
   AT_ASSERT(input.front().ndimension() == 5);
 
   if (transposed_) {
