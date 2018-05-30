@@ -119,6 +119,6 @@ example below as well::
             p.start()
             processes.append(p)
         for p in processes:
-          p.join()
+            p.join()
 
 .. __: https://github.com/pytorch/examples/tree/master/mnist_hogwild

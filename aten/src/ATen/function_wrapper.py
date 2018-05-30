@@ -89,11 +89,18 @@ ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formal
 # the superclass.  But it doesn't seem to be harmful.
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
-    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
+    const auto& self_ty = *this;
+    (void)self_ty;
+    ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
+}
+""")
+TYPE_DERIVED_DEFINITION_NATIVE_MISSING = CodeTemplate("""\
+${return_type} ${Type}::${api_name}(${type_method_formals}) const {
+    AT_ERROR("${api_name} not supported on ${Type}");
 }
 """)
 TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
-${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
+${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
 
 # 6. add non-virtual declaration to Tensor.h
@@ -416,6 +423,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_list': List[AtFormal],
     'condition': str,
     'auto_gpu': bool,
+    'with_gil': bool,
     'cpu_half': bool,
     # options should be List[FunctionOption]
     'options': Any,
@@ -448,6 +456,8 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('returns', List[ReturnType]),
     ('inplace', bool),
     ('abstract', bool),
+    ('auto_gpu', bool),
+    ('with_gil', bool),
 ])
 
 
@@ -785,6 +795,8 @@ def create_generic(top_env, declarations):
             inplace=option['inplace'],
             # See Note [Abstract ATen methods]
             abstract=abstract,
+            auto_gpu=option.get('auto_gpu', True),
+            with_gil=option.get('with_gil', False),
         ))
 
     def native_get_formals(option, include_constants=False):
@@ -987,6 +999,8 @@ def create_generic(top_env, declarations):
             inplace=option['inplace'],
             # See Note [Abstract ATen methods]
             abstract=abstract,
+            auto_gpu=option.get('auto_gpu', True),
+            with_gil=option.get('with_gil', False),
         ))
 
     output_declarations = []  # type: List[OutputDeclaration]
@@ -1106,7 +1120,7 @@ def create_derived(backend_type_env, declarations):
         return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
 
     def handle_only_zero_dim(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
+        # type: (Environment, FunctionOption) -> Optional[List[str]]
         if option.get('zero_dim_tensor_only', False):
             check_name = option['zero_dim_dispatch_when_scalar']
             return [ZERO_DIM_ONLY.substitute(env, check_name=check_name)]
@@ -1155,7 +1169,7 @@ def create_derived(backend_type_env, declarations):
         is_nn = option['mode'] == 'NN'
         actuals = get_arguments(cimpl['arguments'], option)
         if is_cuda or is_nn:
-            actuals = ['context->thc_state'] + actuals
+            actuals = ['context->getTHCState()'] + actuals
 
         cname = cimpl['cname']
         if option.get('sparse', False):
@@ -1393,14 +1407,15 @@ def create_derived(backend_type_env, declarations):
                     backend_type_env['ScalarName'])
             if pair in option['backend_type_pairs']:
                 native_dispatch = dispatch.get(pair[0])
-                if native_dispatch is None:
-                    raise Exception('could not find backend {} in native function dispatch specification {}'
-                                    .format(pair[0], dispatch))
-                option['native_type_method_dispatch'] = native_dispatch
                 type_object_declarations.append(
                     TYPE_DERIVED_DECLARATION.substitute(env))
-                type_object_definitions.append(
-                    TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
+                if native_dispatch is None:
+                    type_object_definitions.append(
+                        TYPE_DERIVED_DEFINITION_NATIVE_MISSING.substitute(env))
+                else:
+                    option['native_type_method_dispatch'] = native_dispatch
+                    type_object_definitions.append(
+                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:

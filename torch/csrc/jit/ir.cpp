@@ -106,13 +106,10 @@ void PythonOp::cloneFrom(Node * other_) {
   this->cconv = other->cconv;
   Py_INCREF(other->pyobj.get());
   this->pyobj = THPObjectPtr(other->pyobj.get());
-  this->var_flags = other->var_flags;
   for(auto & sa : other->scalar_args) {
     Py_INCREF(sa.get());
     this->scalar_args.emplace_back(sa.get());
   }
-  this->tracing_autograd_python_function =
-      other->tracing_autograd_python_function;
 }
 
 }} // namespace torch::jit
@@ -207,11 +204,13 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   }
   out << "]";
 }
-void printAttributes(std::ostream & out, const Node * n) {
+void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
   auto names = n->attributeNames();
   int i = 0;
   for(auto name : names) {
+    if (ignore_subgraph && name == attr::Subgraph)
+      continue;
     if(i++ > 0)
       out << ", ";
     // TODO: debugging mode to see the qualifier.  We definitely
@@ -301,13 +300,12 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   IR_ELSEIFM_CONST(CppOp)
     out << "CppOp[" << value->name() << "]";
   IR_ELSE()
-    if(n->hasAttribute(attr::Subgraph)) {
-      if(groups) {
-        out << n->kind().toQualString() << "_" << groups->size();
-        groups->push_back(n);
-      } else {
-        out << n->kind().toQualString() << "[" << *n->g(attr::Subgraph) << "]";
+    if(n->hasAttribute(attr::Subgraph) && groups) {
+      out << n->kind().toQualString() << "_" << groups->size();
+      if (n->numAttributes() > 1) {
+        printAttributes(out, n, /*ignore_subgraph=*/true);
       }
+      groups->push_back(n);
     } else {
       out << n->kind().toQualString();
       if(n->hasAttributes()) {
@@ -664,6 +662,41 @@ std::shared_ptr<Graph> Graph::copy() {
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
+}
+
+inline Value* Value::setUniqueName(const std::string & name) {
+  if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
+    throw std::runtime_error("names may not be integers: " + name);
+  }
+
+  auto & names = node()->owningGraph()->unique_names_;
+
+  // clear any old name from the map
+  if(hasUniqueName()) {
+    names.erase(unique_name_);
+    unique_name_ = "";
+  }
+
+  // allow "" to clear the uniquename
+  if(name == "")
+    return this;
+
+  // if someone else has this name, then rename the other value
+  auto old_owner_of_name = names.find(name);
+  if(old_owner_of_name != names.end()) {
+    size_t suffix = 1;
+    std::string replacement_name;
+    do {
+      std::stringstream ss;
+      ss << name << "." << suffix++;
+      replacement_name = ss.str();
+    } while(names.count(replacement_name) > 0);
+    old_owner_of_name->second->setUniqueName(replacement_name);
+  }
+
+  names[name] = this;
+  unique_name_ = name;
+  return this;
 }
 
 }} // namespace torch::jit

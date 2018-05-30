@@ -17,6 +17,8 @@ from caffe2.python.control_ops_grad import \
     gen_do_gradient, gen_if_gradient, gen_while_gradient
 
 import caffe2.python._import_c_extension as C
+
+import copy
 import pickle
 import numpy as np
 import sys
@@ -118,6 +120,19 @@ def InferBlobDevices(net):
         for b in op.output:
             mapping[b] = op_device
     return mapping
+
+
+def InferOpBlobDevicesAsDict(op):
+    input_dev_list, output_dev_list = InferOpBlobDevices(op)
+    input_dict = {
+        op.input[i]: input_dev_list[i]
+        for i in range(len(op.input))
+    }
+    output_dict = {
+        op.output[i]: output_dev_list[i]
+        for i in range(len(op.output))
+    }
+    return input_dict, output_dict
 
 
 def InferOpBlobDevices(op):
@@ -351,7 +366,8 @@ def CreateOperator(
         operator.arg.extend(arg)
     # Add all other arguments
     for key, value in viewitems(kwargs):
-        operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
+        if value is not None:
+            operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
 
     if workspace.IsImmediate():
         workspace.RunOperatorImmediate(operator)
@@ -431,7 +447,7 @@ class IR(object):
         # a) ssa: a list of [op, in_versions, out_versions] recording the
         #    input and the output version of each operator, similar
         #    to a normal SSA form.
-        # b) input_count: a dictionary specifying for each blob and
+        # b) input_usages: a dictionary specifying for each blob and
         #    each of its version, how many times it is used as input for another
         #    op.
         # c) frontier: maintaining the current versions of the blobs
@@ -1430,7 +1446,7 @@ class Net(object):
         # make sure that this net name hasn't been used before
         self._net.name = Net._get_next_net_name(name)
 
-    def AppendNet(self, net):
+    def AppendNet(self, net, device_option=None):
         assert isinstance(net, Net)
         for i in net.Proto().external_input:
             if (
@@ -1445,7 +1461,12 @@ class Net(object):
                 if o not in self.Proto().external_output
             ]
         )
-        self._ExtendOps(net.Proto().op)
+        ops = net.Proto().op
+        if device_option is not None:
+            ops = [copy.deepcopy(op) for op in ops]
+            map(lambda x: x.device_option.CopyFrom(device_option), ops)
+
+        self._ExtendOps(ops)
         return self
 
     def LogInfo(self, *msg_or_blobs):

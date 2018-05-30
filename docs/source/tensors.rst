@@ -44,7 +44,7 @@ A tensor can be constructed from a Python :class:`list` or sequence using the
     :meth:`~torch.Tensor.requires_grad_` or
     :meth:`~torch.Tensor.detach` to avoid a copy.
     If you have a numpy array and want to avoid a copy, use
-    :func:`torch.from_numpy`.
+    :func:`torch.as_tensor`.
 
 An tensor of specific data type can be constructed by passing a
 :class:`torch.dtype` and/or a :class:`torch.device` to a

@@ -182,6 +182,7 @@ class lazy_property(object):
     def __get__(self, instance, obj_type=None):
         if instance is None:
             return self
-        value = self.wrapped(instance)
+        with torch.enable_grad():
+            value = self.wrapped(instance)
         setattr(instance, self.wrapped.__name__, value)
         return value

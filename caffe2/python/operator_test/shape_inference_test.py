@@ -20,18 +20,19 @@ class TestShapeInference(test_util.TestCase):
         brew.fc(m, "data", "fc1", dim_in=96, dim_out=32)
         brew.fc(m, "fc1", "fc2", dim_in=32, dim_out=55)
 
-        (shapes, types) = workspace.InferShapesAndTypes(
-            [m.param_init_net, m.net],
-            {'data': [64, 96]}
-        )
+        for b in [0, 64]:
+            (shapes, types) = workspace.InferShapesAndTypes(
+                [m.param_init_net, m.net],
+                {'data': [b, 96]}
+            )
 
-        self.assertEquals(shapes['data'], [64, 96])
-        self.assertEquals(shapes['fc1_w'], [32, 96])
-        self.assertEquals(shapes['fc1_b'], [32])
-        self.assertEquals(shapes['fc1'], [64, 32])
-        self.assertEquals(shapes['fc2_w'], [55, 32])
-        self.assertEquals(shapes['fc2_b'], [55])
-        self.assertEquals(shapes['fc2'], [64, 55])
+            self.assertEquals(shapes['data'], [b, 96])
+            self.assertEquals(shapes['fc1_w'], [32, 96])
+            self.assertEquals(shapes['fc1_b'], [32])
+            self.assertEquals(shapes['fc1'], [b, 32])
+            self.assertEquals(shapes['fc2_w'], [55, 32])
+            self.assertEquals(shapes['fc2_b'], [55])
+            self.assertEquals(shapes['fc2'], [b, 55])
 
     def testFCAxis2(self):
         model = model_helper.ModelHelper(name="test_model")
@@ -484,6 +485,13 @@ class TestShapeInference(test_util.TestCase):
         model = model_helper.ModelHelper(name="powtest")
         model.Pow("x", 'y', exponent=-1.0)
         workspace.FeedBlob('x', np.random.rand(1, 2, 3, 4).astype(np.float32))
+        self.InferTensorRunAndCompare(model)
+
+    def testInt8Conversion(self):
+        model = model_helper.ModelHelper(name="int8_conversion_test")
+        model.FloatToFused8BitRowwiseQuantized('x', 'x_8bit')
+        model.Fused8BitRowwiseQuantizedToFloat('x_8bit', 'x_recovered')
+        workspace.FeedBlob('x', np.random.rand(100, 150).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
     def InferTensorRunAndCompare(self, model, expected_uninferred_blobs=None):

@@ -13,14 +13,14 @@ build:
   script_env:
     - CAFFE2_CMAKE_ARGS
     - PACKAGE_CUDA_LIBS
-    - BUILD_WITH_CUDA
+    - CUDA_VERSION
   # features section here
 
 requirements:
   build:
     - cmake
     - future
-    - numpy
+    - numpy {{ numpy }}
     - python
     - six
     # build section here

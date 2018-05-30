@@ -1,16 +1,19 @@
 #include <catch.hpp>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-using namespace autograd;
+#include <test/cpp/api/util.h>
+
+using namespace torch;
+using namespace torch::nn;
 
 template <typename R, typename Func>
 bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   auto nhid = 32;
-  auto model = SimpleContainer().make();
-  auto l1 = model->add(Linear(1, nhid).make(), "l1");
+  auto model = std::make_shared<SimpleContainer>();
+  auto l1 = model->add(Linear(1, nhid).build(), "l1");
   auto rnn = model->add(model_maker(nhid), "rnn");
-  auto lo = model->add(Linear(nhid, 1).make(), "lo");
+  auto lo = model->add(Linear(nhid, 1).build(), "lo");
 
   auto optim = Adam(model, 1e-2).make();
 
@@ -49,7 +52,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     Variable loss = at::mse_loss(x, y);
 
     optim->zero_grad();
-    backward(loss);
+    loss.backward();
     optim->step();
 
     running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
@@ -61,41 +64,52 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   return true;
 };
 
+void check_lstm_sizes(std::vector<Variable> tup) {
+  // Expect the LSTM to have 64 outputs and 3 layers, with an input of batch
+  // 10 and 16 time steps (10 x 16 x n)
+
+  auto out = tup[0];
+  auto hids = tup[1];
+
+  REQUIRE(out.ndimension() == 3);
+  REQUIRE(out.size(0) == 10);
+  REQUIRE(out.size(1) == 16);
+  REQUIRE(out.size(2) == 64);
+
+  REQUIRE(hids.ndimension() == 4);
+  REQUIRE(hids.size(0) == 2); // (hx, cx)
+  REQUIRE(hids.size(1) == 3); // layers
+  REQUIRE(hids.size(2) == 16); // Batchsize
+  REQUIRE(hids.size(3) == 64); // 64 hidden dims
+
+  // Something is in the hiddens
+  REQUIRE(hids.norm().toCFloat() > 0);
+}
+
 TEST_CASE("rnn") {
   SECTION("lstm") {
     SECTION("sizes") {
-      auto model = LSTM(128, 64).nlayers(2).dropout(0.2).make();
+      auto model = LSTM(128, 64).layers(3).dropout(0.2).build();
       Variable x = Var(at::CPU(at::kFloat).randn({10, 16, 128}));
       auto tup = model->forward({x});
       auto y = x.mean();
 
-      auto out = tup[0];
-      auto hids = tup[1];
+      y.backward();
+      check_lstm_sizes(tup);
 
-      backward(y);
-      REQUIRE(out.ndimension() == 3);
-      REQUIRE(out.size(0) == 10);
-      REQUIRE(out.size(1) == 16);
-      REQUIRE(out.size(2) == 64);
+      auto next = model->forward({x, tup[1]});
 
-      REQUIRE(hids.ndimension() == 4);
-      REQUIRE(hids.size(0) == 2); // 2 layers
-      REQUIRE(hids.size(1) == 2); // c and h
-      REQUIRE(hids.size(2) == 16); // Batch size of 16
-      REQUIRE(hids.size(3) == 64); // 64 hidden dims
+      check_lstm_sizes(next);
 
-      // Something is in the hiddens
-      REQUIRE(hids.norm().toCFloat() > 0);
-
-      Variable diff = model->forward({x, hids})[1] - hids;
+      Variable diff = next[1] - tup[1];
 
       // Hiddens changed
       REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);
-    };
+    }
 
     SECTION("outputs") {
       // Make sure the outputs match pytorch outputs
-      auto model = LSTM(2, 2).make();
+      auto model = LSTM(2, 2).build();
       for (auto& v : model->parameters()) {
         float size = v.second.numel();
         auto p = static_cast<float*>(v.second.data().storage()->data());
@@ -126,9 +140,9 @@ TEST_CASE("rnn") {
         REQUIRE(std::abs(flat[i].toCFloat() - c_out[i]) < 1e-3);
       }
 
-      REQUIRE(out[1].ndimension() == 4); // T x (hx, cx) x B x 2
-      REQUIRE(out[1].size(0) == 1);
-      REQUIRE(out[1].size(1) == 2);
+      REQUIRE(out[1].ndimension() == 4); // (hx, cx) x layers x B x 2
+      REQUIRE(out[1].size(0) == 2);
+      REQUIRE(out[1].size(1) == 1);
       REQUIRE(out[1].size(2) == 4);
       REQUIRE(out[1].size(3) == 2);
       flat = out[1].data().view(16);
@@ -151,57 +165,70 @@ TEST_CASE("rnn") {
       for (size_t i = 0; i < 16; i++) {
         REQUIRE(std::abs(flat[i].toCFloat() - h_out[i]) < 1e-3);
       }
-    };
-  }
-  SECTION("integration") {
-    SECTION("LSTM") {
-      REQUIRE(test_RNN_xor<LSTM>(
-          [](int s) { return LSTM(s, s).nlayers(2).make(); }));
-    }
-
-    SECTION("gru") {
-      REQUIRE(
-          test_RNN_xor<GRU>([](int s) { return GRU(s, s).nlayers(2).make(); }));
-    }
-
-    SECTION("rnn") {
-      SECTION("relu") {
-        REQUIRE(test_RNN_xor<RNN>([](int s) {
-          return RNN(s, s, RNN::Mode::Relu).nlayers(2).make();
-        }));
-      }
-
-      SECTION("tanh") {
-        REQUIRE(test_RNN_xor<RNN>([](int s) {
-          return RNN(s, s, RNN::Mode::Tanh).nlayers(2).make();
-        }));
-      }
     }
   }
 }
 
+TEST_CASE("rnn/integration/LSTM") {
+  REQUIRE(
+      test_RNN_xor<LSTM>([](int s) { return LSTM(s, s).layers(2).build(); }));
+}
+
+TEST_CASE("rnn/integration/GRU") {
+  REQUIRE(test_RNN_xor<GRU>([](int s) { return GRU(s, s).layers(2).build(); }));
+}
+
+TEST_CASE("rnn/integration/RNN") {
+  SECTION("relu") {
+    REQUIRE(test_RNN_xor<RNN>(
+        [](int s) { return RNN(s, s).relu().layers(2).build(); }));
+  }
+  SECTION("tanh") {
+    REQUIRE(test_RNN_xor<RNN>(
+        [](int s) { return RNN(s, s).tanh().layers(2).build(); }));
+  }
+}
+
 TEST_CASE("rnn_cuda", "[cuda]") {
+  SECTION("sizes") {
+    auto model = LSTM(128, 64).layers(3).dropout(0.2).build();
+    model->cuda();
+    Variable x = Var(at::CUDA(at::kFloat).randn({10, 16, 128}));
+    auto tup = model->forward({x});
+    auto y = x.mean();
+
+    y.backward();
+    check_lstm_sizes(tup);
+
+    auto next = model->forward({x, tup[1]});
+
+    check_lstm_sizes(next);
+
+    Variable diff = next[1] - tup[1];
+
+    // Hiddens changed
+    REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);
+  };
+
   SECTION("lstm") {
     REQUIRE(test_RNN_xor<LSTM>(
-        [](int s) { return LSTM(s, s).nlayers(2).make(); }, true));
+        [](int s) { return LSTM(s, s).layers(2).build(); }, true));
   }
 
   SECTION("gru") {
     REQUIRE(test_RNN_xor<GRU>(
-        [](int s) { return GRU(s, s).nlayers(2).make(); }, true));
+        [](int s) { return GRU(s, s).layers(2).build(); }, true));
   }
 
   SECTION("rnn") {
     SECTION("Relu") {
       REQUIRE(test_RNN_xor<RNN>(
-          [](int s) { return RNN(s, s, RNN::Mode::Relu).nlayers(2).make(); },
-          true));
+          [](int s) { return RNN(s, s).relu().layers(2).build(); }, true));
     }
 
     SECTION("tanh") {
       REQUIRE(test_RNN_xor<RNN>(
-          [](int s) { return RNN(s, s, RNN::Mode::Tanh).nlayers(2).make(); },
-          true));
+          [](int s) { return RNN(s, s).tanh().layers(2).build(); }, true));
     }
   }
 }

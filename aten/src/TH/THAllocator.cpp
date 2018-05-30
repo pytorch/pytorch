@@ -55,7 +55,7 @@ struct THMapAllocatorContext_ {
 #define TH_ALLOC_ALIGNMENT 64
 
 typedef struct {
-  int refcount;
+  std::atomic<int> refcount;
 } THMapInfo;
 
 const char * unknown_filename = "filename not specified";
@@ -552,7 +552,7 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
 #ifdef _WIN32
   THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
   if (--info->refcount == 0) {
-    SetEvent(ctx->event); 
+    SetEvent(ctx->event);
   }
   if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0)
     THError("could not unmap the shared memory file");

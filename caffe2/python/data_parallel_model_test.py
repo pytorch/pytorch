@@ -9,6 +9,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import time
 from mock import Mock
 from hypothesis import assume, given
 import hypothesis.strategies as st
@@ -342,6 +343,62 @@ class DataParallelModelTest(TestCase):
 
             for _ in range(2):
                 data_parallel_model.Synchronize(model)
+
+        with TemporaryDirectory() as tmpdir:
+            self.run_test_locally(
+                run,
+                comm_size=2,
+                device_option=None,
+                tmpdir=tmpdir)
+
+    def test_pre_train_synchronization_barrier(self):
+        def run(comm_rank, comm_size, tmpdir):
+            def add_input_ops(model):
+                pass
+
+            def add_model_ops(model, loss_scale):
+                return []
+
+            def add_optimizer(model):
+                pass
+
+            workspace.ResetWorkspace()
+            store_handler = "store_handler"
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "FileStoreHandlerCreate",
+                    [],
+                    [store_handler],
+                    path=tmpdir))
+            rendezvous = dict(
+                kv_handler=store_handler,
+                shard_id=comm_rank,
+                num_shards=comm_size,
+                engine='GLOO',
+            )
+
+            model = cnn.CNNModelHelper(
+                order="NHWC",
+                name="test",
+            )
+            # Set network timeout to 2 seconds, and add a 3 seconds
+            # sleep for 1 host.  Make sure there is no timeout on the
+            # second RunNet.
+            data_parallel_model._DEFAULT_TIMEOUT_SEC = 2
+            data_parallel_model.Parallelize_CPU(
+                model,
+                input_builder_fun=add_input_ops,
+                forward_pass_builder_fun=add_model_ops,
+                optimizer_builder_fun=add_optimizer,
+                devices=[1, 2, 3],
+                rendezvous=rendezvous,
+                barrier_net_timeout_sec=5
+            )
+            data_parallel_model.RunInitNet(model)
+            data_parallel_model.RunNet(model, 2)
+            if comm_rank == 0:
+                time.sleep(data_parallel_model._DEFAULT_TIMEOUT_SEC)
+            data_parallel_model.RunNet(model, 2)
 
         with TemporaryDirectory() as tmpdir:
             self.run_test_locally(

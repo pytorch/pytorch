@@ -237,6 +237,9 @@ class ModelLayer(object):
                 self.request_only = False
                 break
 
+        self.precomputation_request_only = False
+        self.precomputation_object_only = False
+
         self._output_schema = None
         self._predict_output_schema = None
         self.eval_output_schema = None

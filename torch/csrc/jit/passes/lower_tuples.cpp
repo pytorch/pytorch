@@ -100,6 +100,19 @@ static void LowerTuples(Block* block) {
   VisitNode(block->return_node(), nullptr);
 }
 
+static void EnsureNoTuples(Block* block) {
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      EnsureNoTuples(b);
+    }
+    for (Value * o : n->outputs()) {
+      JIT_ASSERTM(o->type()->kind() != TypeKind::TupleType,
+                  "Couldn't lower all tuples. This is an error because "
+                  "they're not implemented in the interpreter just yet.");
+    }
+  }
+}
+
 void LowerTuples(std::shared_ptr<Graph>& graph) {
   for(auto input : graph->inputs()) {
     JIT_ASSERTM(input->type()->kind() != TypeKind::TupleType, "tuples cannot be inputs to the graph");
@@ -109,6 +122,7 @@ void LowerTuples(std::shared_ptr<Graph>& graph) {
   }
   LowerTuples(graph->block());
   EliminateDeadCode(graph);
+  EnsureNoTuples(graph->block());
 }
 
 }}

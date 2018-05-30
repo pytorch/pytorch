@@ -6,10 +6,16 @@ exclude(NOMNI_SRCS "${NOMNI_SRCS}" "${NOMNI_TEST_SRCS}")
 add_library(nomnigraph STATIC "${NOMNI_SRCS}")
 add_dependencies(nomnigraph Caffe_PROTO Caffe2_PROTO)
 
-target_include_directories(nomnigraph PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-list(APPEND Caffe2_DEPENDENCY_LIBS nomnigraph)
-set(Caffe2_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS} PARENT_SCOPE)
+target_include_directories(nomnigraph PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS nomnigraph)
+set(Caffe2_PUBLIC_DEPENDENCY_LIBS ${Caffe2_PUBLIC_DEPENDENCY_LIBS} PARENT_SCOPE)
 
+install(TARGETS nomnigraph EXPORT Caffe2Targets DESTINATION lib)
+install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/include
+        DESTINATION include
+        FILES_MATCHING PATTERN "*.h")
 
 if (BUILD_TEST)
   foreach(test_src ${NOMNI_TEST_SRCS})

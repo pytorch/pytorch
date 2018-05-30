@@ -140,6 +140,9 @@ struct Attributes {
   bool hasAttributes() const {
     return values_.size() > 0;
   }
+  size_t numAttributes() const {
+    return values_.size();
+  }
   // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {
     std::vector<Symbol> names;
@@ -167,12 +170,29 @@ struct Attributes {
   CREATE_ACCESSOR(Strings,ss)
   CREATE_ACCESSOR(Int,i)
   CREATE_ACCESSOR(Ints,is)
-  CREATE_ACCESSOR(Tensor,t)
-  CREATE_ACCESSOR(Tensors,ts)
   CREATE_ACCESSOR(Graph,g)
   CREATE_ACCESSOR(Graphs,gs)
 
   #undef CREATE_ACCESSOR
+
+  // does not use CREATE_ACCESSOR because we need additional asserts
+  Derived* t_(Symbol name, TensorAttr::ConstructorType v) {
+    JIT_ASSERT(!v.defined() || !v.is_variable_or_undefined());
+    return set<TensorAttr>(name,std::forward<TensorAttr::ConstructorType>(v));
+  }
+  const TensorAttr::ValueType& t(Symbol name) const {
+    return get<TensorAttr>(name);
+  }
+
+  Derived* ts_(Symbol name, TensorsAttr::ConstructorType v) {
+    for(auto & t : v) {
+      JIT_ASSERT(!t.defined() || !t.is_variable_or_undefined());
+    }
+    return set<TensorsAttr>(name,std::forward<TensorsAttr::ConstructorType>(v));
+  }
+  const TensorsAttr::ValueType& ts(Symbol name) const {
+    return get<TensorsAttr>(name);
+  }
 
 private:
   Derived* This() {

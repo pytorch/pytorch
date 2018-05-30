@@ -1,115 +1,21 @@
-
-CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
+cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
-# avoid some cmake warnings
-IF(POLICY CMP0026)
- CMAKE_POLICY(SET CMP0026 OLD)
-ENDIF()
+if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  # ---[ Generate and install header and cpp files
+  include(../../../cmake/Codegen.cmake)
+endif()
 
-IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
-  SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
-  SET(VCOMP_LIB "vcomp")
-ELSE()
-  SET(MSVC_OPT_FLAG " ")
-  SET(VCOMP_LIB "vcompd")
-ENDIF()
-
-########################
-# SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
-# so we need to set these commands here rather than in src/TH
-IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-  IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast")
-  ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "-O3 -ffast-math")
-  ENDIF(MSVC)
-ENDIF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-IF(C_AVX_FOUND)
-  IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast ${CXX_AVX_FLAGS}")
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
-  ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${CXX_AVX_FLAGS}")
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "-O3 ${CXX_AVX_FLAGS}")
-  ENDIF(MSVC)
-ENDIF(C_AVX_FOUND)
-
-IF(C_AVX2_FOUND)
-  IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2 ${CXX_AVX2_FLAGS}")
-  ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "-O3 ${CXX_AVX2_FLAGS}")
-  ENDIF(MSVC)
-ENDIF(C_AVX2_FOUND)
-
-IF(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-  SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
-ENDIF()
-
-FILE(GLOB cpu_kernel_cpp_in RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cpu/*.cpp")
-
-LIST(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
-IF(MSVC)
-  LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}")
-ELSE(MSVC)
-  LIST(APPEND CPU_CAPABILITY_FLAGS "-O3")
-ENDIF(MSVC)
-
-IF(CXX_AVX_FOUND)
-  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX_CPU_DEFINITION")
-  LIST(APPEND CPU_CAPABILITY_NAMES "AVX")
-  IF(MSVC)
-    LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}/arch:AVX")
-  ELSE(MSVC)
-    LIST(APPEND CPU_CAPABILITY_FLAGS "-O3 -mavx")
-  ENDIF(MSVC)
-ENDIF(CXX_AVX_FOUND)
-
-IF(CXX_AVX2_FOUND)
-  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
-  LIST(APPEND CPU_CAPABILITY_NAMES "AVX2")
-  IF(MSVC)
-    LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2")
-  ELSE(MSVC)
-    LIST(APPEND CPU_CAPABILITY_FLAGS "-O3 -mavx2")
-  ENDIF(MSVC)
-ENDIF(CXX_AVX2_FOUND)
-
-list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
-math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
-
-FOREACH(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
-  FOREACH(IMPL ${cpu_kernel_cpp_in})
-    LIST(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
-    SET(NEW_IMPL ${CMAKE_CURRENT_BINARY_DIR}/${IMPL}.${CPU_CAPABILITY}.cpp)
-    CONFIGURE_FILE(${IMPL} ${NEW_IMPL} COPYONLY)
-    SET(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
-    LIST(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
-    IF(MSVC)
-      SET(MACRO_FLAG "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
-    ELSE(MSVC)
-      SET(MACRO_FLAG "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
-    ENDIF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${MACRO_FLAG}")
-  ENDFOREACH()
-ENDFOREACH()
+IF(NOT MSVC)
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-ignored-qualifiers")
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-ignored-qualifiers")
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-absolute-value")
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-absolute-value")
+ENDIF(NOT MSVC)
 
 ################################################################################
 # Helper functions
 ################################################################################
-
-FUNCTION(EXCLUDE_DIR list_name dir_name)
-  # A helper that excludes all files that contain dir_name in their file path
-  SET(local_list ${${list_name}})
-  FOREACH(source ${local_list})
-    IF(${source} MATCHES ${dir_name})
-      MESSAGE(STATUS "Excluding " ${source} " from the build")
-      LIST(REMOVE_ITEM local_list ${source})
-    ENDIF()
-  ENDFOREACH()
-  SET(${list_name} ${local_list} PARENT_SCOPE)
-ENDFUNCTION()
 
 function(filter_list output input)
     unset(result)
@@ -124,11 +30,6 @@ function(filter_list output input)
 endfunction()
 
 
-IF ($ENV{TH_BINARY_BUILD})
-  MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
-  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
-ENDIF()
-
 # Can be compiled standalone
 IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DIR OR NOT AT_INSTALL_SHARE_DIR)
   SET(AT_INSTALL_BIN_DIR "bin" CACHE PATH "AT install binary subdirectory")
@@ -137,146 +38,93 @@ IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DI
   SET(AT_INSTALL_SHARE_DIR "share" CACHE PATH "AT install include subdirectory")
 ENDIF()
 
-# TODO: Maybe put this in the generated files directory
 CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
+CONFIGURE_FILE(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
 
-FILE(GLOB base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.h")
-FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
-FILE(GLOB native_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/*.cpp")
-FILE(GLOB native_cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cudnn/*.cpp")
-FILE(GLOB native_cuda_cu RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cuda/*.cu")
-FILE(GLOB native_mkl_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/mkl/*.cpp")
-FILE(GLOB native_mkldnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/mkldnn/*.cpp")
+# NB: If you edit these globs, you'll have to update setup.py package_data as well
+FILE(GLOB base_h "*.h" "detail/*.h")
+FILE(GLOB base_cpp "*.cpp" "detail/*.cpp")
+FILE(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
+FILE(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
+FILE(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
+FILE(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
+FILE(GLOB cudnn_cpp "cudnn/*.cpp")
+FILE(GLOB mkl_cpp "mkl/*.cpp")
+FILE(GLOB mkldnn_cpp "mkldnn/*.cpp")
 
-FILE(GLOB_RECURSE cuda_h
-     RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
-     "cuda/*.cuh" "cuda/*.h" "cudnn/*.cuh" "cudnn/*.h")
+FILE(GLOB native_cpp "native/*.cpp")
+FILE(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
+FILE(GLOB native_cuda_cu "native/cuda/*.cu")
+FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
+FILE(GLOB native_mkl_cpp "native/mkl/*.cpp")
+FILE(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 
-FILE(GLOB cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "cudnn/*.cpp")
-FILE(GLOB mkl_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "mkl/*.cpp")
-FILE(GLOB mkldnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "mkldnn/*.cpp")
-
-FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
-
-FILE(GLOB_RECURSE aten_cuda_cu RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "cuda/*.cu")
-
-IF(DEFINED ENV{PYTORCH_PYTHON})
-  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
-  SET(PYCMD "$ENV{PYTORCH_PYTHON}")
-ELSE()
-  SET(PYCMD "python")
-ENDIF()
-
-SET(GEN_COMMAND
-    ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG}
-    -s ${CMAKE_CURRENT_SOURCE_DIR}
-    ${cwrap_files}
-)
-
-EXECUTE_PROCESS(
-    COMMAND ${GEN_COMMAND}
-      --output-dependencies ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt
-    RESULT_VARIABLE RETURN_VALUE
-)
-if (NOT RETURN_VALUE EQUAL 0)
-    message(STATUS ${generated_cpp})
-    message(FATAL_ERROR "Failed to get generated_cpp list")
+set(all_cpu_cpp ${base_cpp} ${native_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
+if(AT_MKL_ENABLED)
+  set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
-file(READ ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt generated_cpp)
+if(AT_MKLDNN_ENABLED)
+  set(all_cpu_cpp ${all_cpu_cpp} ${mkldnn_cpp})
+endif()
 
-FILE(GLOB_RECURSE all_templates "templates/*")
-
-FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ATen)
-
-ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
-COMMAND ${GEN_COMMAND}
-DEPENDS ${all_python} ${all_templates} ${cwrap_files})
-
-# Generated headers used from a cuda (.cu) file are
-# not tracked correctly in cmake . We make the libATen.so depend explicitly
-# on building the generated aten files to workaround.
-ADD_CUSTOM_TARGET(aten_files_are_generated
-  DEPENDS ${generated_cpp}
-)
-
-
-SET(all_cpp ${base_cpp} ${native_cpp} ${native_cudnn_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
-
-INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
-IF(NOT NO_CUDA)
-  INCLUDE_DIRECTORIES(${ATen_CUDA_INCLUDE})
-  INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/cuda")
-  SET(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${aten_cuda_cu} ${native_cuda_cu})
-  SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS})
+IF(NOT NO_CUDA OR WITH_ROCM)
+  list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
+  set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu})
+  set(all_cuda_cpp ${native_cudnn_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
   IF(CUDNN_FOUND)
-    SET(all_cpp ${all_cpp} ${cudnn_cpp})
-  ENDIF()
-  IF(AT_MKL_ENABLED)
-    SET(all_cpp ${all_cpp} ${mkl_cpp})
+    SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
   ENDIF()
 endif()
-
-IF(AT_MKLDNN_ENABLED)
-  SET(all_cpp ${all_cpp} ${mkldnn_cpp})
-ENDIF()
 
 filter_list(generated_h generated_cpp "\\.h$")
+filter_list(cuda_generated_h cuda_generated_cpp "\\.h$")
 
-INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
+list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
-INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
+list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_BINARY_DIR})
 IF(NOT AT_LINK_STYLE)
   SET(AT_LINK_STYLE SHARED)
 ENDIF()
-IF(CUDA_FOUND)
-  CUDA_ADD_LIBRARY(ATen ${AT_LINK_STYLE} ${all_cpp})
-ELSE()
-  ADD_LIBRARY(ATen ${AT_LINK_STYLE} ${all_cpp})
-ENDIF()
-ADD_DEPENDENCIES(ATen aten_files_are_generated)
 
-if(NOT MSVC)
-  target_compile_options(ATen
-    PRIVATE
-    -Wall
-    -Wextra
-    -fexceptions
-    -Wno-missing-field-initializers
-    -Wno-type-limits
-    -Wno-unused-parameter
-    -Wno-unknown-pragmas)
-
-  if ($ENV{WERROR})
-    target_compile_options(ATen PRIVATE -Werror)
-  endif()
-endif()
-
-set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/../third_party/tbb")
+set(TBB_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/tbb")
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
 set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-add_subdirectory(${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb)
+add_subdirectory(cpu/tbb)
 set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
-target_include_directories(tbb_static PUBLIC ${TBB_ROOT_DIR}/include)
-target_link_libraries(ATen tbb_static)
-
-if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
-    SET_PROPERTY(TARGET ATen PROPERTY CXX_STANDARD 11)
-endif(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
+list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
+list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb_static)
 
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
-    TARGET_LINK_LIBRARIES(ATen "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+    list(APPEND ATen_CPU_DEPENDENCY_LIBS
+      "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+    if(NOT NO_CUDA OR WITH_ROCM)
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+        "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+    endif()
   ELSE ($ENV{TH_BINARY_BUILD})
-    TARGET_LINK_LIBRARIES(ATen ${BLAS_LIBRARIES})
+    list(APPEND ATen_CPU_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
+    if(NOT NO_CUDA OR WITH_ROCM)
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${BLAS_LIBRARIES}")
+    endif()
   ENDIF ($ENV{TH_BINARY_BUILD})
 ENDIF(BLAS_FOUND)
 
 IF(LAPACK_FOUND)
-  TARGET_LINK_LIBRARIES(ATen ${LAPACK_LIBRARIES})
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
+  if(NOT NO_CUDA OR WITH_ROCM)
+    # Although Lapack provides CPU (and thus, one might expect that ATen_cuda
+    # would not need this at all), some of our libraries (magma in particular)
+    # backend to CPU BLAS/LAPACK implementations, and so it is very important
+    # we get the *right* implementation, because even if the symbols are the
+    # same, LAPACK implementions may have different calling conventions.
+    # This caused https://github.com/pytorch/pytorch/issues/7353
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
+  endif()
 ENDIF(LAPACK_FOUND)
 
 IF (UNIX AND NOT APPLE)
@@ -284,7 +132,7 @@ IF (UNIX AND NOT APPLE)
    # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
    CHECK_LIBRARY_EXISTS(rt clock_gettime "time.h" NEED_LIBRT)
    IF(NEED_LIBRT)
-     TARGET_LINK_LIBRARIES(ATen rt)
+     list(APPEND ATen_CPU_DEPENDENCY_LIBS rt)
      SET(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} rt)
    ENDIF(NEED_LIBRT)
 ENDIF(UNIX AND NOT APPLE)
@@ -311,62 +159,37 @@ IF(UNIX)
   ENDIF(HAVE_MALLOC_USABLE_SIZE)
 ENDIF(UNIX)
 
-IF(NOT MSVC)
-  TARGET_LINK_LIBRARIES(ATen m)
-ELSE(NOT MSVC)
-  IF(AT_MKL_MT)
-    set_target_properties(ATen PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(ATen PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(ATen PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
-  ENDIF(AT_MKL_MT)
-ENDIF(NOT MSVC)
-
-# Is __thread supported?
-IF(NOT MSVC)
-  CHECK_C_SOURCE_COMPILES("static __thread int x = 1; int main() { return x; }" C_HAS_THREAD)
-ELSE(NOT MSVC)
-  CHECK_C_SOURCE_COMPILES("static __declspec( thread ) int x = 1; int main() { return x; }" C_HAS_THREAD)
-ENDIF(NOT MSVC)
-IF(NOT C_HAS_THREAD)
-  MESSAGE(STATUS "Warning: __thread is not supported, generating thread-unsafe code")
-ELSE(NOT C_HAS_THREAD)
-  add_compile_options(-DTH_HAVE_THREAD)
-ENDIF(NOT C_HAS_THREAD)
+if(NOT MSVC)
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS m)
+endif()
 
 if(MKLDNN_FOUND)
-  target_link_libraries(ATen ${MKLDNN_LIBRARIES})
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
 
-# Directory where cpuinfo will download and build all dependencies
-set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
-  CACHE PATH "Confu-style dependencies binary directory")
+list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
 
-# ---[ Configure cpuinfo
-if (NOT TARGET cpuinfo)
-  if (NOT DEFINED CPUINFO_SOURCE_DIR)
-    set(CPUINFO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
-  endif()
+if(NOT MSVC)
+  # Preserve values for the main build
+  set(__aten_sleef_build_shared_libs ${BUILD_SHARED_LIBS})
+  set(__aten_sleef_build_tests ${BUILD_TESTS})
 
-  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
-  if(MSVC)
-    # ATen is built with default MSVC runtime linking, which is /MD (DLL)
-    # so no need to check *_USE_MSVC_STATIC_RUNTIME or some equivalent.
-    set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
-  endif()
-  add_subdirectory(
-    "${CPUINFO_SOURCE_DIR}"
-    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
-  # We build static version of cpuinfo but link
-  # them into a shared library for Caffe2, so they need PIC.
-  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build sleef static" FORCE)
+  set(BUILD_DFT OFF CACHE BOOL "Don't build sleef DFT lib" FORCE)
+  set(BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
+  set(BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/sleef" ${CMAKE_BINARY_DIR}/sleef)
+  set_property(TARGET sleef PROPERTY FOLDER "dependencies")
+  list(APPEND ATen_CPU_INCLUDE SYSTEM ${CMAKE_BINARY_DIR}/include)
+  link_directories(${CMAKE_BINARY_DIR}/sleef/lib)
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS sleef)
+
+  # Set these back. TODO: Use SLEEF_ to pass these instead
+  set(BUILD_SHARED_LIBS ${__aten_sleef_build_shared_libs} CACHE BOOL "Build shared libs" FORCE)
+  set(BUILD_TESTS ${__aten_sleef_build_tests} CACHE BOOL "Build tests" FORCE)
 endif()
-TARGET_LINK_LIBRARIES(ATen cpuinfo)
 
-IF(CUDA_FOUND)
+IF(NOT NO_CUDA)
   IF ($ENV{ATEN_STATIC_CUDA})
     # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
     # we first have to build a fake lib that links with no device callbacks,
@@ -400,7 +223,7 @@ IF(CUDA_FOUND)
     add_dependencies(FAKELINKED_CUFFT FAKELINKED_CUFFT_TARGET)
     set_target_properties(FAKELINKED_CUFFT PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a)
 
-    TARGET_LINK_LIBRARIES(ATen
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
@@ -409,53 +232,222 @@ IF(CUDA_FOUND)
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a
       )
   ELSE()
-    TARGET_LINK_LIBRARIES(ATen
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
       ${CUDA_cusparse_LIBRARY}
       ${CUDA_curand_LIBRARY})
-    CUDA_ADD_CUBLAS_TO_TARGET(ATen)
-    CUDA_ADD_CUFFT_TO_TARGET(ATen)
   ENDIF()
 
   if(CUDNN_FOUND)
-    target_link_libraries(ATen ${CUDNN_LIBRARIES})
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
   endif(CUDNN_FOUND)
 
   IF(USE_MAGMA)
-    TARGET_LINK_LIBRARIES(ATen ${MAGMA_LIBRARIES})
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
     IF ($ENV{TH_BINARY_BUILD})
-      TARGET_LINK_LIBRARIES(ATen "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+        "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     ENDIF($ENV{TH_BINARY_BUILD})
   ENDIF(USE_MAGMA)
   IF ($ENV{ATEN_STATIC_CUDA})
-    TARGET_LINK_LIBRARIES(ATen "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
   ENDIF($ENV{ATEN_STATIC_CUDA})
 ENDIF()
 
-INSTALL(TARGETS ATen
-  RUNTIME DESTINATION "${AT_INSTALL_BIN_DIR}"
-  LIBRARY DESTINATION "${AT_INSTALL_LIB_DIR}"
-  ARCHIVE DESTINATION "${AT_INSTALL_LIB_DIR}")
+IF(WITH_ROCM)
+ ### Link in the ROCm libraries BLAS / RNG.
+ FIND_LIBRARY(HIPBLAS_LIBRARY hipblas HINTS ${HIPBLAS_PATH}/lib)
+ FIND_LIBRARY(HIPRNG_LIBRARY hiprng HINTS ${HIPRNG_PATH}/lib)
 
-GET_TARGET_PROPERTY(ATEN_OUTPUT_NAME ATen LOCATION)
-GET_FILENAME_COMPONENT(ATEN_OUTPUT_NAME ${ATEN_OUTPUT_NAME} NAME)
-SET(ATEN_LIBRARIES "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_LIB_DIR}/${ATEN_OUTPUT_NAME}")
+ list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${HIPBLAS_LIBRARY} ${HIPRNG_LIBRARY})
+ENDIF()
+
+# Include CPU paths for CUDA as well
+list(APPEND ATen_CUDA_INCLUDE ${ATen_CPU_INCLUDE})
+
+# We have two libraries: libATen_cpu.so and libATen_cuda.so,
+# with libATen_cuda.so depending on libATen_cpu.so.  The CPU library
+# contains CPU code only.  libATen_cpu.so is invariant to the setting
+# of NO_CUDA (it always builds the same way); libATen_cuda.so is only
+# built when NO_CUDA=0 and CUDA is available.
+set(ATen_CPU_SRCS ${all_cpu_cpp})
+if(AT_LINK_STYLE STREQUAL "INTERFACE")
+  # Source code can't be added to an interface library, so it is
+  # passed back to be compiled into the containing library
+  add_library(ATen_cpu INTERFACE)
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB)
+else()
+  add_library(ATen_cpu ${AT_LINK_STYLE} ${ATen_CPU_SRCS})
+  target_include_directories(ATen_cpu INTERFACE $<INSTALL_INTERFACE:include>)
+  target_include_directories(ATen_cpu PRIVATE ${ATen_CPU_INCLUDE})
+  target_link_libraries(ATen_cpu PUBLIC ${ATen_CPU_DEPENDENCY_LIBS})
+  target_link_libraries(ATen_cpu PRIVATE ATEN_CPU_FILES_GEN_LIB)
+  caffe2_interface_library(ATen_cpu ATen_cpu_library)
+  # Set standard properties on the target
+  aten_set_target_props(ATen_cpu)
+
+  # Make sure these don't get built by parent
+  set(ATen_CPU_SRCS)
+endif()
+
+if(NOT NO_CUDA OR WITH_ROCM)
+  if(AT_LINK_STYLE STREQUAL "INTERFACE")
+    # Source code can't be added to an interface library, so it is
+    # passed back to be compiled into the containing library
+    add_library(ATen_cuda INTERFACE)
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
+    set(ATen_CUDA_SRCS ${all_cuda_cpp})
+  else()
+    # A hack to deal with cuda library dependencies and modern CMake: the
+    # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
+    # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
+    # hack adds the PRIVATE keywords to CUDA_LIBRARIES so we can deal with
+    # it. We will then manually add the cudart library as interface libs.
+    set(__tmp ${CUDA_LIBRARIES})
+    set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
+    torch_cuda_based_add_library(ATen_cuda ${AT_LINK_STYLE} ${ATen_CUDA_SRCS})
+    set(CUDA_LIBRARIES ${__tmp})
+    target_link_libraries(ATen_cuda INTERFACE caffe2::cudart)
+
+    target_include_directories(
+        ATen_cuda INTERFACE $<INSTALL_INTERFACE:include>)
+    target_include_directories(
+        ATen_cuda PRIVATE ${ATen_CUDA_INCLUDE})
+    target_link_libraries(
+        ATen_cuda PRIVATE ${ATen_CUDA_DEPENDENCY_LIBS} ATEN_CUDA_FILES_GEN_LIB)
+
+    # These public dependencies must go after the previous dependencies, as the
+    # order of the libraries in the linker call matters here when statically
+    # linking; libculibos and cublas must be last.
+    target_link_libraries(
+        ATen_cuda PUBLIC ATen_cpu ${ATen_PUBLIC_CUDA_DEPENDENCY_LIBS})
+
+    # Set standard properties on the target
+    aten_set_target_props(ATen_cuda)
+
+    caffe2_interface_library(ATen_cuda ATen_cuda_library)
+
+    # Make sure these don't get built by parent
+    set(ATen_CUDA_SRCS)
+  endif()
+endif()
+
+if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
+  if(NOT NO_CUDA)
+    if (NOT $ENV{ATEN_STATIC_CUDA})
+      cuda_add_cublas_to_target(ATen_cuda)
+      cuda_add_cufft_to_target(ATen_cuda)
+    endif()
+  endif()
+
+  if(NOT MSVC)
+    aten_compile_options(ATen_cpu)
+    if(NOT NO_CUDA OR WITH_ROCM)
+      aten_compile_options(ATen_cuda)
+    endif()
+  endif()
+
+  if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
+    set_property(TARGET ATen_cpu PROPERTY CXX_STANDARD 11)
+    if(NOT NO_CUDA OR WITH_ROCM)
+      set_property(TARGET ATen_cuda PROPERTY CXX_STANDARD 11)
+    endif()
+  endif()
+endif()
+
+if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  # Eventually replace this use of LOCATION with use of
+  # $<TARGET_FILE:ATen_cpu>, but generators only work in some cases
+  cmake_policy(SET CMP0026 OLD)
+  get_target_property(ATEN_CPU_OUTPUT_NAME ATen_cpu LOCATION)
+  get_filename_component(ATEN_CPU_OUTPUT_NAME ${ATEN_CPU_OUTPUT_NAME} NAME)
+  set(ATEN_LIBRARIES
+    "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_LIB_DIR}/${ATEN_CPU_OUTPUT_NAME}")
+  if(NOT NO_CUDA OR WITH_ROCM)
+    get_target_property(ATEN_CUDA_OUTPUT_NAME ATen_cuda LOCATION)
+    get_filename_component(ATEN_CUDA_OUTPUT_NAME ${ATEN_CUDA_OUTPUT_NAME} NAME)
+    list(APPEND ATEN_LIBRARIES
+      "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_LIB_DIR}/${ATEN_CUDA_OUTPUT_NAME}")
+  endif()
+
+  install(TARGETS ATen_cpu
+    RUNTIME DESTINATION "${AT_INSTALL_BIN_DIR}"
+    LIBRARY DESTINATION "${AT_INSTALL_LIB_DIR}"
+    ARCHIVE DESTINATION "${AT_INSTALL_LIB_DIR}")
+
+  if(NOT NO_CUDA OR WITH_ROCM)
+    install(TARGETS ATen_cuda
+      RUNTIME DESTINATION "${AT_INSTALL_BIN_DIR}"
+      LIBRARY DESTINATION "${AT_INSTALL_LIB_DIR}"
+      ARCHIVE DESTINATION "${AT_INSTALL_LIB_DIR}")
+  endif()
+endif()
+
 SET(ATEN_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_INCLUDE_DIR}")
 CONFIGURE_FILE(ATenConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake")
 INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
+# https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
 FOREACH(HEADER ${base_h})
-  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
-ENDFOREACH()
-FOREACH(HEADER ${generated_h})
-  INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${HEADER}
-  DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
-ENDFOREACH()
-FOREACH(HEADER ${cuda_h})
-  # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
-  GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
+  string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
+  GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
 ENDFOREACH()
-INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/ATen/Declarations.yaml
+FOREACH(HEADER ${generated_h} ${cuda_generated_h})
+  # NB: Assumed to be flat
+  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
+ENDFOREACH()
+FOREACH(HEADER ${cuda_h})
+  string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
+  GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
+  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
+ENDFOREACH()
+INSTALL(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)
+
+if(ATEN_NO_TEST)
+  message("disable test because ATEN_NO_TEST is set")
+else()
+  add_subdirectory(test)
+endif()
+
+if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  foreach(test_src ${ATen_CPU_TEST_SRCS})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    add_executable(${test_name} "${test_src}")
+    target_include_directories(
+        ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+    target_link_libraries(${test_name} ATen_cpu)
+    add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+    install(TARGETS ${test_name} DESTINATION test)
+  endforeach()
+
+  if(NOT NO_CUDA OR WITH_ROCM)
+    foreach(test_src ${ATen_CUDA_TEST_SRCS})
+      get_filename_component(test_name ${test_src} NAME_WE)
+      torch_cuda_based_add_executable(${test_name} "${test_src}")
+      target_include_directories(
+          ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+      target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+      target_link_libraries(${test_name} ATen_cpu ATen_cuda)
+      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+      install(TARGETS ${test_name} DESTINATION test)
+    endforeach()
+  endif()
+
+  # Make sure these don't get built by parent
+  set(ATen_CPU_TEST_SRCS)
+  set(ATen_CUDA_TEST_SRCS)
+endif()
+
+# Pass source, includes, and libs to parent
+set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
+set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
+set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
+set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)
+set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
+set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)

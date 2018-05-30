@@ -1,4 +1,7 @@
 #include "ATen/Type.h"
+
+// ${generated_comment}
+
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
 #include "ATen/Scalar.h"
@@ -6,15 +9,18 @@
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/UndefinedType.h"
+#include <ATen/detail/VariableHooksInterface.h>
 
 #include <iostream>
-${type_headers}
+${cpu_type_headers}
 
 namespace at {
 
-void Type::registerAll(Context * context) {
-  ${type_registrations}
-  context->type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
+void Type::registerCPU(Context * context) {
+  ${cpu_type_registrations}
+  context->type_registry[static_cast<int>(IsVariable::NotVariable)]
+                        [static_cast<int>(Backend::Undefined)]
+                        [static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
 }
 
 Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {

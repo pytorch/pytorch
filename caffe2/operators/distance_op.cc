@@ -382,12 +382,71 @@ OPERATOR_SCHEMA(L1Distance)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-Given two input float tensors X, Y, and produces one output float tensor
-of the L1 difference between X and Y, computed as L1(x,y) = sum over |x-y|
+Computes the row-wise L1 Distance between the two input tensors $X$ and $Y$, which is defined as
+
+$$L1Distance(\mathbf{x},\mathbf{y}) = \sum_{i}\mid x_i - y_i\mid$$
+
+Note, both inputs must either be 1-dimensional or 2-dimensional and both must have the same shape. The output $Z$ will be 1-dimensional regardless and its length will equal the number of rows in the inputs.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "L1Distance",
+    ["X", "Y"],
+    ["Z"]
+)
+
+# Create X
+X = 5*np.ones((1, 4))
+print("X:\n",X)
+
+# Create Y
+Y = np.ones((1, 4))
+print("Y:\n",Y)
+
+# Feed X & Y into workspace
+workspace.FeedBlob("X", X.astype(np.float32))
+workspace.FeedBlob("Y", Y.astype(np.float32))
+
+# Run op
+workspace.RunOperatorOnce(op)
+
+# Collect Output
+print("Z:\n", workspace.FetchBlob("Z"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[5. 5. 5. 5.]]
+Y:
+ [[1. 1. 1. 1.]]
+Z:
+ [16.]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "X", "1D or 2D input tensor")
-    .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")
-    .Output(0, "Z", "1D output tensor");
+    .Input(0, "X", "First input tensor. (1D or 2D)")
+    .Input(1, "Y", "Second input tensor. (must have the same shape as $X$)")
+    .Output(0, "Z", "1D output tensor. One value for each row of the inputs.");
 
 OPERATOR_SCHEMA(L1DistanceGradient).NumInputs(3).NumOutputs(2);
 
@@ -449,8 +508,69 @@ OPERATOR_SCHEMA(CosineSimilarity)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-Given two input float tensors X, Y, and produces one output float tensor
-of the cosine similarity between X and Y.
+This op takes two input float tensors of the same size, $X$ and $Y$, and produces one output float tensor , $Z$, calculated as the cosine similarity between $X$ and $Y$. Recall, the cosine similarity between two tensors $X$ and $Y$ is defined as:
+
+$$\mathbf{Z}=CosineSimilarity(\mathbf{X},\mathbf{Y}) = \frac{\mathbf{X}\cdot\mathbf{Y}}{\|\mathbf{X}\|\|\mathbf{Y}\|} = \frac{\sum_n^{i=1}X_iY_i}{\sqrt{\sum_n^{i=1}X_i^2}\sqrt{\sum_n^{i=1}Y_i^2}}$$
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "CosineSimilarity",
+    ["X", "Y"],
+    ["Z"]
+)
+
+# Create X
+X = np.random.randn(3, 3)
+print("X:\n",X)
+
+# Create Y
+Y = np.random.randn(3, 3)
+print("Y:\n",Y)
+
+# Feed X & Y into workspace
+workspace.FeedBlob("X", X.astype(np.float32))
+workspace.FeedBlob("Y", Y.astype(np.float32))
+
+# Run op
+workspace.RunOperatorOnce(op)
+
+# Collect Output
+print("Z:\n", workspace.FetchBlob("Z"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[-0.42635564 -0.23831588 -0.25515547]
+ [ 1.43914719 -1.05613228  1.01717373]
+ [ 0.06883105  0.33386519 -1.46648334]]
+Y:
+ [[-0.90648691 -0.14241514 -1.1070837 ]
+ [ 0.92152729 -0.28115511 -0.17756722]
+ [-0.88394254  1.34654037 -0.80080998]]
+Z:
+ [-1.7849885e-23  1.7849885e-23 -1.0842022e-07]
+
+```
+
+</details>
+
 )DOC")
     .Input(0, "X", "1D or 2D input tensor")
     .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")

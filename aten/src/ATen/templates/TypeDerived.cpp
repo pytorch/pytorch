@@ -4,6 +4,9 @@
 #define __STDC_FORMAT_MACROS
 
 #include "ATen/${Type}.h"
+
+// ${generated_comment}
+
 #include "ATen/${Storage}.h"
 #include "ATen/${Tensor}.h"
 #include "ATen/${Generator}.h"
@@ -24,9 +27,7 @@
 #include <sstream>
 
 #include "ATen/Config.h"
-#if AT_CUDA_ENABLED()
 $extra_cuda_headers
-#endif
 
 namespace at {
 

@@ -13,12 +13,17 @@ using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
 bool isDifferentiable(Node * n) {
-  // TODO: unsqueeze!
   static std::unordered_set<Symbol> differentiable_kinds = {
     aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
-    aten::unsqueeze
+    aten::unsqueeze, aten::expand, aten::addmm
   };
+  // TODO: check this more generally via schema
+  // This check ensures that the `alpha` and `beta` attributes on this addmm
+  // node are constant and equivalent to 1.0
+  if (n->kind() == aten::addmm && n->inputs().size() > 3) {
+    return false;
+  }
   return differentiable_kinds.count(n->kind()) > 0;
 }
 
@@ -90,7 +95,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
             dmat2 = inputs.at(0).t().mm(grads.at(0));
           }
         } else {
-          dmat2 = grads.at(0).mm(inputs.at(1).t());
+          dmat2 = inputs.at(0).t().mm(grads.at(0));
         }
         return {dmat1, dmat2};
       }

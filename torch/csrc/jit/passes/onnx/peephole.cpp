@@ -23,14 +23,21 @@ bool isNopTranspose(const std::vector<int64_t> & perm) {
 
 // returns a vector `ret` such that transposing by `ret` is equivalent
 // to transposing by `t1` and then by `t2`
+//
+// This fires in the case that we have transpose ops T1 -> T2. We are
+// fusing the transpose op T1 into T2 and discarding T1. We assume the elements
+// of the permutation in `t1` are raw indices into its input, since a previous
+// iteration would have folded all the transposes up to that point. Thus,
+// `ret[i] = t1[t2[i]]` says "the output of t2 at position i takes the value of
+// the input tensor index contained in t1 at position `t2[i]``".
 std::vector<int64_t> composeTransposes(const std::vector<int64_t> & t1,
                                        const std::vector<int64_t> & t2) {
   JIT_ASSERT(t1.size() == t2.size());
   std::vector<int64_t> ret;
-  for (size_t i = 0; i < t1.size(); i++) {
-    JIT_ASSERT(   t1[i]  < int64_t(t2.size()));
-    JIT_ASSERT(t2[t1[i]] < int64_t(t2.size()));
-    ret.push_back(t2[t1[i]]);
+  ret.reserve(t1.size());
+  for (size_t i = 0; i < t2.size(); i++) {
+    JIT_ASSERT(t2[i] < int64_t(t1.size()));
+    ret.push_back(t1[t2[i]]);
   }
   return ret;
 }
@@ -92,6 +99,7 @@ void fuseBroadcast(Block *b) {
 
     // The expanded_rhs input isn't actually an expand, so no fusion available
     if (expanded_rhs->kind() != aten::expand) continue;
+    if (expanded_rhs->inputs().size() != 1) continue;
 
     auto* unexpanded_rhs = expanded_rhs->input();
 
@@ -220,6 +228,18 @@ void pushPackingPastRnn(Block *b) {
     if(rnn->owningBlock() != n->owningBlock())
       continue;
 
+    // The rnn is followed by a transpose and a reshape (if
+    // bidirectional), or by a squeeze (if unidirectional).
+    Node * next = rnn->outputs()[0]->uses()[0].user;
+    if (next->kind() == onnx::Transpose) {
+      next = next->outputs()[0]->uses()[0].user;
+      if (next->kind() != onnx::Reshape) {
+        continue;
+      }
+    } else if (next->kind() != onnx::Squeeze) {
+      continue;
+    }
+
     // remove PackPadded from in front of the RNN
     n->outputs()[0]->replaceAllUsesWith(n->inputs()[0]);
 
@@ -229,14 +249,14 @@ void pushPackingPastRnn(Block *b) {
 
     // and insert new PackPadded after the RNN
     Node * newPackPadded = b->owningGraph()->create(prim::PackPadded, 2);
-    newPackPadded->insertAfter(rnn);
+    newPackPadded->insertAfter(next);
 
     // make things consume from the new PackPadded
-    rnn->outputs()[0]->replaceAllUsesWith(newPackPadded->outputs()[0]);
+    next->outputs()[0]->replaceAllUsesWith(newPackPadded->outputs()[0]);
     n->outputs()[1]->replaceAllUsesWith(newPackPadded->outputs()[1]);
 
     // setup the new PackPadded's inputs
-    newPackPadded->addInput(rnn->outputs()[0]);
+    newPackPadded->addInput(next->outputs()[0]);
     newPackPadded->addInput(n->inputs()[1]);
 
     it.destroyCurrent();

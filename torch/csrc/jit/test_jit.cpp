@@ -24,6 +24,7 @@
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/assertions.h"
 
@@ -442,7 +443,7 @@ void interpTest() {
     auto w_hh  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, hidden_size}));
 
     auto lstm_g = build_lstm();
-    Code lstm_function(lstm_g, /*values_are_variables=*/false);
+    Code lstm_function(lstm_g);
     std::vector<at::Tensor> outputs;
     InterpreterState lstm_interp(lstm_function);
     runOneStage(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
@@ -468,7 +469,7 @@ void interpStageTest() {
 
 
     auto lstm_g = build_lstm_stages();
-    Code lstm_function(lstm_g, /*values_are_variables=*/false);
+    Code lstm_function(lstm_g);
     std::vector<at::Tensor> outputs;
     InterpreterState lstm_interp(lstm_function);
     runOneStage(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
@@ -522,7 +523,7 @@ variable_list get_grad_outputs(const variable_list& vars) {
 std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_in) {
   std::shared_ptr<tracer::TracingState> state;
   variable_list trace_vars_in;
-  std::tie(state, trace_vars_in) = tracer::enter(vars_in, 1, true);
+  std::tie(state, trace_vars_in) = tracer::enter(vars_in, 1);
   auto trace_vars_out = test(trace_vars_in);
   tracer::exit(trace_vars_out);
   return state->graph;
@@ -530,7 +531,7 @@ std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_i
 
 variable_list grad(const variable_list& outputs, const variable_list& inputs, const variable_list& grad_outputs) {
   static const auto get_edge = [](const Variable& v) { return v.gradient_edge(); };
-  auto & engine = torch::autograd::Engine::getDefaultEngine();
+  auto & engine = torch::autograd::Engine::get_default_engine();
   return engine.execute(fmap(outputs, get_edge), grad_outputs, true, false, fmap(inputs, get_edge));
 }
 
@@ -546,8 +547,8 @@ std::pair<tensor_list, tensor_list> runGradient(Gradient& grad_spec,
                                                 tensor_list& tensors_in,
                                                 tensor_list& tensor_grads_in) {
   tensor_list tensors_out, tensor_grads_out;
-  Code f_code{grad_spec.f, /*values_are_variables=*/false},
-      df_code{grad_spec.df, /*values_are_variables=*/false};
+  Code f_code{grad_spec.f},
+      df_code{grad_spec.df};
   InterpreterState f_interpreter { f_code }, df_interpreter { df_code };
 
   runOneStage(f_interpreter, tensors_in, tensors_out);
@@ -571,13 +572,14 @@ void testADFormulas() {
   using VL = variable_list;
   static const var_meta_list binary_pointwise = {{2, 3, 4, 5}, {2, 3, 4, 5}};
   static const var_meta_list unary_pointwise  = {{2, 3, 4, 5}};
+  static const var_meta_list unary_pointwise_2d  = {{2, 3}};
   static const std::vector<ADTestSpec> ad_tests = {
     {"add",     binary_pointwise, [](const VL& v) -> VL { return {v[0] + v[1]}; }},
     {"sub",     binary_pointwise, [](const VL& v) -> VL { return {v[0] - v[1]}; }},
     {"mul",     binary_pointwise, [](const VL& v) -> VL { return {v[0] * v[1]}; }},
     {"sigmoid", unary_pointwise,  [](const VL& v) -> VL { return {v[0].sigmoid()}; }},
     {"tanh",    unary_pointwise,  [](const VL& v) -> VL { return {v[0].tanh()}; }},
-    {"t",       unary_pointwise,  [](const VL& v) -> VL { return {v[0].t()}; }},
+    {"t",       unary_pointwise_2d,  [](const VL& v) -> VL { return {v[0].t()}; }},
     {"mm",      {{10, 12}, {12, 15}}, [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
     {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(4, 1)); }},
     {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(3, 2)); }},
@@ -866,13 +868,13 @@ void testControlFlow() {
   script::defineMethodsInModule(cu, cf_examples, torch::jit::script::Resolver(), nullptr);
   auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
     auto graph = cu.get_method(name).graph();
-    Code code(graph, /*values_are_variables=*/false);
+    Code code(graph);
     InterpreterState interp(code);
     interp.runOneStage(stack);
     return stack;
   };
 
-  auto L = [](int64_t l) { return at::Scalar(l).toTensor(); };
+  auto L = [](int64_t l) { return autograd::make_variable(at::Scalar(l).toTensor()); };
   auto V = [](at::Tensor t) { return at::Scalar(t).toLong(); };
   auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);

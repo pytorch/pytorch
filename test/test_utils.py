@@ -20,7 +20,7 @@ from torch.utils.trainer.plugins.plugin import Plugin
 from torch.utils.serialization import load_lua
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS
+from common import IS_WINDOWS, IS_PPC
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -114,6 +114,15 @@ class DatasetMock(object):
 
     def __len__(self):
         return 10
+
+
+class RandomDatasetMock(object):
+
+    def __getitem__(self, index):
+        return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
+
+    def __len__(self):
+        return 1000
 
 
 class TestCheckpoint(TestCase):
@@ -232,6 +241,20 @@ class TestDataLoader(TestCase):
     def setUp(self):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
+
+    def test_random_seed(self):
+        def run():
+            dataloader = torch.utils.data.DataLoader(RandomDatasetMock(),
+                                                     batch_size=2,
+                                                     num_workers=4,
+                                                     shuffle=True)
+            return next(iter(dataloader))
+
+        torch.manual_seed(2018)
+        x1 = run()
+        torch.manual_seed(2018)
+        x2 = run()
+        self.assertEqual(x1, x2)
 
     def test_single_keep(self):
         dataloader = torch.utils.data.DataLoader(self.dataset,
@@ -361,6 +384,7 @@ class TestFFI(TestCase):
 
     @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
     @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
+    @unittest.skipIf(IS_PPC, "skip for ppc64le due to incompatible exception handling")
     def test_cpu(self):
         create_extension(
             name='test_extensions.cpulib',
@@ -646,21 +670,21 @@ class TestCollectEnv(TestCase):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count('\n') >= 17)
 
-    @unittest.skipIf('BUILD_ENVIRONMENT' not in os.environ.keys(), 'CI-only test')
-    def test_expect(self):
-        info_output = get_pretty_env_info()
+    # @unittest.skipIf('BUILD_ENVIRONMENT' not in os.environ.keys(), 'CI-only test')
+    # def test_expect(self):
+    #     info_output = get_pretty_env_info()
 
-        ci_build_envs = [
-            'pytorch-linux-trusty-py2.7',
-            'pytorch-linux-xenial-cuda9-cudnn7-py3',
-            'pytorch-macos-10.13-py3',
-            'pytorch-win-ws2016-cuda9-cudnn7-py3'
-        ]
-        build_env = os.environ['BUILD_ENVIRONMENT']
-        if build_env not in ci_build_envs:
-            return
+    #     ci_build_envs = [
+    #         'pytorch-linux-trusty-py2.7',
+    #         'pytorch-linux-xenial-cuda9-cudnn7-py3',
+    #         'pytorch-macos-10.13-py3',
+    #         'pytorch-win-ws2016-cuda9-cudnn7-py3'
+    #     ]
+    #     build_env = os.environ['BUILD_ENVIRONMENT']
+    #     if build_env not in ci_build_envs:
+    #         return
 
-        self.assertExpectedOutput(info_output, build_env)
+    #     self.assertExpectedOutput(info_output, build_env)
 
 
 class TestONNXUtils(TestCase):

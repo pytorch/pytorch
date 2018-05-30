@@ -132,8 +132,8 @@ bool GroupNormOp<T, Context>::RunOnDeviceImpl(
       4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
 
   // Uses rsqrt to computes 1 / std which is much faster than computes std.
-  EigenArrayMap<T>(rsig_data, N, G) += epsilon_;
-  math::InvSqrt<T, Context>(N * G, rsig_data, rsig_data, &context_);
+  EigenArrayMap<T> rsig_array(rsig_data, G, N);
+  rsig_array = (rsig_array += epsilon_).rsqrt();
 
   // Computes Y = gamma * (X - mu) * rsig + beta.
   if (order_ == StorageOrder::NCHW) {

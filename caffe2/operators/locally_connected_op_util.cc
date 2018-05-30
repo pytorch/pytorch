@@ -1,5 +1,7 @@
 #include "caffe2/operators/locally_connected_op_util.h"
 
+#include <algorithm>
+
 namespace caffe2 {
 namespace lc_op_util {
 
@@ -7,10 +9,26 @@ void SetColumnBufferShape(
     const int N,
     const int kernel_size,
     const int output_image_size,
+    const std::vector<int>& output_image_dims,
     const StorageOrder order,
+    std::vector<int>* column_slice_dims,
     std::vector<int>* column_dims,
     std::vector<int>* column_transposed_dims,
     std::vector<int>* column_axes) {
+  column_slice_dims->resize(output_image_dims.size() + 1);
+  if (order == StorageOrder::NCHW) {
+    column_slice_dims->front() = kernel_size;
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        column_slice_dims->begin() + 1);
+  } else {
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        column_slice_dims->begin());
+    column_slice_dims->back() = kernel_size;
+  }
   *column_dims = order == StorageOrder::NCHW
       ? std::vector<int>{N, kernel_size, output_image_size}
       : std::vector<int>{N, output_image_size, kernel_size};

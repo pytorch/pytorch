@@ -93,6 +93,9 @@ class DistributedDataParallel(Module):
                            the module at beginning of the forward function.
                            (default: True)
 
+    Attributes:
+        module (Module): the module to be parallelized
+
     Example::
 
         >>> torch.distributed.init_process_group(world_size=4, init_method='...')

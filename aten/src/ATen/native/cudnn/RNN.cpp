@@ -1,8 +1,10 @@
 #include <ATen/ATen.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/Config.h>
 #include <ATen/Error.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -585,7 +587,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
 
   auto input = input_r;
   auto weight_buf = weight_buf_r;
-
+  if (fn_dropout_state.defined()) {
+      auto input_arg = TensorArg(input, "input", 1);
+      auto dropout_state_arg = TensorArg(fn_dropout_state, "dropout_states", 15);
+      checkSameGPU("cudnn_rnn", input_arg, dropout_state_arg);
+  }
   RNNParams fn;
   fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, getCudnnDataType(input));
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);

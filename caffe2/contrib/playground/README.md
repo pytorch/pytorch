@@ -41,13 +41,14 @@ $ python caffe2/contrib/playground/AnyExpOnTerm.py --parameters-json '{
         "forward_pass_py":"caffe2_resnet50_default_forward",
         "parameter_update_py":"explicit_resnet_param_update",
         "optimizer_py":"",
-        "rendezvous_py":"rendezvous_filestore"},
+        "rendezvous_py":"rendezvous_filestore",
+        "additional_override_py":""},
 
     "model_param":{
         "pretrained_model":"", "reset_epoch":true, "memonger" : true, "cuda_nccl": true,
         "combine_spatial_bn":true, "max_concurrent_distributed_ops" : 16,
         "base_learning_rate":0.05, "bn_epsilon":0.00001, "bn_momentum":0.9, "custom_bn_init": true,
-        "bn_init_gamma":1e-323, "weight_decay":1e-4, "weight_decay_bn":1e-323},
+        "bn_init_gamma":1e-323, "weight_decay":1e-4, "weight_decay_bn":1e-323, "engine":"CUDNN"},
 
     "epoch_iter":{
         "num_train_sample_per_epoch":10240,
@@ -149,3 +150,5 @@ $ python caffe2/contrib/playground/AnyExpOnTerm.py --parameters-json '{
 6. In the demo, the opts item “gen_output_py” uses output_generator.py , which provides a minimum way to generating final experimental result, stored in the form of a dict.  It will allow user to do whatever visualization with these data after the training is finished.
 
 7. Customize your experimental result.  A meter interface is provided to implement your own metrics calculators.  Example compute_loss.py and compute_topk_accuracy.py.  For training metrics, results are calculated right away in each iteration.  For testing metrics, results are accumulated for the whole loop and finally calculated after test iteration finishes.  Once your have your meter class defined, you can start defining what metrics to report in your opts['output']['metrics'] list.  The name you give to your metrics can later be used when you define your plots.  The Playground will always record throughput metrics secs_per_train and samples_per_sec.
+
+8. an additional_override_py option is provided for the modules to allow user override any existing methods defined in the main framework AnyExp.py.  This make it easy to shut down part of the model to focus on remaining modules for experimenting or debugging.  An example is given as override_no_test_model_no_checkpoint.py, which turns off checkpointing and does neither prepare nor run test model.

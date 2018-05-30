@@ -26,10 +26,7 @@ REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
-// From whatever the current context, ensure the output is TensorCPU
-REGISTER_CPU_OPERATOR(
-    EnsureCPUOutput,
-    CopyOp<CPUContext, CPUContext, CPUContext>);
+
 // From CPU, copy it to whatever the current context
 REGISTER_CPU_OPERATOR(
     CopyFromCPUInput,
@@ -80,8 +77,71 @@ OPERATOR_SCHEMA(Print)
         "(int, default 1) Print tensor every `every_n` runs")
     .Input(0, "tensor", "The tensor to print.");
 
-OPERATOR_SCHEMA(LengthsToShape).NumInputs(1).NumOutputs(1);
+OPERATOR_SCHEMA(LengthsToShape)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+This operator takes a list of $N$ equal integers as input which represent the lengths of $N$ vectors. The output is the calculated shape of the matrix if the $N$ integers were combined into a single matrix.
 
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/utility_ops.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/utility_ops.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LengthsToShape",
+    ["X"],
+    ["Y"]
+)
+
+# Create X: Sample softmax output for 5-class model
+X = np.array([2,2,2,2,2,2,2,2,2,2])
+print("X:\n",X)
+
+# Feed X into workspace
+workspace.FeedBlob("X", X.astype(np.int32))
+
+# Run op
+workspace.RunOperatorOnce(op)
+
+# Collect Output
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [2 2 2 2 2 2 2 2 2 2]
+Y:
+ [10  2]
+
+```
+
+</details>
+
+    )DOC")
+    .Input(
+        0,
+        "X",
+        "List, of length $N$, of equal integers representing the lengths of several vectors.")
+    .Output(
+        0,
+        "Y",
+        "Vector of length 2 describing the dimensions of the data if the $N$ vectors from the input were combined to a single matrix.");
 OPERATOR_SCHEMA(FlattenToVec)
     .NumInputs(1)
     .NumOutputs(1)
@@ -97,13 +157,58 @@ OPERATOR_SCHEMA(FlattenToVec)
       return out;
     })
     .SetDoc(R"DOC(
-Flattens the input tensor into a 1D vector.
+
+The *FlattenToVec* op flattens the input tensor into a 1-D vector. The op accepts a single input tensor and returns a single output tensor.
+
+Github Links:
+
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.cc
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.h
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "FlattenToVec",
+    ["input"],
+    ["output"],
+)
+
+workspace.FeedBlob("input", np.array([[1,2,3],[4,5,6],[7,8,9],[10,11,12]]).astype(np.float32))
+print("input:\n", workspace.FetchBlob("input"))
+
+workspace.RunOperatorOnce(op)
+print("output: \n", workspace.FetchBlob("output"))
+
+```
+
+**Result**
+
+```
+
+input:
+ [[ 1.  2.  3.]
+ [ 4.  5.  6.]
+ [ 7.  8.  9.]
+ [10. 11. 12.]]
+output:
+ [ 1.  2.  3.  4.  5.  6.  7.  8.  9. 10. 11. 12.]
+
+```
+
+</details>
+
 )DOC")
     .Input(0, "input", "A tensor of rank >= 1.")
-    .Output(
-        0,
-        "output",
-        "A tensor of rank 1 with the contents of the input tensor");
+    .Output(0, "output", "A tensor of rank 1 (vector) with the contents of the input tensor.");
 
 OPERATOR_SCHEMA(Alias)
     .NumInputs(1)
@@ -254,9 +359,58 @@ OPERATOR_SCHEMA(Copy)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
     .InputsCanCrossDevices()
-    .SetDoc("Copy input tensor into output, potentially across devices.")
-    .Input(0, "input", "The input tensor.")
-    .Output(0, "output", "Tensor that will contain a copy of the input.");
+    .SetDoc(R"DOC(
+Copy input tensor into output, potentially across devices.
+
+Github Links:
+
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.cc
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.h
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Copy",
+    ["input"],
+    ["output"]
+)
+
+workspace.FeedBlob("input", np.random.rand(3,3))
+print("input:", workspace.FetchBlob("input"))
+workspace.RunOperatorOnce(op)
+print("output:", workspace.FetchBlob("output"))
+
+```
+
+**Result**
+
+```
+
+input:
+[[0.16826761 0.68168217 0.55196001]
+ [0.19735483 0.34837823 0.69015595]
+ [0.09448514 0.57390828 0.37097193]]
+output:
+[[0.16826761 0.68168217 0.55196001]
+ [0.19735483 0.34837823 0.69015595]
+ [0.09448514 0.57390828 0.37097193]]
+
+```
+
+</details>
+
+)DOC")
+    .Input(0, "input", "(*Tensor*): input tensor to copy")
+    .Output(0, "output", "(*Tensor*): copy of input tensor");
 
 OPERATOR_SCHEMA(CopyGPUToCPU)
     .NumInputs(1)
@@ -300,26 +454,6 @@ Copy tensor for CPU to GPU context. Must be run under GPU device option.
     .Input(0, "input", "The input tensor.")
     .Output(0, "output", "Tensor that will contain a copy of the input.");
 
-OPERATOR_SCHEMA(EnsureCPUOutput)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .IdenticalTypeAndShape()
-    .InputsCanCrossDevices()
-    .DeviceInferenceFunction([](const OperatorDef& def) {
-      auto op_device =
-          def.has_device_option() ? def.device_option() : DeviceOption();
-      auto cpu_option = DeviceOption();
-      vector<DeviceOption> in_dev(def.input_size(), op_device);
-      vector<DeviceOption> out_dev(def.output_size(), cpu_option);
-      return std::make_pair(in_dev, out_dev);
-    })
-    .SetDoc(R"DOC(
-Take an input tensor in the current Context (GPU or CPU) and create an output
-which is always a TensorCPU. This may involves cross-device MemCpy.
-)DOC")
-    .Input(0, "input", "The input CUDA or CPU tensor.")
-    .Output(0, "output", "TensorCPU that is a copy of the input.");
-
 OPERATOR_SCHEMA(CopyFromCPUInput)
     .NumInputs(1)
     .NumOutputs(1)
@@ -351,53 +485,203 @@ OPERATOR_SCHEMA(CopyOnDeviceLike)
 OPERATOR_SCHEMA(HasElements)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc("Returns true iff the input tensor has size > 0")
-    .Input(0, "tensor", "Tensor of any type.")
-    .Output(
-        0,
-        "has_elements",
-        "Scalar bool tensor. True if input is not empty.");
+    .SetDoc(R"DOC(
+The *HasElements* op accepts a single input $tensor$, and produces a single boolean output $has\_elements$. The output is *True* if and only if $tensor$ has size > 0. Note, this op is the opposite of the *IsEmpty* op.
+
+Github Links:
+
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.cc
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.h
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "HasElements",
+    ["tensor"],
+    ["has_elements"],
+)
+
+# Use a not-empty tensor
+workspace.FeedBlob("tensor", np.random.randn(2, 2).astype(np.float32))
+print("tensor:\n", workspace.FetchBlob("tensor"))
+
+workspace.RunOperatorOnce(op)
+print("has_elements: ", workspace.FetchBlob("has_elements"),"\n")
+
+# Use an empty tensor
+workspace.FeedBlob("tensor", np.empty(0))
+print("tensor:\n", workspace.FetchBlob("tensor"))
+
+workspace.RunOperatorOnce(op)
+print("has_elements: ", workspace.FetchBlob("has_elements"))
+
+```
+
+**Result**
+
+```
+
+tensor:
+ [[ 0.6116506  -0.54433197]
+ [ 0.19406661 -0.7338629 ]]
+has_elements:  True
+
+tensor:
+ []
+has_elements:  False
+
+```
+
+</details>
+
+)DOC")
+    .Input(0, "tensor", "Input data tensor to check for elements.")
+    .Output(0, "has_elements", "Output scalar boolean tensor. True if input has size > 0.");
 
 OPERATOR_SCHEMA(IsEmpty)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc("Returns true iff the input tensor has size == 0")
+    .SetDoc(R"DOC(
+The *IsEmpty* op accepts a single input $tensor$, and produces a single boolean output $is\_empty$. The output is *True* if and only if $tensor$ has size == 0.
+
+Github Links:
+
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.cc
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.h
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "IsEmpty",
+    ["tensor"],
+    ["is_empty"],
+)
+
+# Use a not-empty tensor
+workspace.FeedBlob("tensor", np.random.randn(2, 2).astype(np.float32))
+print("tensor:\n", workspace.FetchBlob("tensor"))
+
+workspace.RunOperatorOnce(op)
+print("is_empty: ", workspace.FetchBlob("is_empty"),"\n")
+
+# Use an empty tensor
+workspace.FeedBlob("tensor", np.empty(0))
+print("tensor:\n", workspace.FetchBlob("tensor"))
+
+workspace.RunOperatorOnce(op)
+print("is_empty: ", workspace.FetchBlob("is_empty"))
+
+```
+
+**Result**
+
+```
+
+tensor:
+ [[ 0.26018378  0.6778789 ]
+ [-1.3097627  -0.40083608]]
+is_empty:  False
+
+tensor:
+ []
+is_empty:  True
+
+```
+
+</details>
+
+)DOC")
     .ScalarType(::caffe2::TensorProto_DataType::TensorProto_DataType_BOOL)
-    .Input(0, "tensor", "Tensor of any type.")
-    .Output(0, "is_empty", "Scalar bool tensor. True if input is empty.");
+    .Input(0, "tensor", "Input data tensor to check if empty.")
+    .Output(0, "is_empty", "Output scalar boolean tensor. True if input has size == 0.");
 
 OPERATOR_SCHEMA(Gather)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given DATA tensor of rank r >= 1, and INDICES tensor of rank q, gather
-entries of the outer-most dimension of DATA indexed by INDICES, and concatenate
-them in an output tensor of rank q + (r - 1).
 
-Example:
-  DATA  = [
-      [1.0, 1.2],
-      [2.3, 3.4],
-      [4.5, 5.7],
-  ]
-  INDICES = [
-      [0, 1],
-      [1, 2],
-  ]
-  OUTPUT = [
-      [
-          [1.0, 1.2],
-          [2.3, 3.4],
-      ],
-      [
-          [2.3, 3.4],
-          [4.5, 5.7],
-      ],
-  ]
+The *Gather* op accepts a *DATA* tensor of rank $r >= 1$ and *INDICES* tensor of rank $q$ as inputs. It then gathers entries of the outer-most dimension of *DATA*, indexed by *INDICES*, and concatenate them in an output tensor of rank $q + (r - 1)$.
+
+Github Links:
+
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.cc
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.h
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Gather",
+    ["DATA", "INDICES"],
+    ["OUTPUT"]
+)
+data = np.array([[1., 1.2],[2.3, 3.4],[4.5, 5.7]])
+print("DATA:\n",data)
+
+inds = np.array([[0, 1],[1, 2]])
+print("INDICES:\n",inds)
+
+# Feed X into workspace
+workspace.FeedBlob("DATA", data.astype(np.float32))
+workspace.FeedBlob("INDICES", inds.astype(np.int32))
+
+workspace.RunOperatorOnce(op)
+print("OUTPUT:\n", workspace.FetchBlob("OUTPUT"))
+
+```
+
+**Result**
+
+```
+
+DATA:
+ [[1.  1.2]
+ [2.3 3.4]
+ [4.5 5.7]]
+INDICES:
+ [[0 1]
+ [1 2]]
+OUTPUT:
+ [[[1.  1.2]
+  [2.3 3.4]]
+
+ [[2.3 3.4]
+  [4.5 5.7]]]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "DATA", "Tensor of rank r >= 1.")
-    .Input(1, "INDICES", "Tensor of int32/int64 indices, of any rank q.")
-    .Output(0, "OUTPUT", "Tensor of rank q + (r - 1).")
+    .Input(0, "DATA", "Input data tensor of rank $r>=1$")
+    .Input(1, "INDICES", "Input indices tensor of rank $q$. This tensor must contain integers.")
+    .Output(0, "OUTPUT", "Output tensor of rank $q+(r-1)$")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out(1);
@@ -494,17 +778,65 @@ OPERATOR_SCHEMA(LengthsToSegmentIds)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given a vector of segment lengths, returns a zero-based, consecutive vector
-of segment_ids. For example, [1, 3, 0, 2] will produce [0, 1, 1, 1, 3, 3].
-In general, the inverse operation is SegmentIdsToLengths. Notice though that
-trailing empty sequence lengths can't be properly recovered from segment ids.
+Given a vector of segment lengths (*lengths*) the *LengthsToSegmentIds* op returns a zero-based, consecutive vector of segment ids (*segment_ids*). For example, *lengths=[1, 3, 0, 2]* will produce *segment_ids=[0, 1, 1, 1, 3, 3]*. In general, the inverse operation is *SegmentIdsToLengths*. Notice though that trailing empty sequence lengths can't be properly recovered from segment ids.
+
+Github Links:
+
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.cc
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.h
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LengthsToSegmentIds",
+    ["lengths"],
+    ["segment_ids"],
+)
+
+workspace.FeedBlob("lengths", np.array([1, 3, 0, 2]).astype(np.int32))
+print("lengths:\n", workspace.FetchBlob("lengths"))
+
+workspace.RunOperatorOnce(op)
+print("segment_ids: \n", workspace.FetchBlob("segment_ids"))
+
+```
+
+**Result**
+
+```
+
+lengths:
+ [1 3 0 2]
+segment_ids:
+ [0 1 1 1 3 3]
+
+```
+
+</details>
+
 )DOC")
     .Input(0, "lengths", "1D tensor of int32 or int64 segment lengths.")
-    .Output(0, "segment_ids", "1D tensor of length `sum(lengths)`");
+    .Output(0, "segment_ids", "1D tensor of length *sum(lengths)*");
 
 OPERATOR_SCHEMA(LengthsToRanges)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
+      out_shape.push_back(2);
+      return vector<TensorShape>{
+          CreateTensorShape(out_shape, in[0].data_type())};
+    })
     .SetDoc(R"DOC(
 Given a vector of segment lengths, calculates offsets of each segment and packs
 them next to the lengths. For the input vector of length N the output is a Nx2
@@ -899,21 +1231,67 @@ bool RangeOp<CPUContext>::DoRunOnDevice(
 OPERATOR_SCHEMA(Range)
     .NumInputs(1, 3)
     .NumOutputs(1)
-    .SetDoc(
-        "Values are generated within the half-open interval [start, stop) "
-        "(in other words, the interval including start but excluding stop). "
-        "When called with a single value, this will return `[0, v]` with the "
-        "result type inferred from the input types.")
+    .SetDoc(R"DOC(
+Generates an output tensor within the half-open interval $[start, stop)$ (the interval including start but excluding stop).
+- The `start` input is optional, and defaults to 0 when not set.
+- The `step` input is optional, and defaults to 1 when not set.
+- The type of the `output` tensor is determined by the types of inputs used.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/utility_ops.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/utility_ops.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Range",
+    ["start", "stop", "step"],
+    ["output"]
+)
+
+workspace.FeedBlob("start", np.array(4, dtype=np.int32))
+workspace.FeedBlob("stop", np.array(17, dtype=np.int32))
+workspace.FeedBlob("step", np.array(2, dtype=np.int32))
+print("start:", workspace.FetchBlob("start"))
+print("stop:", workspace.FetchBlob("stop"))
+print("step:", workspace.FetchBlob("step"))
+workspace.RunOperatorOnce(op)
+print("output:", workspace.FetchBlob("output"))
+
+```
+
+**Result**
+
+```
+
+start: 4
+stop: 17
+step: 2
+output: [ 4  6  8 10 12 14 16]
+
+```
+
+</details>
+        )DOC")
     .Input(
         0,
         "start",
-        "Optional scalar Tensor with the start of the interval (inclusive).")
-    .Input(1, "stop", "scalar Tensor with the end of the interval (exclusive)")
-    .Input(2, "step", "Optional scalar Tensor with spacing between values.")
+        "(*Tensor*): [OPTIONAL] scalar tensor containing the start of the interval (inclusive) (default=0)")
+    .Input(1, "stop", "(*Tensor*): scalar tensor containing the end of the interval (exclusive)")
+    .Input(2, "step", "(*Tensor*): [OPTIONAL] scalar tensor specifying the spacing between values (default=1)")
     .Output(
         0,
         "output",
-        "1D tensor of same type as inputs that contains the sequence.");
+        "(*Tensor*): 1D tensor of same type as inputs that contains the sequence");
 
 REGISTER_CPU_OPERATOR(Range, RangeOp<CPUContext>);
 NO_GRADIENT(Range);

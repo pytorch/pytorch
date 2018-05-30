@@ -199,9 +199,12 @@ public:
   size_t unique() const {
     return unique_;
   }
+  bool hasUniqueName() const {
+    return unique_name_ != "";
+  }
   Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
-    if (unique_name_ != "")
+    if (hasUniqueName())
       return unique_name_;
     return std::to_string(unique());
   }
@@ -246,7 +249,7 @@ public:
 
   Value* copyMetadata(Value * from) {
     setType(from->type());
-    if (from->unique_name_ != "")
+    if (from->hasUniqueName())
       setUniqueName(from->uniqueName());
     return this;
   }
@@ -741,13 +744,12 @@ struct Block {
   }
   Value * addInput(std::string name="") {
     Value * v = input_->addOutput();
-    if (name != "") v->setUniqueName(name);
+    v->setUniqueName(name);
     return v;
   }
   Value* insertInput(size_t i, std::string name = "") {
     Value* v = input_->insertOutput(i);
-    if (name != "")
-      v->setUniqueName(name);
+    v->setUniqueName(name);
     return v;
   }
   void eraseInput(size_t i) {
@@ -826,7 +828,7 @@ private:
   std::unordered_set<const Block*> all_blocks;
   size_t next_unique_;
 
-  std::unordered_set<std::string> unique_names_;
+  std::unordered_map<std::string, Value*> unique_names_;
 
   size_t new_node_stage_;
 
@@ -950,6 +952,7 @@ public:
     AutoGPU guard(ref.type().is_cuda() ? ref.get_device() : -1);
     auto n = create(prim::Constant);
     n->t_(attr::value, ref.clone());
+    n->output()->inferTypeFrom(ref);
     return n;
   }
   Node * createFusionGroup(int device) {
@@ -976,10 +979,8 @@ public:
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
-      std::vector<VariableFlags>&& var_flags,
-      pyobj_list&& scalar_args,
-      bool tracing_autograd_python_function = true);
-  Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags);
+      pyobj_list&& scalar_args);
+  Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
   // if copy_blocks is false, it will not recursively clone the nested blocks
@@ -1072,6 +1073,7 @@ private:
     all_nodes.erase(it);
   }
   void freeValue(Value * v) {
+    v->setUniqueName("");
     auto it = all_values.find(v);
     JIT_ASSERT(it != all_values.end());
     delete *it;
@@ -1193,22 +1195,6 @@ inline void Node::cloneFrom(Node * s) {
 	copyAttributes(*s);
 }
 
-inline Value* Value::setUniqueName(const std::string & orig_name) {
-  if (orig_name.find_first_not_of("0123456789") == std::string::npos) {
-    throw std::runtime_error("names may not be integers: " + orig_name);
-  }
-  auto & names = node()->owningGraph()->unique_names_;
-  auto name = orig_name;
-  for(size_t i = 1; names.find(name) != names.end(); i++) {
-    std::stringstream ss;
-    ss << orig_name << "." << i;
-    name = ss.str();
-  }
-  names.insert(name);
-  unique_name_ = std::move(name);
-  return this;
-}
-
 inline Block::Block(Graph * graph_, Node * node_)
 : graph_(graph_)
 , output_(initOutput(graph_->create(prim::Return, 0)))
@@ -1283,14 +1269,10 @@ struct PythonOp : public Node {
   PythonOp* init(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
-      std::vector<VariableFlags>&& var_flags,
-      pyobj_list&& scalar_args,
-      bool tracing_autograd_python_function = true) {
+      pyobj_list&& scalar_args) {
     this->pyobj = std::move(pyobj);
     this->scalar_args = std::move(scalar_args);
     this->cconv = cconv;
-    this->var_flags = std::move(var_flags);
-    this->tracing_autograd_python_function = tracing_autograd_python_function;
     return this;
   }
   virtual Node * allocNewInstance(Graph * g) override {
@@ -1312,27 +1294,21 @@ struct PythonOp : public Node {
   // 's' -- python scalar argument
   // 't' -- tensor argument
   std::string cconv;
-  bool tracing_autograd_python_function;
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
-  std::vector<VariableFlags> var_flags;
   std::string name() const;
   virtual void cloneFrom(Node * other_) override;
 };
 inline Node* Graph::createPythonOp(
     THPObjectPtr&& pyobj,
     const std::string& cconv,
-    std::vector<VariableFlags>&& var_flags,
-    pyobj_list&& scalar_args,
-    bool tracing_autograd_python_function) {
+    pyobj_list&& scalar_args) {
   auto op = new PythonOp(this);
   return op->init(
       std::move(pyobj),
       cconv,
-      std::move(var_flags),
-      std::move(scalar_args),
-      tracing_autograd_python_function);
+      std::move(scalar_args));
 }
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.
@@ -1342,12 +1318,10 @@ struct CppOp : public Node {
   CppOp(Graph * g)
   : Node(g,prim::CppOp) {}
   std::shared_ptr<torch::autograd::Function> fn;
-  std::vector<VariableFlags> var_flags;
   std::string name() const;
-  CppOp* init(std::shared_ptr<torch::autograd::Function> fn, std::vector<VariableFlags> && var_flags) {
+  CppOp* init(std::shared_ptr<torch::autograd::Function> fn) {
     JIT_ASSERT(fn);
     this->fn = std::move(fn);
-    this->var_flags = std::move(var_flags);
     return this;
   }
   virtual Node * allocNewInstance(Graph * g) override {
@@ -1357,12 +1331,11 @@ struct CppOp : public Node {
     Node::cloneFrom(other_);
     auto other = other_->cast<CppOp>();
     this->fn = other->fn;
-    this->var_flags = other->var_flags;
   }
 };
-inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags) {
+inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function> & fn) {
   auto op = new CppOp(this);
-  return op->init(fn, std::move(var_flags));
+  return op->init(fn);
 }
 
 inline graph_node_list_iterator Node::iterator() {

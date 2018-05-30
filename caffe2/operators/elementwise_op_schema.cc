@@ -301,9 +301,27 @@ Performs element-wise {desc} comparison `{name}` (with limited broadcast support
   };
 }
 
-#define CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(name, symbol, desc) \
-  OPERATOR_SCHEMA(name).NumInputs(2).NumOutputs(1).FillUsing(      \
-      ComparisonDocGenerator(symbol, desc));                       \
+#define CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(name, symbol, desc)             \
+  OPERATOR_SCHEMA(name)                                                        \
+      .NumInputs(2)                                                            \
+      .NumOutputs(1)                                                           \
+      .TensorInferenceFunction(                                                \
+          [](const OperatorDef& def, const vector<TensorShape>& in) {          \
+            ArgumentHelper helper(def);                                        \
+            const auto broadcasted =                                           \
+                helper.GetSingleArgument<bool>("broadcast", false);            \
+            if (!broadcasted) {                                                \
+              CAFFE_ENFORCE_EQ(in[0].dims().size(), in[1].dims().size());      \
+              for (int i = 0; i < in[0].dims().size(); ++i) {                  \
+                CAFFE_ENFORCE_EQ(in[0].dims(i), in[1].dims(i));                \
+              }                                                                \
+            }                                                                  \
+            auto output_dims =                                                 \
+                std::vector<TIndex>(in[0].dims().begin(), in[0].dims().end()); \
+            return vector<TensorShape>{                                        \
+                CreateTensorShape(output_dims, TensorProto::BOOL)};            \
+          })                                                                   \
+      .FillUsing(ComparisonDocGenerator(symbol, desc));                        \
   SHOULD_NOT_DO_GRADIENT(name)
 
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LT, "<", "less than");

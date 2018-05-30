@@ -2,7 +2,7 @@
 #include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 
-#include "ATen/cuda/AccumulateType.cuh"
+#include "ATen/AccumulateType.h"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
@@ -35,7 +35,7 @@ __global__ void EmbeddingBag_updateOutputKernel(
 
   // the strategy here is that each bag x feature is handled by a single thread
 
-  using accscalar_t = cuda::acc_type<scalar_t>;
+  using accscalar_t = acc_type<scalar_t, true>;
   int64_t chunksPerBag = THCCeilDiv(stride, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;
   int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
@@ -100,7 +100,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
     scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
     int64_t stride, int mode, int64_t *bag_size) {
 
-  using accscalar_t = cuda::acc_type<scalar_t>;
+  using accscalar_t = acc_type<scalar_t, true>;
   int idx = blockIdx.x * 4 + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
@@ -237,7 +237,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
   dim3 block(32, 4);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad.type(), "embedding_bag_backward_cuda_sum_avg_kernel", [&] {
-        using cuda_scalar_t = cuda::type<scalar_t>;
+        using cuda_scalar_t = cuda::into_type<scalar_t>;
         EmbeddingBag_accGradParametersKernel_sum_avg<
             cuda_scalar_t><<<grid, block, 0, stream>>>(
             sorted_indices.data<int64_t>(), orig_indices.data<int64_t>(),
@@ -256,7 +256,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
     int64_t *max_indices, scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t stride, int64_t numBags) {
 
-  using accscalar_t = cuda::acc_type<scalar_t>;
+  using accscalar_t = acc_type<scalar_t, true>;
 
   int64_t chunksPerBag = THCCeilDiv(stride, (int64_t)blockDim.x);
   int64_t numChunks = numBags * chunksPerBag;
@@ -292,7 +292,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad.type(), "embedding_bag_backward_cuda_max", [&] {
-        using cuda_scalar_t = cuda::type<scalar_t>;
+        using cuda_scalar_t = cuda::into_type<scalar_t>;
         EmbeddingBag_accGradParametersKernel_max<
             cuda_scalar_t><<<grid, block, 0, stream>>>(
             max_indices.data<int64_t>(), grad.data<cuda_scalar_t>(), 
@@ -343,7 +343,7 @@ embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   dim3 block = dim3(32, 8);
   int grid = 1024;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(weight.type(), "embedding_bag_cuda", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     EmbeddingBag_updateOutputKernel<cuda_scalar_t><<<grid, block, 0, stream>>>(
         indices.data<int64_t>(), offsets.data<int64_t>(),
         weight.data<cuda_scalar_t>(), output.data<cuda_scalar_t>(),

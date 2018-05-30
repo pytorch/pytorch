@@ -34,6 +34,11 @@ if [[ "$image" == *cuda* ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
 fi
 
+if [[ "$image" == *rocm* ]]; then
+  ROCM_VERSION="$(echo "${image}" | perl -n -e'/rocm(\d+\.\d+.\d+)/ && print $1')"
+  DOCKERFILE="${OS}-rocm/Dockerfile"
+fi
+
 if [[ "$image" == *conda* ]]; then
   # Unlike python version, Anaconda version is either 2 or 3
   ANACONDA_VERSION="$(echo "${image}" | perl -n -e'/conda(\d)/ && print $1')"
@@ -86,5 +91,6 @@ docker build \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
+       --build-arg "ROCM_VERSION=${ROCM_VERSION}" \
        "$@" \
        "$(dirname ${DOCKERFILE})"

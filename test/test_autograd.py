@@ -150,13 +150,14 @@ class TestAutograd(TestCase):
             def backward(ctx, grad):
                 return grad * 2
 
-        v = torch.ones(1, requires_grad=True)
-        MyFunction.apply(v).backward()
-        self.assertEqual(v.grad.data.tolist(), [2])
+        for shape in [(1,), ()]:
+            v = torch.ones(shape, requires_grad=True)
+            MyFunction.apply(v).backward()
+            self.assertEqual(v.grad, torch.full(shape, 2))
 
-        v.grad.data.zero_()
-        MyFunction.apply(v.clone()).backward()
-        self.assertEqual(v.grad.data.tolist(), [2])
+            v.grad.data.zero_()
+            MyFunction.apply(v.clone()).backward()
+            self.assertEqual(v.grad, torch.full(shape, 2))
 
     def test_legacy_function_none_grad(self):
         class MyFunction(Function):
@@ -687,9 +688,19 @@ class TestAutograd(TestCase):
         y = Variable(torch.ones(5, 5) * 4)
         with torch.no_grad():
             w = x + y
+
+        @torch.no_grad()
+        def adder(x, y):
+            return x + y
+
+        z = adder(x, y)
+
         self.assertFalse(w.requires_grad)
         self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
         self.assertIsNone(w.grad_fn)
+        self.assertFalse(z.requires_grad)
+        self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
+        self.assertIsNone(z.grad_fn)
 
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
@@ -1774,7 +1785,7 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad.data, torch.ones(x.size()))
 
     def test_set_grad_enabled(self):
-        x = torch.tensor([1], requires_grad=True)
+        x = torch.tensor([1.], requires_grad=True)
         with torch.set_grad_enabled(False):
             y = x * 2
         self.assertFalse(y.requires_grad)
@@ -2621,6 +2632,8 @@ method_tests = [
     ('sum', (), NO_ARGS, 'scalar'),
     ('sum', (), (0,), 'scalar_dim', [0]),
     ('sum', (), (0, True,), 'scalar_keepdim_dim', [0]),
+    ('sum', (S, S, S), ([1, 2],), 'multi_dim'),
+    ('sum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
     ('prod', (S, S, S), NO_ARGS),
     ('prod', (S, S, S), (1,), 'dim', [0]),
     ('prod', (S, S, S), (1, True,), 'keepdim_dim', [0]),
@@ -2736,6 +2749,7 @@ method_tests = [
     ('addcdiv', (), (0.5, (S, S, 1), (1, S)), 'scalar_scale_broadcast_lhs'),
     ('zero_', (S, S, S), NO_ARGS),
     ('zero_', (), NO_ARGS, 'scalar'),
+    ('logsumexp', (S, S), (1,)),
     ('norm', (S, S), (2,)),
     ('norm', (S, S), (0,), '0'),
     ('norm', (S, S), (0.5,), '0_5'),
@@ -2867,6 +2881,10 @@ method_tests = [
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
      'large', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (S, S, S), ((S, S, S),), 'batched', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (2, 3, S, S), ((2, 3, S, S),), 'batched_dims', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (2, 2, S, S), ((1, S, S),), 'batched_broadcast_A', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (1, S, S), ((2, 2, S, S),), 'batched_broadcast_b', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
     # FIXME: we should compute the derivative w.r.t torch.tensor(1)

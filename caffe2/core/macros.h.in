@@ -57,7 +57,6 @@ static_assert(
   {"CXX_FLAGS", "${CMAKE_CXX_FLAGS}"}, \
   {"BUILD_TYPE", "${CMAKE_BUILD_TYPE}"}, \
   {"BLAS", "${BLAS}"}, \
-  {"USE_ATEN", "${USE_ATEN}"}, \
   {"USE_CUDA", "${USE_CUDA}"}, \
   {"USE_NCCL", "${USE_NCCL}"}, \
   {"USE_MPI", "${USE_MPI}"}, \

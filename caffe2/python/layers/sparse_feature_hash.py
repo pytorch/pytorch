@@ -52,6 +52,8 @@ class SparseFeatureHash(ModelLayer):
             assert False, "Input type must be one of (IdList, IdScoreList)"
 
         assert self.modulo >= 1, 'Unexpected modulo: {}'.format(self.modulo)
+        if input_record.lengths.metadata:
+            self.output_schema.lengths.set_metadata(input_record.lengths.metadata)
 
         # operators in this layer do not have CUDA implementation yet.
         # In addition, since the sparse feature keys that we are hashing are

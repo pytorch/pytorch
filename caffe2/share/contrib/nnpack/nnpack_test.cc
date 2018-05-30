@@ -81,8 +81,7 @@ void compare(
         "convolution_transform_strategy", convolutionTransformStrategy));
   }
   if (!activation.empty()) {
-    nnpackOpDef.add_arg()->CopyFrom(MakeArgument(
-        "activation", activation));
+    nnpackOpDef.add_arg()->CopyFrom(MakeArgument("activation", activation));
   }
   nnpackOpDef.add_arg()->CopyFrom(MakeArgument("stride_h", strideH));
   nnpackOpDef.add_arg()->CopyFrom(MakeArgument("stride_w", strideW));
@@ -131,7 +130,6 @@ void compare(
     activationOp = CreateOperator(activationOpDef, &ws);
     EXPECT_NE(nullptr, activationOp.get());
   }
-
 
   for (auto i = 0; i < 10; ++i) {
     EXPECT_TRUE(nnpackOp->Run());
@@ -313,7 +311,17 @@ TEST(NNPACK, ConvRelu_1x1s1) {
     auto outChannels = randInt(1, 8) * group;
     auto n = 1;
     runConv(
-        1, 1, 1, 1, group, "DIRECT", inChannels, outChannels, n, "PRECOMPUTE", "Relu");
+        1,
+        1,
+        1,
+        1,
+        group,
+        "DIRECT",
+        inChannels,
+        outChannels,
+        n,
+        "PRECOMPUTE",
+        "Relu");
   }
 }
 

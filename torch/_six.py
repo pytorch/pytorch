@@ -38,6 +38,12 @@ else:
     int_classes = int
 
 
+if PY2:
+    FileNotFoundError = IOError
+else:
+    FileNotFoundError = FileNotFoundError
+
+
 def with_metaclass(meta, *bases):
     """Create a base class with a metaclass."""
     # This requires a bit of explanation: the basic idea is to make a dummy

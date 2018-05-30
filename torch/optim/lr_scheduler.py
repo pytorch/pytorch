@@ -22,12 +22,6 @@ class _LRScheduler(object):
         self.step(last_epoch + 1)
         self.last_epoch = last_epoch
 
-    def __getstate__(self):
-        return self.state_dict()
-
-    def __setstate__(self, state):
-        self.load_state_dict(state)
-
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
 
@@ -239,7 +233,11 @@ class ReduceLROnPlateau(object):
         factor (float): Factor by which the learning rate will be
             reduced. new_lr = lr * factor. Default: 0.1.
         patience (int): Number of epochs with no improvement after
-            which learning rate will be reduced. Default: 10.
+            which learning rate will be reduced. For example, if
+            `patience = 2`, then we will ignore the first 2 epochs
+            with no improvement, and will only decrease the LR after the
+            3rd epoch if the loss still hasn't improved then.
+            Default: 10.
         verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
         threshold (float): Threshold for measuring the new optimum,
@@ -374,3 +372,10 @@ class ReduceLROnPlateau(object):
             self.mode_worse = (-float('inf'))
 
         self.is_better = partial(self._cmp, mode, threshold_mode, threshold)
+
+    def state_dict(self):
+        return {key: value for key, value in self.__dict__.items() if key not in {'optimizer', 'is_better'}}
+
+    def load_state_dict(self, state_dict):
+        self.__dict__.update(state_dict)
+        self._init_is_better(mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode)

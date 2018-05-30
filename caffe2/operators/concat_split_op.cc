@@ -19,22 +19,87 @@ std::pair<std::vector<DeviceOption>, std::vector<DeviceOption>> splitOpDevInfer(
 } // namespace.
 
 REGISTER_CPU_OPERATOR(Split, SplitOp<CPUContext>);
+REGISTER_CPU_OPERATOR(SplitByLengths, SplitByLengthsOp<CPUContext>);
 OPERATOR_SCHEMA(Split)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
-    .Input(0, "input", "The tensor to split")
-    .Input(1, "split", "Optional list of output lengths (see also arg 'split')")
-    .Arg("axis", "Which axis to split on")
-    .Arg("split", "length of each output")
-    .Arg("order", "Either NHWC or NCWH, will split on C axis, defaults to NCHW")
+    .Input(0, "input", "(*Tensor*): tensor to split")
+    .Input(1, "split", "(*Tensor`<int>`*): [OPTIONAL] list of output lengths (see also arg `split`)")
+    .Arg("axis", "(*int*): axis to split on")
+    .Arg("split", "(*Tuple(int)*): length of each output")
+    .Arg("order", "(*string*): order of dimensions of input and output blobs; either \"NCHW\" or \"NHWC\"")
+    .Output(0,"[output_0, output_1, ...]","(*Tensor*): output tensor")
     .DeviceInferenceFunction(splitOpDevInfer)
     .SetDoc(R"DOC(
-Split a tensor into a list of tensors, along the specified
-'axis'. The lengths of the split can be specified using argument 'split' or
-optional second input blob to the operator. Otherwise, the tensor is split
-to equal sized parts.
+Split an `input` tensor into a list of tensors, along the axis specified by the `axis` dimension. The lengths of the split can be specified using argument `split` or optional second input blob to the operator. Otherwise, the tensor is split to equal sized parts.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/concat_split_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Split",
+    ["input"],
+    ["output_0","output_1","output_2"],
+    split=(3,2,4),
+    axis=0
+)
+
+workspace.FeedBlob("input", np.random.randint(10, size=(9)))
+print("input:", workspace.FetchBlob("input"))
+workspace.RunOperatorOnce(op)
+print("output_0:", workspace.FetchBlob("output_0"))
+print("output_1:", workspace.FetchBlob("output_1"))
+print("output_2:", workspace.FetchBlob("output_2"))
+
+```
+
+**Result**
+
+```
+
+input: [2 2 6 6 6 0 5 7 4]
+output_0: [2 2 6]
+output_1: [6 6]
+output_2: [0 5 7 4]
+
+```
+
+</details>
+
 )DOC")
     .InheritOnnxSchema("Split");
+
+OPERATOR_SCHEMA(SplitByLengths)
+    .NumInputs(2)
+    .NumOutputs(1, INT_MAX)
+    .Input(0, "input", "The tensor to split")
+    .Input(1, "legnths", "The tensor `l_i` indicates the logic block of input.")
+    .Arg("axis", "Which axis to split on")
+    .Arg("order", "Either NHWC or NCWH, will split on C axis, defaults to NCHW")
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      auto op_device =
+          def.has_device_option() ? def.device_option() : DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), op_device);
+      vector<DeviceOption> out_dev(def.output_size(), op_device);
+      // lengths input should be on CPU
+      in_dev[1] = DeviceOption();
+      return std::make_pair(in_dev, out_dev);
+    })
+    .SetDoc(R"DOC(
+Split a tensor into a list of tensors, given a lengths input, along the specified
+'axis'. If `K` outputs are provided, the op assumes `len(lengths) % K == 0`.
+The `input` will be split into `K` parts. Each part of length
+`sum(lengths[i*k:i*k+k))`)DOC");
 
 namespace {
 OpSchema::Cost CostInferenceForConcat(
@@ -56,6 +121,10 @@ OpSchema::Cost CostInferenceForConcat(
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
   }
+  uint64_t nElemRead = 1;
+  for (int i = 0; i < in.size(); ++i) {
+    nElemRead += nElemFromDim(in[i]);
+  }
   int size = 1;
   for (auto& s : out_shape) {
     size *= s;
@@ -63,7 +132,8 @@ OpSchema::Cost CostInferenceForConcat(
 
   struct OpSchema::Cost cost;
   cost.flops = 0;
-  cost.bytes_moved = size * sizeof(float);
+  cost.bytes_read = nElemRead * sizeof(in[0].data_type());
+  cost.bytes_written = size * sizeof(in[0].data_type());
   cost.params_bytes = 0;
   return cost;
 }
@@ -206,6 +276,7 @@ class GetSplitGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Split, GetSplitGradient);
 REGISTER_GRADIENT(DepthSplit, GetSplitGradient);
+REGISTER_GRADIENT(SplitByLengths, GetSplitGradient);
 
 class GetConcatGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

@@ -24,14 +24,14 @@ make -j
 which tries to replicate PyTorch's MNIST model + training loop
 - The principled way to write a model is probably something like 
 ```
-AUTOGRAD_CONTAINER_CLASS(MyModel) {
+TORCH_AUTOGRAD_CONTAINER_CLASS(MyModel) {
   // This does a 2D convolution, followed by global sum pooling, followed by a linear.
  public:
   void initialize_containers() override {
     myConv_ = add(Conv2d(1, 50, 3, 3).stride(2).make(), "conv");
     myLinear_ = add(Linear(50, 1).make(), "linear");
   }
-  variable_list forward(variable_list x) override {
+  std::vector<Variable> forward(std::vector<Variable> x) override {
     auto v = myConv_->forward(x);
     v = v.mean(-1).mean(-1);
     return myLinear_.forward({v});

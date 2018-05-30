@@ -12,6 +12,8 @@ test_gpu_speed_lstm () {
 
   cd benchmark/scripts/
 
+  git checkout 43dfb2c0370e70ef37f249dc09aff9f0ccd2ddb0
+
   SAMPLE_ARRAY=()
   NUM_RUNS=$1
 
