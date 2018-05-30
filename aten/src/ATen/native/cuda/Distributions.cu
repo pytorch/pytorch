@@ -101,7 +101,7 @@ namespace at { namespace native {
 Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
   Tensor ret = lambda.type().tensor(lambda.sizes());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "poisson", [&] {
-    poisson_cuda_kernel<cuda::type<scalar_t>>(ret, lambda, next_philox_seed(gen, 20));
+    poisson_cuda_kernel<cuda::into_type<scalar_t>>(ret, lambda, next_philox_seed(gen, 20));
   });
   return ret;
 }
@@ -109,7 +109,7 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
 Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
   Tensor ret = alpha.type().tensor(alpha.sizes());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "gamma", [&] {
-     gamma_cuda_kernel<cuda::type<scalar_t>>(ret, alpha, next_philox_seed(gen, 10));
+     gamma_cuda_kernel<cuda::into_type<scalar_t>>(ret, alpha, next_philox_seed(gen, 10));
    });
   return ret;
 }
@@ -117,7 +117,7 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
 Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
   Tensor ret = self.type().tensor(self.sizes());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "_standard_gamma_grad", [&] {
-     gamma_grad_cuda_kernel<cuda::type<scalar_t>>(ret, self, output);
+     gamma_grad_cuda_kernel<cuda::into_type<scalar_t>>(ret, self, output);
    });
   return ret;
 }
