@@ -27,13 +27,15 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
 fi
 
-if [[ "${SHOULD_RUN_TEST1}" == "true" ]]; then
+test_python_nn() {
   time python test/run_test.py --include nn --verbose
-fi
+}
 
-if [[ "${SHOULD_RUN_TEST2}" == "true" ]]; then
+test_python_all_except_nn() {
   time python test/run_test.py --exclude nn --verbose
+}
 
+test_aten() {
   # Test ATen
   if [[ "$BUILD_ENVIRONMENT" != *asan* ]]; then
     echo "Running ATen tests with pytorch lib"
@@ -45,7 +47,9 @@ if [[ "${SHOULD_RUN_TEST2}" == "true" ]]; then
     ls build/bin
     aten/tools/run_tests.sh build/bin
   fi
+}
 
+test_torchvision() {
   rm -rf ninja
 
   echo "Installing torchvision at branch master"
@@ -61,7 +65,9 @@ if [[ "${SHOULD_RUN_TEST2}" == "true" ]]; then
   #time python setup.py install
   pip install .
   popd
+}
 
+test_libtorch() {
   if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
      echo "Testing libtorch with NO_PYTHON"
      CPP_BUILD="$PWD/../cpp-build"
@@ -72,5 +78,22 @@ if [[ "${SHOULD_RUN_TEST2}" == "true" ]]; then
      fi
      python tools/download_mnist.py --quiet -d test/cpp/api/mnist
      OMP_NUM_THREADS=2 "$CPP_BUILD"/libtorch/bin/test_api
+  fi
+}
+
+if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+  test_python_nn
+  test_python_all_except_nn
+  test_aten
+  test_torchvision
+  test_libtorch
+else
+  if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+    test_python_nn
+  elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+    test_python_all_except_nn
+    test_aten
+    test_torchvision
+    test_libtorch
   fi
 fi

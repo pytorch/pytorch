@@ -34,7 +34,7 @@ except botocore.exceptions.ClientError as e:
 
 EOL
 
-cat >ci_scripts/test_pytorch.bat <<EOL
+cat >ci_scripts/setup_pytorch_env.bat <<EOL
 
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
@@ -64,14 +64,30 @@ python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
 
 7z x %IMAGE_COMMIT_TAG%.7z
 
-set SPLIT_TESTS=true
+cd ..
 
-IF "%SHOULD_RUN_TEST1%" == "true" (
-    python run_test.py --include nn --verbose
-)
-IF "%SHOULD_RUN_TEST2%" == "true" (
-    python run_test.py --exclude nn --verbose
-)
 EOL
 
-ci_scripts/test_pytorch.bat && echo "TEST PASSED"
+cat >ci_scripts/test_python_nn.bat <<EOL
+call ci_scripts/setup_pytorch_env.bat
+cd test/ && python run_test.py --include nn --verbose && cd ..
+EOL
+
+cat >ci_scripts/test_python_all_except_nn.bat <<EOL
+call ci_scripts/setup_pytorch_env.bat
+cd test/ && python run_test.py --exclude nn --verbose && cd ..
+EOL
+
+run_tests() {
+    if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+        ci_scripts/test_python_nn.bat && ci_scripts/test_python_all_except_nn.bat
+    else
+        if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+            ci_scripts/test_python_nn.bat
+        elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+            ci_scripts/test_python_all_except_nn.bat
+        fi
+    fi
+}
+
+run_tests && echo "TEST PASSED"

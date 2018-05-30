@@ -117,29 +117,3 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
 else
   BUILD_TEST_LIBTORCH=0
 fi
-
-# We set these values to true by default, so that both tests will run
-# in the same job in pre-split setting and in local test environment.
-export SHOULD_RUN_TEST1=true
-export SHOULD_RUN_TEST2=true
-
-# If this is a build-only job, we don't run the tests.
-if [[ "${JOB_BASE_NAME}" == *-build ]]; then
-  export SHOULD_RUN_TEST1=false
-  export SHOULD_RUN_TEST2=false
-fi
-
-# In post-split setting, if $SPLIT_TESTS is not set to "true", we run all tests in -test1 job,
-# and if $SPLIT_TESTS is set to "true", we run the tests in their respective jobs.
-if [[ "${JOB_BASE_NAME}" == *-test1 ]] || [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-  export SHOULD_RUN_TEST1=false
-  export SHOULD_RUN_TEST2=false
-  if ([[ "${SPLIT_TESTS}" != "true" ]] && [[ "${JOB_BASE_NAME}" == *-test1 ]]) || \
-    ([[ "${SPLIT_TESTS}" == "true" ]] && [[ "${JOB_BASE_NAME}" == *-test1 ]]); then
-    export SHOULD_RUN_TEST1=true
-  fi
-  if ([[ "${SPLIT_TESTS}" != "true" ]] && [[ "${JOB_BASE_NAME}" == *-test1 ]]) || \
-    ([[ "${SPLIT_TESTS}" == "true" ]] && [[ "${JOB_BASE_NAME}" == *-test2 ]]); then
-    export SHOULD_RUN_TEST2=true
-  fi
-fi
