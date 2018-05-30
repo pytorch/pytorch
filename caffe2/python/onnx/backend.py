@@ -705,7 +705,8 @@ class Caffe2Backend(Backend):
         initializer of the predict_graph, "img" is not initalized. We don't have a check for this, since
         there is no way we can know which blob is the input of the predict_graph.
         '''
-        super(Caffe2Backend, cls).prepare(model, device, **kwargs)
+        if not kwargs.pop('no_check_UNSAFE', False):
+            super(Caffe2Backend, cls).prepare(model, device, **kwargs)
         opset_version = None
         for imp in model.opset_import:
             if not imp.HasField("domain") or imp.domain == "":
