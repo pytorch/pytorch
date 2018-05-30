@@ -1147,6 +1147,9 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     # Used to be embedding_bag(weight, input, ...)
     # Now is     embedding_bag(input, weight, ...)
     if weight.dtype == torch.long and input.is_floating_point():
+        warnings.warn("Argument order of nn.functional.embedding_bag was changed. "
+                      "Usage `embedding_bag(weight, input, ...)` is deprecated, "
+                      "and should now be `embedding_bag(input, weight, ...)`.")
         weight, input = input, weight
 
     if input.dim() == 2:
