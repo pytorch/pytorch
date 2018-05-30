@@ -39,8 +39,15 @@ const caffe2::OperatorDef* getOpDef(const repr::NeuralNetOperator& nnOp) {
   if (!annotation || !isa<Caffe2Annotation>(annotation)) {
     return nullptr;
   }
-
   return dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
+}
+
+caffe2::OperatorDef* getMutableOpDef(repr::NeuralNetOperator& nnOp) {
+  auto annotation = nnOp.getMutableAnnotation();
+  if (!annotation || !isa<Caffe2Annotation>(annotation)) {
+    return nullptr;
+  }
+  return dyn_cast<Caffe2Annotation>(annotation)->getMutableOperatorDef();
 }
 
 bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
@@ -62,13 +69,8 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   // FUSION_CONV_RELU = 1
   // FUSION_CONV_SUM = 2
   // FUSION_CONV_SUM_RELU = 3
-  auto conv = repr::nn::get<repr::Conv>(convNode);
-  auto annotation = conv->getMutableAnnotation();
-  if (!annotation || !isa<Caffe2Annotation>(annotation)) {
-    return;
-  }
-
-  auto* op = dyn_cast<Caffe2Annotation>(annotation)->getMutableOperatorDef();
+  auto* nnOp = repr::nn::get<repr::NeuralNetOperator>(convNode);
+  auto* op = getMutableOpDef(*nnOp);
   if (op == nullptr) {
     return;
   }
@@ -356,23 +358,26 @@ void enforceFusionInplaceForIdeep(repr::NNModule* nn) {
 }
 
 void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
-  for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
-    repr::Conv* conv;
-    repr::NNGraph::NodeRef convNode;
-    std::tie(conv, convNode) = node_pair;
+  // Pre-convert filters format to expected on here
+  // in order to avoid boring conversions during computations
+  for (auto& node : nn->dataFlow.getMutableNodes()) {
+    if (!repr::nn::is<repr::Conv>(node) && !repr::nn::is<repr::FC>(node)) {
+      continue;
+    }
 
-    if (!isOnIdeepDevice(*conv)) {
+    auto* nnOp = repr::nn::get<repr::NeuralNetOperator>(node);
+    if (!isOnIdeepDevice(*nnOp)) {
       LOG(WARNING) << "Not a IDEEP operator";
       continue;
     }
 
-    auto convInputs = repr::nn::getInputs(convNode);
-    if (convInputs.size() < 2) {
-      LOG(WARNING) << "Invalid convolution input size";
+    auto inputs = repr::nn::getInputs(node);
+    if (inputs.size() < 2) {
+      LOG(WARNING) << "Invalid input size";
       continue;
     }
 
-    auto* blob = getBlob(convInputs[1], ws);
+    auto* blob = getBlob(inputs[1], ws);
     if (blob == nullptr) {
       LOG(WARNING) << "Filter blob dose not exist";
       continue;
@@ -384,8 +389,55 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
-    auto expected_desc =
-      ideep::convolution_forward::expected_weights_descriptor(filter->get_dims());
+    itensor::descriptor expected_desc;
+    if (repr::nn::is<repr::Conv>(node)) {
+      auto conv = repr::nn::get<repr::Conv>(node);
+      filter->make_group(conv->getGroup());
+      expected_desc = ideep::convolution_forward::expected_weights_descriptor(
+            filter->get_dims(),
+            filter->get_data_type(),
+            conv->getStrides(),
+            conv->getPads(),
+            conv->getPads(),
+            conv->getDilations(),
+            conv->getGroup());
+
+    } else if (repr::nn::is<repr::FC>(node)) {
+      auto* nnOp = repr::nn::get<repr::NeuralNetOperator>(node);
+      auto* op = getMutableOpDef(*nnOp);
+      if (op == nullptr) {
+        continue;
+      }
+
+      auto axis_w = 1;
+      for (auto& arg : *op->mutable_arg()) {
+        if (arg.name() == "axis_w") {
+          axis_w = arg.i();
+          if (filter->get_dims().size() < axis_w) {
+            axis_w = INT_MAX;
+          }
+          break;
+        }
+      }
+
+      if (axis_w == INT_MAX) {
+        LOG(WARNING) << "Invalid axis_w arg in FC";
+        continue;
+      }
+
+      if (axis_w != 1) {
+        auto f_dims = filter->get_dims();
+        auto f_dim0 = std::accumulate(
+          f_dims.begin(), f_dims.begin() + axis_w, 1, std::multiplies<itensor::dim_t>());
+        auto f_dim1 = std::accumulate(
+          f_dims.begin() + axis_w, f_dims.end(), 1, std::multiplies<itensor::dim_t>());
+        filter->reshape({f_dim0, f_dim1});
+      }
+
+      expected_desc = ideep::inner_product_forward::expected_weights_descriptor(
+          filter->get_dims());
+    }
+
     if (filter->get_descriptor() != expected_desc) {
       itensor* new_filter = new itensor(expected_desc);
       ideep::reorder::compute(*filter, *new_filter);
