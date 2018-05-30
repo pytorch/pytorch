@@ -33,6 +33,9 @@ if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7.2* 
   export MAX_JOBS=`expr $(nproc) - 1`
 fi
 
+# Target only our CI GPU machine's CUDA arch to speed up the build
+export TORCH_CUDA_ARCH_LIST=5.2
+
 WERROR=1 python setup.py install
 
 # Add the test binaries so that they won't be git clean'ed away
