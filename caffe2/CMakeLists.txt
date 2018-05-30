@@ -247,7 +247,10 @@ if ($ENV{WERROR})
   if(USE_CUDA OR USE_ROCM)
     target_compile_options(caffe2_gpu PRIVATE -Werror)
   endif()
+endif()
 
+# ---[ Test binaries.
+if(BUILD_CAFFE2)
   # ---[ HIP library.
   if(USE_HIP)
     HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
@@ -267,10 +270,7 @@ if ($ENV{WERROR})
     list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
     install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
   endif()
-endif()
 
-# ---[ Test binaries.
-if(BUILD_CAFFE2)
   if (BUILD_TEST)
     set(Caffe2_ALL_TEST_SRCS ${Caffe2_CPU_TEST_SRCS})
     if (USE_CUDA OR USE_ROCM)
