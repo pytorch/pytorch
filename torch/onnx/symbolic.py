@@ -605,7 +605,7 @@ def type_as(g, self, other):
         return self
     else:
         other_type_name = self.type().scalarType().lower()
-        return g.op("Cast", self, to_i=scalar_name_to_pytorch[other_type_name])
+        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[scalar_name_to_pytorch[other_type_name]])
 
 
 # ignore clone operators that are inserted by PyTorch autograd
