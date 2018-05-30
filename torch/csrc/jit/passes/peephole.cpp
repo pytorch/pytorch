@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 namespace torch { namespace jit {
 
@@ -29,7 +30,7 @@ void PeepholeOptimize(Block * block) {
         if(n->inputs().size() != 1) break;
         if (n->is(attr::size) == n->input()->type()->expect<TensorType>()->sizes()) {
           n->output()->replaceAllUsesWith(n->input());
-          it.destroyCurrent();
+          // Let DCE clean up any unused nodes at this point
         }
       } break;
       case aten::t: {
@@ -37,15 +38,7 @@ void PeepholeOptimize(Block * block) {
         auto input_node = n->input()->node();
         if (input_node->kind() == aten::t)  {
           n->output()->replaceAllUsesWith(input_node->input());
-          it.destroyCurrent();
-          // The previous transpose might be unnecessary now.
-          if (input_node->output()->uses().size() == 0) {
-            if (*it == input_node) {
-              it.destroyCurrent();
-            } else {
-              input_node->destroy();
-            }
-          }
+          // Let DCE clean up any unused nodes at this point
         }
       } break;
       // Fuse mm + add into addmm
@@ -76,15 +69,7 @@ void PeepholeOptimize(Block * block) {
         // Copy shape information from output node
         ((Value*)addmm_value)->copyMetadata(n->output());
         n->output()->replaceAllUsesWith(addmm_value);
-        it.destroyCurrent();
-
-        if (input_node->output()->uses().size() == 0) {
-          if (*it == input_node) {
-            it.destroyCurrent();
-          } else {
-            input_node->destroy();
-          }
-        }
+        // Let DCE clean up any unused nodes at this point
       } break;
     }
   }
@@ -92,6 +77,8 @@ void PeepholeOptimize(Block * block) {
 
 void PeepholeOptimize(std::shared_ptr<Graph>& graph) {
   PeepholeOptimize(graph->block());
+  // Eliminate dead code created by any peephole passes we've just done
+  EliminateDeadCode(graph->block());
 }
 
 }}
