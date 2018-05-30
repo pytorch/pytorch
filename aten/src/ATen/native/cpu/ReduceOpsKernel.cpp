@@ -17,18 +17,20 @@ static inline int64_t round_down(int64_t a, int64_t m) {
   return a - (a % m);
 }
 
-template<typename F>
-static void parallel_for(int64_t end, int64_t step, bool parallelize, F func) {
-  if (parallelize) {
-    tbb::parallel_for<int64_t>(0, end, step, func);
-  } else {
-    for (int64_t i = 0; i != end; i += step) {
-      func(i);
-    }
-  }
+template <typename F>
+static void parallel_for(int64_t size, int64_t step, bool parallelize, F func) {
+  parallel_for_1d(
+      [func, step](int64_t begin, int64_t end) {
+        int64_t k = begin * step;
+        for (int64_t i = begin; i < end; i++, k += step) {
+          func(k);
+        }
+      },
+      0,
+      size / step,
+      1,
+      parallelize);
 }
-
-static default_partitioner_type ap;
 
 // Vectorized reduction defined by reduce operation `Op` with identity `ident`.
 // The reduction is built on top of reduce128, which reduces down a column
@@ -44,8 +46,6 @@ struct Reduction {
   using ReduceScalar = Op<scalar_t>;
 
   static void apply(Tensor& res, const Tensor& self, at::optional<int64_t> dim) {
-    internal::init_tbb_num_threads();
-
     auto out = res.data<scalar_t>();
     auto data = self.data<scalar_t>();
     auto numel = self.numel();
@@ -80,16 +80,17 @@ struct Reduction {
 
     scalar_t sum;
     if (size > internal::TBB_GRAIN_SIZE) {
-      sum = tbb::parallel_reduce(
-          tbb::blocked_range<int64_t>(0, k, internal::TBB_GRAIN_SIZE / WIDTH),
-          scalar_t(ident),
-          [=](const tbb::blocked_range<int64_t>& r, scalar_t init) {
+      sum = parallel_reduce_1d(
+          [data](int64_t begin, int64_t end, scalar_t init) {
             scalar_t buf[WIDTH];
-            reduce128(&data[r.begin() * WIDTH], buf, r.end() - r.begin(), WIDTH);
+            reduce128(&data[begin * WIDTH], buf, end - begin, WIDTH);
             return std::accumulate(buf, buf + WIDTH, init, ReduceScalar());
           },
           ReduceScalar(),
-          ap);
+          (scalar_t)ident,
+          0,
+          k,
+          internal::TBB_GRAIN_SIZE / WIDTH);
     } else {
       scalar_t buf[WIDTH];
       reduce128(data, buf, k, WIDTH);
