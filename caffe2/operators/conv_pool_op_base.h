@@ -165,15 +165,6 @@ class ConvPoolOpBase : public Operator<Context> {
       CAFFE_ENFORCE_GE(dilation_[dim], 0);
       CAFFE_ENFORCE_GE(stride_[dim], 0);
     }
-
-    if (group_ != 1) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
-        CAFFE_ENFORCE_EQ(
-            dilation_[dim],
-            1,
-            "When group is used, dilation should not be set at the same time.");
-      }
-    }
   }
 
   // Returns the input image dimensions for the current storage order type.
@@ -550,22 +541,22 @@ class ConvPoolOpBase : public Operator<Context> {
     return out;
   }
 
-  static vector<TensorShape> TensorInferenceForConv(
+  static std::vector<TensorShape> TensorInferenceForConv(
       const OperatorDef& def,
-      const vector<TensorShape>& in) {
+      const std::vector<TensorShape>& in) {
     if (in[0].unknown_shape()) {
-      vector<TensorShape> out(1);
+      std::vector<TensorShape> out(1);
       out[0].set_unknown_shape(true);
       return out;
     }
     return TensorInferenceForSchema(def, in, in[1].dims(0));
   }
 
-  static vector<TensorShape> TensorInferenceForPool(
+  static std::vector<TensorShape> TensorInferenceForPool(
       const OperatorDef& def,
-      const vector<TensorShape>& in) {
+      const std::vector<TensorShape>& in) {
     if (in[0].unknown_shape()) {
-      vector<TensorShape> out(1);
+      std::vector<TensorShape> out(1);
       out[0].set_unknown_shape(true);
       return out;
     }
@@ -575,6 +566,18 @@ class ConvPoolOpBase : public Operator<Context> {
     int num_channels =
         (order == StorageOrder::NCHW ? in[0].dims(1) : in[0].dims(3));
     return TensorInferenceForSchema(def, in, num_channels);
+  }
+
+  static std::vector<TensorShape> TensorInferenceForLC(
+      const OperatorDef& def,
+      const std::vector<TensorShape>& in) {
+    if (in[0].unknown_shape()) {
+      std::vector<TensorShape> out(1);
+      out[0].set_unknown_shape(true);
+      return out;
+    }
+    const int img_ndim = in[0].dims_size() - 2;
+    return TensorInferenceForSchema(def, in, in[1].dims(img_ndim));
   }
 
   virtual ~ConvPoolOpBase() {}

@@ -229,7 +229,7 @@ void load(Archive& archive, at::Tensor& tensor) {
 }
 
 template <class Archive>
-void load(Archive& archive, tag::Variable& var) {
+void load(Archive& archive, torch::autograd::Variable& var) {
   load(archive, var.data());
 }
 

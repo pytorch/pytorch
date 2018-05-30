@@ -5,17 +5,16 @@
 #include <cmath>
 #include <cstdint>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 Linear::Linear(size_t features_in, size_t features_out)
     : in_(features_in), out_(features_out) {}
 
 void Linear::reset() {
-  register_parameter(
-      "weight", &Linear::weight_, at::CPU(at::kFloat).empty({out_, in_}));
-  if (with_bias_) {
-    register_parameter("bias", &Linear::bias_, at::CPU(at::kFloat).empty(out_));
-  }
+  weight_ =
+      register_parameter("weight", at::CPU(at::kFloat).empty({out_, in_}));
+  bias_ = register_parameter("bias", at::CPU(at::kFloat).empty(out_));
 
   const auto stdv = 1.0 / std::sqrt(weight_.size(1));
   for (auto& p : parameters()) {
@@ -23,18 +22,19 @@ void Linear::reset() {
   }
 }
 
-variable_list Linear::forward(variable_list input) {
+std::vector<Variable> Linear::forward(std::vector<Variable> input) {
   auto x = input[0];
   if (x.ndimension() == 2 && with_bias_) {
     // Fused op is marginally faster
     AT_ASSERT(x.size(1) == weight_.size(1));
-    return variable_list({at::addmm(bias_, x, weight_.t())});
+    return std::vector<Variable>({at::addmm(bias_, x, weight_.t())});
   }
 
   auto output = x.matmul(weight_.t());
   if (with_bias_) {
     output += bias_;
   }
-  return variable_list({output});
+  return std::vector<Variable>({output});
 }
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

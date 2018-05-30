@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
@@ -35,6 +36,7 @@ NetBase::NetBase(
           def->external_output().end()),
       name_(def->name()),
       net_def_(def) {
+  static GlobalInitIsCalledGuard guard;
   // Check that node_name is empty for all ops
   for (const OperatorDef& op : def->op()) {
     if (op.has_device_option()) {
@@ -160,9 +162,44 @@ unique_ptr<NetBase> CreateNet(
   return net;
 }
 
-std::shared_ptr<TaskThreadPool> ExecutorHelper::GetPool(
+TaskThreadPool* ExecutorHelper::GetPool(
     const DeviceOption& /* unused */) const {
   CAFFE_THROW("Not implemented");
+}
+
+std::vector<float> NetBase::TEST_Benchmark(
+    const int warmup_runs,
+    const int main_runs,
+    const bool run_individual) {
+  LOG(INFO) << "Starting benchmark, running warmup runs";
+  CAFFE_ENFORCE(
+      warmup_runs >= 0,
+      "Number of warm up runs should be non negative, provided ",
+      warmup_runs);
+  for (int run_idx = 0; run_idx < warmup_runs; ++run_idx) {
+    CAFFE_ENFORCE(Run(), "Warmup run ", run_idx, " has failed");
+  }
+
+  LOG(INFO) << "Running main runs";
+  CAFFE_ENFORCE(
+      main_runs >= 0,
+      "Number of main runs should be non negative, provided ",
+      main_runs);
+
+  Timer timer;
+  for (int run_idx = 0; run_idx < main_runs; ++run_idx) {
+    CAFFE_ENFORCE(Run(), "Main run ", run_idx, " has failed");
+  }
+  auto millis = timer.MilliSeconds();
+  LOG(INFO) << "Main runs finished. Milliseconds per iter: "
+            << millis / main_runs
+            << ". Iters per second: " << 1000.0 * main_runs / millis;
+
+  if (run_individual) {
+    LOG(INFO) << "Net does not support per-op benchmark; "
+                 "to run it, switch to a simple net type";
+  }
+  return std::vector<float>{millis / main_runs};
 }
 
 } // namespace caffe2

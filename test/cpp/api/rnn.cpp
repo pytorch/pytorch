@@ -2,13 +2,15 @@
 
 #include <torch/torch.h>
 
+#include <test/cpp/api/util.h>
+
 using namespace torch;
 using namespace torch::nn;
 
 template <typename R, typename Func>
 bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   auto nhid = 32;
-  auto model = std::make_shared<Sequential>();
+  auto model = std::make_shared<SimpleContainer>();
   auto l1 = model->add(Linear(1, nhid).build(), "l1");
   auto rnn = model->add(model_maker(nhid), "rnn");
   auto lo = model->add(Linear(nhid, 1).build(), "lo");
@@ -50,7 +52,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     Variable loss = at::mse_loss(x, y);
 
     optim->zero_grad();
-    backward(loss);
+    loss.backward();
     optim->step();
 
     running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
@@ -62,7 +64,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   return true;
 };
 
-void check_lstm_sizes(variable_list tup) {
+void check_lstm_sizes(std::vector<Variable> tup) {
   // Expect the LSTM to have 64 outputs and 3 layers, with an input of batch
   // 10 and 16 time steps (10 x 16 x n)
 
@@ -92,7 +94,7 @@ TEST_CASE("rnn") {
       auto tup = model->forward({x});
       auto y = x.mean();
 
-      backward(y);
+      y.backward();
       check_lstm_sizes(tup);
 
       auto next = model->forward({x, tup[1]});
@@ -195,7 +197,7 @@ TEST_CASE("rnn_cuda", "[cuda]") {
     auto tup = model->forward({x});
     auto y = x.mean();
 
-    backward(y);
+    y.backward();
     check_lstm_sizes(tup);
 
     auto next = model->forward({x, tup[1]});

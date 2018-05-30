@@ -6,7 +6,8 @@
 
 #include <cstdint>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 class Linear : public torch::nn::CloneableModule<Linear> {
  public:
@@ -14,7 +15,7 @@ class Linear : public torch::nn::CloneableModule<Linear> {
 
   void reset() override;
 
-  variable_list forward(variable_list) override;
+  std::vector<Variable> forward(std::vector<Variable>);
 
   TORCH_ATTR(int64_t, in);
   TORCH_ATTR(int64_t, out);
@@ -23,4 +24,5 @@ class Linear : public torch::nn::CloneableModule<Linear> {
   TORCH_ATTR(Variable, bias);
 };
 
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

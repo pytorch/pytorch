@@ -151,6 +151,12 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding
     def _onnx_symbolic_pack_padded_sequence(g, input, lengths):
         if batch_first:
             input = g.op('Transpose', input, perm_i=[1, 0, 2])
+        if lengths.type().kind() != 'TensorType':
+            raise RuntimeError("Lengths must be a Tensor for ONNX export")
+        # We know it's a TensorType so this check is now safe.
+        if lengths.type().scalarType() != 'Int':
+            raise RuntimeError("ONNX export requires that the lengths passed "
+                               "to pack_padded_sequence must be of type Int")
         return g.op("prim::PackPadded", input, lengths, outputs=2)
 
     def pack_padded_sequence_trace_wrapper(input, lengths):

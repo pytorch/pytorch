@@ -47,13 +47,15 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
       const std::string expected = type.toString();
       const std::string actual = tensors[i].type().toString();
       throw std::invalid_argument(
-        "argument contains mixed types (" + expected + " and " + actual + ")");
+          "argument contains mixed types (" + expected + " and " + actual +
+          ")");
     }
     if (!tensors[i].sizes().equals(sizes)) {
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
       throw std::invalid_argument(
-        "argument contains mixed sizes (" + expected + " and " + actual + ")");
+          "argument contains mixed sizes (" + expected + " and " + actual +
+          ")");
     }
   }
 }
@@ -92,10 +94,14 @@ using RankType = uint32_t;
 using PortType = uint16_t;
 using SizeType = uint64_t;
 
-#define SYSCHECK(expr) { \
-  errno = 0; auto ___output = (expr); (void)___output;     \
-  if (errno != 0) throw std::system_error(errno, std::system_category()); \
-}
+#define SYSCHECK(expr)                                        \
+  {                                                           \
+    errno = 0;                                                \
+    auto ___output = (expr);                                  \
+    (void)___output;                                          \
+    if (errno != 0)                                           \
+      throw std::system_error(errno, std::system_category()); \
+  }
 
 inline PortType convertToPort(int64_t port) {
   if ((port < 0) || (port >= std::numeric_limits<PortType>::max()))
@@ -115,8 +121,7 @@ inline RankType convertToRank(int64_t rank, int64_t min = 0) {
 class ResourceGuard {
  public:
   ResourceGuard(std::function<void()> destructor)
-    : destructor_(std::move(destructor))
-    , released_(false) {}
+      : destructor_(std::move(destructor)), released_(false) {}
 
   ~ResourceGuard() {
     if (!released_) {
@@ -127,6 +132,7 @@ class ResourceGuard {
   void release() {
     released_ = true;
   }
+
  private:
   std::function<void()> destructor_;
   bool released_;
@@ -134,15 +140,15 @@ class ResourceGuard {
 
 namespace tcputil {
 
-constexpr std::chrono::milliseconds kNoTimeout =
-  std::chrono::milliseconds(-1);
+constexpr std::chrono::milliseconds kNoTimeout = std::chrono::milliseconds(-1);
 
 // Send and receive
-template<typename T>
-void sendBytes(int socket,
-               const T* buffer,
-               size_t length,
-               bool moreData = false) {
+template <typename T>
+void sendBytes(
+    int socket,
+    const T* buffer,
+    size_t length,
+    bool moreData = false) {
   size_t bytesToSend = sizeof(T) * length;
   if (bytesToSend == 0) {
     return;
@@ -171,7 +177,7 @@ void sendBytes(int socket,
   }
 }
 
-template<typename T>
+template <typename T>
 void recvBytes(int socket, T* buffer, size_t length) {
   size_t bytesToReceive = sizeof(T) * length;
   if (bytesToReceive == 0) {
@@ -179,7 +185,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
   }
 
   auto bytes = reinterpret_cast<uint8_t*>(buffer);
-  uint8_t *currentBytes = bytes;
+  uint8_t* currentBytes = bytes;
 
   while (bytesToReceive > 0) {
     ssize_t bytesReceived;
@@ -194,17 +200,15 @@ void recvBytes(int socket, T* buffer, size_t length) {
 }
 
 // send a vector's length and data
-template<typename T>
-void sendVector(int socket,
-                const std::vector<T>& vec,
-                bool moreData = false) {
+template <typename T>
+void sendVector(int socket, const std::vector<T>& vec, bool moreData = false) {
   SizeType size = vec.size();
   sendBytes<SizeType>(socket, &size, 1, true);
   sendBytes<T>(socket, vec.data(), size, moreData);
 }
 
 // receive a vector as sent in sendVector
-template<typename T>
+template <typename T>
 std::vector<T> recvVector(int socket) {
   SizeType valueSize;
   recvBytes<SizeType>(socket, &valueSize, 1);
@@ -214,12 +218,12 @@ std::vector<T> recvVector(int socket) {
 }
 
 // this is only for convenience when sending rvalues
-template<typename T>
+template <typename T>
 void sendValue(int socket, const T& value, bool moreData = false) {
   sendBytes<T>(socket, &value, 1, moreData);
 }
 
-template<typename T>
+template <typename T>
 T recvValue(int socket) {
   T value;
   recvBytes<T>(socket, &value, 1);
@@ -227,9 +231,10 @@ T recvValue(int socket) {
 }
 
 // send a string's length and data
-inline void sendString(int socket,
-                const std::string& str,
-                bool moreData = false) {
+inline void sendString(
+    int socket,
+    const std::string& str,
+    bool moreData = false) {
   SizeType size = str.size();
   sendBytes<SizeType>(socket, &size, 1, true);
   sendBytes<char>(socket, str.data(), size, moreData);
@@ -245,18 +250,19 @@ inline std::string recvString(int socket) {
 }
 
 // Other helpers
-std::string sockaddrToString(struct sockaddr *addr);
+std::string sockaddrToString(struct sockaddr* addr);
 
 std::pair<int, PortType> listen(PortType port);
 
-int connect(const std::string& address,
-            PortType port,
-            bool wait = true,
-            const std::chrono::milliseconds& timeout = kNoTimeout);
+int connect(
+    const std::string& address,
+    PortType port,
+    bool wait = true,
+    const std::chrono::milliseconds& timeout = kNoTimeout);
 
-std::tuple<int, std::string>
-accept(int listenSocket,
-       const std::chrono::milliseconds& timeout = kNoTimeout);
+std::tuple<int, std::string> accept(
+    int listenSocket,
+    const std::chrono::milliseconds& timeout = kNoTimeout);
 
 } // namespace tcputil
 } // namespace c10d

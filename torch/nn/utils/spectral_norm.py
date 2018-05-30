@@ -10,6 +10,9 @@ class SpectralNorm(object):
 
     def __init__(self, name='weight', n_power_iterations=1, eps=1e-12):
         self.name = name
+        if n_power_iterations <= 0:
+            raise ValueError('Expected n_power_iterations to be positive, but '
+                             'got n_power_iterations={}'.format(n_power_iterations))
         self.n_power_iterations = n_power_iterations
         self.eps = eps
 
@@ -26,7 +29,7 @@ class SpectralNorm(object):
                 v = normalize(torch.matmul(weight_mat.t(), u), dim=0, eps=self.eps)
                 u = normalize(torch.matmul(weight_mat, v), dim=0, eps=self.eps)
 
-            sigma = torch.dot(u, torch.matmul(weight_mat, v))
+        sigma = torch.dot(u, torch.matmul(weight_mat, v))
         weight = weight / sigma
         return weight, u
 
@@ -40,8 +43,7 @@ class SpectralNorm(object):
     def __call__(self, module, inputs):
         weight, u = self.compute_weight(module)
         setattr(module, self.name, weight)
-        with torch.no_grad():
-            getattr(module, self.name).copy_(weight)
+        setattr(module, self.name + '_u', u)
 
     @staticmethod
     def apply(module, name, n_power_iterations, eps):

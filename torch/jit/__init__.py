@@ -1,7 +1,7 @@
 import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
-from torch.nn import Module, ModuleList, ParameterList, Parameter
+from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
@@ -584,6 +584,8 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
             # contains each of these modules as submodules. The ConstModuleList then
             # is set as an attribute of the parent module.
             super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
+        elif isinstance(value, Sequential):
+            super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
         else:
             super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
 
@@ -707,6 +709,20 @@ class _ConstModuleList(ScriptModule):
         keys = super(_ConstModuleList, self).__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
+
+
+class _ConstSequential(_ConstModuleList):
+    __constants__ = ['mods']
+
+    def __init__(self, mods):
+        super(_ConstSequential, self).__init__(mods._modules.values())
+
+    @script_method
+    def forward(self, input):
+        for m in self:
+            input = m(input)
+        return input
+
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

@@ -2,21 +2,21 @@
 
 #include <cstdint>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 Embedding::Embedding(int64_t count, int64_t dimension)
     : count_(count), dimension_(dimension) {}
 
 void Embedding::reset() {
-  this->register_parameter(
-      "table",
-      &Embedding::table_,
-      at::CPU(at::kFloat).empty({count_, dimension_}));
+  table_ = register_parameter(
+      "table", at::CPU(at::kFloat).empty({count_, dimension_}));
   table_.data().normal_(0, 1);
 }
 
-variable_list Embedding::forward(variable_list input) {
+std::vector<Variable> Embedding::forward(std::vector<Variable> input) {
   return {at::embedding(table_, /*indices=*/input[0])};
 }
 
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch
