@@ -7100,6 +7100,19 @@ class TestTorch(TestCase):
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
 
+    def test_Size_scalar(self):
+        three = torch.tensor(3)
+        two = torch.tensor(2)
+        x = torch.Size([0, 1, two, three, 4])
+        for i in range(1, 5):
+            self.assertEqual(x[i], i)
+
+    def test_Size_iter(self):
+        for sizes in [iter([1, 2, 3, 4, 5]), range(1, 6)]:
+            x = torch.Size(sizes)
+            for i in range(0, 5):
+                self.assertEqual(x[i], i + 1)
+
     def test_t_not_2d_error(self):
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t())
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t_())
