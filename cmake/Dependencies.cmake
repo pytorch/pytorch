@@ -49,6 +49,11 @@ endif()
 set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib")
 message(STATUS "The BLAS backend of choice:" ${BLAS})
 
+# include("${CMAKE_CURRENT_LIST_DIR}/../third_party/tbb/cmake/TBBBuild.cmake")
+# tbb_build(TBB_ROOT "${CMAKE_CURRENT_LIST_DIR}/../third_party/tbb" CONFIG_DIR TBB_DIR)
+find_library(tbb REQUIRED)
+list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS tbb)
+
 if(BLAS STREQUAL "Eigen")
   # Eigen is header-only and we do not have any dependent libraries
   set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
