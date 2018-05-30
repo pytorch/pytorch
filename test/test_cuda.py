@@ -1103,10 +1103,16 @@ class TestCuda(TestCase):
     @unittest.skipIf(torch.cuda.device_count() >= 10, "Loading a cuda:9 tensor")
     @unittest.skipIf(not PY3, "Tensor was serialized with Python 3")
     def test_load_nonexistent_device(self):
+        # Setup: create a serialized file object with a 'cuda:9' restore location
+        tensor = torch.randn(2, device='cuda')
+        buf = io.BytesIO()
+        torch.save(tensor, buf)
+        # NB: this might not work in the future if serialization changes
+        buf = io.BytesIO(buf.getvalue().replace(b'cuda:0', b'cuda:9'))
+
         msg = r'Attempting to deserialize object on CUDA device 9'
         with self.assertRaisesRegex(RuntimeError, msg):
-            fname = os.path.join(os.path.dirname(__file__), 'data/pi-cuda9.pt')
-            _ = torch.load(fname)
+            _ = torch.load(buf)
 
     def test_serialization(self):
         x = torch.randn(4, 4).cuda()
