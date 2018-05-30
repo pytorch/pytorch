@@ -73,6 +73,8 @@ void PeepholeOptimize(Block * block) {
         SymbolicVariable mat2(input_node->input(1));
         SymbolicVariable addmm_value = mat.addmm(mat1, mat2);
 
+        // Copy shape information from output node
+        ((Value*)addmm_value)->copyMetadata(n->output());
         n->output()->replaceAllUsesWith(addmm_value);
         it.destroyCurrent();
 
