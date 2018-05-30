@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ATen/ScalarType.h"
+
 namespace at {
 
 template <typename T>
