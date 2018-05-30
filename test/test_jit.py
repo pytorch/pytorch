@@ -2772,13 +2772,13 @@ class TestScript(TestCase):
             # default arg dim
             return torch.cat([a, a])
 
-        self.checkScript(t0, (torch.zeros(1, 1)))
+        self.checkScript(t0, (torch.zeros(1, 1),))
 
         def t1(a):
             # keywords out of order
             return torch.cat(dim=1, tensors=[a, a])
 
-        self.checkScript(t1, (torch.zeros(1, 1, 2)))
+        self.checkScript(t1, (torch.zeros(1, 1, 2),))
 
         def t2(a):
             # mix const/non-const attributes
@@ -2788,7 +2788,26 @@ class TestScript(TestCase):
                 b = 0
             return torch.sum(a, dim=b, keepdim=False)
 
-        self.checkScript(t2, (torch.zeros(1, 1, 2)))
+        self.checkScript(t2, (torch.zeros(1, 1, 2),))
+
+    def test_gather_dynamic_index(self):
+        def t(x):
+            gather1 = x[0]
+            idx = 0 + 1
+            gather2 = x[idx]
+            return gather1 + gather2
+
+        self.checkScript(t, (torch.zeros(3, 2, 3),))
+
+    def test_slice_dynamic_index(self):
+        def t(x):
+            slice1 = x[0:1]
+            zero = 0
+            one = zero + 1
+            slice2 = x[zero:one]
+            return slice1 + slice2
+
+        self.checkScript(t, (torch.zeros(3, 2, 3),))
 
 
 # Smoke tests for export methods
