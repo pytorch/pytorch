@@ -438,6 +438,7 @@ if(USE_CUDA)
   endif()
 endif()
 
+# TODO: Unify USE_HIP and USE_ROCM
 # ---[ HIP
 if(USE_HIP)
   include(cmake/public/LoadHIP.cmake)

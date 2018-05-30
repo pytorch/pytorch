@@ -128,11 +128,6 @@ if (FALSE)
   foreach(tmp ${Caffe2_HIP_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
-endif()
-
-# ---[ Generate and install header files.
-=======
->>>>>>> master
 
   message(STATUS "ATen CPU test sources: ")
   foreach(tmp ${ATen_CPU_TEST_SRCS})
