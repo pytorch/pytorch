@@ -48,7 +48,8 @@ class RandomSampler(Sampler):
         self.data_source = data_source
 
     def __iter__(self):
-        return iter(torch.randperm(len(self.data_source), device = torch.device('cpu')).tolist())
+        cpu = torch.device('cpu')
+        return iter(torch.randperm(len(self.data_source), device = cpu).tolist())
 
     def __len__(self):
         return len(self.data_source)
