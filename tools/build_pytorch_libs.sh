@@ -14,7 +14,6 @@ set -ex
 WITH_CUDA=0
 WITH_ROCM=0
 WITH_NNPACK=0
-WITH_MKLDNN=0
 WITH_GLOO_IBVERBS=0
 WITH_DISTRIBUTED_MW=0
 while [[ $# -gt 0 ]]; do
@@ -27,9 +26,6 @@ while [[ $# -gt 0 ]]; do
           ;;
       --with-nnpack)
           WITH_NNPACK=1
-          ;;
-      --with-mkldnn)
-          WITH_MKLDNN=1
           ;;
       --with-gloo-ibverbs)
           WITH_GLOO_IBVERBS=1
