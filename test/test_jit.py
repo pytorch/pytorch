@@ -908,7 +908,7 @@ class TestJit(TestCase):
         def addmm(mat, mat1, mat2, alpha, beta):
             a = mat.addmm(mat1, mat2)
             b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
-            c = mat.addmm(mat1, mat2, alpha=4.20, beta=-1.0)
+            c = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
             d = mat.addmm(mat1, mat2, alpha=alpha, beta=beta)
 
             return a + b + c + d
