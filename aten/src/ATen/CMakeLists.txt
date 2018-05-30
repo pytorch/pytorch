@@ -86,6 +86,11 @@ IF(NOT AT_LINK_STYLE)
   SET(AT_LINK_STYLE SHARED)
 ENDIF()
 
+# Unset our restrictive C++ flags here and reset them later.
+# Remove this once we use proper target_compile_options.
+set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+set(CMAKE_CXX_FLAGS)
+
 set(TBB_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/tbb")
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
 set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
@@ -96,6 +101,8 @@ add_subdirectory(cpu/tbb)
 set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
 list(APPEND ATen_THIRD_PARTY_INCLUDE ${TBB_ROOT_DIR}/include)
 list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb_static)
+
+set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
@@ -174,6 +181,11 @@ if(NOT MSVC)
   set(__aten_sleef_build_shared_libs ${BUILD_SHARED_LIBS})
   set(__aten_sleef_build_tests ${BUILD_TESTS})
 
+  # Unset our restrictive C++ flags here and reset them later.
+  # Remove this once we use proper target_compile_options.
+  set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  set(CMAKE_CXX_FLAGS)
+
   set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build sleef static" FORCE)
   set(BUILD_DFT OFF CACHE BOOL "Don't build sleef DFT lib" FORCE)
   set(BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
@@ -183,6 +195,8 @@ if(NOT MSVC)
   list(APPEND ATen_THIRD_PARTY_INCLUDE ${CMAKE_BINARY_DIR}/include)
   link_directories(${CMAKE_BINARY_DIR}/sleef/lib)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS sleef)
+
+  set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 
   # Set these back. TODO: Use SLEEF_ to pass these instead
   set(BUILD_SHARED_LIBS ${__aten_sleef_build_shared_libs} CACHE BOOL "Build shared libs" FORCE)
