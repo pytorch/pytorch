@@ -8,6 +8,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/jit/tracer.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"
@@ -558,19 +559,25 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
 static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   auto parsed = parse_to_conversion(args, kwargs);
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
-  if (device) {
+  if (!device && scalarType) {
+    // only dtype given
+    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+    auto& type = self_.type().toScalarType(*scalarType);
+    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
+  } else if (device) {
+    // device and maybe dtype given
+    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
     auto deviceAutoGPU = device->deviceInt64();
     auto& layout = *torch::getLayout(self_.type().backend());
     auto& type = torch::getType(scalarType.value_or(self_.type().scalarType()), layout, device->type);
     return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, non_blocking));
   } else {
-    auto& type = self_.type().toScalarType(*scalarType);
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
+    Py_INCREF(self);
+    return self;
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

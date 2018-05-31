@@ -296,19 +296,20 @@ class Module(object):
 
         This can be called as
 
-        .. function:: to(device, dtype=None, non_blocking=True)
+        .. function:: to(device=None, dtype=None, non_blocking=False)
 
-        .. function:: to(dtype, non_blocking=True)
+        .. function:: to(dtype, non_blocking=False)
 
-        .. function:: to(tensor, non_blocking=True)
+        .. function:: to(tensor, non_blocking=False)
 
-        It has similar signature as :meth:`torch.Tensor.to`, but only accepts
-        floating point desired :attr:`dtype` s. In particular, this method will
+        Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
+        floating point desired :attr:`dtype` s. In addition, this method will
         only cast the floating point parameters and buffers to :attr:`dtype`
-        (if given). It will still move the integral parameters and buffers to
-        :attr:`device`, if that is given. When :attr:`non_blocking`, it tries to
-        convert asynchronously with respect to the host if possible, e.g.,
-        moving CPU Tensors with pinned memory to CUDA devices.
+        (if given). The integral parameters and buffers will be moved
+        :attr:`device`, if that is given, but with dtypes unchanged. When
+        :attr:`non_blocking` is set, it tries to convert/move asynchronously
+        with respect to the host if possible, e.g., moving CPU Tensors with
+        pinned memory to CUDA devices.
 
         See below for examples.
 
@@ -363,19 +364,8 @@ class Module(object):
                 raise TypeError('nn.Module.to only accepts floating point '
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
-        if device is not None:
-            def convert(t):
-                if t.is_floating_point():
-                    return t.to(device, dtype, non_blocking)
-                else:
-                    return t.to(device, non_blocking=non_blocking)
-
-        else:
-            # `dtype` is not None and is floating point type in this
-            def convert(t):
-                if t.is_floating_point():
-                    return t.to(dtype, non_blocking)
-                return t
+        def convert(t):
+            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
         return self._apply(convert)
 

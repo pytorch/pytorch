@@ -383,31 +383,8 @@ static PyObject * THPVariable_layout(THPVariable* self) {
 
 static PyObject * THPVariable_device(THPVariable* self) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(torch::getDevice(self->cdata));
+  return THPDevice_New(torch::tensor::getDevice(self->cdata));
   END_HANDLE_TH_ERRORS
-}
-
-std::tuple<at::optional<torch::Device>, at::optional<at::ScalarType>, bool>
-parse_to_conversion(PyObject *args, PyObject *kwargs) {
-  static PythonArgParser parser({
-    "to(Device device, ScalarType dtype=None, bool non_blocking=False)",
-    "to(ScalarType dtype, bool non_blocking=False)",
-    "to(Tensor tensor, bool non_blocking=False)",
-  });
-  ParsedArgs<3> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    return std::make_tuple(r.device(0), r.scalartypeOptional(1), r.toBool(2));
-  } else if (r.idx == 1) {
-    return std::make_tuple(at::nullopt, r.scalartype(0), r.toBool(1));
-  } else {
-    auto tensor = r.tensor(0);
-    return std::make_tuple(
-      torch::getDevice(tensor),
-      tensor.type().scalarType(),
-      r.toBool(1)
-    );
-  }
 }
 
 static struct PyGetSetDef THPVariable_properties[] = {

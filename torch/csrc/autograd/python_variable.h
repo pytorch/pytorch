@@ -6,7 +6,6 @@
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/THP_export.h"
-#include "torch/csrc/utils/device.h"
 
 // Python object that backs torch.autograd.Variable
 struct THPVariable {
@@ -37,6 +36,3 @@ inline at::Tensor& THPVariable_UnpackData(PyObject* obj) {
   auto var = (THPVariable*)obj;
   return var->cdata.data();
 }
-
-std::tuple<at::optional<torch::Device>, at::optional<at::ScalarType>, bool>
-parse_to_conversion(PyObject *args, PyObject *kwargs);

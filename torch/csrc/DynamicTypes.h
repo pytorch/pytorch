@@ -28,6 +28,5 @@ THPDtype* getDtype(at::ScalarType scalarType);
 THPLayout* getLayout(at::Backend backend);
 at::Type& getType(at::ScalarType scalarType, const THPLayout& layout, const DeviceType& deviceType);
 DeviceType getDeviceType(const at::Type& type);
-Device getDevice(const at::Tensor& tensor);
 
 }  // namespace torch

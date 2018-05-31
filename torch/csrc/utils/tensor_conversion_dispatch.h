@@ -23,7 +23,7 @@ namespace torch { namespace utils {
 // w.r.t the host.
 at::Tensor dispatch_type_conversion(const at::Tensor & self,
                                     const at::Type & type,
-                                    at::optional<int> device=at::nullopt,
+                                    at::optional<int64_t> device=at::nullopt,
                                     bool non_blocking=false);
 
 }} // namespace torch::utils

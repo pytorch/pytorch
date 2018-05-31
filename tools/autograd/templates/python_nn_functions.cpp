@@ -7,6 +7,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 
 #include "python_nn_functions_dispatch.h"
@@ -38,13 +39,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
     Py_INCREF(Py_None);
     PyTuple_SET_ITEM(tuple.get(), 1, Py_None);
   }
-  if (non_blocking) {
-    Py_INCREF(Py_True);
-    PyTuple_SET_ITEM(tuple.get(), 2, Py_True);
-  } else {
-    Py_INCREF(Py_False);
-    PyTuple_SET_ITEM(tuple.get(), 2, Py_False);
-  }
+  PyTuple_SET_ITEM(tuple.get(), 2, torch::autograd::utils::wrap(non_blocking));
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }
