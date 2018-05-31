@@ -16,3 +16,4 @@
 /torch/csrc/jit/passes/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
 /test/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
 /scripts/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
+/torch/lib/c10d/ @apaszke @pietern @teng-li
