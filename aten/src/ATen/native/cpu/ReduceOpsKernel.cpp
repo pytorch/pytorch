@@ -66,7 +66,7 @@ struct Reduction {
     }
     int64_t batch = numel / (n * stride);
     bool paralellize = batch * n > internal::TBB_GRAIN_SIZE;
-    parallel_for(batch, 1, paralellize, [=](int64_t b) {
+    parallel_for(batch, 1, paralellize, [out, data, stride, n](int64_t b) {
       if (stride == 1) {
         out[b] = reduce_all(&data[b * n], n);
       } else {
