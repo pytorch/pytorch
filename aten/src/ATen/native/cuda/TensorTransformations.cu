@@ -9,8 +9,7 @@ namespace native {
 
 template <typename scalar_t>
 __global__
-void flip_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N, int64_t* flip_dims,
-  int64_t flip_dims_size, int64_t* strides, int64_t* strides_contiguous, int64_t* shape, int64_t total_dims) {
+void flip_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N, int64_t* flip_dims, int64_t flip_dims_size, int64_t* strides, int64_t* strides_contiguous, int64_t* shape, int64_t total_dims) {
 
   int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_index >= N) {
@@ -37,7 +36,7 @@ void flip_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N, int6
 // Flip tensor given a list of dims
 Tensor flip_cuda(const Tensor& self, IntList dims) {
   auto in_tensor = self;
-  int64_t flip_dims_size = dims.size(), total_dims = in_tensor.dim(), N = in_tensor.numel();
+  const int64_t flip_dims_size = dims.size(), total_dims = in_tensor.dim(), N = in_tensor.numel();
   check_errors(total_dims, flip_dims_size, dims);
 
   auto flip_dims = std::vector<int64_t>(dims);
