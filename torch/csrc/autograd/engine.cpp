@@ -479,8 +479,8 @@ auto Engine::execute(const edge_list& input_roots,
 
 #ifdef NO_PYTHON
 Engine& Engine::get_default_engine(){
-	static Engine engine;
-    return engine;
+  static Engine engine;
+  return engine;
 }
 #endif
 
