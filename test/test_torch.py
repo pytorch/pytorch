@@ -3318,20 +3318,20 @@ class TestTorch(TestCase):
     def test_slice(self):
         empty = torch.Tensor()
         x = torch.arange(0., 16).view(4, 4)
-        self.assertEqual(x.slice(), x)
-        self.assertEqual(x.slice(0, 0, 4), x)
+        self.assertEqual(x[:], x)
+        self.assertEqual(x[:4], x)
         # start and stop are clamped to the size of dim
-        self.assertEqual(x.slice(0, 0, 5), x)
+        self.assertEqual(x[:5], x)
         # if start >= stop then the result is empty
-        self.assertEqual(x.slice(0, 2, 1), empty)
-        self.assertEqual(x.slice(0, 2, 2), empty)
+        self.assertEqual(x[2:1], empty)
+        self.assertEqual(x[2:2], empty)
         # out of bounds is also empty
-        self.assertEqual(x.slice(0, 10, 12), empty)
+        self.assertEqual(x[10:12], empty)
         # additional correctness checks
-        self.assertEqual(x.slice(0, 0, 1).data.tolist(), [[0, 1, 2, 3]])
-        self.assertEqual(x.slice(0, 0, -3).data.tolist(), [[0, 1, 2, 3]])
-        self.assertEqual(x.slice(start=-2, end=3, dim=1).data.tolist(), [[2], [6], [10], [14]])
-        self.assertEqual(x.slice(0, 0, -1, 2).data.tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
+        self.assertEqual(x[:1].data.tolist(), [[0, 1, 2, 3]])
+        self.assertEqual(x[:-3].data.tolist(), [[0, 1, 2, 3]])
+        self.assertEqual(x[:, -2:3].data.tolist(), [[2], [6], [10], [14]])
+        self.assertEqual(x[0:-1:2].data.tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
 
     def test_is_signed(self):
         self.assertEqual(torch.IntTensor(5).is_signed(), True)
