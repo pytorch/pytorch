@@ -468,7 +468,7 @@ endif()
 
 # Debug and Release symbol support
 if (MSVC)
-  if (${CMAKE_BUILD_TYPE} MATCHES "Release")
+  if ((${CMAKE_BUILD_TYPE} MATCHES "Release") OR (${CMAKE_BUILD_TYPE} MATCHES "RelWithDebInfo") OR (${CMAKE_BUILD_TYPE} MATCHES "MinSizeRel"))
     if (${BUILD_SHARED_LIBS})
       list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD")
     else()
