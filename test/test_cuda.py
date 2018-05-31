@@ -574,7 +574,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
 
 
 class TestCuda(TestCase):
-    _do_cuda_memory_check = True
+    _do_cuda_memory_leak_check = True
 
     @staticmethod
     def _test_memory_stats_generator(self, device=None, N=35):
@@ -1664,7 +1664,7 @@ class TestCuda(TestCase):
         b = a.half()
         self.assertGreater(b.norm().item(), 0)
 
-    # Test that make_cuda_memory_checked_test successfully detects leak
+    # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_cuda_memory_leak_detection(self):
         l = []
 

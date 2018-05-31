@@ -652,7 +652,7 @@ def require_grad(input):
 
 
 class TestNN(NNTestCase):
-    _do_cuda_memory_check = True
+    _do_cuda_memory_leak_check = True
 
     def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         def fw(input):
