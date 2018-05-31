@@ -40,56 +40,62 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
     return at::op##_out(result, self);                           \
   }
 
-#define IMPLEMENT_UNARY_OP_FLOAT_CMATH(op, opfn)                          \
-  Tensor& _##op##__cpu(Tensor& self_) {                                   \
-    if (self_.numel() > 0) {                                              \
-      Tensor self = sort_strides(self_);                                  \
-      AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {                   \
-        CPU_tensor_parallel_apply1<scalar_t>(                             \
-            self, [](scalar_t& y) { y = opfn(y); });                      \
-      });                                                                 \
-    }                                                                     \
-    return self_;                                                         \
-  }                                                                       \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) {           \
-    result.resize_(self.sizes());                                         \
-    if (result.numel() > 0) {                                             \
-      AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {                   \
-        CPU_tensor_parallel_apply2<scalar_t, scalar_t>(                   \
-            result, self, [](scalar_t& y, scalar_t& x) { y = opfn(x); }); \
-      });                                                                 \
-    }                                                                     \
-    return result;                                                        \
+#define IMPLEMENT_UNARY_OP_FLOAT_CMATH(op, opfn)                \
+  Tensor& _##op##__cpu(Tensor& self_) {                         \
+    if (self_.numel() > 0) {                                    \
+      Tensor self = sort_strides(self_);                        \
+      AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {         \
+        CPU_tensor_parallel_apply1<scalar_t>(                   \
+            self, [](scalar_t& y) { y = opfn(y); }, 2048);      \
+      });                                                       \
+    }                                                           \
+    return self_;                                               \
+  }                                                             \
+  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
+    result.resize_(self.sizes());                               \
+    if (result.numel() > 0) {                                   \
+      AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {         \
+        CPU_tensor_parallel_apply2<scalar_t, scalar_t>(         \
+            result,                                             \
+            self,                                               \
+            [](scalar_t& y, scalar_t& x) { y = opfn(x); },      \
+            2048);                                              \
+      });                                                       \
+    }                                                           \
+    return result;                                              \
   }
 
-#define IMPLEMENT_UNARY_OP_VEC(op, opfn)                                    \
-  Tensor& _##op##__cpu(Tensor& self_) {                                     \
-    if (self_.numel() > 0) {                                                \
-      Tensor self = sort_strides(self_);                                    \
-      if (self.is_contiguous()) {                                           \
-        op##Impl(self, self);                                               \
-      } else {                                                              \
-        AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {                   \
-          CPU_tensor_parallel_apply1<scalar_t>(                             \
-              self, [](scalar_t& y) { y = opfn(y); });                      \
-        });                                                                 \
-      }                                                                     \
-    }                                                                       \
-    return self_;                                                           \
-  }                                                                         \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) {             \
-    result.resize_(self.sizes());                                           \
-    if (result.numel() > 0) {                                               \
-      if (result.is_contiguous() && self.is_contiguous()) {                 \
-        op##Impl(result, self);                                             \
-      } else {                                                              \
-        AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {                   \
-          CPU_tensor_parallel_apply2<scalar_t, scalar_t>(                   \
-              result, self, [](scalar_t& y, scalar_t& x) { y = opfn(x); }); \
-        });                                                                 \
-      }                                                                     \
-    }                                                                       \
-    return result;                                                          \
+#define IMPLEMENT_UNARY_OP_VEC(op, opfn)                        \
+  Tensor& _##op##__cpu(Tensor& self_) {                         \
+    if (self_.numel() > 0) {                                    \
+      Tensor self = sort_strides(self_);                        \
+      if (self.is_contiguous()) {                               \
+        op##Impl(self, self);                                   \
+      } else {                                                  \
+        AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {       \
+          CPU_tensor_parallel_apply1<scalar_t>(                 \
+              self, [](scalar_t& y) { y = opfn(y); }, 2048);    \
+        });                                                     \
+      }                                                         \
+    }                                                           \
+    return self_;                                               \
+  }                                                             \
+  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
+    result.resize_(self.sizes());                               \
+    if (result.numel() > 0) {                                   \
+      if (result.is_contiguous() && self.is_contiguous()) {     \
+        op##Impl(result, self);                                 \
+      } else {                                                  \
+        AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {       \
+          CPU_tensor_parallel_apply2<scalar_t, scalar_t>(       \
+              result,                                           \
+              self,                                             \
+              [](scalar_t& y, scalar_t& x) { y = opfn(x); },    \
+              2048);                                            \
+        });                                                     \
+      }                                                         \
+    }                                                           \
+    return result;                                              \
   }
 
 IMPLEMENT_UNARY_OP_PREQUEL(abs)

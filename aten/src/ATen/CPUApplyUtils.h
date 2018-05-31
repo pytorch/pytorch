@@ -348,10 +348,13 @@ inline void CPU_tensor_apply4(
 }
 
 template <typename scalar1, typename Op>
-inline void CPU_tensor_parallel_apply1(Tensor tensor1, const Op op) {
+inline void CPU_tensor_parallel_apply1(
+    Tensor tensor1,
+    const Op op,
+    int64_t grain_size = internal::TBB_GRAIN_SIZE) {
   if (!_apply_preamble({tensor1}))
     return;
-  if (tensor1.numel() < internal::TBB_GRAIN_SIZE) {
+  if (tensor1.numel() < grain_size) {
     CPU_tensor_apply1<scalar1>(tensor1, op);
     return;
   }
@@ -378,11 +381,14 @@ inline void CPU_tensor_parallel_apply1(Tensor tensor1, const Op op) {
 }
 
 template <typename scalar1, typename scalar2, typename Op>
-inline void
-CPU_tensor_parallel_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
+inline void CPU_tensor_parallel_apply2(
+    Tensor tensor1,
+    Tensor tensor2,
+    const Op op,
+    int64_t grain_size = internal::TBB_GRAIN_SIZE) {
   if (!_apply_preamble({tensor1, tensor2}))
     return;
-  if ((tensor1.numel() + tensor2.numel()) < internal::TBB_GRAIN_SIZE) {
+  if ((tensor1.numel() + tensor2.numel()) < grain_size) {
     CPU_tensor_apply2<scalar1, scalar2>(tensor1, tensor2, op);
     return;
   }
