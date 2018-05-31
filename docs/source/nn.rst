@@ -996,6 +996,11 @@ Non-linear activation functions
 
 .. autofunction:: softshrink
 
+:hidden:`gumbel_softmax`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: gumbel_softmax
+
 :hidden:`log_softmax`
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -1069,6 +1074,19 @@ Dropout functions
 ~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: dropout3d
+
+Sparse functions
+----------------------------------
+
+:hidden:`embedding`
+~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: embedding
+
+:hidden:`embedding_bag`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: embedding_bag
 
 Distance functions
 ----------------------------------
