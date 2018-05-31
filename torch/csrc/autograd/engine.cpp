@@ -7,6 +7,7 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include <ATen/DeviceGuard.h>
+#include <ATen/ExpandUtils.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -301,7 +302,7 @@ static bool is_compatible_type(const at::Type& expected, const at::Type& actual)
 }
 
 template<typename F>
-static void validate_outputs(const edge_list& edges, const variable_list& grads, const F& format_error) {
+static void validate_outputs(const edge_list& edges, variable_list& grads, const F& format_error) {
   if (grads.size() != edges.size()) {
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
@@ -322,10 +323,14 @@ static void validate_outputs(const edge_list& edges, const variable_list& grads,
       continue;
     }
     if (!grads[i].sizes().equals(metadata.shape())) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected shape ";
-      ss << metadata.shape() << " but got " << grads[i].sizes();
-      throw std::runtime_error(format_error(ss.str()));
+      if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - got ";
+        ss << grads[i].sizes() << " but expected shape compatible with ";
+        ss << metadata.shape();
+        throw std::runtime_error(format_error(ss.str()));
+      }
+      grads[i] = at::reduce_to(grads[i], metadata.shape());
     }
     if (!is_compatible_type(metadata.type(), grads[i].type())) {
       std::stringstream ss;
@@ -501,7 +506,7 @@ auto Engine::execute(const edge_list& input_roots,
                      const edge_list& outputs) -> variable_list {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
 
-  validate_outputs(input_roots, inputs, [](const std::string& msg) {
+  validate_outputs(input_roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
 

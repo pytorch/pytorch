@@ -123,16 +123,6 @@ void fuseBroadcast(Block *b) {
       continue;
 
     n->replaceInput(input_index, unexpanded_rhs);
-    n->i_(attr::broadcast, 1);
-    if (axis) {
-      // Gemm doesn't support the axis argument, so be sure to omit it
-      // for that op. It also only supports an axis of 1.
-      if (n->kind() == onnx::Gemm) {
-        JIT_ASSERT(axis.value() == 1);
-      } else {
-        n->i_(attr::axis, axis.value());
-      }
-    }
     if (!rhs_expand->hasUses()) {
       rhs_expand->destroy();
     }

@@ -1,10 +1,16 @@
 #include "DispatchStub.h"
 
+<<<<<<< HEAD
 #include <ATen/Error.h>
 
 #include <cpuinfo.h>
 #include <cstdlib>
 #include <cstring>
+=======
+#include <cpuinfo.h>
+#include <cstdlib>
+#include <strings.h>
+>>>>>>> Implement add, sub, mul, div using TensorIterator
 
 namespace at { namespace native {
 

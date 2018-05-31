@@ -70,6 +70,8 @@ public:
     return Tag::HAS_t == tag;
   }
 
+  Scalar operator-() const;
+
 private:
   enum class Tag { HAS_d, HAS_i, HAS_t };
   Tag tag;
@@ -94,5 +96,4 @@ inline T Scalar::to<T>() { \
 }
 AT_FORALL_SCALAR_TYPES(DEFINE_TO)
 #undef DEFINE_TO
-
 }

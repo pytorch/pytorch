@@ -51,6 +51,18 @@ struct AT_API TensorImpl : public Retainable {
   // the right shape afterall.
   virtual TensorImpl* maybe_zero_dim(bool condition_when_zero_dim);
 
+  // True if a tensor was auto-wrapped from a C++ or Python number.
+  // Wrapped numbers are considered "lower priority" when computing the result
+  // of an operation. Otherwise, they behave like their non-wrapped, zero-dim
+  // equivalents.
+  bool is_wrapped_number() const {
+    return is_wrapped_number_;
+  }
+  void set_wrapped_number(bool value) {
+    AT_ASSERT(dim() == 0);
+    is_wrapped_number_ = value;
+  }
+
   // ~~~~~ Autograd API ~~~~~
   // Some methods below are defined in TensorImpl.cpp because Tensor is an
   // incomplete type.
@@ -78,6 +90,7 @@ struct AT_API TensorImpl : public Retainable {
   virtual void set_data(Tensor new_data);
 
 protected:
+  bool is_wrapped_number_ = false;
   Type * type_;
 public:
   THTensor * tensor;
