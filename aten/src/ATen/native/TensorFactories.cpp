@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <sstream>
 
-    namespace at {
+namespace at {
 namespace native {
 
 Tensor arange(const Type& dtype, Scalar start, Scalar end, Scalar step) {
