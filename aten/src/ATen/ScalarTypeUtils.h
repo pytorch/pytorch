@@ -6,7 +6,6 @@ namespace at {
 
 template <typename T>
 struct CTypeToScalarType {
-  static at::ScalarType to();
 };
 
 #define DEFINE_TO_SCALAR_TYPE(ct, st, _2)                          \
