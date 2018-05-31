@@ -264,8 +264,9 @@ struct Variable : public at::Tensor {
   void set_name(const std::string& name);
   const std::string& name() const noexcept;
 
-  PyObject* pyobj() const noexcept;
-  void set_pyobj(PyObject* pyobj) noexcept;
+  void* unique_instance_tag() const noexcept {
+      return pImpl;
+  }
 
  private:
   /// Private implementation struct of the `Variable`. This struct declaration
@@ -372,7 +373,6 @@ struct Variable::Impl : public at::TensorImpl {
   // We use this to make sure we can setup the backwards trace
   // correctly when this variable is passed to another function.
   uint32_t output_nr_;
-  PyObject* pyobj_; // weak reference
 
   // Mutex to ensure that concurrent read operations that modify internal
   // state are still thread-safe. Used by get_grad_fn and
@@ -589,14 +589,6 @@ inline void Variable::set_name(const std::string& name) {
 
 inline const std::string& Variable::name() const noexcept {
   return get()->name;
-}
-
-inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
-  get()->pyobj_ = pyobj;
-}
-
-inline PyObject* Variable::pyobj() const noexcept {
-  return get()->pyobj_;
 }
 
 // Private Methods

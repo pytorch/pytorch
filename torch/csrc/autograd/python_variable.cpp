@@ -37,6 +37,10 @@ using namespace torch::autograd;
 
 PyObject *THPVariableClass = nullptr;
 
+namespace {
+std::unordered_map<void*, PyObject*> gVariableWrappingCache;
+}
+
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
@@ -49,7 +53,8 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
   if (obj) {
     auto v = (THPVariable*) obj;
     new (&v->cdata) Variable(std::move(var));
-    v->cdata.set_pyobj(obj);
+    gVariableWrappingCache[v->cdata.unique_instance_tag()] = obj;
+    // std::cout << gVariableWrappingCache.size() << " - "<< "@@@ constructed new wrapper\n";
     if (auto fn = dynamic_cast<PyFunction*>(v->cdata.grad_fn_unsafe())) {
       // Create a new reference to the THPFunction. This ensures that ref count
       // of the THPFunction is at least the number of referring THPVariables.
@@ -67,12 +72,18 @@ PyObject * THPVariable_Wrap(Variable var)
     Py_RETURN_NONE;
   }
 
-  if (auto obj = var.pyobj()) {
+  auto it = gVariableWrappingCache.insert({var.unique_instance_tag(), nullptr});
+  if (!it.second) {
+    PyObject* obj = it.first->second;
+    // std::cout << gVariableWrappingCache.size() << " - "<< "@@@ Wrapping var, existing one\n";
     Py_INCREF(obj);
     return obj;
   }
 
-  return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
+  // std::cout << gVariableWrappingCache.size() << " - "<< "@@@ Wrapping var, new one\n";
+  PyObject* obj = THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
+  it.first->second = obj;
+  return obj;
 }
 
 static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
@@ -109,7 +120,8 @@ static int THPVariable_clear(THPVariable *self)
     if (auto grad_acc = self->cdata.try_get_grad_accumulator()) {
       grad_acc->pre_hooks().clear();
     }
-    self->cdata.set_pyobj(nullptr);
+    // std::cout << gVariableWrappingCache.size() << " - "<< "@@@ Erasing wrapper\n";
+    gVariableWrappingCache.erase(self->cdata.unique_instance_tag());
   }
   self->cdata.reset();
   return 0;
