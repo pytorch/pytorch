@@ -64,6 +64,9 @@ if(NOT NO_CUDA)
     ${CMAKE_MODULE_PATH})
   set(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 
+  # Polyfill for upstream FindCUDA
+  include(CMakeInitializeConfigs)
+
   if(NOT CUDA_FOUND)
     find_package(CUDA 7.0)
   endif()
