@@ -470,6 +470,7 @@ class TestDataLoader(TestCase):
     def test_error_workers(self):
         self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: stuck test")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_partial_workers(self):
         "check that workers exit even if the iterator is not exhausted"
