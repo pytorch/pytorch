@@ -153,6 +153,13 @@ class TestOptim(TestCase):
         weight_c = Variable(weight.data.clone(), requires_grad=True)
         bias_c = Variable(bias.data.clone(), requires_grad=True)
         optimizer_c = constructor(weight_c, bias_c)
+        if isinstance(optimizer, optim.SVRG):
+            print(optimizer)
+            print(optimizer_c)
+            print(weight)
+            print(weight_c)
+            print(bias)
+            print(bias_c)
         fn_c = functools.partial(fn_base, optimizer_c, weight_c, bias_c)
         # Load state dict
         state_dict = deepcopy(optimizer.state_dict())
@@ -490,6 +497,37 @@ class TestOptim(TestCase):
     def test_invalid_param_type(self):
         with self.assertRaises(TypeError):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
+
+    def test_svrg(self):
+        def _build_snapshot_params_dict(weight, bias, **kwargs):
+            return [dict(snapshot_params=[weight]), dict(snapshot_params=[bias], **kwargs)]
+
+        def _build_snapshot_params_dict_single(weight, bias, **kwargs):
+            return [dict(snapshot_params=bias, **kwargs)]
+
+        self._test_basic_cases(
+            lambda weight, bias: optim.SVRG([weight, bias],
+                                            [weight.new(weight.data.clone()), bias.new(bias.data.clone())], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SVRG(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                _build_snapshot_params_dict(weight.new(weight.data.clone()), bias.new(bias.data.clone()), lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SVRG(
+                self._build_params_dict_single(weight, bias, lr=1e-2),
+                _build_snapshot_params_dict_single(weight.new(weight.data.clone()), bias.new(bias.data.clone()), lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SVRG(
+                self._build_params_dict_single(weight, bias, lr=1e-2),
+                _build_snapshot_params_dict_single(weight.new(weight.data.clone()), bias.new(bias.data.clone()), lr=1e-2))
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
+            optim.SVRG(None, None, lr=1e-2, momentum=-0.5)
 
 
 class SchedulerTestNet(torch.nn.Module):

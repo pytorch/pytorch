@@ -16,10 +16,13 @@ class SVRG(Optimizer):
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
         update_frequency (int, optional): determines after how many epochs the snapshot should be updated (default: 1)
+
+    .. _Accelerating stochastic gradient descent using predictive variance reduction:
+    https://papers.nips.cc/paper/4937-accelerating-stochastic-gradient-descent-using-predictive-variance-reduction.pdf
     """
     def __init__(self, params, snapshot_params=None, lr=required, momentum=0, dampening=0,
                  weight_decay=0, nesterov=False, update_frequency=1):
-        if not 0.0 <= lr:
+        if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
             raise ValueError("Invalid momentum value: {}".format(momentum))
@@ -27,10 +30,8 @@ class SVRG(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
-        if update_frequency < 0.0:
-            raise ValueError("Invalid update_frequency value: {}".format(update_frequency))
-        if not isinstance(update_frequency, int):
-            raise TypeError("Invalid update_frequency type: {}".format(type(update_frequency)))
+        if update_frequency < 0.0 and not isinstance(update_frequency, int):
+            raise ValueError("Invalid update_frequency: {}".format(update_frequency))
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov)
@@ -48,8 +49,7 @@ class SVRG(Optimizer):
         if not isinstance(snapshot_param_groups[0], dict):
             snapshot_param_groups = [{'snapshot_params': snapshot_param_groups}]
 
-        for param_group in snapshot_param_groups:
-            self.add_snapshot_param_group(param_group)
+        self.add_snapshot_param_group(snapshot_param_groups)
 
     def step(self, closure=None):
         r"""Performs a single optimization step.
@@ -60,7 +60,9 @@ class SVRG(Optimizer):
         """
         loss, snapshot_loss = None, None
         if closure is not None:
-            loss, snapshot_loss = closure()
+            loss = closure()
+            if isinstance(loss, tuple):
+                loss, snapshot_loss = loss
 
         for group in self.param_groups:
             weight_decay = group['weight_decay']
@@ -71,7 +73,7 @@ class SVRG(Optimizer):
                 if p.grad is None:
                     continue
                 if p.grad.data.is_sparse:
-                    raise RuntimeError("SVRG doesn't support sparse gradients")
+                    raise RuntimeError('SVRG does not support sparse gradients')
                 snapshot_params = group['snapshot_params'][idx]
                 average_gradient = group['average_gradient'][idx]
                 # gradient data
@@ -145,27 +147,30 @@ class SVRG(Optimizer):
                     sp.grad.detach_()
                     sp.grad.zero_()
 
-    def add_snapshot_param_group(self, snapshot_param_group):
+    def add_snapshot_param_group(self, snapshot_param_groups):
         r"""Add a snapshot param group to the :class:`Optimizer` s `param_groups`.
 
         Arguments:
-            param_group (dict): Specifies what Tensors should be used to compute the average gradient along
+            snapshot_param_groups (list): Specifies what Tensors should be used to compute the average gradient along
             with group specific optimization options, should the same as the ones defined for the main params.
         """
-        assert isinstance(param_group, dict), "param group must be a dict"
+        assert isinstance(snapshot_param_groups, list), "snapshot param groups must be a list"
 
-        snapshot_params = param_group['snapshot_params']
-        if isinstance(snapshot_params, torch.Tensor):
-            snapshot_param_group['snapshot_params'] = [snapshot_params]
-        elif isinstance(snapshot_params, set):
-            raise TypeError('optimizer parameters need to be organized in ordered collections, but '
-                            'the ordering of tensors in sets will change between runs. Please use a list instead.')
-        else:
-            param_group['snapshot_params'] = list(snapshot_params)
+        for param_group in snapshot_param_groups:
+            assert isinstance(param_group, dict), "param group must be a dict"
+            snapshot_params = param_group['snapshot_params']
+            if isinstance(snapshot_params, torch.Tensor):
+                param_group['snapshot_params'] = [snapshot_params]
+            elif isinstance(snapshot_params, set):
+                raise TypeError('optimizer parameters need to be organized in ordered collections, but '
+                                'the ordering of tensors in sets will change between runs. Please use a list instead.')
+            else:
+                param_group['snapshot_params'] = list(snapshot_params)
 
         # Add the snapshot_params and the average gradient to the parameter groups
         for idx, group in enumerate(self.param_groups):
             group['snapshot_params'] = snapshot_param_groups[idx]['snapshot_params']
             group['average_gradient'] = list()
             for p in group['params']:
+                # This is the part that breaks Sparse Tensor support
                 group['average_gradient'].append(torch.zeros_like(p.data))
