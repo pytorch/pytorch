@@ -15,13 +15,13 @@ class CUDADevice {
  public:
   CUDADevice(int device);
 
-  CUDADevice() : CUDADevice(-1) {}
+  CUDADevice() {}
 
   ~CUDADevice();
 
- protected:
   void setDevice(int device);
 
+ protected:
   int originalDevice_ = -1;
 };
 

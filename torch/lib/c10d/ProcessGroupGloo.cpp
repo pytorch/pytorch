@@ -101,6 +101,7 @@ std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
 // synchronizeStreams ensures that the private streams associated with
 // an algorithm entry wait for the public streams to complete.
 void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
+  CUDADevice deviceGuard;
   const auto& key = entry->key;
   for (auto i = 0; i < key.devices.size(); i++) {
     const auto& device = key.devices[i];
@@ -114,7 +115,7 @@ void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
     // stream is stream 0 and cudaEventRecord relies on the current
     // device to find the right one.
     //
-    CUDADevice deviceGuard(device);
+    deviceGuard.setDevice(device);
     C10D_CUDA_CHECK(cudaEventRecord(event, publicStream));
     C10D_CUDA_CHECK(cudaStreamWaitEvent(privateStream, event, 0));
   }
@@ -170,10 +171,11 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
     // Populate devices and events so that we can later synchronize
     // with the operation associated with this work finishing.
     if (cuda_) {
+      CUDADevice deviceGuard;
       devices_ = entry.key.devices;
       events_.resize(devices_.size());
       for (auto i = 0; i < devices_.size(); i++) {
-        CUDADevice device(devices_[i]);
+        deviceGuard.setDevice(devices_[i]);
         events_[i] = CUDAEvent::create();
         const auto& event = events_[i].getEvent();
         const auto& stream = entry.streams[i].getStream();
@@ -378,6 +380,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 // failure must be signaled through the Work future.
 //
 EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
+  CUDADevice deviceGuard;
   auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
   entry->key = key;
 
@@ -385,7 +388,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   auto& srcSizes = key.srcSizes;
   entry->src.resize(srcSizes.size());
   for (int i = 0; i < srcSizes.size(); i++) {
-    CUDADevice device(key.type->is_cuda() ? key.devices[i] : -1);
+    deviceGuard.setDevice(key.type->is_cuda() ? key.devices[i] : -1);
     entry->src[i] = key.type->tensor(srcSizes[i]);
   }
 
@@ -394,7 +397,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     entry->streams.resize(key.devices.size());
     entry->events.resize(key.devices.size());
     for (auto i = 0; i < key.devices.size(); i++) {
-      CUDADevice device(key.devices[i]);
+      deviceGuard.setDevice(key.devices[i]);
       entry->streams[i] = CUDAStream::create();
       entry->events[i] = CUDAEvent::create();
     }
