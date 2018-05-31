@@ -246,7 +246,7 @@ class _DataLoaderIter(object):
 
         self.sample_iter = iter(self.batch_sampler)
 
-        base_seed = torch.LongTensor(1).random_()[0]
+        base_seed = torch.LongTensor(1).random_().item()
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn

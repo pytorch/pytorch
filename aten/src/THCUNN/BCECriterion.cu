@@ -10,13 +10,13 @@
 #include <thrust/transform_reduce.h>
 
 template <typename T>
-inline __device__ T eps();
+inline __host__ __device__ T eps();
 
 template <>
-inline __device__ float eps() { return 1e-12f; }
+inline __host__ __device__ float eps() { return 1e-12f; }
 
 template <>
-inline __device__ double eps() { return 1e-12; }
+inline __host__ __device__ double eps() { return 1e-12; }
 
 template <typename Dtype, typename Acctype>
 struct bce_functor

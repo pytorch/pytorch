@@ -252,8 +252,8 @@ class DBReader {
    * accessing the same cursor. You should consider using Read() explicitly.
    */
   inline Cursor* cursor() const {
-    LOG(ERROR) << "Usually for a DBReader you should use Read() to be "
-                  "thread safe. Consider refactoring your code.";
+    VLOG(1) << "Usually for a DBReader you should use Read() to be "
+               "thread safe. Consider refactoring your code.";
     return cursor_.get();
   }
 

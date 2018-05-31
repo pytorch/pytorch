@@ -3,6 +3,8 @@
 // for context
 #define __STDC_FORMAT_MACROS
 
+// ${generated_comment}
+
 #include "ATen/Config.h"
 #include "ATen/${Tensor}.h"
 #include "ATen/${Storage}.h"

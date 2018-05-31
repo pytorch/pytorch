@@ -495,7 +495,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_){
     dim3 grid(outer_size);
     dim3 block = SoftMax_getBlockSize(ILP, dim_size);
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     using accscalar_t = acc_type<cuda_scalar_t, true>;
     cunn_SoftMaxForward<ILP, cuda_scalar_t, accscalar_t, Epilogue>
       <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
@@ -509,7 +509,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_){
     uint32_t smem_size;
     dim3 grid, block;
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     using accscalar_t = acc_type<cuda_scalar_t, true>;
     SpatialSoftMax_getLaunchSizes<accscalar_t>(
         &cunn_SpatialSoftMaxForward<cuda_scalar_t, accscalar_t, Epilogue>,
@@ -548,7 +548,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     dim3 grid(outer_size);
     dim3 block = SoftMax_getBlockSize(ILP, dim_size);
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "host_softmax_backward", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     using accscalar_t = acc_type<cuda_scalar_t, true>;
     cunn_SoftMaxBackward<ILP, cuda_scalar_t, accscalar_t, Epilogue>
       <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
@@ -559,7 +559,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     uint32_t smem_size;
     dim3 grid, block;
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "host_softmax_backward", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     using accscalar_t = acc_type<cuda_scalar_t, true>;
     SpatialSoftMax_getLaunchSizes<accscalar_t>(
         &cunn_SpatialSoftMaxBackward<cuda_scalar_t, accscalar_t, Epilogue>,

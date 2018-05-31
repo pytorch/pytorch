@@ -1,25 +1,22 @@
 #include <torch/nn/modules/embedding.h>
 
-namespace torch { namespace nn {
+#include <cstdint>
 
-Embedding::Embedding(uint32_t num_embeddings, uint32_t embedding_dim)
-    : num_embeddings(num_embeddings), embedding_dim(embedding_dim) {}
+namespace torch {
+namespace nn {
 
-variable_list Embedding::forward(variable_list input) {
-  auto x = input[0];
-  return variable_list({at::embedding(weight, x, -1, false, false)});
+Embedding::Embedding(int64_t count, int64_t dimension)
+    : count_(count), dimension_(dimension) {}
+
+void Embedding::reset() {
+  table_ = register_parameter(
+      "table", at::CPU(at::kFloat).empty({count_, dimension_}));
+  table_.data().normal_(0, 1);
 }
 
-void Embedding::reset_parameters() {
-  for (auto& p : parameters()) {
-    p.second.data().normal_(0, 1);
-  }
+std::vector<Variable> Embedding::forward(std::vector<Variable> input) {
+  return {at::embedding(table_, /*indices=*/input[0])};
 }
 
-void Embedding::initialize_parameters() {
-  weight = this->add(
-      Var(at::CPU(at::kFloat).empty({num_embeddings, embedding_dim})),
-      "weight");
-}
-
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

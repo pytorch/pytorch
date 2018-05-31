@@ -41,7 +41,6 @@ else
     PYTEST="pytest"
 fi
 
-cd "$top_dir"
 if [[ $PARALLEL == 1 ]]; then
     $PYTEST -n 3 "${test_paths[@]}"
 else

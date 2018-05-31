@@ -1,102 +1,122 @@
 #include <torch/nn/modules/conv.h>
 
-#include <ATen/Error.h>
+#include <torch/expanding_array.h>
 
-#include <stdexcept>
+#include <ATen/ATen.h>
 
-namespace torch { namespace nn {
+#include <cmath>
+#include <cstdint>
+#include <functional>
+#include <vector>
 
-Conv::Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan)
-    : Nd_(Nd),
-      in_channels_(in_chan),
-      out_channels_(out_chan),
-      stride_(makeTup(1, 1)),
-      padding_(makeTup(0)),
-      dilation_(makeTup(1, 1)),
-      dilated_(false),
-      output_padding_(makeTup(0)) {}
+namespace torch {
+namespace nn {
+template <size_t D, typename Derived>
+Conv<D, Derived>::Conv(
+    int64_t input_channels,
+    int64_t output_channels,
+    ExpandingArray<D> kernel_size)
+    : input_channels_(input_channels),
+      output_channels_(output_channels),
+      kernel_size_(std::move(kernel_size)) {}
 
-void Conv::initialize_parameters() {
+template <size_t D, typename Derived>
+void Conv<D, Derived>::reset() {
   if (!transposed_) {
-    for (auto pad : output_padding_) {
-      if (pad != 0) {
-        throw std::runtime_error(
-            "Only transposed convolutions support output padding!");
-      }
+    for (auto pad : *output_padding_) {
+      AT_CHECK(
+          pad == 0, "Only transposed convolutions support output padding!");
     }
   }
 
-  IntVec wsize;
+  std::vector<int64_t> weights_size;
   if (transposed_) {
-    wsize.push_back(in_channels_);
-    wsize.push_back(out_channels_ / groups_);
+    weights_size.push_back(input_channels_);
+    weights_size.push_back(output_channels_ / groups_);
   } else {
-    wsize.push_back(out_channels_);
-    wsize.push_back(in_channels_ / groups_);
+    weights_size.push_back(output_channels_);
+    weights_size.push_back(input_channels_ / groups_);
   }
-  wsize.insert(wsize.end(), ks_.begin(), ks_.end());
-  weight = this->add(Var(at::CPU(at::kFloat).empty(wsize)), "weight");
-  if (!no_bias_) {
-    bias = this->add(Var(at::CPU(at::kFloat).empty(out_channels_)), "bias");
-  } else {
-    AT_ASSERT(!bias.defined());
-  }
-}
+  weights_size.insert(
+      weights_size.end(), kernel_size_->begin(), kernel_size_->end());
+  AT_ASSERT(weights_size.size() == 2 + kernel_size_->size());
 
-void Conv::reset_parameters() {
-  auto n = in_channels_;
-  for (auto k : ks_)
-    n *= k;
-  auto stdv = 1.0 / std::sqrt(n);
-  for (auto& p : parameters()) {
+  weight_ = this->register_parameter(
+      "weight", at::CPU(at::kFloat).empty(weights_size));
+  if (with_bias_) {
+    bias_ = this->register_parameter(
+        "bias", at::CPU(at::kFloat).empty(output_channels_));
+  }
+
+  const auto number_of_features = std::accumulate(
+      kernel_size_->begin(),
+      kernel_size_->end(),
+      input_channels_,
+      std::multiplies<int64_t>{});
+  const auto stdv = 1.0 / std::sqrt(number_of_features);
+  for (auto& p : this->parameters()) {
     p.second.data().uniform_(-stdv, stdv);
   }
 }
 
-variable_list Conv::forward(variable_list input) {
-  auto x = input[0];
-  if (Nd_ == 1) {
-    AT_ASSERT(x.ndimension() == 3);
-    x = x.unsqueeze(-1); // TODO: Use conv1d once available
-  } else if (Nd_ == 2) {
-    AT_ASSERT(x.ndimension() == 4);
-  } else if (Nd_ == 3) {
-    AT_ASSERT(x.ndimension() == 5);
-  } else {
-    throw std::runtime_error("Only Conv{1,2,3}d are supported");
-  }
+std::vector<Variable> Conv1d::forward(std::vector<Variable> input) {
+  AT_ASSERT(input.front().ndimension() == 3);
 
-  Variable out;
-  if (Nd_ == 1 || Nd_ == 2) {
-    if (transposed_) {
-      out = at::conv_transpose2d(
-          x,
-          weight,
-          bias,
-          stride_,
-          padding_,
-          output_padding_,
-          groups_,
-          dilation_);
-    } else {
-      out = at::conv2d(x, weight, bias, stride_, padding_, dilation_, groups_);
-    }
-  } else if (Nd_ == 3) {
-    if (transposed_) {
-      out = at::conv_transpose3d(
-          x,
-          weight,
-          bias,
-          stride_,
-          padding_,
-          output_padding_,
-          groups_,
-          dilation_);
-    } else {
-      out = at::conv3d(x, weight, bias, stride_, padding_, dilation_, groups_);
-    }
+  if (transposed_) {
+    return {at::conv_transpose1d(
+        input.front(),
+        weight_,
+        bias_,
+        stride_,
+        padding_,
+        output_padding_,
+        groups_,
+        dilation_)};
   }
-
-  return variable_list({out});
+  return {at::conv1d(
+      input.front(), weight_, bias_, stride_, padding_, dilation_, groups_)};
 }
-}} // namespace torch::nn
+
+std::vector<Variable> Conv2d::forward(std::vector<Variable> input) {
+  AT_ASSERT(input.front().ndimension() == 4);
+
+  if (transposed_) {
+    return {at::conv_transpose2d(
+        input.front(),
+        weight_,
+        bias_,
+        stride_,
+        padding_,
+        output_padding_,
+        groups_,
+        dilation_)};
+  }
+  return {at::conv2d(
+      input.front(), weight_, bias_, stride_, padding_, dilation_, groups_)};
+}
+
+std::vector<Variable> Conv3d::forward(std::vector<Variable> input) {
+  AT_ASSERT(input.front().ndimension() == 5);
+
+  if (transposed_) {
+    return {at::conv_transpose3d(
+        input.front(),
+        weight_,
+        bias_,
+        stride_,
+        padding_,
+        output_padding_,
+        groups_,
+        dilation_)};
+  } else {
+    return {at::conv3d(
+        input.front(), weight_, bias_, stride_, padding_, dilation_, groups_)};
+  }
+}
+
+template class Conv<1, Conv1d>;
+template class Conv<2, Conv2d>;
+template class Conv<3, Conv3d>;
+
+} // namespace nn
+} // namespace torch

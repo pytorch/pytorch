@@ -7,12 +7,14 @@
 
 #include <stdbool.h>
 #include <unordered_map>
+#include <cstdlib>
 #include <libshm.h>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/dlpack.h>
 #include <ATen/DLConvertor.h>
+#include <ATen/Utils.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -105,6 +107,25 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
+}
+
+// The idea behind these two functions is to make it easy to test if we are
+// built with ASAN: they're designed not to crash if ASAN is not enabled, but
+// to trigger ASAN if it is enabled.  This lets us run a "canary" tests which
+// checks if our build environment is misconfigured.
+
+static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
+  THPUtils_assert(THPUtils_checkLong(arg), "crash_if_csrc_asan expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  volatile char x[3];
+  x[static_cast<int>(THPUtils_unpackLong(arg))] = 0;
+  return PyLong_FromLong(x[0]);
+}
+
+static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
+  THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  return PyLong_FromLong(at::_crash_if_asan(static_cast<int>(THPUtils_unpackLong(arg))));
 }
 
 static PyObject * THPModule_getNumThreads(PyObject *module)
@@ -365,6 +386,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
   {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
+  {"_crash_if_csrc_asan", (PyCFunction)THPModule_crashIfCsrcASAN, METH_O, NULL},
+  {"_crash_if_aten_asan", (PyCFunction)THPModule_crashIfATenASAN, METH_O, NULL},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
   {"_set_backcompat_keepdim_warn", (PyCFunction)THPModule_setBackcompatKeepdimWarn, METH_O, NULL},
@@ -487,7 +510,6 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
-  torch::autograd::initAutogradClosureBindings(module);
   torch::jit::initJITBindings(module);
   torch::onnx::initONNXBindings(module);
   torch::autograd::initNNFunctions(module);

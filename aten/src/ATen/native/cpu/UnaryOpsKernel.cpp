@@ -5,6 +5,7 @@
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
 #include "ATen/cpu/vec256/vec256.h"
+#include "ATen/cpu/vec256/functional.h"
 #include "ATen/native/cpu/CapabilityDispatch.h"
 
 namespace at { namespace native {
@@ -12,44 +13,18 @@ namespace {
 
 using namespace vec256;
 
-template <typename scalar_t, typename F>
-static void
-unary_kernel(scalar_t* arr_out, const scalar_t* arr_in, int64_t size, F func) {
-  using Vec = Vec256<scalar_t>;
-  int64_t size_rounded = size - (size % Vec::size);
-  int64_t k = 0;
-  for (; k != size_rounded; k += Vec::size) {
-    auto value = func(Vec::s_load(arr_in + k));
-    value.store(arr_out + k);
-  }
-  auto leftover = size - k;
-  if (leftover > 0) {
-    Vec a;
-    a.load_partial(arr_in + k, leftover);
-    func(a).store_partial(arr_out + k, leftover);
-  }
-}
-
 template <class scalar_t, class F>
 static void parallel_apply(Tensor& result, const Tensor& self, F f) {
-  internal::init_tbb_num_threads();
-
-  static tbb::affinity_partitioner ap;
-
   auto arr_out = result.data<scalar_t>();
   auto arr_in = self.data<scalar_t>();
   int64_t size = self.numel();
-  if (size < internal::TBB_GRAIN_SIZE) {
-    unary_kernel(arr_out, arr_in, size, f);
-  } else {
-    tbb::parallel_for(
-        tbb::blocked_range<int64_t>(0, size, internal::TBB_GRAIN_SIZE),
-        [&](const tbb::blocked_range<int64_t>& r) {
-          auto size = r.end() - r.begin();
-          unary_kernel(arr_out + r.begin(), arr_in + r.begin(), size, f);
-        },
-        ap);
-  }
+  parallel_for_1d(
+      [arr_out, arr_in, f](int64_t begin, int64_t end) {
+        map(f, arr_out + begin, arr_in + begin, end - begin);
+      },
+      0,
+      size,
+      1024);
 }
 
 static void abs_kernel(Tensor& result, const Tensor& self) {

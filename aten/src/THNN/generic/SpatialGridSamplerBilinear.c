@@ -34,7 +34,7 @@ static inline void THNN_(SpatialGridSamplerBilinear_shapeCheck)
 }
 
 #define SAFE_GET(input, x, y, n, c, H, W) x >= 0 && x < W && y >=0 \
-    && y < H ? THTensor_fastGet4d(input, n, c, y, x) : 0
+    && y < H ? THTensor_(fastGet4d)(input, n, c, y, x) : 0
 
 #define CLIP_COORDINATES(in, out, clip_limit) out = MIN((clip_limit-1), MAX(in, 0))
 
@@ -63,8 +63,8 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
     for (h = 0; h < H; ++h) {
       for (w = 0; w < W; ++w) {
         // get the corresponding input x, y co-ordinates from grid
-        real ix = THTensor_fastGet4d(grid, n, h, w, 0);
-        real iy = THTensor_fastGet4d(grid, n, h, w, 1);
+        real ix = THTensor_(fastGet4d)(grid, n, h, w, 0);
+        real iy = THTensor_(fastGet4d)(grid, n, h, w, 1);
 
         // normalize ix, iy from [-1, 1] to [0, IH-1] & [0, IW-1]
         ix = ((ix + 1) / 2) * (IW-1);
@@ -107,7 +107,7 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
           real sw_val = SAFE_GET(input, ix_sw, iy_sw, n, c, IH, IW);
           real se_val = SAFE_GET(input, ix_se, iy_se, n, c, IH, IW);
           real out_val = nw_val * nw + ne_val * ne + sw_val * sw + se_val * se;
-          THTensor_fastSet4d(output, n, c, h, w, out_val);
+          THTensor_(fastSet4d)(output, n, c, h, w, out_val);
         }
       }
     }
@@ -117,8 +117,8 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
 #define SAFE_ADD(input, x, y, n, c, H, W, value)    \
   do {                \
     if (x >= 0 && x < W && y >=0 && y < H) {      \
-      real old_value = THTensor_fastGet4d(input, n, c, y, x); \
-      THTensor_fastSet4d(input, n, c, y, x, value + old_value); \
+      real old_value = THTensor_(fastGet4d)(input, n, c, y, x); \
+      THTensor_(fastSet4d)(input, n, c, y, x, value + old_value); \
     }               \
   } while(0)
 
@@ -149,8 +149,8 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
     for (h = 0; h < H; ++h) {
       for (w = 0; w < W; ++w) {
         // get the corresponding input x, y co-ordinates from grid
-        real ix = THTensor_fastGet4d(grid, n, h, w, 0);
-        real iy = THTensor_fastGet4d(grid, n, h, w, 1);
+        real ix = THTensor_(fastGet4d)(grid, n, h, w, 0);
+        real iy = THTensor_(fastGet4d)(grid, n, h, w, 1);
 
         real gix = 0;
         real giy = 0;
@@ -200,7 +200,7 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
         }
 
         for (int c = 0; c < C; ++c) {
-          real gradout = THTensor_fastGet4d(gradOutput, n, c, h, w);
+          real gradout = THTensor_(fastGet4d)(gradOutput, n, c, h, w);
 
           // calculate and set gradInput
           SAFE_ADD(gradInput, ix_nw_cl, iy_nw_cl, n, c, IH, IW, nw * gradout);
@@ -229,11 +229,11 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
         gix = gix * (IW - 1) / 2;
         giy = giy * (IH - 1) / 2;
 
-        real gix_old = THTensor_fastGet4d(gradGrid, n, h, w, 0);
-        real giy_old = THTensor_fastGet4d(gradGrid, n, h, w, 1);
+        real gix_old = THTensor_(fastGet4d)(gradGrid, n, h, w, 0);
+        real giy_old = THTensor_(fastGet4d)(gradGrid, n, h, w, 1);
 
-        THTensor_fastSet4d(gradGrid, n, h, w, 0, gix_old + gix);
-        THTensor_fastSet4d(gradGrid, n, h, w, 1, giy_old + giy);
+        THTensor_(fastSet4d)(gradGrid, n, h, w, 0, gix_old + gix);
+        THTensor_(fastSet4d)(gradGrid, n, h, w, 1, giy_old + giy);
       }
     }
   }

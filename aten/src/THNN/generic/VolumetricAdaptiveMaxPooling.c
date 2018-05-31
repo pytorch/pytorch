@@ -66,7 +66,7 @@ static void THNN_(VolumetricAdaptiveMaxPooling_updateOutput_frame)(
               for(iw = 0; iw < kW; iw++)
               {
                 real val = *(ip + it*istrideT + ih*istrideH + iw*istrideW);
-                if (val > maxval)
+                if ((val > maxval) || isnan(val))
                 {
                   maxval = val;
                   maxindex = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + (iw+istartW);

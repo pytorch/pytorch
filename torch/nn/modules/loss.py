@@ -53,13 +53,14 @@ class L1Loss(_Loss):
 
     Args:
         size_average (bool, optional): By default, the losses are averaged
-           over observations for each minibatch. However, if the field
-           size_average is set to ``False``, the losses are instead summed for
-           each minibatch. Ignored when reduce is ``False``. Default: ``True``
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed
-           for each minibatch. When reduce is ``False``, the loss function returns
-           a loss per input/target element instead and ignores size_average.
-           Default: ``True``
+            for each minibatch. When reduce is ``False``, the loss function returns
+            a loss per input/target element instead and ignores size_average.
+            Default: ``True``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -131,13 +132,13 @@ class NLLLoss(_WeightedLoss):
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each
-           class. If given, it has to be a Tensor of size `C`. Otherwise, it is
-           treated as if having all ones.
+            class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+            treated as if having all ones.
         size_average (bool, optional): By default, the losses are averaged
-           over observations for each minibatch with weights set by
-           :attr:`weight`. However, if the field :attr:`size_average` is set to
-           ``False``, the losses are instead summed for each minibatch. Ignored
-           when :attr:`reduce` is ``False``. Default: ``True``
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When
             :attr:`size_average` is ``True``, the loss is averaged over
@@ -225,9 +226,11 @@ class PoissonNLLLoss(_Loss):
 
             .. math::
                 \text{target}*\log(\text{target}) - \text{target} + 0.5 * \log(2\pi\text{target}).
-        size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field `size_average`
-            is set to ``False``, the losses are instead summed for each minibatch.
+        size_average (bool, optional): By default, the losses are averaged
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of :math:`\log(0)` when
             :attr:`log_input == False`. Default: 1e-8
         reduce (bool, optional): By default, the losses are averaged
@@ -312,8 +315,10 @@ class KLDivLoss(_Loss):
 
     Args:
         size_average (bool, optional): By default, the losses are averaged
-            for each minibatch over observations **as well as** over
-            dimensions. However, if ``False`` the losses are instead summed.
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged
             over observations for each minibatch, or summed, depending on
             size_average. When reduce is ``False``, returns a loss per input/target
@@ -363,9 +368,10 @@ class MSELoss(_Loss):
 
     Args:
         size_average (bool, optional): By default, the losses are averaged
-           over observations for each minibatch. However, if the field
-           size_average is set to ``False``, the losses are instead summed for
-           each minibatch. Only applies when reduce is ``True``. Default: ``True``
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged
            over observations for each minibatch, or summed, depending on
            size_average. When reduce is ``False``, returns a loss per input/target
@@ -419,9 +425,10 @@ class BCELoss(_WeightedLoss):
             of each batch element. If given, has to be a Tensor of size
             "nbatch".
         size_average (bool, optional): By default, the losses are averaged
-            over observations for each minibatch. However, if the field
-            size_average is set to ``False``, the losses are instead summed for
-            each minibatch. Default: ``True``
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on size_average. When reduce
             is False, returns a loss per input/target element instead and ignores
@@ -483,9 +490,10 @@ class BCEWithLogitsLoss(_Loss):
             of each batch element. If given, has to be a Tensor of size
             "nbatch".
         size_average (bool, optional): By default, the losses are averaged
-            over observations for each minibatch. However, if the field
-            size_average is set to ``False``, the losses are instead summed for
-            each minibatch. Default: ``True``
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on size_average. When reduce
             is False, returns a loss per input/target element instead and ignores
@@ -547,10 +555,11 @@ class HingeEmbeddingLoss(_Loss):
 
     Args:
         margin (float, optional): Has a default value of `1`.
-        size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field :attr:`size_average`
-            is set to ``False``, the losses are instead summed for each minibatch.
-            Default: ``True``
+        size_average (bool, optional): By default, the losses are averaged
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on :attr:`size_average`. When
             :attr:`reduce` is ``False``, returns a loss per batch element instead and
@@ -591,10 +600,11 @@ class MultiLabelMarginLoss(_Loss):
     This allows for different samples to have variable amounts of target classes
 
     Args:
-        size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field :attr:`size_average`
-            is set to ``False``, the losses are instead summed for each minibatch.
-            Default: ``True``
+        size_average (bool, optional): By default, the losses are averaged
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on :attr:`size_average`. When
             :attr:`reduce` is ``False``, returns a loss per batch element instead and
@@ -641,12 +651,14 @@ class SmoothL1Loss(_Loss):
 
     Args:
         size_average (bool, optional): By default, the losses are averaged
-           over all elements. However, if the field size_average is set to ``False``,
-           the losses are instead summed. Ignored when reduce is ``False``. Default: ``True``
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed
-           over elements. When reduce is ``False``, the loss function returns
-           a loss per input/target element instead and ignores size_average.
-           Default: ``True``
+            over elements. When reduce is ``False``, the loss function returns
+            a loss per input/target element instead and ignores size_average.
+            Default: ``True``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -674,10 +686,11 @@ class SoftMarginLoss(_Loss):
         \text{loss}(x, y) = \sum_i \frac{\log(1 + \exp(-y[i]*x[i]))}{\text{x.nelement}()}
 
     Args:
-        size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field :attr:`size_average`
-            is set to ``False``, the losses are instead summed for each minibatch.
-            Default: ``True``
+        size_average (bool, optional): By default, the losses are averaged
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on :attr:`size_average`. When
             :attr:`reduce` is ``False``, returns a loss per batch element instead and
@@ -737,9 +750,11 @@ class CrossEntropyLoss(_WeightedLoss):
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
            If given, has to be a Tensor of size `C`
-        size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
-           However, if the field `size_average` is set to ``False``, the losses are
-           instead summed for each minibatch. Ignored if reduce is ``False``.
+        size_average (bool, optional): By default, the losses are averaged
+           over each loss element in the batch. Note that for some losses, there
+           multiple elements per sample. If the field size_average is set to
+           ``False``, the losses are instead summed for each minibatch. Ignored
+           when reduce is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When `size_average` is
             ``True``, the loss is averaged over non-ignored targets.
@@ -792,12 +807,13 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each
-           class. If given, it has to be a Tensor of size `C`. Otherwise, it is
-           treated as if having all ones.
-        size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field :attr:`size_average`
-            is set to ``False``, the losses are instead summed for each minibatch.
-            Default: ``True``
+            class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+            treated as if having all ones.
+        size_average (bool, optional): By default, the losses are averaged
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on :attr:`size_average`. When
             :attr:`reduce` is ``False``, returns a loss per batch element instead and
@@ -836,10 +852,11 @@ class CosineEmbeddingLoss(_Loss):
     Args:
         margin (float, optional): Should be a number from `-1` to `1`, `0` to `0.5`
             is suggested. If `margin` is missing, the default value is `0`.
-        size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field :attr:`size_average`
-            is set to ``False``, the losses are instead summed for each minibatch.
-            Default: ``True``
+        size_average (bool, optional): By default, the losses are averaged
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on :attr:`size_average`. When
             :attr:`reduce` is ``False``, returns a loss per batch element instead and
@@ -870,10 +887,11 @@ class MarginRankingLoss(_Loss):
 
     Args:
         margin (float, optional): Has a default value of `0`.
-        size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field :attr:`size_average`
-            is set to ``False``, the losses are instead summed for each minibatch.
-            Default: ``True``
+        size_average (bool, optional): By default, the losses are averaged
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on :attr:`size_average`. When
             :attr:`reduce` is ``False``, returns a loss per batch element instead and
@@ -923,10 +941,11 @@ class MultiMarginLoss(_WeightedLoss):
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, it has to be a Tensor of size `C`. Otherwise, it is
             treated as if having all ones.
-        size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field :attr:`size_average`
-            is set to ``False``, the losses are instead summed for each minibatch.
-            Default: ``True``
+        size_average (bool, optional): By default, the losses are averaged
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on :attr:`size_average`. When
             :attr:`reduce` is ``False``, returns a loss per batch element instead and
@@ -972,10 +991,11 @@ class TripletMarginLoss(_Loss):
         swap (float, optional): The distance swap is described in detail in the paper
             `Learning shallow convolutional feature descriptors with triplet losses` by
             V. Balntas, E. Riba et al. Default: ``False``.
-        size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field :attr:`size_average`
-            is set to ``False``, the losses are instead summed for each minibatch.
-            Default: ``True``
+        size_average (bool, optional): By default, the losses are averaged
+            over each loss element in the batch. Note that for some losses, there
+            multiple elements per sample. If the field :attr:`size_average` is set to
+            ``False``, the losses are instead summed for each minibatch. Ignored
+            when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on :attr:`size_average`. When
             :attr:`reduce` is ``False``, returns a loss per batch element instead and

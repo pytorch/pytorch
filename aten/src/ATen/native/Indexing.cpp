@@ -146,12 +146,10 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
   auto max_idx = index.max().toCLong();
   auto min_idx = index.min().toCLong();
   if (max_idx >= dim_size) {
-    AT_ERROR("index", max_idx, "is out of bounds for dimension", dim, "with size", dim_size); 
-    throw std::runtime_error("foo");
+    AT_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
   } 
   if (min_idx < -dim_size) {
-    AT_ERROR("index", min_idx, "is out of bounds for dimension", dim, "with size", dim_size); 
-    throw std::runtime_error("foo");
+    AT_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
   }
   return index.remainder(dim_size);
 }

@@ -1,6 +1,10 @@
 #include "caffe2/core/predictor.h"
+#ifdef CAFFE2_OPTIMIZER
+#include "caffe2/opt/optimizer.h"
+#endif
 
 #include <unordered_set>
+#include "caffe2/core/init.h"
 
 namespace caffe2 {
 
@@ -81,10 +85,22 @@ Predictor::Predictor(
     const NetDef& init_net,
     const NetDef& run_net,
     Workspace* parent,
-    bool run_init)
+    bool run_init,
+    int optimization)
     : run_net_(run_net), ws_(parent) {
+
   if (run_init) {
     CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
+  }
+
+  GlobalInit();
+
+  if (optimization) {
+#ifdef CAFFE2_OPTIMIZER
+    run_net_ = opt::optimize(run_net_, &ws_, optimization);
+#else
+    LOG(WARNING) << "Caffe2 is compiled without optimization passes.";
+#endif
   }
 
   // real model inputs can be fed later in run* functions
@@ -97,6 +113,7 @@ Predictor::Predictor(
       blob->template GetMutable<TensorCPU>();
     }
   }
+
   CAFFE_ENFORCE(ws_.CreateNet(run_net));
 }
 

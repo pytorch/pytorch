@@ -1,0 +1,5 @@
+# Set the default behavior, in case people don't have core.autocrlf set.
+* text=auto
+
+# BASH scripts shouldn't be converted since they may need to be used by Docker
+*.sh text eol=lf

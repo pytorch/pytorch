@@ -20,6 +20,12 @@ def parse_kwargs(desc):
     return {desc.split(' ')[0]: desc for desc in kwargs}
 
 
+reduceops_common_args = parse_kwargs("""
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+""")
+
 factory_common_args = parse_kwargs("""
     out (Tensor, optional): the output tensor
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -902,7 +908,7 @@ Example::
 
 add_docstr(torch.cumprod,
            r"""
-cumprod(input, dim, out=None) -> Tensor
+cumprod(input, dim, dtype=None) -> Tensor
 
 Returns the cumulative product of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -916,7 +922,7 @@ a vector of size N, with elements.
 Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -932,7 +938,7 @@ Example::
     >>> torch.cumprod(a, dim=0)
     tensor([ 0.6001,  0.1241, -0.0238, -0.0233, -0.0157, -0.0000, -0.0000,
              0.0000, -0.0000, -0.0000])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.cumsum,
            r"""
@@ -950,7 +956,7 @@ a vector of size N, with elements.
 Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -961,7 +967,7 @@ Example::
     >>> torch.cumsum(a, dim=0)
     tensor([-0.8286, -1.3175, -0.8020,  0.0423,  0.2289,  0.0537, -2.0058,
             -1.8209, -2.9780, -3.4022])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.diag,
            r"""
@@ -2179,6 +2185,36 @@ Example::
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
 """.format(**factory_common_args))
 
+add_docstr(torch.logsumexp,
+           r"""
+logsumexp(input, dim, keepdim=False, out=None)
+
+Returns the log of summed exponentials of each row of the :attr:`input`
+tensor in the given dimension :attr:`dim`. The computation is numerically
+stabilized.
+
+For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
+
+           :math:`\text{logsumexp}(x)_{i} = \log \sum_j \exp(x_ij).`
+
+If :attr:`keepdim` is ``True``, the output tensor is of the same size
+as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
+the output tensor having 1 fewer dimension than :attr:`input`.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int or tuple of ints): the dimension or dimensions to reduce
+    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    out (Tensor, optional): the output tensor
+
+
+Example::
+    >>> a = torch.randn(3, 3)
+    >>> torch.logsumexp(a, 1)
+    tensor([ 0.8442,  1.4322,  0.8711])
+""")
+
 add_docstr(torch.lt,
            r"""
 lt(input, other, out=None) -> Tensor
@@ -3259,12 +3295,13 @@ Example::
 
 add_docstr(torch.prod,
            r"""
-.. function:: prod(input) -> Tensor
+.. function:: prod(input, dtype=None) -> Tensor
 
 Returns the product of all elements in the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
+    {dtype}
 
 Example::
 
@@ -3274,7 +3311,7 @@ Example::
     >>> torch.prod(a)
     tensor(0.6902)
 
-.. function:: prod(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: prod(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the product of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
@@ -3288,7 +3325,7 @@ Args:
     input (Tensor): the input tensor
     dim (int): the dimension to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -3300,7 +3337,7 @@ Example::
             [ 1.1131, -1.0629]])
     >>> torch.prod(a, 1)
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.pstrf, r"""
 pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
@@ -3461,9 +3498,9 @@ Example::
     tensor([ 4.,  3.,  4.])
 
 
-    >>> torch.randint(3, 10, (2,2), dtype=torch.long)
-    tensor([[ 8,  3],
-            [ 3,  9]])
+    >>> torch.randint(10, (2,2))
+    tensor([[ 0.,  2.],
+            [ 5.,  5.]])
 
 
     >>> torch.randint(3, 10, (2,2))
@@ -4101,12 +4138,13 @@ Example::
 
 add_docstr(torch.sum,
            r"""
-.. function:: sum(input) -> Tensor
+.. function:: sum(input, dtype=None) -> Tensor
 
 Returns the sum of all elements in the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
+    {dtype}
 
 Example::
 
@@ -4116,7 +4154,7 @@ Example::
     >>> torch.sum(a)
     tensor(-0.5475)
 
-.. function:: sum(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
@@ -4131,7 +4169,7 @@ Args:
     input (Tensor): the input tensor
     dim (int or tuple of ints): the dimension or dimensions to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -4146,7 +4184,7 @@ Example::
     >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
     >>> torch.sum(b, (2, 1))
     tensor([  435.,  1335.,  2235.,  3135.])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.svd,
            r"""
@@ -4267,7 +4305,7 @@ Examples::
 
 add_docstr(torch.t,
            r"""
-t(input, out=None) -> Tensor
+t(input) -> Tensor
 
 Expects :attr:`input` to be a matrix (2-D tensor) and transposes dimensions 0
 and 1.
@@ -4276,7 +4314,6 @@ Can be seen as a short-hand function for :meth:`transpose(input, 0, 1)`
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -4411,7 +4448,7 @@ Example::
 
 add_docstr(torch.transpose,
            r"""
-transpose(input, dim0, dim1, out=None) -> Tensor
+transpose(input, dim0, dim1) -> Tensor
 
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
@@ -4424,7 +4461,6 @@ Args:
     input (Tensor): the input tensor
     dim0 (int): the first dimension to be transposed
     dim1 (int): the second dimension to be transposed
-    out (Tensor, optional): the output tensor
 
 Example::
 

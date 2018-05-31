@@ -118,7 +118,7 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "_fft_fill_with_conjugate_symmetry_", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     typedef thrust::device_ptr<cuda_scalar_t> device_ptr;
     typedef thrust::counting_iterator<int64_t> counter;
     typedef thrust::transform_iterator<cnt_to_dst_idx_functor, counter> dst_idx_iterator;

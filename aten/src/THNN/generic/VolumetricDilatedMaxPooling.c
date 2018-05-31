@@ -170,7 +170,7 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
               {
                 index = z * iwidth * iheight + y * iwidth + x;
                 real val = ip[index];
-                if (val > maxval)
+                if ((val > maxval) || isnan(val))
                 {
                   maxval = val;
                   maxindex = index;

@@ -369,6 +369,14 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   return ret;
 }
 
+Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim, bool keepdim) {
+  if (! keepdim) {
+    grad = grad.unsqueeze(dim);
+    result = result.unsqueeze(dim);
+  }
+  return grad * (self - result).exp();
+}
+
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   auto result = self;
 
@@ -844,7 +852,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       return std::tuple<Tensor, Tensor, Tensor>(
                 ggO,
                 ggW_maybe_squeeze.expand_as(gO) * gO * nonpositive_mask,
-                (ggI * gO * nonpositive_mask).sum()
+                (ggI * gO * nonpositive_mask).sum().expand_as(weight)
           );
   } else {
       // Expand ggW to match size of ggI; a simple expand doesn't work because

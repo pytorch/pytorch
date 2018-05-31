@@ -1,5 +1,7 @@
 #pragma once
 
+// ${generated_comment}
+
 #include "ATen/Scalar.h"
 #include "ATen/Type.h"
 #include "ATen/Tensor.h"
