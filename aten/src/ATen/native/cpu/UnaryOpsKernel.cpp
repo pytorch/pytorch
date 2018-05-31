@@ -15,16 +15,23 @@ using namespace vec256;
 
 template <class scalar_t, class F>
 static void parallel_apply(Tensor& result, const Tensor& self, F f) {
+  internal::init_tbb_num_threads();
+
+static default_partitioner_type ap;
+
   auto arr_out = result.data<scalar_t>();
   auto arr_in = self.data<scalar_t>();
   int64_t size = self.numel();
-  parallel_for_1d(
-      [arr_out, arr_in, f](int64_t begin, int64_t end) {
-        map(f, arr_out + begin, arr_in + begin, end - begin);
-      },
-      0,
-      size,
-      1024);
+  if (size < internal::TBB_GRAIN_SIZE) {
+    map(f, arr_out, arr_in, size);
+  } else {
+    tbb::parallel_for(
+        tbb::blocked_range<int64_t>(0, size, internal::TBB_GRAIN_SIZE),
+        [&](const tbb::blocked_range<int64_t>& r) {
+          map(f, arr_out + r.begin(), arr_in + r.begin(), r.end() - r.begin());
+        },
+        ap);
+  }
 }
 
 static void abs_kernel(Tensor& result, const Tensor& self) {
