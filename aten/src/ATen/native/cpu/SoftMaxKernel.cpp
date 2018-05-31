@@ -35,7 +35,7 @@ inline void _vec_log_softmax_lastdim(
     grain_size = CHUNK_SIZE;
 
   parallel_for_1d(
-      [&](int64_t begin, int64_t end) {
+      [&input_data_base, &output_data_base, &dim_size](int64_t begin, int64_t end) {
         for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
           scalar_t tmp_sum_scalar[CHUNK_SIZE];
           scalar_t max_input_arr[CHUNK_SIZE];
@@ -98,7 +98,7 @@ inline void _vec_softmax_lastdim(
     grain_size = 1;
 
   parallel_for_1d(
-      [&](int64_t begin, int64_t end) {
+      [&input_data_base, &output_data_base, &dim_size](int64_t begin, int64_t end) {
         for (int64_t i = begin; i < end; i++) {
           scalar_t* input_data = input_data_base + i * dim_size;
           scalar_t* output_data = output_data_base + i * dim_size;
@@ -139,7 +139,7 @@ inline void _vec_host_softmax_backward_lastdim(
     grain_size = 1;
 
   parallel_for_1d(
-      [&](int64_t begin, int64_t end) {
+      [&grad_input_data_base, &grad_data_base, &output_data_base, dim_size](int64_t begin, int64_t end) {
         for (int64_t i = begin; i < end; i++) {
           scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
           scalar_t* grad_data = grad_data_base + i * dim_size;

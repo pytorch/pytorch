@@ -26,7 +26,7 @@ constexpr int64_t TBB_GRAIN_SIZE = 32768;
 
 template <class F>
 inline void parallel_for_1d(
-    F f,
+    const F& f,
     int64_t begin,
     int64_t end,
     int64_t grain_size = internal::TBB_GRAIN_SIZE,
@@ -48,15 +48,15 @@ inline void parallel_for_1d(
   } else {
     tbb::parallel_for(
         tbb::blocked_range<int64_t>(begin, end, grain_size),
-        [f](const tbb::blocked_range<int64_t>& r) { f(r.begin(), r.end()); },
+        [&f](const tbb::blocked_range<int64_t>& r) { f(r.begin(), r.end()); },
         ap);
   }
 }
 
 template <class scalar_t, class F, class SF>
 inline scalar_t parallel_reduce_1d(
-    F f,
-    SF sf,
+    const F& f,
+    const SF &sf,
     scalar_t ident,
     int64_t begin,
     int64_t end,
@@ -80,7 +80,7 @@ inline scalar_t parallel_reduce_1d(
   return tbb::parallel_reduce(
       tbb::blocked_range<int64_t>(begin, end, grain_size),
       scalar_t(ident),
-      [f](const tbb::blocked_range<int64_t>& r, scalar_t init) {
+      [&f](const tbb::blocked_range<int64_t>& r, scalar_t init) {
         return f(r.begin(), r.end(), init);
       },
       sf,
