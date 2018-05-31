@@ -318,6 +318,26 @@ if(BUILD_CAFFE2)
       install(TARGETS caffe2_pybind11_state_gpu DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
     endif()
 
+    if(USE_HIP)
+      add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+      add_dependencies(caffe2_pybind11_state_hip ${Caffe2_MAIN_LIBS_ORDER})
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
+      if (APPLE)
+        set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ".so")
+        set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
+      elseif (MSVC)
+        set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ".pyd")
+      endif()
+      set_target_properties(
+              caffe2_pybind11_state_hip PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+              ${CMAKE_BINARY_DIR}/caffe2/python)
+      target_link_libraries(
+              caffe2_pybind11_state_hip ${Caffe2_CPU_LINK} ${Caffe2_HIP_LINK} ${Caffe2_DEPENDENCY_LIBS}
+              ${Caffe2_HIP_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
+      install(TARGETS caffe2_pybind11_state_hip DESTINATION caffe2/python)
+    endif()
+
     if (MSVC AND CMAKE_GENERATOR MATCHES "Visual Studio")
       # If we are building under windows, we will copy the file from
       # build/caffe2/python/{Debug,Release}/caffe2_pybind11_state.pyd
