@@ -879,11 +879,13 @@ std::function<void(OpSchema&)> AveragePoolDocGenerator(const char* dim) {
         0,
         "Y",
         "*(type: Tensor`<float>`)* Output data tensor.");
+    /*
     schema.Arg("kernel", "*(type: int)* Size of the window to take an average over.");
     schema.Arg("stride", "*(type: int)* Stride of the window.");
     schema.Arg("pad", "*(type: int)* Implicit zero padding to be added on both sides.");
     schema.Arg("dilation", "*(type: int)* Parameter that controls the stride of elements in the window.");
     schema.Arg("order", "*(type: string; default: 'NCHW')* Order of the blob dimensions.");
+    */
   };
 }
 
@@ -901,11 +903,13 @@ std::function<void(OpSchema&)> MaxPoolDocGenerator(const char* dim) {
         0,
         "Y",
         "*(type: Tensor`<float>`)* Output data tensor.");
+    /*
     schema.Arg("kernel", "*(type: int)* Size of the window to take an average over.");
     schema.Arg("stride", "*(type: int)* Stride of the window.");
     schema.Arg("pad", "*(type: int)* Implicit zero padding to be added on both sides.");
     schema.Arg("dilation", "*(type: int)* Parameter that controls the stride of elements in the window.");
     schema.Arg("order", "*(type: string; default: 'NCHW')* Order of the blob dimensions.");
+    */
   };
 }
 REGISTER_CPU_OPERATOR(
