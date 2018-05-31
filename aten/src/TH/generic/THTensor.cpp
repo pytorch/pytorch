@@ -51,7 +51,7 @@ THLongStorage *THTensor_(newStrideOf)(THTensor *self)
 real *THTensor_(data)(const THTensor *self)
 {
   if(self->storage)
-    return (self->storage->data+self->storageOffset);
+    return (THStorage_(data)(self->storage)+self->storageOffset);
   else
     return NULL;
 }
@@ -108,8 +108,8 @@ THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset,
                           storage,
                           storageOffset,
                           (size ? size->size : (stride ? stride->size : 0)),
-                          (size ? size->data : NULL),
-                          (stride ? stride->data : NULL));
+                          (size ? THLongStorage_data(size) : NULL),
+                          (stride ? THLongStorage_data(stride) : NULL));
 
   return self;
 }
@@ -252,9 +252,9 @@ static int THTensor_(isViewable)(THTensor *tensor, THLongStorage *view_size, THL
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
         (tensor->size[tensor_d - 1] != 1 && tensor->stride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
-      while (view_d >= 0 && (view_numel < tensor_numel || view_size->data[view_d] == 1)) {
-        new_stride->data[view_d] = view_numel * chunk_base_stride;
-        view_numel *= view_size->data[view_d];
+      while (view_d >= 0 && (view_numel < tensor_numel || THLongStorage_data(view_size)[view_d] == 1)) {
+        THLongStorage_data(new_stride)[view_d] = view_numel * chunk_base_stride;
+        view_numel *= THLongStorage_data(view_size)[view_d];
         view_d--;
       }
       if (view_numel != tensor_numel) {
@@ -296,7 +296,7 @@ void THTensor_(resize)(THTensor *self, THLongStorage *size, THLongStorage *strid
 #ifdef DEBUG
   THAssert(size->size <= INT_MAX);
 #endif
-  THTensor_(resizeNd)(self, size->size, size->data, (stride ? stride->data : NULL));
+  THTensor_(resizeNd)(self, size->size, THLongStorage_data(size), (stride ? THLongStorage_data(stride) : NULL));
 }
 
 void THTensor_(resizeAs)(THTensor *self, THTensor *src)
@@ -357,8 +357,8 @@ void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storag
                           storage_,
                           storageOffset_,
                           (size_ ? size_->size : (stride_ ? stride_->size : 0)),
-                          (size_ ? size_->data : NULL),
-                          (stride_ ? stride_->data : NULL));
+                          (size_ ? THLongStorage_data(size_) : NULL),
+                          (stride_ ? THLongStorage_data(stride_) : NULL));
 }
 
 void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
@@ -644,7 +644,7 @@ int THTensor_(isSize)(const THTensor *self, const THLongStorage *dims)
 
   for(d = 0; d < self->nDimension; ++d)
   {
-    if(self->size[d] != dims->data[d])
+    if(self->size[d] != THLongStorage_data(dims)[d])
       return 0;
   }
   return 1;

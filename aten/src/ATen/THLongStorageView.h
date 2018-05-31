@@ -2,6 +2,7 @@
 
 #include "TH/TH.h"
 #include "TH/THStorage.hpp"
+#include "TH/THTypeConversion.hpp"
 
 namespace at {
 
@@ -72,16 +73,17 @@ public:
       // make storage of size 0 actually a 1-length storage with 1 element
       // so that our 0-dim tensors get allocated as 1-dim inside TH
       one = 1;
-      storage.data = &one;
+      storage.data_ptr = &one;
       storage.size = 1;
     } else if (noelem_to_empty && is_noelem_tensor_size(ref)) {
-      storage.data = (int64_t*)(ref.data());
+      storage.data_ptr = (void*)(ref.data());
       storage.size = 0;
     }
     else {
-      storage.data = (int64_t*)(ref.data());
+      storage.data_ptr = (void*)(ref.data());
       storage.size = ref.size();
     }
+    storage.scalar_type = at::CTypeToScalarType<th::from_type<int64_t>>::to();
     storage.refcount = 0;
     storage.flag = 0;
     storage.allocator = nullptr;

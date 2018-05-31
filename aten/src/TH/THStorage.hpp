@@ -5,6 +5,9 @@
 
 #include "THStorage.h"
 
+#include "ATen/ScalarType.h"
+#include "ATen/ScalarTypeUtils.h"
+#include "THTypeConversion.hpp"
 #include <atomic>
 
 #include "generic/THStorage.hpp"

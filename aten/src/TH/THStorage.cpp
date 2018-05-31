@@ -14,7 +14,7 @@
 
 
 THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
-  return _THSizeDesc(size->data, size->size);
+  return _THSizeDesc(THLongStorage_data(size), size->size);
 }
 
 THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElement)
@@ -23,11 +23,11 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
   ptrdiff_t dim_infer = -1;
   ptrdiff_t i;
   for (i = 0; i < size->size; i++) {
-    if (size->data[i] == -1) {
+    if (THLongStorage_data(size)[i] == -1) {
       THArgCheck(dim_infer == -1, 1, "only one dimension can be inferred");
       dim_infer = i;
     } else {
-      total_size *= size->data[i];
+      total_size *= THLongStorage_data(size)[i];
     }
   }
   if (dim_infer != -1) {
@@ -42,7 +42,7 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
   THLongStorage* copy = THLongStorage_newWithSize(size->size);
   THLongStorage_copy(copy, size);
   if (dim_infer != -1) {
-    copy->data[dim_infer] = nElement / total_size;
+    THLongStorage_data(copy)[dim_infer] = nElement / total_size;
   }
   return copy;
 }

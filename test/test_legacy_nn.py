@@ -6,10 +6,10 @@ from copy import deepcopy
 
 import torch
 import torch.legacy.nn as nn
-from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
-    module_tests, criterion_tests, TEST_CUDA, PRECISION
-from torch.autograd.gradcheck import get_numerical_jacobian
 from common import to_gpu, freeze_rng_state, run_tests
+from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
+    module_tests, criterion_tests, PRECISION
+from torch.autograd.gradcheck import get_numerical_jacobian
 from torch.autograd import Variable
 
 
@@ -652,6 +652,7 @@ def require_grad(input):
 
 
 class TestNN(NNTestCase):
+    _do_cuda_memory_leak_check = True
 
     def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         def fw(input):

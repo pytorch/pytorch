@@ -147,6 +147,12 @@ private:                                                                       \
 #define CAFFE2_API CAFFE2_IMPORT
 #endif
 
+#ifdef CAFFE2_BUILD_OBSERVER_LIB
+#define CAFFE2_OBSERVER_API CAFFE2_EXPORT
+#else
+#define CAFFE2_OBSERVER_API CAFFE2_IMPORT
+#endif
+
 
 #if defined(_MSC_VER)
 #define NOMINMAX
