@@ -35,11 +35,4 @@ IMPLEMENT_UNARY_OP_PREQUEL(rsqrt)
 IMPLEMENT_UNARY_OP_PREQUEL(tan)
 IMPLEMENT_UNARY_OP_PREQUEL(trunc)
 
-Tensor& _tanh__cuda(Tensor& self) {
-  return at::_th_tanh_out(self, self);
-}
-Tensor& _tanh_out_cuda(Tensor& result, const Tensor& self) {
-  return at::_th_tanh_out(result, self);
-}
-
 }}

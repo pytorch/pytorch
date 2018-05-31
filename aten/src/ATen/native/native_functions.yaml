@@ -1045,19 +1045,6 @@
     CPU: _tan_out_cpu
     CUDA: _tan_out_cuda
 
-- func: tanh(Tensor self) -> Tensor
-
-- func: tanh_(Tensor self) -> Tensor
-  dispatch:
-    CPU: _tanh__cpu
-    CUDA: _tanh__cuda
-
-- func: tanh_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _tanh_out_cpu
-    CUDA: _tanh_out_cuda
-
 - func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor

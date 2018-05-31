@@ -1417,11 +1417,24 @@
     - THTensor* self
 ]]
 [[
-  name: _th_tanh
-  cname: tanh
+  name: tanh_
   types:
     - floating_point
   backends:
+    - CPU
+    - CUDA
+  cname: tanh
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+[[
+  name: tanh
+  types:
+    - floating_point
+  backends:
+    - CPU
     - CUDA
   variants:
     - method

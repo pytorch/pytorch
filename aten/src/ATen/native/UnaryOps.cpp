@@ -115,11 +115,6 @@ IMPLEMENT_UNARY_OP_PREQUEL(rsqrt)
 IMPLEMENT_UNARY_OP_PREQUEL(tan)
 IMPLEMENT_UNARY_OP_PREQUEL(trunc)
 
-Tensor tanh(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return at::tanh_out(result, self);
-}
-
 IMPLEMENT_UNARY_OP_VEC(abs, std::abs)
 IMPLEMENT_UNARY_OP_VEC(acos, std::acos)
 IMPLEMENT_UNARY_OP_VEC(asin, std::asin)
@@ -141,7 +136,6 @@ IMPLEMENT_UNARY_OP_FLOAT_CMATH(sin, std::sin)
 IMPLEMENT_UNARY_OP_FLOAT_CMATH(sinh, std::sinh)
 IMPLEMENT_UNARY_OP_VEC(sqrt, std::sqrt)
 IMPLEMENT_UNARY_OP_FLOAT_CMATH(tan, std::tan)
-IMPLEMENT_UNARY_OP_VEC(tanh, std::tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc, std::trunc)
 }
 } // namespace at
