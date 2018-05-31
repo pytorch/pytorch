@@ -137,8 +137,22 @@ def _with_file_like(f, mode, body):
             f.close()
 
 
-def _is_real_file(f):
-    """Checks if f is backed by a real file (has a fileno)"""
+def _is_compressed_file(f):
+    compress_modules = ['gzip']
+    try:
+        return f.__module__ in compress_modules
+    except AttributeError:
+        return False
+
+
+def _should_read_directly(f):
+    """
+    Checks if f is a file that should be read directly. It should be read
+    directly if it is backed by a real file (has a fileno) and is not a
+    a compressed file (e.g. gzip)
+    """
+    if _is_compressed_file(f):
+        return False
     try:
         return f.fileno() >= 0
     except io.UnsupportedOperation:
@@ -251,7 +265,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
     f.flush()
     for key in serialized_storage_keys:
-        serialized_storages[key]._write_file(f, _is_real_file(f))
+        serialized_storages[key]._write_file(f, _should_read_directly(f))
 
 
 def load(f, map_location=None, pickle_module=pickle):
@@ -465,8 +479,8 @@ def _load(f, map_location, pickle_module):
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
-    f_is_real_file = _is_real_file(f)
-    if f_is_real_file and f.tell() == 0:
+    f_should_read_directly = _should_read_directly(f)
+    if f_should_read_directly and f.tell() == 0:
         # legacy_load requires that f has fileno()
         # only if offset is zero we can attempt the legacy tar file loader
         try:
@@ -489,10 +503,10 @@ def _load(f, map_location, pickle_module):
 
     deserialized_storage_keys = pickle_module.load(f)
 
-    offset = f.tell() if f_is_real_file else None
+    offset = f.tell() if f_should_read_directly else None
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
-        deserialized_objects[key]._set_from_file(f, offset, f_is_real_file)
+        deserialized_objects[key]._set_from_file(f, offset, f_should_read_directly)
         offset = None
 
     return result
