@@ -728,19 +728,141 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 const char* kAveragePoolDoc = R"DOC(
-consumes an input blob X and applies average pooling across the
-the blob according to kernel sizes, stride sizes, and pad lengths defined by the
-ConvPoolOpBase operator. Average pooling consisting of averaging all values of a
-subset of the input tensor according to the kernel size and downsampling the
-data into the output blob Y for further processing.
+consumes an input blob and applies average pooling across the the blob according
+to kernel sizes, stride sizes, pad lengths and dilation. Average pooling consists
+of taking the average value of a subset of the input tensor according to the kernel
+size and downsampling the data into the output blob for further processing. The
+`brew` module has a wrapper for this operator for use in a `ModelHelper` object.
+
+Pooling layers reduce the spatial dimensionality of the input blob. Each of the
+output blob's dimensions will reduce according to:
+
+$$dim_{out}=\frac{dim_{in}-kernel+2*pad}{stride}+1$$
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/conv_pool_op_base.h
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "AveragePool",
+    ["X"],
+    ["Y"],
+    kernel=2,
+    stride=2,
+)
+
+workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) # NCHW
+print("X:\n", workspace.FetchBlob("X"), "\n")
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+```
+
+**Result**
+
+```
+X:
+ [[[[-0.2883434   0.43498734  0.05417408  1.912558    0.09390241
+    -0.33173105]
+   [ 1.633709    1.2047161   0.36964908  0.99961185  0.4184147
+     0.9989975 ]
+   [ 1.7644193   0.1789665   1.5812988  -0.6038542  -0.36090398
+     0.33195344]
+   [ 0.9457722  -0.95174325 -0.78124577  1.2062047   1.1903144
+     0.2586746 ]
+   [ 1.252104    0.32645547  1.8073524  -0.78397465  0.9978303
+    -0.97614396]
+   [ 0.5440196   1.5778259  -0.76750124  0.5051756   0.8838398
+    -0.37085298]]]]
+
+Y:
+ [[[[0.7462672  0.83399826 0.2948959 ]
+   [0.4843537  0.3506009  0.35500962]
+   [0.9251013  0.19026303 0.13366827]]]]
+```
+
+</details>
+
 )DOC";
 
 const char* kMaxPoolDoc = R"DOC(
-consumes an input blob X and applies max pooling across the
-the blob according to kernel sizes, stride sizes, and pad lengths defined by the
-ConvPoolOpBase operator. Max pooling consisting of taking the maximum value of a
-subset of the input tensor according to the kernel size and downsampling the
-data into the output blob Y for further processing.
+consumes an input blob and applies max pooling across the the blob according to
+kernel sizes, stride sizes, pad lengths and dilation. Max pooling consists of
+taking the maximum value of a subset of the input tensor according to the kernel
+size and downsampling the data into the output blob for further processing. The
+`brew` module has a wrapper for this operator for use in a `ModelHelper` object.
+
+Pooling layers reduce the spatial dimensionality of the input blob. Each of the
+output blob's dimensions will reduce according to:
+
+$$dim_{out}=\frac{dim_{in}-kernel+2*pad}{stride}+1$$
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/conv_pool_op_base.h
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "MaxPool",
+    ["X"],
+    ["Y"],
+    kernel=2,
+    stride=2,
+)
+
+workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) # NCHW
+print("X:\n", workspace.FetchBlob("X"), "\n")
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+```
+
+**Result**
+
+```
+X:
+ [[[[-2.8534958e-01 -1.7719941e+00 -8.2277227e-04  1.1088650e+00
+    -2.1476576e+00 -3.5070452e-01]
+   [-9.0058845e-01 -3.0070004e-01 -1.7907504e+00 -7.1746534e-01
+     1.2798511e+00 -3.2214901e-01]
+   [ 1.5806322e+00  1.6845188e+00 -2.6633200e-01 -3.8576153e-01
+    -9.6424848e-02 -3.9696163e-01]
+   [ 1.2572408e-01  6.3612902e-01 -3.9554062e-01 -6.9735396e-01
+    -9.1898698e-01 -1.9609968e-01]
+   [-1.1587460e+00  2.4605224e+00 -1.5497679e+00  1.3020347e-01
+    -8.1293899e-01 -7.8803545e-01]
+   [ 1.4323474e+00  1.3618395e+00  9.8975077e-02 -1.1307785e-01
+     7.2035044e-01  2.7642491e-01]]]]
+
+Y:
+ [[[[-0.28534958  1.108865    1.2798511 ]
+   [ 1.6845188  -0.266332   -0.09642485]
+   [ 2.4605224   0.13020347  0.72035044]]]]
+
+```
+
+</details>
+
 )DOC";
 
 std::function<void(OpSchema&)> AveragePoolDocGenerator(const char* dim) {
@@ -752,18 +874,18 @@ std::function<void(OpSchema&)> AveragePoolDocGenerator(const char* dim) {
     schema.Input(
         0,
         "X",
-        "Input data tensor from the previous operator; dimensions depend on "
-        "whether the NCHW or NHWC operators are being used. For example, in "
-        "the former, the input has size (N x C x H x W), where N is the batch "
-        "size, C is the number of channels, and H and W are the height and the "
-        "width of the data. The corresponding permutation of dimensions is "
-        "used in the latter case.");
+        "*(type: Tensor`<float>`)* Input data tensor of shape NCHW or NHWC.");
     schema.Output(
         0,
         "Y",
-        "Output data tensor from average pooling across the input "
-        "tensor. Dimensions will vary based on various kernel, stride, and pad "
-        "sizes.");
+        "*(type: Tensor`<float>`)* Output data tensor.");
+    /*
+    schema.Arg("kernel", "*(type: int)* Size of the window to take an average over.");
+    schema.Arg("stride", "*(type: int)* Stride of the window.");
+    schema.Arg("pad", "*(type: int)* Implicit zero padding to be added on both sides.");
+    schema.Arg("dilation", "*(type: int)* Parameter that controls the stride of elements in the window.");
+    schema.Arg("order", "*(type: string; default: 'NCHW')* Order of the blob dimensions.");
+    */
   };
 }
 
@@ -776,18 +898,18 @@ std::function<void(OpSchema&)> MaxPoolDocGenerator(const char* dim) {
     schema.Input(
         0,
         "X",
-        "Input data tensor from the previous operator; dimensions depend on "
-        "whether the NCHW or NHWC operators are being used. For example, in "
-        "the former, the input has size (N x C x H x W), where N is the batch "
-        "size, C is the number of channels, and H and W are the height and the "
-        "width of the data. The corresponding permutation of dimensions is "
-        "used in the latter case.");
+        "*(type: Tensor`<float>`)* Input data tensor of shape NCHW or NHWC.");
     schema.Output(
         0,
         "Y",
-        "Output data tensor from max pooling across the input "
-        "tensor. Dimensions will vary based on various kernel, stride, and pad "
-        "sizes.");
+        "*(type: Tensor`<float>`)* Output data tensor.");
+    /*
+    schema.Arg("kernel", "*(type: int)* Size of the window to take an average over.");
+    schema.Arg("stride", "*(type: int)* Stride of the window.");
+    schema.Arg("pad", "*(type: int)* Implicit zero padding to be added on both sides.");
+    schema.Arg("dilation", "*(type: int)* Parameter that controls the stride of elements in the window.");
+    schema.Arg("order", "*(type: string; default: 'NCHW')* Order of the blob dimensions.");
+    */
   };
 }
 REGISTER_CPU_OPERATOR(
