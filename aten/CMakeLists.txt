@@ -33,8 +33,6 @@ if (NOT USE_CUDA)
   set(NO_CUDA ON)
 endif()
 
-# Load the CMake Utilities (For multiplexing between CUDA and HIP).
-INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public/utils.cmake)
 # Create the project in all cases
 project(ATen CXX C)
 
@@ -144,9 +142,7 @@ elseif(NOT NO_CUDA)
   add_subdirectory(src/THCS)
 else()
   message("disabling CUDA because NO_CUDA is set")
-  message("disabling HIP because WITH_ROCM is not set")
   SET(AT_CUDA_ENABLED 0)
-  SET(AT_HIP_ENABLED 0)
 endif()
 
 list(APPEND ATen_CPU_INCLUDE
