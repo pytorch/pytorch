@@ -1,7 +1,3 @@
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <gloo/transport/tcp/device.h>
 
 #include "CUDAUtils.hpp"
@@ -10,41 +6,14 @@
 #include "private/CUDAUtils.hpp"
 
 #include "test/CUDATest.hpp"
+#include "test/TestUtils.hpp"
 
-namespace c10d {
-namespace test {
+using namespace c10d::test;
 
-std::string tmppath() {
-  const char* tmpdir = getenv("TMPDIR");
-  if (tmpdir == nullptr) {
-    tmpdir = "/tmp";
-  }
-
-  // Create template
-  std::vector<char> tmp(256);
-  auto len = snprintf(tmp.data(), tmp.size(), "%s/testXXXXXX", tmpdir);
-  tmp.resize(len);
-
-  // Create temporary file
-  auto fd = mkstemp(&tmp[0]);
-  if (fd == -1) {
-    throw std::system_error(errno, std::system_category());
-  }
-  close(fd);
-  return std::string(tmp.data(), tmp.size());
-}
-
-struct TemporaryFile {
-  std::string path;
-
-  TemporaryFile() {
-    path = tmppath();
-  }
-
-  ~TemporaryFile() {
-    unlink(path.c_str());
-  }
-};
+using c10d::CUDADevice;
+using c10d::CUDAStream;
+using c10d::ProcessGroup;
+using c10d::THCStreamGuard;
 
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
@@ -214,11 +183,6 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
     return pg_->broadcast(inputs_, options);
   }
 };
-
-} // namespace test
-} // namespace c10d
-
-using namespace c10d::test;
 
 void runAsyncAllreduceTest(
     const std::string& path,
