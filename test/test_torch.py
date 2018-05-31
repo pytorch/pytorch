@@ -2383,7 +2383,7 @@ class TestTorch(TestCase):
         except RuntimeError as e:
             return 'invalid multinomial distribution' in str(e)
 
-    @unittest.skipIf(sys.version_info[0] == 2,
+    @unittest.skipIf(not PY3,
                      "spawn start method is not supported in Python 2, \
                      but we need it for for testing failure case for CPU RNG on Windows")
     def test_multinomial_invalid_probs(self):
