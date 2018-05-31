@@ -164,7 +164,7 @@ auto ${Storage}::get(std::size_t ind) -> Scalar {
 auto ${Storage}::fast_get(std::size_t ind) -> Scalar {
   if(${isCUDA})
     throw std::runtime_error("unsupported operation 'fast_get'");
-  return static_cast<${ScalarType}>(${to_at_type}(storage->unsafeData<${THScalarType}>()[ind]));
+  return static_cast<${ScalarType}>(${to_at_type}(storage->unsafe_data<${THScalarType}>()[ind]));
 }
 
 void ${Storage}::set_flag(char flag) {

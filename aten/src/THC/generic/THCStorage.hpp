@@ -21,11 +21,11 @@ typedef struct THCStorage
         AT_ERROR("Attempt to access Storage having data type ", at::toString(scalar_type),
                  " as data type ", at::toString(scalar_type_T));
       }
-      return unsafeData<T>();
+      return unsafe_data<T>();
     }
 
     template <typename T>
-    inline T * unsafeData() const {
+    inline T * unsafe_data() const {
       return static_cast<T*>(this->data_ptr);
     }
 } THCStorage;
