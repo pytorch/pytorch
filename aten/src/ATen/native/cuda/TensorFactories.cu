@@ -59,7 +59,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     // Generate random values for the keys array
     AT_DISPATCH_ALL_TYPES(
       result_tmp.type(), "randperm_out_cuda", [&] {
-        using cuda_scalar_t = cuda::type<scalar_t>;
+        using cuda_scalar_t = cuda::into_type<scalar_t>;
 
         auto keys = result_tmp.type().tensor(result_tmp.sizes()).random_(generator);
 
