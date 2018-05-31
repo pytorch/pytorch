@@ -27,6 +27,7 @@ static torch::autograd::python::PythonEngine engine;
 // throughout the code in both NO_PYTHON builds and regular builds
 Engine& torch::autograd::Engine::get_default_engine() {
   return engine;
+}
 
 namespace torch { namespace autograd { namespace python {
 
