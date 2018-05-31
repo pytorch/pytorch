@@ -6,7 +6,7 @@ namespace at {
 namespace native {
 
 Tensor flip_cpu(const Tensor& self, IntList dims) {
-  int64_t total_dims = self.dim(), flip_dims_size = dims.size();
+  const int64_t total_dims = self.dim(), flip_dims_size = dims.size();
   check_errors(total_dims, flip_dims_size, dims);
 
   auto indices = std::vector<at::Tensor>(flip_dims_size);
