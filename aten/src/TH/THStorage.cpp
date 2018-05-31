@@ -12,6 +12,25 @@
 #include "generic/THStorageCopy.cpp"
 #include "THGenerateHalfType.h"
 
+void THStorage_free(THStorage *storage) {
+  if(!storage)
+    return;
+
+  if((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0))
+  {
+    if(--storage->refcount == 0)
+    {
+      if(storage->flag & TH_STORAGE_FREEMEM) {
+        storage->allocator->free(storage->allocatorContext, storage->data_ptr);
+      }
+      if(storage->flag & TH_STORAGE_VIEW) {
+        THStorage_free(storage->view);
+      }
+      storage->refcount.~atomic<int>();
+      THFree(storage);
+    }
+  }
+}
 
 THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
   return _THSizeDesc(THLongStorage_data(size), size->size);

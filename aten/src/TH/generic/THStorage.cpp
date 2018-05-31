@@ -129,23 +129,7 @@ int THStorage_(retainIfLive)(THStorage *storage)
 
 void THStorage_(free)(THStorage *storage)
 {
-  if(!storage)
-    return;
-
-  if((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0))
-  {
-    if(--storage->refcount == 0)
-    {
-      if(storage->flag & TH_STORAGE_FREEMEM) {
-        storage->allocator->free(storage->allocatorContext, THStorage_(data)(storage));
-      }
-      if(storage->flag & TH_STORAGE_VIEW) {
-        THStorage_(free)(storage->view);
-      }
-      storage->refcount.~atomic<int>();
-      THFree(storage);
-    }
-  }
+  THStorage_free(storage);
 }
 
 THStorage* THStorage_(newWithData)(real *data, ptrdiff_t size)
