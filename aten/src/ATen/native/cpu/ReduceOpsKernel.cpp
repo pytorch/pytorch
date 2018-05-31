@@ -18,9 +18,13 @@ static inline int64_t round_down(int64_t a, int64_t m) {
 }
 
 template <typename F>
-static void parallel_for(int64_t size, int64_t step, bool parallelize, F func) {
+static void parallel_for(
+    int64_t size,
+    int64_t step,
+    bool parallelize,
+    const F& func) {
   parallel_for_1d(
-      [func, step](int64_t begin, int64_t end) {
+      [&func, &step](int64_t begin, int64_t end) {
         int64_t k = begin * step;
         for (int64_t i = begin; i < end; i++, k += step) {
           func(k);
@@ -66,7 +70,7 @@ struct Reduction {
     }
     int64_t batch = numel / (n * stride);
     bool paralellize = batch * n > internal::TBB_GRAIN_SIZE;
-    parallel_for(batch, 1, paralellize, [=](int64_t b) {
+    parallel_for(batch, 1, paralellize, [&data, &out, &n, &stride](int64_t b) {
       if (stride == 1) {
         out[b] = reduce_all(&data[b * n], n);
       } else {
@@ -81,7 +85,7 @@ struct Reduction {
     scalar_t sum;
     if (size > internal::TBB_GRAIN_SIZE) {
       sum = parallel_reduce_1d(
-          [data](int64_t begin, int64_t end, scalar_t init) {
+          [&data](int64_t begin, int64_t end, scalar_t init) {
             scalar_t buf[WIDTH];
             reduce128(&data[begin * WIDTH], buf, end - begin, WIDTH);
             return std::accumulate(buf, buf + WIDTH, init, ReduceScalar());
@@ -123,7 +127,7 @@ struct Reduction {
   static void reduce2d(const scalar_t* data, scalar_t* out, int64_t rows, int64_t cols, int64_t stride) {
     int64_t cols_rounded = round_down(cols, WIDTH);
     bool paralellize = cols * rows > internal::TBB_GRAIN_SIZE;
-    parallel_for(cols_rounded, WIDTH, paralellize, [=](int64_t col) {
+    parallel_for(cols_rounded, WIDTH, paralellize, [&data, &out, &rows, &stride](int64_t col) {
       reduce128(&data[col], &out[col], rows, stride);
     });
 

@@ -27,7 +27,12 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   int64_t grain_size =
       std::min(internal::TBB_GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for_1d(
-      [&](int64_t begin, int64_t end) {
+      [&input_data_base,
+       &output_data_base,
+       &dim_stride,
+       &outer_stride,
+       &inner_size,
+       &dim_size](int64_t begin, int64_t end) {
         for (int64_t i = begin; i < end; i++) {
           int64_t outer_idx = i / inner_size;
           int64_t inner_idx = i % inner_size;
