@@ -580,7 +580,7 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
       for (int64_t d = 0; d < sparse->nDimensionI; d++) {
         index += r_->stride[d] * THLongTensor_fastGet2d(indices, d, k);
       }
-      r_->storage->data[index]  += value * THTensor_(fastGet1d)(values, k);
+      r_->storage->unsafe_data<real>()[index]  += value * THTensor_(fastGet1d)(values, k);
     }
   }
 

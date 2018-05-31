@@ -94,6 +94,7 @@ INSTALL(FILES
   THTensor.hpp
   THStorage.hpp
   THGenerator.hpp
+  THTypeConversion.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
 INSTALL(FILES
