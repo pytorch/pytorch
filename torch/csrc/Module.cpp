@@ -126,6 +126,14 @@ static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
   return PyLong_FromLong(x[0]);
 }
 
+static PyObject * THPModule_crashIfCsrcUBSAN(PyObject *module, PyObject *arg) {
+  THPUtils_assert(THPUtils_checkLong(arg), "crash_if_csrc_ubsan expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  int k = 0x7fffffff;
+  k += static_cast<int>(THPUtils_unpackLong(arg));
+  return PyLong_FromLong(k);
+}
+
 static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
   THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
           "but got %s", THPUtils_typename(arg));
@@ -401,6 +409,7 @@ static PyMethodDef TorchMethods[] = {
   {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
   {"_crash_if_csrc_asan", (PyCFunction)THPModule_crashIfCsrcASAN, METH_O, NULL},
+  {"_crash_if_csrc_ubsan", (PyCFunction)THPModule_crashIfCsrcUBSAN, METH_O, NULL},
   {"_crash_if_aten_asan", (PyCFunction)THPModule_crashIfATenASAN, METH_O, NULL},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
