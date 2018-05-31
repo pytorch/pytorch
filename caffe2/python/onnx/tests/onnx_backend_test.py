@@ -19,7 +19,7 @@ pytest_plugins = 'onnx.backend.test.report',
 backend_test = onnx.backend.test.BackendTest(c2, __name__)
 
 backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
-                     '|test_mean|test_hardmax'  # Does not support Mean and Hardmax.
+                     '|test_hardmax'  # Does not support Hardmax.
                      '|test_cast.*FLOAT16.*'  # Does not support Cast on Float16.
                      '|test_depthtospace.*'  # Does not support DepthToSpace.
                      '|test_reduce_l1.*'  # Does not support ReduceL1.
