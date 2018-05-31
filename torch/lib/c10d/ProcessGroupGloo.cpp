@@ -99,15 +99,14 @@ std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
 }
 
 // synchronizeStreams ensures that the private streams associated with
-// an algorithm entry wait for the public streams to complete, and
-// that the public streams wait for the private streams to complete.
+// an algorithm entry wait for the public streams to complete.
 void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
   const auto& key = entry->key;
   for (auto i = 0; i < key.devices.size(); i++) {
     const auto& device = key.devices[i];
     auto publicStream = THCState_getCurrentStreamOnDevice(thcState, device);
     auto privateStream = entry->streams[i].getStream();
-    auto startEvent = entry->startEvents[i].getEvent();
+    auto event = entry->events[i].getEvent();
 
     // Synchronize private stream with public stream.
     //
@@ -116,8 +115,8 @@ void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
     // device to find the right one.
     //
     CUDADevice deviceGuard(device);
-    C10D_CUDA_CHECK(cudaEventRecord(startEvent, publicStream));
-    C10D_CUDA_CHECK(cudaStreamWaitEvent(privateStream, startEvent, 0));
+    C10D_CUDA_CHECK(cudaEventRecord(event, publicStream));
+    C10D_CUDA_CHECK(cudaStreamWaitEvent(privateStream, event, 0));
   }
 }
 
@@ -393,11 +392,11 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   // If these are CUDA tensors, create streams and events
   if (key.type->is_cuda()) {
     entry->streams.resize(key.devices.size());
-    entry->startEvents.resize(key.devices.size());
+    entry->events.resize(key.devices.size());
     for (auto i = 0; i < key.devices.size(); i++) {
       CUDADevice device(key.devices[i]);
       entry->streams[i] = CUDAStream::create();
-      entry->startEvents[i] = CUDAEvent::create();
+      entry->events[i] = CUDAEvent::create();
     }
   }
 
