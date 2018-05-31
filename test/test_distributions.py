@@ -31,6 +31,7 @@ from random import shuffle
 
 import torch
 from common import TestCase, run_tests, set_rng_seed
+from common_cuda import TEST_CUDA
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
@@ -62,8 +63,6 @@ try:
     import scipy.special
 except ImportError:
     TEST_NUMPY = False
-
-TEST_CUDA = torch.cuda.is_available()
 
 
 def pairwise(Dist, *params):
@@ -578,6 +577,8 @@ def unwrap(value):
 
 
 class TestDistributions(TestCase):
+    _do_cuda_memory_leak_check = True
+
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)
