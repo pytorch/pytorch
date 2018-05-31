@@ -1,4 +1,7 @@
 #include "ATen/${Storage}.h"
+
+// ${generated_comment}
+
 #include "ATen/Half.h"
 #include "ATen/Allocator.h"
 
@@ -110,11 +113,11 @@ std::size_t ${Storage}::size() const {
 }
 
 void* ${Storage}::data() {
-  return storage->data;
+  return storage->data_ptr;
 }
 
 const void* ${Storage}::data() const {
-  return storage->data;
+  return storage->data_ptr;
 }
 
 auto ${Storage}::retain() -> ${Storage}& {
@@ -161,7 +164,7 @@ auto ${Storage}::get(std::size_t ind) -> Scalar {
 auto ${Storage}::fast_get(std::size_t ind) -> Scalar {
   if(${isCUDA})
     throw std::runtime_error("unsupported operation 'fast_get'");
-  return static_cast<${ScalarType}>(${to_at_type}(storage->data[ind]));
+  return static_cast<${ScalarType}>(${to_at_type}(storage->unsafe_data<${THScalarType}>()[ind]));
 }
 
 void ${Storage}::set_flag(char flag) {

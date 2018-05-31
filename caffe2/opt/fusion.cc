@@ -1,5 +1,6 @@
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
+#include "caffe2/opt/passes.h"
 
 namespace caffe2 {
 namespace opt {
@@ -82,5 +83,8 @@ void fuseConvBN(nom::repr::NNModule* nn, caffe2::Workspace* ws) {
   while (fuseConvBNHelper(nn, ws)) {
   }
 }
+
+REGISTER_WS_OPT_PASS_FROM_FUNC(FuseConvBN, fuseConvBN);
+
 } // namespace opt
 } // namespace caffe2

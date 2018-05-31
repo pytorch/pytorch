@@ -154,10 +154,10 @@ THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values)
   THLongTensor_max(computed_indices_sizes, ignore, indices, 1, 1);
   THLongTensor_add(computed_indices_sizes, computed_indices_sizes, 1);
   for (int d = 0; d < nDimI; d++) {
-      THTensor_fastSet1d(computed_sizes, d, THTensor_fastGet1d(computed_indices_sizes, d));
+      THLongTensor_fastSet1d(computed_sizes, d, THLongTensor_fastGet1d(computed_indices_sizes, d));
   }
   for (int d = 0; d < nDimV; d++) {
-      THTensor_fastSet1d(computed_sizes, nDimI + d, THTensor_(size)(values, d + 1));
+      THLongTensor_fastSet1d(computed_sizes, nDimI + d, THTensor_(size)(values, d + 1));
   }
 
   THSTensor *self = THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, THLongTensor_data(computed_sizes), indices, values);
@@ -205,15 +205,15 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
   THLongTensor_max(max_indices, ignore, indices, 1, 0);
   THLongTensor_free(ignore);
   for (int d = 0; d < nDimI; d++) {
-    int64_t max_index_in_dim = THTensor_fastGet1d(max_indices, d);
-    int64_t dim_size = sizes->data[d];
+    int64_t max_index_in_dim = THLongTensor_fastGet1d(max_indices, d);
+    int64_t dim_size = THLongStorage_data(sizes)[d];
     THArgCheck(max_index_in_dim < dim_size, 2,
         "sizes is inconsistent with indices: for dim %d, size is %lld but found index %lld",
         d, (long long)dim_size, (long long)max_index_in_dim);
   }
   for (int d = 0; d < nDimV; d++) {
     int64_t values_size = THTensor_(size)(values, d + 1);
-    int64_t specified_size = sizes->data[nDimI + d];
+    int64_t specified_size = THLongStorage_data(sizes)[nDimI + d];
     THArgCheck(values_size <= specified_size, 2,
         "values and sizes are inconsistent: sizes[%d] is %lld but values.size(%d) is %lld",
         d + nDimI, (long long)specified_size, d + 1, (long long)values_size);
@@ -226,7 +226,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
 THSTensor *THSTensor_(newWithSize)(THLongStorage *size, THLongStorage *_ignored)
 {
   THSTensor *self = THSTensor_(new)();
-  THSTensor_(rawResize)(self, size->size, 0, size->data);
+  THSTensor_(rawResize)(self, size->size, 0, THLongStorage_data(size));
   return self;
 }
 
@@ -298,7 +298,7 @@ int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor* src)
 
 THSTensor *THSTensor_(resize)(THSTensor *self, THLongStorage *size)
 {
-  THSTensor_(rawResize)(self, size->size, 0, size->data);
+  THSTensor_(rawResize)(self, size->size, 0, THLongStorage_data(size));
   return self;
 }
 
@@ -368,10 +368,10 @@ void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
   THLongTensor *indices = THSTensor_(newIndices)(self);
   ptrdiff_t i;
   for (i = 0; i < THSTensor_(nnz)(self); i++) {
-    int64_t tmp = THTensor_fastGet2d(indices, d1, i);
-    THTensor_fastSet2d(indices, d1, i,
-        THTensor_fastGet2d(indices, d2, i));
-    THTensor_fastSet2d(indices, d2, i, tmp);
+    int64_t tmp = THLongTensor_fastGet2d(indices, d1, i);
+    THLongTensor_fastSet2d(indices, d1, i,
+        THLongTensor_fastGet2d(indices, d2, i));
+    THLongTensor_fastSet2d(indices, d2, i, tmp);
   }
   i = self->size[d1];
   self->size[d1] = self->size[d2];
@@ -396,7 +396,7 @@ void THSTensor_(mulSlice)(
     THTensor_(select)(dstBuffer, dst, dim, dstIdx);
     THTensor_(cmul)(dstBuffer, src1Buffer, src2Buffer);
   } else {
-    THTensor_fastSet1d(dst, dstIdx, THTensor_fastGet1d(src1, src1Idx) * THTensor_fastGet1d(src2, src2Idx));
+    THTensor_(fastSet1d)(dst, dstIdx, THTensor_(fastGet1d)(src1, src1Idx) * THTensor_(fastGet1d)(src2, src2Idx));
   }
 }
 
@@ -410,7 +410,7 @@ void THSTensor_(divSlice)(
     THTensor_(select)(dstBuffer, dst, dim, dstIdx);
     THTensor_(cdiv)(dstBuffer, src1Buffer, src2Buffer);
   } else {
-    THTensor_fastSet1d(dst, dstIdx, THTensor_fastGet1d(src1, src1Idx) / THTensor_fastGet1d(src2, src2Idx));
+    THTensor_(fastSet1d)(dst, dstIdx, THTensor_(fastGet1d)(src1, src1Idx) / THTensor_(fastGet1d)(src2, src2Idx));
   }
 }
 
@@ -420,7 +420,7 @@ THTensor *THSTensor_(newValuesWithSizeOf)(THTensor *values, int64_t nnz) {
     new_values = THTensor_(newWithSize1d)(nnz);
   } else {
     THLongStorage *size = THTensor_(newSizeOf)(values);
-    size->data[0] = nnz;
+    THLongStorage_data(size)[0] = nnz;
     new_values = THTensor_(newWithSize)(size, NULL);
     THLongStorage_free(size);
   }
@@ -468,8 +468,8 @@ THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
   int64_t prev = -1;
   int64_t blockSize = values->stride[0];
   for (int64_t j = 0; j < self->nnz; j++) {
-    int64_t pos = THTensor_fastGet1d(indicesPermutation, j);
-    int64_t curr = THTensor_fastGet1d(indicesBuffer, j);
+    int64_t pos = THLongTensor_fastGet1d(indicesPermutation, j);
+    int64_t curr = THLongTensor_fastGet1d(indicesBuffer, j);
     if (curr == prev) {
       THBlas_(axpy)(blockSize, 1,
         THTensor_(data)(values) + pos * blockSize, 1,
@@ -477,7 +477,7 @@ THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
     } else {
       ++i;
       for (int64_t d = 0; d < nDimI; d++) {
-        THTensor_fastSet2d(newIndices, d, i, THTensor_fastGet2d(indices, d, pos));
+        THLongTensor_fastSet2d(newIndices, d, i, THLongTensor_fastGet2d(indices, d, pos));
       }
       THBlas_(copy)(blockSize,
         THTensor_(data)(values) + pos * blockSize, 1,
@@ -521,7 +521,7 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
     for (int64_t i = 0; i < r_->nnz; i++) {
       THTensor_(set)(srcBuffer, t);
       for (int64_t d = 0; d < nDimI; d++) {
-        THTensor_(select)(srcBuffer, srcBuffer, 0, THTensor_fastGet2d(mask_indices_, d, i));
+        THTensor_(select)(srcBuffer, srcBuffer, 0, THLongTensor_fastGet2d(mask_indices_, d, i));
       }
       THTensor_(select)(dstBuffer, r_values_, 0, i);
       THTensor_(copy)(dstBuffer, srcBuffer);
@@ -532,10 +532,10 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
     for (int64_t i = 0; i < r_->nnz; i++) {
       int64_t idx = 0;
       for (int64_t d = 0; d < nDimI; d++) {
-        idx += THTensor_fastGet2d(mask_indices_, d, i) * t->stride[d];
+        idx += THLongTensor_fastGet2d(mask_indices_, d, i) * t->stride[d];
       }
-      real val = (t->storage->data + t->storageOffset)[idx];
-      THTensor_fastSet1d(r_values_, i, val);
+      real val = (THStorage_(data)(t->storage) + t->storageOffset)[idx];
+      THTensor_(fastSet1d)(r_values_, i, val);
     }
   }
 

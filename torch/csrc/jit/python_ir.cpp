@@ -70,7 +70,7 @@ void initPythonIRBindings(PyObject * module_) {
       std::string cconv(inputs.size(), 't');
       func.attr("symbolic") = symbolic;
       Node* new_node = g.insertNode(g.createPythonOp(
-        THPObjectPtr(func.release().ptr()), cconv, {}, {}, false));
+        THPObjectPtr(func.release().ptr()), cconv, {}));
       for (auto i : inputs)
         new_node->addInput(i);
       std::vector<Value*> outputs;
@@ -334,9 +334,6 @@ void initPythonIRBindings(PyObject * module_) {
   .def_readonly("user",&Use::user)
   .def_readonly("offset",&Use::offset);
 
-  m.def("_jit_get_graph", [](tracer::TracingState* s) {
-    return s->graph;
-  });
   m.def("_jit_import_graph", [](const std::string& serialized_graph) {
     std::vector<at::Tensor> initializers;
     auto graph = ImportIRGraph(serialized_graph, initializers);

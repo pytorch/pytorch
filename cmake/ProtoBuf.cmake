@@ -21,9 +21,6 @@ macro(custom_protobuf_find)
   endif()
   # We will make sure that protobuf and caffe2 uses the same msvc runtime.
   set(protobuf_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  if (MSVC AND BUILD_SHARED_LIBS)
-    add_definitions(-DPROTOBUF_USE_DLLS)
-  endif()
 
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
     set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
@@ -41,7 +38,7 @@ macro(custom_protobuf_find)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/protobuf/cmake)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 

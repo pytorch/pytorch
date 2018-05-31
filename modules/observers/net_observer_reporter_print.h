@@ -2,9 +2,11 @@
 
 #include "observers/net_observer_reporter.h"
 
+#include "caffe2/core/common.h"
+
 namespace caffe2 {
 
-class NetObserverReporterPrint : public NetObserverReporter {
+class CAFFE2_OBSERVER_API NetObserverReporterPrint : public NetObserverReporter {
  public:
   static const std::string IDENTIFIER;
   void reportDelay(

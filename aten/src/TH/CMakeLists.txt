@@ -48,7 +48,13 @@ set(ATen_CPU_SRCS ${ATen_CPU_SRCS} ${ATen_TH_SRCS} PARENT_SCOPE)
 
 
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE}
-  "${CMAKE_CURRENT_BINARY_DIR}"
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
+PARENT_SCOPE)
+
+set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
 PARENT_SCOPE)
 
 CONFIGURE_FILE(THGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h")
@@ -83,12 +89,12 @@ INSTALL(FILES
   THTensor.h
   THTensorApply.h
   THTensorDimApply.h
-  THTensorMacros.h
   THVector.h
   THHalf.h
   THTensor.hpp
   THStorage.hpp
   THGenerator.hpp
+  THTypeConversion.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
 INSTALL(FILES
@@ -123,4 +129,5 @@ INSTALL(FILES
   # See Note [TH abstraction violation]
   generic/THStorage.hpp
   generic/THTensor.hpp
+  generic/THTensorFastGetSet.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")

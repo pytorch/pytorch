@@ -1,4 +1,7 @@
 #pragma once
+
+// ${generated_comment}
+
 #include "ATen/Type.h"
 #include "ATen/Context.h"
 #include "ATen/TensorMethods.h"

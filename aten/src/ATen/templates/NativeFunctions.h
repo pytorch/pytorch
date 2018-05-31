@@ -1,5 +1,7 @@
 #pragma once
 
+// ${generated_comment}
+
 #include "ATen/ATen.h"
 #include <tuple>
 #include <vector>

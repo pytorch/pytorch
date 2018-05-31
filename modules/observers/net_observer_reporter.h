@@ -1,10 +1,13 @@
 #pragma once
+
 #include <map>
+
+#include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
 
 namespace caffe2 {
 
-class NetObserverReporter {
+class CAFFE2_OBSERVER_API NetObserverReporter {
  public:
   virtual ~NetObserverReporter() = default;
 

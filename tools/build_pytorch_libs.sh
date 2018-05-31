@@ -1,45 +1,48 @@
 #!/usr/bin/env bash
 
-# Shell script used to build the aten/* and third_party/* dependencies prior to
-# linking the libraries and passing the headers to the Python extension
-# compilation stage. This file is used from setup.py, but can also be
+# Shell script used to build the aten/*, caffe2/*, and third_party/*
+# dependencies prior to linking libraries and passing headers to the Python
+# extension compilation stage. This file is used from setup.py, but can also be
 # called standalone to compile the libraries outside of the overall PyTorch
 # build process.
 #
-# TODO: Replace this with a CMakeLists.txt
+# TODO: Replace this with the root-level CMakeLists.txt
 
 set -ex
 
 # Options for building only a subset of the libraries
 WITH_CUDA=0
-if [[ "$1" == "--with-cuda" ]]; then
-  WITH_CUDA=1
-  shift
-fi
-
+WITH_ROCM=0
 WITH_NNPACK=0
-if [[ "$1" == "--with-nnpack" ]]; then
-  WITH_NNPACK=1
-  shift
-fi
-
 WITH_MKLDNN=0
-if [[ "$1" == "--with-mkldnn" ]]; then
-  WITH_MKLDNN=1
-  shift
-fi
-
 WITH_GLOO_IBVERBS=0
-if [[ "$1" == "--with-gloo-ibverbs" ]]; then
-  WITH_GLOO_IBVERBS=1
-  shift
-fi
-
 WITH_DISTRIBUTED_MW=0
-if [[ "$1" == "--with-distributed-mw" ]]; then
-  WITH_DISTRIBUTED_MW=1
-  shift
-fi
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --with-cuda)
+          WITH_CUDA=1
+          ;;
+      --with-rocm)
+          WITH_ROCM=1
+          ;;
+      --with-nnpack)
+          WITH_NNPACK=1
+          ;;
+      --with-mkldnn)
+          WITH_MKLDNN=1
+          ;;
+      --with-gloo-ibverbs)
+          WITH_GLOO_IBVERBS=1
+          ;;
+      --with-distributed-mw)
+          WITH_DISTRIBUTED_MW=1
+          ;;
+      *)
+          break
+          ;;
+    esac
+    shift
+done
 
 CMAKE_INSTALL=${CMAKE_INSTALL-make install}
 
@@ -151,7 +154,7 @@ function build() {
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
-              -DATEN_LIBRARIES="$INSTALL_DIR/lib/libATen$LD_POSTFIX" \
+              -DCAFFE2_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
               -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
               -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
               -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
@@ -207,30 +210,35 @@ function build_nccl() {
   popd
 }
 
-# purpusefully not using build() because we need ATen to build the same
-# regardless of whether it is inside pytorch or not, so it
+# purposefully not using build() because we need Caffe2 to build the same
+# regardless of whether it is inside PyTorch or not, so it
 # cannot take any special flags
-# special flags need to be part of the ATen build itself
+# special flags need to be part of the Caffe2 build itself
 #
 # However, we do explicitly pass library paths when setup.py has already
 # detected them (to ensure that we have a consistent view between the
-# PyTorch and ATen builds.)
-function build_aten() {
+# PyTorch and Caffe2 builds.)
+function build_caffe2() {
   mkdir -p build
   pushd build
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-      -DNO_CUDA=$((1-$WITH_CUDA)) \
-      -DNO_NNPACK=$((1-$WITH_NNPACK)) \
+      -DBUILD_CAFFE2=OFF \
+      -DBUILD_ATEN=ON \
+      -DBUILD_PYTHON=OFF \
+      -DBUILD_BINARY=OFF \
+      -DBUILD_SHARED_LIBS=ON \
+      -DUSE_CUDA=$WITH_CUDA \
+      -DUSE_ROCM=$WITH_ROCM \
+      -DUSE_NNPACK=$WITH_NNPACK \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
-      -DNO_MKLDNN=$((1-$WITH_MKLDNN)) \
+      -DUSE_MKLDNN=$WITH_MKLDNN \
       -DMKLDNN_INCLUDE_DIR=$MKLDNN_INCLUDE_DIR \
       -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
       -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
-      -DATEN_NO_CONTRIB=1 \
       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
@@ -238,8 +246,8 @@ function build_aten() {
       -DCMAKE_EXE_LINKER_FLAGS="$USER_LDFLAGS" \
       -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
-      # to aten/CMakeLists.txt, not here.  We need the vanilla
-      # cmake build to work.
+      # to CMakeLists.txt and aten/CMakeLists.txt, not here.
+      # We need the vanilla cmake build to work.
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
   popd
 }
@@ -257,9 +265,9 @@ for arg in "$@"; do
         pushd "$THIRD_PARTY_DIR"
         build gloo $GLOO_FLAGS
         popd
-    elif [[ "$arg" == "ATen" ]]; then
-        pushd "$BASE_DIR/aten"
-        build_aten
+    elif [[ "$arg" == "caffe2" ]]; then
+        pushd $BASE_DIR
+        build_caffe2
         popd
     elif [[ "$arg" == "THD" ]]; then
         pushd "$TORCH_LIB_DIR"
@@ -282,15 +290,15 @@ pushd torch/lib
 # binaries to torch/lib
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
-cp "$INSTALL_DIR/lib"/* .
+cp -r "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
-    cp "$INSTALL_DIR/lib64"/* .
+    cp -r "$INSTALL_DIR/lib64"/* .
 fi
 cp ../../aten/src/THNN/generic/THNN.h .
 cp ../../aten/src/THCUNN/generic/THCUNN.h .
 cp -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
-    cp "$INSTALL_DIR/bin/"/* .
+    cp -r "$INSTALL_DIR/bin/"/* .
 fi
 
 popd

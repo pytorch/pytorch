@@ -275,7 +275,7 @@ __global__ void THCTensor_kernel_varOuterDim(T *tgt, T *src_, unsigned num_orows
             THCNumerics<AccT>::mul(delta, delta2));
         src += num_irows;
       }
-      
+
       if (flag) {
         m2 = THCNumerics<AccT>::div(m2, scalar_cast<AccT>(row_size));
       } else {
@@ -347,8 +347,8 @@ __global__ void THCTensor_kernel_varInnermostDim(T *tgt, T *src_, unsigned num_r
    * Each block computes the var/std of blockDim.y (32) rows at once.
    * One can visualize the computation as a 16 (x) by 32 (y) grid.
    * - Each of the 32 rows of the block is responsible for the computation
-   *   of one input row. 
-   * - Each row has 16 columns; the variance computation of one input row is 
+   *   of one input row.
+   * - Each row has 16 columns; the variance computation of one input row is
    *   split between 16 threads.
    * - Each of those 16 threads handles the accumulation of 1/16 of the input
    *   row's data.
@@ -386,7 +386,7 @@ __global__ void THCTensor_kernel_varInnermostDim(T *tgt, T *src_, unsigned num_r
 
     /*
      * We are reducing across each row of 16 threads to find the true sum of the
-     * entire input row. The warp shfl xor loop ultimately gives each thread the 
+     * entire input row. The warp shfl xor loop ultimately gives each thread the
      * true sum.
      */
     for (unsigned lane_mask = 8; lane_mask > 0; lane_mask >>= 1) {

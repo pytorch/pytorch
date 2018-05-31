@@ -2,6 +2,7 @@
 #include "THNN.h"
 
 #include "THTensor.hpp"
+#include <cmath>
 
 #define torch_(NAME) TH_CONCAT_3(torch_, Real, NAME)
 #define nn_(NAME) TH_CONCAT_3(nn_, Real, NAME)

@@ -28,7 +28,7 @@ static void parallel_for(int64_t end, int64_t step, bool parallelize, F func) {
   }
 }
 
-static tbb::affinity_partitioner ap;
+static default_partitioner_type ap;
 
 // Vectorized reduction defined by reduce operation `Op` with identity `ident`.
 // The reduction is built on top of reduce128, which reduces down a column
@@ -109,7 +109,7 @@ struct Reduction {
     static_assert(sizeof(acc) == 128, "accumulator should be 128 bytes");
     for (int64_t row = 0; row != rows; row++) {
       for (int j = 0; j != 4; j++) {
-        auto val = Vec::s_load(&data[row * stride + j * Vec::size]);
+        auto val = Vec::loadu(&data[row * stride + j * Vec::size]);
         acc[j] = Reduce()(acc[j], val);
       }
     }
@@ -127,7 +127,9 @@ struct Reduction {
     });
 
     if (cols_rounded != cols) {
+#if !defined(__APPLE__)
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
       scalar_t buf[WIDTH];
 
       // Initializes the entire (tiny) array to avoid uninitialized warnings

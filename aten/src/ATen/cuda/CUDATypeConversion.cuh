@@ -8,15 +8,29 @@
 
 namespace at { namespace cuda {
 template <typename T>
-struct TypeConversion {
+struct IntoTypeConversion {
   using type = T;
 };
 
 template <>
-struct TypeConversion<Half> {
+struct IntoTypeConversion<Half> {
   using type = half;
 };
 
 template <typename T>
-using type = typename TypeConversion<T>::type;
+using into_type = typename IntoTypeConversion<T>::type;
+
+template <typename T>
+struct FromTypeConversion {
+  using type = T;
+};
+
+template <>
+struct FromTypeConversion<half> {
+  using type = Half;
+};
+
+template <typename T>
+using from_type = typename FromTypeConversion<T>::type;
+
 }} // namespace at::cuda

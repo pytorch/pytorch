@@ -138,7 +138,7 @@
   batch1: grad.bmm(batch2.transpose(1, 2)) * alpha
   batch2: batch1.transpose(1, 2).bmm(grad) * alpha
 
-- name: bernoulli(Tensor self, Generator generator)
+- name: bernoulli(Tensor self, double p, Generator generator)
   self: zeros_like(grad)
 
 - name: bmm(Tensor self, Tensor mat2)
@@ -372,6 +372,9 @@
 
 - name: log_normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
+
+- name: logsumexp(Tensor self, int64_t dim, bool keepdim)
+  self: logsumexp_backward(grad, self, result, dim, keepdim)
 
 - name: lt_(Tensor self, Scalar other)
   self: zeros_like(self)

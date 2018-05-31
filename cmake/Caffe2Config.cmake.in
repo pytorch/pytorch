@@ -74,9 +74,17 @@ if (@USE_CUDA@)
   include("${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake")
   if (NOT CAFFE2_FOUND_CUDA)
     message(FATAL_ERROR
-        "Your installed Caffe2 version uses cuda but I cannot find the cuda "
-        "libraries. Please set the proper cuda prefixes and / or install "
-        "cuda.")
+        "Your installed Caffe2 version uses CUDA but I cannot find the CUDA "
+        "libraries. Please set the proper CUDA prefixes and / or install "
+        "CUDA.")
+  endif()
+  if (@BUILD_CAFFE2@)
+    if (NOT CAFFE2_FOUND_CUDNN)
+      message(FATAL_ERROR
+          "Your installed Caffe2 version uses cuDNN but I cannot find the cuDNN "
+          "libraries. Please set the proper cuDNN prefixes and / or install "
+          "cuDNN.")
+    endif()
   endif()
 endif()
 

@@ -23,11 +23,10 @@ struct THPEngine {
 
 static torch::autograd::python::PythonEngine engine;
 
-// Here we add a method of Engine so that we can use Engine::getDefaultEngine
+// Here we add a method of Engine so that we can use Engine::get_default_engine
 // throughout the code in both NO_PYTHON builds and regular builds
 Engine& torch::autograd::Engine::get_default_engine() {
-	  return engine;
-	}
+  return engine;
 
 namespace torch { namespace autograd { namespace python {
 

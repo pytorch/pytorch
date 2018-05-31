@@ -103,7 +103,7 @@ void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, dou
   std::lock_guard<std::mutex> lock(_generator->mutex);
   const int64_t size = THTensor_(numel)(self);
   if (size >= 16 && THTensor_(isContiguous)(self)) {
-    THVector_(normal_fill)(self->storage->data, size, _generator, mean, stddev);
+    THVector_(normal_fill)(THStorage_(data)(self->storage), size, _generator, mean, stddev);
   } else {
     TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_generator, mean, stddev););
   }
@@ -167,18 +167,18 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
 
   for (i = 0; i < inputsize; i++)
     {
-      THTensor_fastSet1d(J, i, 0L);
-      real val = THTensor_fastGet1d(probs, i);
-      THTensor_fastSet1d(q, i, inputsize*val);
+      THLongTensor_fastSet1d(J, i, 0L);
+      real val = THTensor_(fastGet1d)(probs, i);
+      THTensor_(fastSet1d)(q, i, inputsize*val);
 
       if (inputsize * val < 1.0)
         {
-          THTensor_fastSet1d(smaller, small_c, i);
+          THLongTensor_fastSet1d(smaller, small_c, i);
           small_c += 1;
         }
       else
         {
-          THTensor_fastSet1d(larger, large_c, i);
+          THLongTensor_fastSet1d(larger, large_c, i);
           large_c += 1;
         }
     }
@@ -189,30 +189,30 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   int64_t large, small;
   while (small_c > 0 && large_c > 0)
     {
-      large = THTensor_fastGet1d(larger, large_c-1);
-      small = THTensor_fastGet1d(smaller, small_c-1);
+      large = THLongTensor_fastGet1d(larger, large_c-1);
+      small = THLongTensor_fastGet1d(smaller, small_c-1);
 
-      THTensor_fastSet1d(J, small, large);
-      q_data[large * q->stride[0]] -= 1.0 - THTensor_fastGet1d(q, small);
+      THLongTensor_fastSet1d(J, small, large);
+      q_data[large * q->stride[0]] -= 1.0 - THTensor_(fastGet1d)(q, small);
 
       if(q_data[large * q->stride[0]] < 1.0)
         {
-          THTensor_fastSet1d(smaller, small_c-1, large);
+          THLongTensor_fastSet1d(smaller, small_c-1, large);
           large_c -= 1;
         }
       else
         {
-          THTensor_fastSet1d(larger, large_c-1, large);
+          THLongTensor_fastSet1d(larger, large_c-1, large);
           small_c -= 1;
         }
     }
 
-  real q_min = THTensor_fastGet1d(q, inputsize-1);
+  real q_min = THTensor_(fastGet1d)(q, inputsize-1);
   real q_max = q_min;
   real q_temp;
   for (i=0; i < inputsize; i++)
     {
-      q_temp = THTensor_fastGet1d(q, i);
+      q_temp = THTensor_(fastGet1d)(q, i);
       if (q_temp < q_min)
         q_min = q_temp;
       else if (q_temp > q_max)
@@ -252,15 +252,15 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
     {
       rand_ind = THRandom_uniform(_generator, 0, K);
 
-      _q = THTensor_fastGet1d(q, rand_ind);
+      _q = THTensor_(fastGet1d)(q, rand_ind);
 
       _mask = THRandom_bernoulli(_generator, _q);
 
-      J_sample = THTensor_fastGet1d(J, rand_ind);
+      J_sample = THLongTensor_fastGet1d(J, rand_ind);
 
       sample_idx = J_sample*(1 -_mask) + (rand_ind+1L) * _mask;
 
-      THTensor_fastSet1d(self, i, sample_idx-1L);
+      THLongTensor_fastSet1d(self, i, sample_idx-1L);
     }
 }
 void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)

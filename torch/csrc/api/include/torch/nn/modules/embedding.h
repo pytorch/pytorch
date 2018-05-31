@@ -9,13 +9,14 @@
 namespace torch { namespace nn {
 class Embedding : public torch::nn::CloneableModule<Embedding> {
  public:
-  Embedding(uint32_t num_embeddings, uint32_t embedding_dim);
+  Embedding(int64_t count, int64_t dimension);
 
-  variable_list forward(variable_list) override;
-  void reset_parameters() override;
-  void initialize_parameters() override;
+  void reset() override;
 
-  Variable weight;
-  uint32_t num_embeddings, embedding_dim;
+  std::vector<Variable> forward(std::vector<Variable>);
+
+  TORCH_ATTR(int64_t, count);
+  TORCH_ATTR(int64_t, dimension);
+  TORCH_ATTR(Variable, table);
 };
 }} // namespace torch::nn

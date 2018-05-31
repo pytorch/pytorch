@@ -173,7 +173,7 @@ void THCSTensor_(sspaddmm)(THCState *state, THCSTensor *r_, real beta, THCSTenso
 }
 
 void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor *sparse_, THCTensor *dense) {
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined(__HIP_PLATFORM_HCC__)
   THCThrustAllocator thrustAlloc(state);
 #define THRUST_EXEC(fn, ...) fn(thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)), ##__VA_ARGS__)
 #else
@@ -293,9 +293,9 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
     int64_t view_columns = 1;
     THLongStorage *r_size = THCTensor_(newSizeOf)(state, r);
     for (int i = 0; i < nDimI; i++)
-      view_rows *= r_size->data[i];
+      view_rows *= THLongStorage_data(r_size)[i];
     for (int i = nDimI; i < nDim; i++)
-      view_columns *= r_size->data[i];
+      view_columns *= THLongStorage_data(r_size)[i];
 
     THLongStorage *r_view_size = THLongStorage_newWithSize2(view_rows, view_columns);
     THCTensor *r_view = THCTensor_(newView)(state, r, r_view_size);
@@ -367,10 +367,29 @@ void THCSTensor_(div)(THCState *state, THCSTensor *r_, THCSTensor *t, real value
   }
 }
 
+int THCSTensor_(isSameSizeIgnoringDensity)(THCState *state, const THCSTensor *self, const THCSTensor *src) {
+  int d;
+  if (self->nDimensionI + self->nDimensionV != src->nDimensionI + src->nDimensionV) {
+    return 0;
+  }
+  for(d = 0; d < self->nDimensionI + self->nDimensionV; ++d) {
+    if(self->size[d] != src->size[d]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+int THCSTensor_(isSameDensity)(THCState *state, const THCSTensor *self, const THCSTensor *src) {
+  return self->nDimensionI == src->nDimensionI &&
+      self->nDimensionV == src->nDimensionV;
+}
+
+
 void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real value, THCSTensor *src) {
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 3, 3, r_, t, src));
-  if(!THCSTensor_(isSameSizeAs)(state, t, src)) {
-    THError("cadd operands have incompatible sizes or dimension types");
+  if (!THCSTensor_(isSameSizeIgnoringDensity)(state, t, src)) {
+    THError("cadd operands have incompatible sizes");
   }
 
   if (src->nnz == 0) {
@@ -380,6 +399,10 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   if (t->nnz == 0) {
     THCSTensor_(mul)(state, r_, src, value);
     return;
+  }
+
+  if(!THCSTensor_(isSameDensity)(state, t, src)) {
+    THError("cadd operands have incompatible densities");
   }
 
   // We deliberately choose to simply concat the indices and values tensors
@@ -465,7 +488,7 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
   THCSTensor_indexSparseIntersectionKernel<uint64_t, real>
     <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
       I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-      (uint64_t)t_nnz, (uint64_t)s_nnz, (uint64_t*)resultNnz->data);
+      (uint64_t)t_nnz, (uint64_t)s_nnz, (uint64_t*)THCudaLongStorage_data(state, resultNnz));
   THCudaCheck(cudaGetLastError());
   r_->nnz = THCudaLongStorage_get(state, resultNnz, 0);
   THCudaLongStorage_free(state, resultNnz);
@@ -507,7 +530,7 @@ void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t_, real valu
 #if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE) || defined(THCS_REAL_IS_HALF)
 accreal THCSTensor_(normall)(THCState *state, THCSTensor *self, real value) {
   THCSTensor* self_coalesced = THCSTensor_(newCoalesce)(state, self);
-  accreal result = THCTensor_(normall)(state, self_coalesced->values, value); 
+  accreal result = THCTensor_(normall)(state, self_coalesced->values, value);
   THCSTensor_(free)(state, self_coalesced);
   return result;
 }

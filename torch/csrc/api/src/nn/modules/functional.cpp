@@ -1,14 +1,20 @@
 #include <torch/nn/modules/functional.h>
 
+#include <functional>
+#include <utility>
+
 namespace torch { namespace nn {
-Functional::Functional(std::function<variable_list(variable_list)> fun)
-    : fun_(std::move(fun)) {}
-Functional::Functional(std::function<Variable(Variable)> fun)
-    : fun_([fun](variable_list input) {
-        return variable_list({fun(input[0])});
+
+Functional::Functional(Function function) : function_(std::move(function)) {}
+
+Functional::Functional(std::function<Variable(Variable)> function)
+    : function_([function](std::vector<Variable> input) {
+        return std::vector<Variable>({function(input.front())});
       }) {}
 
-variable_list Functional::forward(variable_list input) {
-  return fun_(input);
+void Functional::reset() {}
+
+std::vector<Variable> Functional::forward(std::vector<Variable> input) {
+  return function_(input);
 }
 }} // namespace torch::nn

@@ -10,34 +10,63 @@ OPERATOR_SCHEMA(Slice)
     .NumInputs(1, 3)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Produces a slice of the input tensor. Currently, only slicing in a single
-dimension is supported.
-Slices are passed as 2 1D vectors or as two keyword argument lists with starting
-and end indices for each dimension of the input `data` tensor. If a negative
-value is passed for any of the start or end indices, it represents the number of
-elements before the end of that dimension. End indices are non-inclusive unless
-negative (end index -1 means up to and including the last element).
+Produces a slice of the input tensor.
 
+- Currently, only slicing in a single dimension is supported.
 
-Example:
+- Start and end indices are either passed as two 1D input tensors or using the `starts` and `ends` arguments.
 
-  data = [
-      [1, 2, 3, 4],
-      [5, 6, 7, 8],
-  ]
-  starts = [0, 1]
-  ends = [-1, 3]
+- If a negative value is passed for any of the start or end indices, it represents the number of elements before the end of that dimension. End indices are non-inclusive unless negative (end index -1 means up to and including the last element).
 
-  result = [
-      [2, 3],
-      [6, 7],
-  ]
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/slice_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Slice",
+    ["X"],
+    ["Y"],
+    starts=(0,1),
+    ends=(-1,3)
+)
+
+workspace.FeedBlob("X", np.array([[1,2,3,4],[5,6,7,8]]))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[1 2 3 4]
+ [5 6 7 8]]
+Y:
+[[2 3]
+ [6 7]]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "data", "Tensor of data to extract slices from.")
-    .Input(1, "starts", "1D tensor: start-indices for each dimension of data.")
-    .Input(2, "ends", "1D tensor: end-indices for each dimension of data.")
-    .Arg("starts", "List of starting indices")
-    .Arg("ends", "List of ending indices")
+    .Input(0, "X", "(*Tensor*): tensor to extract slices from")
+    .Input(1, "starts", "(*Tensor`<int>`*): 1D tensor of start-indices for each dimension of data")
+    .Input(2, "ends", "(*Tensor`<int>`*): 1D tensor of end-indices for each dimension of data")
+    .Arg("starts", "(*Tuple(int)*): list of starting indices")
+    .Arg("ends", "(*Tuple(int)*): list of ending indices")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       if (in.size() > 1) {
@@ -73,7 +102,7 @@ Example:
       return vector<TensorShape>{
           CreateTensorShape(dst_sizes, data.data_type())};
     })
-    .Output(0, "output", "Sliced data tensor.")
+    .Output(0, "Y", "(*Tensor*): sliced output tensor")
     .InheritOnnxSchema("Slice");
 
 OPERATOR_SCHEMA(SliceGradient);

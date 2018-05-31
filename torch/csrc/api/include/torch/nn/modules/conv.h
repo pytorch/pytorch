@@ -1,97 +1,47 @@
 #pragma once
 
+#include <torch/expanding_array.h>
 #include <torch/nn/module.h>
 
 #include <cstdint>
 
 namespace torch { namespace nn {
-class Conv : public torch::nn::CloneableModule<Conv> {
- private:
-  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan);
 
+template <size_t D, typename Derived>
+class Conv : public torch::nn::CloneableModule<Derived> {
  public:
-  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan, int ks)
-      : Conv(Nd, in_chan, out_chan) {
-    ks_ = makeTup(ks, 1);
-  }
+  Conv(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<D> kernel_size);
 
-  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan, IntVec ks)
-      : Conv(Nd, in_chan, out_chan) {
-    ks_ = makeTup(ks);
-  }
+  void reset() override;
 
-  void reset_parameters() override;
-  variable_list forward(variable_list) override;
-  void initialize_parameters() override;
-
-  template <typename T>
-  Conv& stride(T s) {
-    stride_ = makeTup(s, 1);
-    return *this;
-  }
-  template <typename T>
-  Conv& padding(T s) {
-    padding_ = makeTup(s);
-    return *this;
-  }
-  template <typename T>
-  Conv& dilation(T s) {
-    dilation_ = makeTup(s, 1);
-    return *this;
-  }
-  template <typename T>
-  Conv& output_padding(T s) {
-    output_padding_ = makeTup(s);
-    return *this;
-  }
-
-  TORCH_AUTOGRAD_KWARG(Conv, bool, transposed, false, true)
-  TORCH_AUTOGRAD_KWARG(Conv, bool, no_bias, false, true)
-  TORCH_AUTOGRAD_KWARG(Conv, int, groups, 1, 1)
-
-  Variable weight, bias;
-  uint32_t Nd_;
-  uint32_t in_channels_;
-  uint32_t out_channels_;
-  IntVec ks_;
-  IntVec stride_;
-  IntVec padding_;
-  IntVec dilation_;
-  bool dilated_;
-  IntVec output_padding_;
-
- protected:
-  IntVec makeTup(int x, int def = 0) {
-    IntVec ret;
-    if (Nd_ == 1) {
-      ret.push_back(x);
-      ret.push_back(def);
-    } else {
-      for (auto i = 0U; i < Nd_; i++)
-        ret.push_back(x);
-    }
-    return ret;
-  }
-  IntVec makeTup(IntVec x) {
-    return x;
-  }
+  TORCH_ATTR(int64_t, input_channels);
+  TORCH_ATTR(int64_t, output_channels);
+  TORCH_ATTR(ExpandingArray<D>, kernel_size);
+  TORCH_ATTR(ExpandingArray<D>, stride) = 1;
+  TORCH_ATTR(ExpandingArray<D>, padding) = 0;
+  TORCH_ATTR(ExpandingArray<D>, dilation) = 1;
+  TORCH_ATTR(ExpandingArray<D>, output_padding) = 0;
+  TORCH_ATTR(bool, transposed) = false;
+  TORCH_ATTR(bool, with_bias) = true;
+  TORCH_ATTR(int64_t, groups) = 1;
+  TORCH_ATTR(Variable, weight);
+  TORCH_ATTR(Variable, bias);
 };
 
-class Conv1d : public Conv {
- public:
-  Conv1d(uint32_t i, uint32_t o, int ks) : Conv(1, i, o, ks) {}
-  Conv1d(uint32_t i, uint32_t o, IntVec ks) : Conv(1, i, o, ks) {}
-};
+#define CONV_D(dimensions)                                                     \
+  class Conv##dimensions##d : public Conv<(dimensions), Conv##dimensions##d> { \
+   public:                                                                     \
+    using Conv<(dimensions), Conv##dimensions##d>::Conv;                       \
+    std::vector<Variable> forward(std::vector<Variable>);                                      \
+  }
 
-class Conv2d : public Conv {
- public:
-  Conv2d(uint32_t i, uint32_t o, int ks) : Conv(2, i, o, ks) {}
-  Conv2d(uint32_t i, uint32_t o, IntVec ks) : Conv(2, i, o, ks) {}
-};
+CONV_D(1);
+CONV_D(2);
+CONV_D(3);
 
-class Conv3d : public Conv {
- public:
-  Conv3d(uint32_t i, uint32_t o, int ks) : Conv(3, i, o, ks) {}
-  Conv3d(uint32_t i, uint32_t o, IntVec ks) : Conv(3, i, o, ks) {}
-};
+#undef CONV_D
+
 }} // namespace torch::nn

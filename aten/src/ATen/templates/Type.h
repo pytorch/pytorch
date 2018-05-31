@@ -1,5 +1,7 @@
 #pragma once
 
+// ${generated_comment}
+
 #include "ATen/Allocator.h"
 #include "ATen/ArrayRef.h"
 #include "ATen/ATenGeneral.h"

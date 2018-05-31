@@ -1,18 +1,20 @@
 # ---[ cuda
 
 set(CAFFE2_FOUND_CUDA FALSE)
+set(CAFFE2_FOUND_CUDNN FALSE)
 
-# Find Cuda.
+# Find CUDA.
 find_package(CUDA 7.0)
 if(NOT CUDA_FOUND)
   message(WARNING
-      "Caffe2: Cuda cannot be found. Depending on whether you are building "
-      "Caffe2 or a Caffe2 dependent library, the next warning / error will "
-      "give you more info.")
+    "Caffe2: CUDA cannot be found. Depending on whether you are building "
+    "Caffe2 or a Caffe2 dependent library, the next warning / error will "
+    "give you more info.")
   return()
 endif()
+set(CAFFE2_FOUND_CUDA TRUE)
 
-# Find cudnn.
+# Find cuDNN.
 if(CAFFE2_STATIC_LINK_CUDA)
   SET(CUDNN_LIBNAME "libcudnn_static.a")
 else()
@@ -28,12 +30,12 @@ find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
     PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64)
 find_package_handle_standard_args(
     CUDNN DEFAULT_MSG CUDNN_INCLUDE_DIR CUDNN_LIBRARY)
-
 if(NOT CUDNN_FOUND)
   message(WARNING
-      "Caffe2: cudnn cannot be found. Caffe2 CUDA depends explicitly "
-      "on cudnn so you should consider installing it.")
-  return()
+    "Caffe2: Cannot find cuDNN library. Turning the option off")
+  set(USE_CUDNN OFF)
+else()
+  set(CAFFE2_FOUND_CUDNN TRUE)
 endif()
 
 # Optionally, find TensorRT
@@ -47,39 +49,40 @@ if (${USE_TENSORRT})
   find_package_handle_standard_args(
     TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
   if(NOT TENSORRT_FOUND)
-    message(WARNING 
+    message(WARNING
       "Caffe2: Cannot find TensorRT library. Turning the option off")
     set(USE_TENSORRT OFF)
   endif()
 endif()
 
-# After both cuda and cudnn are found, we can safely proceed.
-set(CAFFE2_FOUND_CUDA TRUE)
+# ---[ Exract versions
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
-# get cuDNN version
-file(READ ${CUDNN_INCLUDE_DIR}/cudnn.h CUDNN_HEADER_CONTENTS)
-string(REGEX MATCH "define CUDNN_MAJOR * +([0-9]+)"
-             CUDNN_VERSION_MAJOR "${CUDNN_HEADER_CONTENTS}")
-string(REGEX REPLACE "define CUDNN_MAJOR * +([0-9]+)" "\\1"
-             CUDNN_VERSION_MAJOR "${CUDNN_VERSION_MAJOR}")
-string(REGEX MATCH "define CUDNN_MINOR * +([0-9]+)"
-             CUDNN_VERSION_MINOR "${CUDNN_HEADER_CONTENTS}")
-string(REGEX REPLACE "define CUDNN_MINOR * +([0-9]+)" "\\1"
-             CUDNN_VERSION_MINOR "${CUDNN_VERSION_MINOR}")
-string(REGEX MATCH "define CUDNN_PATCHLEVEL * +([0-9]+)"
-             CUDNN_VERSION_PATCH "${CUDNN_HEADER_CONTENTS}")
-string(REGEX REPLACE "define CUDNN_PATCHLEVEL * +([0-9]+)" "\\1"
-             CUDNN_VERSION_PATCH "${CUDNN_VERSION_PATCH}")
-# Assemble cuDNN version
-if(NOT CUDNN_VERSION_MAJOR)
-  set(CUDNN_VERSION "?")
-else()
-  set(CUDNN_VERSION
-      "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
+if (CAFFE2_FOUND_CUDNN)
+  # Get cuDNN version
+  file(READ ${CUDNN_INCLUDE_DIR}/cudnn.h CUDNN_HEADER_CONTENTS)
+  string(REGEX MATCH "define CUDNN_MAJOR * +([0-9]+)"
+               CUDNN_VERSION_MAJOR "${CUDNN_HEADER_CONTENTS}")
+  string(REGEX REPLACE "define CUDNN_MAJOR * +([0-9]+)" "\\1"
+               CUDNN_VERSION_MAJOR "${CUDNN_VERSION_MAJOR}")
+  string(REGEX MATCH "define CUDNN_MINOR * +([0-9]+)"
+               CUDNN_VERSION_MINOR "${CUDNN_HEADER_CONTENTS}")
+  string(REGEX REPLACE "define CUDNN_MINOR * +([0-9]+)" "\\1"
+               CUDNN_VERSION_MINOR "${CUDNN_VERSION_MINOR}")
+  string(REGEX MATCH "define CUDNN_PATCHLEVEL * +([0-9]+)"
+               CUDNN_VERSION_PATCH "${CUDNN_HEADER_CONTENTS}")
+  string(REGEX REPLACE "define CUDNN_PATCHLEVEL * +([0-9]+)" "\\1"
+               CUDNN_VERSION_PATCH "${CUDNN_VERSION_PATCH}")
+  # Assemble cuDNN version
+  if(NOT CUDNN_VERSION_MAJOR)
+    set(CUDNN_VERSION "?")
+  else()
+    set(CUDNN_VERSION
+        "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
+  endif()
+  message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_DIR}, library: ${CUDNN_LIBRARY})")
 endif()
 
-message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_DIR}, library: ${CUDNN_LIBRARY})")
-# ---[ Cuda Libraries wrapper
+# ---[ CUDA libraries wrapper
 
 # find libcuda.so and lbnvrtc.so
 # For libcuda.so, we will find it under lib, lib64, and then the
@@ -126,13 +129,15 @@ set_property(
 
 # cudnn
 # static linking is handled by USE_STATIC_CUDNN environment variable
-add_library(caffe2::cudnn UNKNOWN IMPORTED)
-set_property(
-    TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
-    ${CUDNN_LIBRARY})
-set_property(
-    TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDNN_INCLUDE_DIR})
+if(${USE_CUDNN})
+  add_library(caffe2::cudnn UNKNOWN IMPORTED)
+  set_property(
+      TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
+      ${CUDNN_LIBRARY})
+  set_property(
+      TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+      ${CUDNN_INCLUDE_DIR})
+endif()
 
 # curand
 add_library(caffe2::curand UNKNOWN IMPORTED)
@@ -147,6 +152,22 @@ else()
 endif()
 set_property(
     TARGET caffe2::curand PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDA_INCLUDE_DIRS})
+
+# cufft. CUDA_CUFFT_LIBRARIES is actually a list, so we will make an
+# interface library similar to cudart.
+add_library(caffe2::cufft INTERFACE IMPORTED)
+if(CAFFE2_STATIC_LINK_CUDA)
+    set_property(
+        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a")
+else()
+    set_property(
+        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDA_CUFFT_LIBRARIES})
+endif()
+set_property(
+    TARGET caffe2::cufft PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
 # TensorRT
@@ -192,11 +213,11 @@ set_property(
 # ---[ Cuda flags
 
 # Known NVIDIA GPU achitectures Caffe2 can be compiled for.
-# Default is set to cuda 9. If we detect the cuda architectores to be less than
+# Default is set to cuda 9. If we detect the cuda architectures to be less than
 # 9, we will lower it to the corresponding known archs.
 set(Caffe2_known_gpu_archs "30 35 50 52 60 61 70") # for CUDA 9.x
-set(Caffe2_known_gpu_archs8 "20 21(20) 30 35 50 52 60 61") # for CUDA 8.x
-set(Caffe2_known_gpu_archs7 "20 21(20) 30 35 50 52") # for CUDA 7.x
+set(Caffe2_known_gpu_archs8 "30 35 50 52 60 61") # for CUDA 8.x
+set(Caffe2_known_gpu_archs7 "30 35 50 52") # for CUDA 7.x
 
 ################################################################################################
 # A function for automatic detection of GPUs installed  (if autodetection is enabled)
@@ -251,9 +272,9 @@ function(caffe2_select_nvcc_arch_flags out_variable)
   # List of arch names
   set(__archs_names "Kepler" "Maxwell" "Pascal" "Volta" "All" "Manual")
   set(__archs_name_default "All")
-  if(NOT CMAKE_CROSSCOMPILING)   
-    list(APPEND __archs_names "Auto")   
-    set(__archs_name_default "Auto")    
+  if(NOT CMAKE_CROSSCOMPILING)
+    list(APPEND __archs_names "Auto")
+    set(__archs_name_default "Auto")
   endif()
 
   # Set CUDA_ARCH_NAME strings (so it will be seen as dropbox in the CMake GUI)
@@ -278,24 +299,62 @@ function(caffe2_select_nvcc_arch_flags out_variable)
     unset(CUDA_ARCH_PTX CACHE)
   endif()
 
-  if(${CUDA_ARCH_NAME} STREQUAL "Kepler")
-    set(__cuda_arch_bin "30 35")
-  elseif(${CUDA_ARCH_NAME} STREQUAL "Maxwell")
-    set(__cuda_arch_bin "50")
-  elseif(${CUDA_ARCH_NAME} STREQUAL "Pascal")
-    set(__cuda_arch_bin "60 61")
-  elseif(${CUDA_ARCH_NAME} STREQUAL "Volta")
-    set(__cuda_arch_bin "70")
-  elseif(${CUDA_ARCH_NAME} STREQUAL "All")
-    set(__cuda_arch_bin ${Caffe2_known_gpu_archs})
-  elseif(${CUDA_ARCH_NAME} STREQUAL "Manual")
-    set(__cuda_arch_bin ${CUDA_ARCH_BIN})
-    set(__cuda_arch_ptx ${CUDA_ARCH_PTX})
-  elseif(${CUDA_ARCH_NAME} STREQUAL "Auto")
-    caffe2_detect_installed_gpus(__cuda_arch_bin)
+  set(CUDA_ARCH_LIST)
+  if(DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
+    string(REGEX REPLACE "[ \t]+" ";" TORCH_CUDA_ARCH_LIST "${TORCH_CUDA_ARCH_LIST}")
+    list(APPEND CUDA_ARCH_LIST ${TORCH_CUDA_ARCH_LIST})
+    message(STATUS "Set CUDA arch from TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
   else()
-    message(FATAL_ERROR "Invalid CUDA_ARCH_NAME")
+    list(APPEND CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    message(STATUS "Set CUDA arch from CUDA_ARCH_NAME: ${CUDA_ARCH_NAME}")
   endif()
+  list(REMOVE_DUPLICATES CUDA_ARCH_LIST)
+
+  set(__cuda_arch_bin)
+  set(__cuda_arch_ptx)
+  foreach(arch_name ${CUDA_ARCH_LIST})
+    set(arch_bin)
+    set(arch_ptx)
+    set(add_ptx FALSE)
+    # Check to see if we are compiling PTX
+    if(arch_name MATCHES "(.*)\\+PTX$")
+      set(add_ptx TRUE)
+      set(arch_name ${CMAKE_MATCH_1})
+    endif()
+    if(arch_name MATCHES "(^[0-9]\\.[0-9](\\([0-9]\\.[0-9]\\))?)$")
+      set(arch_bin ${CMAKE_MATCH_1})
+      set(arch_ptx ${arch_bin})
+    else()
+      # Look for it in our list of known architectures
+     if(${arch_name} STREQUAL "Kepler")
+        set(arch_bin "30 35")
+      elseif(${arch_name} STREQUAL "Maxwell")
+        set(arch_bin "50")
+      elseif(${arch_name} STREQUAL "Pascal")
+        set(arch_bin "60 61")
+      elseif(${arch_name} STREQUAL "Volta")
+        set(arch_bin "70")
+      elseif(${arch_name} STREQUAL "All")
+        set(arch_bin ${Caffe2_known_gpu_archs})
+      elseif(${arch_name} STREQUAL "Manual")
+        set(arch_bin ${CUDA_ARCH_BIN})
+        set(arch_ptx ${CUDA_ARCH_PTX})
+        set(add_ptx TRUE)
+      elseif(${arch_name} STREQUAL "Auto")
+        caffe2_detect_installed_gpus(arch_bin)
+      else()
+        message(FATAL_ERROR "Unknown CUDA architecture name ${arch_name}")
+      endif()
+    endif()
+    list(APPEND __cuda_arch_bin ${arch_bin})
+    if(add_ptx)
+      if (NOT arch_ptx)
+        set(arch_ptx ${arch_bin})
+      endif()
+      list(APPEND __cuda_arch_ptx ${arch_ptx})
+    endif()
+  endforeach()
 
   # Remove dots and convert to lists
   string(REGEX REPLACE "\\." "" __cuda_arch_bin "${__cuda_arch_bin}")
@@ -369,7 +428,7 @@ endif()
 
 # CUDA 9.x requires GCC version <= 6
 if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
-    (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 10.0))
+    (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 9.2))
   if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
       NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 7.0 AND
       CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
@@ -409,7 +468,7 @@ endif()
 
 # Debug and Release symbol support
 if (MSVC)
-  if (${CMAKE_BUILD_TYPE} MATCHES "Release")
+  if ((${CMAKE_BUILD_TYPE} MATCHES "Release") OR (${CMAKE_BUILD_TYPE} MATCHES "RelWithDebInfo") OR (${CMAKE_BUILD_TYPE} MATCHES "MinSizeRel"))
     if (${BUILD_SHARED_LIBS})
       list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD")
     else()

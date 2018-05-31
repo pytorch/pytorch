@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
+#include "torch/csrc/jit/passes/decompose_addmm.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
@@ -72,9 +73,10 @@ private:
 // to the output Variables if present.
 struct ExecutionPlan {
   ExecutionPlan(std::shared_ptr<Graph>& graph)
-      : f(graph) {}
+      : f(graph), graph(graph) {}
   ExecutionPlan(std::shared_ptr<Graph>& graph, Gradient grad)
       : f(graph),
+        graph(graph),
         grad(std::move(grad)),
         grad_executor(this->grad.df) {}
 
@@ -84,6 +86,9 @@ struct ExecutionPlan {
     }
     InterpreterState(f).runOneStage(stack);
     return stack;
+  }
+  std::shared_ptr<Graph> get_graph() const {
+    return graph;
   }
 private:
   // inplace to avoid allocations
@@ -149,6 +154,8 @@ private:
     return outputs;
   }
   Code f;
+  // optimized graph for debugging and testing
+  std::shared_ptr<Graph> graph;
   // description of gradient as a graph
   Gradient grad; // if(grad) is false when this is unused
   // executor for df, including code caches
@@ -199,6 +206,19 @@ struct GraphExecutorImpl {
     // and fully optimize
     auto & implementation = getOrCompile(inputs);
     return implementation.run(std::move(inputs));
+  }
+
+  std::shared_ptr<Graph> graphFor(const variable_tensor_list& inputs) const {
+    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
+
+    if (!optimize || (!symbolically_differentiable && needsGradient(inputs))) {
+      JIT_ASSERTM(autograd_fallback_graph, "No graph found for given inputs");
+      return autograd_fallback_graph;
+    }
+
+    auto it = plan_cache.find(spec);
+    JIT_ASSERTM(it != plan_cache.end(), "No graph found for given inputs");
+    return it->second.get_graph();
   }
 
 private:
@@ -271,7 +291,7 @@ private:
     }
     return false;
   }
-  bool needsGradient(const variable_tensor_list & inputs) {
+  bool needsGradient(const variable_tensor_list & inputs) const {
     if (!autograd::GradMode::is_enabled()) {
       return false;
     }
@@ -399,6 +419,12 @@ private:
     // decisions to insert/remove undefs nodes and to work before
     // we propagate input shapes.
 
+    // Decompose addmm nodes to add + mm, so expands can be inserted and
+    // gradients accumulated on the backward pass
+    //
+    // In the future, if we need more passes like this, we should convert this
+    // into a generic canonicalization pass.
+    DecomposeAddmm(g);
     // clean up replaceIfUndef nodes
     specializeUndef(*g, spec);
     // clean up additions resulting from nodes that were in fact undefined
@@ -455,6 +481,7 @@ private:
   // graph through autograd.
   // Since we can't optimize black box functions anyway, there is only one fallback path,
   // and it must work on all sizes (so no optimizations that inspect sizes can run on it)
+  std::shared_ptr<Graph> autograd_fallback_graph;
   Code autograd_fallback;
 
   // optimizable code paths, used when we can differentiate or when no derivative is needed
@@ -481,6 +508,10 @@ variable_tensor_list GraphExecutor::run(variable_tensor_list && inputs) {
 
 std::shared_ptr<Graph> GraphExecutor::graph() const {
   return pImpl->graph;
+}
+
+std::shared_ptr<Graph> GraphExecutor::graphFor(const variable_tensor_list& inputs) const {
+  return pImpl->graphFor(inputs);
 }
 
 }}

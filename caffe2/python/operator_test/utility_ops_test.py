@@ -12,6 +12,7 @@ import numpy as np
 import random
 import unittest
 
+
 class TestUtilityOps(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(), args=st.booleans(), **hu.gcs)
@@ -65,7 +66,7 @@ class TestUtilityOps(hu.HypothesisTestCase):
     def test_transpose(self, dtype, ndims, seed, null_axes, engine, gc, dc):
         if (gc.device_type == caffe2_pb2.CUDA and engine == "CUDNN"):
             # cudnn 5.1 does not support int.
-            assume(workspace.GetCuDNNVersion() >= 6000 or dtype != np.int32) 
+            assume(workspace.GetCuDNNVersion() >= 6000 or dtype != np.int32)
 
         dims = (np.random.rand(ndims) * 16 + 1).astype(np.int32)
         X = (np.random.rand(*dims) * 16).astype(dtype)
@@ -90,7 +91,6 @@ class TestUtilityOps(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(gc, op, [X, axes],
                                    transpose_ref)
-
 
     @given(m=st.integers(5, 10), n=st.integers(5, 10),
            o=st.integers(5, 10), nans=st.booleans(), **hu.gcs)
@@ -293,6 +293,45 @@ class TestUtilityOps(hu.HypothesisTestCase):
             inputs=[items, lengths, indices],
             reference=lengths_gather_op,
         )
+
+    @given(
+        inputs=hu.lengths_tensor(),
+        **hu.gcs_cpu_only)
+    def test_lengths_to_ranges(self, inputs, gc, dc):
+        _, lengths = inputs
+
+        def lengths_to_ranges_op(lengths):
+            return [
+                [[x, y] for x, y in zip(np.cumsum(np.append([0], lengths)),
+                                        lengths)]
+            ]
+
+        op = core.CreateOperator(
+            "LengthsToRanges",
+            ["lengths"],
+            ["output"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[lengths],
+            reference=lengths_to_ranges_op,
+        )
+
+        # Test shape inference logic
+        net = core.Net("test_shape_inference")
+
+        workspace.FeedBlob("lengths", lengths)
+        output = net.LengthsToRanges(
+            ["lengths"],
+            ["output"]
+        )
+        (shapes, types) = workspace.InferShapesAndTypes([net])
+        workspace.RunNetOnce(net)
+        self.assertEqual(shapes[output], list(workspace.blobs[output].shape))
+        self.assertEqual(shapes[output], list(lengths.shape) + [2])
+        self.assertEqual(types[output], core.DataType.INT32)
 
     @given(**hu.gcs)
     def test_size_op(self, gc, dc):

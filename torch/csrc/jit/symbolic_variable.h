@@ -127,7 +127,7 @@ struct SymbolicVariable {
   SymbolicVariable sum(int dim, bool keepdim) const {
     Node * n;
     auto r = create(t("sum"), {*this}, 1, &n)[0];
-    n->i_(a("dim"), dim)
+    n->is_(a("dim"), {dim})
      ->i_(a("keepdim"), keepdim);
     return r;
   }
@@ -147,6 +147,13 @@ struct SymbolicVariable {
     Node *n;
     auto r =  create(aten::view, {*this}, 1, &n)[0];
     n->is_(a("size"), std::move(sizes));
+    return r;
+  }
+  SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
+    Node *n;
+    auto r = create(aten::addmm, {*this, mat1, mat2}, 1, &n)[0];
+    n->t_(a("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+    n->t_(a("beta"), at::CPU(at::kFloat).scalarTensor(1.0));
     return r;
   }
   Value * value() const {
