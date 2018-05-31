@@ -1,5 +1,6 @@
 #pragma once
 
+#include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/timer.h"
@@ -8,7 +9,8 @@
 
 namespace caffe2 {
 
-class PerfNetObserver : public NetObserver {
+
+class CAFFE2_OBSERVER_API PerfNetObserver : public NetObserver {
  public:
   explicit PerfNetObserver(NetBase* subject_);
   virtual ~PerfNetObserver();
