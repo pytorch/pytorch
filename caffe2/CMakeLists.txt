@@ -198,9 +198,13 @@ if(BUILD_CAFFE2)
 
   # ---[ HIP library.
   if(USE_HIP)
+    set(Caffe2_HIP_GCC_COMPILE_FLAGS "-D__HIP_PLATFORM_HCC__=1")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Caffe2_HIP_GCC_COMPILE_FLAGS}")
     HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
     set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
 
+    INCLUDE_DIRECTORIES(/opt/rocm/include /opt/rocm/hiprand/include /opt/rocm/rocrand/include /opt/rocm/miopen/include /data/Thrust/thrust/system/cuda/detail/cub-hip)
+    #LINK_DIRECTORIES(/opt/rocm/lib /opt/rocm/hiprand/lib /opt/rocm/rocrand/lib /opt/rocm/miopen/lib)
     target_include_directories(
       caffe2_hip PUBLIC ${Caffe2_HIP_INCLUDES})
     target_include_directories(
