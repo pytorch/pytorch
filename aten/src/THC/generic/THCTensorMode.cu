@@ -146,7 +146,7 @@ THC_API void THCTensor_(dimApplyMode)(THCState *state,
   } else {
     // Loop through the values and recurse
     for (int i = 0; i < THCTensor_(size)(state, input, curDim); ++i) {
-      position->data[curDim] = i;
+      THLongStorage_data(position)[curDim] = i;
       THCTensor_(dimApplyMode)(state, values, indices, input, sortBuffer, dimension, position, curDim + 1);
     }
   }
