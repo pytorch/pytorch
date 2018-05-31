@@ -34,7 +34,11 @@ if(NOT TBB_INSTALL_INCLUDE_DIR)
   set(TBB_INSTALL_INCLUDE_DIR "${TBB_ROOT_DIR}/include")
 endif()
 
-include_directories("${TBB_ROOT_DIR}/include" "${TBB_ROOT_DIR}/src" "${TBB_ROOT_DIR}/src/rml/include" ${CMAKE_CURRENT_BINARY_DIR})
+set(TBB_INCLUDES
+  "${TBB_ROOT_DIR}/include"
+  "${TBB_ROOT_DIR}/src"
+  "${TBB_ROOT_DIR}/src/rml/include"
+  ${CMAKE_CURRENT_BINARY_DIR})
 
 option(TBB_BUILD_SHARED          "Build TBB shared library" ON)
 option(TBB_BUILD_STATIC          "Build TBB static library" ON)
@@ -239,6 +243,7 @@ add_custom_target(tbb_def_files DEPENDS tbb.def tbbmalloc.def)
 # TBB library
 if (TBB_BUILD_STATIC)
   add_library(tbb_static STATIC ${tbb_src})
+  target_include_directories(tbb_static PRIVATE ${TBB_INCLUDES})
   set_property(TARGET tbb_static APPEND PROPERTY COMPILE_DEFINITIONS "__TBB_BUILD=1")
   set_property(TARGET tbb_static APPEND_STRING PROPERTY COMPILE_FLAGS ${ENABLE_RTTI})
   install(TARGETS tbb_static ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR})
@@ -253,6 +258,7 @@ endif()
 
 if (TBB_BUILD_SHARED)
   add_library(tbb SHARED ${tbb_src})
+  target_include_directories(tbb PRIVATE ${TBB_INCLUDES})
   set_property(TARGET tbb APPEND PROPERTY COMPILE_DEFINITIONS "__TBB_BUILD=1")
   set_property(TARGET tbb APPEND_STRING PROPERTY COMPILE_FLAGS ${ENABLE_RTTI})
   add_dependencies(tbb tbb_def_files)
@@ -293,6 +299,7 @@ if(TBB_BUILD_TBBMALLOC)
   # TBB malloc library
   if (TBB_BUILD_STATIC)
     add_library(tbbmalloc_static STATIC ${tbbmalloc_static_src})
+    target_include_directories(tbbmalloc_static PRIVATE ${TBB_INCLUDES})
     set_property(TARGET tbbmalloc_static APPEND PROPERTY COMPILE_DEFINITIONS "__TBBMALLOC_BUILD=1")
     set_property(TARGET tbbmalloc_static APPEND_STRING PROPERTY COMPILE_FLAGS ${DISABLE_RTTI})
     if (MSVC)
@@ -303,6 +310,7 @@ if(TBB_BUILD_TBBMALLOC)
 
   if (TBB_BUILD_SHARED)
     add_library(tbbmalloc SHARED ${tbbmalloc_src})
+    target_include_directories(tbbmalloc PRIVATE ${TBB_INCLUDES})
     set_property(TARGET tbbmalloc APPEND PROPERTY COMPILE_DEFINITIONS "__TBBMALLOC_BUILD=1")
     set_property(TARGET tbbmalloc APPEND_STRING PROPERTY COMPILE_FLAGS ${DISABLE_RTTI})
     add_dependencies(tbbmalloc tbb_def_files)
