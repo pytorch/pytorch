@@ -60,7 +60,7 @@ dimension adjustment using axis_b");
 class GetMatMulGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    CAFFE_ENFORCE_EQ(def_.input_size(), 2);
+    CAFFE_ENFORCE(def_.input_size() == 2 || def_.input_size() == 3);
 
     bool axis_a = 1;
     bool axis_b = 1;

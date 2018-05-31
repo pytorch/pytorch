@@ -86,6 +86,11 @@ IF(NOT AT_LINK_STYLE)
   SET(AT_LINK_STYLE SHARED)
 ENDIF()
 
+# Unset our restrictive C++ flags here and reset them later.
+# Remove this once we use proper target_compile_options.
+set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+set(CMAKE_CXX_FLAGS)
+
 set(TBB_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/tbb")
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
 set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
@@ -94,8 +99,10 @@ set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
 add_subdirectory(cpu/tbb)
 set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
-list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
+list(APPEND ATen_THIRD_PARTY_INCLUDE ${TBB_ROOT_DIR}/include)
 list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb_static)
+
+set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
@@ -174,15 +181,22 @@ if(NOT MSVC)
   set(__aten_sleef_build_shared_libs ${BUILD_SHARED_LIBS})
   set(__aten_sleef_build_tests ${BUILD_TESTS})
 
+  # Unset our restrictive C++ flags here and reset them later.
+  # Remove this once we use proper target_compile_options.
+  set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  set(CMAKE_CXX_FLAGS)
+
   set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build sleef static" FORCE)
   set(BUILD_DFT OFF CACHE BOOL "Don't build sleef DFT lib" FORCE)
   set(BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
   set(BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/sleef" ${CMAKE_BINARY_DIR}/sleef)
   set_property(TARGET sleef PROPERTY FOLDER "dependencies")
-  list(APPEND ATen_CPU_INCLUDE SYSTEM ${CMAKE_BINARY_DIR}/include)
+  list(APPEND ATen_THIRD_PARTY_INCLUDE ${CMAKE_BINARY_DIR}/include)
   link_directories(${CMAKE_BINARY_DIR}/sleef/lib)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS sleef)
+
+  set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 
   # Set these back. TODO: Use SLEEF_ to pass these instead
   set(BUILD_SHARED_LIBS ${__aten_sleef_build_shared_libs} CACHE BOOL "Build shared libs" FORCE)
@@ -278,6 +292,9 @@ if(AT_LINK_STYLE STREQUAL "INTERFACE")
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB)
 else()
   add_library(ATen_cpu ${AT_LINK_STYLE} ${ATen_CPU_SRCS})
+  if (ATen_THIRD_PARTY_INCLUDE)
+    target_include_directories(ATen_cpu SYSTEM PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
+  endif()
   target_include_directories(ATen_cpu INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(ATen_cpu PRIVATE ${ATen_CPU_INCLUDE})
   target_link_libraries(ATen_cpu PUBLIC ${ATen_CPU_DEPENDENCY_LIBS})
@@ -311,6 +328,8 @@ if(NOT NO_CUDA OR WITH_ROCM)
 
     target_include_directories(
         ATen_cuda INTERFACE $<INSTALL_INTERFACE:include>)
+    target_include_directories(
+        ATen_cuda PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
     target_include_directories(
         ATen_cuda PRIVATE ${ATen_CUDA_INCLUDE})
     target_link_libraries(
@@ -419,6 +438,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     target_include_directories(
         ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+    target_include_directories(${test_name} SYSTEM PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
     target_link_libraries(${test_name} ATen_cpu)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     install(TARGETS ${test_name} DESTINATION test)
@@ -431,6 +451,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
       target_include_directories(
           ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+      target_include_directories(${test_name} SYSTEM PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
       target_link_libraries(${test_name} ATen_cpu ATen_cuda)
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       install(TARGETS ${test_name} DESTINATION test)
@@ -448,6 +469,7 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
+set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)
 set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)

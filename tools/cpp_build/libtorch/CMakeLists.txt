@@ -64,6 +64,9 @@ if(NOT NO_CUDA)
     ${CMAKE_MODULE_PATH})
   set(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 
+  # Polyfill for upstream FindCUDA
+  include(CMakeInitializeConfigs)
+
   if(NOT CUDA_FOUND)
     find_package(CUDA 7.0)
   endif()
@@ -227,6 +230,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_addmm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interned_strings.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp

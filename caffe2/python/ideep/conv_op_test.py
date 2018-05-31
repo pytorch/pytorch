@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given, settings, unlimited
+from hypothesis import given, settings
 import numpy as np
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
@@ -25,7 +25,6 @@ class ConvTest(hu.HypothesisTestCase):
            training_mode=st.booleans(),
            group=st.integers(1, 2),
            **mu.gcs)
-    @settings(deadline=None, timeout=unlimited)
     def test_convolution(self, stride, pad, kernel, size,
                              input_channels, output_channels,
                              batch_size, use_bias, training_mode, group, gc, dc):
