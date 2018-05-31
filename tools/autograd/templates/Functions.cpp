@@ -665,6 +665,8 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
   return result;
 }
 
+// Compute derivatives for targets.
+// Assume targets are given as probabilities (i.e. without taking the logarithm).
 Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce) {
   if (!reduce) {
     return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);

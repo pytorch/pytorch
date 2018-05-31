@@ -47,7 +47,7 @@ DOUBLE_TENSORTYPES = [torch.double]
 
 dtype2prec = {torch.float: 1e-5,
               torch.double: 1e-5,
-              torch.half: 1e-1}
+              torch.half: 1e-2}
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -377,7 +377,6 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def __init__(self, *args, **kwargs):
         super(NewCriterionTest, self).__init__(*args, **kwargs)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
-        self.check_grad_target = kwargs.get('check_grad_target', False)
 
     def _do_extra_tests(self, test_case, module, input, target):
         if not self.check_gradgrad:
@@ -387,18 +386,12 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
         params = tuple(x for x in module.parameters())
         if not isinstance(input, tuple):
-            if self.check_grad_target:
-                inputs = (input, target,) + params
-            else:
-                inputs = (input,) + params
+            inputs = (input,) + params
 
             def apply_fn(input, *params):
                 return module(input, target)
         else:
-            if self.check_grad_target:
-                inputs = input + target + params
-            else:
-                inputs = input + params
+            inputs = input + params
 
             def apply_fn(input1, input2, *params):
                 return module(input1, input2, target)
@@ -5447,7 +5440,6 @@ new_criterion_tests = [
             kldivloss_reference(i, t, get_size_average(m), reduce=True),
         check_no_size_average=True,
         desc='scalar',
-        check_grad_target=True,
     ),
     dict(
         module_name='MSELoss',
@@ -5583,6 +5575,18 @@ def bce_with_logistic_no_reduce_scalar_test():
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
         check_gradgrad=False,
+        pickle=False)
+
+
+def kldivloss_with_target_no_reduce_test():
+    i = torch.rand(10, 10).log()
+    return dict(
+        fullname='KLDivLoss_with_target_no_reduce',
+        constructor=wrap_functional(
+            lambda t: F.kl_div(i.type_as(t), t, reduce=False)),
+        input_fn=lambda: torch.rand(10, 10),
+        reference_fn=lambda t, _:
+            loss_reference_fns['KLDivLoss'](i.type_as(t), t, reduce=False),
         pickle=False)
 
 
@@ -6038,6 +6042,7 @@ new_module_tests = [
     bceloss_no_reduce_scalar_test(),
     bceloss_weights_no_reduce_scalar_test(),
     bce_with_logistic_no_reduce_scalar_test(),
+    kldivloss_with_target_no_reduce_test(),
     kldivloss_no_reduce_test(),
     kldivloss_no_reduce_scalar_test(),
     l1loss_no_reduce_test(),
