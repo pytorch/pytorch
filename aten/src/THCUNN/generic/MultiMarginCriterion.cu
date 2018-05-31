@@ -230,6 +230,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   }
 
   THCTensor_(free)(state, input);
+  THCTensor_(free)(state, gradOutput);
   if(weights)
     THCTensor_(free)(state, weights);
 }

@@ -74,7 +74,9 @@ def get_shell_output(command):
 
 def run_test(python, test_module, test_directory, options):
     verbose = '--verbose' if options.verbose else ''
-    return shell('{} -m unittest {} {}'.format(python, verbose, test_module),
+    # Can't call `python -m unittest test_*` here because it doesn't run code
+    # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
+    return shell('{} {}.py {}'.format(python, test_module, verbose),
                  test_directory)
 
 
