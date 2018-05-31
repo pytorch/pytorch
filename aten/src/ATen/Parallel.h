@@ -39,7 +39,7 @@ inline void parallel_for_1d(
   using default_partitioner_type = tbb::affinity_partitioner;
 #endif
 
-  thread_local static default_partitioner_type ap;
+  static default_partitioner_type ap;
 
   bool sequential = (end - begin) < grain_size || !parallelize;
 
@@ -70,7 +70,7 @@ inline scalar_t parallel_reduce_1d(
   using default_partitioner_type = tbb::affinity_partitioner;
 #endif
 
-  thread_local static default_partitioner_type ap;
+  static default_partitioner_type ap;
 
   bool sequential = (end - begin) < grain_size || !parallelize;
 
