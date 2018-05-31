@@ -22,11 +22,12 @@ static default_partitioner_type ap;
   auto arr_out = result.data<scalar_t>();
   auto arr_in = self.data<scalar_t>();
   int64_t size = self.numel();
-  if (size < internal::TBB_GRAIN_SIZE) {
+  int64_t grain_size = 2048;
+  if (size < grain_size) {
     map(f, arr_out, arr_in, size);
   } else {
     tbb::parallel_for(
-        tbb::blocked_range<int64_t>(0, size, internal::TBB_GRAIN_SIZE),
+        tbb::blocked_range<int64_t>(0, size, grain_size),
         [&](const tbb::blocked_range<int64_t>& r) {
           map(f, arr_out + r.begin(), arr_in + r.begin(), r.end() - r.begin());
         },
