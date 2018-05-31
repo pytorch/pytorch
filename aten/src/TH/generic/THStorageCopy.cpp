@@ -16,8 +16,8 @@ void THStorage_(copy)(THStorage *storage, THStorage *src)
   THStorage_(rawCopy)(storage, THStorage_(data)(src));
 }
 
-// NOTE: for performance, these macros generally directly access data, rather
-// than THStorage_(data)ß
+// NOTE: for performance, these macros generally use the raw data pointer in the inner loops,
+// rather than repeated THStorage_(data) calls.
 
 #define IMPLEMENT_THStorage_COPY(TYPENAMESRC) \
 void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage *src) \
