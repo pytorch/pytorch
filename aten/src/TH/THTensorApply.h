@@ -43,7 +43,7 @@
     TH_TENSOR_APPLY_hasFinished = 1; \
   else \
   { \
-    TENSOR##_data = TENSOR->storage->data+TENSOR->storageOffset; \
+    TENSOR##_data = TENSOR->storage->data<TYPE>()+TENSOR->storageOffset; \
     TENSOR##_size = 1; \
     TENSOR##_stride = 1; \
     for(TENSOR##_i = TENSOR->nDimension-1; TENSOR##_i >= 0; TENSOR##_i--) { \
@@ -320,9 +320,9 @@
 {\
   int TENSOR##Contg = THTensor_(isContiguous)(TENSOR);                      \
   ptrdiff_t TENSOR##Size = THTensor_(nElement)(TENSOR);                     \
-  if(TENSOR##Contg){                                                         \
-    ptrdiff_t iter = 0;                                                         \
-    TYPE *rp = TENSOR->storage->data+TENSOR->storageOffset;                   \
+  if(TENSOR##Contg){                                                        \
+    ptrdiff_t iter = 0;                                                     \
+    TYPE *rp = TENSOR->storage->data<TYPE>()+TENSOR->storageOffset;         \
     PRAGMA( omp parallel for if (TENSOR##Size > OMP_THRESHOLD * 10) firstprivate(rp) reduction(OPERATION) ) \
     for (iter = 0; iter < TENSOR##Size; iter++) { \
       TYPE *TENSOR##_data = rp+iter;                    \
@@ -366,8 +366,8 @@
 {                                                                                              \
   /* for advanced searching index*/                                                            \
   if( CONTIG1 && CONTIG2 ){                                                                    \
-    TYPE1 *rp = TENSOR1->storage->data+TENSOR1->storageOffset;                                    \
-    TYPE2 *tp = TENSOR2->storage->data+TENSOR2->storageOffset;                                    \
+    TYPE1 *rp = TENSOR1->storage->data<TYPE1>()+TENSOR1->storageOffset;                        \
+    TYPE2 *tp = TENSOR2->storage->data<TYPE2>()+TENSOR2->storageOffset;                        \
     ptrdiff_t iter = 0;                                                                        \
     if(tp != rp) {                                                                             \
       PRAGMA(ivdep) \
@@ -445,9 +445,9 @@
 {                                                                             \
   /* for adveanced searching index*/                                                                    \
   if(CONTIG1 && CONTIG2 && CONTIG3){                                                                    \
-    TYPE1 *rp = TENSOR1->storage->data+TENSOR1->storageOffset;                                             \
-    TYPE2 *tp = TENSOR2->storage->data+TENSOR2->storageOffset;                                             \
-    TYPE3 *srcp = TENSOR3->storage->data+TENSOR3->storageOffset;                                           \
+    TYPE1 *rp = TENSOR1->storage->data<TYPE1>()+TENSOR1->storageOffset;                                 \
+    TYPE2 *tp = TENSOR2->storage->data<TYPE2>()+TENSOR2->storageOffset;                                 \
+    TYPE3 *srcp = TENSOR3->storage->data<TYPE3>()+TENSOR3->storageOffset;                               \
     ptrdiff_t iter = 0;\
     if (rp != tp) { \
       PRAGMA(ivdep) \

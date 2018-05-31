@@ -206,14 +206,14 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
   THLongTensor_free(ignore);
   for (int d = 0; d < nDimI; d++) {
     int64_t max_index_in_dim = THLongTensor_fastGet1d(max_indices, d);
-    int64_t dim_size = sizes->data[d];
+    int64_t dim_size = THLongStorage_data(sizes)[d];
     THArgCheck(max_index_in_dim < dim_size, 2,
         "sizes is inconsistent with indices: for dim %d, size is %lld but found index %lld",
         d, (long long)dim_size, (long long)max_index_in_dim);
   }
   for (int d = 0; d < nDimV; d++) {
     int64_t values_size = THTensor_(size)(values, d + 1);
-    int64_t specified_size = sizes->data[nDimI + d];
+    int64_t specified_size = THLongStorage_data(sizes)[nDimI + d];
     THArgCheck(values_size <= specified_size, 2,
         "values and sizes are inconsistent: sizes[%d] is %lld but values.size(%d) is %lld",
         d + nDimI, (long long)specified_size, d + 1, (long long)values_size);
@@ -226,7 +226,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
 THSTensor *THSTensor_(newWithSize)(THLongStorage *size, THLongStorage *_ignored)
 {
   THSTensor *self = THSTensor_(new)();
-  THSTensor_(rawResize)(self, size->size, 0, size->data);
+  THSTensor_(rawResize)(self, size->size, 0, THLongStorage_data(size));
   return self;
 }
 
@@ -298,7 +298,7 @@ int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor* src)
 
 THSTensor *THSTensor_(resize)(THSTensor *self, THLongStorage *size)
 {
-  THSTensor_(rawResize)(self, size->size, 0, size->data);
+  THSTensor_(rawResize)(self, size->size, 0, THLongStorage_data(size));
   return self;
 }
 
@@ -420,7 +420,7 @@ THTensor *THSTensor_(newValuesWithSizeOf)(THTensor *values, int64_t nnz) {
     new_values = THTensor_(newWithSize1d)(nnz);
   } else {
     THLongStorage *size = THTensor_(newSizeOf)(values);
-    size->data[0] = nnz;
+    THLongStorage_data(size)[0] = nnz;
     new_values = THTensor_(newWithSize)(size, NULL);
     THLongStorage_free(size);
   }
@@ -534,7 +534,7 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
       for (int64_t d = 0; d < nDimI; d++) {
         idx += THLongTensor_fastGet2d(mask_indices_, d, i) * t->stride[d];
       }
-      real val = (t->storage->data + t->storageOffset)[idx];
+      real val = (THStorage_(data)(t->storage) + t->storageOffset)[idx];
       THTensor_(fastSet1d)(r_values_, i, val);
     }
   }

@@ -117,7 +117,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         "%" PRId64 ", but the viewed storage has only %" PRId64 " element(s) after offset %" PRId64,
         size, numel - offset, offset);
 
-    real *data_ptr = storage_arg->cdata->data + offset;
+    real *data_ptr = THStorage_(data)(LIBRARY_STATE storage_arg->cdata) + offset;
     THStoragePtr storage(THStorage_(newWithData)(LIBRARY_STATE data_ptr, size));
     storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
     storage->view = storage_arg->cdata;
@@ -142,7 +142,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         item = PySequence_GetItem(first_arg, i);
         real value = THPUtils_(unpackReal)(item.get());
 #if !defined(THC_GENERIC_FILE)
-        self->cdata->data[i] = value;
+        self->cdata->unsafe_data<real>()[i] = value;
 #else
         // TODO: this might be slow - consider batched updates?
         THCStorage_(set)(LIBRARY_STATE self->cdata, i, value);
