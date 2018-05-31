@@ -46,7 +46,7 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
       Tensor self = sort_strides(self_);                        \
       AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {         \
         CPU_tensor_parallel_apply1<scalar_t>(                   \
-            self, [](scalar_t& y) { y = opfn(y); }, 1024);      \
+            self, [](scalar_t& y) { y = opfn(y); }, 2048);      \
       });                                                       \
     }                                                           \
     return self_;                                               \
@@ -59,7 +59,7 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
             result,                                             \
             self,                                               \
             [](scalar_t& y, scalar_t& x) { y = opfn(x); },      \
-            1024);                                              \
+            2048);                                              \
       });                                                       \
     }                                                           \
     return result;                                              \
@@ -74,7 +74,7 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
       } else {                                                  \
         AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {       \
           CPU_tensor_parallel_apply1<scalar_t>(                 \
-              self, [](scalar_t& y) { y = opfn(y); }, 1024);    \
+              self, [](scalar_t& y) { y = opfn(y); }, 2048);    \
         });                                                     \
       }                                                         \
     }                                                           \
@@ -91,7 +91,7 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
               result,                                           \
               self,                                             \
               [](scalar_t& y, scalar_t& x) { y = opfn(x); },    \
-              1024);                                            \
+              2048);                                            \
         });                                                     \
       }                                                         \
     }                                                           \

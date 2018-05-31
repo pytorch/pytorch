@@ -358,22 +358,25 @@ inline void CPU_tensor_parallel_apply1(
     CPU_tensor_apply1<scalar1>(tensor1, op);
     return;
   }
+  auto range = tbb::blocked_range<size_t>(0, tensor1.numel());
   if (tensor1.ndimension() < 8) {
-    parallel_for_1d(
-        [&tensor1, &op](int64_t begin, int64_t end) {
-          apply_op(end - begin, begin, op, strided_tensor_iter_fixed<scalar1, 8>(tensor1, true));
-        },
-        0,
-        tensor1.numel(),
-        grain_size);
+    tbb::parallel_for(
+        range, [&tensor1, &op](const tbb::blocked_range<size_t> r) {
+          apply_op(
+              r.end() - r.begin(),
+              r.begin(),
+              op,
+              strided_tensor_iter_fixed<scalar1, 8>(tensor1, true));
+        });
   } else {
-    parallel_for_1d(
-        [&tensor1, &op](int64_t begin, int64_t end) {
-          apply_op(end - begin, begin, op, strided_tensor_iter<scalar1>(tensor1));
-        },
-        0,
-        tensor1.numel(),
-        grain_size);
+    tbb::parallel_for(
+        range, [&tensor1, &op](const tbb::blocked_range<size_t> r) {
+          apply_op(
+              r.end() - r.begin(),
+              r.begin(),
+              op,
+              strided_tensor_iter<scalar1>(tensor1));
+        });
   }
 }
 
@@ -389,32 +392,27 @@ inline void CPU_tensor_parallel_apply2(
     CPU_tensor_apply2<scalar1, scalar2>(tensor1, tensor2, op);
     return;
   }
+  auto range = tbb::blocked_range<size_t>(0, tensor1.numel());
   if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
-    parallel_for_1d(
-        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
+    tbb::parallel_for(
+        range, [&tensor1, &tensor2, &op](const tbb::blocked_range<size_t> r) {
           apply_op(
-              end - begin,
-              begin,
+              r.end() - r.begin(),
+              r.begin(),
               op,
               strided_tensor_iter_fixed<scalar1, 8>(tensor1),
               strided_tensor_iter_fixed<scalar2, 8>(tensor2));
-        },
-        0,
-        tensor1.numel(),
-        grain_size);
+        });
   } else {
-    parallel_for_1d(
-        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
+    tbb::parallel_for(
+        range, [&tensor1, &tensor2, &op](const tbb::blocked_range<size_t> r) {
           apply_op(
-              end - begin,
-              begin,
+              r.end() - r.begin(),
+              r.begin(),
               op,
               strided_tensor_iter<scalar1>(tensor1),
               strided_tensor_iter<scalar2>(tensor2));
-        },
-        0,
-        tensor1.numel(),
-        grain_size);
+        });
   }
 }
 

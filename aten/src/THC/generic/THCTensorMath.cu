@@ -174,7 +174,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     if (dim == cat_dimension) {
       result_dim_size = cat_dim_size;
     }
-    size->data[dim] = result_dim_size;
+    THLongStorage_data(size)[dim] = result_dim_size;
   }
   THCTensor_(resize)(state, result, size, NULL);
   THLongStorage_free(size);

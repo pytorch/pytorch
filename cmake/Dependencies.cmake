@@ -653,7 +653,7 @@ if (USE_ZSTD)
 endif()
 
 # ---[ Onnx
-if (BUILD_CAFFE2)
+if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if (NOT DEFINED ONNX_NAMESPACE)
     SET(ONNX_NAMESPACE "onnx_c2")
   endif()
@@ -680,7 +680,7 @@ if (BUILD_CAFFE2)
 endif()
 
 # --[ TensorRT integration with onnx-trt
-if (BUILD_CAFFE2)
+if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if (USE_TENSORRT)
     set(CMAKE_CUDA_COMPILER ${CUDA_NVCC_EXECUTABLE})
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt)

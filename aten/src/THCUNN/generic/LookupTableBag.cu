@@ -33,8 +33,8 @@ void THNN_(LookupTableBag_updateOutput)(
 
   THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
   THLongStorage *outputSize = THLongStorage_newWithSize(2);
-  outputSize->data[0] = numBags;
-  outputSize->data[1] = stride;
+  THLongStorage_data(outputSize)[0] = numBags;
+  THLongStorage_data(outputSize)[1] = stride;
   THCTensor_(resize)(state, output, outputSize, NULL);
   THCTensor_(zero)(state, output);
   THCIndexTensor_(resize)(state, offset2bag, inputSize, NULL);

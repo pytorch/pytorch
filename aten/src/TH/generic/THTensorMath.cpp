@@ -325,7 +325,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
 #ifdef DEBUG
   THAssert(numel <= LONG_MAX);
 #endif
-  newSize->data[dim] = numel;
+  THLongStorage_data(newSize)[dim] = numel;
   THTensor_(resize)(tensor,newSize,NULL);
   THLongStorage_free(newSize);
 
@@ -3650,7 +3650,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
     if (dim == cat_dimension) {
       result_dim_size = cat_dim_size;
     }
-    size->data[dim] = result_dim_size;
+    THLongStorage_data(size)[dim] = result_dim_size;
   }
   THTensor_(resize)(result, size, NULL);
 
@@ -3667,12 +3667,12 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   // Second path for non-contiguous
   int64_t offset;
   if (cat_dimension == 0 && allContiguous) {
-    real* result_data = result->storage->data + result->storageOffset;
+    real* result_data = THStorage_(data)(result->storage) + result->storageOffset;
     offset = 0;
     for (int j = 0; j < numInputs; j++) {
       if (inputs[j]->nDimension) {
         THTensor* input0 = inputs[j];
-        real* input0_data = input0->storage->data + input0->storageOffset;
+        real* input0_data = THStorage_(data)(input0->storage) + input0->storageOffset;
         int64_t input0_size = THTensor_(nElement)(input0);
         memcpy(result_data + offset, input0_data, input0_size*sizeof(real));
         offset += input0_size;

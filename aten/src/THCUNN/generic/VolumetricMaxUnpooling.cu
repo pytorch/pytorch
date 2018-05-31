@@ -117,24 +117,26 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
 
   input = THCTensor_(newContiguous)(state, input);
   indices = THCIndexTensor_(newContiguous)(state, indices);
+  output = THCTensor_(newContiguous)(state, output);
   THCTensor_(zero)(state, output);
 
   if (fiveDimensionalInput) {
     // Collapse batch and feature dimensions
+    // newFoldBatchDim assumes contiguity so the newContiguous calls must
+    // preceed this
+    THCTensor *old_output = output;
     output = THCTensor_(newFoldBatchDim)(state, output);
+    THCTensor_(free)(state, old_output);
 
     THCTensor *old_input = input;
     input = THCTensor_(newFoldBatchDim)(state, input);
     THCTensor_(free)(state, old_input);
-    
+
     THCIndexTensor *old_indices = indices;
     indices = THCIndexTensor_(newFoldBatchDim)(state, indices);
     THCIndexTensor_(free)(state, old_indices);
-  } else {
-    THCTensor_(retain)(state, output);
   }
 
-  output = THCTensor_(newContiguous)(state, output);
   real* outputData = THCTensor_(data)(state, output);
 
   THCDeviceTensor<real, 4> cudaInput;
@@ -221,7 +223,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
     THCIndexTensor *old_indices = indices;
     indices = THCIndexTensor_(newFoldBatchDim)(state, indices);
     THCIndexTensor_(free)(state, old_indices);
-  
+
     THCTensor *old_gradOutput = gradOutput;
     gradOutput = THCTensor_(newFoldBatchDim)(state, gradOutput);
     THCTensor_(free)(state, old_gradOutput);

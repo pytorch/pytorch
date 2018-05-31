@@ -5,6 +5,9 @@
 
 #include "THCStorage.h"
 
+#include "ATen/ScalarType.h"
+#include "ATen/ScalarTypeUtils.h"
+#include "ATen/cuda/CUDATypeConversion.cuh"
 #include <atomic>
 
 #include "generic/THCStorage.hpp"
