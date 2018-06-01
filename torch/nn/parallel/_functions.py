@@ -55,8 +55,9 @@ class Gather(Function):
         ctx.input_gpus = tuple(map(lambda i: i.get_device(), inputs))
         if all(t.dim() == 0 for t in inputs) and dim == 0:
             inputs = tuple(t.view(1) for t in inputs)
-            warnings.warn('When gathering along dimension 0, all input tensors '
-                          'are scalars, will unsqueeze and return a vector instead.')
+            warnings.warn('Was asked to gather along dimension 0, but all '
+                          'input tensors were scalars; will instead unsqueeze '
+                          'and return a vector.')
             ctx.unsqueezed_scalar = True
         else:
             ctx.unsqueezed_scalar = False
