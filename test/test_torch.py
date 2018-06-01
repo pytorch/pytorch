@@ -17,6 +17,7 @@ from itertools import product, combinations
 from functools import reduce
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
+from torch.jit.maskedbatch import MaskedBatch
 
 if TEST_NUMPY:
     import numpy as np
@@ -937,6 +938,215 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
         # [res] torch.add([res,] tensor1, value, tensor2)
+
+    def mb_rand(self, *dims):
+        dims = [dim for dim in dims if dim != ()]
+        xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:])) for i in range(dims[0])]
+        xb = MaskedBatch.fromlist(xs, tuple(b for b, d in dims[1:]))
+        return xs, (xb.data, xb.mask, xb.dims)
+
+    def mb_assert_allclose(self, xs, ybs):
+        if isinstance(ybs, torch.autograd.Variable):
+            self.assertAlmostEqual(xs.data, ybs.data, places=3)
+        elif isinstance(ybs, MaskedBatch):
+            self.mb_assert_allclose(xs, ybs.examples())
+        else:
+            if isinstance(ybs, (list, tuple)):
+                for j, yb in enumerate(ybs):
+                    for i, y in enumerate(yb.examples()):
+                        self.mb_assert_allclose(xs[i][j], y)
+            else:
+                for x, yb in zip(xs, ybs):
+                    self.mb_assert_allclose(x, yb)
+
+    def test_maskedbatch_elementwise_unary_ops(self):
+        ops_list = ['tanh', 'relu', 'sigmoid']
+        for op in ops_list:
+            xs, batch = self.mb_rand(4, (True, 3), (False, 2))
+            ys = [eval('torch.' + op)(xs[j]) for j in range(4)]
+            ybs = eval('torch.b_' + op)(batch)
+            self.mb_assert_allclose(ys, MaskedBatch(*ybs))
+
+    def test_maskedbatch_elementwise_binary_ops(self):
+        ops_list = ['add', 'sub', 'mul']
+        for op in ops_list:
+            xs, batch = self.mb_rand(4, (True, 3), (False, 2))
+            xs2, batch2 = xs, batch
+            ys = [eval('torch.' + op)(xs[j], xs2[j]) for j in range(4)]
+            ybs = eval('torch.b_' + op)(batch, batch2)
+            self.mb_assert_allclose(ys, MaskedBatch(*ybs))
+
+            # test broadcast
+            xs, batch = self.mb_rand(4, (False, 3), (False, 2))
+            other = torch.rand(3, 2)
+            ys = [eval('torch.' + op)(xs[j], other) for j in range(4)]
+            ybs = eval('torch.b_' + op)(batch, (other,))
+            self.mb_assert_allclose(ys, MaskedBatch(*ybs))
+
+    def test_maskedbatch_elementwise_batch_value_ops(self):
+        ops_list = ['add', 'sub', 'mul']
+        for op in ops_list:
+            xs, batch = self.mb_rand(4, (True, 3), (False, 2))
+            other = 0.5
+            ys = [eval('torch.' + op)(xs[j], other) for j in range(4)]
+            ybs = eval('torch.b_' + op)(batch, other)
+            self.mb_assert_allclose(ys, MaskedBatch(*ybs))
+
+    def test_maskedbatch_mm(self):
+        xs, batch = self.mb_rand(4, (True, 3), (False, 2))
+        xs2, batch2 = self.mb_rand(4, (False, 2), (True, 5))
+        ys = [torch.mm(xs[j].squeeze(0), xs2[j].squeeze(0)).unsqueeze(0) for j in range(4)]
+        ybs = torch.b_mm(batch, batch2)
+        self.mb_assert_allclose(ys, MaskedBatch(*ybs))
+
+        # test broadcast
+        second = torch.rand(2, 5)
+        ys = [torch.mm(xs[j].squeeze(0), second).unsqueeze(0) for j in range(4)]
+        ybs = torch.b_mm(batch, (second,))
+        self.mb_assert_allclose(ys, MaskedBatch(*ybs))
+
+    def test_maskedbatch_matmul(self):
+        def mb_test(xs, batch, xs2, batch2):
+            ys = [torch.matmul(xs[j].squeeze(0), xs2[j].squeeze(0)).unsqueeze(0) for j in range(4)]
+            ybs = torch.b_matmul(batch, batch2)
+            self.mb_assert_allclose(ys, MaskedBatch(*ybs))
+
+        # 1 dimension * 1 dimension
+        xs, batch = self.mb_rand(4, (False, 2))
+        xs2, batch2 = self.mb_rand(4, (False, 2))
+        mb_test(xs, batch, xs2, batch2)
+        # 1 dimension * 2 dimension
+        xs, batch = self.mb_rand(4, (False, 2))
+        xs2, batch2 = self.mb_rand(4, (False, 2), (True, 3))
+        mb_test(xs, batch, xs2, batch2)
+        # 2 dimension * 1 dimensions
+        xs, batch = self.mb_rand(4, (True, 3), (False, 2))
+        xs2, batch2 = self.mb_rand(4, (False, 2))
+        mb_test(xs, batch, xs2, batch2)
+        # 2 dimension * 2 dimension
+        xs, batch = self.mb_rand(4, (True, 3), (False, 2))
+        xs2, batch2 = self.mb_rand(4, (False, 2), (True, 3))
+        mb_test(xs, batch, xs2, batch2)
+
+    def test_maskedbatch_contiguous(self):
+        xs, batch = self.mb_rand(4, (True, 3), (False, 2))
+        ys = [xs[j].contiguous() for j in range(4)]
+        ybs = torch.b_contiguous(batch)
+        self.mb_assert_allclose(ys, MaskedBatch(*ybs))
+
+    def test_maskedbatch_view(self):
+        xs, batch = self.mb_rand(5, (True, 3), (False, 2), (False, 2))
+        ys = [xs[j].view((1, -1, 4)) for j in range(5)]
+        ybs = torch.b_view(batch, (5, -1, 4))
+        self.mb_assert_allclose(ys, MaskedBatch(*ybs))
+
+    def test_maskedbatch_lstm(self):
+        class SlowLSTM(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, bias=True, dropout=0.0):
+                import torch.nn.functional as F
+                from torch import Tensor as T
+                from torch.nn import Parameter as P
+                from torch.autograd import Variable as V
+                super(SlowLSTM, self).__init__()
+                self.input_size = input_size
+                self.hidden_size = hidden_size
+                self.bias = bias
+                self.dropout = dropout
+                # input to hidden weights
+                self.w_xi = P(T(input_size, hidden_size))
+                self.w_xf = P(T(input_size, hidden_size))
+                self.w_xo = P(T(input_size, hidden_size))
+                self.w_xc = P(T(input_size, hidden_size))
+                # hidden to hidden weights
+                self.w_hi = P(T(hidden_size, hidden_size))
+                self.w_hf = P(T(hidden_size, hidden_size))
+                self.w_ho = P(T(hidden_size, hidden_size))
+                self.w_hc = P(T(hidden_size, hidden_size))
+                # bias terms
+                self.b_i = T(hidden_size).fill_(0)
+                self.b_f = T(hidden_size).fill_(0)
+                self.b_o = T(hidden_size).fill_(0)
+                self.b_c = T(hidden_size).fill_(0)
+
+                # Wrap biases as parameters if desired, else as variables without gradients
+                if bias:
+                    W = P
+                else:
+                    W = V
+                self.b_i = W(self.b_i)
+                self.b_f = W(self.b_f)
+                self.b_o = W(self.b_o)
+                self.b_c = W(self.b_c)
+                self.reset_parameters()
+
+            def reset_parameters(self):
+                std = 1.0 / math.sqrt(self.hidden_size)
+                for w in self.parameters():
+                    w.data.uniform_(-std, std)
+
+            def forward_single(self, x, hidden):
+                h, c = hidden
+                h = h.view(h.size(1), -1)
+                c = c.view(c.size(1), -1)
+                x = x.view(x.size(1), -1)
+                # Linear mappings
+                i_t = torch.mm(x, self.w_xi) + torch.mm(h, self.w_hi) + self.b_i
+                f_t = torch.mm(x, self.w_xf) + torch.mm(h, self.w_hf) + self.b_f
+                o_t = torch.mm(x, self.w_xo) + torch.mm(h, self.w_ho) + self.b_o
+                # activations
+                i_t.sigmoid_()
+                f_t.sigmoid_()
+                o_t.sigmoid_()
+                # cell computations
+                c_t = torch.mm(x, self.w_xc) + torch.mm(h, self.w_hc) + self.b_c
+                c_t.tanh_()
+                c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
+                h_t = torch.mul(o_t, torch.tanh(c_t))
+                # Reshape for compatibility
+                h_t = h_t.view(1, h_t.size(0), -1)
+                c_t = c_t.view(1, c_t.size(0), -1)
+                if self.dropout > 0.0:
+                    F.dropout(h_t, p=self.dropout, training=self.training, inplace=True)
+                # return h_t, (h_t, c_t)
+                return h_t
+
+            def forward_batch(self, x, hidden):
+                bs = x[0].size(0)
+                h, c = hidden
+                h = h.view(1, h.size(1), -1)
+                c = c.view(1, c.size(1), -1)
+                x = torch.b_view(x, (bs, x[0].size(1), x[0].size(2)))
+                h = (h.expand(bs, -1, -1), x[1], x[2])
+                c = (c.expand(bs, -1, -1), x[1], x[2])
+                # Linear mappings
+                i_t = torch.b_add(torch.b_add(torch.b_mm(x, (self.w_xi,)), torch.b_mm(h, (self.w_hi,))), (self.b_i,))
+                f_t = torch.b_add(torch.b_add(torch.b_mm(x, (self.w_xf,)), torch.b_mm(h, (self.w_hf,))), (self.b_f,))
+                o_t = torch.b_add(torch.b_add(torch.b_mm(x, (self.w_xo,)), torch.b_mm(h, (self.w_ho,))), (self.b_o,))
+                # activations
+                i_t = torch.b_sigmoid(i_t)
+                f_t = torch.b_sigmoid(f_t)
+                o_t = torch.b_sigmoid(o_t)
+                # cell computations
+                c_t = torch.b_add(torch.b_add(torch.b_mm(x, (self.w_xc,)), torch.b_mm(h, (self.w_hc,))), (self.b_c,))
+                c_t = torch.b_tanh(c_t)
+                c_t = torch.b_add(torch.b_mul(c, f_t), torch.b_mul(i_t, c_t))
+                h_t = torch.b_mul(o_t, torch.b_tanh(c_t))
+                # Reshape for compatibility
+                h_t = torch.b_view(h_t, (bs, h_t[0].size(1), h_t[0].size(2)))
+                c_t = torch.b_view(c_t, (bs, c_t[0].size(1), c_t[0].size(2)))
+                if self.dropout > 0.0:
+                    F.dropout(h_t, p=self.dropout, training=self.training, inplace=True)
+                # return h_t, (h_t, c_t)
+                return h_t
+
+        batch_size, input_size, hidden_size = 5, 3, 2
+        lstm = SlowLSTM(input_size, hidden_size)
+        xs, batch = self.mb_rand(batch_size, (False, 4), (False, input_size))
+        hx = torch.randn(1, 4, hidden_size)
+        cx = torch.randn(1, 4, hidden_size)
+        ys = [lstm.forward_single(xs[j], (hx, cx)) for j in range(batch_size)]
+        ybs = lstm.forward_batch(batch, (hx, cx))
+        self.mb_assert_allclose(ys, MaskedBatch(*ybs))
 
     def test_csub(self):
         # with a tensor
