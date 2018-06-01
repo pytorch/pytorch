@@ -106,6 +106,7 @@ def visualize_rec(graph, value_map, name_prefix, pb_graph, executors_it=None):
             value_map[val.unique()] = rec_value_map[out.unique()]
 
     op_id_counter = defaultdict(int)
+
     def name_for(node):
         kind = node.kind()[node.kind().index('::') + 2:]
         op_id_counter[kind] += 1
