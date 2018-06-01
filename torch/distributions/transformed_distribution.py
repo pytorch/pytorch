@@ -28,8 +28,12 @@ class TransformedDistribution(Distribution):
         transforms = [SigmoidTransform().inv, AffineTransform(loc=a, scale=b)]
         logistic = TransformedDistribution(base_distribution, transforms)
 
-    For more examples, please look at the implementations of :class:`Pareto`
-    and :class:`Gumbel`.
+    For more examples, please look at the implementations of
+    :class:`~torch.distributions.gumbel.Gumbel`,
+    :class:`~torch.distributions.log_normal.LogNormal`,
+    :class:`~torch.distributions.pareto.Pareto`,
+    :class:`~torch.distributions.relaxed_bernoulli.RelaxedBernoulli` and
+    :class:`~torch.distributions.relaxed_categorical.RelaxedOneHotCategorical`
     """
     arg_constraints = {}
 
