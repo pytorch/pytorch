@@ -1338,6 +1338,46 @@ class TestNN(NNTestCase):
         sample = next(model.parameters())[0, 0, 0]
         self.assertTrue(torch.equal(sample.data, vec.data[:5]))
 
+    # We don't want to make propagating NaN a hard requirement on ops, but for
+    # these easy ones, we should make them do so.
+    def _test_nonlinearity_propagate_nan(self, device):
+        nan = float('nan')
+
+        def test(nonlinearity, *args, **kwargs):
+            x = torch.tensor([nan], device=device)
+            fn = getattr(F, nonlinearity)
+            try:
+                self.assertTrue(math.isnan(fn(x, *args, **kwargs).item()))
+            except Exception as e:
+                if 'not implemented' not in str(e):
+                    raise
+
+        test('relu')
+        test('relu', inplace=True)
+        test('relu6')
+        test('elu')
+        test('selu')
+        test('rrelu')
+        test('rrelu', inplace=True)
+        test('hardtanh')
+        test('tanh')
+        test('sigmoid')
+        test('logsigmoid')
+        test('hardshrink')
+        test('tanhshrink')
+        test('softsign')
+        test('softmin', 0)
+        test('softmax', 0)
+        test('log_softmax', 0)
+        test('leaky_relu', 0.2)
+
+    def test_nonlinearity_propagate_nan(self):
+        self._test_nonlinearity_propagate_nan('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_nonlinearity_propagate_nan_cuda(self):
+        self._test_nonlinearity_propagate_nan('cuda')
+
     def test_weight_norm(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
@@ -2247,8 +2287,8 @@ class TestNN(NNTestCase):
 
     def _test_gather(self, output_device):
         inputs = (
-            Variable(torch.randn(2, 4).cuda(0), requires_grad=True),
-            Variable(torch.randn(2, 4).cuda(1), requires_grad=True)
+            torch.randn(2, 4, device='cuda:0', requires_grad=True),
+            torch.randn(2, 4, device='cuda:1', requires_grad=True),
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([4, 4]))
@@ -2264,6 +2304,27 @@ class TestNN(NNTestCase):
         result.backward(grad)
         self.assertEqual(inputs[0].grad.data, grad[:2])
         self.assertEqual(inputs[1].grad.data, grad[2:])
+        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
+
+        # test scalar inputs, should stack into a vector in this case
+        inputs = (
+            torch.randn((), device='cuda:0', requires_grad=True),
+            torch.randn((), device='cuda:1', requires_grad=True),
+        )
+        result = dp.gather(inputs, output_device)
+        self.assertEqual(result.size(), torch.Size([2]))
+        self.assertEqual(result[0], inputs[0])
+        self.assertEqual(result[1], inputs[1])
+        if output_device != -1:
+            self.assertEqual(result.get_device(), output_device)
+        else:
+            self.assertFalse(result.is_cuda)
+        grad = torch.randn(2)
+        if output_device != -1:
+            grad = grad.cuda(output_device)
+        result.backward(grad)
+        self.assertEqual(inputs[0].grad, grad[0])
+        self.assertEqual(inputs[1].grad, grad[1])
         _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
