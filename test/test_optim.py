@@ -501,24 +501,28 @@ class TestOptim(TestCase):
 
         self._test_basic_cases(
             lambda weight, bias: optim.SVRG([weight, bias],
-                                            [weight.new(weight.data.clone()), bias.new(bias.data.clone())], lr=1e-3)
+                                            [weight.new(weight.data.clone()),
+                                             bias.new(bias.data.clone())], lr=1e-3)
         )
         self._test_basic_cases(
             lambda weight, bias: optim.SVRG(
                 self._build_params_dict(weight, bias, lr=1e-2),
-                _build_snapshot_params_dict(weight.new(weight.data.clone()), bias.new(bias.data.clone()), lr=1e-2),
+                _build_snapshot_params_dict(weight.new(weight.data.clone()),
+                                            bias.new(bias.data.clone()), lr=1e-2),
                 lr=1e-3)
         )
         self._test_basic_cases(
             lambda weight, bias: optim.SVRG(
                 self._build_params_dict_single(weight, bias, lr=1e-2),
-                _build_snapshot_params_dict_single(weight.new(weight.data.clone()), bias.new(bias.data.clone()), lr=1e-2),
+                _build_snapshot_params_dict_single(weight.new(weight.data.clone()),
+                                                   bias.new(bias.data.clone()), lr=1e-2),
                 lr=1e-3)
         )
         self._test_basic_cases(
             lambda weight, bias: optim.SVRG(
                 self._build_params_dict_single(weight, bias, lr=1e-2),
-                _build_snapshot_params_dict_single(weight.new(weight.data.clone()), bias.new(bias.data.clone()), lr=1e-2)
+                _build_snapshot_params_dict_single(weight.new(weight.data.clone()),
+                                                   bias.new(bias.data.clone()), lr=1e-2)
             )
         )
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
@@ -526,7 +530,8 @@ class TestOptim(TestCase):
 
     def test_svrg_sparse(self):
         self._test_rosenbrock_sparse(
-            lambda params: optim.SVRG(params, [param.new(param.data.clone()) for param in params], lr=5e-3)
+            lambda params: optim.SVRG(params,
+                                      [param.new(param.data.clone()) for param in params], lr=5e-3)
         )
 
 

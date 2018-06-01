@@ -139,8 +139,8 @@ class SVRG(Optimizer):
                     if p.grad is None:
                         continue
                     if i == 0:
-                        group['average_gradient'][idx].zero_()
-                    group['average_gradient'][idx].add_(1/len(dataloader), p.grad.data)
+                        state['average_gradient'].zero_()
+                    state['average_gradient'].add_(1 / len(dataloader), p.grad.data)
 
     def zero_grad(self):
         r"""Clears the gradients of all optimized :class:`Variable` s."""
