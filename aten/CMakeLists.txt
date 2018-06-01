@@ -25,18 +25,12 @@ else()
   cmake_dependent_option(
       NO_MKLDNN "Legacy no MKLDNN" OFF
       "USE_MKLDNN" ON)
-  cmake_dependent_option(
-      WITH_ROCM "Legacy ROCm" ON
-      "USE_ROCM" OFF)
 
   # Flag for shared dependencies
   set(BUILD_ATEN ON)
 endif()
 if (NOT USE_CUDA)
   set(NO_CUDA ON)
-endif()
-if (WITH_ROCM)
-  set(USE_ROCM ON)
 endif()
 
 # Create the project in all cases
@@ -123,7 +117,7 @@ add_subdirectory(src/THNN)
 add_subdirectory(src/THS)
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.
-IF(WITH_ROCM)
+IF(USE_ROCM)
   include(LoadHIP)
 ENDIF()
 
@@ -133,7 +127,7 @@ IF(MSVC)
   LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
 ENDIF(MSVC)
 
-if(WITH_ROCM)
+if(USE_ROCM)
   SET(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
