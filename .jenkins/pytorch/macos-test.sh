@@ -25,9 +25,9 @@ export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 export MACOSX_DEPLOYMENT_TARGET=10.9
 export CXX=clang++
 export CC=clang
-if which ccache > /dev/null; then
-  export CXX="ccache clang++"
-  export CC="ccache clang"
+if which sccache > /dev/null; then
+  export CXX="sccache clang++"
+  export CC="sccache clang"
 fi
 # If we run too many parallel jobs, we will OOM
 export MAX_JOBS=2
