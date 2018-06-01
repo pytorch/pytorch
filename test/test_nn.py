@@ -2287,8 +2287,8 @@ class TestNN(NNTestCase):
 
     def _test_gather(self, output_device):
         inputs = (
-            Variable(torch.randn(2, 4).cuda(0), requires_grad=True),
-            Variable(torch.randn(2, 4).cuda(1), requires_grad=True)
+            torch.randn(2, 4, device='cuda:0', requires_grad=True),
+            torch.randn(2, 4, device='cuda:1', requires_grad=True),
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([4, 4]))
@@ -2304,6 +2304,27 @@ class TestNN(NNTestCase):
         result.backward(grad)
         self.assertEqual(inputs[0].grad.data, grad[:2])
         self.assertEqual(inputs[1].grad.data, grad[2:])
+        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
+
+        # test scalar inputs, should stack into a vector in this case
+        inputs = (
+            torch.randn((), device='cuda:0', requires_grad=True),
+            torch.randn((), device='cuda:1', requires_grad=True),
+        )
+        result = dp.gather(inputs, output_device)
+        self.assertEqual(result.size(), torch.Size([2]))
+        self.assertEqual(result[0], inputs[0])
+        self.assertEqual(result[1], inputs[1])
+        if output_device != -1:
+            self.assertEqual(result.get_device(), output_device)
+        else:
+            self.assertFalse(result.is_cuda)
+        grad = torch.randn(2)
+        if output_device != -1:
+            grad = grad.cuda(output_device)
+        result.backward(grad)
+        self.assertEqual(inputs[0].grad, grad[0])
+        self.assertEqual(inputs[1].grad, grad[1])
         _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
