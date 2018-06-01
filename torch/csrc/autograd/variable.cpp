@@ -122,7 +122,6 @@ void Variable::Impl::backward(
     gradient = make_variable(at::ones_like(data_), /*requires_grad=*/false);
   }
   inputs.push_back(std::move(as_variable_ref(*gradient)));
-
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
 }
 

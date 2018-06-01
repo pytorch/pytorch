@@ -477,12 +477,24 @@ auto Engine::execute(const edge_list& input_roots,
   return graph_task.captured_vars;
 }
 
-#ifdef NO_PYTHON
-Engine& Engine::get_default_engine() {
+// note that when python is present, this base engine will be overriden
+// with a PythonEngine. Because this typically happens before get_default_engine
+// is called, this base engine will never be created.
+static Engine& get_base_engine() {
   static Engine engine;
   return engine;
 }
-#endif
+
+std::atomic<EngineStub> engine_stub(get_base_engine);
+
+void set_default_engine_stub(EngineStub stub) {
+  engine_stub.store(stub);
+}
+
+
+Engine& Engine::get_default_engine() {
+  return engine_stub.load()();
+}
 
 void Engine::queue_callback(std::function<void()> callback) {
   std::lock_guard<std::mutex> lock(post_callbacks_lock);
