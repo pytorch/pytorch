@@ -717,12 +717,17 @@ class _ConstSequential(_ConstModuleList):
     def __init__(self, mods):
         super(_ConstSequential, self).__init__(mods._modules.values())
 
-    @script_method
-    def forward(self, input):
-        for m in self:
-            input = m(input)
-        return input
-
+        # we define the forward method via self.define rather than
+        # making it a direct class member (with a @script) annotation
+        # because, in optimized runtime environments where only .pyc files
+        # are shipped, we cant retrieve the source code.
+        # TODO: find a workaround for this and remove this hack
+        self.define("""
+        def forward(self, input):
+            for m in self:
+                input = m(input)
+            return input
+        """)
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
