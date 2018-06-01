@@ -2876,6 +2876,30 @@ class TestScript(TestCase):
         self.assertEqual(w.grad, w_ref.grad)
         self.assertEqual(b.grad, b_ref.grad)
 
+    def test_zeros(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['d']
+
+            def __init__(self):
+                self.d = torch.device('cpu')
+
+            @torch.jit.script_method
+            def create(self):
+                return torch.zeros([1, 1, 2], dtype=torch.float, device=self.d, layout=torch.strided)
+
+        r = M().create()
+        self.assertEqual(r.dtype, torch.float)
+        self.assertEqual(torch.zeros([1, 1, 2], dtype=torch.float), r)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    def test_rand(self):
+
+        def test_rand():
+            a = torch.rand([3, 4])
+            return a + 1.0 - a
+
+        self.checkScript(test_rand, ())
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):

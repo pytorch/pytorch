@@ -3,6 +3,8 @@
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/functional.h"
+#include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/utils/device.h"
 
 #include <unordered_map>
 #include <cstring>
@@ -85,6 +87,26 @@ std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   JIT_ASSERT(vec.size() == N);
   std::copy(vec.begin(), vec.end(), res.begin());
   return res;
+}
+
+static at::Backend resolveBackend(int64_t device_type, int64_t is_strided) {
+  switch(static_cast<torch::DeviceType>(device_type)) {
+    case torch::DeviceType::CPU:
+      if(is_strided)
+        return at::kCPU;
+      else
+        return at::kSparseCPU;
+    case torch::DeviceType::CUDA:
+      if(is_strided)
+        return at::kCUDA;
+      else
+        return at::kSparseCUDA;
+  }
+  throw std::runtime_error("unknown backend");
+}
+
+static at::Type& resolveType(int64_t device_type, int64_t is_strided, at::ScalarType type) {
+  return torch::getType(resolveBackend(device_type, is_strided), type);
 }
 
 using operator_constructor = std::function<TensorOp(jit::Node*)>;
