@@ -1341,8 +1341,9 @@ class TestNN(NNTestCase):
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
     def _test_nonlinearity_propagate_nan(self, device):
+        nan = float('nan')
         def test(nonlinearity, *args, **kwargs):
-            x = torch.tensor([math.nan], device=device)
+            x = torch.tensor([nan], device=device)
             fn = getattr(F, nonlinearity)
             try:
                 self.assertTrue(math.isnan(fn(x, *args, **kwargs).item()))
