@@ -605,7 +605,7 @@ def type_as(g, self, other):
         return self
     else:
         other_type_name = self.type().scalarType().lower()
-        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
+        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[scalar_name_to_pytorch[other_type_name]])
 
 
 # ignore clone operators that are inserted by PyTorch autograd
@@ -687,14 +687,25 @@ def _unique(g, input, sorted, return_inverse):
 # TODO: remove these once we support Type's in the JIT IR and we can once again
 # use the unified toType operator
 cast_pytorch_to_onnx = {
-    'uint8_t': torch.onnx.TensorProtoDataType.UINT8,
-    'int8_t': torch.onnx.TensorProtoDataType.INT8,
-    'double': torch.onnx.TensorProtoDataType.DOUBLE,
-    'float': torch.onnx.TensorProtoDataType.FLOAT,
+    'Byte': torch.onnx.TensorProtoDataType.UINT8,
+    'Char': torch.onnx.TensorProtoDataType.INT8,
+    'Double': torch.onnx.TensorProtoDataType.DOUBLE,
+    'Float': torch.onnx.TensorProtoDataType.FLOAT,
     'Half': torch.onnx.TensorProtoDataType.FLOAT16,
-    'int': torch.onnx.TensorProtoDataType.INT32,
-    'int64_t': torch.onnx.TensorProtoDataType.INT64,
-    'int16_t': torch.onnx.TensorProtoDataType.INT16,
+    'Int': torch.onnx.TensorProtoDataType.INT32,
+    'Long': torch.onnx.TensorProtoDataType.INT64,
+    'Short': torch.onnx.TensorProtoDataType.INT16,
+}
+
+scalar_name_to_pytorch = {
+    'uint8_t': 'Byte',
+    'int8_t': 'Char',
+    'double': 'Double',
+    'float': 'Float',
+    'half': 'Half',
+    'int': 'Int',
+    'int64_t': 'Long',
+    'int16_t': 'Short',
 }
 
 
