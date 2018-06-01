@@ -87,6 +87,26 @@ class BatchDistillLRLoss(ModelLayer):
             net.NextScopedBlob('scaled_teacher_cross_entropy'),
             scale=self._teacherWeight,
         )
+        if 'weight' in self.input_record.fields:
+            weight_blob = self.input_record.weight()
+            if self.input_record.weight.field_type().base != np.float32:
+                weight_blob = net.Cast(
+                    weight_blob,
+                    weight_blob + '_float32',
+                    to=core.DataType.FLOAT
+                )
+            weight_blob = net.StopGradient(
+                [weight_blob],
+                [net.NextScopedBlob('weight_stop_gradient')],
+            )
+            scaled_true_xent = net.Mul(
+                [scaled_true_xent, weight_blob],
+                net.NextScopedBlob('weighted_xent_label'),
+            )
+            scaled_teacher_xent = net.Mul(
+                [scaled_teacher_xent, weight_blob],
+                net.NextScopedBlob('weighted_xent_teacher'),
+            )
 
         true_loss = net.AveragedLoss(
             scaled_true_xent,
@@ -96,7 +116,6 @@ class BatchDistillLRLoss(ModelLayer):
             scaled_teacher_xent,
             net.NextScopedBlob('teacher_loss')
         )
-
         net.Add(
             [true_loss, teacher_loss],
             self.output_schema.field_blobs()
