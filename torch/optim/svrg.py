@@ -72,10 +72,12 @@ class SVRG(Optimizer):
             for idx, p in enumerate(group['params']):
                 if p.grad is None:
                     continue
-                if p.grad.data.is_sparse:
-                    raise RuntimeError('SVRG does not support sparse gradients')
+                state = self.state[p]
+                # State initialization, add the average gradient to the state
+                if len(state) == 0:
+                    state['average_gradient'] = torch.zeros_like(p.grad.data)
+                average_gradient = state['average_gradient']
                 snapshot_params = group['snapshot_params'][idx]
-                average_gradient = group['average_gradient'][idx]
                 # gradient data
                 d_p = p.grad.data
                 # subtract the average gradient
@@ -125,6 +127,10 @@ class SVRG(Optimizer):
         for group in self.param_groups:
             for p, sp in zip(group['params'], group['snapshot_params']):
                 sp.data.copy_(p.data)
+                state = self.state[p]
+                # State initialization, add the average gradient to the state
+                if len(state) == 0:
+                    state['average_gradient'] = torch.zeros_like(p.grad.data)
         # Iterate over all the dataset to compute the average gradient
         for i, (data, target) in enumerate(dataloader):
             closure(data, target)
@@ -167,10 +173,6 @@ class SVRG(Optimizer):
             else:
                 param_group['snapshot_params'] = list(snapshot_params)
 
-        # Add the snapshot_params and the average gradient to the parameter groups
+        # Add the snapshot_params to the parameter groups
         for idx, group in enumerate(self.param_groups):
             group['snapshot_params'] = snapshot_param_groups[idx]['snapshot_params']
-            group['average_gradient'] = list()
-            for p in group['params']:
-                # This is the part that breaks Sparse Tensor support
-                group['average_gradient'].append(torch.zeros_like(p.data))

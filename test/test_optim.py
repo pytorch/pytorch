@@ -524,6 +524,11 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
             optim.SVRG(None, None, lr=1e-2, momentum=-0.5)
 
+    def test_svrg_sparse(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SVRG(params, [param.new(param.data.clone()) for param in params], lr=5e-3)
+        )
+
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
