@@ -16,7 +16,7 @@ fi
 export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
 source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
-rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch
+rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 
 git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
@@ -31,7 +31,7 @@ export MAX_JOBS=2
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 
 # Download torch binaries in the test jobs
-rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch
+rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
 7z x ${IMAGE_COMMIT_TAG}.7z -o"${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages"
 
