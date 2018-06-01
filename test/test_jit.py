@@ -1592,7 +1592,7 @@ class TestScript(TestCase):
         self.assertEqual(with_docstring.__doc__, 'test str')
 
     def test_script_method_docstring(self):
-        class A:
+        class A(torch.jit.ScriptModule):
             @torch.jit.script_method
             def with_docstring(self, x):
                 """test str"""

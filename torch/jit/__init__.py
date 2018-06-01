@@ -374,13 +374,12 @@ def script(fn, _frames_up=0):
     return Wrapper(graph, True)
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'wrap'))
 
 
 def script_method(fn):
-    fn_attributes = {i: getattr(fn, i) for i in functools.WRAPPER_ASSIGNMENTS}
-    Wrapper = type('ScriptMethodStubWrapper', (ScriptMethodStub, ), fn_attributes)
-    return Wrapper(createResolutionCallback(frames_up=1), get_jit_ast(fn))
+    wrap = functools.wraps(fn)(lambda: None)
+    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn), wrap)
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -537,11 +536,13 @@ class ScriptMeta(type(torch._C.ScriptModule)):
     # a pybind11 type
     def __init__(cls, name, bases, attrs):
         # find all the script methods
+        cls.wraps = {}
         methods = []
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
                 delattr(cls, k)
                 methods.append(v)
+                cls.wraps[v.wrap.__name__] = v.wrap
         # after the user's __init__ register all the script methods
         # with the module
         original_init = getattr(cls, '__init__', lambda self: None)
@@ -563,6 +564,18 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
+class ScriptMethodWrapper(object):
+    def __init__(self, script_method):
+        self.script_method = script_method
+
+    def __call__(self, *args, **kwargs):
+        return self.script_method(*args, **kwargs)
+
+
+def _build_wrap(wrap, script_method):
+    return functools.wraps(wrap)(ScriptMethodWrapper(script_method))
+
+
 class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def __init__(self, optimize=True):
         # must be before Module.init since the field is used in __getattr__
@@ -574,7 +587,10 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
 
     def __getattr__(self, attr):
         if self._has_method(attr):
-            return self._get_method(attr)
+            if attr in self.__class__.wraps:
+                return _build_wrap(self.__class__.wraps[attr], self._get_method(attr))
+            else:
+                return self._get_method(attr)
         return Module.__getattr__(self, attr)
 
     def __setattr__(self, attr, value):
