@@ -37,10 +37,15 @@ size_t ReplaceAll(string& s, const char* from, const char* to) {
   return numReplaced;
 }
 
-static std::function<string(void)> FetchStackTrace = []() { return ""; };
+namespace {
+std::function<string(void)>* GetFetchStackTrace() {
+  static std::function<string(void)> func = []() { return ""; };
+  return &func;
+};
+} // namespace
 
 void SetStackTraceFetcher(std::function<string(void)> fetcher) {
-  FetchStackTrace = fetcher;
+  *GetFetchStackTrace() = fetcher;
 }
 
 static std::function<void(const OperatorDef&)> OperatorLogger =
@@ -70,7 +75,7 @@ EnforceNotMet::EnforceNotMet(
           ". ",
           msg,
           " ")},
-      stack_trace_(FetchStackTrace()) {
+      stack_trace_((*GetFetchStackTrace())()) {
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << msg_stack_[0];
   }

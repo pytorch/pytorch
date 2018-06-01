@@ -45,6 +45,7 @@ class PerfOperatorObserver : public ObserverBase<OperatorBase> {
   virtual ~PerfOperatorObserver();
 
   double getMilliseconds() const;
+  OpSchema::Cost getAnalyticalCost() const;
 
  private:
   void Start() override;

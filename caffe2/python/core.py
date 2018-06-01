@@ -82,7 +82,7 @@ def IsOperatorWithEngine(op_type, engine):
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
-def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None):
+def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None, numa_node_id=None):
     option = caffe2_pb2.DeviceOption()
     option.device_type = device_type
     option.cuda_gpu_id = cuda_gpu_id
@@ -90,6 +90,9 @@ def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None):
         option.node_name = node_name
     if random_seed is not None:
         option.random_seed = random_seed
+    if numa_node_id is not None:
+        assert device_type == caffe2_pb2.CPU
+        option.numa_node_id = numa_node_id
     return option
 
 
@@ -2256,6 +2259,8 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
     Assumptions:
       1. every external inputs of this net is already in blob_to_device!
       2. if not, this function will use net device option
+      3. InferOpBlobDevices might fail to get the correct inference for ops like
+         EnsureCPUOutput that could take in input from multiple places.
     '''
     new_net = net.Clone(net._net.name + '_cross_device', keep_schema=True)
     del new_net._net.op[:]
