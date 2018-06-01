@@ -82,7 +82,7 @@ def IsOperatorWithEngine(op_type, engine):
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
-def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None):
+def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None, numa_node_id=None):
     option = caffe2_pb2.DeviceOption()
     option.device_type = device_type
     option.cuda_gpu_id = cuda_gpu_id
@@ -90,6 +90,9 @@ def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None):
         option.node_name = node_name
     if random_seed is not None:
         option.random_seed = random_seed
+    if numa_node_id is not None:
+        assert device_type == caffe2_pb2.CPU
+        option.numa_node_id = numa_node_id
     return option
 
 

@@ -28,7 +28,9 @@ class PrependDimOp : public Operator<Context> {
     CAFFE_ENFORCE(
         input.dim(0) % dim_size_ == 0,
         "First dimension must be multiple of prepend_dim. Current first dimension: ",
-        input.dim(0));
+        input.dim(0),
+        ", prepend dim: ",
+        dim_size_);
 
     vector<int64_t> actual_new_shape(input.ndim() + 1);
     actual_new_shape[0] = dim_size_;
