@@ -61,4 +61,8 @@ protected:
   std::mutex post_callbacks_lock;
 };
 
+// allow python_engine to override the default engine when it loads
+typedef Engine& (*EngineStub)(void);
+void set_default_engine_stub(EngineStub stub);
+
 }} // namespace torch::autograd

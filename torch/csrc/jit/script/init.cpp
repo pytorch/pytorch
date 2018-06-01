@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/Device.h"
+#include "torch/csrc/jit/tensor_conversions.h"
 
 namespace torch {
 namespace jit {
@@ -17,6 +19,12 @@ using ResolutionCallback = std::function<py::function(std::string)>;
 
 static std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
+}
+
+static std::shared_ptr<SugaredValue> createConstant(SourceRange loc, Method& m, const at::Tensor& val) {
+  auto n = m.graph()->createConstant(val);
+  n->setSourceLocation(std::make_shared<SourceRange>(loc));
+  return std::make_shared<SimpleValue>(m.graph()->insertNode(n)->output());
 }
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
@@ -93,19 +101,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return packOutputs(*m.graph(), outputs);
   }
 
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
-    // We generally don't want to allow traversing arbitrary Python objects, but we
-    // make an exception for traversing modules because we want to be access
-    // torch, torch.nn.functional, and the functions they expose.
-    py::object member = getattr(loc, field);
-    if (isBuiltinModule() && py::isinstance<py::function>(member)) {
-      return std::make_shared<BuiltinFunction>(field, at::nullopt);
-    }
-    if (py::isinstance<py::module>(self) && py::isinstance<py::module>(member)) {
-      return std::make_shared<PythonValue>(member);
-    }
-    throw ErrorReport(loc) << "unsupported attribute lookup on " << py::repr(self) << ".";
-  }
+  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
 
   virtual std::string kind() const override {
     std::stringstream ss;
@@ -167,16 +163,43 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
       return createConstant(loc, m, at::CPU(at::kFloat).scalarTensor(py::cast<float>(self)));
     } else if(py::isinstance<py::bool_>(self)) {
       return createConstant(loc, m, at::CPU(at::kByte).scalarTensor(py::cast<bool>(self)));
+    } else if(THPDevice_Check(self.ptr())) {
+      auto device = (THPDevice*) self.ptr();
+      auto t = as_tensor({static_cast<int64_t>(device->device.type), device->device.deviceInt64()});
+      return createConstant(loc, m, t);
+    } else if(THPLayout_Check(self.ptr())) {
+      auto layout = (THPLayout*) self.ptr();
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(layout->is_strided));
+    } else if(THPDtype_Check(self.ptr())) {
+      auto dtype = (THPDtype*)(self.ptr());
+      int64_t v = static_cast<int64_t>(dtype->scalar_type);
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
     }
     return std::make_shared<ConstantPythonValue>(self);
   }
-private:
-  static std::shared_ptr<SugaredValue> createConstant(SourceRange loc, Method& m, const at::Tensor& val) {
-    auto n = m.graph()->createConstant(val);
-    n->setSourceLocation(std::make_shared<SourceRange>(loc));
-    return std::make_shared<SimpleValue>(m.graph()->insertNode(n)->output());
-  }
 };
+
+std::shared_ptr<SugaredValue> PythonValue::attr(SourceRange loc, Method & m, const std::string& field) {
+  // We generally don't want to allow traversing arbitrary Python objects, but we
+  // make an exception for traversing modules because we want to be access
+  // torch, torch.nn.functional, and the functions they expose.
+  py::object member = getattr(loc, field);
+  if (isBuiltinModule()) {
+    if(py::isinstance<py::function>(member)) {
+      return std::make_shared<BuiltinFunction>(field, at::nullopt);
+    }
+    //e.g. any tensor attribute objects such as torch.uint8
+    if(THPDtype_Check(member.ptr()) ||
+       THPLayout_Check(member.ptr()) ||
+       THPDevice_Check(member.ptr())) {
+      return ConstantPythonValue::create(loc, m, member);
+    }
+  }
+  if (py::isinstance<py::module>(self) && py::isinstance<py::module>(member)) {
+    return std::make_shared<PythonValue>(member);
+  }
+  throw ErrorReport(loc) << "unsupported attribute lookup on " << py::repr(self) << ".";
+}
 
 Resolver pythonResolver(ResolutionCallback rcb) {
   return [=](const std::string& name) -> std::shared_ptr<SugaredValue> {

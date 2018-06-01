@@ -34,6 +34,15 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
+export ATEN_DISABLE_AVX=
+export ATEN_DISABLE_AVX2=
+if [[ "${JOB_BASE_NAME}" == *NO_AVX* ]]; then
+  export ATEN_DISABLE_AVX=1
+fi
+if [[ "${JOB_BASE_NAME}" == *NO_AVX2* ]]; then
+  export ATEN_DISABLE_AVX2=1
+fi
+
 test_python_nn() {
   time python test/run_test.py --include nn --verbose
 }
