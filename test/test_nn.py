@@ -27,7 +27,8 @@ from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
-    TEST_SCIPY, download_file, PY3, PY34, to_gpu, get_function_arglist
+    TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
+    get_function_arglist, skipCUDAMemoryLeakCheckIf
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
@@ -5429,26 +5430,29 @@ def _rand_tensor_non_equal(*size):
     return torch.randperm(total).view(*size).double()
 
 
-def add_test(test):
+def add_test(test, decorator=None):
+    def add(test_name, fn):
+        if hasattr(TestNN, test_name):
+            raise RuntimeError('Found two tests with the same name: ' + test_name)
+        if decorator is not None:
+            fn = decorator(fn)
+        setattr(TestNN, test_name, fn)
+
     test_name = test.get_name()
-    cuda_test_name = test_name + '_cuda'
-    if hasattr(TestNN, test_name):
-        raise RuntimeError('Found two tests with the same name: ' + test_name)
-    if hasattr(TestNN, cuda_test_name):
-        raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
-    setattr(TestNN, test_name, lambda self, test=test: test(self))
+    add(test_name, lambda self, test=test: test(self))
     # Hardshrink is not implemented in CUDA, so we must not test it.
     if not test_name.startswith("test_Hardshrink"):
+        cuda_test_name = test_name + '_cuda'
         # With dtype enable, it's good enough to test against three floating types
         if 'dtype' in get_function_arglist(test.test_cuda):
-            setattr(TestNN, cuda_test_name + '_float', lambda self,
-                    test=test: test.test_cuda(self, dtype=torch.float))
-            setattr(TestNN, cuda_test_name + '_double', lambda self,
-                    test=test: test.test_cuda(self, dtype=torch.double))
-            setattr(TestNN, cuda_test_name + '_half', lambda self,
-                    test=test: test.test_cuda(self, dtype=torch.half))
+            add(cuda_test_name + '_float', lambda self,
+                test=test: test.test_cuda(self, dtype=torch.float))
+            add(cuda_test_name + '_double', lambda self,
+                test=test: test.test_cuda(self, dtype=torch.double))
+            add(cuda_test_name + '_half', lambda self,
+                test=test: test.test_cuda(self, dtype=torch.half))
         else:
-            setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
+            add(cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
 def wrap_functional(fn, **kwargs):
@@ -6180,6 +6184,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6188,6 +6193,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6196,6 +6202,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine_simple_average',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6204,6 +6211,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6212,6 +6220,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6220,6 +6229,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input_not_affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6227,6 +6237,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6235,6 +6246,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_simple_average',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6243,6 +6255,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6251,6 +6264,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6259,6 +6273,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6266,6 +6281,7 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6274,6 +6290,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_simple_average',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6282,6 +6299,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6290,6 +6308,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6298,6 +6317,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -6305,6 +6325,7 @@ new_module_tests = [
         input_size=(4, 3, 15),
         cudnn=True,
         check_eval=True,
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -6313,6 +6334,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -6320,6 +6342,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -6328,6 +6351,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -6335,6 +6359,7 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -6343,6 +6368,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6351,6 +6377,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_elementwise_affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6359,6 +6386,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_elementwise_affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6367,6 +6395,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_elementwise_affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6375,6 +6404,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6383,6 +6413,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6391,6 +6422,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNorm
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6399,6 +6431,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6407,6 +6440,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_affine',
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6415,6 +6449,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6423,6 +6458,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
+        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='Conv1d',
@@ -7380,8 +7416,9 @@ for test_params in module_tests + new_module_tests:
     if 'constructor' not in test_params:
         name = test_params.pop('module_name')
         test_params['constructor'] = getattr(nn, name)
+    decorator = test_params.pop('decorator', None)
     test = NewModuleTest(**test_params)
-    add_test(test)
+    add_test(test, decorator)
     if 'check_eval' in test_params:
         # create a new test that is identical but that sets module.training to False
         desc = test_params.get('desc', None)
@@ -7397,13 +7434,14 @@ for test_params in module_tests + new_module_tests:
 
         test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
         test = NewModuleTest(**test_params)
-        add_test(test)
+        add_test(test, decorator)
 
 for test_params in criterion_tests + new_criterion_tests:
     name = test_params.pop('module_name')
     test_params['constructor'] = getattr(nn, name)
     test = NewCriterionTest(**test_params)
-    add_test(test)
+    decorator = test_params.pop('decorator', None)
+    add_test(test, decorator)
     if 'check_no_size_average' in test_params:
         desc = test_params.get('desc', None)
         test_params['desc'] = 'no_size_average' if desc is None else desc + '_no_size_average'
@@ -7417,7 +7455,7 @@ for test_params in criterion_tests + new_criterion_tests:
 
         test_params['constructor'] = gen_no_size_average_constructor(test_params['constructor'])
         test = NewCriterionTest(**test_params)
-        add_test(test)
+        add_test(test, decorator)
 
 
 class UnpoolingNet(nn.Module):

@@ -82,9 +82,12 @@ def skipIfNoLapack(fn):
     return wrapper
 
 
-def skipCUDAMemoryLeakCheck(fn):
-    fn._do_cuda_memory_leak_check = False
-    return fn
+def skipCUDAMemoryLeakCheckIf(condition):
+    def dec(fn):
+        if getattr(fn, '_do_cuda_memory_leak_check', True):  # if current True
+            fn._do_cuda_memory_leak_check = not condition
+        return fn
+    return dec
 
 
 def get_cuda_memory_usage():
