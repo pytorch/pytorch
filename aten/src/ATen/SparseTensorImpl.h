@@ -1,8 +1,5 @@
 #pragma once
 
-#include <atomic>
-#include <memory>
-
 #include "ATen/TensorImpl.h"
 
 namespace at {
