@@ -37,7 +37,7 @@ def main(args):
 
     iters = int(args.instances)
     for i in range(iters):
-        input_blob_name = input_name + (str(i) if args.chain else '')
+        input_blob_name = input_name + (str(i) if i > 0 and args.chain else '')
         output_blob_name = output_name + str(i + 1)
         add_op = getattr(brew, op_type)
         add_op(model, input_blob_name, output_blob_name, **kwargs)
