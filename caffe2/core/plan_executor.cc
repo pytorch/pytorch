@@ -489,6 +489,7 @@ bool RunPlanOnWorkspace(
 
   NetDefMap net_defs;
   for (const NetDef& net_def : plan.network()) {
+    LOG(INFO) << "Processing net '" << net_def.name() << "'";
     CAFFE_ENFORCE(
         net_defs.count(net_def.name()) == 0,
         "Your plan contains networks of the same name \"",

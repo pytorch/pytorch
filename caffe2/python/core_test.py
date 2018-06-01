@@ -655,14 +655,7 @@ class TestInferDevice(test_util.TestCase):
     def test_infer_device_cross_device(self):
         self._test_op("CopyGPUToCPU", self.cuda_option, self.cpu_option)
         self._test_op("CopyCPUToGPU", self.cpu_option, self.cuda_option)
-        self._test_op("EnsureCPUOutput", self.cuda_option, self.cpu_option)
         self._test_op("CopyFromCPUInput", self.cpu_option, self.cuda_option)
-        self._test_op(
-            "EnsureCPUOutput",
-            self.cpu_option,
-            self.cpu_option,
-            op_option=self.cpu_option
-        )
         self._test_op(
             "CopyFromCPUInput",
             self.cpu_option,

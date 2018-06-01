@@ -115,7 +115,7 @@ class OperatorBase : public Observable<OperatorBase> {
   }
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
-  vector<TensorShape> InputTensorShapes();
+  vector<TensorShape> InputTensorShapes() const;
 
   virtual void WaitEvent(const Event& ev, int /*stream_id */ = -1) {
     ev.Finish();
