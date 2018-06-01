@@ -43,8 +43,32 @@ class ProcessGroup {
     // If false, the exception function can be called to get details.
     virtual bool isSuccess() const = 0;
 
+    // Ensures that operations on the output tensors that are invoked
+    // after this function returns are correctly sequenced after the
+    // asynchronous completion of this work.
+    //
+    // For CUDA tensors, it inserts stream synchronization such that
+    // the streams of the caller wait for completion of the
+    // asynchronous operations on the destination tensors.
+    //
+    // For CPU tensors, it is currently a nop.
+    //
+    // This function should only be used if the caller polls for
+    // completion through the `isCompleted` function, it has returned
+    // true, and the `isSuccess` function also has returned true.
+    //
+    virtual void synchronize() = 0;
+
     // Waits until request completes. Blocking operation.
     // Returns false if the work completed with an exception.
+    //
+    // Functionally equivalent to:
+    //
+    //   while (!isCompleted()) { /* nop */ }
+    //   auto success = isSuccess();
+    //   if (success) { synchronize(); }
+    //   return success;
+    //
     virtual bool wait() = 0;
 
     // Returns exception if wait() returned false.

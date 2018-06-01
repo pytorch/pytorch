@@ -123,9 +123,6 @@ cmake_dependent_option(
     WITH_CUDA "Legacy CUDA" ON
     "USE_CUDA" OFF)
 cmake_dependent_option(
-    WITH_ROCM "Legacy ROCm" ON
-    "USE_ROCM" OFF)
-cmake_dependent_option(
     NO_CUDA "Legacy no CUDA" OFF
     "USE_CUDA" ON)
 cmake_dependent_option(
