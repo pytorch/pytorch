@@ -567,6 +567,7 @@ include_dirs += [
     tmp_install_path + "/include/TH",
     tmp_install_path + "/include/THNN",
     tmp_install_path + "/include/ATen",
+    "build/third_party",
 ]
 
 library_dirs.append(lib_path)
