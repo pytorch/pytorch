@@ -275,10 +275,10 @@ Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool kee
   return result;
 }
 
-Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
-  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+Tensor logsumexp(const Tensor &self, int64_t dim, bool keepdim) {
+  int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   Tensor result = self.type().tensor();
-  return at::native::logsumexp_out(result, self, dim, keepdim);
+  return at::native::logsumexp_out(result, self, dim_, keepdim);
 }
 
 // \DIM REDUCE ################################################################
