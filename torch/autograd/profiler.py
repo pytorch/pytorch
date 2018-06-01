@@ -542,7 +542,7 @@ def build_table(events, sort_by=None, header=None):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if sort_by is not None:
         events = sorted(events, key=lambda evt: getattr(evt, sort_by))
-        
+
     name_lengths = [len(evt.key) for evt in events]
     if len(name_lengths) == 0:
         return ""
