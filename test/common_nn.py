@@ -6,6 +6,7 @@ from itertools import product
 
 import torch
 import torch.cuda
+from torch.nn import Reduction
 from common import TestCase, to_gpu, freeze_rng_state, is_iterable
 from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
@@ -21,7 +22,10 @@ PRECISION = 1e-5
 
 
 def get_size_average(m):
-    return getattr(m, 'size_average', False) or getattr(m, 'sizeAverage', False)
+    result = getattr(m, 'reduction', None)
+    if result is not None:
+        return result is 'elementwise_mean'
+    return getattr(m, 'sizeAverage', None)
 
 
 def get_weight(m):

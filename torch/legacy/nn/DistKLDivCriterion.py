@@ -1,4 +1,5 @@
 import torch
+from torch.nn import Reduction
 from .Criterion import Criterion
 
 
@@ -18,8 +19,7 @@ class DistKLDivCriterion(Criterion):
             input,
             target,
             self.output_tensor,
-            self.sizeAverage,
-            True,  # reduce
+            Reduction.get_reduction_enum(self.sizeAverage, True),
         )
         self.output = self.output_tensor[0].item()
         return self.output
@@ -33,7 +33,6 @@ class DistKLDivCriterion(Criterion):
             target,
             implicit_gradOutput,
             self.gradInput,
-            self.sizeAverage,
-            True,  # reduce
+            Reduction.get_reduction_enum(self.sizeAverage, True),
         )
         return self.gradInput

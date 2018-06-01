@@ -1,4 +1,5 @@
 import torch
+from torch.nn import Reduction
 from .Criterion import Criterion
 
 
@@ -22,11 +23,10 @@ class SpatialClassNLLCriterion(Criterion):
             input,
             target,
             self.output_tensor,
-            self.sizeAverage,
+            Reduction.get_reduction_enum(self.sizeAverage, True),
             self.weights,
             self.total_weight_tensor,
             self.ignore_index,
-            True,  # reduce
         )
         self.output = self.output_tensor[0].item()
         return self.output
@@ -40,10 +40,9 @@ class SpatialClassNLLCriterion(Criterion):
             target,
             implicit_gradOutput,
             self.gradInput,
-            self.sizeAverage,
+            Reduction.get_reduction_enum(self.sizeAverage, True),
             self.weights,
             self.total_weight_tensor,
             self.ignore_index,
-            True,  # reduce
         )
         return self.gradInput

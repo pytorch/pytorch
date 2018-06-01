@@ -7,12 +7,11 @@ void THNN_(SoftMarginCriterion_updateOutput)(
   THTensor *input,
   THTensor *target,
   THTensor *output,
-  bool sizeAverage,
-  bool reduce)
+  int64_t reduction)
 {
   THNN_CHECK_SHAPE(input, target);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THTensor_(resizeAs)(output, input);
 
     TH_TENSOR_APPLY3(real, input, real, target, real, output,
@@ -29,7 +28,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
                    real z = log(1. + exp(-*input_data* *target_data));
                    sum += z;)
 
-  if(sizeAverage)
+  if (reduction == Reduction::ElementwiseMean)
     sum /= THTensor_(nElement)(input);
 
   THTensor_(set1d)(output, 0, sum);
@@ -41,13 +40,12 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
   THTensor *target,
   THTensor *gradOutput,
   THTensor *gradInput,
-  bool sizeAverage,
-  bool reduce)
+  int64_t reduction)
 {
   THNN_CHECK_SHAPE(input, target);
   THTensor_(resizeAs)(gradInput, input);
 
-  if (!reduce) {
+  if (!reduction) {
     THNN_CHECK_SHAPE(gradOutput, input);
 
     TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
@@ -57,7 +55,7 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
     return;
   }
 
-  real norm = (sizeAverage ? 1./((real)THTensor_(nElement)(input)) : 1.);
+  real norm = (reduction == Reduction::ElementwiseMean ? 1./((real)THTensor_(nElement)(input)) : 1.);
 
   TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
                    real z = exp(-*target_data * *input_data);
