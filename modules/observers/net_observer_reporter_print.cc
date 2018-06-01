@@ -7,16 +7,13 @@ namespace caffe2 {
 
 const std::string NetObserverReporterPrint::IDENTIFIER = "Caffe2Observer ";
 
-void NetObserverReporterPrint::reportDelay(
+void NetObserverReporterPrint::report(
     NetBase* net,
-    std::map<std::string, double>& delays,
-    const char* unit) {
-  CAFFE_ENFORCE(unit != nullptr, "Unit is null");
+    std::map<std::string, PerformanceInformation>& info) {
   LOG(INFO) << IDENTIFIER << "Net Name - " << net->Name();
   LOG(INFO) << IDENTIFIER << "Delay Start";
-  for (auto& p : delays) {
-    LOG(INFO) << IDENTIFIER << p.first << " - " << p.second << "\t(" << *unit
-              << ")";
+  for (auto& p : info) {
+    LOG(INFO) << IDENTIFIER << p.first << " - " << p.second.latency << "\t(ms)";
   }
   LOG(INFO) << IDENTIFIER << "Delay End";
 }

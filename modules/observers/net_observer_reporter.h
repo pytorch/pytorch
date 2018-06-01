@@ -7,6 +7,19 @@
 
 namespace caffe2 {
 
+struct PerformanceInformation {
+  // Analytic
+  int64_t flops = 0;
+  int64_t bytes_written = 0;
+  int64_t bytes_read = 0;
+  std::vector<TensorShape> tensor_shapes = {};
+  std::vector<Argument> args = {};
+  std::string engine = ""; // the engine used
+  std::string type = ""; // the type of the operator
+  // Measured
+  double latency = 0;
+};
+
 class CAFFE2_OBSERVER_API NetObserverReporter {
  public:
   virtual ~NetObserverReporter() = default;
@@ -16,9 +29,8 @@ class CAFFE2_OBSERVER_API NetObserverReporter {
     The delays are saved in a map. The key is an identifier associated
     with the reported delay. The value is the delay value in float
   */
-  virtual void reportDelay(
+  virtual void report(
       NetBase* net,
-      std::map<std::string, double>& delays,
-      const char* unit) = 0;
+      std::map<std::string, PerformanceInformation>&) = 0;
 };
 }
