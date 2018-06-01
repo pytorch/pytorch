@@ -28,7 +28,7 @@ class TransformedDistribution(Distribution):
         transforms = [SigmoidTransform().inv, AffineTransform(loc=a, scale=b)]
         logistic = TransformedDistribution(base_distribution, transforms)
 
-    For more examples, please look at the implementations of :class:`FisherSnedecor`
+    For more examples, please look at the implementations of :class:`Pareto`
     and :class:`Gumbel`.
     """
     arg_constraints = {}
