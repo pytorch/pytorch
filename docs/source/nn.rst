@@ -716,6 +716,16 @@ Utilities
 
 .. autofunction:: torch.nn.utils.clip_grad_value_
 
+:hidden:`parameters_to_vector`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.parameters_to_vector
+
+:hidden:`vector_to_parameters`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.vector_to_parameters
+
 :hidden:`weight_norm`
 ~~~~~~~~~~~~~~~~~~~~~
 
