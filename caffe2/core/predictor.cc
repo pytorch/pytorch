@@ -97,7 +97,11 @@ Predictor::Predictor(
 
   if (optimization) {
 #ifdef CAFFE2_OPTIMIZER
-    run_net_ = opt::optimize(run_net_, &ws_, optimization);
+    try {
+      run_net_ = opt::optimize(run_net_, &ws_, optimization);
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Optimization pass failed: " << e.what();
+    }
 #else
     LOG(WARNING) << "Caffe2 is compiled without optimization passes.";
 #endif
