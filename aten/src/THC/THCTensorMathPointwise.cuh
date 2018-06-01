@@ -655,11 +655,11 @@ struct TensorMaxValueOp {
   TensorMaxValueOp(T v) : val(v) {}
 
   __device__ __forceinline__ void operator()(T* out) {
-    *out = THCNumerics<T>::gt(*out, val) ? *out : val;
+    *out = THCNumerics<T>::lt(*out, val) ? val : *out;  // this order propagates NaN
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = THCNumerics<T>::gt(*in, val) ? *in : val;
+    *out = THCNumerics<T>::lt(*in, val) ? val : *in;  // this order propagates NaN
   }
 
   T val;
@@ -670,11 +670,11 @@ struct TensorMinValueOp {
   TensorMinValueOp(T v) : val(v) {}
 
   __device__ __forceinline__ void operator()(T* out) {
-    *out = THCNumerics<T>::lt(*out, val) ? *out : val;
+    *out = THCNumerics<T>::gt(*out, val) ? val : *out;  // this order propagates NaN
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = THCNumerics<T>::lt(*in, val) ? *in : val;
+    *out = THCNumerics<T>::gt(*in, val) ? val : *in;  // this order propagates NaN
   }
 
   T val;
