@@ -891,6 +891,11 @@ Caffe2Ops Caffe2Backend::CreateMatMul(OnnxNode* onnx_node, int opset_version) {
 Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) {
   auto& attributes = onnx_node->attributes;
   auto scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
+  if (scales.size() != 4) {
+    CAFFE_THROW("The scales argument should have 4 inputs");
+  } else if (!AlmostEqual(scales[0], 1) || !AlmostEqual(scales[1], 1))  {
+    CAFFE_THROW("The first two elements in the scales argument must be 1");
+  }
   attributes.remove("mode");
   attributes.remove("scales");
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
