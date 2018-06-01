@@ -1342,6 +1342,7 @@ class TestNN(NNTestCase):
     # these easy ones, we should make them do so.
     def _test_nonlinearity_propagate_nan(self, device):
         nan = float('nan')
+
         def test(nonlinearity, *args, **kwargs):
             x = torch.tensor([nan], device=device)
             fn = getattr(F, nonlinearity)
