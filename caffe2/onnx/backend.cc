@@ -327,11 +327,6 @@ const std::
   return kPerOpRenamedAttrs;
 }
 
-//HAVE TO MODIFY ABOVE ^^
-
-
-
-
 // operators whose behavior is different beyond renaming
 // the value is an attribute of this class that is a
 // function from ToffeIR node_def to caffe2 op_def
@@ -892,7 +887,7 @@ Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) 
   auto& attributes = onnx_node->attributes;
   auto scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
   if (scales.size() != 4) {
-    CAFFE_THROW("The scales argument should have 4 inputs");
+    CAFFE_THROW("The scales argument should have size 4");
   } else if (!AlmostEqual(scales[0], 1) || !AlmostEqual(scales[1], 1))  {
     CAFFE_THROW("The first two elements in the scales argument must be 1");
   }
