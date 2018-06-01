@@ -18,8 +18,7 @@ class Bernoulli(ExponentialFamily):
 
         >>> m = Bernoulli(torch.tensor([0.3]))
         >>> m.sample()  # 30% chance 1; 70% chance 0
-         0.0
-        [torch.FloatTensor of size 1]
+        tensor([ 0.])
 
     Args:
         probs (Number, Tensor): the probabilty of sampling `1`

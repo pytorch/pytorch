@@ -54,7 +54,8 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
-from torch.distributions.utils import _finfo, probs_to_logits, softmax, lazy_property
+from torch.distributions.utils import _finfo, probs_to_logits, lazy_property
+from torch.nn.functional import softmax
 
 TEST_NUMPY = True
 try:
@@ -3129,7 +3130,7 @@ class TestAgainstScipy(TestCase):
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
-        simplex_tensor = softmax(torch.randn(20))
+        simplex_tensor = softmax(torch.randn(20), dim=-1)
         self.distribution_pairs = [
             (
                 Bernoulli(simplex_tensor),

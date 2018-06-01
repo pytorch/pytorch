@@ -20,11 +20,7 @@ class OneHotCategorical(Distribution):
 
         >>> m = OneHotCategorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
-         0
-         0
-         1
-         0
-        [torch.FloatTensor of size 4]
+        tensor([ 0.,  0.,  0.,  1.])
 
     Args:
         probs (Tensor): event probabilities

@@ -20,8 +20,7 @@ class Gamma(ExponentialFamily):
 
         >>> m = Gamma(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # Gamma distributed with concentration=1 and rate=1
-         0.1046
-        [torch.FloatTensor of size 1]
+        tensor([ 0.1046])
 
     Args:
         concentration (float or Tensor): shape parameter of the distribution

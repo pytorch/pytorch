@@ -32,16 +32,6 @@ def _finfo(tensor):
     return _FINFO[tensor.storage_type()]
 
 
-def expand_n(v, n):
-    r"""
-    Cleanly expand float or Tensor parameters.
-    """
-    if isinstance(v, Number):
-        return torch.Tensor([v]).expand(n, 1)
-    else:
-        return v.expand(n, *v.size())
-
-
 def _broadcast_shape(shapes):
     r"""
     Given a list of tensor sizes, returns the size of the resulting broadcasted
@@ -102,15 +92,7 @@ def _sum_rightmost(value, dim):
     """
     if dim == 0:
         return value
-    return value.contiguous().view(value.shape[:-dim] + (-1,)).sum(-1)
-
-
-def softmax(tensor):
-    r"""
-    Returns the result with softmax applied to :attr:`tensor` along the last
-    dimension.
-    """
-    return F.softmax(tensor, -1)
+    return value.reshape(*value.shape[:-dim], -1).sum(-1)
 
 
 def log_sum_exp(tensor, keepdim=True):
@@ -122,8 +104,7 @@ def log_sum_exp(tensor, keepdim=True):
         tensor (torch.Tensor)
         keepdim (Boolean): Whether to retain the last dimension on summing.
     """
-    max_val = tensor.max(dim=-1, keepdim=True)[0]
-    return max_val + (tensor - max_val).exp().sum(dim=-1, keepdim=keepdim).log()
+    return tensor.logsumexp(dim=-1, keepdim=keepdim)
 
 
 def logits_to_probs(logits, is_binary=False):
@@ -135,7 +116,7 @@ def logits_to_probs(logits, is_binary=False):
     """
     if is_binary:
         return F.sigmoid(logits)
-    return softmax(logits)
+    return F.softmax(logits, dim=-1)
 
 
 def clamp_probs(probs):

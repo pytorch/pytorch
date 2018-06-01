@@ -85,11 +85,7 @@ class RelaxedBernoulli(TransformedDistribution):
         >>> m = RelaxedBernoulli(torch.tensor([2.2]),
                                  torch.tensor([0.1, 0.2, 0.3, 0.99]))
         >>> m.sample()
-         0.2951
-         0.3442
-         0.8918
-         0.9021
-        [torch.FloatTensor of size 4]
+        tensor([ 0.2951,  0.3442,  0.8918,  0.9021])
 
     Args:
         temperature (Tensor):
