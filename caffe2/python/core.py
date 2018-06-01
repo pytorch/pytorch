@@ -2256,6 +2256,8 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
     Assumptions:
       1. every external inputs of this net is already in blob_to_device!
       2. if not, this function will use net device option
+      3. InferOpBlobDevices might fail to get the correct inference for ops like
+         EnsureCPUOutput that could take in input from multiple places.
     '''
     new_net = net.Clone(net._net.name + '_cross_device', keep_schema=True)
     del new_net._net.op[:]
