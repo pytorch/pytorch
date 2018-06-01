@@ -86,6 +86,9 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     random.seed(seed)
     torch.manual_seed(seed)
 
+    # do not wait for putting thread to join when this worker exits
+    data_queue.cancel_join_thread()
+
     if init_fn is not None:
         init_fn(worker_id)
 
@@ -242,7 +245,6 @@ class _DataLoaderIter(object):
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory and torch.cuda.is_available()
         self.timeout = loader.timeout
-        self.done_event = threading.Event()
 
         self.sample_iter = iter(self.batch_sampler)
 
@@ -252,7 +254,7 @@ class _DataLoaderIter(object):
             self.worker_init_fn = loader.worker_init_fn
             self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
             self.worker_queue_idx = 0
-            self.worker_result_queue = multiprocessing.SimpleQueue()
+            self.worker_result_queue = multiprocessing.Queue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
             self.shutdown = False
@@ -268,7 +270,8 @@ class _DataLoaderIter(object):
                           self.worker_init_fn, i))
                 for i in range(self.num_workers)]
 
-            if self.pin_memory or self.timeout > 0:
+            if self.pin_memory:
+                self.done_event = threading.Event()
                 self.data_queue = queue.Queue()
                 if self.pin_memory:
                     maybe_device_id = torch.cuda.current_device()
@@ -366,33 +369,26 @@ class _DataLoaderIter(object):
         raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
-        try:
-            if not self.shutdown:
-                self.shutdown = True
-                self.done_event.set()
-                for q in self.index_queues:
-                    q.put(None)
-                # if some workers are waiting to put, make place for them
-                try:
-                    while not self.worker_result_queue.empty():
-                        self.worker_result_queue.get()
-                except (FileNotFoundError, ImportError):
-                    # Many weird errors can happen here due to Python
-                    # shutting down. These are more like obscure Python bugs.
-                    # FileNotFoundError can happen when we rebuild the fd
-                    # fetched from the queue but the socket is already closed
-                    # from the worker side.
-                    # ImportError can happen when the unpickler loads the
-                    # resource from `get`.
-                    pass
-                # done_event should be sufficient to exit worker_manager_thread,
-                # but be safe here and put another None
-                self.worker_result_queue.put(None)
-        finally:
-            # removes pids no matter what
+        if not self.shutdown:
+            self.shutdown = True
+            # removes pids
             if self.worker_pids_set:
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
+            # Workers can't be waiting to put be cause their output queue
+            # is a multiprocessing.Queue and its .put is non-blocking.
+            # They can only be waiting to get, so we put `None` here.
+            for q in self.index_queues:
+                q.put(None)
+            for w in self.workers:
+                w.join()
+            if hasattr(self, 'worker_manager_thread'):
+                self.done_event.set()
+                # `done_event` should be sufficient to exit the
+                # `worker_manager_thread`, but be safe here and put another
+                # `None`
+                self.worker_result_queue.put(None)
+                self.worker_manager_thread.join()
 
     def __del__(self):
         if self.num_workers > 0:
