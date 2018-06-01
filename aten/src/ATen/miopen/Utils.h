@@ -9,7 +9,7 @@ namespace at { namespace native {
 
 inline void setMIOpenStreamToCurrent() {
   // TODO: Should getCurrentStream be a method on Context?
-  MIOPEN_CHECK(miopenSetStream(getMiopenHandle(), THCState_getCurrentStream(globalContext().thc_state)));
+  MIOPEN_CHECK(miopenSetStream(getMiopenHandle(), THCState_getCurrentStream(globalContext().getTHCState())));
 }
 
 // cuDNN has a buggy check for tensor being contiguous (that is, it does

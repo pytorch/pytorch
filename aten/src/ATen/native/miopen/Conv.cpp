@@ -34,11 +34,11 @@ at::Tensor cudnn_convolution_backward_bias(
   throw std::runtime_error("cudnn_convolution_backward_bias: ATen not compiled with MIOpen support");
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
+std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-  throw std::runtime_error("miopen_convolution_backward: ATen not compiled with MIOpen support");
+  throw std::runtime_error("cudnn_convolution_backward: ATen not compiled with MIOpen support");
 }
 
 at::Tensor cudnn_convolution_transpose(
@@ -179,6 +179,14 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
 // Checking
 //
 // ---------------------------------------------------------------------
+
+// Note [Legacy CuDNN grouped convolution support]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// CuDNN earlier than CuDNN 7 does not directly support group
+// convolution, so we provide support for it by sequentially
+// running a convolution per group  with appropriately
+// adjusted sizes.  https://blog.yani.io/filter-group-tutorial/
+// has a fairly good diagram explaining how it works.
 
 // Used on pad, stride and dilation
 static void check_args(CheckedFrom c, IntList args, size_t expected_size, const char* arg_name)
@@ -382,48 +390,41 @@ template<typename algo_t>
 struct algorithm_search {
 };
 
-size_t getWorkspaceSize(
-    const ConvolutionArgs& args, const miopenConvFwdAlgorithm_t)
+miopenStatus_t getWorkspaceSize(
+    const ConvolutionArgs& args,
+    miopenConvFwdAlgorithm_t algo, size_t* sz)
 {
-    size_t sz = 0;
-    miopenConvolutionForwardGetWorkSpaceSize(
+    return miopenConvolutionForwardGetWorkSpaceSize(
         args.handle,
         args.wdesc.desc(),
         args.idesc.desc(),
         args.cdesc.desc(),
         args.odesc.desc(),
-        &sz);
-    return sz;
+        sz);
 }
-size_t getWorkspaceSize(
-    const ConvolutionArgs& args, const miopenConvBwdDataAlgorithm_t)
+miopenStatus_t getWorkspaceSize(
+    const ConvolutionArgs& args, miopenConvBwdDataAlgorithm_t algo, size_t* sz)
 {
-    size_t sz = 0;
-    miopenConvolutionBackwardDataGetWorkSpaceSize(
+    return miopenConvolutionBackwardDataGetWorkSpaceSize(
         args.handle,
         args.odesc.desc(),
         args.wdesc.desc(),
         args.cdesc.desc(),
         args.idesc.desc(),
-        &sz);
-    return sz;
+        sz);
 }
-size_t getWorkspaceSize(
-    const ConvolutionArgs& args, const miopenConvBwdWeightsAlgorithm_t)
+miopenStatus_t getWorkspaceSize(
+    const ConvolutionArgs& args, miopenConvBwdWeightsAlgorithm_t algo, size_t* sz)
 {
-    size_t sz = 0;
-    miopenConvolutionBackwardWeightsGetWorkSpaceSize(
+    return miopenConvolutionBackwardWeightsGetWorkSpaceSize(
         args.handle,
         args.odesc.desc(),
         args.idesc.desc(),
         args.cdesc.desc(),
         args.wdesc.desc(),
-        &sz);
-    return sz;
+        sz);
 }
 
-//FIXME: delete this
-#if 0
 template<typename algo_t>
 size_t getMaxWorkspaceSize(
     const ConvolutionArgs& args,
@@ -436,24 +437,26 @@ size_t getMaxWorkspaceSize(
     size_t total_gpu_mem = 0;
     size_t free_gpu_mem = 0;
 
-    //THCudaCheck(THCudaMemGetInfoCached(state, &free_gpu_mem, &total_gpu_mem, &max_block_size));
+    THCudaCheck(THCudaMemGetInfoCached(state, &free_gpu_mem, &total_gpu_mem, &max_block_size));
 
     for (int i = 0; i < n_algo; i++) {
         miopenStatus_t err;
         size_t sz;
         err = getWorkspaceSize(args, algo[i], &sz);
-        //if (MIOPEN_STATUS_SUCCESS != err || sz == 0
-        //    || sz < max_ws_size || sz > max_block_size) continue;
-        if (MIOPEN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size) continue;
+        if (miopenStatusSuccess != err || sz == 0
+            || sz < max_ws_size || sz > max_block_size) continue;
         max_ws_size = sz;
     }
     return max_ws_size;
 }
-#endif
 
 template<typename perf_t>
 perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
-  return perfResults[0];
+  if (deterministic) {
+    throw std::runtime_error("no deterministic convolution algorithms available in MIOpen");
+  } else {
+    return perfResults[0];
+  }
 }
 
 template<>
@@ -465,9 +468,18 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
   static BenchmarkCache<algo_t>& cache() { return fwd_algos; }
 
   static perf_t findAlgorithm(const ConvolutionArgs& args) {
+    static const algo_t algos[] = {
+         miopenConvolutionFwdAlgoGEMM,
+         miopenConvolutionFwdAlgoFFT,
+         miopenConvolutionFwdAlgoDirect,
+         miopenConvolutionFwdAlgoWinograd,
+    };
+    static constexpr int num_algos = 4;
+    static_assert(sizeof(algos) / sizeof(algos[0]) == num_algos,
+                  "Missing MIOpen convolution forward algorithms");
     int perf_count;
-    perf_t perf_results;
-    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionForwardAlgorithm(
         args.handle,
@@ -475,22 +487,21 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
         args.wdesc.desc(), args.weight.data_ptr(),
         args.cdesc.desc(),
         args.odesc.desc(), args.output.data_ptr(),
-        1,	// just return the fastest
+        num_algos,
         &perf_count,
         &perf_results,
         ws.data,
         ws.size,
         false));
-    return perf_results;
+    return getBestAlgorithm(perf_results.get(), args.params.deterministic, perf_count)
   }
 
-// FIXME - remove these two
-#if 0
   static void getAlgorithm(
     const ConvolutionArgs& args,
     algo_t* algo)
   {
-    miopenConvolutionFwdPreference_t pref = MIOPEN_CONVOLUTION_FWD_PREFER_FASTEST;
+    throw std::runtime_error("miopenGetConvolutionForwardAlgorithm is not supported.");
+    /*miopenConvolutionFwdPreference_t pref = cudnn_convolution_FWD_PREFER_FASTEST;
     MIOPEN_CHECK(miopenGetConvolutionForwardAlgorithm(
         args.handle,
         args.idesc.desc(),
@@ -499,23 +510,23 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
         args.odesc.desc(),
         pref,
         0,
-        algo));
+        algo));*/
   }
 
   static void getWorkspaceSize(
     const ConvolutionArgs& args,
     algo_t algo, size_t* workspaceSize)
   {
-    MIOPEN_CHECK(miopenGetConvolutionForwardWorkspaceSize(
+    throw std::runtime_error("miopenGetConvolutionForwardWorkspaceSize is not supported.");
+    /*MIOPEN_CHECK(miopenGetConvolutionForwardWorkspaceSize(
         args.handle,
         args.idesc.desc(),
         args.wdesc.desc(),
         args.cdesc.desc(),
         args.odesc.desc(),
         algo,
-        workspaceSize));
+        workspaceSize));*/
   }
-#endif
 };
 
 template<>
@@ -527,9 +538,18 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
   static BenchmarkCache<algo_t>& cache() { return bwd_data_algos; }
 
   static perf_t findAlgorithm(const ConvolutionArgs& args) {
+    static const algo_t algos[] = {
+        miopenConvolutionBwdDataAlgoGEMM,
+        miopenConvolutionBwdDataAlgoDirect,
+        miopenConvolutionBwdDataAlgoFFT,
+        miopenConvolutionBwdDataAlgoWinograd,
+    };
+    static constexpr int num_algos = 4;
+    static_assert(sizeof(algos) / sizeof(algos[0]) == num_algos,
+                  "Missing MIOpen convolution backward data algorithms.");
     int perf_count;
-    perf_t perf_results;
-    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardDataAlgorithm(
         args.handle,
@@ -537,43 +557,44 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
         args.wdesc.desc(), args.weight.data_ptr(),
         args.cdesc.desc(),
         args.idesc.desc(), args.input.data_ptr(),
-        1,      // just return the fastest
+        num_algos,
         &perf_count,
         &perf_results,
         ws.data,
         ws.size,
         false));
-    return perf_results;
+    return getBestAlgorithm(perf_results.get(), args.params.deterministic, perf_count);
   }
 
-// FIXME - remove these two
-#if 0
   static void getAlgorithm(const ConvolutionArgs& args, algo_t* algo) {
-    MIOPEN_CHECK(miopenGetConvolutionBackwardDataAlgorithm(
+    throw std::runtime_error("miopenGetConvolutionBackwardDataAlgorithm is not supported.");
+
+    /*MIOPEN_CHECK(miopenGetConvolutionBackwardDataAlgorithm(
         args.handle,
         args.wdesc.desc(),
         args.odesc.desc(),
         args.cdesc.desc(),
         args.idesc.desc(),
-        MIOPEN_CONVOLUTION_BWD_DATA_PREFER_FASTEST,
+        cudnn_convolution_BWD_DATA_PREFER_FASTEST,
         0,
-        algo));
+        algo));*/
   }
 
   static void getWorkspaceSize(
     const ConvolutionArgs& args,
     miopenConvBwdDataAlgorithm_t algo, size_t* workspaceSize)
   {
-    MIOPEN_CHECK(miopenGetConvolutionBackwardDataWorkspaceSize(
+    throw std::runtime_error("miopenGetConvolutionBackwardDataWorkspaceSize is not supported.");
+
+    /*MIOPEN_CHECK(miopenGetConvolutionBackwardDataWorkspaceSize(
         args.handle,
         args.wdesc.desc(),
         args.odesc.desc(),
         args.cdesc.desc(),
         args.idesc.desc(),
         algo,
-        workspaceSize));
+        workspaceSize));*/
   }
-#endif
 };
 
 template<>
@@ -585,52 +606,61 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
   static BenchmarkCache<algo_t>& cache() { return bwd_filter_algos; }
 
   static perf_t findAlgorithm(const ConvolutionArgs& args) {
+    static const algo_t algos[] = {
+        miopenConvolutionBwdWeightsAlgoGEMM,
+        miopenConvolutionBwdWeightsAlgoDirect,
+    };
+
+    static constexpr int num_algos = 2;
+    static_assert(sizeof(algos) / sizeof(algos[0]) == num_algos,
+                  "Missing MIOpen convolution backward filter algorithms.");
+    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
     int perf_count;
-    perf_t perf_results;
-    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
     Workspace ws(max_ws_size);
+
     MIOPEN_CHECK(miopenFindConvolutionBackwardWeightsAlgorithm(
         args.handle,
         args.odesc.desc(), args.output.data_ptr(),
         args.idesc.desc(), args.input.data_ptr(),
         args.cdesc.desc(),
         args.wdesc.desc(), args.weight.data_ptr(),
-        1,      // just return the fastest
+        num_algos,
         &perf_count,
         &perf_results,
         ws.data,
         ws.size,
         false));
-    return perf_results;
+    return getBestAlgorithm<perf_t>(perf_results.get(), args.params.deterministic, perf_count);
   }
 
-// FIXME - remove these two
-#if 0
   static void getAlgorithm(const ConvolutionArgs& args, algo_t* algo) {
-    MIOPEN_CHECK(miopenGetConvolutionBackwardFilterAlgorithm(
+    throw std::runtime_error("miopenGetConvolutionBackwardFilterAlgorithm is not supported.");
+
+    /*MIOPEN_CHECK(miopenGetConvolutionBackwardFilterAlgorithm(
         args.handle,
         args.idesc.desc(),
         args.odesc.desc(),
         args.cdesc.desc(),
         args.wdesc.desc(),
-        MIOPEN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST,
+        cudnn_convolution_BWD_FILTER_PREFER_FASTEST,
         0,
-        algo)
-    );
+        algo));*/
   }
 
   static void getWorkspaceSize(const ConvolutionArgs& args, algo_t algo, size_t* workspaceSize)
   {
-    MIOPEN_CHECK(miopenGetConvolutionBackwardFilterWorkspaceSize(
+    throw std::runtime_error("miopenGetConvolutionBackwardFilterWorkspaceSize is not supported.");
+
+    /*MIOPEN_CHECK(miopenGetConvolutionBackwardFilterWorkspaceSize(
         args.handle,
         args.idesc.desc(),
         args.odesc.desc(),
         args.cdesc.desc(),
         args.wdesc.desc(),
         algo,
-        workspaceSize));
+        workspaceSize));*/
   }
-#endif
 };
 
 template<typename algo_t>
@@ -647,14 +677,26 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
     return;
   }
 
+  if (!benchmark) {
+    search::getAlgorithm(args, algo);
+    return;
+  }
+
   if (cache.find(args.params, algo)) {
     // re-check cache since another thread may have benchmarked the algorithm
     return;
   }
 
   auto perfResults = search::findAlgorithm(args);
-  *algo = reinterpret_cast<algo_t&>(perfResults);
-
+  // for deterministic algo, look at all the perf results and return the best
+  // deterministic algo
+  if (perfResults.status == miopenStatusSuccess &&
+      !(args.params.deterministic /*&& perfResults.determinism != CUDNN_DETERMINISTIC*/)) {
+      *algo = perfResults.algo;
+  } else {
+      //*algo = search::DEFAULT_ALGO;
+      throw std::runtime_error("Deterministic algorithms aren't supported in MIOpen.");
+  }
   cache.insert(args.params, *algo);
 
   THCDeviceAllocator* allocator = THCCachingAllocator_get();
@@ -671,7 +713,7 @@ Workspace chooseAlgorithm(
 
   using search = algorithm_search<algo_t>;
   size_t workspace_size;
-  workspace_size = getWorkspaceSize(args, *algo);
+  search::getWorkspaceSize(args, *algo, &workspace_size);
   try {
     return Workspace(workspace_size);
   } catch (std::runtime_error& e) {
@@ -682,7 +724,7 @@ Workspace chooseAlgorithm(
     *algo = search::DEFAULT_ALGO;
     search::cache().insert(args.params, *algo);
 
-    workspace_size = getWorkspaceSize(args, *algo);
+    search::getWorkspaceSize(args, *algo, &workspace_size);
     return Workspace(workspace_size);
   }
 }
@@ -694,7 +736,7 @@ Workspace chooseAlgorithm(
 // ---------------------------------------------------------------------
 
 // In-place!
-void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const TensorArg& bias)
+void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const TensorArg& bias)
 {
   checkAllSameType(c, {output, bias});
   checkAllSameGPU(c, {output, bias});
@@ -719,11 +761,11 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
 //    - cudnn_convolution (Tensor)
 //      Entry points for clients, takes bias
 //
-//    - miopen_convolution_forward (TensorArg)
+//    - cudnn_convolution_forward (TensorArg)
 //      Entry point, which may be reused between regular
 //      convolution and transposed convolution.  Does NOT take bias.
 //
-//    - raw_miopen_convolution_forward_out (Tensor)
+//    - raw_cudnn_convolution_forward_out (Tensor)
 //      Low level function which invokes CuDNN, and takes an output
 //      tensor which is directly written to (thus _out).
 //
@@ -756,7 +798,7 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
 //    - It doesn't resize output (it is assumed to be correctly sized)
 //    - It takes a ConvolutionParams struct
 //
-void raw_miopen_convolution_forward_out(
+void raw_cudnn_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
@@ -775,7 +817,7 @@ void raw_miopen_convolution_forward_out(
   // reinitialize the workspace for each convolution we do.  This is
   // wasteful; we'd rather reuse the workspace.  OTOH, legacy group
   // convolution support is already pretty slow, so this might not
-  // matter.  (This applies to raw_miopen_convolution_backward_input as well.)
+  // matter.  (This applies to raw_cudnn_convolution_backward_input as well.)
   miopenConvFwdAlgorithm_t fwdAlg;
   Workspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
 
@@ -790,7 +832,7 @@ void raw_miopen_convolution_forward_out(
     args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size));
 }
 
-Tensor miopen_convolution_forward(
+Tensor cudnn_convolution_forward(
     CheckedFrom c,
     const TensorArg& input, const TensorArg& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
@@ -810,9 +852,19 @@ Tensor miopen_convolution_forward(
   // See #4500
   Tensor weight_contig = weight->contiguous();
 
-  raw_miopen_convolution_forward_out(
+#if CUDNN_VERSION < 7000
+  for (int i = 0; i < groups; i++) {
+    raw_cudnn_convolution_forward_out(
+        narrowGroup(*output, output_channels_dim,        i, groups),
+        narrowGroup(*input,  input_channels_dim,         i, groups),
+        narrowGroup(weight_contig, weight_output_channels_dim, i, groups),
+        padding, stride, dilation, 1, benchmark, deterministic);
+  }
+#else
+  raw_cudnn_convolution_forward_out(
       *output, *input, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
+#endif
 
   return *output;
 }
@@ -825,13 +877,12 @@ Tensor cudnn_convolution(
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
   CheckedFrom c = "cudnn_convolution";
-  auto output_t = miopen_convolution_forward(
+  auto output_t = cudnn_convolution_forward(
     c, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
   if (bias->defined()) {
-    miopen_convolution_add_bias_(c, { output_t, "result", 0 }, bias);
+    cudnn_convolution_add_bias_(c, { output_t, "result", 0 }, bias);
   }
   return output_t;
 }
@@ -845,9 +896,8 @@ Tensor cudnn_convolution_transpose_backward_input(
 {
   TensorArg grad_output { grad_output_t,  "grad_output", 1 },
             weight      { weight_t, "weight", 2 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
-  return miopen_convolution_forward(
+  return cudnn_convolution_forward(
     "cudnn_convolution_transpose_backward_input",
     grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
 }
@@ -879,7 +929,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 //
 // ---------------------------------------------------------------------
 
-void raw_miopen_convolution_backward_input_out(
+void raw_cudnn_convolution_backward_input_out(
     const at::Tensor& grad_input,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
@@ -938,14 +988,24 @@ Tensor cudnn_convolution_backward_input(
   // See #4500
   Tensor weight_contig = weight->contiguous();
 
-  raw_miopen_convolution_backward_input_out(
+#if CUDNN_VERSION < 7000
+  for (int i = 0; i < groups; i++) {
+    raw_cudnn_convolution_backward_input_out(
+        narrowGroup(*grad_input, input_channels_dim, i, groups),
+        narrowGroup(*grad_output, output_channels_dim, i, groups),
+        narrowGroup(weight_contig, weight_output_channels_dim, i, groups),
+        padding, stride, dilation, 1, benchmark, deterministic);
+  }
+#else
+  raw_cudnn_convolution_backward_input_out(
       *grad_input, *grad_output, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
+#endif
 
   return *grad_input;
 }
 
-Tensor miopen_convolution_transpose_forward(
+Tensor cudnn_convolution_transpose_forward(
     CheckedFrom c,
     const TensorArg& grad_output, const TensorArg& weight,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
@@ -964,7 +1024,6 @@ Tensor cudnn_convolution_backward_input(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             weight{ weight_t, "weight", 2 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
   return cudnn_convolution_backward_input(
       "cudnn_convolution_backward_input",
@@ -972,7 +1031,7 @@ Tensor cudnn_convolution_backward_input(
       padding, stride, dilation, groups, benchmark, deterministic);
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
+std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
@@ -1002,10 +1061,10 @@ Tensor cudnn_convolution_transpose(
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
   CheckedFrom c = "cudnn_convolution_transpose";
-  auto output_t = miopen_convolution_transpose_forward(
+  auto output_t = cudnn_convolution_transpose_forward(
     c, input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic);
   if (bias->defined()) {
-    miopen_convolution_add_bias_(c, { output_t, "result", 0 }, bias);
+    cudnn_convolution_add_bias_(c, { output_t, "result", 0 }, bias);
   }
   return output_t;
 }
@@ -1016,7 +1075,7 @@ Tensor cudnn_convolution_transpose(
 //
 // ---------------------------------------------------------------------
 
-void raw_miopen_convolution_backward_weight_out(
+void raw_cudnn_convolution_backward_weight_out(
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
@@ -1062,9 +1121,19 @@ Tensor cudnn_convolution_backward_weight(
   TensorArg grad_weight{ grad_weight_t, "result", 0 };
   convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
 
-  raw_miopen_convolution_backward_weight_out(
+#if CUDNN_VERSION < 7000
+  for (int i = 0; i < groups; i++) {
+    raw_cudnn_convolution_backward_weight_out(
+        narrowGroup(*grad_weight, weight_output_channels_dim, i, groups),
+        narrowGroup(*grad_output, output_channels_dim, i, groups),
+        narrowGroup(*input, input_channels_dim, i, groups),
+        padding, stride, dilation, groups, benchmark, deterministic);
+  }
+#else
+  raw_cudnn_convolution_backward_weight_out(
       *grad_weight, *grad_output, *input,
       padding, stride, dilation, groups, benchmark, deterministic);
+#endif
 
   return grad_weight_t;
 }
@@ -1078,7 +1147,6 @@ Tensor cudnn_convolution_backward_weight(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             input{ input_t, "input", 2 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
   return cudnn_convolution_backward_weight(
       "cudnn_convolution_backward_weight",
@@ -1095,7 +1163,6 @@ Tensor cudnn_convolution_transpose_backward_weight(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             input{ input_t, "input", 2 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
   return cudnn_convolution_backward_weight(
       "cudnn_convolution_backward_weight",
@@ -1113,7 +1180,6 @@ Tensor cudnn_convolution_backward_bias(
     const Tensor& grad_output_t)
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
 
   auto grad_bias_t = grad_output->type().tensor(

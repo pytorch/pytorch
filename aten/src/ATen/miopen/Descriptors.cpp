@@ -11,8 +11,6 @@ inline miopenDataType_t getDataType(const at::Type& t) {
     return miopenFloat;
   } else if (scalar_type == at::kHalf) {
     return miopenHalf;
-  } else if (scalar_type == at::kDouble) {
-    throw std::runtime_error("TensorDescriptor only supports float and half tensors");
   }
   throw std::runtime_error("TensorDescriptor only supports float and half tensors");
 }
@@ -57,10 +55,11 @@ std::string miopenTypeToString(miopenDataType_t dtype) {
       return "miopenFloat";
     case miopenHalf:
       return "miopenHalf";
+    default:
+      std::ostringstream oss;
+      oss << "(unknown data-type " << static_cast<int>(dtype) << ")";
+      return oss.str();
   }
-  std::ostringstream oss;
-  oss << "(unknown data-type " << static_cast<int>(dtype) << ")";
-  return oss.str();
 }
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
