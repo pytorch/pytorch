@@ -10,7 +10,7 @@ We support the following use cases:
     between {1, 2} and {3, 4}
   - 8 gpus, where peer access are enabled in two groups,
     between {1, 2, 3, 4} and {5, 6, 7, 8}.
-If above cases are not satisified, a fallback function which does not rely on
+If above cases are not satisfied, a fallback function which does not rely on
 peer access will be called.
 """
 
@@ -38,6 +38,8 @@ def OnCPU():
 
 def Allreduce(net, blobs, reduced_affix="_reduced", gpu_indices=None):
     """The general Allreduce interface that reroutes the function calls.
+    CPUs and AMD GPUs are not supported because
+    GetCudaPeerAccessPattern is called to get gpu peer access pattern.
   """
     if gpu_indices is None:
         gpu_indices = list(range(len(blobs)))
