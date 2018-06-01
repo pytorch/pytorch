@@ -63,6 +63,42 @@ struct SymbolicVariable {
     n->t_(attr::other, rhs.toTensor());
     return r;
   }
+  SymbolicVariable operator>(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::gt, {*this}, 1, &n)[0].typeLike(*this);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator<(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::lt, {*this}, 1, &n)[0].typeLike(*this);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator>=(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::ge, {*this}, 1, &n)[0].typeLike(*this);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator<=(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::le, {*this}, 1, &n)[0].typeLike(*this);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator==(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::eq, {*this}, 1, &n)[0].typeLike(*this);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator!=(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::ne, {*this}, 1, &n)[0].typeLike(*this);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
   SymbolicVariable operator+(const SymbolicVariable rhs) const {
     Node * n;
     auto r = create(aten::add, {*this, rhs}, 1, &n)[0].typeLike(*this);
@@ -99,6 +135,9 @@ struct SymbolicVariable {
     n->i_(a("chunks"), chunks)
      ->i_(a("dim"), dim);
     return r;
+  }
+  SymbolicVariable type_as(const SymbolicVariable rhs) const {
+    return create(aten::type_as, {*this, rhs})[0].typeLike(rhs);
   }
   SymbolicVariable narrow(int dim, int64_t start, int64_t length) const {
     Node * n;

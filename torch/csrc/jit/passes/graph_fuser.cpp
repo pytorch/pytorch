@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/autodiff.h"
 #include <unordered_map>
 
 namespace torch { namespace jit {
@@ -64,6 +65,7 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::tan,
   aten::tanh,
   aten::trunc,
+  aten::type_as,
   aten::_sigmoid_backward,
   aten::_tanh_backward,
 };
@@ -78,19 +80,21 @@ bool isSimpleMap(Node *node) {
   TensorType* expected_type = node->inputs()[0]->type()->cast<TensorType>();
   if (!expected_type)
     return false;
-  static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual) {
+  static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual, bool checkScalarType = true) {
     TensorType* actual = _actual->cast<TensorType>();
     return actual &&
-           expected->scalarType() == actual->scalarType() &&
+           (!checkScalarType || expected->scalarType() == actual->scalarType()) &&
            expected->device() == actual->device() &&
            expected->sizes() == actual->sizes();
   };
+//Don't check scalar types for type_as and comparison, allFloatIO is doing some checks.
+  bool checkScalarType = ((node->kind() != aten::type_as) && !(torch::jit::isComparison(node)));
   for (Value * val : node->inputs()) {
-    if (!equal_modulo_strides(expected_type, val->type()))
+    if (!equal_modulo_strides(expected_type, val->type(), checkScalarType))
       return false;
   }
   for (Value * val : node->outputs()) {
-    if (!equal_modulo_strides(expected_type, val->type()))
+    if (!equal_modulo_strides(expected_type, val->type(), checkScalarType))
       return false;
   }
   return true;
@@ -128,15 +132,19 @@ struct GraphFuser {
     }
   }
   bool allFloatIO(Node * node) {
+    if (!(torch::jit::isComparison(node))) { //comparisons will output byte, and that's ok
     for(auto & o : node->outputs()) {
       if(!hasFloatType(o)) {
         return false;
       }
     }
+    }
+    if (node->kind() != aten::type_as) { // as long as type_as outputs float, we are ok
     for(auto & o : node->inputs()) {
       if(!hasFloatType(o)) {
         return false;
       }
+    }
     }
     return true;
   }

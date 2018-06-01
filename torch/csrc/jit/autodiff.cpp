@@ -16,7 +16,7 @@ bool isDifferentiable(Node * n) {
   static std::unordered_set<Symbol> differentiable_kinds = {
     aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
-    aten::unsqueeze, aten::expand, aten::addmm
+    aten::unsqueeze, aten::expand, aten::addmm, aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le, aten::type_as
   };
   // TODO: check this more generally via schema
   // This check ensures that the `alpha` and `beta` attributes on this addmm
@@ -32,6 +32,12 @@ bool isDifferentiable(Graph & g) {
                      static_cast<bool(*)(Node*)>(isDifferentiable));
 }
 
+bool isComparison(Node * n) {
+  static std::unordered_set<Symbol> comparison_kinds = {
+    aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le
+  };
+  return comparison_kinds.count(n->kind()) > 0;
+}
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
@@ -73,6 +79,8 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         return {-grads.at(0)};
       case aten::view:
         return {grads.at(0).view(inputs.at(0).sizes())};
+      case aten::type_as:
+        return {grads.at(0).type_as(inputs.at(0))};
       case aten::unsqueeze:
         return {grads.at(0).squeeze(node->i(attr::dim))};
       case aten::mm: {
@@ -173,10 +181,9 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }
 
-static value_set findAllRequiresGradNodes(
+static value_set findAllRequiresGradNodes(  
         Graph& graph, const std::vector<bool>& input_requires_grad) {
   JIT_ASSERT(graph.inputs().size() == input_requires_grad.size());
-
   std::unordered_set<Value*> requires_grad_set;
   const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
 
@@ -188,6 +195,8 @@ static value_set findAllRequiresGradNodes(
 
   for (Node * node : graph.nodes()) {
     if (std::none_of(node->inputs().begin(), node->inputs().end(), requires_grad)) continue;
+    if (node->kind() == aten::type_as && !requires_grad(node->inputs()[0])) continue;
+    if (isComparison(node)) continue;
     for (Value * output : node->outputs())
       requires_grad_set.emplace(output);
   }
@@ -249,7 +258,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   auto reverse_node = graph.create(prim::Reverse, 0);
   auto reverse_block = reverse_node->addBlock();
   WithInsertPoint guard(reverse_block);
-
   auto requires_grad_set = findAllRequiresGradNodes(graph, input_requires_grad);
   const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
 
@@ -285,6 +293,8 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     auto inputs = node->inputs();
     if (std::none_of(inputs.begin(), inputs.end(), requires_grad))
       continue;
+    if (isComparison(node)) continue;
+    if (node->kind() == aten::type_as && !requires_grad(inputs[0])) continue;
     value_list grad_inputs = gradientForNode(node, fmap(node->outputs(), get_grad));
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (std::size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
@@ -300,7 +310,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
   }
-
   return ReverseDetails(std::move(grad_map), std::move(requires_grad_set), reverse_block);
 }
 

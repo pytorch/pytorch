@@ -148,7 +148,6 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     }
     default: ; // fall-through
   }
-
   std::vector<TensorType*> types;
   bool present;
   std::tie(types, present) = gatherTypes(node->inputs());
@@ -370,8 +369,9 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     // a tensor, so we should special-case these ops in the shape propagation.
     // Additionally, passing in a zero representative tensor into an integer
     // division op causes divide-by-zero errors
-    bool shape_inferenceable = !std::any_of(types.begin(), types.end(), [](TensorType* t){
-      return at::isIntegralType(t->scalarType());
+    bool shape_inferenceable = node->kind() == aten::type_as ||
+      !std::any_of(types.begin(), types.end(), [](TensorType* t){
+      return at::isIntegralType(t->scalarType() );
     });
     if (!shape_inferenceable) {
       setDynamicType(node);
