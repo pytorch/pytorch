@@ -717,8 +717,7 @@ class _ConstSequential(_ConstModuleList):
     def __init__(self, mods):
         super(_ConstSequential, self).__init__(mods._modules.values())
 
-    # commenting script_method until T29956663 is resolved
-    #@script_method
+    @script_method
     def forward(self, input):
         for m in self:
             input = m(input)
