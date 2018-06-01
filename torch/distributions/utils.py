@@ -92,7 +92,8 @@ def _sum_rightmost(value, dim):
     """
     if dim == 0:
         return value
-    return value.reshape(*value.shape[:-dim], -1).sum(-1)
+    value = value.reshape(*value.shape[:-dim], -1).sum(-1) 
+    return value
 
 
 def log_sum_exp(tensor, keepdim=True):
