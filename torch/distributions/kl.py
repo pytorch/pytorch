@@ -237,7 +237,7 @@ def _kl_expfamily_expfamily(p, q):
     if not type(p) == type(q):
         raise NotImplementedError("The cross KL-divergence between different exponential families cannot \
                             be computed using Bregman divergences")
-    p_nparams = [np.clone().requires_grad_() for np in p._natural_params]
+    p_nparams = [np.detach().requires_grad_() for np in p._natural_params]
     q_nparams = q._natural_params
     lg_normal = p._log_normalizer(*p_nparams)
     gradients = torch.autograd.grad(lg_normal.sum(), p_nparams, create_graph=True)
