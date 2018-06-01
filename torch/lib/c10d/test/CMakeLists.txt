@@ -1,3 +1,7 @@
+cuda_add_library(c10d_cuda_test CUDATest.cu)
+target_compile_options(c10d_cuda_test PUBLIC "-std=c++11")
+target_link_libraries(c10d_cuda_test c10d)
+
 function(c10d_add_test test_src)
   get_filename_component(test_name ${test_src} NAME_WE)
   add_executable(${test_name} "${test_src}")
@@ -8,7 +12,8 @@ endfunction()
 
 c10d_add_test(FileStoreTest.cpp c10d)
 c10d_add_test(TCPStoreTest.cpp c10d)
-c10d_add_test(ProcessGroupGlooTest.cpp c10d c10d_gloo)
+c10d_add_test(ProcessGroupGlooTest.cpp c10d c10d_cuda_test c10d_gloo)
+c10d_add_test(ProcessGroupGlooAsyncTest.cpp c10d c10d_cuda_test c10d_gloo)
 if(MPI_FOUND)
   add_definitions(-DMPIEXEC=${MPIEXEC})
   c10d_add_test(ProcessGroupMPITest.cpp c10d c10d_mpi)
