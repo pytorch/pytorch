@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <vector>
+#include "ATen/optional.h"
 
 namespace at {
   struct Tensor;
@@ -14,6 +15,7 @@ namespace torch { namespace jit {
 struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
+struct Node;
 struct TensorType;
 
 struct Code {
@@ -45,5 +47,10 @@ private:
   InterpreterState(InterpreterStateImpl * pImpl);
   std::shared_ptr<InterpreterStateImpl> pImpl;
 };
+
+using Operation = std::function<int(std::vector<at::Tensor>&)>;
+using OpHandler = std::function<at::optional<Operation>(Node* n)>;
+void addInterpreterOpHandler(OpHandler handler);
+bool hasHandleOutput(Node * n);
 
 }}

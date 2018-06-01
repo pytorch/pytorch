@@ -7,19 +7,16 @@ from itertools import product
 import torch
 import torch.cuda
 from common import TestCase, to_gpu, freeze_rng_state, is_iterable
-from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, contiguous
+from common_cuda import TEST_CUDA
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 import torch.backends.cudnn
+
 
 # tarfile module tries to obtain a file object name in python 3.3
 if sys.version_info[:2] == (3, 3):
     TemporaryFile = tempfile.NamedTemporaryFile
 else:
     TemporaryFile = tempfile.TemporaryFile
-
-TEST_CUDA = torch.cuda.is_available()
-TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
-TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.cuda.FloatTensor(1))
-TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 PRECISION = 1e-5
 
 
@@ -783,9 +780,8 @@ class NNTestCase(TestCase):
             return self._forward(module, input).detach()
 
         res = tuple()
-        input = contiguous(input)
         if jacobian_input:
-            res += get_numerical_jacobian(fw, input, input, eps=1e-6),
+            res += get_numerical_jacobian(fw, input, eps=1e-6),
         if jacobian_parameters:
             param, _ = self._get_parameters(module)
             res += torch.cat([get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param], 0),
@@ -813,8 +809,8 @@ class NNTestCase(TestCase):
         input_t = iter_tensors(input)
         numerical_t = iter_tensors(numerical_d_x)
         for x, d_x in zip(input_t, numerical_t):
-            x = x.view(-1)
-            d_x = d_x.view(-1)
+            x = x.view(-1).data
+            d_x = d_x.view(-1).data
             for i in range(x.nelement()):
                 original = x[i].item()
                 x[i] = original + eps

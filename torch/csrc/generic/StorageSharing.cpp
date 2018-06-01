@@ -18,7 +18,7 @@ static PyObject * THPStorage_(sharedDecref)(THPStorage *self)
       ctx = (libshm_context*)allocator_obj->allocatorContext;
   }
   if (ctx)
-    THRefcountedMapAllocator_decref(ctx->th_context, storage->data);
+    THRefcountedMapAllocator_decref(ctx->th_context, THStorage_(data)(storage));
 #endif
   Py_INCREF(self);
   return (PyObject *)self;
@@ -39,7 +39,7 @@ static PyObject * THPStorage_(sharedIncref)(THPStorage *self)
       ctx = (libshm_context*)allocator_obj->allocatorContext;
   }
   if (ctx)
-    THRefcountedMapAllocator_incref(ctx->th_context, storage->data);
+    THRefcountedMapAllocator_incref(ctx->th_context, THStorage_(data)(storage));
 #endif
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -47,7 +47,7 @@ static PyObject * THPStorage_(sharedIncref)(THPStorage *self)
 
 static PyObject * THPStorage_(newTHView)(THStorage *base, ptrdiff_t offset, size_t size)
 {
-  void *data = (char*)base->data + offset;
+  void *data = (char*)base->data<real>() + offset;
   THStoragePtr view(THStorage_(newWithData)(LIBRARY_STATE (real*)data, size));
   view->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
   view->view = base;
@@ -101,7 +101,7 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self)
     ctx = (libshm_context*)allocator_obj->allocatorContext;
   } else {
     // TODO: retry on collision
-    // TODO: free GIL - but remember to reacquire it when an exception is thrown
+    AutoNoGIL no_gil;
     THStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->size));
     THStorage_(copy)(new_storage, storage);
     THStorage_(swap)(storage, new_storage);
@@ -182,6 +182,7 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self)
     auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
     ctx = (THMapAllocatorContext*)allocator_obj->allocatorContext;
   } else {
+    AutoNoGIL no_gil;
     THStoragePtr new_storage(THPStorage_(newFdStorage)(storage->size));
     THStorage_(copy)(new_storage, storage);
     THStorage_(swap)(storage, new_storage);
@@ -244,10 +245,10 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   THPObjectPtr size(PyLong_FromLong(storage->size));
   THPObjectPtr _offset(PyLong_FromLong(0));
   THPObjectPtr view_size(PyLong_FromLong(storage->size));
-  if (storage->data) {
+  if (THStorage_(data)(LIBRARY_STATE storage)) {
     size_t base_size;
-    void *base_ptr = THCCachingAllocator_getBaseAllocation(storage->data, &base_size);
-    ptrdiff_t offset = (char*)storage->data - (char*)base_ptr;
+    void *base_ptr = THCCachingAllocator_getBaseAllocation(THStorage_(data)(LIBRARY_STATE storage), &base_size);
+    ptrdiff_t offset = (char*)storage->data<real>() - (char*)base_ptr;
 
     cudaIpcMemHandle_t handle;
     THCudaCheck(cudaIpcGetMemHandle(&handle, base_ptr));

@@ -272,6 +272,28 @@ void Gemm<float16, CUDAContext>(
 }
 
 template <>
+void BiasCHW<float, CUDAContext>(
+    const float* bias,
+    const float* bias_multiplier,
+    const int bias_channels,
+    const int image_size,
+    float* image,
+    CUDAContext* context) {
+  Gemm<float, CUDAContext>(
+      CblasNoTrans,
+      CblasNoTrans,
+      bias_channels,
+      image_size,
+      1,
+      1,
+      bias,
+      bias_multiplier,
+      1,
+      image,
+      context);
+}
+
+template <>
 void GemmBatched<float, CUDAContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,

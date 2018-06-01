@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <sstream>
 
-    namespace at {
+namespace at {
 namespace native {
 
 Tensor arange(const Type& dtype, Scalar start, Scalar end, Scalar step) {
@@ -48,7 +48,7 @@ Tensor& empty_out(Tensor& result, IntList size) {
 // TODO: remove when we have Type support in the IR
 
 #define DEFINE_CAST_OP(_1, n, _2)                                \
-  Tensor _cast_##_1(const Tensor& self, bool non_blocking) {     \
+  Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
     auto& target_type = self.type().toScalarType(ScalarType::n); \
     if (self.type() == target_type)                              \
       return self;                                               \

@@ -4,6 +4,9 @@
 #define __STDC_FORMAT_MACROS
 
 #include "ATen/${Type}.h"
+
+// ${generated_comment}
+
 #include "ATen/${Storage}.h"
 #include "ATen/${Tensor}.h"
 #include "ATen/${Generator}.h"

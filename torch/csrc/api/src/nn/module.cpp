@@ -11,7 +11,8 @@
 #include <typeinfo>
 #include <unordered_map>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 Module::Module(std::string name) : name_(std::move(name)) {}
 
@@ -44,14 +45,14 @@ std::shared_ptr<Module> Module::clone() const {
 
 std::map<std::string, Variable> Module::parameters() const {
   std::map<std::string, Variable> ret;
-  for (auto pair : children_) {
+  for (const auto& pair : children_) {
     auto& name = pair.first;
     auto& child = pair.second;
     for (auto& p : child->parameters()) {
       ret[name + "." + p.first] = p.second;
     }
   }
-  for (auto pair : parameters_) {
+  for (const auto& pair : parameters_) {
     ret[pair.first] = pair.second;
   }
   return ret;
@@ -78,7 +79,7 @@ Variable& Module::param(std::string const& name) {
 
   auto param_name = name.substr(begin);
   auto it = container->parameters_.find(param_name);
-  if (it == parameters_.end()) {
+  if (it == container->parameters_.end()) {
     throw std::runtime_error("No such param: " + param_name);
   }
   return it->second;
@@ -111,7 +112,7 @@ void Module::to(at::Type& type) {
     child.second->to(type);
   }
   for (auto& pair : parameters_) {
-    auto& parameter = pair.second;
+    auto parameter = pair.second;
     at::detail::set_data(parameter, parameter.data().toType(type));
     AT_ASSERT(parameter.data().type() == type);
     AT_ASSERT(&parameter.type() == autograd::VariableType::getType(type));
@@ -123,7 +124,7 @@ void Module::to(at::ScalarType scalar_type) {
     child.second->to(scalar_type);
   }
   for (auto& pair : parameters_) {
-    auto& parameter = pair.second;
+    auto parameter = pair.second;
     auto& new_type = parameter.data().type().toScalarType(scalar_type);
     at::detail::set_data(parameter, parameter.data().toType(new_type));
     AT_ASSERT(parameter.data().type().scalarType() == scalar_type);
@@ -136,7 +137,7 @@ void Module::to(at::Backend backend) {
     child.second->to(backend);
   }
   for (auto& pair : parameters_) {
-    auto& parameter = pair.second;
+    auto parameter = pair.second;
     auto& new_type = parameter.data().type().toBackend(backend);
     at::detail::set_data(parameter, parameter.data().toType(new_type));
     AT_ASSERT(parameter.data().type().backend() == backend);
@@ -157,31 +158,22 @@ void Module::zero_grad() {
   }
 }
 
-std::shared_ptr<nn::Module> Module::add(
-    std::shared_ptr<nn::Module> m,
-    std::string const& name) {
-  if (this->children_.find(name) != this->children_.end()) {
-    throw std::runtime_error("Trying to add container that already exists");
-  }
-  if (std::find(name.begin(), name.end(), '.') != name.end()) {
-    // We can't allow containers with dots in their names, as that would make
-    // their parameters not findable with parameters().
-    throw std::runtime_error("Trying to add parameter with a '.' in its name");
-  }
-  this->children_[name] = std::move(m);
-  return this->children_[name];
+Variable Module::register_parameter(
+    const std::string& name,
+    at::Tensor tensor) {
+  auto variable = autograd::make_variable(tensor, /*requires_grad=*/true);
+  const auto pair = parameters_.emplace(name, std::move(variable));
+  AT_CHECK(pair.second, "Parameter has already been registered");
+  return pair.first->second;
 }
 
-Variable& Module::add(Variable v, std::string const& name) {
-  if (this->parameters_.find(name) != this->parameters_.end()) {
-    throw std::runtime_error("Trying to add parameter that already exists");
-  }
-  if (std::find(name.begin(), name.end(), '.') != name.end()) {
-    // We can't allow parameters with dots in their names, as that would make
-    // them not findable with parameters().
-    throw std::runtime_error("Trying to add parameter with a '.' in its name");
-  }
-  this->parameters_[name] = v;
-  return this->parameters_[name];
+Variable Module::register_buffer(const std::string& name, at::Tensor tensor) {
+  auto variable = autograd::make_variable(tensor, /*requires_grad=*/false);
+  const auto pair = parameters_.emplace(name, std::move(variable));
+  AT_CHECK(pair.second, "Parameter has already been registered");
+  return pair.first->second;
 }
-}} // namespace torch::nn
+
+void Module::clone_(Module& other) {}
+} // namespace nn
+} // namespace torch

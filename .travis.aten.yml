@@ -16,7 +16,7 @@ script:
     - cd aten
     - mkdir build install
     - cd build
-    - cmake .. -DNO_CUDA=1 -DCMAKE_INSTALL_PREFIX=../install
+    - cmake .. -DUSE_CUDA=OFF -DCMAKE_INSTALL_PREFIX=../install
     - make install
     - ../tools/run_tests.sh .
     - cd ..

@@ -31,6 +31,7 @@ from random import shuffle
 
 import torch
 from common import TestCase, run_tests, set_rng_seed
+from common_cuda import TEST_CUDA
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
@@ -53,7 +54,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
-from torch.distributions.utils import _finfo, probs_to_logits, softmax
+from torch.distributions.utils import _finfo, probs_to_logits, softmax, lazy_property
 
 TEST_NUMPY = True
 try:
@@ -62,8 +63,6 @@ try:
     import scipy.special
 except ImportError:
     TEST_NUMPY = False
-
-TEST_CUDA = torch.cuda.is_available()
 
 
 def pairwise(Dist, *params):
@@ -578,6 +577,8 @@ def unwrap(value):
 
 
 class TestDistributions(TestCase):
+    _do_cuda_memory_leak_check = True
+
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)
@@ -689,6 +690,31 @@ class TestDistributions(TestCase):
                                          'sample and enumerate_support.').format(Dist.__name__, i + 1, len(params)))
                 except NotImplementedError:
                     pass
+
+    def test_lazy_property_grad(self):
+        x = torch.randn(1, requires_grad=True)
+
+        class Dummy(object):
+            @lazy_property
+            def y(self):
+                return x + 1
+
+        def test():
+            x.grad = None
+            Dummy().y.backward()
+            self.assertEqual(x.grad, torch.ones(1))
+
+        test()
+        with torch.no_grad():
+            test()
+
+        mean = torch.randn(2)
+        cov = torch.eye(2, requires_grad=True)
+        distn = MultivariateNormal(mean, cov)
+        with torch.no_grad():
+            distn.scale_tril
+        distn.scale_tril.sum().backward()
+        self.assertIsNotNone(cov.grad)
 
     def test_has_examples(self):
         distributions_with_examples = set(e.Dist for e in EXAMPLES)
@@ -880,7 +906,6 @@ class TestDistributions(TestCase):
         self.assertEqual(Multinomial(total_count, p).sample((6,)).size(), (6, 2, 3))
         set_rng_seed(0)
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
-        p.grad.zero_()
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
 
         # sample check for extreme value of probs

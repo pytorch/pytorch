@@ -131,7 +131,7 @@ void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, struct THTensor 
                               cudaMemcpyHostToDevice,
                               stream->stream));
 
-  THCudaCheck(THCCachingHostAllocator_recordEvent(src->storage->data, stream));
+  THCudaCheck(THCCachingHostAllocator_recordEvent(THStorage_(data)(src->storage), stream));
 
   if (currentDevice != tensorDevice) {
     THCudaCheck(cudaSetDevice(currentDevice));
@@ -162,7 +162,7 @@ void THTensor_(copyAsyncCuda)(THCState *state, THTensor *self, struct THCTensor 
                               cudaMemcpyDeviceToHost,
                               stream->stream));
 
-  THCudaCheck(THCCachingHostAllocator_recordEvent(src->storage->data, stream));
+  THCudaCheck(THCCachingHostAllocator_recordEvent(THCStorage_(data)(state, src->storage), stream));
 
   if (currentDevice != tensorDevice) {
     THCudaCheck(cudaSetDevice(currentDevice));

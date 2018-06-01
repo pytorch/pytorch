@@ -13,11 +13,11 @@ template <typename T>
 void DropoutBase<T>::reset() {}
 
 template <typename T>
-variable_list DropoutBase<T>::forward(variable_list input) {
+std::vector<Variable> DropoutBase<T>::forward(std::vector<Variable> input) {
   if (rate_ == 0 || !is_training()) {
     return input;
   }
-  variable_list output;
+  std::vector<Variable> output;
   for (const auto& value : input) {
     const auto noise = (noise_mask(value).uniform_(0, 1) > rate_)
                            .toType(value.type().scalarType())

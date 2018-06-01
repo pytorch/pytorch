@@ -14,6 +14,8 @@ CAFFE2_API EventErrorMessageFunction
 CAFFE2_API EventSetFinishedFunction
     Event::event_finished_setter_[MaxDeviceTypes];
 CAFFE2_API EventResetFunction Event::event_resetter_[MaxDeviceTypes];
+CAFFE2_API EventSetCallbackFunction
+    Event::event_callback_setter_[MaxDeviceTypes];
 
 namespace {
 const std::string kNoError = "No error";
@@ -96,7 +98,29 @@ void EventSetFinishedCPU(const Event* event, const char* err_msg) {
     wrapper->err_msg_ = err_msg;
     wrapper->status_ = EventStatus::EVENT_FAILED;
   }
+
+  if (wrapper->callback_) {
+    wrapper->callback_();
+  }
+
   wrapper->cv_completed_.notify_all();
+}
+
+bool EventSetCallbackCPU(Event* event, EventCallbackFunction callback) {
+  auto* wrapper = static_cast<CPUEventWrapper*>(event->event_.get());
+  std::unique_lock<std::mutex> lock(wrapper->mutex_);
+
+  if (wrapper->callback_) {
+    return false;
+  }
+  wrapper->callback_ = callback;
+  if (wrapper->status_ == EventStatus::EVENT_SUCCESS ||
+      wrapper->status_ == EventStatus::EVENT_FAILED) {
+    if (wrapper->callback_) {
+      wrapper->callback_();
+    }
+  }
+  return true;
 }
 
 void EventResetCPU(Event* event) {
@@ -104,6 +128,7 @@ void EventResetCPU(Event* event) {
   std::unique_lock<std::mutex> lock(wrapper->mutex_);
   wrapper->status_ = EventStatus::EVENT_INITIALIZED;
   wrapper->err_msg_ = "";
+  wrapper->callback_ = nullptr;
 }
 
 REGISTER_EVENT_CREATE_FUNCTION(CPU, EventCreateCPU);
@@ -115,5 +140,7 @@ REGISTER_EVENT_QUERY_FUNCTION(CPU, EventQueryCPU);
 REGISTER_EVENT_ERROR_MESSAGE_FUNCTION(CPU, EventErrorMessageCPU);
 REGISTER_EVENT_SET_FINISHED_FUNCTION(CPU, EventSetFinishedCPU);
 REGISTER_EVENT_RESET_FUNCTION(CPU, EventResetCPU);
+
+REGISTER_EVENT_SET_CALLBACK_FUNCTION(CPU, EventSetCallbackCPU);
 
 } // namespace caffe2

@@ -293,9 +293,9 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
     int64_t view_columns = 1;
     THLongStorage *r_size = THCTensor_(newSizeOf)(state, r);
     for (int i = 0; i < nDimI; i++)
-      view_rows *= r_size->data[i];
+      view_rows *= THLongStorage_data(r_size)[i];
     for (int i = nDimI; i < nDim; i++)
-      view_columns *= r_size->data[i];
+      view_columns *= THLongStorage_data(r_size)[i];
 
     THLongStorage *r_view_size = THLongStorage_newWithSize2(view_rows, view_columns);
     THCTensor *r_view = THCTensor_(newView)(state, r, r_view_size);
@@ -488,7 +488,7 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
   THCSTensor_indexSparseIntersectionKernel<uint64_t, real>
     <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
       I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
-      (uint64_t)t_nnz, (uint64_t)s_nnz, (uint64_t*)resultNnz->data);
+      (uint64_t)t_nnz, (uint64_t)s_nnz, (uint64_t*)THCudaLongStorage_data(state, resultNnz));
   THCudaCheck(cudaGetLastError());
   r_->nnz = THCudaLongStorage_get(state, resultNnz, 0);
   THCudaLongStorage_free(state, resultNnz);

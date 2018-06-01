@@ -79,7 +79,7 @@ static inline void THNN_(VolumetricConvolution_shapeCheck)
 
   if (exactInputDepth < kT || exactInputHeight < kH || exactInputWidth < kW) {
     THError("Calculated input size: (%d x %d x %d). "
-      "Kernel size: (%d x %d x %d). Kernel size can't greater than actual input size",
+      "Kernel size: (%d x %d x %d). Kernel size can't be greater than actual input size",
       exactInputDepth,exactInputHeight,exactInputWidth,kT,kH,kW);
   }
 
