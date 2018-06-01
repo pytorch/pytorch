@@ -17,7 +17,7 @@ void THNN_(AbsCriterion_updateOutput)(
 
   if (!reduce) {
     THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply3(state, input, target, output,
+    THC_pointwiseApply3<real, real, real>(state, input, target, output,
                         abs_updateOutput_no_reduce_functor<real>());
     return;
   }
@@ -58,7 +58,7 @@ void THNN_(AbsCriterion_updateGradInput)(
 
   if (!reduce) {
     THCUNN_check_shape(state, gradOutput, input);
-    THC_pointwiseApply3(state, input, target, gradInput,
+    THC_pointwiseApply3<real, real, real>(state, input, target, gradInput,
                         abs_updateGradInput_no_reduce_functor<real>());
     THCTensor_(cmul)(state, gradInput, gradInput, gradOutput);
     return;
