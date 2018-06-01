@@ -12,6 +12,8 @@ namespace torch { namespace jit {
 // a separate component in the autograd handles unwrapping and wrapping
 // variable objects for use in the interpreter.
 
+struct Node;
+struct GraphExecutor;
 struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
@@ -20,12 +22,17 @@ struct TensorType;
 
 struct Code {
   Code()
-  : pImpl(nullptr) {}
+    : pImpl(nullptr) {}
   Code(std::shared_ptr<Graph>& graph);
   ~Code();
+
+  // Returns pointers to GraphExecutors created to run GraphExecutor nodes in the given graph.
+  const std::vector<GraphExecutor*>& executors();
+
   operator bool() const {
     return pImpl != nullptr;
   }
+
 private:
   std::shared_ptr<CodeImpl> pImpl;
   friend struct InterpreterStateImpl;
