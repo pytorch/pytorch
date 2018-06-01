@@ -151,9 +151,9 @@ static void check_input_shape_forward(const at::Tensor& input,
 
   if (weight_dim != k) {
     std::stringstream ss;
-    ss << "Expected " << k << "-dimensional weight for " << k
-       << "-dimensional input " << input.sizes() << ", but got weight of size "
-       << weight.sizes() << " instead";
+    ss << "Expected " << weight_dim << "-dimensional input for " << weight_dim
+       << "-dimensional weight " << weight.sizes() << ", but got input of size "
+       << input.sizes() << " instead";
     throw std::runtime_error(ss.str());
   }
   if (weight.size(0) < groups) {
@@ -167,8 +167,8 @@ static void check_input_shape_forward(const at::Tensor& input,
   if (!transposed) {
     if (input.size(1) != (weight.size(1) * groups)) {
       std::stringstream ss;
-      ss << "Given groups=" << groups << ", weight" << weight.sizes()
-         << ", so expected input" << input.sizes() << " to have "
+      ss << "Given groups=" << groups << ", weight of size " << weight.sizes()
+         << ", expected input" << input.sizes() << " to have "
          << (weight.size(1) * groups) << " channels, but got " << input.size(1)
          << " channels instead";
       throw std::runtime_error(ss.str());
@@ -183,8 +183,8 @@ static void check_input_shape_forward(const at::Tensor& input,
   } else { // transposed
     if (input.size(1) != weight.size(0)) {
       std::stringstream ss;
-      ss << "Given transposed=" << transposed << ", weight" << weight.sizes()
-         << ", so expected input" << input.sizes() << " to have "
+      ss << "Given transposed=" << transposed << ", weight of size " << weight.sizes()
+         << ", expected input" << input.sizes() << " to have "
          << weight.size(0) << " channels, but got " << input.size(1)
          << " channels instead";
       throw std::runtime_error(ss.str());
@@ -295,11 +295,11 @@ at::Tensor _convolution(
   auto input = input_r.contiguous();
   auto weight = weight_r;
   auto bias = bias_r;
-  auto k = input.ndimension();
+  auto k = weight.ndimension();
   int64_t dim = k - 2;
 
   if (dim <= 0) {
-    throw std::runtime_error("input has less dimensions than expected");
+    throw std::runtime_error("weight should have at least two dimensions");
   }
 
   ConvParams params;
