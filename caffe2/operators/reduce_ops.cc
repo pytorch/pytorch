@@ -24,10 +24,10 @@ void ComputeReduceMinMaxGradient(
   std::vector<int> index(ndim, 0);
   for (int dX_index = 0; dX_index < dX_size; ++dX_index) {
     const int dY_index =
-        math::internal::GetIndexFromDims(ndim, dY_dims.data(), index.data());
+        math::utils::GetIndexFromDims(ndim, dY_dims.data(), index.data());
     dX_data[dX_index] =
         Y_data[dY_index] == X_data[dX_index] ? dY_data[dY_index] : T(0);
-    math::internal::IncreaseIndexInDims(ndim, dX_dims.data(), index.data());
+    math::utils::IncreaseIndexInDims(ndim, dX_dims.data(), index.data());
   }
 }
 
