@@ -398,143 +398,6 @@ Operation createCppOperation(CppOp* op) {
   };
 }
 
-// Returns a function implementing functionality of a given node,
-// or nullptr if it's a no-op for autograd.
-Operation getOperation(jit::Node* node) {
-  IR_IFM(node, CppOp)
-    JIT_ASSERT(!dynamic_cast<autograd::Eval*>(value->fn.get()));
-    return createCppOperation(value);
-  IR_ELSEIF(FusionGroup)
-    auto fusion_fn = sharedFusionCompiler().getOrCompile(value);
-    auto num_inputs = value->inputs().size();
-    return [fusion_fn, num_inputs](Stack & stack) {
-      autograd::profiler::RecordFunction record("FusionGroup");
-      std::vector<at::Tensor> toutputs;
-      // TODO: have fusion_fn work off of a stack as well
-      fusion_fn->launch(last(stack, num_inputs), toutputs);
-      drop(stack, num_inputs);
-      stack.insert(stack.end(), toutputs.begin(), toutputs.end());
-      return 0;
-    };
-  IR_ELSEIF(Constant)
-    auto t = autograd::make_variable(value->t(attr::value));
-    return [t](Stack & stack) {
-      stack.push_back(t);
-      return 0;
-    };
-  IR_ELSEIF(Undefined)
-    return [](Stack & stack) {
-      stack.push_back(at::Tensor());
-      return 0;
-    };
-  IR_ELSEIF(ReplaceIfUndef)
-    return [](Stack & stack) {
-      auto alternate = pop(stack);
-      auto result = pop(stack);
-      if(result.defined()) {
-        stack.push_back(std::move(result));
-      } else {
-        stack.push_back(std::move(alternate));
-      }
-      return 0;
-    };
-  IR_ELSEIF(Print)
-    size_t num_inputs = value->inputs().size();
-    return [num_inputs](Stack & stack) {
-      bool first = true;
-      for (at::Tensor i : last(stack, num_inputs)) {
-        if (!first) std::cout << " ";
-        first = false;
-        if (auto tensor_impl = dynamic_cast<at::TensorImpl*>(i.get())) {
-          std::cout << at::Tensor(tensor_impl, true);
-        } else if (!i.defined()) {
-          std::cout << "<undefined tensor>";
-        } else {
-          auto& r = *i.get();
-          std::cout << "<" << typeid(r).name() << " at " << i << ">";
-        }
-      }
-      drop(stack, num_inputs);
-      std::cout << std::endl;
-      return 0;
-    };
-  IR_ELSEIF(GraphExecutor)
-    GraphExecutor executor(value->g(attr::Subgraph));
-    auto num_inputs = value->inputs().size();
-    return [=](Stack& stack) mutable {
-      autograd::profiler::RecordFunction record("GraphExecutor");
-      auto inputs = last(stack, num_inputs);
-      variable_tensor_list tinputs(inputs.begin(), inputs.end());
-      drop(stack, num_inputs);
-      //TODO: has graph executor work from a stack as well
-      variable_tensor_list toutputs = executor.run(variable_tensor_list(std::move(tinputs)));
-      stack.insert(stack.end(), toutputs.begin(), toutputs.end());
-      return 0;
-    };
-
-
-  // Load x, y
-  // loads values from registers onto the stack, the actual callback does
-  // nothing since the stack manipulation is already encoded in inst.inputs
-  // and inst.outputs
-  IR_ELSEIF(Load)
-    return [=](Stack& stack) {
-      return 0;
-    };
-
-  // x, y = Store
-  // stores values from stack into registers, the actual callback does
-  // nothing since the stack manipulation is already encoded in inst.inputs
-  // and inst.outputs
-  IR_ELSEIF(Store)
-    return [=](Stack& stack) {
-      return 0;
-    };
-  IR_ELSEIF(Drop)
-    auto N = value->inputs().size();
-    return [=](Stack& stack) {
-      drop(stack, N);
-      return 0;
-    };
-  IR_ELSE()
-    switch (node->kind()) {
-      case onnx::Reshape: {
-        return [=](Stack& stack) {
-          auto shape = pop(stack).contiguous();
-          auto input = pop(stack);
-          JIT_ASSERT(shape.ndimension() == 1);
-          at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
-          stack.push_back(input.reshape(shape_list));
-          return 0;
-        };
-      } break;
-      case onnx::Shape: {
-        return [=](Stack& stack) {
-          auto t = pop(stack);
-          at::IntList sizes = t.sizes();
-          auto sizes_tensor = torch::CPU(at::kLong).tensor(sizes.size());
-          auto accessor = sizes_tensor.accessor<int64_t, 1>();
-          for (size_t i=0; i<sizes.size(); ++i) {
-            accessor[i] = sizes[i];
-          }
-          stack.push_back(sizes_tensor);
-          return 0;
-        };
-      } break;
-      default: ;
-    };
-
-    // ops registered in another compilation unit
-    // eg: the PythonOp handler
-    if(auto op = lookupExternalOp(node)) {
-      return *op;
-    }
-
-    return getTensorOp(node).op;
-  IR_END()
-}
-
-
 // We need some lists for inputs and outputs. To keep all the memory
 // contiguous we allocate a single vector and use offsets into the vector
 // which are stored in the ListHandle struct
@@ -784,6 +647,146 @@ struct CodeImpl {
     return r;
   }
 
+  // Returns a function implementing functionality of a given node,
+  // or nullptr if it's a no-op for autograd.
+  Operation getOperation(jit::Node* node) {
+    IR_IFM(node, CppOp)
+      JIT_ASSERT(!dynamic_cast<autograd::Eval*>(value->fn.get()));
+      return createCppOperation(value);
+    IR_ELSEIF(FusionGroup)
+      auto fusion_fn = sharedFusionCompiler().getOrCompile(value);
+      auto num_inputs = value->inputs().size();
+      return [fusion_fn, num_inputs](Stack & stack) {
+        autograd::profiler::RecordFunction record("FusionGroup");
+        std::vector<at::Tensor> toutputs;
+        // TODO: have fusion_fn work off of a stack as well
+        fusion_fn->launch(last(stack, num_inputs), toutputs);
+        drop(stack, num_inputs);
+        stack.insert(stack.end(), toutputs.begin(), toutputs.end());
+        return 0;
+      };
+    IR_ELSEIF(Constant)
+      auto t = autograd::make_variable(value->t(attr::value));
+      return [t](Stack & stack) {
+        stack.push_back(t);
+        return 0;
+      };
+    IR_ELSEIF(Undefined)
+      return [](Stack & stack) {
+        stack.push_back(at::Tensor());
+        return 0;
+      };
+    IR_ELSEIF(ReplaceIfUndef)
+      return [](Stack & stack) {
+        auto alternate = pop(stack);
+        auto result = pop(stack);
+        if(result.defined()) {
+          stack.push_back(std::move(result));
+        } else {
+          stack.push_back(std::move(alternate));
+        }
+        return 0;
+      };
+    IR_ELSEIF(Print)
+      size_t num_inputs = value->inputs().size();
+      return [num_inputs](Stack & stack) {
+        bool first = true;
+        for (at::Tensor i : last(stack, num_inputs)) {
+          if (!first) std::cout << " ";
+          first = false;
+          if (auto tensor_impl = dynamic_cast<at::TensorImpl*>(i.get())) {
+            std::cout << at::Tensor(tensor_impl, true);
+          } else if (!i.defined()) {
+            std::cout << "<undefined tensor>";
+          } else {
+            auto& r = *i.get();
+            std::cout << "<" << typeid(r).name() << " at " << i << ">";
+          }
+        }
+        drop(stack, num_inputs);
+        std::cout << std::endl;
+        return 0;
+      };
+    IR_ELSEIF(GraphExecutor)
+      auto executor = std::make_shared<GraphExecutor>(value->g(attr::Subgraph));
+      graph_executors.emplace_back(executor.get());
+      auto num_inputs = value->inputs().size();
+      return [=](Stack& stack) mutable {
+        autograd::profiler::RecordFunction record("GraphExecutor");
+        auto inputs = last(stack, num_inputs);
+        variable_tensor_list tinputs(inputs.begin(), inputs.end());
+        drop(stack, num_inputs);
+        //TODO: has graph executor work from a stack as well
+        variable_tensor_list toutputs = executor->run(variable_tensor_list(std::move(tinputs)));
+        stack.insert(stack.end(), toutputs.begin(), toutputs.end());
+        return 0;
+      };
+
+    // Load x, y
+    // loads values from registers onto the stack, the actual callback does
+    // nothing since the stack manipulation is already encoded in inst.inputs
+    // and inst.outputs
+    IR_ELSEIF(Load)
+      return [=](Stack& stack) {
+        return 0;
+      };
+
+    // x, y = Store
+    // stores values from stack into registers, the actual callback does
+    // nothing since the stack manipulation is already encoded in inst.inputs
+    // and inst.outputs
+    IR_ELSEIF(Store)
+      return [=](Stack& stack) {
+        return 0;
+      };
+    IR_ELSEIF(Drop)
+      auto N = value->inputs().size();
+      return [=](Stack& stack) {
+        drop(stack, N);
+        return 0;
+      };
+    IR_ELSE()
+      switch (node->kind()) {
+        case onnx::Reshape: {
+          return [=](Stack& stack) {
+            auto shape = pop(stack).contiguous();
+            auto input = pop(stack);
+            JIT_ASSERT(shape.ndimension() == 1);
+            at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
+            stack.push_back(input.reshape(shape_list));
+            return 0;
+          };
+        } break;
+        case onnx::Shape: {
+          return [=](Stack& stack) {
+            auto t = pop(stack);
+            at::IntList sizes = t.sizes();
+            auto sizes_tensor = torch::CPU(at::kLong).tensor(sizes.size());
+            auto accessor = sizes_tensor.accessor<int64_t, 1>();
+            for (size_t i=0; i<sizes.size(); ++i) {
+              accessor[i] = sizes[i];
+            }
+            stack.push_back(sizes_tensor);
+            return 0;
+          };
+        } break;
+        default: ;
+      };
+
+      // ops registered in another compilation unit
+      // eg: the PythonOp handler
+      if(auto op = lookupExternalOp(node)) {
+        return *op;
+      }
+
+      return getTensorOp(node).op;
+    IR_END()
+  }
+
+  const std::vector<GraphExecutor*>& executors() {
+    return graph_executors;
+  }
+
   void dumpInstruction(std::ostream & out, size_t pc) const {
     auto writeList = [&](const ListHandle<int> & list) {
       for(int i = 0; i < list.size; i++) {
@@ -822,6 +825,7 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
+  std::vector<GraphExecutor*> graph_executors; // for debugging
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
@@ -930,18 +934,27 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
 Code::Code(std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
 Code::~Code() {}
+
+const std::vector<GraphExecutor*>& Code::executors() {
+  return pImpl->executors();
+}
+
 InterpreterState::InterpreterState(const Code & function)
-: pImpl(new InterpreterStateImpl(function)) {}
+  : pImpl(new InterpreterStateImpl(function)) {}
 InterpreterState::~InterpreterState() {}
+
 void InterpreterState::runOneStage(Stack & stack) {
     return pImpl->runOneStage(stack);
 }
+
 const TensorType & InterpreterState::tensorTypeForInput(size_t i) const {
   return pImpl->tensorTypeForInput(i);
 }
+
 InterpreterState InterpreterState::clone() const {
   return InterpreterState(new InterpreterStateImpl(*pImpl));
 }
+
 InterpreterState::InterpreterState(InterpreterStateImpl * pImpl) : pImpl(pImpl) {}
 
 }}

@@ -88,6 +88,42 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
    .def("_jit_pass_decompose_addmm", DecomposeAddmm);
 
+  py::class_<ArgumentSpec>(m, "ArgumentSpec")
+      .def("__repr__", [](ArgumentSpec& self) {
+        std::ostringstream s;
+        s << self;
+        return s.str();
+      });
+  py::class_<Code>(m, "Code")
+      .def("executors", [](Code& c) {
+        return py::make_iterator(c.executors().begin(), c.executors().end());
+      });
+
+  py::class_<ExecutionPlanState>(m, "ExecutionPlanState")
+    .def_property_readonly("graph", [](ExecutionPlanState& s) {
+      return s.graph;
+    })
+    .def_property_readonly("code", [](ExecutionPlanState& s) {
+      return s.f;
+    })
+    .def_property_readonly("grad_executor", [](ExecutionPlanState& s) {
+      return s.grad_executor.get();
+    });
+
+  py::class_<GraphExecutorState>(m, "GraphExecutorState")
+    .def_property_readonly("graph", [](GraphExecutorState& s) {
+      return s.graph;
+    })
+    .def_property_readonly("execution_plans", [](GraphExecutorState& s) {
+      return s.execution_plans;
+    })
+    .def_property_readonly("autograd_fallback", [](GraphExecutorState& s) {
+      return s.autograd_fallback;
+    })
+    .def_property_readonly("autograd_fallback_graph", [](GraphExecutorState& s) {
+      return s.autograd_fallback_graph;
+    });
+
   py::class_<GraphExecutor>(m, "GraphExecutor")
       .def(
           py::init([](py::function func,
@@ -112,6 +148,9 @@ void initJITBindings(PyObject *module) {
       .def("graph_for", [](GraphExecutor& ge, py::args args) {
         return ge.graphFor(createVariableTensorList(args));
       })
+      .def("get_debug_state", [](GraphExecutor& ge) {
+        return ge.getDebugState();
+      })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         auto inputs = createVariableTensorList(args);
         auto outputs = ge.run(std::move(inputs));
@@ -130,6 +169,7 @@ void initJITBindings(PyObject *module) {
           return tuple;
         }
       });
+
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
