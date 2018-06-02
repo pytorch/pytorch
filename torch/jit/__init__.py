@@ -374,12 +374,11 @@ def script(fn, _frames_up=0):
     return Wrapper(graph, True)
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'wrap'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))
 
 
 def script_method(fn):
-    wrap = functools.wraps(fn)(lambda: None)
-    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn), wrap)
+    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn), fn)
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -536,13 +535,13 @@ class ScriptMeta(type(torch._C.ScriptModule)):
     # a pybind11 type
     def __init__(cls, name, bases, attrs):
         # find all the script methods
-        cls.wraps = {}
+        cls.original_methods = {}
         methods = []
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
                 delattr(cls, k)
                 methods.append(v)
-                cls.wraps[v.wrap.__name__] = v.wrap
+                cls.original_methods[v.original_method.__name__] = v.original_method
         # after the user's __init__ register all the script methods
         # with the module
         original_init = getattr(cls, '__init__', lambda self: None)
@@ -572,8 +571,8 @@ class ScriptMethodWrapper(object):
         return self.script_method(*args, **kwargs)
 
 
-def _build_wrap(wrap, script_method):
-    return functools.wraps(wrap)(ScriptMethodWrapper(script_method))
+def _build_wrap(original_method, script_method):
+    return functools.wraps(original_method)(ScriptMethodWrapper(script_method))
 
 
 class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
@@ -587,8 +586,8 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
 
     def __getattr__(self, attr):
         if self._has_method(attr):
-            if attr in self.__class__.wraps:
-                return _build_wrap(self.__class__.wraps[attr], self._get_method(attr))
+            if attr in self.__class__.original_methods:
+                return _build_wrap(self.__class__.original_methods[attr], self._get_method(attr))
             else:
                 return self._get_method(attr)
         return Module.__getattr__(self, attr)
