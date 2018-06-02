@@ -1,11 +1,6 @@
-#ifndef NO_PYTHON
-#include "torch/csrc/python_headers.h"
-#endif
-
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/onnx/onnx.h"
 #include "torch/csrc/autograd/symbolic.h"
-#include "torch/csrc/Exceptions.h"
 
 #include "torch/csrc/utils/functional.h"
 #include <ATen/ATen.h>
