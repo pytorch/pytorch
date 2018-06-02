@@ -15,10 +15,11 @@ THCTensor_(copyIgnoringOverlaps)(THCState* state, THCTensor* dst, THCTensor* src
   // This is itself invoked by pointwiseApply2 / THCTensor_copy in
   // case that there are write overlaps.
   // FIXME: really, overlapping writes should be illegal/an error in Torch
-  THC_pointwiseApply2(
+  THC_pointwiseApply2<real,
+                      real>(
     state, dst, src,
-    CopyOp<typename TensorUtils<THCTensor>::DataType,
-           typename TensorUtils<THCTensor>::DataType>(),
+    CopyOp<real,
+           real>(),
     ReadOnly, /* ignore overwrites */
     ReadOnly);
 }

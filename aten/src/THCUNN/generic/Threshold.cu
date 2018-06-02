@@ -18,7 +18,7 @@ void THNN_(Threshold_updateOutput)(
 
   if (inplace)
   {
-    THC_pointwiseApply1(state, input,
+    THC_pointwiseApply1<real>(state, input,
       ThresholdUpdateOutputIP<real>(threshold, val)
     );
     THCTensor_(set)(state, output, input);
@@ -26,7 +26,7 @@ void THNN_(Threshold_updateOutput)(
   else
   {
     THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply2(state, output, input,
+    THC_pointwiseApply2<real, real>(state, output, input,
       ThresholdUpdateOutput<real>(threshold, val)
     );
   }
@@ -51,7 +51,7 @@ void THNN_(Threshold_updateGradInput)(
 
   if (inplace)
   {
-    THC_pointwiseApply2(state, gradOutput, input,
+    THC_pointwiseApply2<real, real>(state, gradOutput, input,
       ThresholdUpdateGradInputIP<real>(threshold)
     );
     THCTensor_(set)(state, gradInput, gradOutput);
@@ -59,7 +59,7 @@ void THNN_(Threshold_updateGradInput)(
   else
   {
     THCTensor_(resizeAs)(state, gradInput, input);
-    THC_pointwiseApply3(state, gradInput, input, gradOutput,
+    THC_pointwiseApply3<real, real, real>(state, gradInput, input, gradOutput,
        ThresholdUpdateGradInput<real>(threshold)
     );
   }
