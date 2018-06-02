@@ -9,12 +9,6 @@
 #endif
 
 template<>
-void THPPointer<THStorage>::free() {
-  if (ptr)
-    THStorage_(free)(LIBRARY_STATE ptr);
-}
-
-template<>
 void THPPointer<THTensor>::free() {
   if (ptr)
     THTensor_(free)(LIBRARY_STATE ptr);
@@ -35,7 +29,6 @@ void THPPointer<THSTensor>::free() {
 #endif
 
 
-template class THPPointer<THStorage>;
 template class THPPointer<THTensor>;
 template class THPPointer<THPStorage>;
 #if GENERATE_SPARSE
