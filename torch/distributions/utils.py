@@ -113,17 +113,18 @@ def softmax(tensor):
     return F.softmax(tensor, -1)
 
 
-def log_sum_exp(tensor, keepdim=True):
+def log_sum_exp(tensor, dim=-1, keepdim=True):
     r"""
     Numerically stable implementation for the `LogSumExp` operation. The
-    summing is done along the last dimension.
+    summing is done along the required dimension. (Default: last dimension)
 
     Args:
         tensor (torch.Tensor)
+        dim (int): The dimension to sum up. Default: -1
         keepdim (Boolean): Whether to retain the last dimension on summing.
     """
-    max_val = tensor.max(dim=-1, keepdim=True)[0]
-    return max_val + (tensor - max_val).exp().sum(dim=-1, keepdim=keepdim).log()
+    max_val = tensor.max(dim=dim, keepdim=True)[0]
+    return max_val + (tensor - max_val).exp().sum(dim=dim, keepdim=keepdim).log()
 
 
 def logits_to_probs(logits, is_binary=False):
