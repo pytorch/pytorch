@@ -549,11 +549,11 @@ DELEGATE_POWX_FUNCTION(float, vsPowx)
 DELEGATE_POWX_FUNCTION(double, vdPowx)
 #undef DELEGATE_POWX_FUNCTION
 
-#define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Funcname, OriginalFunc) \
-  template <>                                                      \
-  void Funcname<T, CPUContext>(                                    \
-      const int N, const T* a, const T* b, T* y, CPUContext*) {    \
-    OriginalFunc(N, a, b, y);                                      \
+#define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Func, FuncImpl)      \
+  template <>                                                   \
+  void Func<T, CPUContext>(                                     \
+      const int N, const T* A, const T* B, T* C, CPUContext*) { \
+    FuncImpl(N, A, B, C);                                       \
   }
 DELEGATE_SIMPLE_BINARY_FUNCTION(float,  Add, vsAdd)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Add, vdAdd)
@@ -607,29 +607,36 @@ DELEGATE_POWX_FUNCTION(float)
 
 #endif  // CAFFE2_USE_MKL
 
-
-#define EIGEN_SIMPLE_BINARY_FUNCTION(T, Funcname, expr)                        \
-template <>                                                                    \
-void Funcname<T, CPUContext>(                                                  \
-    const int N, const T* a, const T* b, T* y,                                 \
-    CPUContext*) {                                                             \
-  EigenVectorMap<T>(y, N) =                                                    \
-      ConstEigenVectorMap<T>(a, N).array() expr                                \
-      ConstEigenVectorMap<T>(b, N).array();                                    \
-}
+#define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)                            \
+  template <>                                                                  \
+  void Func<T, CPUContext>(                                                    \
+      const int N, const T* A, const T* B, T* C, CPUContext*) {                \
+    if (C == A) {                                                              \
+      EigenVectorMap<T>(C, N).array() expr## =                                 \
+          ConstEigenVectorMap<T>(B, N).array();                                \
+    } else if (C == B) {                                                       \
+      EigenVectorMap<T>(C, N).array() expr## =                                 \
+          ConstEigenVectorMap<T>(A, N).array();                                \
+    } else {                                                                   \
+      EigenVectorMap<T>(C, N) = ConstEigenVectorMap<T>(A, N)                   \
+                                    .array() expr ConstEigenVectorMap<T>(B, N) \
+                                    .array();                                  \
+    }                                                                          \
+  }
 
 #ifdef CAFFE2_USE_MKL
 
-#define DEFINE_SIMPLE_BINARY_FUNCTION(Funcname, expr)                          \
-EIGEN_SIMPLE_BINARY_FUNCTION(int32_t, Funcname, expr)                          \
-EIGEN_SIMPLE_BINARY_FUNCTION(int64_t, Funcname, expr)
+#define DEFINE_SIMPLE_BINARY_FUNCTION(Func, expr)        \
+  EIGEN_SIMPLE_BINARY_FUNCTION(std::int32_t, Func, expr) \
+  EIGEN_SIMPLE_BINARY_FUNCTION(std::int64_t, Func, expr)
 
 #else
 
-#define DEFINE_SIMPLE_BINARY_FUNCTION(Funcname, expr)                          \
-EIGEN_SIMPLE_BINARY_FUNCTION(float, Funcname, expr)                            \
-EIGEN_SIMPLE_BINARY_FUNCTION(int32_t, Funcname, expr)                          \
-EIGEN_SIMPLE_BINARY_FUNCTION(int64_t, Funcname, expr)
+#define DEFINE_SIMPLE_BINARY_FUNCTION(Func, expr)        \
+  EIGEN_SIMPLE_BINARY_FUNCTION(float, Func, expr)        \
+  EIGEN_SIMPLE_BINARY_FUNCTION(double, Func, expr)       \
+  EIGEN_SIMPLE_BINARY_FUNCTION(std::int32_t, Func, expr) \
+  EIGEN_SIMPLE_BINARY_FUNCTION(std::int64_t, Func, expr)
 
 #endif
 
@@ -992,42 +999,232 @@ CAFFE2_SPECIALIZED_ELEMWISEMAX(float)
 CAFFE2_SPECIALIZED_MAXIMUM(float)
 #undef CAFFE2_SPECIALIZED_MAXIMUM
 
-// AddToRow and AddToCol adds the corresponding row/col vector b to the matrix a
-// of shape M x N. The actual implementation uses eigen which is column major,
-// so notice the row/column swap in the actual implementation.
-#define DELEGATE_BROADCAST_BINARY_FUNCTION(T, Funcname, expr)                \
-  template <>                                                                \
-  void Funcname##ToRow<T, CPUContext>(                                       \
-      const int M, const int N, const T* a, const T* b, T* y, CPUContext*) { \
-    EigenArrayMap<T>(y, N, M) = ConstEigenArrayMap<T>(a, N, M).colwise()     \
-                                    expr ConstEigenVectorArrayMap<T>(b, N);  \
-  }                                                                          \
-  /* inplace versions */                                                     \
-  template <>                                                                \
-  void Funcname##ToRow<T, CPUContext>(                                       \
-      const int M, const int N, const T* x, T* y, CPUContext*) {             \
-    EigenArrayMap<T>(y, N, M).colwise() expr## =                             \
-        ConstEigenVectorArrayMap<T>(x, N);                                   \
-  }                                                                          \
-  template <>                                                                \
-  void Funcname##ToCol<T, CPUContext>(                                       \
-      const int M, const int N, const T* x, T* y, CPUContext*) {             \
-    EigenArrayMap<T>(y, N, M).rowwise() expr## =                             \
-        ConstEigenVectorArrayMap<T>(x, M).transpose();                       \
+// The actual implementation uses eigen which is column major, so notice the
+// row/column swap in the actual implementation.
+#define DELEGATE_2D_BROADCAST_BINARY_FUNCTION(T, Func, expr)        \
+  template <>                                                       \
+  void Rowwise##Func<T, CPUContext, false>(                         \
+      const int rows,                                               \
+      const int cols,                                               \
+      const T* A,                                                   \
+      const T* B,                                                   \
+      T* C,                                                         \
+      CPUContext*) {                                                \
+    if (C == A) {                                                   \
+      EigenArrayMap<T>(C, cols, rows).colwise() expr## =            \
+          ConstEigenVectorArrayMap<T>(B, cols);                     \
+    } else {                                                        \
+      EigenArrayMap<T>(C, cols, rows) =                             \
+          ConstEigenArrayMap<T>(A, cols, rows)                      \
+              .colwise() expr ConstEigenVectorArrayMap<T>(B, cols); \
+    }                                                               \
+  }                                                                 \
+                                                                    \
+  template <>                                                       \
+  void Rowwise##Func<T, CPUContext, true>(                          \
+      const int rows,                                               \
+      const int cols,                                               \
+      const T* A,                                                   \
+      const T* B,                                                   \
+      T* C,                                                         \
+      CPUContext*) {                                                \
+    if (C == B) {                                                   \
+      EigenArrayMap<T>(C, cols, rows).colwise() expr## =            \
+          ConstEigenVectorArrayMap<T>(A, cols);                     \
+    } else {                                                        \
+      EigenArrayMap<T>(C, cols, rows) =                             \
+          ConstEigenArrayMap<T>(B, cols, rows)                      \
+              .colwise() expr ConstEigenVectorArrayMap<T>(A, cols); \
+    }                                                               \
+  }                                                                 \
+                                                                    \
+  template <>                                                       \
+  void Colwise##Func<T, CPUContext, false>(                         \
+      const int rows,                                               \
+      const int cols,                                               \
+      const T* A,                                                   \
+      const T* B,                                                   \
+      T* C,                                                         \
+      CPUContext*) {                                                \
+    if (C == A) {                                                   \
+      EigenArrayMap<T>(C, cols, rows).rowwise() expr## =            \
+          ConstEigenVectorArrayMap<T>(B, rows).transpose();         \
+    } else {                                                        \
+      EigenArrayMap<T>(C, cols, rows) =                             \
+          ConstEigenArrayMap<T>(A, cols, rows)                      \
+              .rowwise() expr ConstEigenVectorArrayMap<T>(B, rows)  \
+              .transpose();                                         \
+    }                                                               \
+  }                                                                 \
+                                                                    \
+  template <>                                                       \
+  void Colwise##Func<T, CPUContext, true>(                          \
+      const int rows,                                               \
+      const int cols,                                               \
+      const T* A,                                                   \
+      const T* B,                                                   \
+      T* C,                                                         \
+      CPUContext*) {                                                \
+    if (C == B) {                                                   \
+      EigenArrayMap<T>(C, cols, rows).rowwise() expr## =            \
+          ConstEigenVectorArrayMap<T>(A, rows).transpose();         \
+    } else {                                                        \
+      EigenArrayMap<T>(C, cols, rows) =                             \
+          ConstEigenArrayMap<T>(B, cols, rows)                      \
+              .rowwise() expr ConstEigenVectorArrayMap<T>(A, rows)  \
+              .transpose();                                         \
+    }                                                               \
   }
 
-#define DEFINE_BROADCAST_BINARY_FUNCTION(name, op)                       \
-  DELEGATE_BROADCAST_BINARY_FUNCTION(int32_t, name, op)                  \
-  DELEGATE_BROADCAST_BINARY_FUNCTION(int64_t, name, op)                  \
-  DELEGATE_BROADCAST_BINARY_FUNCTION(float, name, op)                    \
+#define DEFINE_2D_BROADCAST_BINARY_FUNCTION(Func, expr)           \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(float, Func, expr)        \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(double, Func, expr)       \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int32_t, Func, expr) \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int64_t, Func, expr)
 
-DEFINE_BROADCAST_BINARY_FUNCTION(Add, +)
-DEFINE_BROADCAST_BINARY_FUNCTION(Sub, -)
-DEFINE_BROADCAST_BINARY_FUNCTION(Mul, *)
-DEFINE_BROADCAST_BINARY_FUNCTION(Div, /)
+DEFINE_2D_BROADCAST_BINARY_FUNCTION(Add, +)
+DEFINE_2D_BROADCAST_BINARY_FUNCTION(Mul, *)
 
-#undef DEFINE_BROADCAST_BINARY_FUNCTION
-#undef DELEGATE_BROADCAST_BINARY_FUNCTION
+#undef DEFINE_2D_BROADCAST_BINARY_FUNCTION
+#undef DELEGATE_2D_BROADCAST_BINARY_FUNCTION
+
+#define DEFINE_2D_BROADCAST_SUB_FUNCTION(T)                 \
+  template <>                                               \
+  void RowwiseSub<T, CPUContext, false>(                    \
+      const int rows,                                       \
+      const int cols,                                       \
+      const T* A,                                           \
+      const T* B,                                           \
+      T* C,                                                 \
+      CPUContext*) {                                        \
+    if (C == A) {                                           \
+      EigenArrayMap<T>(C, cols, rows).colwise() -=          \
+          ConstEigenVectorArrayMap<T>(B, cols);             \
+    } else {                                                \
+      EigenArrayMap<T>(C, cols, rows) =                     \
+          ConstEigenArrayMap<T>(A, cols, rows).colwise() -  \
+          ConstEigenVectorArrayMap<T>(B, cols);             \
+    }                                                       \
+  }                                                         \
+                                                            \
+  template <>                                               \
+  void RowwiseSub<T, CPUContext, true>(                     \
+      const int rows,                                       \
+      const int cols,                                       \
+      const T* A,                                           \
+      const T* B,                                           \
+      T* C,                                                 \
+      CPUContext*) {                                        \
+    EigenArrayMap<T>(C, cols, rows) =                       \
+        (-ConstEigenArrayMap<T>(B, cols, rows)).colwise() + \
+        ConstEigenVectorArrayMap<T>(A, cols);               \
+  }                                                         \
+                                                            \
+  template <>                                               \
+  void ColwiseSub<T, CPUContext, false>(                    \
+      const int rows,                                       \
+      const int cols,                                       \
+      const T* A,                                           \
+      const T* B,                                           \
+      T* C,                                                 \
+      CPUContext*) {                                        \
+    if (C == A) {                                           \
+      EigenArrayMap<T>(C, cols, rows).rowwise() -=          \
+          ConstEigenVectorArrayMap<T>(B, rows).transpose(); \
+    } else {                                                \
+      EigenArrayMap<T>(C, cols, rows) =                     \
+          ConstEigenArrayMap<T>(A, cols, rows).rowwise() -  \
+          ConstEigenVectorArrayMap<T>(B, rows).transpose(); \
+    }                                                       \
+  }                                                         \
+                                                            \
+  template <>                                               \
+  void ColwiseSub<T, CPUContext, true>(                     \
+      const int rows,                                       \
+      const int cols,                                       \
+      const T* A,                                           \
+      const T* B,                                           \
+      T* C,                                                 \
+      CPUContext*) {                                        \
+    EigenArrayMap<T>(C, cols, rows) =                       \
+        (-ConstEigenArrayMap<T>(B, cols, rows)).rowwise() + \
+        ConstEigenVectorArrayMap<T>(A, rows).transpose();   \
+  }
+
+DEFINE_2D_BROADCAST_SUB_FUNCTION(float);
+DEFINE_2D_BROADCAST_SUB_FUNCTION(double);
+DEFINE_2D_BROADCAST_SUB_FUNCTION(std::int32_t);
+DEFINE_2D_BROADCAST_SUB_FUNCTION(std::int64_t);
+
+#undef DEFINE_2D_BROADCAST_SUB_FUNCTION
+
+#define DEFINE_2D_BROADCAST_DIV_FUNCTION(T)                        \
+  template <>                                                      \
+  void RowwiseDiv<T, CPUContext, false>(                           \
+      const int rows,                                              \
+      const int cols,                                              \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      T* C,                                                        \
+      CPUContext*) {                                               \
+    if (C == A) {                                                  \
+      EigenArrayMap<T>(C, cols, rows).colwise() /=                 \
+          ConstEigenVectorArrayMap<T>(B, cols);                    \
+    } else {                                                       \
+      EigenArrayMap<T>(C, cols, rows) =                            \
+          ConstEigenArrayMap<T>(A, cols, rows).colwise() /         \
+          ConstEigenVectorArrayMap<T>(B, cols);                    \
+    }                                                              \
+  }                                                                \
+                                                                   \
+  template <>                                                      \
+  void RowwiseDiv<T, CPUContext, true>(                            \
+      const int rows,                                              \
+      const int cols,                                              \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      T* C,                                                        \
+      CPUContext*) {                                               \
+    EigenArrayMap<T>(C, cols, rows) =                              \
+        ConstEigenArrayMap<T>(B, cols, rows).inverse().colwise() * \
+        ConstEigenVectorArrayMap<T>(A, cols);                      \
+  }                                                                \
+                                                                   \
+  template <>                                                      \
+  void ColwiseDiv<T, CPUContext, false>(                           \
+      const int rows,                                              \
+      const int cols,                                              \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      T* C,                                                        \
+      CPUContext*) {                                               \
+    if (C == A) {                                                  \
+      EigenArrayMap<T>(C, cols, rows).rowwise() /=                 \
+          ConstEigenVectorArrayMap<T>(B, rows).transpose();        \
+    } else {                                                       \
+      EigenArrayMap<T>(C, cols, rows) =                            \
+          ConstEigenArrayMap<T>(A, cols, rows).rowwise() /         \
+          ConstEigenVectorArrayMap<T>(B, rows).transpose();        \
+    }                                                              \
+  }                                                                \
+                                                                   \
+  template <>                                                      \
+  void ColwiseDiv<T, CPUContext, true>(                            \
+      const int rows,                                              \
+      const int cols,                                              \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      T* C,                                                        \
+      CPUContext*) {                                               \
+    EigenArrayMap<T>(C, cols, rows) =                              \
+        ConstEigenArrayMap<T>(B, cols, rows).inverse().rowwise() * \
+        ConstEigenVectorArrayMap<T>(A, rows).transpose();          \
+  }
+
+DEFINE_2D_BROADCAST_DIV_FUNCTION(float);
+DEFINE_2D_BROADCAST_DIV_FUNCTION(double);
+
+#undef DEFINE_2D_BROADCAST_DIV_FUNCTION
 
 #define CAFFE2_SPECIALIZED_SET(T)                                             \
   template <>                                                                 \
@@ -1118,6 +1315,183 @@ void Not<bool, CPUContext>(
 
 CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(float);
 #undef CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH
+
+namespace {
+
+int GetRowwiseBinaryOpPivot(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims) {
+  if (ndim == 0) {
+    return 0;
+  }
+  int A_pivot = 0;
+  for (; A_pivot < ndim && A_dims[A_pivot] == 1; ++A_pivot);
+  int B_pivot = 0;
+  for (; B_pivot < ndim && B_dims[B_pivot] == 1; ++B_pivot);
+  if (A_pivot == B_pivot) {
+    return 0;
+  }
+  const int pivot = std::max(A_pivot, B_pivot);
+  return std::equal(A_dims + pivot, A_dims + ndim, B_dims + pivot) ? pivot : 0;
+}
+
+int GetColwiseBinaryOpPivot(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims) {
+  if (ndim == 0) {
+    return 0;
+  }
+  int A_pivot = ndim - 1;
+  for (; A_pivot >= 0 && A_dims[A_pivot] == 1; --A_pivot);
+  int B_pivot = ndim - 1;
+  for (; B_pivot >= 0 && B_dims[B_pivot] == 1; --B_pivot);
+  if (A_pivot == B_pivot) {
+    return 0;
+  }
+  const int pivot = std::min(A_pivot, B_pivot) + 1;
+  return std::equal(A_dims, A_dims + pivot, B_dims) ? pivot : ndim;
+}
+
+template <typename T, class Operator1, class Operator2>
+void BinaryOpWith2DBroadcasting(
+    const int ndim,
+    const int* dims,
+    const int pivot,
+    const bool broadcast_A,
+    const Operator1& op1,
+    const Operator2& op2,
+    const T* A,
+    const T* B,
+    T* C,
+    CPUContext* context) {
+  const int rows =
+      std::accumulate(dims, dims + pivot, 1, std::multiplies<int>());
+  const int cols =
+      std::accumulate(dims + pivot, dims + ndim, 1, std::multiplies<int>());
+  if (broadcast_A) {
+    op1(rows, cols, A, B, C, context);
+  } else {
+    op2(rows, cols, A, B, C, context);
+  }
+}
+
+template <typename T, class BinaryOperator>
+void BroacastBinaryOpImpl(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims,
+    const int* C_dims,
+    const BinaryOperator& op,
+    const T* A,
+    const T* B,
+    T* C) {
+  std::vector<int> index(ndim, 0);
+  const int C_size =
+      std::accumulate(C_dims, C_dims + ndim, 1, std::multiplies<int>());
+  for (int C_index = 0; C_index < C_size; ++C_index) {
+    const int A_index = internal::GetIndexFromDims(ndim, A_dims, index.data());
+    const int B_index = internal::GetIndexFromDims(ndim, B_dims, index.data());
+    C[C_index] = A[A_index] + B[B_index];
+    internal::IncreaseIndexInDims(ndim, C_dims, index.data());
+  }
+}
+
+} // namespace
+
+#define DELEGATE_BROADCAST_BINARY_FUNCTION(T, Func, op)                       \
+  template <>                                                                 \
+  void Func<T, CPUContext>(                                                   \
+      const int A_ndim,                                                       \
+      const int* A_dims,                                                      \
+      const int B_ndim,                                                       \
+      const int* B_dims,                                                      \
+      const T* A,                                                             \
+      const T* B,                                                             \
+      T* C,                                                                   \
+      CPUContext* context) {                                                  \
+    const int ndim = std::max(A_ndim, B_ndim);                                \
+    std::vector<int> A_dims_array(ndim, 1);                                   \
+    std::vector<int> B_dims_array(ndim, 1);                                   \
+    std::vector<int> C_dims_array(ndim);                                      \
+    std::copy(A_dims, A_dims + A_ndim, A_dims_array.begin() + ndim - A_ndim); \
+    std::copy(B_dims, B_dims + B_ndim, B_dims_array.begin() + ndim - B_ndim); \
+    for (int i = 0; i < ndim; ++i) {                                          \
+      CAFFE_ENFORCE(                                                          \
+          A_dims_array[i] == B_dims_array[i] || A_dims_array[i] == 1 ||       \
+          B_dims_array[i] == 1);                                              \
+      C_dims_array[i] = std::max(A_dims_array[i], B_dims_array[i]);           \
+    }                                                                         \
+                                                                              \
+    if (A_dims_array == B_dims_array) {                                       \
+      const int size = std::accumulate(                                       \
+          C_dims_array.cbegin(),                                              \
+          C_dims_array.cend(),                                                \
+          1,                                                                  \
+          std::multiplies<int>());                                            \
+      Func<T, CPUContext>(size, A, B, C, context);                            \
+      return;                                                                 \
+    }                                                                         \
+    const int rowwise_pivot = GetRowwiseBinaryOpPivot(                        \
+        ndim, A_dims_array.data(), B_dims_array.data());                      \
+    if (rowwise_pivot > 0) {                                                  \
+      BinaryOpWith2DBroadcasting(                                             \
+          ndim,                                                               \
+          C_dims_array.data(),                                                \
+          rowwise_pivot,                                                      \
+          A_dims_array[rowwise_pivot - 1] == 1,                               \
+          Rowwise##Func<T, CPUContext, true>,                                 \
+          Rowwise##Func<T, CPUContext, false>,                                \
+          A,                                                                  \
+          B,                                                                  \
+          C,                                                                  \
+          context);                                                           \
+      return;                                                                 \
+    }                                                                         \
+    const int colwise_pivot = GetColwiseBinaryOpPivot(                        \
+        ndim, A_dims_array.data(), B_dims_array.data());                      \
+    if (colwise_pivot < ndim) {                                               \
+      BinaryOpWith2DBroadcasting(                                             \
+          ndim,                                                               \
+          C_dims_array.data(),                                                \
+          rowwise_pivot,                                                      \
+          A_dims_array[colwise_pivot] == 1,                                   \
+          Colwise##Func<T, CPUContext, true>,                                 \
+          Colwise##Func<T, CPUContext, false>,                                \
+          A,                                                                  \
+          B,                                                                  \
+          C,                                                                  \
+          context);                                                           \
+      return;                                                                 \
+    }                                                                         \
+    BroacastBinaryOpImpl(                                                     \
+        ndim,                                                                 \
+        A_dims_array.data(),                                                  \
+        B_dims_array.data(),                                                  \
+        C_dims_array.data(),                                                  \
+        op<T>(),                                                              \
+        A,                                                                    \
+        B,                                                                    \
+        C);                                                                   \
+  }
+
+#define DEFINE_BROADCAST_BINARY_FUNCTION(Func, op)           \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(float, Func, op)        \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(double, Func, op)       \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(std::int32_t, Func, op) \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(std::int64_t, Func, op)
+
+DEFINE_BROADCAST_BINARY_FUNCTION(Add, std::plus)
+DEFINE_BROADCAST_BINARY_FUNCTION(Sub, std::minus)
+DEFINE_BROADCAST_BINARY_FUNCTION(Mul, std::multiplies)
+
+#undef DEFINE_BROADCAST_BINARY_FUNCTION
+
+DELEGATE_BROADCAST_BINARY_FUNCTION(float, Div, std::divides);
+DELEGATE_BROADCAST_BINARY_FUNCTION(double, Div, std::divides);
+
+#undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
 template <>
 void RandUniform<float, CPUContext>(

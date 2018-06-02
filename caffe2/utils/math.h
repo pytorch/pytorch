@@ -87,6 +87,16 @@ void Not(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Powx(const int N, const T* a, const T b, T* y, Context* context);
 
+namespace internal {
+
+// Increase the index digits by one based on dims.
+void IncreaseIndexInDims(const int n, const int* dims, int* index);
+
+// Get index value from dims and index digits.
+int GetIndexFromDims(const int n, const int* dims, const int* index);
+
+} // namespace internal
+
 #define CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT(name)                         \
   template <typename T, class Context>                                       \
   void name(const int N, const T* a, const T* b, bool* y, Context* context); \
@@ -110,23 +120,38 @@ CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT(Xor);
 
 #undef CAFFE2_DECLARE_BINARY_OP_BINARY_RESULT
 
-#define CAFFE2_DECLARE_BINARY_OP(name)                                    \
+#define CAFFE2_DECLARE_BINARY_OP(Func)                                    \
   template <typename T, class Context>                                    \
-  void name(const int N, const T* a, const T* b, T* y, Context* context); \
-  template <typename T, class Context>                                    \
-  void name##ToRow(                                                       \
-      const int M,                                                        \
-      const int N,                                                        \
-      const T* a,                                                         \
-      const T* b,                                                         \
-      T* y,                                                               \
+  void Func(const int N, const T* A, const T* B, T* C, Context* context); \
+                                                                          \
+  template <typename T, class Context, bool kBroadcastA = false>          \
+  void Rowwise##Func(                                                     \
+      const int rows,                                                     \
+      const int cols,                                                     \
+      const T* A,                                                         \
+      const T* B,                                                         \
+      T* C,                                                               \
       Context* context);                                                  \
+                                                                          \
+  template <typename T, class Context, bool kBroadcastA = false>          \
+  void Colwise##Func(                                                     \
+      const int rows,                                                     \
+      const int cols,                                                     \
+      const T* A,                                                         \
+      const T* B,                                                         \
+      T* C,                                                               \
+      Context* context);                                                  \
+                                                                          \
   template <typename T, class Context>                                    \
-  void name##ToRow(                                                       \
-      const int M, const int N, const T* x, T* y, Context* context);      \
-  template <typename T, class Context>                                    \
-  void name##ToCol(                                                       \
-      const int M, const int N, const T* x, T* y, Context* context);
+  void Func(                                                              \
+      const int A_ndim,                                                   \
+      const int* A_dims,                                                  \
+      const int B_ndim,                                                   \
+      const int* B_dims,                                                  \
+      const T* A,                                                         \
+      const T* B,                                                         \
+      T* C,                                                               \
+      Context* context);
 
 CAFFE2_DECLARE_BINARY_OP(Add);
 CAFFE2_DECLARE_BINARY_OP(Sub);
@@ -134,16 +159,6 @@ CAFFE2_DECLARE_BINARY_OP(Mul);
 CAFFE2_DECLARE_BINARY_OP(Div);
 
 #undef CAFFE2_DECLARE_BINARY_OP
-
-namespace internal {
-
-// Increase the index digits by one based on dims.
-void IncreaseIndexInDims(const int n, const int* dims, int* index);
-
-// Get index value from dims and index digits.
-int GetIndexFromDims(const int n, const int* dims, const int* index);
-
-} // namespace internal
 
 template <typename T, class Context>
 void ReduceMin(
