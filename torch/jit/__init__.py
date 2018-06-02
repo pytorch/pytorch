@@ -369,9 +369,7 @@ def _script_graph(fn, _frames_up=0):
 
 def script(fn, _frames_up=0):
     graph = _script_graph(fn, _frames_up=_frames_up + 1)
-    fn_attributes = {i: getattr(fn, i) for i in functools.WRAPPER_ASSIGNMENTS}
-    Wrapper = type('GraphExecutorWrapper', (torch._C.GraphExecutor, ), fn_attributes)
-    return Wrapper(graph, True)
+    return functools.wraps(fn)(torch._C.GraphExecutor(graph, True))
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))
@@ -563,16 +561,8 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
-class ScriptMethodWrapper(object):
-    def __init__(self, script_method):
-        self.script_method = script_method
-
-    def __call__(self, *args, **kwargs):
-        return self.script_method(*args, **kwargs)
-
-
 def _build_wrap(original_method, script_method):
-    return functools.wraps(original_method)(ScriptMethodWrapper(script_method))
+    return functools.wraps(original_method)(script_method)
 
 
 class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):

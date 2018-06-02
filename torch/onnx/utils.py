@@ -17,7 +17,7 @@ import functools
 import types
 from torch._six import string_classes
 from torch.autograd import Function, function
-from torch.jit import _unique_state_dict, ScriptMethodWrapper
+from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes
 
 
@@ -143,13 +143,6 @@ def _trace_and_get_graph_from_model(model, args, training):
     return trace.graph(), torch_out
 
 
-def _maybe_unwrap(method):
-    if isinstance(method, ScriptMethodWrapper):
-        return method.script_method
-    else:
-        return method
-
-
 def _model_to_graph(model, args, f, verbose=False, training=False,
                     input_names=None, output_names=None, aten=False,
                     export_raw_ir=False, example_outputs=None, propagate=False):
@@ -163,7 +156,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
         if isinstance(example_outputs, torch.Tensor):
             example_outputs = [example_outputs]
         try:
-            method = _maybe_unwrap(model.__getattr__('forward'))
+            method = model.__getattr__('forward')
             graph = method.propagate_and_assign_input_and_output_shapes(
                 args, example_outputs, False, propagate)
             params = method.params()

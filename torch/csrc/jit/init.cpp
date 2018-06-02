@@ -85,7 +85,7 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_onnx_block", BlockToONNX)
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops);
 
-  py::class_<GraphExecutor>(m, "GraphExecutor")
+  py::class_<GraphExecutor>(m, "GraphExecutor", py::dynamic_attr())
       .def(
           py::init([](py::function func,
                       variable_list inputs,
