@@ -45,17 +45,26 @@ if (${name}_tensor.dim() == 0)
 auto ${name} = tensor_as<at::IntList>(std::move(${name}_tensor));\
 """)
 
-CALL_NAMESPACE = CodeTemplate("at::${name}(${args})")
-CALL_METHOD = CodeTemplate("(${first}).${name}(${args})")
+CALL_NAMESPACE = CodeTemplate("""\
+AutoGPU device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
+auto result = at::${name}(${args});
+""")
+CALL_METHOD = CodeTemplate("""\
+AutoGPU device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
+auto result = (${first}).${name}(${args});
+""")
+CALL_DTYPE = CodeTemplate("""\
+AutoGPU device_guard(device[1]);
+auto result = resolveType(device[0], layout, (at::ScalarType)dtype).${name}(${args});
+""")
 
 CONSTRUCTOR = CodeTemplate("""\
 {"${descriptor}", [](Node *node) {
   ${kw_assignments}
   return TensorOp([=](Stack & stack) {
     autograd::profiler::RecordFunction record("${name}");
-    AutoGPU device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
     ${pos_assignments}
-    auto result = ${call};
+    ${call}
     drop(stack, ${num_dynamic_inputs});
     pack(stack, std::move(result));
     return 0;
@@ -68,6 +77,22 @@ def is_magic_method(api_name):
     return api_name.startswith('__') and api_name.endswith('__')
 
 
+blacklisted_types = {'SparseTensor', 'Storage', 'ScalarType', 'optional<ScalarType>'}
+default_only_types = {'Generator'}
+
+
+def is_jit_arg(i, arg):
+    simple_type = arg['simple_type']
+    if simple_type in blacklisted_types:
+        return False
+    if simple_type in default_only_types and 'default' not in arg:
+        return False
+    # allow 'Type dtype' as the first argument only
+    if simple_type == 'Type' and (i > 0 or arg['name'] != 'dtype'):
+        return False
+    return True
+
+
 def is_jit_op(decl):
     # we currently only support vararg tensor lists when they are the _first_ argument
     # and the only tensor argument
@@ -77,18 +102,10 @@ def is_jit_op(decl):
     if has_tensorlist and (num_tensor_args != 1 or arguments[0]['simple_type'] != 'TensorList'):
         return False
 
-    uses_tensors = any(arg['simple_type'] in {'Tensor', 'TensorList'} for arg in decl['arguments']) or \
-        'Tensor' in decl['method_of']
     return ((not decl['api_name'].endswith('_') or is_magic_method(decl['api_name'])) and
             not decl['name'].endswith('_out') and
-            not any(arg['simple_type'] == 'Generator' for arg in decl['arguments']) and
-            not any(arg['simple_type'] == 'SparseTensor' for arg in decl['arguments']) and
-            not any(arg['simple_type'] == 'Storage' for arg in decl['arguments']) and
-            not any(arg['simple_type'] == 'ScalarType' for arg in decl['arguments']) and
-            not any(arg['simple_type'] == 'optional<ScalarType>' for arg in decl['arguments']) and
-            not any(arg['simple_type'] == 'Type' for arg in decl['arguments']) and
-            uses_tensors)
-
+            ('namespace' in decl['method_of'] or 'Tensor' in decl['method_of']) and
+            all(is_jit_arg(i, arg) for i, arg in enumerate(decl['arguments'])))
 
 # Scalar overloads like add(Tensor self, Scalar other) are not supported atm.
 # TODO: Why are they not supported?
@@ -98,6 +115,7 @@ skip_scalar_overload = {
     'fmod-2': [1], 'remainder-2': [1], '__and__-2': [1], '__or__-2': [1],
     '__iand__-2': [1], '__ior__-2': [1], '__xor__-2': [1], '__ixor__-2': [1],
     '__lshift__-2': [1], '__ilshift__-2': [1], '__rshift__-2': [1], '__irshift__-2': [1],
+    'normal-2': [0, 1], 'bernoulli-2': [0, 1],
 }
 
 
@@ -113,11 +131,15 @@ def is_sized_intlist_arg(arg):
 def gen_jit_dispatch(declarations, out):
     ops = {}
 
-    def get_invocation(decl, args):
-        if 'namespace' in decl['method_of']:
-            return CALL_NAMESPACE.substitute(name=decl['name'], args=args)
+    def get_invocation(decl, args, num_dynamic_inputs):
+        if decl.get('has_dtype'):
+            return CALL_DTYPE.substitute(name=decl['name'], args=args[:-3])
+        elif 'namespace' in decl['method_of']:
+            return CALL_NAMESPACE.substitute(name=decl['name'], args=args, num_dynamic_inputs=num_dynamic_inputs)
         else:
-            return CALL_METHOD.substitute(name=decl['name'], first=args[0], args=args[1:])
+            return CALL_METHOD.substitute(
+                name=decl['name'], first=args[0], args=args[1:],
+                num_dynamic_inputs=num_dynamic_inputs)
 
     def emit_decl_variant(decl, is_positional_arg, has_tensorlist):
         # is_positional_arg is a boolean list the same length as decl['arguments']
@@ -145,6 +167,8 @@ def gen_jit_dispatch(declarations, out):
             # the first argument, that is then followed by a number of positional args.
             if arg['simple_type'] == 'TensorList':
                 arguments.append('peekSlice(stack, 0, varargs_length - {}, varargs_length)'.format(static_inputs))
+            elif arg['simple_type'] in default_only_types:
+                arguments.append(arg['default'])
             elif is_tensor_arg(arg):
                 arguments.append('std::move(peek(stack, {}, {}))'.format(next(real_inputs), static_inputs))
             elif is_positional_arg[i]:
@@ -172,7 +196,7 @@ def gen_jit_dispatch(declarations, out):
                 attr_names.append('{}_{}'.format(arg['name'], attr_method))
                 arguments.append(arg['name'])
 
-        call = get_invocation(decl, arguments)
+        call = get_invocation(decl, arguments, num_dynamic_inputs)
 
         # Descriptor is a unique identifier for a particular overload of an op.
         attr_names = sorted(attr_names)
@@ -184,7 +208,7 @@ def gen_jit_dispatch(declarations, out):
         # at::Scalar as a positional scalar arg, then prefer the tensor overload.
         # It should get broadcasted correctly.
         if descriptor in skip_scalar_overload:
-            if any(decl['arguments'][idx]['simple_type'] == 'Scalar'
+            if any(decl['arguments'][idx]['simple_type'] in {'Scalar', 'double'}
                    for idx in skip_scalar_overload[descriptor]):
                 return
 
@@ -213,11 +237,11 @@ def gen_jit_dispatch(declarations, out):
         # into attributes, as that would allow us to avoid reparsing tensors into scalar
         # args at every invocation).
 
-        all_arguments_are_inputs = tuple(True for _ in arguments)
+        all_real_arguments_are_inputs = tuple(arg['simple_type'] not in default_only_types for arg in arguments)
         only_tensors_are_inputs = tuple(is_tensor_arg(arg) for arg in arguments)
 
         # NB: if there are no scalar args then both options on LHS are equivalent, so deduplicate them.
-        for variant in {all_arguments_are_inputs, only_tensors_are_inputs}:
+        for variant in {all_real_arguments_are_inputs, only_tensors_are_inputs}:
             emit_decl_variant(decl, variant, has_tensorlist)
 
     # We need to add methods implemented manually in TensorImpl
@@ -229,7 +253,25 @@ def gen_jit_dispatch(declarations, out):
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t'}],
     } for name in ['sizes', 'strides', 'dim']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
+
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
+
+    # add arguments dtype and device for functions like zeros
+    for decl in jit_decls:
+        arguments = decl['arguments']
+        if len(arguments) == 0 or arguments[0]['simple_type'] != 'Type':
+            continue
+        del arguments[0]
+        arguments.extend([
+            # dtype is specified as an int64_t of at::ScalarType
+            {'name': 'dtype', 'simple_type': 'int64_t', 'default': 'static_cast<int64_t>(at::kFloat)'},
+            # device is specified as an IntList of { torch::DeviceType, device_id }
+            {'name': 'device', 'simple_type': 'IntList',
+                'default': '{static_cast<int64_t>(torch::DeviceType::CPU), -1}'},
+            # layout is specified as an int64_t of Layouts's is_strided
+            {'name': 'layout', 'simple_type': 'int64_t', 'default': '1'}
+        ])
+        decl['has_dtype'] = True
 
     for decl in jit_decls:
         emit_decl(decl)
@@ -314,12 +356,13 @@ def emit_schema(jit_decls, out):
         env['arguments'].append("{{ {}, {}, {}, {} }}, {} ".format(n, t, d, a, comment))
 
     def emit(decl):
+        arguments = [a for a in decl['arguments'] if a['simple_type'] not in default_only_types]
         n = get_name(decl['name'])
-        for a in decl['arguments']:
+        for a in arguments:
             emit_arg(a, False)
         for a in decl['returns']:
             emit_arg(a, True)
-        n_args = len(decl['arguments'])
+        n_args = len(arguments)
         n_returns = len(decl['returns'])
         env['operators'].append('{{ {}, {}, {} }}, // FunctionSchema("{}", <{} arguments>, <{} returns>) '.format(
             n, n_args, n_returns, decl['name'], n_args, n_returns))
