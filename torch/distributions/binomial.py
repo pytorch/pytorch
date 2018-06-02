@@ -17,7 +17,7 @@ class Binomial(Distribution):
         >>> x = m.sample()
         tensor([   0.,   22.,   71.,  100.])
 
-        >>> m = Binomial(torch.Tensor([[5.], [10.]]), torch.Tensor([0.5, 0.8]))
+        >>> m = Binomial(torch.tensor([[5.], [10.]]), torch.tensor([0.5, 0.8]))
         >>> x = m.sample()
         tensor([[ 4.,  5.],
                 [ 7.,  6.]])
