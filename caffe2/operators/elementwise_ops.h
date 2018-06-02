@@ -310,11 +310,16 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
     vector<int> A_dims;
     vector<int> B_dims;
     if (legacy_broadcast_) {
-      size_t pre, n, post;
-      std::tie(pre, n, post) = ComputeLegacyBroadcastSizes(A, B, axis_);
-      A_dims = {
-          static_cast<int>(pre), static_cast<int>(n), static_cast<int>(post)};
-      B_dims = {static_cast<int>(n), 1};
+      if (B.size() == 1) {
+        A_dims = {static_cast<int>(A.size())};
+        B_dims = {1};
+      } else {
+        size_t pre, n, post;
+        std::tie(pre, n, post) = ComputeLegacyBroadcastSizes(A, B, axis_);
+        A_dims = {
+            static_cast<int>(pre), static_cast<int>(n), static_cast<int>(post)};
+        B_dims = {static_cast<int>(n), 1};
+      }
     } else {
       std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
       std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
