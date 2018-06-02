@@ -7,7 +7,10 @@ namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(
     Sqrt,
-    UnaryElementwiseOp<FloatTypes, CPUContext, SqrtFunctor<CPUContext>>);
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        SqrtFunctor<CPUContext>>);
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(Sqrt)
