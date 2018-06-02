@@ -145,7 +145,7 @@ goto:eof
   cd build
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
-                  -DBUILD_CAFFE2=OFF ^
+                  -DBUILD_CAFFE2=ON ^
                   -DBUILD_ATEN=ON ^
                   -DBUILD_PYTHON=OFF ^
                   -DBUILD_BINARY=OFF ^
