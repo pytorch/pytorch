@@ -189,20 +189,6 @@ int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage)
 
 void THCStorage_(free)(THCState *state, THCStorage *self)
 {
-  if(!(self->flag & TH_STORAGE_REFCOUNTED))
-    return;
-
-  if (--self->refcount == 0)
-  {
-    if(self->flag & TH_STORAGE_FREEMEM) {
-      THCudaCheck(
-        (*self->allocator->free)(self->allocatorContext, THCStorage_(data)(state, self)));
-    }
-    if(self->flag & TH_STORAGE_VIEW) {
-      THCStorage_(free)(state, self->view);
-    }
-    self->refcount.~atomic<int>();
-    THFree(self);
-  }
+  THCStorage_free(state, self);
 }
 #endif

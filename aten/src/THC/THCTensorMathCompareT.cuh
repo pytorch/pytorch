@@ -50,7 +50,7 @@ struct TensorNEOp {
   }
 };
 
-template<typename TensorType, typename TensorTypeOut, typename Op>
+template<typename ScalarTypeOut, typename ScalarType, typename TensorTypeOut, typename TensorType, typename Op>
 void THC_logicalTensor(THCState *state,
                        TensorTypeOut *self_,
                        TensorType *src1,
@@ -64,7 +64,7 @@ void THC_logicalTensor(THCState *state,
              TensorUtils<TensorType>::getNumElements(state, src2), 3,
              "sizes do not match");
 
-  if (!THC_pointwiseApply3(state, self_, src1, src2, op)) {
+  if (!THC_pointwiseApply3<ScalarTypeOut, ScalarType, ScalarType>(state, self_, src1, src2, op)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 

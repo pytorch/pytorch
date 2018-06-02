@@ -215,6 +215,18 @@ OnnxAttributes::get(const std::string& key) const {
 }
 
 template <>
+::google::protobuf::RepeatedField<float>
+OnnxAttributes::get(const std::string& key) const {
+  ::google::protobuf::RepeatedField<float> value;
+  const auto it = onnx_attrs_.find(key);
+  if (it != onnx_attrs_.end()) {
+    const AttributeProto& attr = *it->second;
+    value.CopyFrom(attr.floats());
+  }
+  return value;
+}
+
+template <>
 const TensorProto* OnnxAttributes::get(const std::string& key) const {
   const TensorProto* value = nullptr;
   const auto it = onnx_attrs_.find(key);
@@ -309,7 +321,6 @@ const std::
           kPerOpRenamedAttrs = {{"Squeeze", {{"axes", "dims"}}},
                                 {"Unsqueeze", {{"axes", "dims"}}},
                                 {"Transpose", {{"perm", "axes"}}},
-                                {"Upsample", {{"mode", ""}}},
                                 {"ConvTranspose", {{"output_padding", "adjs"}}},
                                 {"Selu", {{"gamma", "scale"}}}};
 
@@ -341,7 +352,8 @@ Caffe2Backend::get_special_operators() const {
               {"Split", &Caffe2Backend::CreateSplit},
               {"Reciprocal", &Caffe2Backend::CreateReciprocal},
               {"BatchNormalization", &Caffe2Backend::CreateBatchNormalization},
-              {"MatMul", &Caffe2Backend::CreateMatMul}};
+              {"MatMul", &Caffe2Backend::CreateMatMul},
+              {"Upsample", &Caffe2Backend::CreateUpsample}};
   return kSpecialOperators;
 }
 
@@ -867,6 +879,28 @@ Caffe2Ops Caffe2Backend::CreateMatMul(OnnxNode* onnx_node, int opset_version) {
   auto* broadcast_arg = op->add_arg();
   broadcast_arg->set_name("broadcast");
   broadcast_arg->set_i(1);
+
+  return c2_op;
+}
+
+Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) {
+  auto& attributes = onnx_node->attributes;
+  auto scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
+  if (scales.size() != 4) {
+    CAFFE_THROW("The scales argument should have size 4");
+  } else if (!AlmostEqual(scales.Get(0), 1) || !AlmostEqual(scales.Get(1), 1))  {
+    CAFFE_THROW("The first two elements in the scales argument must be 1");
+  }
+  attributes.remove("mode");
+  attributes.remove("scales");
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+  auto* op = c2_op.ops.Mutable(0);
+  auto* c2_height = op->add_arg();
+  c2_height->set_name("height_scale");
+  c2_height->set_f(scales.Get(2));
+  auto* c2_width = op->add_arg();
+  c2_width->set_name("width_scale");
+  c2_width->set_f(scales.Get(3));
 
   return c2_op;
 }
