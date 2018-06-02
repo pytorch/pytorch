@@ -13,7 +13,7 @@ mkdir -p $CAFFE2_BUILDPATH
 pushd $CAFFE2_BUILDPATH
 
 cmake -DUSE_CUDA=$((1-$NO_CUDA)) \
-      -DBUILD_CAFFE2=OFF \
+      -DBUILD_CAFFE2=ON \
       -DBUILD_ATEN=ON \
       -DBUILD_PYTHON=OFF \
       -DBUILD_BINARY=OFF \
