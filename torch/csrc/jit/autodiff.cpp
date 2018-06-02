@@ -32,11 +32,11 @@ bool isDifferentiable(Graph & g) {
                      static_cast<bool(*)(Node*)>(isDifferentiable));
 }
 
-bool isComparison(Node * n) {
-  static std::unordered_set<Symbol> comparison_kinds = {
+bool outputNotRequiresGrad(Node * n) {
+  static std::unordered_set<Symbol> output_nograd = {
     aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le
   };
-  return comparison_kinds.count(n->kind()) > 0;
+  return output_nograd.count(n->kind()) > 0;
 }
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
@@ -181,7 +181,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }
 
-static value_set findAllRequiresGradNodes(  
+static value_set findAllRequiresGradNodes(
         Graph& graph, const std::vector<bool>& input_requires_grad) {
   JIT_ASSERT(graph.inputs().size() == input_requires_grad.size());
   std::unordered_set<Value*> requires_grad_set;
@@ -196,7 +196,7 @@ static value_set findAllRequiresGradNodes(
   for (Node * node : graph.nodes()) {
     if (std::none_of(node->inputs().begin(), node->inputs().end(), requires_grad)) continue;
     if (node->kind() == aten::type_as && !requires_grad(node->inputs()[0])) continue;
-    if (isComparison(node)) continue;
+    if (outputNotRequiresGrad(node)) continue;
     for (Value * output : node->outputs())
       requires_grad_set.emplace(output);
   }
@@ -293,7 +293,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     auto inputs = node->inputs();
     if (std::none_of(inputs.begin(), inputs.end(), requires_grad))
       continue;
-    if (isComparison(node)) continue;
+    if (outputNotRequiresGrad(node)) continue;
     if (node->kind() == aten::type_as && !requires_grad(inputs[0])) continue;
     value_list grad_inputs = gradientForNode(node, fmap(node->outputs(), get_grad));
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
