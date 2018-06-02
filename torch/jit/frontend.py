@@ -185,8 +185,8 @@ class StmtBuilder(Builder):
     def build_Expr(ctx, stmt):
         value = stmt.value
         if value.__class__.__name__ == 'Str':
-            # If an expression is a string literal, then
-            # it is a docstring. Just ignore it.
+            # If a statement is a string literal expression,
+            # then it is a docstring. Just ignore it.
             return None
         else:
             return ExprStmt([build_expr(ctx, value)])
