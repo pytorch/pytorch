@@ -82,12 +82,8 @@ class RelaxedOneHotCategorical(TransformedDistribution):
 
         >>> m = RelaxedOneHotCategorical(torch.tensor([2.2]),
                                          torch.tensor([0.1, 0.2, 0.3, 0.4]))
-        >>> m.sample()  # equal probability of 1, 1, 2, 3
-         0.1294
-         0.2324
-         0.3859
-         0.2523
-        [torch.FloatTensor of size 4]
+        >>> m.sample()
+        tensor([ 0.1294,  0.2324,  0.3859,  0.2523])
 
     Args:
         temperature (Tensor): relaxation temperature

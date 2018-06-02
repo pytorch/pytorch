@@ -13,8 +13,7 @@ class Laplace(Distribution):
 
         >>> m = Laplace(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # Laplace distributed with loc=0, scale=1
-         0.1046
-        [torch.FloatTensor of size 1]
+        tensor([ 0.1046])
 
     Args:
         loc (float or Tensor): mean of the distribution

@@ -15,8 +15,7 @@ class Beta(ExponentialFamily):
 
         >>> m = Beta(torch.tensor([0.5]), torch.tensor([0.5]))
         >>> m.sample()  # Beta distributed with concentration concentration1 and concentration0
-         0.1046
-        [torch.FloatTensor of size 1]
+        tensor([ 0.1046])
 
     Args:
         concentration1 (float or Tensor): 1st concentration parameter of the distribution
@@ -66,7 +65,7 @@ class Beta(ExponentialFamily):
     def concentration1(self):
         result = self._dirichlet.concentration[..., 0]
         if isinstance(result, Number):
-            return torch.Tensor([result])
+            return torch.tensor([result])
         else:
             return result
 
@@ -74,7 +73,7 @@ class Beta(ExponentialFamily):
     def concentration0(self):
         result = self._dirichlet.concentration[..., 1]
         if isinstance(result, Number):
-            return torch.Tensor([result])
+            return torch.tensor([result])
         else:
             return result
 
