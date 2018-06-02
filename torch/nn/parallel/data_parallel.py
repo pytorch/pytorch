@@ -135,7 +135,15 @@ class DataParallel(Module):
     def gather(self, outputs, output_device):
         return gather(outputs, output_device, dim=self.dim)
 
+    def __getattr__(self,name):
+        if name is not 'module':
+            try:
+                return getattr(self.module,name)
+            except AttributeError:
+                pass
 
+        return super(DataParallel, self).__getattr__(name)
+    
 def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, module_kwargs=None):
     r"""Evaluates module(input) in parallel across the GPUs given in device_ids.
 
