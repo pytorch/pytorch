@@ -561,10 +561,6 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
-def _build_wrap(original_method, script_method):
-    return functools.wraps(original_method)(script_method)
-
-
 class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def __init__(self, optimize=True):
         # must be before Module.init since the field is used in __getattr__
@@ -577,7 +573,9 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def __getattr__(self, attr):
         if self._has_method(attr):
             if attr in self.__class__.original_methods:
-                return _build_wrap(self.__class__.original_methods[attr], self._get_method(attr))
+                original_method = self.__class__.original_methods[attr]
+                script_method = self._get_method(attr)
+                return functools.wraps(original_method)(script_method)
             else:
                 return self._get_method(attr)
         return Module.__getattr__(self, attr)
