@@ -19,7 +19,7 @@ void THNN_(BCECriterion_updateOutput)(
 
   if (!reduce) {
     THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply3(state, input, target, output,
+    THC_pointwiseApply3<real, real, real>(state, input, target, output,
         bce_updateOutput_no_reduce_functor<real, accreal>());
     if (weights) {
       THCTensor_(cmul)(state, output, output, weights);
@@ -85,7 +85,7 @@ void THNN_(BCECriterion_updateGradInput)(
 
   if (!reduce) {
     THCUNN_check_nElement(state, gradOutput, input);
-    THC_pointwiseApply3(state, input, target, gradInput,
+    THC_pointwiseApply3<real, real, real>(state, input, target, gradInput,
         bce_updateGradInput_no_reduce_functor<real, accreal>());
     THCTensor_(cmul)(state, gradInput, gradInput, gradOutput);
     if (weights) {
