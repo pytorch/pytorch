@@ -22,9 +22,9 @@ class Gamma(ExponentialFamily):
         tensor([ 0.1046])
 
     Args:
-        concentration (float or tensor): shape parameter of the distribution
+        concentration (float or Tensor): shape parameter of the distribution
             (often referred to as alpha)
-        rate (float or tensor): rate = 1 / scale of the distribution
+        rate (float or Tensor): rate = 1 / scale of the distribution
             (often referred to as beta)
     """
     arg_constraints = {'concentration': constraints.positive, 'rate': constraints.positive}

@@ -18,9 +18,9 @@ class Beta(ExponentialFamily):
         tensor([ 0.1046])
 
     Args:
-        concentration1 (float or tensor): 1st concentration parameter of the distribution
+        concentration1 (float or Tensor): 1st concentration parameter of the distribution
             (often referred to as alpha)
-        concentration0 (float or tensor): 2nd concentration parameter of the distribution
+        concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
     """
     arg_constraints = {'concentration1': constraints.positive, 'concentration0': constraints.positive}

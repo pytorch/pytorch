@@ -21,8 +21,8 @@ class Pareto(TransformedDistribution):
         tensor([ 1.5623])
 
     Args:
-        scale (float or tensor): Scale parameter of the distribution
-        alpha (float or tensor): Shape parameter of the distribution
+        scale (float or Tensor): Scale parameter of the distribution
+        alpha (float or Tensor): Shape parameter of the distribution
     """
     arg_constraints = {'alpha': constraints.positive, 'scale': constraints.positive}
 

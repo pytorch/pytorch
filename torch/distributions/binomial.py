@@ -23,9 +23,9 @@ class Binomial(Distribution):
                 [ 7.,  6.]])
 
     Args:
-        total_count (int or tensor): number of Bernoulli trials
-        probs (tensor): Event probabilities
-        logits (tensor): Event log-odds
+        total_count (int or Tensor): number of Bernoulli trials
+        probs (Tensor): Event probabilities
+        logits (Tensor): Event log-odds
     """
     arg_constraints = {'total_count': constraints.nonnegative_integer,
                        'probs': constraints.unit_interval}

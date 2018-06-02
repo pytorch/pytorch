@@ -16,8 +16,8 @@ class Laplace(Distribution):
         tensor([ 0.1046])
 
     Args:
-        loc (float or tensor): mean of the distribution
-        scale (float or tensor): scale of the distribution
+        loc (float or Tensor): mean of the distribution
+        scale (float or Tensor): scale of the distribution
     """
     arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real

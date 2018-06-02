@@ -63,7 +63,7 @@ class Transform(object):
             the codomain. Transforms that are not bijective should at least
             maintain the weaker pseudoinverse properties
             ``t(t.inv(t(x)) == t(x)`` and ``t.inv(t(t.inv(y))) == t.inv(y)``.
-        sign (int or tensor): For bijective univariate transforms, this
+        sign (int or Tensor): For bijective univariate transforms, this
             should be +1 or -1 depending on whether transform is monotone
             increasing or decreasing.
         event_dim (int): Number of dimensions that are correlated together in
@@ -372,8 +372,8 @@ class AffineTransform(Transform):
     Transform via the pointwise affine mapping :math:`y = \text{loc} + \text{scale} \times x`.
 
     Args:
-        loc (tensor or float): Location parameter.
-        scale (tensor or float): Scale parameter.
+        loc (Tensor or float): Location parameter.
+        scale (Tensor or float): Scale parameter.
         event_dim (int): Optional size of `event_shape`. This should be zero
             for univariate random variables, 1 for distributions over vectors,
             2 for distributions over matrices, etc.

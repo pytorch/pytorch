@@ -23,8 +23,8 @@ class OneHotCategorical(Distribution):
         tensor([ 0.,  0.,  0.,  1.])
 
     Args:
-        probs (tensor): event probabilities
-        logits (tensor): event log probabilities
+        probs (Tensor): event probabilities
+        logits (Tensor): event log probabilities
     """
     arg_constraints = {'probs': constraints.simplex}
     support = constraints.simplex

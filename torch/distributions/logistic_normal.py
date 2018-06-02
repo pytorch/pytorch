@@ -15,8 +15,8 @@ class LogisticNormal(TransformedDistribution):
         Y = log(X / (1 - X.cumsum(-1)))[..., :-1] ~ Normal(loc, scale)
 
     Args:
-        loc (float or tensor): mean of the base distribution
-        scale (float or tensor): standard deviation of the base distribution
+        loc (float or Tensor): mean of the base distribution
+        scale (float or Tensor): standard deviation of the base distribution
 
     Example::
 

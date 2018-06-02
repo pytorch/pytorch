@@ -19,8 +19,8 @@ class Normal(ExponentialFamily):
         tensor([ 0.1046])
 
     Args:
-        loc (float or tensor): mean of the distribution (often referred to as mu)
-        scale (float or tensor): standard deviation of the distribution
+        loc (float or Tensor): mean of the distribution (often referred to as mu)
+        scale (float or Tensor): standard deviation of the distribution
             (often referred to as sigma)
     """
     arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}

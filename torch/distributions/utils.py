@@ -19,13 +19,13 @@ _FINFO = {
 
 def _finfo(tensor):
     r"""
-    Return floating point info about a `tensor`:
+    Return floating point info about a `Tensor`:
     - `.eps` is the smallest number that can be added to 1 without being lost.
     - `.tiny` is the smallest positive number greater than zero
       (much smaller than `.eps`).
 
     Args:
-        tensor (torch tensor): tensor of floating point data.
+        tensor (Tensor): tensor of floating point data.
     Returns:
         _Finfo: a `namedtuple` with fields `.eps` and `.tiny`.
     """
@@ -58,11 +58,11 @@ def broadcast_all(*values):
         `(1,)`.
 
     Args:
-        values (list of `numbers.Number` or `torch.*tensor`)
+        values (list of `numbers.Number` or `torch.*Tensor`)
 
     Raises:
         ValueError: if any of the values is not a `numbers.Number` or
-            `torch.*tensor` instance
+            `torch.*Tensor` instance
     """
     values = list(values)
     scalar_idxs = [i for i in range(len(values)) if isinstance(values[i], Number)]
@@ -87,7 +87,7 @@ def _sum_rightmost(value, dim):
     Sum out ``dim`` many rightmost dimensions of a given tensor.
 
     Args:
-        value (tensor): A tensor of ``.dim()`` at least ``dim``.
+        value (Tensor): A tensor of ``.dim()`` at least ``dim``.
         dim (int): The number of rightmost dims to sum out.
     """
     if dim == 0:
@@ -102,7 +102,7 @@ def log_sum_exp(tensor, keepdim=True):
     summing is done along the last dimension.
 
     Args:
-        tensor (torch tensor)
+        tensor (Tensor)
         keepdim (Boolean): Whether to retain the last dimension on summing.
     """
     return tensor.logsumexp(dim=-1, keepdim=keepdim)
