@@ -224,7 +224,7 @@ function build_caffe2() {
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-      -DBUILD_CAFFE2=OFF \
+      -DBUILD_CAFFE2=ON \
       -DBUILD_ATEN=ON \
       -DBUILD_PYTHON=OFF \
       -DBUILD_BINARY=OFF \
