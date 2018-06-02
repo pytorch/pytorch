@@ -7,7 +7,7 @@ THCTensor_(fill)(THCState* state, THCTensor *self_, real value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
 
-  if (!THC_pointwiseApply1(
+  if (!THC_pointwiseApply1<real>(
         state, self_, TensorFillOp<real>(value))) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
@@ -25,7 +25,7 @@ THCTensor_(zero)(THCState *state, THCTensor *self_)
                                 sizeof(real) * THCTensor_(nElement)(state, self_),
                                 THCState_getCurrentStream(state)));
   } else {
-    if (!THC_pointwiseApply1(
+    if (!THC_pointwiseApply1<real>(
           state, self_,
           TensorFillOp<real>(ScalarConvert<int, real>::to(0)))) {
       THArgCheck(false, 1, CUTORCH_DIM_WARNING);

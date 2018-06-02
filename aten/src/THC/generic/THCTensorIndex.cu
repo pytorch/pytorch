@@ -267,7 +267,7 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
     // wrap indices so to replace negative indices
     THCudaLongTensor* sorted_index = THCudaLongTensor_new(state);
     THCudaLongTensor_resizeAs(state, sorted_index, index);
-    THC_pointwiseApply2(state, sorted_index, index, WrapIndexOp(dstSize));
+    THC_pointwiseApply2<int64_t, int64_t>(state, sorted_index, index, WrapIndexOp(dstSize));
 
     THCTensor* sorted_src = THCTensor_(newClone)(state, src);
 
