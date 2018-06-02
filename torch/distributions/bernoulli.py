@@ -21,8 +21,8 @@ class Bernoulli(ExponentialFamily):
         tensor([ 0.])
 
     Args:
-        probs (Number, Tensor): the probabilty of sampling `1`
-        logits (Number, Tensor): the log-odds of sampling `1`
+        probs (Number, tensor): the probabilty of sampling `1`
+        logits (Number, tensor): the log-odds of sampling `1`
     """
     arg_constraints = {'probs': constraints.unit_interval}
     support = constraints.boolean
@@ -84,7 +84,7 @@ class Bernoulli(ExponentialFamily):
 
     def enumerate_support(self):
         values = self._new((2,))
-        torch.arange(2, out=values.data)
+        torch.arange(2, out=values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
         return values

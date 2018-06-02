@@ -22,7 +22,7 @@ class Poisson(ExponentialFamily):
         tensor([ 3.])
 
     Args:
-        rate (Number, Tensor): the rate parameter
+        rate (Number, tensor): the rate parameter
     """
     arg_constraints = {'rate': constraints.positive}
     support = constraints.nonnegative_integer

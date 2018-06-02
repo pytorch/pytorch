@@ -23,8 +23,8 @@ class OneHotCategorical(Distribution):
         tensor([ 0.,  0.,  0.,  1.])
 
     Args:
-        probs (Tensor): event probabilities
-        logits (Tensor): event log probabilities
+        probs (tensor): event probabilities
+        logits (tensor): event log probabilities
     """
     arg_constraints = {'probs': constraints.simplex}
     support = constraints.simplex
@@ -80,6 +80,6 @@ class OneHotCategorical(Distribution):
     def enumerate_support(self):
         n = self.event_shape[0]
         values = self._new((n, n))
-        torch.eye(n, out=values.data)
+        torch.eye(n, out=values)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
         return values.expand((n,) + self.batch_shape + (n,))

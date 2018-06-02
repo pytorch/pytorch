@@ -17,7 +17,7 @@ class Exponential(ExponentialFamily):
         tensor([ 0.1046])
 
     Args:
-        rate (float or Tensor): rate = 1 / scale of the distribution
+        rate (float or tensor): rate = 1 / scale of the distribution
     """
     arg_constraints = {'rate': constraints.positive}
     support = constraints.positive

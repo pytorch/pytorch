@@ -97,10 +97,10 @@ class MultivariateNormal(Distribution):
         tensor([-0.2102, -0.5429])
 
     Args:
-        loc (Tensor): mean of the distribution
-        covariance_matrix (Tensor): positive-definite covariance matrix
-        precision_matrix (Tensor): positive-definite precision matrix
-        scale_tril (Tensor): lower-triangular factor of covariance, with positive-valued diagonal
+        loc (tensor): mean of the distribution
+        covariance_matrix (tensor): positive-definite covariance matrix
+        precision_matrix (tensor): positive-definite precision matrix
+        scale_tril (tensor): lower-triangular factor of covariance, with positive-valued diagonal
 
     Note:
         Only one of :attr:`covariance_matrix` or :attr:`precision_matrix` or

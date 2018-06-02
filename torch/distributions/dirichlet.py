@@ -46,7 +46,7 @@ class Dirichlet(ExponentialFamily):
         tensor([ 0.1046,  0.8954])
 
     Args:
-        concentration (Tensor): concentration parameter of the distribution
+        concentration (tensor): concentration parameter of the distribution
             (often referred to as alpha)
     """
     arg_constraints = {'concentration': constraints.positive}

@@ -32,8 +32,8 @@ class Categorical(Distribution):
         tensor(3)
 
     Args:
-        probs (Tensor): event probabilities
-        logits (Tensor): event log probabilities
+        probs (tensor): event probabilities
+        logits (tensor): event log probabilities
     """
     arg_constraints = {'probs': constraints.simplex}
     has_enumerate_support = True

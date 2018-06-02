@@ -19,8 +19,8 @@ class Uniform(Distribution):
         tensor([ 2.3418])
 
     Args:
-        low (float or Tensor): lower range (inclusive).
-        high (float or Tensor): upper range (exclusive).
+        low (float or tensor): lower range (inclusive).
+        high (float or tensor): upper range (exclusive).
     """
     # TODO allow (loc,scale) parameterization to allow independent constraints.
     arg_constraints = {'low': constraints.dependent, 'high': constraints.dependent}

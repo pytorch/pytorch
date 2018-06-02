@@ -33,8 +33,8 @@ class Multinomial(Distribution):
 
     Args:
         total_count (int): number of trials
-        probs (Tensor): event probabilities
-        logits (Tensor): event log probabilities
+        probs (tensor): event probabilities
+        logits (tensor): event log probabilities
     """
     arg_constraints = {'logits': constraints.real}  # Let logits be the canonical parameterization.
 

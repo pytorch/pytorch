@@ -18,7 +18,7 @@ class StudentT(Distribution):
         tensor([ 0.1046])
 
     Args:
-        df (float or Tensor): degrees of freedom
+        df (float or tensor): degrees of freedom
     """
     arg_constraints = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real

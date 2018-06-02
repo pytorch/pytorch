@@ -118,7 +118,7 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor):
+            value (tensor):
         """
         raise NotImplementedError
 
@@ -128,7 +128,7 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor):
+            value (tensor):
         """
         raise NotImplementedError
 
@@ -138,7 +138,7 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor):
+            value (tensor):
         """
         raise NotImplementedError
 
@@ -154,7 +154,7 @@ class Distribution(object):
         use `itertools.product(m.enumerate_support())`.
 
         Returns:
-            Tensor iterating over dimension 0.
+            tensor iterating over dimension 0.
         """
         raise NotImplementedError
 
@@ -163,7 +163,7 @@ class Distribution(object):
         Returns entropy of distribution, batched over batch_shape.
 
         Returns:
-            Tensor of shape batch_shape.
+            tensor of shape batch_shape.
         """
         raise NotImplementedError
 
@@ -172,7 +172,7 @@ class Distribution(object):
         Returns perplexity of distribution, batched over batch_shape.
 
         Returns:
-            Tensor of shape batch_shape.
+            tensor of shape batch_shape.
         """
         return torch.exp(self.entropy())
 
@@ -196,13 +196,13 @@ class Distribution(object):
         and event shapes.
 
         Args:
-            value (Tensor): the tensor whose log probability is to be
+            value (tensor): the tensor whose log probability is to be
                 computed by the `log_prob` method.
         Raises
             ValueError: when the rightmost dimensions of `value` do not match the
                 distribution's batch and event shapes.
         """
-        if not isinstance(value, torch.Tensor):
+        if value.__class__.__name__ != 'Tensor':
             raise ValueError('The value argument to log_prob must be a Tensor')
 
         event_dim_start = len(value.size()) - len(self._event_shape)

@@ -19,13 +19,13 @@ _FINFO = {
 
 def _finfo(tensor):
     r"""
-    Return floating point info about a `Tensor`:
+    Return floating point info about a `tensor`:
     - `.eps` is the smallest number that can be added to 1 without being lost.
     - `.tiny` is the smallest positive number greater than zero
       (much smaller than `.eps`).
 
     Args:
-        tensor (Tensor): tensor of floating point data.
+        tensor (torch tensor): tensor of floating point data.
     Returns:
         _Finfo: a `namedtuple` with fields `.eps` and `.tiny`.
     """
@@ -50,25 +50,25 @@ def broadcast_all(*values):
     r"""
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
-      - `torch.Tensor` instances are broadcasted as per the `broadcasting rules
+      - `torch.*Tensor` instances are broadcasted as per the `broadcasting rules
         <http://pytorch.org/docs/master/notes/broadcasting.html>`_
-      - numbers.Number instances (scalars) are upcast to Tensors having
+      - numbers.Number instances (scalars) are upcast to tensors having
         the same size and type as the first tensor passed to `values`.  If all the
         values are scalars, then they are upcasted to Tensors having size
         `(1,)`.
 
     Args:
-        values (list of `numbers.Number` or `torch.Tensor`)
+        values (list of `numbers.Number` or `torch.*tensor`)
 
     Raises:
         ValueError: if any of the values is not a `numbers.Number` or
-            `torch.Tensor` instance
+            `torch.*tensor` instance
     """
     values = list(values)
     scalar_idxs = [i for i in range(len(values)) if isinstance(values[i], Number)]
-    tensor_idxs = [i for i in range(len(values)) if isinstance(values[i], torch.Tensor)]
+    tensor_idxs = [i for i in range(len(values)) if values[i].__class__.__name__ == 'Tensor']
     if len(scalar_idxs) + len(tensor_idxs) != len(values):
-        raise ValueError('Input arguments must all be instances of numbers.Number or torch.Tensor.')
+        raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
     if tensor_idxs:
         broadcast_shape = _broadcast_shape([values[i].size() for i in tensor_idxs])
         for idx in tensor_idxs:
@@ -87,7 +87,7 @@ def _sum_rightmost(value, dim):
     Sum out ``dim`` many rightmost dimensions of a given tensor.
 
     Args:
-        value (Tensor): A tensor of ``.dim()`` at least ``dim``.
+        value (tensor): A tensor of ``.dim()`` at least ``dim``.
         dim (int): The number of rightmost dims to sum out.
     """
     if dim == 0:
@@ -102,7 +102,7 @@ def log_sum_exp(tensor, keepdim=True):
     summing is done along the last dimension.
 
     Args:
-        tensor (torch.Tensor)
+        tensor (torch tensor)
         keepdim (Boolean): Whether to retain the last dimension on summing.
     """
     return tensor.logsumexp(dim=-1, keepdim=keepdim)

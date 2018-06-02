@@ -22,9 +22,9 @@ class Gamma(ExponentialFamily):
         tensor([ 0.1046])
 
     Args:
-        concentration (float or Tensor): shape parameter of the distribution
+        concentration (float or tensor): shape parameter of the distribution
             (often referred to as alpha)
-        rate (float or Tensor): rate = 1 / scale of the distribution
+        rate (float or tensor): rate = 1 / scale of the distribution
             (often referred to as beta)
     """
     arg_constraints = {'concentration': constraints.positive, 'rate': constraints.positive}
@@ -51,7 +51,7 @@ class Gamma(ExponentialFamily):
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(shape)
-        value.data.clamp_(min=_finfo(value).tiny)  # do not record in autograd graph
+        value.detach().clamp_(min=_finfo(value).tiny)  # do not record in autograd graph
         return value
 
     def log_prob(self, value):
