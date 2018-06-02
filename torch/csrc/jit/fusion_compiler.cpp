@@ -61,10 +61,12 @@ std::ostream& operator<<(std::ostream & out, const TensorDesc & d) {
 namespace codegen {
 
 auto type_declarations_template = CodeTemplate(R"(
+#if defined(__CUDACC_RTC__)
 typedef unsigned char uint8_t; 
 typedef signed char int8_t; 
 typedef short int  int16_t; 
-typedef long int int64_t; 
+typedef long long int int64_t; 
+#endif
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
 struct TensorInfo {

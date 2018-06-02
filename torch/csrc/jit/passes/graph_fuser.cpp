@@ -80,7 +80,7 @@ bool isSimpleMap(Node *node) {
   TensorType* expected_type = node->inputs()[0]->type()->cast<TensorType>();
   if (!expected_type)
     return false;
-  static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual, bool checkScalarType = true) {
+  static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual, bool checkScalarType) {
     TensorType* actual = _actual->cast<TensorType>();
     return actual &&
            (!checkScalarType || expected->scalarType() == actual->scalarType()) &&
