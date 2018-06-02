@@ -92,6 +92,10 @@ template <>
 OnnxAttributes::get(const std::string& key) const;
 
 template <>
+::google::protobuf::RepeatedField<float>
+OnnxAttributes::get(const std::string& key) const;
+
+template <>
 const TensorProto* OnnxAttributes::get(const std::string& key) const;
 
 // convenient class for onnx node
@@ -183,6 +187,9 @@ class Caffe2Backend {
   Caffe2Ops CreateBatchNormalization(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateMatMul(OnnxNode* onnx_node, int opset_version);
+
+  Caffe2Ops CreateUpsample(OnnxNode* onnx_node, int opset_version);
+
 
   // LUT related getters
   const std::unordered_map<std::string, std::string>& get_renamed_operators()
