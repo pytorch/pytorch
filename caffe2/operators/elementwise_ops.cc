@@ -69,13 +69,13 @@ REGISTER_CPU_OPERATOR(
     Sign,
     UnaryElementwiseOp<NumericTypes, CPUContext, SignFunctor<CPUContext>>);
 
-#define REGISTER_CPU_COMPARE_OPERATOR(Op) \
-  REGISTER_CPU_OPERATOR(                  \
-      Op,                                 \
-      BinaryElementwiseOp<                \
-          NumericTypes,                   \
-          CPUContext,                     \
-          Op##Functor<CPUContext>,        \
+#define REGISTER_CPU_COMPARE_OPERATOR(Op)                     \
+  REGISTER_CPU_OPERATOR(                                      \
+      Op,                                                     \
+      BinaryElementwiseOp<                                    \
+          TensorTypes<bool, int32_t, int64_t, float, double>, \
+          CPUContext,                                         \
+          Op##Functor<CPUContext>,                            \
           FixedType<bool>>)
 
 REGISTER_CPU_COMPARE_OPERATOR(EQ);

@@ -17,13 +17,13 @@ REGISTER_CUDA_OPERATOR(
     Sign,
     UnaryElementwiseOp<NumericTypes, CUDAContext, SignFunctor<CUDAContext>>);
 
-#define REGISTER_CUDA_COMPARE_OPERATOR(Op) \
-  REGISTER_CUDA_OPERATOR(                  \
-      Op,                                  \
-      BinaryElementwiseOp<                 \
-          NumericTypes,                    \
-          CUDAContext,                     \
-          Op##Functor<CUDAContext>,        \
+#define REGISTER_CUDA_COMPARE_OPERATOR(Op)                    \
+  REGISTER_CUDA_OPERATOR(                                     \
+      Op,                                                     \
+      BinaryElementwiseOp<                                    \
+          TensorTypes<bool, int32_t, int64_t, float, double>, \
+          CUDAContext,                                        \
+          Op##Functor<CUDAContext>,                           \
           FixedType<bool>>)
 
 REGISTER_CUDA_COMPARE_OPERATOR(EQ);

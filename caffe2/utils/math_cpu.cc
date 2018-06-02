@@ -1335,7 +1335,8 @@ void BroadcastBinaryOpImpl(
   DELEGATE_1D_BINARY_FUNCTION(float, bool, Func, Op)        \
   DELEGATE_1D_BINARY_FUNCTION(double, bool, Func, Op)       \
   DELEGATE_1D_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
-  DELEGATE_1D_BINARY_FUNCTION(std::int64_t, bool, Func, Op)
+  DELEGATE_1D_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
+  DELEGATE_1D_BINARY_FUNCTION(bool, bool, Func, Op)
 
 DEFINE_1D_COMPARE_FUNCTION(EQ, std::equal_to)
 DEFINE_1D_COMPARE_FUNCTION(NE, std::not_equal_to)
@@ -1411,7 +1412,8 @@ DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
   DELEGATE_2D_BROADCAST_BINARY_FUNCTION(float, bool, Func, Op)        \
   DELEGATE_2D_BROADCAST_BINARY_FUNCTION(double, bool, Func, Op)       \
   DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
-  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int64_t, bool, Func, Op)
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, Func, Op)
 
 DEFINE_2D_COMPARE_FUNCTION(EQ, std::equal_to)
 DEFINE_2D_COMPARE_FUNCTION(NE, std::not_equal_to)
@@ -1526,7 +1528,8 @@ DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
   DELEGATE_BROADCAST_BINARY_FUNCTION(float, bool, Func, Op)        \
   DELEGATE_BROADCAST_BINARY_FUNCTION(double, bool, Func, Op)       \
   DELEGATE_BROADCAST_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
-  DELEGATE_BROADCAST_BINARY_FUNCTION(std::int64_t, bool, Func, Op)
+  DELEGATE_BROADCAST_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Func, Op)
 
 DEFINE_BROADCAST_COMPARE_FUNCTION(EQ, std::equal_to)
 DEFINE_BROADCAST_COMPARE_FUNCTION(NE, std::not_equal_to)
