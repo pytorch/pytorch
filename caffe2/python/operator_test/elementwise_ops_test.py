@@ -12,32 +12,6 @@ import numpy as np
 
 class TestElementwiseOps(hu.HypothesisTestCase):
 
-    @given(n=st.integers(0, 10), m=st.integers(4, 6),
-           d=st.integers(2, 3), seed=st.integers(0, 1000), **hu.gcs)
-    def test_div(self, n, m, d, gc, dc, seed):
-        np.random.seed(seed)
-        X = np.random.rand(n, m, d).astype(np.float32)
-        Y = np.random.rand(n, m, d).astype(np.float32) + 5.0
-
-        def div_op(X, Y):
-            return [np.divide(X, Y)]
-
-        op = core.CreateOperator(
-            "Div",
-            ["X", "Y"],
-            ["Z"]
-        )
-
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X, Y],
-            reference=div_op,
-        )
-
-        self.assertGradientChecks(
-            gc, op, [X, Y], 0, [0], stepsize=1e-4, threshold=1e-2)
-
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     def test_log(self, n, m, gc, dc, seed):
@@ -307,3 +281,137 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         result_2 = net_2.EQ(["X", "Y"], 1)
         (shapes, types) = workspace.InferShapesAndTypes([net])
         self.assertTrue(str(result_2) not in shapes)
+
+    def _run_single_test(self, op, ref, A, B, test_grad, gc, dc):
+        inputs = [A, B]
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            reference=ref,
+        )
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        if test_grad:
+            for i in range(len(inputs)):
+                self.assertGradientChecks(gc, op, inputs, i, [0])
+
+        inputs = [B, A]
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            reference=ref,
+        )
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        if test_grad:
+            for i in range(len(inputs)):
+                self.assertGradientChecks(gc, op, inputs, i, [0])
+
+    def _test_binary_op(
+            self, op_name, np_ref, n, m, k, t, bias, test_grad, gc, dc):
+        op = core.CreateOperator(
+            op_name,
+            ["A", "B"],
+            ["C"],
+        )
+
+        def ref(A, B):
+            return [np_ref(A, B)]
+
+        A = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        B = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+
+        A = np.random.rand(1).astype(np.float32) + bias
+        B = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+
+        A = np.random.rand(k, t).astype(np.float32) + bias
+        B = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+
+        A = np.random.rand(n, m, 1, 1).astype(np.float32) + bias
+        B = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+
+        A = np.random.rand(m, 1, t).astype(np.float32) + bias
+        B = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+
+        A = np.random.rand(1, m, 1, t).astype(np.float32) + bias
+        B = np.random.rand(n, 1, k, 1).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
+           t=st.integers(1, 5), **hu.gcs)
+    def test_add(self, n, m, k, t, gc, dc):
+        self._test_binary_op("Add", np.add, n, m, k, t, -0.5, True, gc, dc)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
+           t=st.integers(1, 5), **hu.gcs)
+    def test_sub(self, n, m, k, t, gc, dc):
+        self._test_binary_op("Sub", np.subtract, n, m,
+                             k, t, -0.5, True, gc, dc)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
+           t=st.integers(1, 5), **hu.gcs)
+    def test_mul(self, n, m, k, t, gc, dc):
+        self._test_binary_op("Mul", np.multiply, n, m,
+                             k, t, -0.5, True, gc, dc)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
+           t=st.integers(1, 5), **hu.gcs)
+    def test_div(self, n, m, k, t, gc, dc):
+        self._test_binary_op("Div", np.divide, n, m, k, t, 1.0, True, gc, dc)
+
+    def _test_bitwise_binary_op(self, op_name, np_ref, n, m, k, t, gc, dc):
+        op = core.CreateOperator(
+            op_name,
+            ["A", "B"],
+            ["C"],
+        )
+
+        def ref(A, B):
+            return [np_ref(A, B)]
+
+        A = np.random.randint(128, size=(n, m, k, t))
+        B = np.random.randint(128, size=(n, m, k, t))
+        self._run_single_test(op, ref, A, B, False, gc, dc)
+
+        A = np.random.randint(128, size=1)
+        B = np.random.randint(128, size=(n, m, k, t))
+        self._run_single_test(op, ref, A, B, False, gc, dc)
+
+        A = np.random.randint(128, size=(k, t))
+        B = np.random.randint(128, size=(n, m, k, t))
+        self._run_single_test(op, ref, A, B, False, gc, dc)
+
+        A = np.random.randint(128, size=(n, m, 1, 1))
+        B = np.random.randint(128, size=(n, m, k, t))
+        self._run_single_test(op, ref, A, B, False, gc, dc)
+
+        A = np.random.randint(128, size=(m, 1, t))
+        B = np.random.randint(128, size=(n, m, k, t))
+        self._run_single_test(op, ref, A, B, False, gc, dc)
+
+        A = np.random.randint(128, size=(1, m, 1, t))
+        B = np.random.randint(128, size=(n, 1, k, 1))
+        self._run_single_test(op, ref, A, B, False, gc, dc)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
+           t=st.integers(1, 5), **hu.gcs)
+    def test_bitwise_and(self, n, m, k, t, gc, dc):
+        self._test_bitwise_binary_op(
+            "BitwiseAnd", np.bitwise_and, n, m, k, t, gc, dc)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
+           t=st.integers(1, 5), **hu.gcs)
+    def test_bitwise_or(self, n, m, k, t, gc, dc):
+        self._test_bitwise_binary_op(
+            "BitwiseOr", np.bitwise_or, n, m, k, t, gc, dc)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
+           t=st.integers(1, 5), **hu.gcs)
+    def test_bitwise_xor(self, n, m, k, t, gc, dc):
+        self._test_bitwise_binary_op(
+            "BitwiseXor", np.bitwise_xor, n, m, k, t, gc, dc)
