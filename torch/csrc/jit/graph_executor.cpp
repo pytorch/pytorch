@@ -90,6 +90,22 @@ struct ExecutionPlan {
   std::shared_ptr<Graph> get_graph() const {
     return graph;
   }
+
+  ExecutionPlanState getDebugState() {
+    ExecutionPlanState state;
+    state.f = &f;
+    state.graph = graph.get();
+    if (grad) {
+      state.grad = &grad;
+      state.grad_executor = std::unique_ptr<GraphExecutorState>(
+          new GraphExecutorState(grad_executor.getDebugState()));
+    } else {
+      state.grad = nullptr;
+      state.grad_executor.reset();
+    }
+    return state;
+  }
+
 private:
   // inplace to avoid allocations
   variable_tensor_list unwrapVariables(variable_tensor_list && list) const {
@@ -221,6 +237,22 @@ struct GraphExecutorImpl {
     return it->second.get_graph();
   }
 
+  GraphExecutorState getDebugState() {
+    GraphExecutorState state;
+    state.graph = graph.get();
+    if (autograd_fallback) {
+      state.autograd_fallback = &autograd_fallback;
+      state.autograd_fallback_graph = autograd_fallback_graph.get();
+    } else {
+      state.autograd_fallback = nullptr;
+      state.autograd_fallback_graph = nullptr;
+    }
+    for (auto & entry : plan_cache) {
+      state.execution_plans.emplace(entry.first, entry.second.getDebugState());
+    }
+    return state;
+  }
+
 private:
   friend struct GraphExecutor;
 
@@ -349,6 +381,7 @@ private:
         CreateAutodiffSubgraphs(*graph_);
       runOptimization(graph_, /*graphMustSupportVariables=*/true);
     }
+    autograd_fallback_graph = graph_;
     autograd_fallback = Code(graph_);
     return autograd_fallback;
   }
@@ -512,6 +545,10 @@ std::shared_ptr<Graph> GraphExecutor::graph() const {
 
 std::shared_ptr<Graph> GraphExecutor::graphFor(const variable_tensor_list& inputs) const {
   return pImpl->graphFor(inputs);
+}
+
+GraphExecutorState GraphExecutor::getDebugState() {
+  return pImpl->getDebugState();
 }
 
 }}
