@@ -14,6 +14,9 @@ namespace test_is_equality_comparable {
     static_assert(!is_equality_comparable<NotEqualityComparable>::value, "");
     static_assert(is_equality_comparable<EqualityComparable>::value, "");
     static_assert(is_equality_comparable<int>::value, "");
+
+    // v_ just exists to silence a compiler warning about operator==(EqualityComparable, EqualityComparable) not being needed
+    const bool v_ = EqualityComparable() == EqualityComparable();
 }
 
 namespace test_is_hashable {
@@ -39,6 +42,12 @@ namespace {
             void operator()() {}
         };
         auto lambda = [] () {};
+        // func() and func__ just exists to silence a compiler warning about lambda being unused
+        bool func() {
+            lambda();
+            return true;
+        }
+        bool func__ = func();
 
         static_assert(is_function_type<void()>::value, "");
         static_assert(is_function_type<int()>::value, "");

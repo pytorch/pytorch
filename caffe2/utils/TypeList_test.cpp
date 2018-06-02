@@ -88,7 +88,7 @@ namespace test_reverse {
 
 namespace test_map_types_to_values {
     struct map_to_size {
-      template<class T> constexpr size_t operator()(T) {return sizeof(typename T::type);}
+      template<class T> constexpr size_t operator()(T) const {return sizeof(typename T::type);}
     };
 
     TEST(TypeListTest, MapTypesToValues_sametype) {

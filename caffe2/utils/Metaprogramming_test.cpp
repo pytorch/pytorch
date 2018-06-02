@@ -30,7 +30,7 @@ namespace test_function_traits {
 namespace test_to_std_array {
     constexpr int obj2[3] = {3, 5, 6};
     static_assert(eq(std::array < int, 3 > {{3, 5, 6}}, to_std_array(obj2)), "");
-    static_assert(eq(std::array < int, 3 > {{3, 5, 6}}, to_std_array({3, 5, 6})), "");
+    static_assert(eq(std::array < int, 3 > {{3, 5, 6}}, to_std_array<int, 3>({3, 5, 6})), "");
 }
 
 struct MovableOnly {
@@ -81,7 +81,6 @@ namespace test_extract_arg_by_filtered_index {
     }
 
     TEST(MetaprogrammingTest, ExtractArgByFilteredIndex_singleInput) {
-        MyClass obj;
         auto a1 = extract_arg_by_filtered_index<std::is_integral, 0>(3);
         EXPECT_EQ(3, a1);
     }
@@ -173,7 +172,7 @@ namespace test_filter_map {
     TEST(MetaprogrammingTest, FilterMap_movableOnly_byValue) {
         struct map_movable_by_lvalue {
           MovableOnly operator()(MovableOnly a) const {
-            return std::move(a);
+            return a;
           }
         };
 
