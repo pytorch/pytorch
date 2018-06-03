@@ -177,7 +177,8 @@ class Caffe2Backend(Backend):
         'Squeeze':              {'axes': 'dims'},
         'Unsqueeze':            {'axes': 'dims'},
         'Transpose':            {'perm': 'axes'},
-        'Upsample':             {'mode': ''},
+        'Upsample':             {'mode': '',
+                                 'scales': ''},
         'ConvTranspose':        {'output_padding': 'adjs'},
         'Selu':                 {'gamma': 'scale'},
         'If':                   {'then_branch': 'then_net',
@@ -193,6 +194,7 @@ class Caffe2Backend(Backend):
         'RNN': '_create_rnn_variant',
         'Loop': '_create_loop',
         'If': '_create_if',
+        'Upsample': '_create_upsample',
     }
 
     # Dummy name generator
@@ -376,6 +378,17 @@ class Caffe2Backend(Backend):
 
         return outputs
 
+    @classmethod
+    def _create_upsample(cls, init_model, pred_model, n, opset_version):
+        c2_op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
+        if len(n.attrs['scales']) != 4:
+            raise ValueError("The scales argument should have size 4")
+        elif not (np.isclose(n.attrs['scales'][0], 1) and np.isclose(n.attrs['scales'][1], 1)):
+            raise ValueError("The first two elements in the scales argument must be 1")
+        c2_op.arg.extend([caffe2.python.utils.MakeArgument('height_scale', n.attrs['scales'][2])])
+        c2_op.arg.extend([caffe2.python.utils.MakeArgument('width_scale', n.attrs['scales'][3])])
+
+        return c2_op
 
     @classmethod
     def _create_rnn_variant(cls, init_model, pred_model, n, opset_version):
@@ -854,6 +867,7 @@ class Caffe2Backend(Backend):
         c2_op.input.extend(onnx_node.inputs)
         c2_op.output.extend(onnx_node.outputs)
         c2_op.name = onnx_node.name
+
 
         onnx_op_type = onnx_node.op_type
         broken_version = cls._broken_operators.get(onnx_op_type, float('Inf'))

@@ -1,36 +1,10 @@
 #pragma once
 
 #include "Store.hpp"
-
-#include <condition_variable>
-#include <mutex>
-#include <string>
-#include <vector>
+#include "test/TestUtils.hpp"
 
 namespace c10d {
 namespace test {
-
-class Semaphore {
- public:
-  void post(int n = 1) {
-    std::unique_lock<std::mutex> lock(m_);
-    n_ += n;
-    cv_.notify_all();
-  }
-
-  void wait(int n = 1) {
-    std::unique_lock<std::mutex> lock(m_);
-    while (n_ < n) {
-      cv_.wait(lock);
-    }
-    n_ -= n;
-  }
-
- protected:
-  int n_ = 0;
-  std::mutex m_;
-  std::condition_variable cv_;
-};
 
 inline void set(
     Store& store,

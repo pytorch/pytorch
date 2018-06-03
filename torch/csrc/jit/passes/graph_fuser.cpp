@@ -51,7 +51,6 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::mul,
   aten::ne,
   aten::neg,
-  aten::ones,
   aten::pow,
   aten::reciprocal,
   aten::remainder,
@@ -65,7 +64,6 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::tan,
   aten::tanh,
   aten::trunc,
-  aten::zeros,
   aten::_sigmoid_backward,
   aten::_tanh_backward,
 };

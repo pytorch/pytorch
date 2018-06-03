@@ -127,7 +127,6 @@ INSTALL(FILES
   generic/THVectorDispatch.cpp
   generic/THVector.h
   # See Note [TH abstraction violation]
-  generic/THStorage.hpp
   generic/THTensor.hpp
   generic/THTensorFastGetSet.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")
