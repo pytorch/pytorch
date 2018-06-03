@@ -44,7 +44,7 @@ TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
 }
 
-std::size_t UndefinedType::elementSizeInBytes() const {
+size_t UndefinedType::elementSizeInBytes() const {
   AT_ERROR("elementSizeInBytes not defined for UndefinedType");
 }
 

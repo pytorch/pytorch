@@ -129,7 +129,7 @@ namespace cereal {
 namespace agimpl {
 
 template <class Archive>
-void saveBinary(Archive& archive, void const* data, std::size_t size) {
+void saveBinary(Archive& archive, void const* data, size_t size) {
   // In general, there's no direct `saveBinary`-like method on archives
   std::vector<char> v(
       static_cast<char const*>(data), static_cast<char const*>(data) + size);
@@ -137,13 +137,13 @@ void saveBinary(Archive& archive, void const* data, std::size_t size) {
 }
 template <>
 inline void
-saveBinary(BinaryOutputArchive& archive, void const* data, std::size_t size) {
+saveBinary(BinaryOutputArchive& archive, void const* data, size_t size) {
   // Writes to output stream without extra copy
   archive.saveBinary(data, size);
 }
 
 template <class Archive>
-void loadBinary(Archive& archive, void* data, std::size_t size) {
+void loadBinary(Archive& archive, void* data, size_t size) {
   // In general, there's no direct `loadBinary`-like method on archives
   std::vector<char> v(size);
   archive(v);
@@ -151,7 +151,7 @@ void loadBinary(Archive& archive, void* data, std::size_t size) {
 }
 template <>
 inline void
-loadBinary(BinaryInputArchive& archive, void* data, std::size_t size) {
+loadBinary(BinaryInputArchive& archive, void* data, size_t size) {
   // Read from input stream without extra copy
   archive.loadBinary(data, size);
 }

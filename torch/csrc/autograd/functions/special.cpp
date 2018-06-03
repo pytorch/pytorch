@@ -121,13 +121,13 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
 bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outputs,
                          const placeholder_list& inherited_placeholders) {
   using bitset_type = uint64_t;
-  constexpr std::size_t max_outputs = sizeof(bitset_type) * 8;
+  constexpr size_t max_outputs = sizeof(bitset_type) * 8;
 
   if (inherited_placeholders.size() != 0) return false;
 
   auto& grad_fn = outputs[0].grad_fn();
-  if (static_cast<std::size_t>(grad_fn->num_inputs()) >= max_outputs) return false;
-  if (static_cast<std::size_t>(grad_fn->num_inputs()) != outputs.size()) return false;
+  if (static_cast<size_t>(grad_fn->num_inputs()) >= max_outputs) return false;
+  if (static_cast<size_t>(grad_fn->num_inputs()) != outputs.size()) return false;
 
   // Check that all outputs have the same grad_fn and cover all its inputs
   bitset_type output_nrs = 0;
@@ -141,7 +141,7 @@ bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outpu
   // Check that grad_fn's next_edges match the inputs exactly.
   auto num_inputs = inputs.size();
   if (num_inputs != grad_fn->num_outputs()) return false;
-  for (std::size_t i = 0; i < num_inputs; ++i) {
+  for (size_t i = 0; i < num_inputs; ++i) {
     const auto& next_grad_edge = grad_fn->next_edge(i);
     // Unfortunately, null edge pruning (see Note [Null-edge pruning]) applies
     // to autograd functions which would otherwise be eligible for the
@@ -319,7 +319,7 @@ std::pair<edge_list, variable_list> Eval::filterRoots(const variable_list& input
     throw std::logic_error("inputs.size() != roots.size()");
   filtered_inputs.reserve(num_inputs);
   filtered_roots.reserve(num_inputs);
-  for (std::size_t i = 0; i < num_inputs; ++i) {
+  for (size_t i = 0; i < num_inputs; ++i) {
     // This check is the sole reason why this function is needed. The problem
     // with larger Evals is that they might trigger computation of nodes that
     // would normally be ignored. For example, consider a subgraph with multiple
