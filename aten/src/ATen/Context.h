@@ -86,6 +86,9 @@ public:
   cudaStream_t getCurrentCUDAStream() const {
     return detail::getCUDAHooks().getCurrentCUDAStream(thc_state.get());
   }
+  cudaStream_t getCurrentCUDAStreamOnDevice(int64_t device) const {
+    return detail::getCUDAHooks().getCurrentCUDAStreamOnDevice(thc_state.get(), device);
+  }
   cudaDeviceProp* getCurrentDeviceProperties() const {
     return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
   }

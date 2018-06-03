@@ -29,7 +29,7 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
       self->allocatorContext,
       (void**)&(data_ptr),
       self->size * sizeof(real),
-      size * sizeof(real), THCState_getCurrentStream(state));
+      size * sizeof(real), THCState_getCurrentStreamOnDevice(state, device));
     if (err != cudaSuccess) {
       THCudaCheck(err);
     }
@@ -55,7 +55,7 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
       (*self->allocator->malloc)(self->allocatorContext,
                                  (void**)&(data),
                                  size * sizeof(real),
-                                 THCState_getCurrentStream(state));
+                                 THCState_getCurrentStreamOnDevice(state, device));
     THCudaCheck(err);
 
     if (THCStorage_(data)(state, self)) {

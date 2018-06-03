@@ -165,13 +165,15 @@ inline dim3 getApplyBlock() {
   return dim3(THC_APPLY_THREADS_PER_BLOCK);
 }
 
-inline bool getApplyGrid(THCState* state, uint64_t totalElements, dim3& grid) {
-  int curDevice = -1;
-  cudaGetDevice(&curDevice);
-  if (curDevice == -1) return false;
+inline bool getApplyGrid(THCState* state, uint64_t totalElements, dim3& grid, int curDevice = -1) {
+  if (curDevice == -1) {
+//either not set by the caller, or caller had an error
+      cudaGetDevice(&curDevice);
+      if (curDevice == -1) return false;
+  }
 
   uint64_t numBlocks = THCCeilDiv(totalElements, static_cast<uint64_t>(THC_APPLY_THREADS_PER_BLOCK));
-  uint64_t maxGridX = THCState_getCurrentDeviceProperties(state)->maxGridSize[0];
+  uint64_t maxGridX = THCState_getDeviceProperties(state, curDevice)->maxGridSize[0];
   if (numBlocks > maxGridX)
       numBlocks = maxGridX;
 
@@ -205,8 +207,10 @@ bool THC_pointwiseApply1(THCState* state,
 
   dim3 grid;
   ptrdiff_t totalElements = TensorUtils<TensorTypeA>::getNumElements(state, a);
-
-  if (!getApplyGrid(state, totalElements, grid)) {
+  
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  if (!getApplyGrid(state, totalElements, grid, curDevice)) {
     return false;
   }
 
@@ -236,7 +240,7 @@ bool THC_pointwiseApply1(THCState* state,
   kernelPointwiseApply1<Op,                                             \
                         typename TensorUtils<TensorTypeA>::DataType,    \
                         TYPE, A>                                        \
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
+    <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(             \
       OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, TYPE, A>  \
           (aInfo),                                                      \
       (TYPE) totalElements, op);
@@ -349,7 +353,9 @@ bool THC_pointwiseApply2(THCState* state,
   const dim3 block = getApplyBlock();
 
   dim3 grid;
-  if (!getApplyGrid(state, totalElements, grid)) {
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  if (!getApplyGrid(state, totalElements, grid, curDevice)) {
     return false;
   }
 
@@ -387,7 +393,7 @@ bool THC_pointwiseApply2(THCState* state,
                         typename TensorUtils<TensorTypeA>::DataType,    \
                         typename TensorUtils<TensorTypeB>::DataType,    \
                         TYPE, A, B>                                     \
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
+    <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(             \
       OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, TYPE, A>  \
           (aInfo),                                                      \
       OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, TYPE, B>  \
@@ -546,7 +552,9 @@ bool THC_pointwiseApply3(THCState* state,
   const dim3 block = getApplyBlock();
 
   dim3 grid;
-  if (!getApplyGrid(state, totalElements, grid)) {
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  if (!getApplyGrid(state, totalElements, grid, curDevice)) {
     return false;
   }
 
@@ -584,7 +592,7 @@ bool THC_pointwiseApply3(THCState* state,
                         typename TensorUtils<TensorTypeB>::DataType,    \
                         typename TensorUtils<TensorTypeC>::DataType,    \
                         TYPE, A, B, C>                                  \
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
+    <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(             \
       OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, TYPE, A>  \
           (aInfo),                                                      \
       OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, TYPE, B>  \

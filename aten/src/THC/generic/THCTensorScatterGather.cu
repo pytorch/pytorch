@@ -4,7 +4,7 @@
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_gatherKernel<TYPE, REAL, DIMS>                                \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>(               \
+  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(gather)(THCState* state, THCTensor *tensor,
@@ -37,7 +37,9 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THArgCheck(getApplyGrid(state, totalElements, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
   if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
@@ -98,7 +100,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterKernel<TYPE, REAL, DIMS>                               \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>(               \
+  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLongTensor *index, THCTensor *src) {
@@ -130,7 +132,9 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THArgCheck(getApplyGrid(state, totalElements, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
   if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
@@ -186,7 +190,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterAddKernel<TYPE, REAL, DIMS>                               \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>(               \
+  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaLongTensor *index, THCTensor *src) {
@@ -217,7 +221,9 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THArgCheck(getApplyGrid(state, totalElements, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
   if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
@@ -273,7 +279,7 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterFillKernel<TYPE, REAL, DIMS>                           \
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(      \
+      <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(      \
           tensorInfo, indexInfo, value, dim, (TYPE)totalElements);
 
 void
@@ -302,7 +308,9 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THArgCheck(getApplyGrid(state, totalElements, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
   if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {

@@ -236,13 +236,14 @@ __host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
   return (a + b - 1) / b;
 }
 
-inline bool getApplyGrid(uint64_t totalElements, dim3& grid) {
-  int curDevice = -1;
-  cudaGetDevice(&curDevice);
-  if (curDevice == -1) return false;
-
+inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice = -1) {
+  if (curDevice == -1) {
+//either not set by a caller or caller had an error
+      curDevice = current_device();
+      if (curDevice == -1) return false;
+  }
   uint64_t numBlocks = ATenCeilDiv(totalElements, static_cast<uint64_t>(AT_APPLY_THREADS_PER_BLOCK));
-  uint64_t maxGridX = at::globalContext().getCurrentDeviceProperties()->maxGridSize[0];
+  uint64_t maxGridX = at::globalContext().getDeviceProperties(curDevice)->maxGridSize[0];
   if (numBlocks > maxGridX)
       numBlocks = maxGridX;
   grid = dim3(numBlocks);
@@ -286,7 +287,8 @@ bool CUDA_tensor_apply2(at::Tensor a,
   const dim3 block = getApplyBlock();
 
   dim3 grid;
-  if (!getApplyGrid(totalElements, grid)) {
+  int64_t curDevice = current_device();
+  if (!getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
 
@@ -323,7 +325,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
                         scalar1,                                        \
                         scalar2,                                        \
                         TYPE, A, B>                                     \
-   <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(    \
+   <<<grid, block, 0, at::globalContext().getCurrentCUDAStreamOnDevice(curDevice)>>>(    \
        aInfo, bInfo, (TYPE) totalElements, op);
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
@@ -466,7 +468,8 @@ bool CUDA_tensor_apply3(at::Tensor a,
   const dim3 block = getApplyBlock();
 
   dim3 grid;
-  if (!getApplyGrid(totalElements, grid)) {
+  int64_t curDevice = current_device();
+  if (!getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
 
@@ -501,7 +504,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
                         scalar2,                                        \
                         scalar3,                                        \
                         TYPE, A, B, C>                                  \
-    <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(   \
+    <<<grid, block, 0, at::globalContext().getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
       aInfo, bInfo, cInfo, (TYPE) totalElements, op);
 
 #define HANDLE_C_CASE(TYPE, A, B, C) {      \
@@ -685,7 +688,8 @@ bool CUDA_tensor_apply4(at::Tensor a,
   const dim3 block = getApplyBlock();
 
   dim3 grid;
-  if (!getApplyGrid(totalElements, grid)) {
+  int64_t curDevice = current_device();
+  if (!getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
 
@@ -727,7 +731,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
                         scalar3,                                        \
                         scalar4,                                        \
                         TYPE, A, B, C, D>                               \
-    <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(   \
+    <<<grid, block, 0, at::globalContext().getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
     aInfo, bInfo, cInfo, dInfo, (TYPE) totalElements, op);
 
 #define HANDLE_D_CASE(TYPE, A, B, C, D) {       \
