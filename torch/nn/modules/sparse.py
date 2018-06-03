@@ -26,9 +26,7 @@ class Embedding(Module):
                                  See Notes for more details regarding sparse gradients.
         _weight (Tensor, optional): If given a Tensor of size (num_embeddings, embedding_dim), will initialize
                                     the weights for the Embedding with the given Tensor.
-        
-        if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
-                                 See Notes for more details regarding sparse gradients.
+
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
