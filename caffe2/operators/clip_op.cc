@@ -40,24 +40,72 @@ OPERATOR_SCHEMA(Clip)
     .AllowInplace({{0, 0}})
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-Clip operator limits the given input within an interval. The interval is
-specified with arguments 'min' and 'max'. They default to
-numeric_limits::lowest() and numeric_limits::max() respectively. The clipping
-operation can be done in in-place fashion too, where the input and output blobs
-are the same.
+This operator limits the given input within an interval. The interval is
+specified by the `min` and `max` arguments. They default to
+*numeric_limits::lowest()* and *numeric_limits::max()* respectively. The
+clipping operation can be done in an in-place fashion by using the same output
+blob as the input blob.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/clip_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Clip",
+    ["X"],
+    ["Y"],
+    min=20.0,
+    max=60.0
+
+)
+
+workspace.FeedBlob("X", (np.random.randint(100, size=(5,5))).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+X: [[45. 16. 59. 99. 48.]
+ [12. 44. 46. 82. 28.]
+ [ 1. 91. 18.  9. 71.]
+ [24. 37. 61. 12. 81.]
+ [36. 38. 30. 84. 40.]]
+Y: [[45. 20. 59. 60. 48.]
+ [20. 44. 46. 60. 28.]
+ [20. 60. 20. 20. 60.]
+ [24. 37. 60. 20. 60.]
+ [36. 38. 30. 60. 40.]]
+```
+
+</details>
+
 )DOC")
-    .Arg("min", "Minimum value, under which element is replaced by min")
-    .Arg("max", "Maximum value, above which element is replaced by max")
+    .Arg("min", "*(type: float)* Minimum value, under which element is "
+    "replaced by min (default=*numeric_limits::lowest()*).")
+    .Arg("max", "*(type: float)* Maximum value, under which element is "
+    "replaced by max (default=*numeric_limits::max()*).")
     .Input(
         0,
-        "input",
-        "Input tensor (Tensor<float>) containing elements to be"
-        "clipped")
-    .Input(
-        1,
-        "output",
-        "Output tensor (Tensor<float>) containing clipped"
-        "input elements")
+        "X",
+        "*(Tensor`<float>`)* Input tensor within range "
+        "[*numeric_limits::lowest()*, *numeric_limits::max()*].")
+    .Output(
+        0,
+        "Y",
+        "*(Tensor`<float>`)* Output tensor clipped within range [`min`, `max`].")
     .InheritOnnxSchema("Clip");
 
 OPERATOR_SCHEMA(ClipGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
