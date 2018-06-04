@@ -104,6 +104,8 @@ set(C10D_GLOO_SRCS
   )
 
 add_library(c10d_gloo ${C10D_GLOO_SRCS})
+set_property(TARGET c10d_gloo PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET c10d_gloo PROPERTY CXX_STANDARD 11)
 target_include_directories(c10d_gloo PUBLIC ${GLOO_INCLUDE_DIR})
 target_link_libraries(c10d_gloo PUBLIC c10d ${Gloo_NATIVE_LIBRARY} ${Gloo_LIBRARY})
 copy_header(ProcessGroupGloo.hpp)

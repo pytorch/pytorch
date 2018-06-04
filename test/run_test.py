@@ -17,6 +17,7 @@ from torch.utils import cpp_extension
 TESTS = [
     'autograd',
     'cpp_extensions',
+    'c10d',
     'cuda',
     'dataloader',
     'distributed',
@@ -34,6 +35,7 @@ TESTS = [
 ]
 
 WINDOWS_BLACKLIST = [
+    'c10d',
     'distributed',
 ]
 

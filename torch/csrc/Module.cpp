@@ -28,6 +28,7 @@
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/autograd/python_legacy_variable.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/c10d/c10d.h"
 #include "torch/csrc/tensor/python_tensor.h"
 #include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/utils/python_strings.h"
@@ -486,6 +487,7 @@ static PyObject* initModule() {
 #endif
 #ifdef WITH_DISTRIBUTED
   THPUtils_addPyMethodDefs(methods, THDPModule_methods());
+  THPUtils_addPyMethodDefs(methods, torch::c10d::python_functions());
 #endif
 
 #if PY_MAJOR_VERSION == 2
