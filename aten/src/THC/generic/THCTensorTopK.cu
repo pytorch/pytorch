@@ -64,11 +64,11 @@ THC_API void THCTensor_(topk)(THCState* state,
 
 #define RUN_T(INDEX_T)                                                  \
   TensorInfo<real, INDEX_T> inputInfo =                                 \
-    getTensorInfo<THCTensor, INDEX_T>(state, input);                    \
+    getTensorInfo<real, THCTensor, INDEX_T>(state, input);              \
   TensorInfo<real, INDEX_T> topKInfo =                                  \
-    getTensorInfo<THCTensor, INDEX_T>(state, topK);                     \
+    getTensorInfo<real, THCTensor, INDEX_T>(state, topK);               \
   TensorInfo<int64_t, INDEX_T> indicesInfo =                            \
-    getTensorInfo<THCudaLongTensor, INDEX_T>(state, indices);           \
+    getTensorInfo<int64_t, THCudaLongTensor, INDEX_T>(state, indices);  \
                                                                         \
   /* We use these structures solely to find the offset to */            \
   /* each slice we are operating on */                                  \

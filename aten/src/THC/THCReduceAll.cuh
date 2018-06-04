@@ -219,7 +219,8 @@ void callReduceAll(THCState* state,
 
 // Reduces the entire tensor to one value. `out` points to
 // host-resident memory.
-template <typename TensorType,
+template <typename ScalarType,
+          typename TensorType,
           typename ModifyOp,
           typename ReduceOp,
           typename AccT>
@@ -230,6 +231,7 @@ bool THC_reduceAll(THCState* state,
                    AccT init,
                    AccT* out,
                    int outOnDevice) {
+  static_assert(std::is_same<ScalarType, typename TensorUtils<TensorType>::DataType>::value, "ScalarTypeA must match");
   ptrdiff_t inElements = TensorUtils<TensorType>::getNumElements(state, in);
 
   if (TensorUtils<TensorType>::getDims(state, in) > MAX_CUTORCH_DIMS) {
@@ -261,7 +263,7 @@ bool THC_reduceAll(THCState* state,
   // dimension, and the loop to translate the linear index to the array
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, IN)                                           \
-  callReduceAll<typename TensorUtils<TensorType>::DataType,             \
+  callReduceAll<ScalarType,                                             \
                 TYPE, AccT, ModifyOp, ReduceOp, IN>(                    \
                   state, inInfo, inElements, init, modifyOp,            \
                   reduceOp, devOut);
@@ -282,15 +284,15 @@ bool THC_reduceAll(THCState* state,
   }
 
   if (TensorUtils<TensorType>::canUse32BitIndexMath(state, in)) {
-    TensorInfo<typename TensorUtils<TensorType>::DataType, unsigned int> inInfo =
-      getTensorInfo<TensorType, unsigned int>(state, in);
+    TensorInfo<ScalarType, unsigned int> inInfo =
+      getTensorInfo<ScalarType, TensorType, unsigned int>(state, in);
     inInfo.collapseDims();
 
     HANDLE_IN_CASE(unsigned int, inInfo.dims);
   } else {
-    TensorInfo<typename TensorUtils<TensorType>::DataType,
+    TensorInfo<ScalarType,
                uint64_t> inInfo =
-      getTensorInfo<TensorType, uint64_t>(state, in);
+      getTensorInfo<ScalarType, TensorType, uint64_t>(state, in);
     inInfo.collapseDims();
 
     /*

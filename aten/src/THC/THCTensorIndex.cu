@@ -457,7 +457,7 @@ void dispatchTakePutImpl(THCState *state, TensorType *a, TensorType *b, THCudaLo
   auto start = THCudaLongTensor_data(state, index);
   auto end = start + THCudaLongTensor_numel(state, index);
 
-  auto aInfo = getTensorInfo<TensorType, IndexType>(state, a);
+  auto aInfo = getTensorInfo<real, TensorType, IndexType>(state, a);
   aInfo.collapseDims();
   auto numel = TensorUtils<TensorType>::getNumElements(state, a);
   if (aInfo.isContiguous()) {
