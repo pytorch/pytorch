@@ -155,16 +155,15 @@ class TestJit(TestCase):
         self.assertExportImport(trace, (x, y))
 
     # index-2 is not implemented in interpreter
-    @unittest.expectedFailure
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
-        y = torch.tensor([0], dtype=torch.int64, requires_grad=True)
+        y = torch.tensor([0], dtype=torch.int64)
 
-        @torch.jit.compile(nderivs=0)
+        @torch.jit.trace(x, y)
         def fn(x, y):
             return x[y]
 
-        fn(x, y)  # Fails
+        fn(x, y)
 
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
@@ -924,18 +923,6 @@ class TestJit(TestCase):
         out_test = addmm(mat, mat1, mat2, alpha, beta)
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
-
-    def test_index_trace(self):
-        # Ensure index-* is emitted by gen_jit_dispatch.py
-        # This exercises the functionality that we can have one TensorList
-        # in the argument list that appears at any position.
-        x = torch.zeros(9, 8, 7)
-        i = torch.LongTensor([0])
-        @torch.jit.trace(x, i)
-        def index_test(x, i):
-            return x[i, i]
-
-        self.assertEqual(index_test(x, i), x[i, i])
 
 
 class TestScript(TestCase):
