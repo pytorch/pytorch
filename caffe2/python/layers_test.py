@@ -770,6 +770,20 @@ class TestLayers(LayersTestCase):
         workspace.RunNetOnce(predict_net)
 
     @given(
+        X=hu.arrays(dims=[2, 5, 6]),
+    )
+    def testLayerNormalization(self, X):
+        input_record = self.new_record(schema.Scalar((np.float32, (5, 6,))))
+        schema.FeedRecord(input_record, [X])
+        ln_output = self.model.LayerNormalization(input_record)
+        self.assertEqual(schema.Scalar((np.float32, (5, 6,))), ln_output)
+        self.model.output_schema = schema.Struct()
+
+        train_init_net, train_net = self.get_training_nets()
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+
+    @given(
         X=hu.arrays(dims=[5, 2]),
         num_to_collect=st.integers(min_value=1, max_value=10),
     )
