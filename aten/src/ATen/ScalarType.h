@@ -8,15 +8,18 @@
 
 namespace at {
 
-#define AT_FORALL_SCALAR_TYPES(_) \
+#define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_) \
 _(uint8_t,Byte,i) \
 _(int8_t,Char,i) \
 _(int16_t,Short,i) \
 _(int,Int,i) \
 _(int64_t,Long,i) \
-_(at::Half,Half,d) \
 _(float,Float,d) \
 _(double,Double,d)
+
+#define AT_FORALL_SCALAR_TYPES(_) \
+_(at::Half,Half,d) \
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_)
 
 enum class ScalarType {
 #define DEFINE_ENUM(_1,n,_2) \

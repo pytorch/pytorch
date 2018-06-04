@@ -1164,3 +1164,21 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
+
+# - func: _nnz(Tensor self) -> int64_t
+#   variants: method
+
+# - func: _resize_nnz_(Tensor self, int64_t nnz) -> int64_t
+#   variants: method
+
+# - func: _indices(Tensor self) -> Tensor
+#   variants: method
+
+# - func: _values(Tensor self) -> Tensor
+#   variants: method
+
+# - func: _dimI(Tensor self) -> int64_t
+#   variants: method
+
+# - func: _dimV(Tensor self) -> int64_t
+#   variants: method
