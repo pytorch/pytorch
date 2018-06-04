@@ -76,7 +76,7 @@ DataChannel::Group::Group(std::vector<rank_type> ranks, rank_type max_rank)
   }
 
   _new2old.reserve(ranks.size());
-  for (std::size_t i = 0; i < ranks.size(); ++i) {
+  for (size_t i = 0; i < ranks.size(); ++i) {
     _new2old.push_back(ranks[i]);
     _old2new.insert({ranks[i], i});
   }

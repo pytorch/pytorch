@@ -1,6 +1,3 @@
-#ifndef NO_PYTHON
-#include "torch/csrc/python_headers.h"
-#endif
 #include "torch/csrc/jit/tracer.h"
 
 #include "torch/csrc/autograd/variable.h"
@@ -14,59 +11,6 @@
 #include <string>
 #include <sstream>
 #include <memory>
-
-#ifndef NO_PYTHON
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/jit/pybind.h"
-#include <frameobject.h>
-#include <patchlevel.h>
-
-
-// Python interpreter retrieval routine adapted from
-// https://stackoverflow.com/a/8706144
-std::string torch::jit::tracer::getPythonInterpreterStackTrace() {
-  std::stringstream stack_trace;
-  AutoGIL gil;
-  PyThreadState *tstate = PyThreadState_GET();
-  if (NULL != tstate && NULL != tstate->frame) {
-    PyFrameObject *frame = tstate->frame;
-
-    while (NULL != frame) {
-      int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-      std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
-      std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-      stack_trace << filename << "(" << line << "): " << funcname << "\n";
-      frame = frame->f_back;
-    }
-  }
-  return stack_trace.str();
-}
-// This is a temporary constructor so that we can write python tests of
-// the executor. It does not have most of the functionality of CompiledFunction
-// such as being able to hold parameters...
-std::shared_ptr<torch::jit::Graph> torch::jit::tracer::createGraphByTracing(
-        py::function func,
-        tracer::variable_list trace_inputs,
-        size_t num_func_inputs) {
-  auto enter_info = tracer::enter(std::move(trace_inputs), 1);
-  py::tuple py_inputs(num_func_inputs);
-  for(size_t i = 0; i < num_func_inputs; ++i) {
-    py_inputs[i] = py::cast(enter_info.second[i]);
-  }
-  auto out = func(*py_inputs);
-  std::vector<autograd::Variable> outputs;
-  if(PyTuple_Check(out.ptr())) {
-    outputs = py::cast<std::vector<autograd::Variable>>(out);
-  } else {
-    outputs.push_back(py::cast<autograd::Variable>(out));
-  }
-  tracer::exit(outputs);
-  auto graph = enter_info.first->graph;
-  EliminateDeadCode(graph);
-  return graph;
-}
-#endif
 
 namespace torch { namespace jit { namespace tracer {
 
@@ -116,7 +60,7 @@ struct TraceEval : autograd::Eval {
     auto& graph = tracing_state->graph;
     graph->advanceStage();
 
-    for (std::size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
+    for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
       auto input = inputs[i];
       Value *input_node = graph->addInput();
       if (!input.defined()) continue;
@@ -166,58 +110,12 @@ void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_li
   std::make_shared<autograd::Eval>()->replaceSubgraph(inputs, outputs);
 }
 
-// We must record the nodes of inputs before we actually carry out
-// the operation, because an inplace operation may destroy the information
-// we're interested in.  See #4480.
-template<typename F>
-PreTraceInfo makePreTraceInfo(at::ArrayRef<Variable> inputs, F ctor) {
-  PreTraceInfo info;
-  info.state = getTracingState(inputs);
-  auto& graph = info.state->graph;
-  auto state_lock = info.state->lock();
-
-  Node *n = ctor(info.state, *graph);
-#ifndef NO_PYTHON
-  auto sl = std::make_shared<StringSourceLocation>(getPythonInterpreterStackTrace());
-  n->setSourceLocation(sl);
-#endif
-
-  for (Variable input : inputs) {
-    n->addInput(getValueTrace(info.state, input));
-  }
-
-  // NB: Order matters. This must append after inputs but before outputs.
-  graph->appendNode(n);
-
-  info.n = n;
-
-  return info;
-}
-
 PreTraceInfo preRecordTrace(Symbol op,
                             at::ArrayRef<Variable> inputs) {
   return makePreTraceInfo(inputs, [&op](const std::shared_ptr<TracingState>& state, Graph& graph) {
     return graph.create(op, 0 /* initial outputs */);
   });
 }
-
-#ifndef NO_PYTHON
-PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
-                                  std::string arg_types,
-                                  at::ArrayRef<Variable> inputs,
-                                  pyobj_list scalar_args) {
-  THPObjectPtr apply(PyObject_GetAttrString(pyobj.get(), "apply"));
-  if(!apply) {
-    throw python_error();
-  }
-  return makePreTraceInfo(inputs, [&](const std::shared_ptr<TracingState>& state, Graph& graph) {
-    return graph.createPythonOp(
-        std::move(apply),
-        arg_types,
-        std::move(scalar_args));
-  });
-}
-#endif
 
 void postRecordTrace(const PreTraceInfo& info,
                      at::ArrayRef<Variable> outputs) {
@@ -263,6 +161,17 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   setValueTrace(tracing_state, size_var, node->output());
 
   return size_var;
+}
+
+
+// no python present so we just do not record source information
+void defaultRecordSourceLocation(Node* n) {}
+std::atomic<decltype(&defaultRecordSourceLocation)> record_source_location(defaultRecordSourceLocation);
+void recordSourceLocation(Node* n) {
+  return record_source_location.load()(n);
+}
+void setRecordSourceLocation(void (*v)(Node*)) {
+  record_source_location.store(v);
 }
 
 }}}

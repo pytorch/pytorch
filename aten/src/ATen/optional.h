@@ -144,7 +144,7 @@ struct has_overloaded_addressof
   template <class X>
   constexpr static bool has_overload(...) { return false; }
 
-  template <class X, std::size_t S = sizeof(std::declval<X&>().operator&()) >
+  template <class X, size_t S = sizeof(std::declval<X&>().operator&()) >
   constexpr static bool has_overload(bool) { return true; }
 
   constexpr static bool value = has_overload<T>(true);

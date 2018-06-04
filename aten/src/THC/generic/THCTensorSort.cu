@@ -111,12 +111,12 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
   // we are sorting on a per-block basis
   if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, key)) {
     TensorInfo<real, unsigned int> keyInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, key);
+      getTensorInfo<real, THCTensor, unsigned int>(state, key);
     keyInfo.reduceDim(dim);
     int collapseKeyDim = keyInfo.collapseDims(dim);
 
     TensorInfo<int64_t, unsigned int> valueInfo =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, value);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, value);
     valueInfo.reduceDim(dim);
     int collapseValueDim = valueInfo.collapseDims(dim);
 
@@ -134,12 +134,12 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
     }
   } else {
     TensorInfo<real, uint64_t> keyInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, key);
+      getTensorInfo<real, THCTensor, uint64_t>(state, key);
     keyInfo.reduceDim(dim);
     int collapseKeyDim = keyInfo.collapseDims(dim);
 
     TensorInfo<int64_t, uint64_t> valueInfo =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, value);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, value);
     valueInfo.reduceDim(dim);
     int collapseValueDim = valueInfo.collapseDims(dim);
 

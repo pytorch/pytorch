@@ -10,8 +10,8 @@
 #define ROW_PTR2(t, r) (THCTensor_(data)(THCState *state, t) + (r) * (t)->stride[0])
 #define COL_PTR2(t, c) (THCTensor_(data)(THCState *state, t) + (c) * (t)->stride[1])
 
-#define I_INFO(tensor) getTensorInfo<THCIndexTensor, uint64_t>(state, tensor)
-#define V_INFO(tensor) getTensorInfo<THCTensor, uint64_t>(state, tensor)
+#define I_INFO(tensor) getTensorInfo<int64_t, THCIndexTensor, uint64_t>(state, tensor)
+#define V_INFO(tensor) getTensorInfo<real, THCTensor, uint64_t>(state, tensor)
 
 THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, int64_t dim, int64_t nnz) {
   THCudaIntTensor *csr = THCudaIntTensor_newWithSize1d(state, dim + 1);

@@ -13,6 +13,51 @@ if(NOT CUDA_FOUND)
   return()
 endif()
 set(CAFFE2_FOUND_CUDA TRUE)
+message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
+message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
+message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
+
+if(CUDA_FOUND)
+  # Sometimes, we may mismatch nvcc with the CUDA headers we are
+  # compiling with, e.g., if a ccache nvcc is fed to us by CUDA_NVCC_EXECUTABLE
+  # but the PATH is not consistent with CUDA_HOME.  It's better safe
+  # than sorry: make sure everything is consistent.
+  set(file "${PROJECT_BINARY_DIR}/detect_cuda_version.c")
+  file(WRITE ${file} ""
+    "#include <cuda.h>\n"
+    "#include <stdio.h>\n"
+    "int main() {\n"
+    "  printf(\"%d.%d\", CUDA_VERSION / 1000, (CUDA_VERSION / 10) % 100);\n"
+    "  return 0;\n"
+    "}\n"
+    )
+  try_run(run_result compile_result ${PROJECT_BINARY_DIR} ${file}
+    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
+    LINK_LIBRARIES ${CUDA_LIBRARIES}
+    RUN_OUTPUT_VARIABLE cuda_version_from_header
+    COMPILE_OUTPUT_VARIABLE output_var
+    )
+  if(NOT compile_result)
+    message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
+  endif()
+  message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
+  if(NOT ${cuda_version_from_header} STREQUAL ${CUDA_VERSION})
+    # Force CUDA to be processed for again next time
+    # TODO: I'm not sure if this counts as an implementation detail of
+    # FindCUDA
+    set(${cuda_version_from_findcuda} ${CUDA_VERSION})
+    unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
+    # Not strictly necessary, but for good luck.
+    unset(CUDA_VERSION CACHE)
+    # Error out
+    message(FATAL_ERROR "FindCUDA says CUDA version is ${cuda_version_from_findcuda} (usually determined by nvcc), "
+      "but the CUDA headers say the version is ${cuda_version_from_header}.  This often occurs "
+      "when you set both CUDA_HOME and CUDA_NVCC_EXECUTABLE to "
+      "non-standard locations, without also setting PATH to point to the correct nvcc.  "
+      "Perhaps, try re-running this command again with PATH=${CUDA_TOOLKIT_ROOT_DIR}/bin:$PATH.  "
+      "See above log messages for more diagnostics, and see https://github.com/pytorch/pytorch/issues/8092 for more details.")
+  endif()
+endif()
 
 # Find cuDNN.
 if(CAFFE2_STATIC_LINK_CUDA)
@@ -21,13 +66,29 @@ else()
   SET(CUDNN_LIBNAME "cudnn")
 endif()
 include(FindPackageHandleStandardArgs)
-set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
-find_path(CUDNN_INCLUDE_DIR cudnn.h
+
+if(DEFINED ENV{CUDNN_ROOT_DIR})
+  set(CUDNN_ROOT_DIR $ENV{CUDNN_ROOT_DIR} CACHE PATH "Folder contains NVIDIA cuDNN")
+else()
+  set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
+endif()
+
+if(DEFINED ENV{CUDNN_INCLUDE_DIR})
+  set(CUDNN_INCLUDE_DIR $ENV{CUDNN_INCLUDE_DIR})
+else()
+  find_path(CUDNN_INCLUDE_DIR cudnn.h
     HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES cuda/include include)
-find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
+endif()
+
+if(DEFINED ENV{CUDNN_LIBRARY})
+  set(CUDNN_LIBRARY $ENV{CUDNN_LIBRARY})
+else()
+  find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
     HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64)
+endif()
+
 find_package_handle_standard_args(
     CUDNN DEFAULT_MSG CUDNN_INCLUDE_DIR CUDNN_LIBRARY)
 if(NOT CUDNN_FOUND)
@@ -56,7 +117,6 @@ if (${USE_TENSORRT})
 endif()
 
 # ---[ Exract versions
-message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 if (CAFFE2_FOUND_CUDNN)
   # Get cuDNN version
   file(READ ${CUDNN_INCLUDE_DIR}/cudnn.h CUDNN_HEADER_CONTENTS)

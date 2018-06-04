@@ -18,9 +18,9 @@ namespace {
 
 void sendMessage(int socket, std::unique_ptr<rpc::RPCMessage> msg) {
   auto& bytes = msg.get()->bytes();
-  std::uint64_t msg_length = static_cast<std::uint64_t>(bytes.length());
+  uint64_t msg_length = static_cast<uint64_t>(bytes.length());
 
-  send_bytes<std::uint64_t>(socket, &msg_length, 1, true);
+  send_bytes<uint64_t>(socket, &msg_length, 1, true);
   send_bytes<std::uint8_t>(
     socket,
     reinterpret_cast<const std::uint8_t*>(bytes.data()),
@@ -29,8 +29,8 @@ void sendMessage(int socket, std::unique_ptr<rpc::RPCMessage> msg) {
 }
 
 std::unique_ptr<rpc::RPCMessage> receiveMessage(int socket) {
-  std::uint64_t msg_length;
-  recv_bytes<std::uint64_t>(socket, &msg_length, 1);
+  uint64_t msg_length;
+  recv_bytes<uint64_t>(socket, &msg_length, 1);
 
   std::unique_ptr<std::uint8_t[]> bytes(new std::uint8_t[msg_length]);
   recv_bytes<std::uint8_t>(socket, bytes.get(), msg_length);
@@ -64,7 +64,7 @@ MasterCommandChannel::~MasterCommandChannel() {
   }
 
   auto world_size = _sockets.size();
-  for (std::size_t i = 0; i < world_size; ++i) {
+  for (size_t i = 0; i < world_size; ++i) {
     auto socket = _sockets[i];
     if (socket == -1) continue;
     try {
@@ -78,7 +78,7 @@ MasterCommandChannel::~MasterCommandChannel() {
 bool MasterCommandChannel::init() {
   int socket;
   rank_type rank;
-  for (std::size_t i = 1; i < _sockets.size(); ++i) {
+  for (size_t i = 1; i < _sockets.size(); ++i) {
     std::tie(socket, std::ignore) = accept(_sockets[0]);
     recv_bytes<rank_type>(socket, &rank, 1);
     _sockets.at(rank) = socket;
@@ -87,7 +87,7 @@ bool MasterCommandChannel::init() {
   /* Sending confirm byte is to test connection and make barrier for workers.
    * It allows to block connected workers until all remaining workers connect.
    */
-  for (std::size_t i = 1; i < _sockets.size(); ++i) {
+  for (size_t i = 1; i < _sockets.size(); ++i) {
     std::uint8_t confirm_byte = 1;
     send_bytes<std::uint8_t>(_sockets[i], &confirm_byte, 1);
   }
@@ -134,7 +134,7 @@ std::tuple<rank_type, std::string> MasterCommandChannel::recvError() {
   if (!_poll_events) {
     // cache poll events array, it will be reused in another `receiveError` calls
     _poll_events.reset(new struct pollfd[_sockets.size()]);
-    for (std::size_t rank = 0; rank < _sockets.size(); ++rank) {
+    for (size_t rank = 0; rank < _sockets.size(); ++rank) {
       _poll_events[rank] = {
         .fd = _sockets[rank],
         .events = POLLIN
@@ -142,12 +142,12 @@ std::tuple<rank_type, std::string> MasterCommandChannel::recvError() {
     }
   }
 
-  for (std::size_t rank = 0; rank < _sockets.size(); ++rank) {
+  for (size_t rank = 0; rank < _sockets.size(); ++rank) {
     _poll_events[rank].revents = 0;
   }
 
   SYSCHECK(::poll(_poll_events.get(), _sockets.size(), -1))
-  for (std::size_t rank = 0; rank < _sockets.size(); ++rank) {
+  for (size_t rank = 0; rank < _sockets.size(); ++rank) {
     if (this->_poll_events[rank].revents == 0)
       continue;
 
@@ -162,8 +162,8 @@ std::tuple<rank_type, std::string> MasterCommandChannel::recvError() {
 
     try {
       // receive error
-      std::uint64_t error_length;
-      recv_bytes<std::uint64_t>(_poll_events[rank].fd, &error_length, 1);
+      uint64_t error_length;
+      recv_bytes<uint64_t>(_poll_events[rank].fd, &error_length, 1);
 
       std::unique_ptr<char[]> error(new char[error_length]);
       recv_bytes<char>(_poll_events[rank].fd, error.get(), error_length);
@@ -204,8 +204,8 @@ std::unique_ptr<rpc::RPCMessage> WorkerCommandChannel::recvMessage() {
 }
 
 void WorkerCommandChannel::sendError(const std::string& error) {
-  std::uint64_t error_length = static_cast<std::uint64_t>(error.size());
-  send_bytes<std::uint64_t>(_socket, &error_length, 1, true);
+  uint64_t error_length = static_cast<uint64_t>(error.size());
+  send_bytes<uint64_t>(_socket, &error_length, 1, true);
   send_bytes<char>(_socket, error.data(), error_length);
 }
 

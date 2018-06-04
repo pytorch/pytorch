@@ -5,7 +5,7 @@
 THC_API void
 THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
   if (dst == src) return;
-  THC_copyTensor<THCTensor, THCTensor>(state, dst, src);
+  THC_copyTensor<real, real, THCTensor, THCTensor>(state, dst, src);
 }
 
 THC_API void
@@ -24,24 +24,24 @@ THCTensor_(copyIgnoringOverlaps)(THCState* state, THCTensor* dst, THCTensor* src
     ReadOnly);
 }
 
-#define IMPLEMENT_THC_CUDA_TENSOR_COPY(TYPEC, TYPECUDA)                 \
+#define IMPLEMENT_THC_CUDA_TENSOR_COPY(TYPEC, TYPECUDA, SCALARC)        \
   THC_API void                                                          \
   THCTensor_(copyCuda##TYPEC)(THCState *state,                          \
                               THCTensor *self,                          \
                               THCuda##TYPECUDA##Tensor *src) {          \
-    THC_copyTensor<THCTensor, THCuda##TYPECUDA##Tensor>(state, self, src); \
+    THC_copyTensor<real, SCALARC, THCTensor, THCuda##TYPECUDA##Tensor>(state, self, src); \
   }
 
-IMPLEMENT_THC_CUDA_TENSOR_COPY(Byte, Byte)
-IMPLEMENT_THC_CUDA_TENSOR_COPY(Char, Char)
-IMPLEMENT_THC_CUDA_TENSOR_COPY(Short, Short)
-IMPLEMENT_THC_CUDA_TENSOR_COPY(Int, Int)
-IMPLEMENT_THC_CUDA_TENSOR_COPY(Long, Long)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Byte, Byte, uint8_t)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Char, Char, int8_t)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Short, Short, int16_t)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Int, Int, int32_t)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Long, Long, int64_t)
 // THCudaTensor aka the non-existent THCudaFloatTensor
-IMPLEMENT_THC_CUDA_TENSOR_COPY(Float, )
-IMPLEMENT_THC_CUDA_TENSOR_COPY(Double, Double)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Float, , float)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Double, Double, double)
 #ifdef CUDA_HALF_TENSOR
-IMPLEMENT_THC_CUDA_TENSOR_COPY(Half, Half)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Half, Half, half)
 #endif
 
 #undef IMPLEMENT_THC_CUDA_TENSOR_COPY
