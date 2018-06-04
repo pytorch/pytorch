@@ -623,6 +623,25 @@ class TestLayers(LayersTestCase):
         loss = self.model.BatchDistillLRLoss(input_record)
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
 
+    def testDistillBatchLRLossWithTeacherWeightScreen(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float32, (2,)))),
+            ('logit', schema.Scalar((np.float32, (2,1)))),
+            ('teacher_label', schema.Scalar((np.float32(2,)))),
+            ('weight', schema.Scalar((np.float64, (2,))))
+        ))
+        label_items = np.array([1.0, 1.0], dtype=np.float32)
+        logit_items = np.array([[1.0], [1.0]],dtype=np.float32)
+        teacher_label_items = np.array([0.8, -1.0], dtype=np.float32)
+        weight_items = np.array([1.0, 1.0], dtype=np.float32)
+        schema.FeedRecord(
+            input_record,
+            [label_items, logit_items, teacher_label_items, weight_items]
+        )
+        loss = self.model.BatchDistillLRLoss(input_record, teacherWeight=0.5)
+        self.run_train_net_forward_only()
+        tensor_loss = workspace.FetchBlob(loss.field_blobs()[0])
+        self.assertEqual(tensor_loss, np.array(0.36326169967651367), "Wrong cross entropy {}".format(tensor_loss))
 
     def testBatchLRLoss(self):
         input_record = self.new_record(schema.Struct(

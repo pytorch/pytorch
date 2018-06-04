@@ -57,6 +57,67 @@ class BatchDistillLRLoss(ModelLayer):
                                dims=[1])
 
         teacher_label = self.input_record.teacher_label()
+
+        TEACHER_WEIGHT_THRESHOLD = 0.0
+
+        threshold = net.ConstantFill(
+            teacher_label,
+            net.NextScopedBlob('threshold'),
+            value=TEACHER_WEIGHT_THRESHOLD,
+            dtype=core.DataType.FLOAT
+        )
+
+        keep_weights = net.ConstantFill(
+            teacher_label,
+            net.NextScopedBlob('keep_weights'),
+            value=self._teacherWeight,
+            dtype=core.DataType.FLOAT
+        )
+
+        zero_weights = net.ConstantFill(
+            teacher_label,
+            net.NextScopedBlob('zero_weights'),
+            value=0.0,
+            dtype=core.DataType.FLOAT
+        )
+
+        neg_ONE = net.ConstantFill(
+            teacher_label,
+            net.NextScopedBlob('neg_ONE'),
+            value=-1.0,
+            dtype=core.DataType.FLOAT
+        )
+
+        ONE = net.ConstantFill(
+            teacher_label,
+            net.NextScopedBlob('ONE'),
+            value=1.0,
+            dtype=core.DataType.FLOAT
+        )
+
+        judge = net.GT(
+            [teacher_label, threshold],
+            net.NextScopedBlob('judge'),
+            broadcast=1
+        )
+
+        screened_teacher_weights = net.Conditional(
+            [judge, keep_weights, zero_weights],
+            net.NextScopedBlob('screened_teacher_weights')
+        )
+
+        neg_screened_teacher_weights = net.Mul(
+            [neg_ONE, screened_teacher_weights],
+            net.NextScopedBlob('neg_screened_teacher_weights'),
+            broadcast=1
+        )
+
+        one_minus_screened_teacher_weights = net.Add(
+            [neg_screened_teacher_weights, ONE],
+            net.NextScopedBlob('one_minus_screened_teacher_weights'),
+            broadcast=1
+        )
+
         if self.input_record.teacher_label.field_type() != np.float32:
             teacher_label = net.Cast(
                 teacher_label,
@@ -77,16 +138,16 @@ class BatchDistillLRLoss(ModelLayer):
             net.NextScopedBlob('teacher_cross_entropy')
         )
 
-        scaled_true_xent = net.Scale(
-            true_xent,
+        scaled_true_xent = net.Mul(
+            [true_xent, one_minus_screened_teacher_weights],
             net.NextScopedBlob('scaled_cross_entropy'),
-            scale=1.0 - self._teacherWeight,
+            broadcast=1
         )
-        scaled_teacher_xent = net.Scale(
-            teacher_xent,
-            net.NextScopedBlob('scaled_teacher_cross_entropy'),
-            scale=self._teacherWeight,
+        scaled_teacher_xent = net.Mul(
+            [teacher_xent, screened_teacher_weights],
+            net.NextScopedBlob('scaled_teacher_cross_entropy')
         )
+
         if 'weight' in self.input_record.fields:
             weight_blob = self.input_record.weight()
             if self.input_record.weight.field_type().base != np.float32:
