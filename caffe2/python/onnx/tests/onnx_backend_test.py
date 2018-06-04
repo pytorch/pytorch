@@ -47,8 +47,7 @@ backend_test.exclude('(test_cast_.*'
                      '|test_rnn_seq_length'
                      '|test_operator_add.*_cuda'
                      '|test_operator_lstm_cuda'
-                     '|test_operator_rnn.*_cuda'
-                     '|test_lrn_default_cuda)')
+                     '|test_operator_rnn.*_cuda)')
 
 # Temporarily skip some ONNX backend tests with broadcasting.
 backend_test.exclude('(test_xor_bcast'
