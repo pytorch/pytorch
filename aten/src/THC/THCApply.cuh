@@ -234,10 +234,10 @@ bool THC_pointwiseApply1(THCState* state,
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, A)                                            \
   kernelPointwiseApply1<Op,                                             \
-                        typename TensorUtils<TensorTypeA>::DataType,    \
+                        ScalarTypeA,                                    \
                         TYPE, A>                                        \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, TYPE, A>  \
+      OffsetInfo<ScalarTypeA, TYPE, A>                                  \
           (aInfo),                                                      \
       (TYPE) totalElements, op);
 
@@ -260,8 +260,8 @@ bool THC_pointwiseApply1(THCState* state,
   // We also use unsigned index math in the kernel, as signed div/mod has
   // additional overhead.
   if (TensorUtils<TensorTypeA>::canUse32BitIndexMath(state, a)) {
-    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, unsigned int> aInfo =
-      getTensorInfo<TensorTypeA, unsigned int>(state, a);
+    TensorInfo<ScalarTypeA, unsigned int> aInfo =
+      getTensorInfo<ScalarTypeA, TensorTypeA, unsigned int>(state, a);
     rearrangeDims(&aInfo);
     aInfo.collapseDims();
 #if CUDA_VERSION < 9000
@@ -271,8 +271,8 @@ bool THC_pointwiseApply1(THCState* state,
 #endif
     HANDLE_A_CASE(unsigned int, aInfo.dims);
   } else {
-    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t> aInfo =
-      getTensorInfo<TensorTypeA, uint64_t>(state, a);
+    TensorInfo<ScalarTypeA, uint64_t> aInfo =
+      getTensorInfo<ScalarTypeA, TensorTypeA, uint64_t>(state, a);
     rearrangeDims(&aInfo);
     aInfo.collapseDims();
 
@@ -281,10 +281,10 @@ bool THC_pointwiseApply1(THCState* state,
     large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1) {
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, 1>
+      OffsetInfo<ScalarTypeA, uint64_t, 1>
         aOffset(aInfo);
       kernelPointwiseApply1<Op,
-                            typename TensorUtils<TensorTypeA>::DataType,
+                            ScalarTypeA,
                             uint64_t, 1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aOffset, (uint64_t) totalElements, op);
@@ -293,10 +293,10 @@ bool THC_pointwiseApply1(THCState* state,
 #if CUDA_VERSION < 9000
         grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -1>
+      OffsetInfo<ScalarTypeA, uint64_t, -1>
         aOffset(aInfo);
       kernelPointwiseApply1<Op,
-                            typename TensorUtils<TensorTypeA>::DataType,
+                            ScalarTypeA,
                             uint64_t, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aOffset, (uint64_t) totalElements, op);
@@ -384,13 +384,13 @@ bool THC_pointwiseApply2(THCState* state,
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, A, B)                                         \
   kernelPointwiseApply2<Op,                                             \
-                        typename TensorUtils<TensorTypeA>::DataType,    \
-                        typename TensorUtils<TensorTypeB>::DataType,    \
+                        ScalarTypeA,                                    \
+                        ScalarTypeB,                                    \
                         TYPE, A, B>                                     \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, TYPE, A>  \
+      OffsetInfo<ScalarTypeA, TYPE, A>                                  \
           (aInfo),                                                      \
-      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, TYPE, B>  \
+      OffsetInfo<ScalarTypeB, TYPE, B>                                  \
           (bInfo),                                                      \
       (TYPE) totalElements, op);
 
@@ -424,11 +424,11 @@ bool THC_pointwiseApply2(THCState* state,
 
   if (TensorUtils<TensorTypeA>::canUse32BitIndexMath(state, a) &&
       TensorUtils<TensorTypeB>::canUse32BitIndexMath(state, b)) {
-    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, unsigned int> aInfo =
-      getTensorInfo<TensorTypeA, unsigned int>(state, a);
+    TensorInfo<ScalarTypeA, unsigned int> aInfo =
+      getTensorInfo<ScalarTypeA, TensorTypeA, unsigned int>(state, a);
 
-    TensorInfo<typename TensorUtils<TensorTypeB>::DataType, unsigned int> bInfo =
-      getTensorInfo<TensorTypeB, unsigned int>(state, b);
+    TensorInfo<ScalarTypeB, unsigned int> bInfo =
+      getTensorInfo<ScalarTypeB, TensorTypeB, unsigned int>(state, b);
 
     rearrangeDims(&aInfo, &bInfo);
     aInfo.collapseDims();
@@ -440,11 +440,11 @@ bool THC_pointwiseApply2(THCState* state,
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims);
   } else {
-    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t> aInfo =
-      getTensorInfo<TensorTypeA, uint64_t>(state, a);
+    TensorInfo<ScalarTypeA, uint64_t> aInfo =
+      getTensorInfo<ScalarTypeA, TensorTypeA, uint64_t>(state, a);
 
-    TensorInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t> bInfo =
-      getTensorInfo<TensorTypeB, uint64_t>(state, b);
+    TensorInfo<ScalarTypeB, uint64_t> bInfo =
+      getTensorInfo<ScalarTypeB, TensorTypeB, uint64_t>(state, b);
 
     rearrangeDims(&aInfo, &bInfo);
     aInfo.collapseDims();
@@ -455,13 +455,13 @@ bool THC_pointwiseApply2(THCState* state,
     large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1 && bInfo.dims == 1) {
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, 1>
+      OffsetInfo<ScalarTypeA, uint64_t, 1>
         aOffset(aInfo);
-      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, 1>
+      OffsetInfo<ScalarTypeB, uint64_t, 1>
         bOffset(bInfo);
       kernelPointwiseApply2<Op,
-                            typename TensorUtils<TensorTypeA>::DataType,
-                            typename TensorUtils<TensorTypeB>::DataType,
+                            ScalarTypeA,
+                            ScalarTypeB,
                             uint64_t, 1, 1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aOffset, bOffset, (uint64_t) totalElements, op);
@@ -469,13 +469,13 @@ bool THC_pointwiseApply2(THCState* state,
 #if CUDA_VERSION < 9000
       grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -1>
+      OffsetInfo<ScalarTypeA, uint64_t, -1>
         aOffset(aInfo);
-      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, -1>
+      OffsetInfo<ScalarTypeB, uint64_t, -1>
         bOffset(bInfo);
       kernelPointwiseApply2<Op,
-                            typename TensorUtils<TensorTypeA>::DataType,
-                            typename TensorUtils<TensorTypeB>::DataType,
+                            ScalarTypeA,
+                            ScalarTypeB,
                             uint64_t, -1, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aOffset, bOffset, (uint64_t) totalElements, op);
@@ -580,16 +580,16 @@ bool THC_pointwiseApply3(THCState* state,
 
 #define HANDLE_CASE(TYPE, A, B, C)                                      \
   kernelPointwiseApply3<Op,                                             \
-                        typename TensorUtils<TensorTypeA>::DataType,    \
-                        typename TensorUtils<TensorTypeB>::DataType,    \
-                        typename TensorUtils<TensorTypeC>::DataType,    \
+                        ScalarTypeA,                                    \
+                        ScalarTypeB,                                    \
+                        ScalarTypeC,                                    \
                         TYPE, A, B, C>                                  \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, TYPE, A>  \
+      OffsetInfo<ScalarTypeA, TYPE, A>                                  \
           (aInfo),                                                      \
-      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, TYPE, B>  \
+      OffsetInfo<ScalarTypeB, TYPE, B>                                  \
           (bInfo),                                                      \
-      OffsetInfo<typename TensorUtils<TensorTypeC>::DataType, TYPE, C>  \
+      OffsetInfo<ScalarTypeC, TYPE, C>                                  \
           (cInfo),                                                      \
       (TYPE) totalElements, op);
 
@@ -638,14 +638,14 @@ bool THC_pointwiseApply3(THCState* state,
   if (TensorUtils<TensorTypeA>::canUse32BitIndexMath(state, a) &&
       TensorUtils<TensorTypeB>::canUse32BitIndexMath(state, b) &&
       TensorUtils<TensorTypeC>::canUse32BitIndexMath(state, c)) {
-    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, unsigned int> aInfo =
-      getTensorInfo<TensorTypeA, unsigned int>(state, a);
+    TensorInfo<ScalarTypeA, unsigned int> aInfo =
+      getTensorInfo<ScalarTypeA, TensorTypeA, unsigned int>(state, a);
 
-    TensorInfo<typename TensorUtils<TensorTypeB>::DataType, unsigned int> bInfo =
-      getTensorInfo<TensorTypeB, unsigned int>(state, b);
+    TensorInfo<ScalarTypeB, unsigned int> bInfo =
+      getTensorInfo<ScalarTypeB, TensorTypeB, unsigned int>(state, b);
 
-    TensorInfo<typename TensorUtils<TensorTypeC>::DataType, unsigned int> cInfo =
-      getTensorInfo<TensorTypeC, unsigned int>(state, c);
+    TensorInfo<ScalarTypeC, unsigned int> cInfo =
+      getTensorInfo<ScalarTypeC, TensorTypeC, unsigned int>(state, c);
 
     rearrangeDims(&aInfo, &bInfo, &cInfo);
     aInfo.collapseDims();
@@ -658,14 +658,14 @@ bool THC_pointwiseApply3(THCState* state,
 #endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims);
   } else {
-    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t> aInfo =
-      getTensorInfo<TensorTypeA, uint64_t>(state, a);
+    TensorInfo<ScalarTypeA, uint64_t> aInfo =
+      getTensorInfo<ScalarTypeA, TensorTypeA, uint64_t>(state, a);
 
-    TensorInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t> bInfo =
-      getTensorInfo<TensorTypeB, uint64_t>(state, b);
+    TensorInfo<ScalarTypeB, uint64_t> bInfo =
+      getTensorInfo<ScalarTypeB, TensorTypeB, uint64_t>(state, b);
 
-    TensorInfo<typename TensorUtils<TensorTypeC>::DataType, uint64_t> cInfo =
-      getTensorInfo<TensorTypeC, uint64_t>(state, c);
+    TensorInfo<ScalarTypeC, uint64_t> cInfo =
+      getTensorInfo<ScalarTypeC, TensorTypeC, uint64_t>(state, c);
 
     rearrangeDims(&aInfo, &bInfo, &cInfo);
     aInfo.collapseDims();
@@ -677,16 +677,16 @@ bool THC_pointwiseApply3(THCState* state,
     large (64-bit indexed) tensors to reduce compilation time. 
     */
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, 1>
+      OffsetInfo<ScalarTypeA, uint64_t, 1>
         aOffset(aInfo);
-      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, 1>
+      OffsetInfo<ScalarTypeB, uint64_t, 1>
         bOffset(bInfo);
-      OffsetInfo<typename TensorUtils<TensorTypeC>::DataType, uint64_t, 1>
+      OffsetInfo<ScalarTypeC, uint64_t, 1>
         cOffset(cInfo);
       kernelPointwiseApply3<Op,
-                            typename TensorUtils<TensorTypeA>::DataType,
-                            typename TensorUtils<TensorTypeB>::DataType,
-                            typename TensorUtils<TensorTypeC>::DataType,
+                            ScalarTypeA,
+                            ScalarTypeB,
+                            ScalarTypeC,
                             uint64_t, 1, 1, 1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
@@ -695,16 +695,16 @@ bool THC_pointwiseApply3(THCState* state,
       grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
-      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -1>
+      OffsetInfo<ScalarTypeA, uint64_t, -1>
         aOffset(aInfo);
-      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, -1>
+      OffsetInfo<ScalarTypeB, uint64_t, -1>
         bOffset(bInfo);
-      OffsetInfo<typename TensorUtils<TensorTypeC>::DataType, uint64_t, -1>
+      OffsetInfo<ScalarTypeC, uint64_t, -1>
         cOffset(cInfo);
       kernelPointwiseApply3<Op,
-                            typename TensorUtils<TensorTypeA>::DataType,
-                            typename TensorUtils<TensorTypeB>::DataType,
-                            typename TensorUtils<TensorTypeC>::DataType,
+                            ScalarTypeA,
+                            ScalarTypeB,
+                            ScalarTypeC,
                             uint64_t, -1, -1, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aOffset, bOffset, cOffset, (uint64_t) totalElements, op);

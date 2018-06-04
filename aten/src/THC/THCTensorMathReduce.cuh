@@ -496,7 +496,9 @@ kernelTransformReduceOuterDimIndex(K *tgt1,
   }
 }
 
-template <typename TensorTypeK,
+template <typename ScalarTypeK,
+          typename ScalarTypeIndex,
+          typename TensorTypeK,
           typename TensorTypeIndex,
           typename BinaryFunction>
 __host__ void
@@ -505,9 +507,7 @@ THC_transformReduceOuterDimIndex(THCState *state,
                                  TensorTypeIndex *tgt2,
                                  TensorTypeK *src,
                                  int64_t rdim,
-                                 const thrust::pair<
-                                 typename TensorUtils<TensorTypeK>::DataType,
-                                 typename TensorUtils<TensorTypeIndex>::DataType>& init,
+                                 const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                                  BinaryFunction binary_op) {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
   unsigned num_orows = 1;
@@ -600,7 +600,9 @@ kernelTransformReduceInnermostDimIndex(K *tgt1,
   }
 }
 
-template <typename TensorTypeK,
+template <typename ScalarTypeK,
+          typename ScalarTypeIndex,
+          typename TensorTypeK,
           typename TensorTypeIndex,
           typename BinaryFunction>
 __host__ void
@@ -608,9 +610,7 @@ THC_transformReduceInnermostDimIndex(THCState *state,
                                      TensorTypeK *tgt1,
                                      TensorTypeIndex *tgt2,
                                      TensorTypeK *src,
-                                     const thrust::pair<
-                                     typename TensorUtils<TensorTypeK>::DataType,
-                                     typename TensorUtils<TensorTypeIndex>::DataType>& init,
+                                     const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                                      BinaryFunction binary_op) {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
   unsigned num_rows = 1;
@@ -632,7 +632,9 @@ THC_transformReduceInnermostDimIndex(THCState *state,
   THCudaCheck(cudaGetLastError());
 }
 
-template <typename TensorTypeK,
+template <typename ScalarTypeK,
+          typename ScalarTypeIndex,
+          typename TensorTypeK,
           typename TensorTypeIndex,
           typename BinaryFunction>
 void
@@ -642,11 +644,11 @@ THC_reduceDimIndex(THCState *state,
                    TensorTypeK *src,
                    int64_t dimension,
                    int keepdim,
-                   const thrust::pair<
-                   typename TensorUtils<TensorTypeK>::DataType,
-                   typename TensorUtils<TensorTypeIndex>::DataType>& init,
+                   const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                    BinaryFunction binary_op)
 {
+  static_assert(std::is_same<ScalarTypeK, typename TensorUtils<TensorTypeK>::DataType>::value, "ScalarTypeK must match");
+  static_assert(std::is_same<ScalarTypeIndex, typename TensorUtils<TensorTypeIndex>::DataType>::value, "ScalarTypeIndex must match");
   THArgCheck(dimension >= 0 &&
              dimension < TensorUtils<TensorTypeK>::getDims(state, src),
              3, "dimension out of range");

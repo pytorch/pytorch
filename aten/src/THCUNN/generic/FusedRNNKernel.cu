@@ -441,11 +441,11 @@ void THNN_(LSTM_forw_ind_wrap)(
   THAssertMsg(getApplyGrid(state, totalElements, grid),
           "Could not get grid size for pointwise apply.");
 
-  TINFO inputI = getTensorInfo<THCTensor, INDTYPE>(state, input);
-  TINFO hiddenI = getTensorInfo<THCTensor, INDTYPE>(state, hidden);
-  TINFO cxI = getTensorInfo<THCTensor, INDTYPE>(state, cx);
-  TINFO hyI = getTensorInfo<THCTensor, INDTYPE>(state, hy);
-  TINFO cyI = getTensorInfo<THCTensor, INDTYPE>(state, cy);
+  TINFO inputI = getTensorInfo<real, THCTensor, INDTYPE>(state, input);
+  TINFO hiddenI = getTensorInfo<real, THCTensor, INDTYPE>(state, hidden);
+  TINFO cxI = getTensorInfo<real, THCTensor, INDTYPE>(state, cx);
+  TINFO hyI = getTensorInfo<real, THCTensor, INDTYPE>(state, hy);
+  TINFO cyI = getTensorInfo<real, THCTensor, INDTYPE>(state, cy);
 
   INDTYPE hid_size = cxI.sizes[cxI.dims-1];
   if(has_bias){
@@ -468,8 +468,8 @@ void THNN_(LSTM_forw_ind_wrap)(
   TINFO bias2I = nullinfo;
 
   if(has_bias){
-    bias1I = getTensorInfo<THCTensor, INDTYPE>(state, bias1);
-    bias2I = getTensorInfo<THCTensor, INDTYPE>(state, bias2);
+    bias1I = getTensorInfo<real, THCTensor, INDTYPE>(state, bias1);
+    bias2I = getTensorInfo<real, THCTensor, INDTYPE>(state, bias2);
     if(maxDim == -2){
       bias1I.collapseDims();
       bias2I.collapseDims();
@@ -534,13 +534,13 @@ void THNN_(LSTM_back_ind_wrap)(
   THAssertMsg(getApplyGrid(state, totalElements, grid),
               "Could not get grid size for pointwise apply");
 
-  TINFO storageI = getTensorInfo<THCTensor, INDTYPE>(state, storage);
-  TINFO gradingatesI = getTensorInfo<THCTensor, INDTYPE>(state, gradInGates);
-  TINFO cxI = getTensorInfo<THCTensor, INDTYPE>(state, cx);
-  TINFO cyI = getTensorInfo<THCTensor, INDTYPE>(state, cy);
-  TINFO gradoutI = getTensorInfo<THCTensor, INDTYPE>(state, gradOutput);
-  TINFO gradoutcI = getTensorInfo<THCTensor, INDTYPE>(state, gradOutputCell);
-  TINFO gradincxI = getTensorInfo<THCTensor, INDTYPE>(state, gradInputCx);
+  TINFO storageI = getTensorInfo<real, THCTensor, INDTYPE>(state, storage);
+  TINFO gradingatesI = getTensorInfo<real, THCTensor, INDTYPE>(state, gradInGates);
+  TINFO cxI = getTensorInfo<real, THCTensor, INDTYPE>(state, cx);
+  TINFO cyI = getTensorInfo<real, THCTensor, INDTYPE>(state, cy);
+  TINFO gradoutI = getTensorInfo<real, THCTensor, INDTYPE>(state, gradOutput);
+  TINFO gradoutcI = getTensorInfo<real, THCTensor, INDTYPE>(state, gradOutputCell);
+  TINFO gradincxI = getTensorInfo<real, THCTensor, INDTYPE>(state, gradInputCx);
 
   INDTYPE hid_size = gradoutI.sizes[gradoutI.dims-1];
 
@@ -623,11 +623,11 @@ void THNN_(GRU_forw_ind_wrap)(
   THAssertMsg(getApplyGrid(state, totalElements, grid),
               "Could not get grid size for pointwise apply.");
 
-  TINFO inputI = getTensorInfo<THCTensor, INDTYPE>(state, input);
-  TINFO hiddenI = getTensorInfo<THCTensor, INDTYPE>(state, hidden);
-  TINFO hxI = getTensorInfo<THCTensor, INDTYPE>(state, hx);
-  TINFO hyI = getTensorInfo<THCTensor, INDTYPE>(state, hy);
-  TINFO storageI = getTensorInfo<THCTensor, INDTYPE>(state, storage);
+  TINFO inputI = getTensorInfo<real, THCTensor, INDTYPE>(state, input);
+  TINFO hiddenI = getTensorInfo<real, THCTensor, INDTYPE>(state, hidden);
+  TINFO hxI = getTensorInfo<real, THCTensor, INDTYPE>(state, hx);
+  TINFO hyI = getTensorInfo<real, THCTensor, INDTYPE>(state, hy);
+  TINFO storageI = getTensorInfo<real, THCTensor, INDTYPE>(state, storage);
 
   INDTYPE hid_size = hxI.sizes[hxI.dims-1];
   if(has_bias){
@@ -650,8 +650,8 @@ void THNN_(GRU_forw_ind_wrap)(
   TINFO bias2I = nullinfo;
 
   if(has_bias){
-    bias1I = getTensorInfo<THCTensor, INDTYPE>(state, bias1);
-    bias2I = getTensorInfo<THCTensor, INDTYPE>(state, bias2);
+    bias1I = getTensorInfo<real, THCTensor, INDTYPE>(state, bias1);
+    bias2I = getTensorInfo<real, THCTensor, INDTYPE>(state, bias2);
     if(maxDim == -2){
       bias1I.collapseDims();
       bias2I.collapseDims();
@@ -720,11 +720,11 @@ void THNN_(GRU_back_ind_wrap)(
   THAssertMsg(getApplyGrid(state, totalElements, grid),
           "Could not get grid size for pointwise apply");
 
-  TINFO gradininputI = getTensorInfo<THCTensor, INDTYPE>(state, gradInInput);
-  TINFO gradinhiddenI = getTensorInfo<THCTensor, INDTYPE>(state, gradInHidden);
-  TINFO gradoutI = getTensorInfo<THCTensor, INDTYPE>(state, gradOutput);
-  TINFO gradinhxI = getTensorInfo<THCTensor, INDTYPE>(state, gradInputHx);
-  TINFO storageI = getTensorInfo<THCTensor, INDTYPE>(state, storage);
+  TINFO gradininputI = getTensorInfo<real, THCTensor, INDTYPE>(state, gradInInput);
+  TINFO gradinhiddenI = getTensorInfo<real, THCTensor, INDTYPE>(state, gradInHidden);
+  TINFO gradoutI = getTensorInfo<real, THCTensor, INDTYPE>(state, gradOutput);
+  TINFO gradinhxI = getTensorInfo<real, THCTensor, INDTYPE>(state, gradInputHx);
+  TINFO storageI = getTensorInfo<real, THCTensor, INDTYPE>(state, storage);
 
   INDTYPE hid_size = gradoutI.sizes[gradoutI.dims-1];
 

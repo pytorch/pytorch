@@ -117,9 +117,10 @@ TENSOR_UTILS(THCudaHalfTensor, half, float);
 // TensorInfos can then be passed to CUDA kernels, but we can use the static functions
 // defined above to perform Tensor Operations that are appropriate for each
 // TensorType.
-template <typename TensorType, typename IndexType>
-TensorInfo<typename TensorUtils<TensorType>::DataType, IndexType>
+template <typename ScalarType, typename TensorType, typename IndexType>
+TensorInfo<ScalarType, IndexType>
 getTensorInfo(THCState* state, TensorType* t) {
+  static_assert(std::is_same<ScalarType, typename TensorUtils<TensorType>::DataType>::value, "ScalarType must match");
   IndexType sz[MAX_CUTORCH_DIMS];
   IndexType st[MAX_CUTORCH_DIMS];
 
@@ -129,7 +130,7 @@ getTensorInfo(THCState* state, TensorType* t) {
     st[i] = TensorUtils<TensorType>::getStride(state, t, i);
   }
 
-  return TensorInfo<typename TensorUtils<TensorType>::DataType, IndexType>(
+  return TensorInfo<ScalarType, IndexType>(
     TensorUtils<TensorType>::getData(state, t), dims, sz, st);
 }
 

@@ -31,7 +31,7 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
 
   if (TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, t)) {
     TensorInfo<int64_t, uint32_t> info =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, t);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, t);
     info.reduceDim(dim);
     int collapseDim = info.collapseDims(dim);
 
@@ -48,7 +48,7 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
     }
   } else {
     TensorInfo<int64_t, uint64_t> info =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, t);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, t);
     info.reduceDim(dim);
     int collapseDim = info.collapseDims(dim);
 
