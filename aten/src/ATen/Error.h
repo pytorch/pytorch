@@ -45,20 +45,6 @@ _str(std::ostream& ss, const T& t, const Args&... args) {
 
 } // namespace detail
 
-/// Utility to demangle a C++ symbol name.
-std::string demangle(const char* name);
-
-/// Returns the printable name of the type.
-template <typename T>
-inline const char* demangle_type() {
-#ifdef __GXX_RTTI
-  static const std::string name = demangle(typeid(T).name());
-  return name.c_str();
-#else // __GXX_RTTI
-  return "(RTTI disabled, cannot show name)";
-#endif // __GXX_RTTI
-}
-
 // Convert a list of string-like arguments into a single string.
 template <typename... Args>
 inline std::string str(const Args&... args) {
