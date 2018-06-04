@@ -353,7 +353,8 @@ Caffe2Backend::get_special_operators() const {
               {"Reciprocal", &Caffe2Backend::CreateReciprocal},
               {"BatchNormalization", &Caffe2Backend::CreateBatchNormalization},
               {"MatMul", &Caffe2Backend::CreateMatMul},
-              {"Upsample", &Caffe2Backend::CreateUpsample}};
+              {"Upsample", &Caffe2Backend::CreateUpsample},
+              {"LRN", &Caffe2Backend::CreateLRN}};
   return kSpecialOperators;
 }
 
@@ -902,6 +903,22 @@ Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) 
   c2_width->set_name("width_scale");
   c2_width->set_f(scales.Get(3));
 
+  return c2_op;
+}
+
+Caffe2Ops Caffe2Backend::CreateLRN(OnnxNode* onnx_node, int opset_version) {
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+  const auto& attributes = onnx_node->attributes;
+  if (!attributes.HasAttribute("alpha")) {
+      auto* arg = c2_op.ops.Mutable(0)->add_arg();
+      arg->set_name("alpha");
+      arg->set_f(1e-4);
+  }
+  if (!attributes.HasAttribute("beta")) {
+      auto* arg = c2_op.ops.Mutable(0)->add_arg();
+      arg->set_name("beta");
+      arg->set_f(0.75);
+  }
   return c2_op;
 }
 
