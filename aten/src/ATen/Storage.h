@@ -14,8 +14,8 @@ struct Storage {
   void operator=(const Storage&) = delete;
 
   virtual ~Storage() {};
-  virtual std::size_t elementSize() const = 0;
-  virtual std::size_t size() const = 0;
+  virtual size_t elementSize() const = 0;
+  virtual size_t size() const = 0;
   virtual void* data() = 0;
   virtual const void* data() const = 0;
   virtual Storage& retain() = 0;
@@ -29,10 +29,10 @@ struct Storage {
   virtual const char * toString() const = 0;
 
   virtual Storage& fill(Scalar value) = 0;
-  virtual Storage& set(std::size_t ind, Scalar value) = 0;
-  virtual Storage& fast_set(std::size_t ind, Scalar value) = 0;
-  virtual Scalar get(std::size_t ind) = 0;
-  virtual Scalar fast_get(std::size_t ind) = 0;
+  virtual Storage& set(size_t ind, Scalar value) = 0;
+  virtual Storage& fast_set(size_t ind, Scalar value) = 0;
+  virtual Scalar get(size_t ind) = 0;
+  virtual Scalar fast_get(size_t ind) = 0;
 
   virtual void set_flag(char flag) = 0;
   virtual void clear_flag(char flag) = 0;

@@ -234,7 +234,7 @@ struct GraphFuser {
     std::unordered_map<Value*, Value*> inner_to_outer;
     auto inner_inputs = producer_subgraph->inputs();
     auto outer_inputs = producer_group->inputs();
-    for (std::size_t i = 0; i < inner_inputs.size(); ++i) {
+    for (size_t i = 0; i < inner_inputs.size(); ++i) {
       inner_to_outer[inner_inputs[i]] = outer_inputs[i];
     }
 
@@ -247,13 +247,13 @@ struct GraphFuser {
       temporary_nodes.emplace_back(outer);
       auto inner_outputs = inner->outputs();
       auto outer_outputs = outer->outputs();
-      for (std::size_t i = 0; i < inner_outputs.size(); ++i)
+      for (size_t i = 0; i < inner_outputs.size(); ++i)
         inner_to_outer[inner_outputs[i]] = outer_outputs[i];
     }
 
     // Replace uses of producer_group outputs and destroy the producer
     auto subgraph_outputs = producer_subgraph->outputs();
-    for (std::size_t i = 0; i < subgraph_outputs.size(); ++i) {
+    for (size_t i = 0; i < subgraph_outputs.size(); ++i) {
       auto outer_output = inner_to_outer.at(subgraph_outputs[i]);
       producer_group->outputs()[i]->replaceAllUsesWith(outer_output);
     }
@@ -267,7 +267,7 @@ struct GraphFuser {
       Node *merged = mergeNodeIntoGroup(consumer_group, node);
       // If any of the outputs are still used then we need to add them
       auto outputs = node->outputs();
-      for (std::size_t i = 0; i < outputs.size(); ++i) {
+      for (size_t i = 0; i < outputs.size(); ++i) {
         auto output = outputs[i];
         if (output->uses().size() == 0) continue;
         consumer_subgraph->registerOutput(merged->outputs()[i]);

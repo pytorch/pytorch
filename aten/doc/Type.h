@@ -98,7 +98,7 @@ struct AT_API Type {
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
-  virtual std::size_t elementSizeInBytes() const = 0;
+  virtual size_t elementSizeInBytes() const = 0;
   virtual Type & toBackend(Backend b) const;
   virtual Type & toScalarType(ScalarType s) const;
   Context& get_context() const { return *context; }

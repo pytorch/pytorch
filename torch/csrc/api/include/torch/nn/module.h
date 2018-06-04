@@ -73,7 +73,7 @@ class Module {
   template <class Archive>
   void save(Archive& ar) const {
     auto params = parameters();
-    std::size_t size = params.size();
+    size_t size = params.size();
     ar(size);
     for (auto& p : params) {
       ar(p.first, p.second);
@@ -83,10 +83,10 @@ class Module {
   template <class Archive>
   void load(Archive& ar) {
     auto params = parameters();
-    std::size_t size;
+    size_t size;
     ar(size);
     std::string name;
-    for (std::size_t i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++) {
       ar(name);
       ar(params[name]);
     }

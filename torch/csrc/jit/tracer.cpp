@@ -60,7 +60,7 @@ struct TraceEval : autograd::Eval {
     auto& graph = tracing_state->graph;
     graph->advanceStage();
 
-    for (std::size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
+    for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
       auto input = inputs[i];
       Value *input_node = graph->addInput();
       if (!input.defined()) continue;
