@@ -925,6 +925,18 @@ class TestJit(TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
 
+    def test_index_trace(self):
+        # Ensure index-* is emitted by gen_jit_dispatch.py
+        # This exercises the functionality that we can have one TensorList
+        # in the argument list that appears at any position.
+        x = torch.zeros(9, 8, 7)
+        i = torch.LongTensor([0])
+        @torch.jit.trace(x, i)
+        def index_test(x, i):
+            return x[i, i]
+
+        self.assertEqual(index_test(x, i), x[i, i])
+
 
 class TestScript(TestCase):
 
