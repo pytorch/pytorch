@@ -796,7 +796,7 @@ if WITH_DISTRIBUTED:
         main_sources += [
             "torch/csrc/c10d/init.cpp",
         ]
-        main_link_args += [C10D_LIB, C10D_GLOO_LIB]
+        main_link_args += [C10D_GLOO_LIB, C10D_LIB]
 
 if WITH_CUDA:
     nvtoolext_lib_name = None
