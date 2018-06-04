@@ -66,13 +66,29 @@ else()
   SET(CUDNN_LIBNAME "cudnn")
 endif()
 include(FindPackageHandleStandardArgs)
-set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
-find_path(CUDNN_INCLUDE_DIR cudnn.h
+
+if(DEFINED ENV{CUDNN_ROOT_DIR})
+  set(CUDNN_ROOT_DIR $ENV{CUDNN_ROOT_DIR} CACHE PATH "Folder contains NVIDIA cuDNN")
+else()
+  set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
+endif()
+
+if(DEFINED ENV{CUDNN_INCLUDE_DIR})
+  set(CUDNN_INCLUDE_DIR $ENV{CUDNN_INCLUDE_DIR})
+else()
+  find_path(CUDNN_INCLUDE_DIR cudnn.h
     HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES cuda/include include)
-find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
+endif()
+
+if(DEFINED ENV{CUDNN_LIBRARY})
+  set(CUDNN_LIBRARY $ENV{CUDNN_LIBRARY})
+else()
+  find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
     HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64)
+endif()
+
 find_package_handle_standard_args(
     CUDNN DEFAULT_MSG CUDNN_INCLUDE_DIR CUDNN_LIBRARY)
 if(NOT CUDNN_FOUND)
