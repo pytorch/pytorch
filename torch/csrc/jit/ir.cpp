@@ -1,6 +1,3 @@
-#ifndef NO_PYTHON
-#include "torch/csrc/python_headers.h"
-#endif
 #include "ir.h"
 
 #include "torch/csrc/autograd/function.h"
@@ -13,124 +10,6 @@
 #include <sstream>
 #include <algorithm>
 #include <string>
-
-#ifndef NO_PYTHON
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "pybind11/pybind11.h"
-
-namespace py = pybind11;
-
-namespace torch { namespace jit {
-
-std::string getPythonName(const PyObject* obj_) {
-  AutoGIL gil;
-  PyObject* obj = const_cast<PyObject*>(obj_);
-  auto v = py::getattr(obj, "__name__", py::str("<python_value>"));
-  // if this was a autograd.Function recover the name of the class
-  return py::str(v);
-}
-
-std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
-  AutoGIL gil;
-  auto pyobj = py::handle(const_cast<PyObject*>(obj.get()));
-  if (py::isinstance<py::tuple>(pyobj)) {
-    // This special-case for printing tuples handles a problem where
-    // str((2L, 3L)) outputs "(2L, 3L)" in Python 2 but "(2, 3)"
-    // in Python 3.  In order to suppress the L-suffix, we must
-    // manually print the string ourselves, calling str() on the
-    // sub-elements.
-    //
-    // This is a fairly fragile fix (What if you have nested tuples
-    // in tuples? What if you have dictionaries?) but it seems to hit
-    // the cases that are triggered in practice in onnx-pytorch.  Revisit
-    // this code if this is not the case.
-    //
-    // By the way, one non-solution for this problem is to monkeypatch
-    // tuple.__str__; this doesn't work because Python doesn't allow
-    // monkeypatching methods of built-in types.
-    auto pytuple = pyobj.cast<py::tuple>();
-    out << "(";
-    size_t i = 0;
-    for (auto& o : pytuple) {
-      if (i > 0) {
-        out << ", ";
-      }
-      THPObjectPtr str(py::str(o).release().ptr());
-      out << THPUtils_unpackString(str.get());
-      i++;
-    }
-    if (i == 1) {
-      out << ",";
-    }
-    out << ")";
-    return out;
-  } else {
-    return out << THPUtils_unpackString(py::str(pyobj).ptr());
-  }
-}
-
-at::optional<THPObjectPtr> PythonOp::autogradFunction() const {
-  AutoGIL gil;
-  py::handle obj = const_cast<PyObject*>(pyobj.get());
-
-  auto r = py::getattr(obj, "__self__", py::none());
-  if(r.is_none())
-    return at::nullopt;
-
-  auto apply = py::getattr(r, "apply", py::none());
-  if(apply.is_none())
-    return at::nullopt;
-
-  auto c = PyObject_RichCompareBool(apply.ptr(), obj.ptr(), Py_NE);
-  if(PyErr_Occurred())
-    throw py::error_already_set();
-  if(c)
-    return at::nullopt;
-
-  return THPObjectPtr(r.release().ptr());
-}
-
-std::string PythonOp::name() const {
-  AutoGIL gil;
-  if(auto autograd = autogradFunction()) {
-    return getPythonName(autograd->get());
-  } else {
-    return getPythonName(pyobj.get());
-  }
-}
-
-void PythonOp::cloneFrom(Node * other_) {
-  Node::cloneFrom(other_);
-  auto other = other_->cast<PythonOp>();
-  this->cconv = other->cconv;
-  Py_INCREF(other->pyobj.get());
-  this->pyobj = THPObjectPtr(other->pyobj.get());
-  for(auto & sa : other->scalar_args) {
-    Py_INCREF(sa.get());
-    this->scalar_args.emplace_back(sa.get());
-  }
-}
-
-}} // namespace torch::jit
-
-#else
-
-namespace torch { namespace jit {
-
-std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
-  throw std::runtime_error("Trying to print Python object from a C++ build");
-}
-
-std::string PythonOp::name() const {
-  throw std::runtime_error("Trying to call PythonOp::name from a C++ build");
-  return std::string();
-}
-
-}} // namespace torch::jit
-
-#endif
-
 
 namespace torch { namespace jit {
 
@@ -289,14 +168,7 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   out << " = ";
   IR_IFM_CONST(n,PythonOp)
     out << "^" << value->name();
-    out << "(";
-    int i = 0;
-    for (auto& scalar : value->scalar_args) {
-      if (i++ > 0)
-        out << ", ";
-      printPyObject(out, scalar);
-    }
-    out << ")";
+    value->writeScalars(out);
   IR_ELSEIFM_CONST(CppOp)
     out << "CppOp[" << value->name() << "]";
   IR_ELSE()
@@ -697,6 +569,19 @@ inline Value* Value::setUniqueName(const std::string & name) {
   names[name] = this;
   unique_name_ = name;
   return this;
+}
+
+PythonOp* defaultAllocPythonOp(Graph*g) {
+  throw std::runtime_error("Trying to allocate a Python object without python bindings loaded");
+}
+std::atomic<decltype(&defaultAllocPythonOp)> alloc_python_op;
+
+// patched in when python bindings are loaded
+PythonOp* allocPythonOp(Graph* g) {
+  return alloc_python_op.load()(g);
+}
+void setAllocPythonOp(PythonOp* (*v)(Graph* g)) {
+  alloc_python_op.store(v);
 }
 
 }} // namespace torch::jit
