@@ -439,10 +439,11 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(BUILD_CAFFE2 AND USE_ROCM)
+if(BUILD_CAFFE2)
   include(cmake/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
+    caffe2_update_option(USE_ROCM ON)
 
     set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
     set(Caffe2_HIP_INCLUDES
@@ -453,9 +454,7 @@ if(BUILD_CAFFE2 AND USE_ROCM)
     # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
       roc::rocblas)
-
   else()
-    message(WARNING "Not compiling with HIP for AMD. Suppress this warning with -DUSE_ROCM=OFF.")
     caffe2_update_option(USE_ROCM OFF)
   endif()
 endif()
