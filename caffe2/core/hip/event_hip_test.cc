@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include "caffe2/core/context.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/event.h"
 
 namespace caffe2 {

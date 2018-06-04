@@ -5,8 +5,8 @@
 #include <mutex>
 #include <hiprand.h>
 
-#include "caffe2/core/common_miopen.h"
-#include "caffe2/core/common_hip.h"
+#include "caffe2/core/hip/common_miopen.h"
+#include "caffe2/core/hip/common_hip.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"

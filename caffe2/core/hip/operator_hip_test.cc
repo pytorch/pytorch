@@ -1,7 +1,7 @@
 #include <string>
 
 #include <gtest/gtest.h>
-#include "caffe2/core/common_hip.h"
+#include "caffe2/core/hip/common_hip.h"
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {

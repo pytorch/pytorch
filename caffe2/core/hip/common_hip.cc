@@ -1,4 +1,4 @@
-#include "caffe2/core/common_hip.h"
+#include "caffe2/core/hip/common_hip.h"
 #include "caffe2/core/asan.h"
 
 #include <atomic>

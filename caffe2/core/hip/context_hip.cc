@@ -6,8 +6,8 @@
 
 #include "cub/util_allocator.cuh"
 #include "caffe2/core/asan.h"
-#include "caffe2/core/common_miopen.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/common_miopen.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"

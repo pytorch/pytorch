@@ -2,8 +2,8 @@
 #ifndef CAFFE2_CORE_MIOPEN_WRAPPERS_H_
 #define CAFFE2_CORE_MIOPEN_WRAPPERS_H_
 
-#include "caffe2/core/common_miopen.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/common_miopen.h"
+#include "caffe2/core/hip/context_hip.h"
 
 namespace caffe2 {
 

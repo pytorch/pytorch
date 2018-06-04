@@ -1,8 +1,8 @@
 #include <iostream> // NOLINT
 
 #include "caffe2/core/blob.h"
-#include "caffe2/core/common_hip.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/common_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include <gtest/gtest.h>
 

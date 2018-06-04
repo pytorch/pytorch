@@ -1,6 +1,6 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serialization.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 
 namespace caffe2 {
 

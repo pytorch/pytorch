@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/net_async_dag_gpu.h"
+#include "caffe2/core/hip/net_async_dag_gpu.h"
 
 #include <set>
 #include <stack>
