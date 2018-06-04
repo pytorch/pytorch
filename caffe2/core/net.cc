@@ -109,7 +109,7 @@ void checkExecutorOverride(std::string& net_type) {
   CAFFE_ENFORCE(
       executors.size() % 2 == 0, "Invalid override executors flag value");
   std::unordered_map<std::string, std::string> overrides;
-  for (auto idx = 0; idx < executors.size() - 1; idx += 2) {
+  for (size_t idx = 0; idx < executors.size() - 1; idx += 2) {
     overrides[executors[idx]] = executors[idx + 1];
   }
   if (overrides.count(net_type)) {
