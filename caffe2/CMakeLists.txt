@@ -205,7 +205,7 @@ caffe2_interface_library(caffe2 caffe2_library)
 list(APPEND Caffe2_MAIN_LIBS caffe2_library)
 
 # ---[ CUDA library.
-if(USE_CUDA OR USE_ROCM)
+if(USE_CUDA OR (USE_ROCM AND NOT BUILD_CAFFE2))
   # A hack to deal with cuda library dependencies and modern CMake: the
   # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
   # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
@@ -241,26 +241,26 @@ if(USE_CUDA OR USE_ROCM)
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
+endif()
 
-  # ---[ HIP library.
-  if(USE_ROCM AND BUILD_CAFFE2)
-    HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
-    set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
+# ---[ Caffe2 HIP sources.
+if(USE_ROCM AND BUILD_CAFFE2)
+  HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
+  set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
 
-    target_include_directories(
-      caffe2_hip PUBLIC ${Caffe2_HIP_INCLUDES})
-    target_include_directories(
-      caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
+  target_include_directories(
+    caffe2_hip PUBLIC ${Caffe2_HIP_INCLUDES})
+  target_include_directories(
+    caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
-    target_link_libraries(caffe2_hip PUBLIC caffe2)
-    target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
+  target_link_libraries(caffe2_hip PUBLIC caffe2)
+  target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
-    set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
+  set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
 
-    caffe2_interface_library(caffe2_hip caffe2_hip_library)
-    list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
-    install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
-  endif()
+  caffe2_interface_library(caffe2_hip caffe2_hip_library)
+  list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
+  install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
 endif()
 
 # ---[ Check if warnings should be errors.
@@ -275,7 +275,7 @@ endif()
 if(BUILD_CAFFE2)
   if (BUILD_TEST)
     set(Caffe2_ALL_TEST_SRCS ${Caffe2_CPU_TEST_SRCS})
-    if (USE_CUDA OR USE_ROCM)
+    if (USE_CUDA)
       list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_GPU_TEST_SRCS})
     endif()
     if(USE_ROCM)
@@ -382,7 +382,7 @@ if(BUILD_CAFFE2)
     endif(WIN32)
     install(TARGETS caffe2_pybind11_state DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
 
-    if(USE_CUDA OR USE_ROCM)
+    if(USE_CUDA)
       add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
@@ -412,7 +412,7 @@ if(BUILD_CAFFE2)
           COMMAND ${CMAKE_COMMAND} -E copy
           $<TARGET_FILE:caffe2_pybind11_state>
           ${CMAKE_BINARY_DIR}/caffe2/python)
-      if (USE_CUDA OR USE_ROCM)
+      if (USE_CUDA)
         add_dependencies(windows_python_copy_lib caffe2_pybind11_state_gpu)
         add_custom_command(
             TARGET windows_python_copy_lib POST_BUILD
