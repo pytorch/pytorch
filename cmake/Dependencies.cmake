@@ -438,9 +438,8 @@ if(USE_CUDA)
   endif()
 endif()
 
-# TODO: Unify USE_HIP and USE_ROCM
 # ---[ HIP
-if(USE_HIP)
+if(BUILD_CAFFE2 AND USE_ROCM)
   include(cmake/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
@@ -456,8 +455,8 @@ if(USE_HIP)
       roc::rocblas)
 
   else()
-    message(WARNING "Not compiling with HIP for AMD. Suppress this warning with -DUSE_HIP=OFF.")
-    caffe2_update_option(USE_HIP OFF)
+    message(WARNING "Not compiling with HIP for AMD. Suppress this warning with -DUSE_ROCM=OFF.")
+    caffe2_update_option(USE_ROCM OFF)
   endif()
 endif()
 

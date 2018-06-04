@@ -241,20 +241,9 @@ if(USE_CUDA OR USE_ROCM)
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
-endif()
 
-# ---[ Check if warnings should be errors.
-if ($ENV{WERROR})
-  target_compile_options(caffe2 PRIVATE -Werror)
-  if(USE_CUDA OR USE_ROCM)
-    target_compile_options(caffe2_gpu PRIVATE -Werror)
-  endif()
-endif()
-
-# ---[ Test binaries.
-if(BUILD_CAFFE2)
   # ---[ HIP library.
-  if(USE_HIP)
+  if(USE_ROCM AND BUILD_CAFFE2)
     HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
     set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
 
@@ -272,13 +261,24 @@ if(BUILD_CAFFE2)
     list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
     install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
   endif()
+endif()
 
+# ---[ Check if warnings should be errors.
+if ($ENV{WERROR})
+  target_compile_options(caffe2 PRIVATE -Werror)
+  if(USE_CUDA OR USE_ROCM)
+    target_compile_options(caffe2_gpu PRIVATE -Werror)
+  endif()
+endif()
+
+# ---[ Test binaries.
+if(BUILD_CAFFE2)
   if (BUILD_TEST)
     set(Caffe2_ALL_TEST_SRCS ${Caffe2_CPU_TEST_SRCS})
     if (USE_CUDA OR USE_ROCM)
       list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_GPU_TEST_SRCS})
     endif()
-    if(USE_HIP)
+    if(USE_ROCM)
       list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_HIP_TEST_SRCS})
     endif()
 
@@ -293,7 +293,7 @@ if(BUILD_CAFFE2)
       install(TARGETS ${test_name} DESTINATION test)
     endforeach()
 
-    if(USE_HIP)
+    if(USE_ROCM)
       foreach(test_src ${Caffe2_HIP_TEST_SRCS})
         get_filename_component(test_name ${test_src} NAME_WE)
         set_target_properties(${test_name} PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})

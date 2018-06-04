@@ -70,7 +70,6 @@ cmake_dependent_option(
     USE_GLOO "Use Gloo" ON
     "BUILD_CAFFE2" OFF)
 option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)
-option(USE_HIP "Use HIP" ON)
 cmake_dependent_option(
     USE_LEVELDB "Use LEVELDB" ON
     "BUILD_CAFFE2" OFF)
@@ -339,11 +338,6 @@ if (USE_CUDA OR USE_ROCM)
 
 endif()
 
-if (USE_HIP)
-  # TODO: check if we should include other hip dependency libraries
-  # to the interface as well.
-
-endif()
 # Note(jiayq): when building static libraries, all PRIVATE dependencies
 # will also become interface libraries, and as a result if there are any
 # dependency libraries that are not exported, the following install export
