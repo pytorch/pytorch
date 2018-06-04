@@ -460,12 +460,12 @@ if(BUILD_CAFFE2)
 endif()
 
 # ---[ ROCm
-if(USE_ROCM)
+if(USE_ROCM AND NOT BUILD_CAFFE2)
  include_directories(${HIP_PATH}/include)
  include_directories(${HIPBLAS_PATH}/include)
  include_directories(${HIPSPARSE_PATH}/include)
  include_directories(${HIPRNG_PATH}/include)
- linclude_directories(${THRUST_PATH})
+ include_directories(${THRUST_PATH})
 
  # load HIP cmake module and load platform id
  EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig -P OUTPUT_VARIABLE PLATFORM)
