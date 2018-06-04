@@ -777,13 +777,16 @@ Applies element-wise :math:`\text{LogSigmoid}(x) = \log \left(\frac{1}{1 + \exp(
 See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
-hardshrink = _add_docstr(torch._C._nn.hardshrink, r"""
-hardshrink(input, lambd=0.5) -> Tensor
 
-Applies the hard shrinkage function element-wise
+def hardshrink(input, lambd=0.5):
+    r"""
+    hardshrink(input, lambd=0.5) -> Tensor
 
-See :class:`~torch.nn.Hardshrink` for more details.
-""")
+    Applies the hard shrinkage function element-wise
+
+    See :class:`~torch.nn.Hardshrink` for more details.
+    """
+    return torch.hardshrink(input, lambd)
 
 
 def tanhshrink(input):

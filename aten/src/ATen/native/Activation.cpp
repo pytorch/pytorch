@@ -1,5 +1,8 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/Dispatch.h"
+#include "ATen/CPUApplyUtils.h"
+#include "ATen/Half.h"
 
 namespace at { namespace native {
 
@@ -28,6 +31,42 @@ Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Gen
 
 Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
   return at::rrelu_with_noise_(self, self.type().tensor(), lower, upper, training, generator);
+}
+
+Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
+  auto lambd_tensor = at::zeros_like(self).fill_(lambd.toTensor());
+  auto out_tensor = self.clone();
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_cpu", [&] {
+    at::CPU_tensor_apply2<scalar_t, scalar_t>(
+        out_tensor,
+        lambd_tensor,
+        [](scalar_t& out_tensor_val,
+           scalar_t& lambd_tensor_val) {
+             if (out_tensor_val >= -lambd_tensor_val && out_tensor_val <= lambd_tensor_val) {
+               out_tensor_val = convert<scalar_t, double>(0.0);
+             }
+    });
+  });
+  return out_tensor;
+}
+
+Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
+  auto lambd_tensor = at::zeros_like(self).fill_(lambd);
+  auto out_tensor = grad.clone();
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_backward_cpu", [&] {
+    at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
+        out_tensor,
+        lambd_tensor,
+        self,
+        [](scalar_t& out_tensor_val,
+           scalar_t& lambd_tensor_val,
+           scalar_t& self_val) {
+             if (self_val >= -lambd_tensor_val && self_val <= lambd_tensor_val) {
+               out_tensor_val = convert<scalar_t, double>(0.0);
+             }
+    });
+  });
+  return out_tensor;
 }
 
 }}  // namespace at::native

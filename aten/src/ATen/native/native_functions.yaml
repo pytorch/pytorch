@@ -845,6 +845,16 @@
 
 - func: relu_(Tensor self) -> Tensor
 
+- func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
+  dispatch:
+    CPU: hardshrink_cpu
+    CUDA: hardshrink_cuda
+
+- func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd=0.5) -> Tensor
+  dispatch:
+    CPU: hardshrink_backward_cpu
+    CUDA: hardshrink_backward_cuda
+
 - func: rsqrt(Tensor self) -> Tensor
 
 - func: rsqrt_(Tensor self) -> Tensor
