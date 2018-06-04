@@ -236,12 +236,8 @@ __host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
   return (a + b - 1) / b;
 }
 
-inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice = -1) {
-  if (curDevice == -1) {
-//either not set by a caller or caller had an error
-      curDevice = current_device();
-      if (curDevice == -1) return false;
-  }
+inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice) {
+  if (curDevice == -1) return false;
   uint64_t numBlocks = ATenCeilDiv(totalElements, static_cast<uint64_t>(AT_APPLY_THREADS_PER_BLOCK));
   uint64_t maxGridX = at::globalContext().getDeviceProperties(curDevice)->maxGridSize[0];
   if (numBlocks > maxGridX)
@@ -288,6 +284,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
 
   dim3 grid;
   int64_t curDevice = current_device();
+  if (curDevice == -1) return false;
   if (!getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
@@ -469,6 +466,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
 
   dim3 grid;
   int64_t curDevice = current_device();
+  if (curDevice == -1) return false;
   if (!getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
@@ -689,6 +687,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
 
   dim3 grid;
   int64_t curDevice = current_device();
+  if (curDevice == -1) return false;
   if (!getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }

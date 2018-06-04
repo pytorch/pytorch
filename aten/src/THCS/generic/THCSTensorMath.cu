@@ -260,19 +260,22 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
     // TODO benchmark to decide whether to remove this special case
     const dim3 block = getApplyBlock();
     dim3 grid;
+    int curDevice = -1;
+    cudaGetDevice(&curDevice);
     if (sparse->nDimensionV == 0) {
-      THArgCheck(getApplyGrid(state, nnz, grid), 1, CUTORCH_DIM_WARNING);
+      
+      THArgCheck(getApplyGrid(state, nnz, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
       THCSTensor_sparseElementwiseKernelScalar<TensorCAddOp<real>, uint64_t, real>
-        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+        <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(
           TensorCAddOp<real>(value),
           V_INFO(r_), I_INFO(indices), V_INFO(values),
           (uint64_t) nnz);
     } else {
-      THArgCheck(getApplyGrid(state, nnz * block.x, grid), 1, CUTORCH_DIM_WARNING);
+      THArgCheck(getApplyGrid(state, nnz * block.x, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
       THCSTensor_sparseElementwiseKernel<TensorCAddOp<real>, uint64_t, real>
-        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+        <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(
           TensorCAddOp<real>(value),
           V_INFO(r_), I_INFO(indices), V_INFO(values),
           (uint64_t) nnz);
@@ -474,10 +477,12 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
   int64_t valueSize = t_values_->stride[0];
   const dim3 block = dim3(min((int64_t) getApplyBlock().x, valueSize));
   dim3 grid;
-  THArgCheck(getApplyGrid(state, valueSize, grid), 1, CUTORCH_DIM_WARNING);
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THArgCheck(getApplyGrid(state, valueSize, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
   THCSTensor_valueSparseIntersectionKernel<TensorMulOp<real>, uint64_t, real>
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+    <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(
       TensorMulOp<real>(),
       I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
       V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
@@ -486,7 +491,7 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
 
   THCudaLongStorage *resultNnz = THCudaLongStorage_newWithSize(state, 1);
   THCSTensor_indexSparseIntersectionKernel<uint64_t, real>
-    <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+    <<<1, 1, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(
       I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
       (uint64_t)t_nnz, (uint64_t)s_nnz, (uint64_t*)THCudaLongStorage_data(state, resultNnz));
   THCudaCheck(cudaGetLastError());

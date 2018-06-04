@@ -165,12 +165,8 @@ inline dim3 getApplyBlock() {
   return dim3(THC_APPLY_THREADS_PER_BLOCK);
 }
 
-inline bool getApplyGrid(THCState* state, uint64_t totalElements, dim3& grid, int curDevice = -1) {
-  if (curDevice == -1) {
-//either not set by the caller, or caller had an error
-      cudaGetDevice(&curDevice);
-      if (curDevice == -1) return false;
-  }
+inline bool getApplyGrid(THCState* state, uint64_t totalElements, dim3& grid, int curDevice) {
+  if (curDevice == -1) return false;
 
   uint64_t numBlocks = THCCeilDiv(totalElements, static_cast<uint64_t>(THC_APPLY_THREADS_PER_BLOCK));
   uint64_t maxGridX = THCState_getDeviceProperties(state, curDevice)->maxGridSize[0];
