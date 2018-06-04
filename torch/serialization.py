@@ -454,6 +454,14 @@ def _load(f, map_location, pickle_module):
 
     f_is_real_file = _is_real_file(f)
 
+    def raise_load_err_msg(pattern, e):
+        if pattern in str(e):
+            msg = (str(e) + ". You can only torch.load from a file that is seekable." +
+                            " Please pre-load the data into a buffer like io.BytesIO and try to load from it instead.")
+            raise type(e)(msg)
+        else:
+            raise e
+
     try:
         if f_is_real_file and f.tell() == 0:
             # legacy_load requires that f has fileno()
@@ -463,10 +471,10 @@ def _load(f, map_location, pickle_module):
             except tarfile.TarError:
                 # if not a tarfile, reset file offset and proceed
                 f.seek(0)
-    except (io.UnsupportedOperation, AttributeError) as e:
-        msg = (str(e) + ". You can only torch.load from a file that is seekable. " +
-               "Please pre-load the data into a buffer like io.BytesIO and try to load from it instead.")
-        raise type(e)(msg)
+    except io.UnsupportedOperation as e:
+        raise_load_err_msg("seek", e)
+    except AttributeError as e:
+        raise_load_err_msg("instance has no attribute 'tell'", e)
 
     magic_number = pickle_module.load(f)
     if magic_number != MAGIC_NUMBER:
