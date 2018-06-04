@@ -11,7 +11,7 @@ namespace torch { namespace utils {
 at::Tensor dispatch_type_conversion(
     const at::Tensor & self,
     const at::Type & type,
-    at::optional<int> device,
+    at::optional<int64_t> device,
     bool non_blocking) {
   if (type.is_cuda()) {
     torch::utils::cuda_lazy_init();
