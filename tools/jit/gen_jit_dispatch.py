@@ -170,14 +170,15 @@ def gen_jit_dispatch(declarations, out):
             # XXX: we currently support only TensorList ops that have a TensorList as
             # the first argument, that is then followed by a number of positional args.
             if arg['simple_type'] == 'TensorList':
-                kw_assignments.append('size_t _Arg_idx_{} = _Arg_idx;'.format(i));
+                kw_assignments.append('size_t _Arg_idx_{} = _Arg_idx;'.format(i))
                 kw_assignments.append('_Arg_idx += {};'.format(num_dynamic_inputs))
-                arguments.append('peekSlice(stack, _Arg_idx_{}, varargs_length - {}, varargs_length)'.format(i, static_inputs))
+                arguments.append(
+                    'peekSlice(stack, _Arg_idx_{}, varargs_length - {}, varargs_length)'.format(i, static_inputs))
             elif arg['simple_type'] in default_only_types:
                 arguments.append(arg['default'])
             elif is_tensor_arg(arg):
                 if has_tensorlist:
-                    kw_assignments.append('size_t _Arg_idx_{} = _Arg_idx++;'.format(i));
+                    kw_assignments.append('size_t _Arg_idx_{} = _Arg_idx++;'.format(i))
                     arg_idx = '_Arg_idx_{}'.format(i)
                     peek_length = 'varargs_length'
                 else:
