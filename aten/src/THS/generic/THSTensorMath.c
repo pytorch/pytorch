@@ -84,12 +84,7 @@ void THSTensor_(pow)(THSTensor *r_, THSTensor *t_, real value) {
 
 #if defined(THS_REAL_IS_FLOAT) || defined(THS_REAL_IS_DOUBLE)
 accreal THSTensor_(normall)(THSTensor *self, real value) {
-  THSTensor* self_coalesced = THSTensor_(newCoalesce)(self);
-  THTensor *self_coalesced_values = THSTensor_(newValues)(self_coalesced);
-  accreal result = THTensor_(normall)(self_coalesced_values, value);
-  THSTensor_(free)(self_coalesced);
-  THTensor_(free)(self_coalesced_values);
-  return result;
+  THError("Internal error! normall shouldn't be called; use at::native_norm instead");
 }
 
 /* floating point only, because that is what TH supports */
