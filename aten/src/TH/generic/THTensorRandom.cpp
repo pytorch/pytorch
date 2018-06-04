@@ -6,6 +6,8 @@
 #include <omp.h>
 #endif
 
+#include <cpuinfo.h>
+
 #include "THGenerator.hpp"
 
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
@@ -131,27 +133,7 @@ void iBernoulli_generate_copy(THTensor *self, THGenerator *_generator, const dou
 void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p)
 {
 #ifdef TH_BLAS_MKL
-  uint32_t eax, ebx, ecx, edx;
-  eax = 0x0;
-  ecx = 0x0;
-  cpuid(&eax, &ebx, &ecx, &edx);
-  /*EAX=0: Get vendor ID as a twelve-character ASCII string stored in EBX, EDX, ECX (in that order)
-    ASCII
-    0x47: G
-    0x65: e
-    0x6e: n
-    0x75: u
-    0x69: i
-    0x6e: n
-    0x65: e
-    0x49: I
-    0x6e: n
-    0x74: t
-    0x65: e
-    0x6c: l
-    "GenuineIntel" – Intel
-  */
-  if((0x6c65746e == ecx) && (0x49656e69 == edx) && (0x756e6547 == ebx )) { /*Intel Vendor*/
+  if(cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
     std::lock_guard<std::mutex> lock(_generator->mutex);
     iBernoulli_generate_copy(self, _generator, p);
   } else {
