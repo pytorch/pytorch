@@ -2,6 +2,7 @@
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/TCPStore.hpp>
 
 #include "torch/csrc/Exceptions.h"
@@ -16,31 +17,7 @@ namespace c10d {
 namespace {
 
 template <typename T>
-py::class_<T, std::shared_ptr<T>> registerStore(
-    py::module& m,
-    const char* name) {
-  return py::class_<T, std::shared_ptr<T>>(m, name)
-      // Convert from std::string to std::vector<uint8>.
-      .def(
-          "set",
-          [](T& store, const std::string& key, const std::string& value) {
-            std::vector<unsigned char> value_(value.begin(), value.end());
-            store.set(key, value_);
-          },
-          py::call_guard<py::gil_scoped_release>())
-      // Convert from std::vector<uint8_t> to py::bytes.
-      // The returned value is not guaranteed to be valid UTF-8.
-      .def(
-          "get",
-          [](T& store, const std::string& key) -> py::bytes {
-            auto value = store.get(key);
-            return py::bytes(
-                reinterpret_cast<char*>(value.data()), value.size());
-          },
-          py::call_guard<py::gil_scoped_release>())
-      .def("add", &T::add, py::call_guard<py::gil_scoped_release>())
-      .def("wait", &T::wait, py::call_guard<py::gil_scoped_release>());
-}
+using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.c10d"));
@@ -48,12 +25,87 @@ PyObject* c10d_init(PyObject* _unused) {
     throw python_error();
   }
 
-  auto m = py::handle(c10d_module).cast<py::module>();
+  auto module = py::handle(c10d_module).cast<py::module>();
 
-  registerStore<::c10d::FileStore>(m, "FileStore")
+  auto store =
+      shared_ptr_class_<::c10d::Store>(module, "Store")
+          // Convert from std::string to std::vector<uint8>.
+          .def(
+              "set",
+              [](::c10d::Store& store,
+                 const std::string& key,
+                 const std::string& value) {
+                std::vector<unsigned char> value_(value.begin(), value.end());
+                store.set(key, value_);
+              },
+              py::call_guard<py::gil_scoped_release>())
+          // Convert from std::vector<uint8_t> to py::bytes.
+          // The returned value is not guaranteed to be valid UTF-8.
+          .def(
+              "get",
+              [](::c10d::Store& store, const std::string& key) -> py::bytes {
+                auto value = store.get(key);
+                return py::bytes(
+                    reinterpret_cast<char*>(value.data()), value.size());
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "add",
+              &::c10d::Store::add,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "wait",
+              &::c10d::Store::wait,
+              py::call_guard<py::gil_scoped_release>());
+
+  shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
       .def(py::init<const std::string&>());
-  registerStore<::c10d::TCPStore>(m, "TCPStore")
+
+  shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
       .def(py::init<const std::string&, int, bool>());
+
+  auto processGroup =
+      shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
+          .def("rank", &::c10d::ProcessGroup::getRank)
+          .def("size", &::c10d::ProcessGroup::getSize)
+          .def(
+              "broadcast",
+              &::c10d::ProcessGroup::broadcast,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "allreduce",
+              &::c10d::ProcessGroup::allreduce,
+              py::call_guard<py::gil_scoped_release>());
+
+  shared_ptr_class_<::c10d::ProcessGroupGloo>(
+      module, "ProcessGroupGloo", processGroup)
+      .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
+
+  shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+      .def("isCompleted", &::c10d::ProcessGroup::Work::isCompleted)
+      .def("isSuccess", &::c10d::ProcessGroup::Work::isSuccess)
+      .def("exception", &::c10d::ProcessGroup::Work::exception)
+      .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
+      .def(
+          "wait",
+          &::c10d::ProcessGroup::Work::wait,
+          py::call_guard<py::gil_scoped_release>());
+
+  // Algorithm specific option structs and enums
+  py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
+    .def(py::init<>())
+      .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
+      .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor);
+
+  py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp);
+
+  py::enum_<::c10d::ReduceOp>(module, "ReduceOp")
+      .value("SUM", ::c10d::ReduceOp::SUM)
+      .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
+      .value("MIN", ::c10d::ReduceOp::MIN)
+      .value("MAX", ::c10d::ReduceOp::MAX);
 
   Py_RETURN_TRUE;
 }
