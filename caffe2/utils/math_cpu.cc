@@ -660,18 +660,12 @@ DELEGATE_SIGN_FUNCTION(std::int32_t)
 DELEGATE_SIGN_FUNCTION(std::int64_t)
 #undef DELEGATE_SIGN_FUNCTION
 
-#define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)                            \
-  template <>                                                                  \
-  void Func<T, CPUContext>(                                                    \
-      const int N, const T* A, const T* B, T* C, CPUContext*) {                \
-    if (C == A) {                                                              \
-      EigenVectorArrayMap<T>(C, N) expr## = ConstEigenVectorArrayMap<T>(B, N); \
-    } else if (C == B) {                                                       \
-      EigenVectorArrayMap<T>(C, N) expr## = ConstEigenVectorArrayMap<T>(A, N); \
-    } else {                                                                   \
-      EigenVectorMap<T>(C, N) = ConstEigenVectorArrayMap<T>(A, N)              \
-          expr ConstEigenVectorArrayMap<T>(B, N);                              \
-    }                                                                          \
+#define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)             \
+  template <>                                                   \
+  void Func<T, CPUContext>(                                     \
+      const int N, const T* A, const T* B, T* C, CPUContext*) { \
+    EigenVectorMap<T>(C, N) = ConstEigenVectorArrayMap<T>(A, N) \
+        expr ConstEigenVectorArrayMap<T>(B, N);                 \
   }
 
 #ifdef CAFFE2_USE_MKL
