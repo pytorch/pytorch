@@ -244,23 +244,25 @@ if(USE_CUDA OR (USE_ROCM AND NOT BUILD_CAFFE2))
 endif()
 
 # ---[ Caffe2 HIP sources.
-if(USE_ROCM AND BUILD_CAFFE2)
-  HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
-  set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
+if(BUILD_CAFFE2)
+  if(USE_ROCM)
+    HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
+    set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
 
-  target_include_directories(
-    caffe2_hip PUBLIC ${Caffe2_HIP_INCLUDES})
-  target_include_directories(
-    caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
+    target_include_directories(
+      caffe2_hip PUBLIC ${Caffe2_HIP_INCLUDES})
+    target_include_directories(
+      caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
-  target_link_libraries(caffe2_hip PUBLIC caffe2)
-  target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
+    target_link_libraries(caffe2_hip PUBLIC caffe2)
+    target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
-  set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
+    set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
 
-  caffe2_interface_library(caffe2_hip caffe2_hip_library)
-  list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
-  install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
+    caffe2_interface_library(caffe2_hip caffe2_hip_library)
+    list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
+    install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
+  endif()
 endif()
 
 # ---[ Check if warnings should be errors.
