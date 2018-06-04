@@ -1,5 +1,8 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/Dispatch.h"
+#include "ATen/CPUApplyUtils.h"
+
 
 namespace at { namespace native {
 
@@ -28,6 +31,59 @@ Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Gen
 
 Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
   return at::rrelu_with_noise_(self, self.type().tensor(), lower, upper, training, generator);
+}
+
+Tensor hard_shrink_cpu(const Tensor & self, Scalar lambda) {
+  auto scalarType = self.type().scalarType();
+  if (scalarType != kDouble
+      && scalarType != kFloat) {
+        std::stringstream ss;
+        ss << "hardshrink only accepts types "
+          << "(Double, Float), "
+          << "tensor has invalid type = "
+          << scalarType;
+        throw std::runtime_error(ss.str());
+  }
+
+  auto lambda_t = at::zeros_like(self).fill_(lambda);
+  auto zero_t = at::zeros_like(self);
+  auto out_t = self.clone();
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "hard_shrink_cpu", [&] {
+    at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
+        out_t,
+        lambda_t,
+        zero_t,
+        [](scalar_t& out_t_val,
+           const scalar_t& lambda_t_val,
+           const scalar_t& zero_t_val) {
+             if (out_t_val >= -lambda_t_val && out_t_val <= lambda_t_val) {
+               out_t_val = zero_t_val;
+             }
+    });
+  });
+  return out_t;
+}
+
+Tensor hard_shrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambda) {
+  auto lambda_t = at::zeros_like(self).fill_(lambda);
+  auto zero_t = at::zeros_like(self);
+  auto out_t = grad.clone();
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "hard_shrink_backward_cpu", [&] {
+    at::CPU_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(
+        out_t,
+        lambda_t,
+        zero_t,
+        self,
+        [](scalar_t& out_t_val,
+           const scalar_t& lambda_t_val,
+           const scalar_t& zero_t_val,
+           const scalar_t& self_val) {
+             if (self_val >= -lambda_t_val && self_val <= lambda_t_val) {
+               out_t_val = zero_t_val;
+             }
+    });
+  });
+  return out_t;
 }
 
 }}  // namespace at::native
