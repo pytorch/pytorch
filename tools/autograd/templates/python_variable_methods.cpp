@@ -563,21 +563,18 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
-  if (!device && scalarType) {
-    // only dtype given
+  if (!device) {
+    // device not given
     auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-    auto& type = self_.type().toScalarType(*scalarType);
+    auto& type = self_.type().toScalarType(scalarType.value_or(self_.type().scalarType()));
     return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
-  } else if (device) {
-    // device and maybe dtype given
+  } else {
+    // device and maybe dtype are given
     auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
     auto deviceAutoGPU = device->deviceInt64();
     auto& layout = *torch::getLayout(self_.type().backend());
     auto& type = torch::getType(scalarType.value_or(self_.type().scalarType()), layout, device->type);
     return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, non_blocking));
-  } else {
-    Py_INCREF(self);
-    return self;
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
