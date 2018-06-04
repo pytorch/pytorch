@@ -2,6 +2,7 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/Device.h"
 #include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/jit/python_tracer.h"
 
 namespace torch {
 namespace jit {

@@ -76,7 +76,13 @@ void initJITBindings(PyObject *module) {
      auto tensor_inputs = createVariableTensorList(inputs);
      PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
    })
-   .def("_jit_run_cpp_tests", runJITCPPTests)
+   .def("_jit_run_cpp_tests", [] {
+     // We have to release the GIL inside this method, because if we happen to
+     // initialize the autograd engine in these tests, the newly spawned worker threads will
+     // try to initialize their PyThreadState*, and they need the GIL for this.
+     AutoNoGIL _no_gil;
+     return runJITCPPTests();
+   })
    .def("_jit_flatten", [](py::handle& obj) {
      auto res =  python::flatten(obj);
      return std::make_pair(res.vars, res.desc);
@@ -171,7 +177,7 @@ void initJITBindings(PyObject *module) {
       });
 
   initPythonIRBindings(module);
-  initPythonTracerBindings(module);
+  tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
   registerPythonInterpreterOps();
