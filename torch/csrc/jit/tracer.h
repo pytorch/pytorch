@@ -214,7 +214,7 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
 // reference to at::Tensor buffer to call unsafeGetTH, but you can't get this
 // out of a const vector (silly std::vector...)
 inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
-    variable_list inputs, std::size_t num_stages) {
+    variable_list inputs, size_t num_stages) {
   auto state = std::make_shared<TracingState>(num_stages);
   for (auto& input : inputs) {
     auto * value_state = detail::getValueState(state, input, false);

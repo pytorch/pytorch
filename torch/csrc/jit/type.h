@@ -121,8 +121,8 @@ struct TensorType : public Type {
 
   at::ScalarType scalarType() const { return scalar_type_; }
   int device() const { return device_; }
-  const std::vector<std::int64_t>& sizes() const { return sizes_; }
-  const std::vector<std::int64_t>& strides() const { return strides_; }
+  const std::vector<int64_t>& sizes() const { return sizes_; }
+  const std::vector<int64_t>& strides() const { return strides_; }
 
   TypePtr withSizesStrides(at::IntList sizes, at::IntList strides) const {
     return std::make_shared<TensorType>(scalar_type_, device_, sizes, strides);
@@ -163,7 +163,7 @@ private:
     if(sizes.size() == 0) // zero-dim case
       return strides;
     strides.back() = 1;
-    for(std::size_t i = strides.size() - 1; i > 0; i--) {
+    for(size_t i = strides.size() - 1; i > 0; i--) {
       strides[i-1] = strides[i] * sizes[i];
     }
     return strides;

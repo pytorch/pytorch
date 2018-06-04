@@ -78,7 +78,7 @@ TypeID ${Type}::ID() const {
   return ${TypeID};
 }
 
-std::size_t ${Type}::elementSizeInBytes() const {
+size_t ${Type}::elementSizeInBytes() const {
   return sizeof(${ScalarType});
 }
 

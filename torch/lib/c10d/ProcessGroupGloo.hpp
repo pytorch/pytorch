@@ -58,7 +58,7 @@ struct AlgorithmKey {
   ReduceOp reduceOp = ReduceOp::UNUSED;
 
   // This function is called by torch::hash<AlgorithmKey>
-  static std::size_t hash(const AlgorithmKey& k) {
+  static size_t hash(const AlgorithmKey& k) {
     return torch::get_hash(
         k.collectiveType,
         k.type,
