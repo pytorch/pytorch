@@ -84,6 +84,7 @@ endif()
 if (CAFFE2_WHITELISTED_FILES)
   caffe2_do_whitelist(Caffe2_CPU_SRCS CAFFE2_WHITELISTED_FILES)
   caffe2_do_whitelist(Caffe2_GPU_SRCS CAFFE2_WHITELISTED_FILES)
+  caffe2_do_whitelist(Caffe2_HIP_SRCS CAFFE2_WHITELISTED_FILES)
 endif()
 
 # Debug messages - if you want to get a list of source files, enable the
@@ -116,6 +117,16 @@ if (FALSE)
 
   message(STATUS "GPU test sources: ")
   foreach(tmp ${Caffe2_GPU_TEST_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
+  message(STATUS "HIP sources: ")
+  foreach(tmp ${Caffe2_HIP_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
+  message(STATUS "HIP test sources: ")
+  foreach(tmp ${Caffe2_HIP_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
 
@@ -194,7 +205,7 @@ caffe2_interface_library(caffe2 caffe2_library)
 list(APPEND Caffe2_MAIN_LIBS caffe2_library)
 
 # ---[ CUDA library.
-if(USE_CUDA OR USE_ROCM)
+if(USE_CUDA OR (USE_ROCM AND NOT BUILD_CAFFE2))
   # A hack to deal with cuda library dependencies and modern CMake: the
   # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
   # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
@@ -232,6 +243,28 @@ if(USE_CUDA OR USE_ROCM)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
 endif()
 
+# ---[ Caffe2 HIP sources.
+if(BUILD_CAFFE2)
+  if(USE_ROCM)
+    HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
+    set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
+
+    target_include_directories(
+      caffe2_hip PUBLIC ${Caffe2_HIP_INCLUDES})
+    target_include_directories(
+      caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
+
+    target_link_libraries(caffe2_hip PUBLIC caffe2)
+    target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
+
+    set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
+
+    caffe2_interface_library(caffe2_hip caffe2_hip_library)
+    list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
+    install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
+  endif()
+endif()
+
 # ---[ Check if warnings should be errors.
 if ($ENV{WERROR})
   target_compile_options(caffe2 PRIVATE -Werror)
@@ -244,8 +277,11 @@ endif()
 if(BUILD_CAFFE2)
   if (BUILD_TEST)
     set(Caffe2_ALL_TEST_SRCS ${Caffe2_CPU_TEST_SRCS})
-    if (USE_CUDA OR USE_ROCM)
+    if (USE_CUDA)
       list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_GPU_TEST_SRCS})
+    endif()
+    if(USE_ROCM)
+      list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_HIP_TEST_SRCS})
     endif()
 
     foreach(test_src ${Caffe2_ALL_TEST_SRCS})
@@ -258,6 +294,18 @@ if(BUILD_CAFFE2)
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       install(TARGETS ${test_name} DESTINATION test)
     endforeach()
+
+    if(USE_ROCM)
+      foreach(test_src ${Caffe2_HIP_TEST_SRCS})
+        get_filename_component(test_name ${test_src} NAME_WE)
+        set_target_properties(${test_name} PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
+        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE HIP)
+        if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
+          target_compile_features(${test_name} PRIVATE cxx_range_for)
+        endif()
+      endforeach()
+    endif()
+
   endif()
 endif()
 
@@ -336,7 +384,7 @@ if(BUILD_CAFFE2)
     endif(WIN32)
     install(TARGETS caffe2_pybind11_state DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
 
-    if(USE_CUDA OR USE_ROCM)
+    if(USE_CUDA)
       add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
@@ -366,7 +414,7 @@ if(BUILD_CAFFE2)
           COMMAND ${CMAKE_COMMAND} -E copy
           $<TARGET_FILE:caffe2_pybind11_state>
           ${CMAKE_BINARY_DIR}/caffe2/python)
-      if (USE_CUDA OR USE_ROCM)
+      if (USE_CUDA)
         add_dependencies(windows_python_copy_lib caffe2_pybind11_state_gpu)
         add_custom_command(
             TARGET windows_python_copy_lib POST_BUILD
