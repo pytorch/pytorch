@@ -1,5 +1,7 @@
 """Adds docstrings to functions defined in the torch._C"""
 
+import re
+
 import torch._C
 from torch._C import _add_docstr as add_docstr
 
@@ -14,8 +16,9 @@ def parse_kwargs(desc):
         'weight (Tensor): a weight tensor\n        Some optional description'
     }
     """
-    # Split by indents. Assumes each arg starts on a new line with 4 spaces.
-    kwargs = [section.strip() for section in desc.split('\n   ')]
+    # Split on exactly 4 spaces after a newline
+    regx = re.compile("\n\s{4}(?!\s)")
+    kwargs = [section.strip() for section in regx.split(desc)]
     kwargs = [section for section in kwargs if len(section) > 0]
     return {desc.split(' ')[0]: desc for desc in kwargs}
 
