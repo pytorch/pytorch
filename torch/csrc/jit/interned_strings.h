@@ -118,7 +118,6 @@ _(attr, Subgraph) \
 _(attr, axes) \
 _(attr, axis) \
 _(attr, broadcast) \
-_(attr, device) \
 _(attr, direction) \
 _(attr, ends) \
 _(attr, inplace) \

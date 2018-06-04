@@ -70,6 +70,7 @@ message QTensorProto {
   required bool is_signed = 5;
   repeated int32 data = 6 [packed = true];
   optional string name = 7;
+  optional TensorProto.DataType data_type = 8 [default = INT32];
 }
 
 // TensorProtos stores multiple TensorProto objects in one single proto. This

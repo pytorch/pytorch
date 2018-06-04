@@ -2803,13 +2803,13 @@ void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
 void THTensor_(cmaxValue)(THTensor *r, THTensor *t, real value) {
   THTensor_(resizeAs)(r, t);
   TH_TENSOR_APPLY2(real, r, real, t,
-                   *r_data = *t_data > value ? *t_data : value;);
+                   *r_data = *t_data < value ? value : *t_data;);  // this order propagates NaN
 }
 
 void THTensor_(cminValue)(THTensor *r, THTensor *t, real value) {
   THTensor_(resizeAs)(r, t);
   TH_TENSOR_APPLY2(real, r, real, t,
-                   *r_data = *t_data < value ? *t_data : value;);
+                   *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
 }
 
 void THTensor_(zeros)(THTensor *r_, THLongStorage *size)

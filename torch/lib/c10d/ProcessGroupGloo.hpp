@@ -15,10 +15,14 @@
 
 #include <torch/csrc/utils/hash.h>
 
+#include "CUDAUtils.hpp"
 #include "ProcessGroup.hpp"
 #include "Store.hpp"
 #include "Types.hpp"
 #include "Utils.hpp"
+
+// Forward declaration
+struct THCState;
 
 namespace c10d {
 
@@ -91,6 +95,32 @@ struct AlgorithmEntry {
   std::vector<at::Tensor> dst;
   std::function<void()> run;
 
+  // For CUDA tensors, the following happens:
+  //
+  // - Input tensor A is copied to persistent tensor B on the stream
+  //   associated with the device that stores A (the stream is a
+  //   per-device thread local stored by THC).
+  // - This stream is recorded in an event (see events below) so that
+  //   the copy can be synchronized.
+  // - The private stream (see streams below) that is used to execute
+  //   the algorithm on a worker thread waits for this event such that
+  //   we know the copy to tensor B has finished.
+  // - Once the algorithm has finished executing, the work object
+  //   associated with the execution records the private streams in
+  //   its own events. Then, when the wait() function on the work
+  //   object is called, the streams of the caller are synchronized
+  //   with asynchronous completion of the memory copies back to the
+  //   destination tensors.
+  //
+  // This approach means the caller of the process group function can
+  // retain asynchrony (no need for synchronizing its CUDA streams).
+  // Once the wait() function on the associated work object returns
+  // true, the caller can launch new CUDA kernels and they will be
+  // correctly sequenced.
+  //
+  std::vector<CUDAStream> streams;
+  std::vector<CUDAEvent> events;
+
   // Used to synchronize between calling thread and worker threads.
   std::mutex m;
   std::condition_variable cv;
@@ -140,22 +170,14 @@ class ProcessGroupGloo : public ProcessGroup {
     explicit WorkGloo();
     virtual ~WorkGloo();
 
-    // Checks if request has completed. Non-blocking operation.
     bool isCompleted() const override;
-
-    // Returns if the work completed successfully.
-    // If false, the exception function can be called to get details.
     bool isSuccess() const override;
-
-    // Waits until request completes. Blocking operation.
-    // Returns false if the work completed with an exception.
+    void synchronize() override;
     bool wait() override;
-
-    // Returns exception if wait() returned false.
     const std::exception& exception() const override;
 
    protected:
-    void finish();
+    void finish(const AlgorithmEntry& entry);
     void finishWithException(const ::gloo::Exception& ex);
 
     std::mutex m_;
@@ -166,6 +188,26 @@ class ProcessGroupGloo : public ProcessGroup {
     // default constructor and constructing an empty std::unique_ptr
     // is probably cheaper (this is highly speculative).
     std::unique_ptr<::gloo::Exception> ex_;
+
+    // List of devices and events so that we can synchronize the
+    // streams of the caller with the kernels that were launched
+    // asynchronously to finish this operation.
+    //
+    // These events are private to a single work instance. An event
+    // captures the progress of a stream at a single point in time. If
+    // we were to use events stored on the algorithm entry, then
+    // multiple work instances might end up using the same events, and
+    // end up interfering with each other (causing unnecessary
+    // synchronization delays). Using events that are private to a
+    // single work instance avoids this. Ad hoc benchmarks showed that
+    // event construction is relatively cheap: creating 8 events takes
+    // 3 microseconds on a fast machine.
+    //
+    // Also see CUDA comment in AlgorithmEntry struct.
+    //
+    bool cuda_;
+    std::vector<int> devices_;
+    std::vector<CUDAEvent> events_;
 
     friend class ProcessGroupGloo;
   };
@@ -231,6 +273,9 @@ class ProcessGroupGloo : public ProcessGroup {
   std::mutex queueMutex_;
   std::condition_variable queueProduceCV_;
   std::condition_variable queueConsumeCV_;
+
+  // Store copy of pointer to THCState retrieved from ::at::globalContext().
+  THCState* thcState_;
 };
 
 } // namespace c10d

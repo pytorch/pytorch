@@ -113,7 +113,8 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
     // might be worth it to avoid non-coalesced reads or writes.
     if (p2pEnabled) {
       bool succ =
-        THC_pointwiseApply2(
+        THC_pointwiseApply2<typename TensorUtils<TensorTypeDst>::DataType,
+                            typename TensorUtils<TensorTypeSrc>::DataType>(
           state, dst, src,
           CopyOp<typename TensorUtils<TensorTypeDst>::DataType,
                  typename TensorUtils<TensorTypeSrc>::DataType>());
@@ -139,7 +140,8 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
         TensorUtils<TensorTypeDst>::resizeAs(state, srcContig, dst);
 
         bool succ =
-          THC_pointwiseApply2(
+          THC_pointwiseApply2<typename TensorUtils<TensorTypeDst>::DataType,
+                              typename TensorUtils<TensorTypeSrc>::DataType>(
             state, srcContig, src,
             CopyOp<typename TensorUtils<TensorTypeDst>::DataType,
                    typename TensorUtils<TensorTypeSrc>::DataType>());

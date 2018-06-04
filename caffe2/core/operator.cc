@@ -54,7 +54,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
-vector<TensorShape> OperatorBase::InputTensorShapes() {
+vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
     tps.push_back(GetTensorShapeOfBlob(blob));
