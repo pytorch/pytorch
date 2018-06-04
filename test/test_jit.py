@@ -79,7 +79,7 @@ def get_lstm_inputs(device):
     input = torch.randn(3, 10, dtype=torch.float, device=device)
     hx = torch.randn(3, 20, dtype=torch.float, device=device)
     cx = torch.randn(3, 20, dtype=torch.float, device=device)
-    module = nn.LSTMCell(10, 20).to(torch.float, device)  # Just to allocate weights with correct sizes
+    module = nn.LSTMCell(10, 20).to(device, torch.float)  # Just to allocate weights with correct sizes
     return (input, hx, cx) + tuple(p.requires_grad_(False) for p in module.parameters())
 
 
