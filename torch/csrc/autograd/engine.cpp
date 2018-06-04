@@ -468,7 +468,7 @@ auto Engine::execute(const edge_list& input_roots,
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock);
-  for (std::size_t i = 0; i < final_callbacks.size(); ++i) {
+  for (size_t i = 0; i < final_callbacks.size(); ++i) {
     cb_lock.unlock();
     final_callbacks[i]();
     cb_lock.lock();
@@ -552,7 +552,7 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
   struct Frame {
     Frame (Function *fn) : fn(fn), next_next_fn(0) {}
     Function *fn;
-    std::size_t next_next_fn;
+    size_t next_next_fn;
 
     Function* get_next_fn() {
       const auto & next = fn->next_edges();

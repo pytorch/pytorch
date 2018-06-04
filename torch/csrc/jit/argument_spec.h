@@ -193,7 +193,7 @@ inline TensorInfo ArgumentSpec::tensorInfo(size_t i) const {
 namespace std {
   template<>
   struct hash<torch::jit::ArgumentSpec> {
-    std::size_t operator()(const torch::jit::ArgumentSpec & spec) const {
+    size_t operator()(const torch::jit::ArgumentSpec & spec) const {
       return spec.hashCode();
     }
   };
