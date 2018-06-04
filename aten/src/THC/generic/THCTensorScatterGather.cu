@@ -49,11 +49,11 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
       TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
       TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, tensor);
+      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<real, unsigned int> srcInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, src);
+      getTensorInfo<real, THCTensor, unsigned int>(state, src);
     TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -76,11 +76,11 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
     }
   } else {
     TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, tensor);
+      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
     TensorInfo<real, uint64_t> srcInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, src);
+      getTensorInfo<real, THCTensor, uint64_t>(state, src);
     TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
     RUN(uint64_t, -1, real);
     THCudaCheck(cudaGetLastError());
   }
@@ -142,11 +142,11 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
       TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
       TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, tensor);
+      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<real, unsigned int> srcInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, src);
+      getTensorInfo<real, THCTensor, unsigned int>(state, src);
     TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -165,11 +165,11 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
     }
   } else {
     TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, tensor);
+      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
     TensorInfo<real, uint64_t> srcInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, src);
+      getTensorInfo<real, THCTensor, uint64_t>(state, src);
     TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
 
     RUN(uint64_t, -1, real)
   }
@@ -229,11 +229,11 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
       TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
       TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, tensor);
+      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<real, unsigned int> srcInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, src);
+      getTensorInfo<real, THCTensor, unsigned int>(state, src);
     TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -252,11 +252,11 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
     }
   } else {
     TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, tensor);
+      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
     TensorInfo<real, uint64_t> srcInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, src);
+      getTensorInfo<real, THCTensor, uint64_t>(state, src);
     TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
 
     RUN(uint64_t, -1, real)
   }
@@ -313,9 +313,9 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, tensor) &&
       TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, tensor);
+      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -334,9 +334,9 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
     }
   } else {
     TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, tensor);
+      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
     TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
 
     RUN(uint64_t, -1, real);
   }
