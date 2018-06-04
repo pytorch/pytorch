@@ -162,6 +162,15 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+# If we prefer finding frameworks/app bundles, then find_library(cuda)
+# will pick up cuda.framework, which ld will choke on.  It's not
+# altogether clear if there's ever a situation we actually want to use
+# cuda.framework though.
+if(APPLE)
+  set(CMAKE_FIND_FRAMEWORK LAST)
+  set(CMAKE_FIND_APPBUNDLE LAST)
+endif()
+
 enable_testing()
 
 # ---[ Build variables set within the cmake tree
