@@ -6,6 +6,11 @@
 #include <string>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <cxxabi.h>
+#include <execinfo.h>
+#endif // !defined(_WIN32)
+
 namespace at {
 #if defined(_MSC_VER)
 // Windows does not have cxxabi.h, so we will simply return the original.

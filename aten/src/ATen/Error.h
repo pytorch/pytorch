@@ -3,23 +3,11 @@
 #include <ATen/ATenGeneral.h> // for AT_API
 #include <ATen/optional.h>
 
-#include <cstdint>
-#include <cstdio>
+#include <cstddef>
 #include <exception>
-#include <functional>
-#include <memory>
+#include <ostream>
 #include <sstream>
-#include <stdexcept>
 #include <string>
-#include <type_traits>
-#include <vector>
-
-#include <stdarg.h>
-
-#if !defined(_WIN32)
-#include <cxxabi.h>
-#include <execinfo.h>
-#endif // !defined(_WIN32)
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
 #define __func__ __FUNCTION__
