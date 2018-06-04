@@ -1,4 +1,4 @@
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/event_cpu.h"
 #include "caffe2/core/operator.h"
 

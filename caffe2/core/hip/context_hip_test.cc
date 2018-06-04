@@ -5,7 +5,7 @@
 #include <array>
 
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include <gtest/gtest.h>
 
 CAFFE2_DECLARE_bool(caffe2_hip_full_device_control);

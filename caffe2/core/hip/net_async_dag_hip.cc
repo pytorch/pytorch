@@ -27,7 +27,7 @@
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 
 CAFFE2_DEFINE_bool(caffe2_use_nvtx, false, "Use NVTX ranges for profiling");
 
