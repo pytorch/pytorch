@@ -1208,6 +1208,18 @@ private:
     }
   }
 
+  static bool isPythonScalar(const Value* value) {
+    return value->type() == FloatType::get() || value->type() == IntType::get();
+  }
+
+  // ins should only have FloatType or IntType
+  TypePtr inferPythonMathType(std::vector<Value*> ins) {
+    if (std::any_of(ins.begin(), ins.end(), [](Value* v) { return v->type() == FloatType::get(); })) {
+      return FloatType::get();
+    }
+    return IntType::get();
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree) {
     switch (tree->kind()) {
@@ -1217,25 +1229,40 @@ private:
       case '>':
       case TK_LE:
       case TK_GE:
-      case '*':
-      case '/':
       case '@':
       case TK_POW:
       case TK_AND:
       case TK_OR:
-      case TK_NOT:
-      case TK_UNARY_MINUS: {
+      case TK_NOT: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         return emitNode(kind, tree->range(), getValues(inputs), 1)->output();
       } break;
+      case '*':
+      case '/':
+      case TK_UNARY_MINUS: {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto inputValues = getValues(inputs);
+        auto* node = emitNode(kind, tree->range(), inputValues, 1);
+        auto* output = node->output();
+        if (std::all_of(inputValues.begin(), inputValues.end(), isPythonScalar)) {
+          output->setType(inferPythonMathType(inputValues));
+        }
+        return output;
+      } break;
       case '+':
       case '-': {
-        const auto& inputs =tree->trees();
+        const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto* node = emitNode(kind, tree->range(), getValues(inputs), 1);
+        auto inputValues = getValues(inputs);
+        auto* node = emitNode(kind, tree->range(), inputValues, 1);
         node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
-        return node->output();
+        auto* output = node->output();
+        if (std::all_of(inputValues.begin(), inputValues.end(), isPythonScalar)) {
+          output->setType(inferPythonMathType(inputValues));
+        }
+        return output;
       }
       case TK_STARRED: {
         throw ErrorReport(tree) << "Unexpected starred expansion. File a bug report.";
