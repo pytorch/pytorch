@@ -6,8 +6,8 @@ void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *s
 {
   THArgCheck(self->size == src->size, 2, "size does not match");
   cudaStream_t stream = THCState_getCurrentStream(state);
-  THCudaCheck(cudaMemcpyAsync(self->data,
-                              src->data,
+  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self),
+                              THStorage_(data)(src),
                               self->size * sizeof(real),
                               cudaMemcpyHostToDevice,
                               stream));
@@ -38,8 +38,8 @@ void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *s
 {
   THArgCheck(self->size == src->size, 2, "size does not match");
   cudaStream_t stream = THCState_getCurrentStream(state);
-  THCudaCheck(cudaMemcpyAsync(self->data,
-                              src->data,
+  THCudaCheck(cudaMemcpyAsync(THStorage_(data)(self),
+                              THCStorage_(data)(state, src),
                               self->size * sizeof(real),
                               cudaMemcpyDeviceToHost,
                               stream));

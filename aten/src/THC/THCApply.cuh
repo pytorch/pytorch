@@ -184,12 +184,14 @@ inline bool getApplyGrid(THCState* state, uint64_t totalElements, dim3& grid) {
   return true;
 }
 
-template <typename TensorTypeA,
+template <typename ScalarTypeA,
+          typename TensorTypeA,
           typename Op>
 bool THC_pointwiseApply1(THCState* state,
                          TensorTypeA* a,
                          const Op& op,
                          TensorArgType aType = ReadWrite) {
+  static_assert(std::is_same<ScalarTypeA, typename TensorUtils<TensorTypeA>::DataType>::value, "ScalarTypeA must match");
   if (TensorUtils<TensorTypeA>::getDims(state, a) > MAX_CUTORCH_DIMS) {
     return false;
   }
@@ -315,7 +317,9 @@ bool THC_pointwiseApply1(THCState* state,
   return true;
 }
 
-template <typename TensorTypeA,
+template <typename ScalarTypeA,
+          typename ScalarTypeB,
+          typename TensorTypeA,
           typename TensorTypeB,
           typename Op>
 bool THC_pointwiseApply2(THCState* state,
@@ -324,6 +328,9 @@ bool THC_pointwiseApply2(THCState* state,
                          const Op& op,
                          TensorArgType aType = ReadWrite,
                          TensorArgType bType = ReadOnly) {
+  static_assert(std::is_same<ScalarTypeA, typename TensorUtils<TensorTypeA>::DataType>::value, "ScalarTypeA must match");
+  static_assert(std::is_same<ScalarTypeB, typename TensorUtils<TensorTypeB>::DataType>::value, "ScalarTypeB must match");
+
   ptrdiff_t totalElements = TensorUtils<TensorTypeA>::getNumElements(state, a);
   if (totalElements != TensorUtils<TensorTypeB>::getNumElements(state, b)) {
     return false;
@@ -499,7 +506,10 @@ bool THC_pointwiseApply2(THCState* state,
   return true;
 }
 
-template <typename TensorTypeA,
+template <typename ScalarTypeA,
+          typename ScalarTypeB,
+          typename ScalarTypeC,
+          typename TensorTypeA,
           typename TensorTypeB,
           typename TensorTypeC,
           typename Op>
@@ -511,6 +521,10 @@ bool THC_pointwiseApply3(THCState* state,
                          TensorArgType aType = ReadWrite,
                          TensorArgType bType = ReadOnly,
                          TensorArgType cType = ReadOnly) {
+  static_assert(std::is_same<ScalarTypeA, typename TensorUtils<TensorTypeA>::DataType>::value, "ScalarTypeA must match");
+  static_assert(std::is_same<ScalarTypeB, typename TensorUtils<TensorTypeB>::DataType>::value, "ScalarTypeB must match");
+  static_assert(std::is_same<ScalarTypeC, typename TensorUtils<TensorTypeC>::DataType>::value, "ScalarTypeB must match");
+
   ptrdiff_t totalElements = TensorUtils<TensorTypeA>::getNumElements(state, a);
 
   if (totalElements != TensorUtils<TensorTypeB>::getNumElements(state, b) ||

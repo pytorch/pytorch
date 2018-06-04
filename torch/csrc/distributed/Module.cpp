@@ -348,7 +348,7 @@ PyObject* THDPModule_allReduceMultiGPU(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   std::vector<at::Tensor> descriptors;
-  std::size_t length;
+  size_t length;
   THDGroup group;
   THDReduceOp op;
   THPObjectPtr sequence;
@@ -367,11 +367,11 @@ PyObject* THDPModule_allReduceMultiGPU(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length = static_cast<std::size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
+  length = static_cast<size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
 
   descriptors.reserve(length);
 
-  for (std::size_t i = 0; i < length; ++i) {
+  for (size_t i = 0; i < length; ++i) {
     if (!THPVariable_Check(PySequence_Fast_GET_ITEM(sequence.get(), i))) {
       goto invalid_arguments;
     }
@@ -402,7 +402,7 @@ PyObject* THDPModule_reduceMultiGPU(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   THPObjectPtr sequence;
-  std::size_t length;
+  size_t length;
   std::vector<at::Tensor> descriptors;
   THDGroup group;
   THDReduceOp op;
@@ -423,11 +423,11 @@ PyObject* THDPModule_reduceMultiGPU(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length = static_cast<std::size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
+  length = static_cast<size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
 
   descriptors.reserve(length);
 
-  for (std::size_t i = 0; i < length; ++i) {
+  for (size_t i = 0; i < length; ++i) {
     if (!THPVariable_Check(PySequence_Fast_GET_ITEM(sequence.get(), i))) {
       goto invalid_arguments;
     }
@@ -460,7 +460,7 @@ PyObject* THDPModule_broadcastMultiGPU(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   THPObjectPtr sequence;
-  std::size_t length;
+  size_t length;
   std::vector<at::Tensor> descriptors;
   THDGroup group;
   int src_rank;
@@ -480,11 +480,11 @@ PyObject* THDPModule_broadcastMultiGPU(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length = static_cast<std::size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
+  length = static_cast<size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
 
   descriptors.reserve(length);
 
-  for (std::size_t i = 0; i < length; ++i) {
+  for (size_t i = 0; i < length; ++i) {
     if (!THPVariable_Check(PySequence_Fast_GET_ITEM(sequence.get(), i))) {
       goto invalid_arguments;
     }
@@ -517,8 +517,8 @@ PyObject* THDPModule_allGatherMultiGPU(PyObject *_unused, PyObject *args)
   THPObjectPtr sequence_one;
   THPObjectPtr sequence_two;
 
-  std::size_t length_one;
-  std::size_t length_two;
+  size_t length_one;
+  size_t length_two;
 
   std::vector<at::Tensor> output_descriptors;
   std::vector<at::Tensor> input_descriptors;
@@ -543,10 +543,10 @@ PyObject* THDPModule_allGatherMultiGPU(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length_one = static_cast<std::size_t>(
+  length_one = static_cast<size_t>(
       PySequence_Fast_GET_SIZE(sequence_one.get()));
 
-  length_two = static_cast<std::size_t>(
+  length_two = static_cast<size_t>(
       PySequence_Fast_GET_SIZE(sequence_two.get()));
 
   if (length_one != length_two) {
@@ -659,7 +659,7 @@ PyObject* THDPModule_allGather(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   THPObjectPtr sequence;
-  std::size_t length;
+  size_t length;
   std::vector<at::Tensor> descriptors;
   std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
@@ -678,11 +678,11 @@ PyObject* THDPModule_allGather(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length = static_cast<std::size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
+  length = static_cast<size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
 
   descriptors.reserve(length);
 
-  for (std::size_t i = 0; i < length; ++i) {
+  for (size_t i = 0; i < length; ++i) {
     if (!THPVariable_Check(PySequence_Fast_GET_ITEM(sequence.get(), i)))
       goto invalid_arguments;
 
@@ -731,7 +731,7 @@ PyObject* THDPModule_gatherRecv(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   THPObjectPtr sequence;
-  std::size_t length;
+  size_t length;
   std::vector<at::Tensor> descriptors;
   std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
@@ -749,11 +749,11 @@ PyObject* THDPModule_gatherRecv(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length = static_cast<std::size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
+  length = static_cast<size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
 
   descriptors.reserve(length);
 
-  for (std::size_t i = 0; i < length; ++i) {
+  for (size_t i = 0; i < length; ++i) {
     if (!THPVariable_Check(PySequence_Fast_GET_ITEM(sequence.get(), i)))
       goto invalid_arguments;
 
@@ -782,7 +782,7 @@ PyObject* THDPModule_scatterSend(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   THPObjectPtr sequence;
-  std::size_t length;
+  size_t length;
   std::vector<at::Tensor> descriptors;
   std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
@@ -800,11 +800,11 @@ PyObject* THDPModule_scatterSend(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length = static_cast<std::size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
+  length = static_cast<size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
 
   descriptors.reserve(length);
 
-  for (std::size_t i = 0; i < length; ++i) {
+  for (size_t i = 0; i < length; ++i) {
     if (!THPVariable_Check(PySequence_Fast_GET_ITEM(sequence.get(), i)))
       goto invalid_arguments;
 
@@ -865,7 +865,7 @@ PyObject* THDPModule_newGroup(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   THPObjectPtr sequence;
-  std::size_t length;
+  size_t length;
   std::vector<int> ranks;
 
   if (PyTuple_GET_SIZE(args) != 1 ||
@@ -879,18 +879,18 @@ PyObject* THDPModule_newGroup(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length = static_cast<std::size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
+  length = static_cast<size_t>(PySequence_Fast_GET_SIZE(sequence.get()));
 
   ranks.reserve(length);
 
-  for (std::size_t i = 0; i < length; ++i) {
+  for (size_t i = 0; i < length; ++i) {
     if (!THPUtils_checkLong(PySequence_Fast_GET_ITEM(sequence.get(), i)))
       goto invalid_arguments;
 
     ranks.push_back(THPUtils_unpackLong(
           PySequence_Fast_GET_ITEM(sequence.get(), i)));
 
-    for (std::size_t j = 0; j < i; ++j)
+    for (size_t j = 0; j < i; ++j)
       THPUtils_assert(ranks[i] != ranks[j], "ranks should be unique");
   }
 

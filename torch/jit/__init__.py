@@ -1,7 +1,7 @@
 import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
-from torch.nn import Module, ModuleList, ParameterList, Parameter
+from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
@@ -501,7 +501,7 @@ class OrderedBufferDict(OrderedDictWrapper):
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, types.FunctionType)
+_constant_types = (bool, float, int, types.FunctionType, torch.device, torch.layout, torch.dtype)
 
 
 def _get_valid_constant(v):
@@ -584,6 +584,8 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
             # contains each of these modules as submodules. The ConstModuleList then
             # is set as an attribute of the parent module.
             super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
+        elif isinstance(value, Sequential):
+            super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
         else:
             super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
 
@@ -707,6 +709,25 @@ class _ConstModuleList(ScriptModule):
         keys = super(_ConstModuleList, self).__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
+
+
+class _ConstSequential(_ConstModuleList):
+    __constants__ = ['mods']
+
+    def __init__(self, mods):
+        super(_ConstSequential, self).__init__(mods._modules.values())
+
+        # we define the forward method via self.define rather than
+        # making it a direct class member (with a @script) annotation
+        # because, in optimized runtime environments where only .pyc files
+        # are shipped, we cant retrieve the source code.
+        # TODO: find a workaround for this and remove this hack
+        self.define("""
+        def forward(self, input):
+            for m in self:
+                input = m(input)
+            return input
+        """)
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

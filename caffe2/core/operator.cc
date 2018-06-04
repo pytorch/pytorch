@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator_gradient.h"
@@ -32,6 +33,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
       event_(caffe2::make_unique<Event>(device_option_)) {
+  static GlobalInitIsCalledGuard guard;
   for (const string& input_str : operator_def.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(
@@ -52,7 +54,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
-vector<TensorShape> OperatorBase::InputTensorShapes() {
+vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
     tps.push_back(GetTensorShapeOfBlob(blob));
@@ -561,7 +563,7 @@ TensorShapes InferBlobShapesAndTypesFromMap(
   for (const auto& blob : blob_dimensions) {
     TensorShape tp;
     for (auto d : blob.second) {
-      CAFFE_ENFORCE_GT(d, 0);
+      CAFFE_ENFORCE_GE(d, 0, blob.first);
       tp.add_dims(d);
     }
     blob_desc[blob.first] = tp;

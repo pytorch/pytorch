@@ -40,7 +40,12 @@ class NeuralNetData;
 /// to use them.
 class Annotation {
  public:
-  enum class AnnotationKind { Generic, Caffe2 };
+  enum class AnnotationKind {
+    Generic,
+    Caffe2,
+    ProfilingOperator,
+    ProfilingData
+  };
 
   Annotation(AnnotationKind K) : Kind(K) {}
   Annotation() : Kind(AnnotationKind::Generic) {}
@@ -52,16 +57,8 @@ class Annotation {
   Annotation(const Annotation&) = delete;
   Annotation& operator=(Annotation&) = delete;
 
-  void* getSaved() const {
-    return Saved;
-  }
-  void setSaved(void* saved) {
-    Saved = saved;
-  }
-
  private:
   const AnnotationKind Kind;
-  void* Saved = nullptr;
 };
 
 class NeuralNetOperator : public Instruction {

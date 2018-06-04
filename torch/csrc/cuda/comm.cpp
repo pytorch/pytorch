@@ -55,7 +55,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
   return tensors;
 }
 
-tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, std::size_t buffer_size) {
+tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t buffer_size) {
   if (!std::all_of(tensors.begin(), tensors.end(),
                    [&](const at::Tensor& t) { return t.get_device() == devices[0]; })) {
     throw std::runtime_error("all tensors must be on devices[0]");
@@ -76,7 +76,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, std::size
       std::vector<at::Tensor> broadcast_indices = broadcast(flat_tuple.first, devices);
       std::vector<at::Tensor> broadcast_values = broadcast(flat_tuple.second, devices);
       results.reserve(devices.size());
-      for (std::size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
+      for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
         AutoGPU auto_gpu(devices[i]);
         auto & device_outputs = outputs[i];
         auto & inds = broadcast_indices[i];
@@ -88,7 +88,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, std::size
       AutoGPU auto_gpu(devices[0]);
       std::vector<Tensor> results = broadcast(utils::flatten_dense_tensors(chunk.tensors),
                                               devices);
-      for (std::size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
+      for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
         auto_gpu.setDevice(devices[i]);
         auto & device_outputs = outputs[i];
         for (auto & t : utils::unflatten_dense_tensors(results[i], chunk.tensors))

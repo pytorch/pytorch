@@ -16,6 +16,7 @@
 #include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
@@ -407,7 +408,7 @@ static void _wrap_outputs(THPFunction *self,
     } else if (is_input) {
       // An input has been returned, but it wasn't modified. Return it as a view
       // so that we can attach a new grad_fn to the Variable.
-      var = var.slice();
+      var = var.view_as(var);
       var.set_gradient_edge({cdata, output_nr});
     } else if (cdata) {
       var.set_gradient_edge({cdata, output_nr});
@@ -602,7 +603,7 @@ static void _trace_post_record(
 
   auto state_lock = trace_info.state->lock();
   trace_info.n->i_(attr::inplace, is_inplace);
-  
+
 }
 
 PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const UnpackedInput& unpacked,

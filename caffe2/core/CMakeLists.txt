@@ -13,14 +13,13 @@ file(GLOB tmp *_test.cc)
 exclude(Caffe2_GPU_SRCS "${Caffe2_GPU_SRCS}" ${tmp})
 
 # ---[ HIP files
-# ------[ HIP Sources
-file(GLOB tmp *_hip.cc)
+file(GLOB_RECURSE tmp *_hip.cc)
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
 # ------[ MIOpen files
-file(GLOB tmp *_miopen.cc)
+file(GLOB_RECURSE tmp *_miopen.cc)
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
 # exclude test files
-file(GLOB tmp *_test.cc)
+file(GLOB_RECURSE tmp *_test.cc)
 exclude(Caffe2_HIP_SRCS "${Caffe2_HIP_SRCS}" ${tmp})
 
 # ---[ CPU files.
@@ -37,7 +36,7 @@ file(GLOB tmp *_gpu_test.cc)
 set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${tmp})
 
 # ---[ HIP test files
-file(GLOB tmp *_hip_test.cc)
+file(GLOB_RECURSE tmp *_hip_test.cc)
 set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS} ${tmp})
 
 # ---[ CPU test files

@@ -188,7 +188,7 @@ void DataChannelMPI::allGather(std::vector<at::Tensor>& output,
     comm
   );
 
-  for (std::size_t i = 0; i < output.size(); ++i)
+  for (size_t i = 0; i < output.size(); ++i)
     output[i].copy_(recv_buffer[i]);
 }
 
@@ -227,7 +227,7 @@ void DataChannelMPI::gather(std::vector<at::Tensor>& output,
   );
 
   // NOTE: this is a no-op in all processes except dst_rank
-  for (std::size_t i = 0; i < output.size(); ++i)
+  for (size_t i = 0; i < output.size(); ++i)
     output[i].copy_(recv_buffer[i]);
 }
 
@@ -256,7 +256,7 @@ void DataChannelMPI::scatter(std::vector<at::Tensor>& input,
       assertSameSizeAndType(in_tensor, output, "scatter");
 
     send_buffer = _newLikeFlat(input);
-    for (std::size_t i = 0; i < input.size(); ++i)
+    for (size_t i = 0; i < input.size(); ++i)
       send_buffer[i].copy_(input[i]);
     sendbuf = send_buffer.data_ptr();
   }
@@ -424,7 +424,7 @@ THDGroup DataChannelMPI::newGroup(const std::vector<rank_type>& ranks) {
 
     // this vector maps new ranks to ranks in COMM_WORLD (global ranks)
     std::vector<rank_type> new_ranks(size);
-    for (std::size_t i = 0; i < 2 * size; i += 2)
+    for (size_t i = 0; i < 2 * size; i += 2)
       new_ranks[all_mapping_ranks[i]] = all_mapping_ranks[i + 1];
 
     new_group = DataChannel::Group(new_ranks, _num_processes - 1);

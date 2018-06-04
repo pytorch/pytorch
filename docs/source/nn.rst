@@ -383,6 +383,12 @@ Non-linear activations (other)
 .. autoclass:: LogSoftmax
     :members:
 
+:hidden:`AdaptiveLogSoftmaxWithLoss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveLogSoftmaxWithLoss
+    :members:
+
 Normalization layers
 ----------------------------------
 
@@ -716,6 +722,16 @@ Utilities
 
 .. autofunction:: torch.nn.utils.clip_grad_value_
 
+:hidden:`parameters_to_vector`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.parameters_to_vector
+
+:hidden:`vector_to_parameters`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.vector_to_parameters
+
 :hidden:`weight_norm`
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -996,6 +1012,11 @@ Non-linear activation functions
 
 .. autofunction:: softshrink
 
+:hidden:`gumbel_softmax`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: gumbel_softmax
+
 :hidden:`log_softmax`
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -1069,6 +1090,19 @@ Dropout functions
 ~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: dropout3d
+
+Sparse functions
+----------------------------------
+
+:hidden:`embedding`
+~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: embedding
+
+:hidden:`embedding_bag`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: embedding_bag
 
 Distance functions
 ----------------------------------

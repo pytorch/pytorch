@@ -20,6 +20,7 @@ class Dropout;
 
 namespace torch {
 namespace nn {
+
 template <typename Derived>
 class RNNBase : public CloneableModule<Derived> {
  public:
@@ -36,7 +37,7 @@ class RNNBase : public CloneableModule<Derived> {
 
   void reset() override;
 
-  variable_list forward(variable_list) override;
+  std::vector<Variable> forward(std::vector<Variable>);
 
   void to(at::Type& type) override;
   void to(at::ScalarType scalar_type) override;
@@ -49,21 +50,13 @@ class RNNBase : public CloneableModule<Derived> {
   TORCH_ATTR(double, dropout) = 0.0;
 
  protected:
-  virtual variable_list cell_forward(variable_list, int64_t layer) = 0;
+  virtual std::vector<Variable> cell_forward(std::vector<Variable>, int64_t layer) = 0;
 
-  variable_list CUDNN_forward(variable_list);
-  variable_list autograd_forward(variable_list);
+  std::vector<Variable> CUDNN_forward(std::vector<Variable>);
+  std::vector<Variable> autograd_forward(std::vector<Variable>);
 
   void flatten_parameters_for_cudnn();
-  std::vector<Tensor> flat_weights() const;
-
-  using CloneableModule<Derived>::register_parameter;
-
-  void register_parameter(
-      const std::string& name,
-      int64_t layer,
-      std::vector<Variable> RNNBase::*variables,
-      Tensor tensor);
+  std::vector<at::Tensor> flat_weights() const;
 
   std::vector<Variable> ihw_;
   std::vector<Variable> ihb_;
@@ -90,7 +83,7 @@ class LSTM : public RNNBase<LSTM> {
   LSTM(int64_t input_size, int64_t hidden_size);
 
  private:
-  variable_list cell_forward(variable_list, int64_t layer) override;
+  std::vector<Variable> cell_forward(std::vector<Variable>, int64_t layer) override;
 };
 
 class GRU : public RNNBase<GRU> {
@@ -98,7 +91,7 @@ class GRU : public RNNBase<GRU> {
   GRU(int64_t input_size, int64_t hidden_size);
 
  private:
-  variable_list cell_forward(variable_list, int64_t layer) override;
+  std::vector<Variable> cell_forward(std::vector<Variable>, int64_t layer) override;
 };
 
 class RNN : public RNNBase<RNN> {
@@ -117,7 +110,7 @@ class RNN : public RNNBase<RNN> {
  private:
   using ActivationFunction = std::function<Variable(Variable)>;
 
-  variable_list cell_forward(variable_list, int64_t layer) override;
+  std::vector<Variable> cell_forward(std::vector<Variable>, int64_t layer) override;
 
   ActivationFunction activation_function_;
 };

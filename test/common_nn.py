@@ -7,19 +7,16 @@ from itertools import product
 import torch
 import torch.cuda
 from common import TestCase, to_gpu, freeze_rng_state, is_iterable
+from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 import torch.backends.cudnn
+
 
 # tarfile module tries to obtain a file object name in python 3.3
 if sys.version_info[:2] == (3, 3):
     TemporaryFile = tempfile.NamedTemporaryFile
 else:
     TemporaryFile = tempfile.TemporaryFile
-
-TEST_CUDA = torch.cuda.is_available()
-TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
-TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.cuda.FloatTensor(1))
-TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 PRECISION = 1e-5
 
 

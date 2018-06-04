@@ -47,6 +47,10 @@ typedef const std::string& (*EventErrorMessageFunction)(const Event*);
 typedef void (*EventSetFinishedFunction)(const Event*, const char*);
 typedef void (*EventResetFunction)(Event*);
 
+// Sets callback that is called when event is finished
+typedef std::function<void()> EventCallbackFunction;
+typedef bool (*EventSetCallbackFunction)(Event*, EventCallbackFunction);
+
 class Event {
  public:
   explicit Event(const DeviceOption& option)
@@ -116,6 +120,16 @@ class Event {
     return event_finished_setter_[type_](this, err_msg);
   }
 
+  bool SupportsCallback() const {
+    return event_callback_setter_[type_] != nullptr;
+  }
+
+  bool SetCallback(EventCallbackFunction callback) {
+    CAFFE_ENFORCE(
+        event_callback_setter_[type_], "Event does not support callbacks");
+    return event_callback_setter_[type_](this, callback);
+  }
+
   // If parent op has succeeded, then we can run any child op;
   // If parent op is in scheduled state, we need to check that:
   //  - child op supports async scheduling
@@ -169,6 +183,9 @@ class Event {
       event_finished_setter_[MaxDeviceTypes];
   CAFFE2_API static EventResetFunction event_resetter_[MaxDeviceTypes];
 
+  CAFFE2_API static EventSetCallbackFunction
+      event_callback_setter_[MaxDeviceTypes];
+
   template <int d>
   friend struct EventCreateFunctionRegisterer;
   template <int d>
@@ -184,6 +201,8 @@ class Event {
   friend struct EventErrorMessageFunctionRegisterer;
   template <int d>
   friend struct EventSetFinishedFunctionRegisterer;
+  template <int d>
+  friend struct EventSetCallbackFunctionRegisterer;
   template <int d>
   friend struct EventResetFunctionRegisterer;
 };
@@ -259,6 +278,18 @@ struct EventSetFinishedFunctionRegisterer {
 #define REGISTER_EVENT_SET_FINISHED_FUNCTION(d, f)                          \
   namespace {                                                               \
   static EventSetFinishedFunctionRegisterer<d> g_event_set_finished_##d(f); \
+  }
+
+template <int d>
+struct EventSetCallbackFunctionRegisterer {
+  explicit EventSetCallbackFunctionRegisterer(EventSetCallbackFunction f) {
+    static_assert(d < MaxDeviceTypes, "");
+    Event::event_callback_setter_[d] = f;
+  }
+};
+#define REGISTER_EVENT_SET_CALLBACK_FUNCTION(d, f)                          \
+  namespace {                                                               \
+  static EventSetCallbackFunctionRegisterer<d> g_event_set_callback_##d(f); \
   }
 
 template <int d>

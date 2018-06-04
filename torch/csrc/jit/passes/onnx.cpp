@@ -67,7 +67,7 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
       ss << num_old_outputs << ", but got " << outputs.size() << ")";
       throw std::runtime_error(ss.str());
     }
-    for (std::size_t i = 0; i < num_old_outputs; ++i) {
+    for (size_t i = 0; i < num_old_outputs; ++i) {
       auto old = old_outputs[i];
       if (outputs[i]) {
         // Allow symbolic() to skip specifying the type of the return node.

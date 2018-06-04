@@ -15,7 +15,7 @@ namespace torch { namespace jit { namespace script {
 struct SourceRangeFactory {
   SourceRangeFactory(std::string source)
     : source_(std::make_shared<std::string>(std::move(source))) {
-    std::size_t pos = 0;
+    size_t pos = 0;
     do {
       line_len_prefix_sum_.push_back(pos);
       pos++;
@@ -33,7 +33,7 @@ struct SourceRangeFactory {
   }
 
   std::shared_ptr<std::string> source_;
-  std::vector<std::size_t> line_len_prefix_sum_;
+  std::vector<size_t> line_len_prefix_sum_;
 };
 
 template<typename T>

@@ -13,3 +13,6 @@
 
 #include "generic/THTensor.hpp"
 #include "THGenerateHalfType.h"
+
+#include "generic/THTensorFastGetSet.hpp"
+#include "THGenerateAllTypes.h"

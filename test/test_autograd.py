@@ -150,13 +150,14 @@ class TestAutograd(TestCase):
             def backward(ctx, grad):
                 return grad * 2
 
-        v = torch.ones(1, requires_grad=True)
-        MyFunction.apply(v).backward()
-        self.assertEqual(v.grad.data.tolist(), [2])
+        for shape in [(1,), ()]:
+            v = torch.ones(shape, requires_grad=True)
+            MyFunction.apply(v).backward()
+            self.assertEqual(v.grad, torch.full(shape, 2))
 
-        v.grad.data.zero_()
-        MyFunction.apply(v.clone()).backward()
-        self.assertEqual(v.grad.data.tolist(), [2])
+            v.grad.data.zero_()
+            MyFunction.apply(v.clone()).backward()
+            self.assertEqual(v.grad, torch.full(shape, 2))
 
     def test_legacy_function_none_grad(self):
         class MyFunction(Function):
@@ -2930,7 +2931,6 @@ method_tests = [
     ('select', (S, S, S), (1, 2), 'dim', [0]),
     ('select', (S,), (0, 2), '1d'),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
-    ('slice', (S, S, S), (-2, 1, -1, 2)),
     ('squeeze', (S, 1, S, 1), NO_ARGS),
     ('squeeze', (1, 1, 1, 1), NO_ARGS, 'input_sizes_are_ones'),
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),

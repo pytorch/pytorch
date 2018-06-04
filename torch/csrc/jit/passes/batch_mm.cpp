@@ -65,7 +65,7 @@ namespace torch { namespace jit {
 // the trees we formed and fuse them.
 
 // Tunable parameter. Set to something larger if it turns out to be better.
-static constexpr std::size_t min_fusion_size = 2;
+static constexpr size_t min_fusion_size = 2;
 
 static std::array<int64_t, 2> as_array(at::IntList sizes) {
   JIT_ASSERT(sizes.size() == 2);

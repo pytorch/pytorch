@@ -1675,6 +1675,7 @@ void Col2Im<float, CPUContext, StorageOrder::NHWC>(
 template <>
 void BiasCHW<float, CPUContext>(
     const float* bias,
+    const float* /*bias_multiplier*/,
     const int bias_channels,
     const int image_size,
     float* image,

@@ -1,7 +1,16 @@
+r"""Importing this file must **not** initialize CUDA context. test_distributed
+relies on this assumption to properly run. This means that when this is imported
+no CUDA calls shall be made, including torch.cuda.device_count(), etc.
+
+common_cuda.py can freely initialize CUDA context when imported.
+"""
+
 import sys
 import os
 import platform
 import re
+import gc
+import types
 import inspect
 import argparse
 import unittest
@@ -73,7 +82,24 @@ def skipIfNoLapack(fn):
     return wrapper
 
 
+def skipCUDAMemoryLeakCheckIf(condition):
+    def dec(fn):
+        if getattr(fn, '_do_cuda_memory_leak_check', True):  # if current True
+            fn._do_cuda_memory_leak_check = not condition
+        return fn
+    return dec
+
+
+def get_cuda_memory_usage():
+    # we don't need CUDA synchronize because the statistics are not tracked at
+    # actual freeing, but at when marking the block as free.
+    num_devices = torch.cuda.device_count()
+    gc.collect()
+    return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
+
 def suppress_warnings(fn):
+    @wraps(fn)
     def wrapper(*args, **kwargs):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -154,6 +180,41 @@ def is_iterable(obj):
 class TestCase(unittest.TestCase):
     precision = 1e-5
     maxDiff = None
+    _do_cuda_memory_leak_check = False
+
+    def __init__(self, method_name='runTest'):
+        super(TestCase, self).__init__(method_name)
+        # Wraps the tested method if we should do CUDA memory check.
+        test_method = getattr(self, method_name)
+        self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
+        if self._do_cuda_memory_leak_check:
+            # the import below may initialize CUDA context, so we do it only if
+            # self._do_cuda_memory_leak_check is True.
+            from common_cuda import TEST_CUDA
+            fullname = self.id().lower()  # class_name.method_name
+            if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
+                # initialize context & RNG to prevent false positive detections
+                # when the test is the first to initialize those
+                from common_cuda import initialize_cuda_context_rng
+                initialize_cuda_context_rng()
+                setattr(self, method_name, self.wrap_with_cuda_memory_check(test_method))
+
+    def wrap_with_cuda_memory_check(self, method):
+        # Assumes that `method` is the tested function in `self`.
+        # NOTE: Python Exceptions (e.g., unittest.Skip) keeps objects in scope
+        #       alive, so this cannot be done in setUp and tearDown because
+        #       tearDown is run unconditionally no matter whether the test
+        #       passes or not. For the same reason, we can't wrap the `method`
+        #       call in try-finally and always do the check.
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            befores = get_cuda_memory_usage()
+            method(*args, **kwargs)
+            afters = get_cuda_memory_usage()
+            for i, (before, after) in enumerate(zip(befores, afters)):
+                self.assertEqual(before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                                 self.id(), after - before, i))
+        return types.MethodType(wrapper, self)
 
     def setUp(self):
         set_rng_seed(SEED)

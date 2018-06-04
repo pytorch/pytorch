@@ -17,10 +17,6 @@ bool THPStorage_(init)(PyObject *module);
 void THPStorage_(postInit)(PyObject *module);
 
 extern PyTypeObject THPStorageType;
-template <> struct THPTypeInfo<THStorage> {
-  static PyTypeObject* pyType() { return &THPStorageType; }
-  static THStorage* cdata(PyObject* p) { return ((THPStorage*)p)->cdata; }
-};
 #endif
 
 #endif

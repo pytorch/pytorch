@@ -468,7 +468,7 @@ auto Engine::execute(const edge_list& input_roots,
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock);
-  for (std::size_t i = 0; i < final_callbacks.size(); ++i) {
+  for (size_t i = 0; i < final_callbacks.size(); ++i) {
     cb_lock.unlock();
     final_callbacks[i]();
     cb_lock.lock();
@@ -477,12 +477,24 @@ auto Engine::execute(const edge_list& input_roots,
   return graph_task.captured_vars;
 }
 
-#ifdef NO_PYTHON
-Engine& Engine::getDefaultEngine() {
+// note that when python is present, this base engine will be overriden
+// with a PythonEngine. Because this typically happens before get_default_engine
+// is called, this base engine will never be created.
+static Engine& get_base_engine() {
   static Engine engine;
   return engine;
 }
-#endif
+
+std::atomic<EngineStub> engine_stub(get_base_engine);
+
+void set_default_engine_stub(EngineStub stub) {
+  engine_stub.store(stub);
+}
+
+
+Engine& Engine::get_default_engine() {
+  return engine_stub.load()();
+}
 
 void Engine::queue_callback(std::function<void()> callback) {
   std::lock_guard<std::mutex> lock(post_callbacks_lock);
@@ -540,7 +552,7 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
   struct Frame {
     Frame (Function *fn) : fn(fn), next_next_fn(0) {}
     Function *fn;
-    std::size_t next_next_fn;
+    size_t next_next_fn;
 
     Function* get_next_fn() {
       const auto & next = fn->next_edges();

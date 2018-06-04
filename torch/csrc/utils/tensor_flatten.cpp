@@ -6,13 +6,13 @@ namespace torch { namespace utils {
 
 using namespace at;
 
-std::vector<TensorGroup> take_tensors(TensorList tensors, std::size_t size_limit) {
+std::vector<TensorGroup> take_tensors(TensorList tensors, size_t size_limit) {
   std::vector<TensorGroup> results;
   results.reserve(tensors.size()); // an overapproximation, but at least we won't have to copy stuff around
   std::unordered_map<at::Type*, TensorGroup> groups;
   for (const auto & tensor : tensors) {
     auto & type = tensor.type();
-    std::size_t tensor_size;
+    size_t tensor_size;
     if (type.is_sparse()) {
       const auto& indices = tensor._indices();
       const auto& values = tensor._values();
@@ -41,11 +41,11 @@ std::vector<TensorGroup> take_tensors(TensorList tensors, std::size_t size_limit
 
 void reorder_tensors_like(std::vector<Tensor>& tensors, TensorList order) {
   TORCH_ASSERT(tensors.size() == order.size());
-  std::unordered_map<at::Type*, std::vector<std::size_t>> type_indices;
-  for (std::size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
+  std::unordered_map<at::Type*, std::vector<size_t>> type_indices;
+  for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
     type_indices[&tensors[i].type()].push_back(i);
 
-  std::unordered_map<at::Type*, std::size_t> type_used;
+  std::unordered_map<at::Type*, size_t> type_used;
   std::vector<Tensor> ordered_tensors;
   ordered_tensors.reserve(tensors.size());
   for (auto & tmpl_tensor : order) {
@@ -86,7 +86,7 @@ std::vector<at::Tensor> unflatten_sparse_tensors(
   std::vector<at::Tensor> outputs;
   outputs.reserve(tensors.size());
   auto & type = tensors[0].type();
-  for (std::size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
+  for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
     outputs.emplace_back(type._sparse_coo_tensor_unsafe(indices[i], values[i], tensors[i].sizes()));
   return outputs;
 }

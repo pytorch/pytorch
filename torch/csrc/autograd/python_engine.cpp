@@ -23,9 +23,7 @@ struct THPEngine {
 
 static torch::autograd::python::PythonEngine engine;
 
-// Here we add a method of Engine so that we can use Engine::getDefaultEngine
-// throughout the code in both NO_PYTHON builds and regular builds
-Engine& torch::autograd::Engine::getDefaultEngine() {
+static Engine& get_python_engine() {
   return engine;
 }
 
@@ -277,5 +275,6 @@ bool THPEngine_initModule(PyObject *module)
     return false;
   Py_INCREF(&THPEngineType);
   PyModule_AddObject(module, "_ImperativeEngine", (PyObject *)&THPEngineType);
+  set_default_engine_stub(get_python_engine);
   return true;
 }

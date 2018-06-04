@@ -14,7 +14,7 @@ _(int8_t,Char,i) \
 _(int16_t,Short,i) \
 _(int,Int,i) \
 _(int64_t,Long,i) \
-_(Half,Half,d) \
+_(at::Half,Half,d) \
 _(float,Float,d) \
 _(double,Double,d)
 

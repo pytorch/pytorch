@@ -19,8 +19,8 @@ except ImportError:
     from yaml import Loader as YamlLoader
 
 
-GENERATED_COMMENT = CodeTemplate("""\
-generated from tools/autograd/templates/${filename}""")
+GENERATED_COMMENT = CodeTemplate(
+    "@" + "generated from tools/autograd/templates/${filename}")
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurence of a parameter in the derivative formula
