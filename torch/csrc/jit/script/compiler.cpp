@@ -1310,9 +1310,13 @@ private:
 
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint()) {
-      return createConstant(*graph, c.range(), at::CPU(at::kFloat).scalarTensor(c.asFloatingPoint()));
+      auto* value = createConstant(*graph, c.range(), at::CPU(at::kFloat).scalarTensor(c.asFloatingPoint()));
+      value->setType(FloatType::get());
+      return value;
     } else {
-      return createConstant(*graph, c.range(), at::CPU(at::kLong).scalarTensor(c.asIntegral()));
+      auto* value = createConstant(*graph, c.range(), at::CPU(at::kLong).scalarTensor(c.asIntegral()));
+      value->setType(IntType::get());
+      return value;
     }
   }
 
