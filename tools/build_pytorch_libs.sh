@@ -17,6 +17,8 @@ WITH_NNPACK=0
 WITH_MKLDNN=0
 WITH_GLOO_IBVERBS=0
 WITH_DISTRIBUTED_MW=0
+WITH_CAFFE2=0
+WITH_CAFFE2_PYTHON=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
       --with-cuda)
@@ -36,6 +38,12 @@ while [[ $# -gt 0 ]]; do
           ;;
       --with-distributed-mw)
           WITH_DISTRIBUTED_MW=1
+          ;;
+      --with-caffe2)
+          WITH_CAFFE2=1
+          ;;
+      --with-caffe2-python)
+          WITH_CAFFE2_PYTHON=1
           ;;
       *)
           break
@@ -224,9 +232,9 @@ function build_caffe2() {
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-      -DBUILD_CAFFE2=OFF \
+      -DBUILD_CAFFE2=$WITH_CAFFE2 \
       -DBUILD_ATEN=ON \
-      -DBUILD_PYTHON=OFF \
+      -DBUILD_PYTHON=$WITH_CAFFE2_PYTHON \
       -DBUILD_BINARY=OFF \
       -DBUILD_SHARED_LIBS=ON \
       -DUSE_CUDA=$WITH_CUDA \
@@ -249,6 +257,20 @@ function build_caffe2() {
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
+
+  # Install Python proto files
+  if [[ $WITH_CAFFE2_PYTHON -ne 0 ]]; then
+    echo "I am im $(pwd)"
+    echo "INSTALL_DIR is $INSTALL_DIR"
+    echo "BASE_DIR is $BASE_DIR"
+    find . -name proto
+    for proto_file in ./caffe/proto/*.py; do
+      cp $proto_file "$BASE_DIR/caffe/proto/"
+    done
+    for proto_file in ./caffe2/proto/*.py; do
+      cp $proto_file "$BASE_DIR/caffe2/proto/"
+    done
+  fi
   popd
 }
 
