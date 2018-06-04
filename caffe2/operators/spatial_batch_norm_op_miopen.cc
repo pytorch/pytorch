@@ -15,8 +15,8 @@
  */
 
 #include <cfloat>
-#include "caffe2/core/context_hip.h"
-#include "caffe2/core/miopen_wrapper.h"
+#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/operators/spatial_batch_norm_op.h"
 #include "caffe2/utils/math.h"
 

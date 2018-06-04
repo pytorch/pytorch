@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/context_hip.h"
-#include "caffe2/core/miopen_wrapper.h"
+#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/core/types.h"
 #include "caffe2/operators/softmax_op.h"
 
