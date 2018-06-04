@@ -222,8 +222,9 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   }
   // pad zeros
   if (pad_end != 0) {
-    Tensor padded_input = at::zeros({batch, len + pad_end}, self.type());
+    Tensor padded_input = at::empty({batch, len + pad_end}, self.options());
     padded_input.narrow(1, 0, len).copy_(input);
+    padded_input.narrow(1, len, pad_end).zero_();
     len += pad_end;
     input = padded_input;
   }
@@ -235,12 +236,12 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   }
   if (hop <= 0) {
     std::ostringstream ss;
-    REPR(ss) << " expected hop > 0, but got hop=" << hop;
+    REPR(ss) << ": expected hop > 0, but got hop=" << hop;
     throw std::runtime_error(ss.str());
   }
   if (fft_size <= 0) {
     std::ostringstream ss;
-    REPR(ss) << " expected fft_size > 0, but got fft_size=" << fft_size;
+    REPR(ss) << ": expected fft_size > 0, but got fft_size=" << fft_size;
     throw std::runtime_error(ss.str());
   }
   if (window.defined() && (window.dim() != 1 || window.size(0) != frame_length)) {
@@ -251,30 +252,45 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
     throw std::runtime_error(ss.str());
   }
   #undef REPR
-  int64_t return_size = onesided ? infer_ft_real_to_complex_onesided_size(fft_size) : fft_size;
-  // build ft kernel
-  // k[omega, t] = cos (2 pi omega t / N) - j sin (2 pi omega t / N)
-  double N = static_cast<double>(fft_size);
-  auto freq_arange = at::arange(0, return_size, self.type()).mul_(M_PI * 2. / N);
-  auto time_arange = at::arange(0, frame_length, self.type());
-  auto arange_2d = at::ger(freq_arange, time_arange);
-  auto re_kernel = arange_2d.cos();
-  auto im_kernel = arange_2d.sin().neg_();
-  auto kernel = at::cat({re_kernel, im_kernel}, 0);
-  if (window.defined()) {
-    kernel *= window.view({1, -1});
+  // two cases:
+  //   1. frame_length == fft_size
+  //      use fft
+  //   2. frame_length != fft_size
+  //      use conv1d
+  Tensor out;
+  if (frame_length == fft_size) {
+    int64_t n_frames = 1 + (len - frame_length) / hop;
+    input = input.as_strided({batch, n_frames, frame_length}, {input.stride(0), hop * input.stride(1), input.stride(1)});
+    if (window.defined()) {
+      input = input.mul(window);
+    }
+    out = input.rfft(1, normalized, onesided);
+  } else {
+    int64_t return_size = onesided ? infer_ft_real_to_complex_onesided_size(fft_size) : fft_size;
+    // build ft kernel
+    // k[omega, t] = cos (2 pi omega t / N) - j sin (2 pi omega t / N)
+    double N = static_cast<double>(fft_size);
+    auto freq_arange = at::arange(0, return_size, self.options()).mul_(M_PI * 2. / N);
+    auto time_arange = at::arange(0, frame_length, self.options());
+    auto arange_2d = at::ger(freq_arange, time_arange);
+    auto re_kernel = arange_2d.cos();
+    auto im_kernel = arange_2d.sin().neg_();
+    auto kernel = at::cat({re_kernel, im_kernel}, 0);
+    if (window.defined()) {
+      kernel.mul_(window.view({1, -1}));
+    }
+    if (normalized) {
+      double T = static_cast<double>(frame_length);
+      kernel.div_(std::sqrt(T));
+    }
+    // prepare for conv1d
+    input = input.view({batch, 1, len});
+    kernel = kernel.view({return_size * 2, 1, frame_length});
+    // conv is actually correlation, so we are good
+    auto conv_out = at::conv1d(input, kernel, {}, hop).squeeze_(-1);
+    // transpose to [batch x time x freq x (re/im)]
+    out = conv_out.view({batch, 2, return_size, -1}).transpose_(1, -1);
   }
-  if (normalized) {
-    double T = static_cast<double>(frame_length);
-    kernel.div_(std::sqrt(T));
-  }
-  // prepare for conv1d
-  input = input.view({batch, 1, len});
-  kernel = kernel.view({return_size * 2, 1, frame_length});
-  // conv is actually correlation, so we are good
-  auto conv_out = at::conv1d(input, kernel, {}, hop).squeeze_(-1);
-  // transpose to [batch x time x freq x (re/im)]
-  auto out = conv_out.view({batch, 2, return_size, -1}).transpose_(1, -1);
   if (self.dim() == 1) {
     return out.squeeze_(0);
   } else {

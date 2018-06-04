@@ -4510,35 +4510,29 @@ class TestTorch(TestCase):
             if expected_error is None:
                 result = x.stft(frame_length, hop, fft_size, normalized, onesided, window, pad_end)
                 ref_result = naive_stft(x, frame_length, hop, fft_size, normalized, onesided, window, pad_end)
-                self.assertEqual(result.data, ref_result, 7e-6, 'stft result')
+                self.assertEqual(result, ref_result, 7e-6, 'stft result')
             else:
                 self.assertRaises(expected_error,
                                   lambda: x.stft(frame_length, hop, fft_size, normalized, onesided, window, pad_end))
 
-        _test((2, 5), 4, 2, pad_end=1)
-        _test((4, 150), 90, 45, pad_end=0)
-        _test((10,), 7, 2, pad_end=0)
-        _test((10, 4000), 1024, 512, pad_end=0)
+        for normalized, onesided in product([True, False], repeat=2):
+            for pad_end in [0, 3]:
+                kwargs = dict(normalized=normalized, onesided=onesided, pad_end=pad_end)
 
-        _test((2, 5), 4, 2, window_sizes=(4,), pad_end=1)
-        _test((4, 150), 90, 45, window_sizes=(90,), pad_end=0)
-        _test((10,), 7, 2, window_sizes=(7,), pad_end=0)
-        _test((10, 4000), 1024, 512, window_sizes=(1024,), pad_end=0)
+                _test((2, 5), 4, 2, **kwargs)
+                _test((4, 150), 90, 45, **kwargs)
+                _test((10,), 7, 2, **kwargs)
+                _test((10, 4000), 1024, 512, **kwargs)
 
-        _test((2, 5), 4, 2, fft_size=5, window_sizes=(4,), pad_end=1)
-        _test((4, 150), 90, 45, fft_size=100, window_sizes=(90,), pad_end=0)
-        _test((10,), 7, 2, fft_size=33, window_sizes=(7,), pad_end=0)
-        _test((10, 4000), 1024, 512, fft_size=1500, window_sizes=(1024,), pad_end=0)
+                _test((2, 5), 4, 2, window_sizes=(4,), **kwargs)
+                _test((4, 150), 90, 45, window_sizes=(90,), **kwargs)
+                _test((10,), 7, 2, window_sizes=(7,), **kwargs)
+                _test((10, 4000), 1024, 512, window_sizes=(1024,), **kwargs)
 
-        _test((2, 5), 4, 2, fft_size=5, onesided=False, window_sizes=(4,), pad_end=1)
-        _test((4, 150), 90, 45, fft_size=100, onesided=False, window_sizes=(90,), pad_end=0)
-        _test((10,), 7, 2, fft_size=33, onesided=False, window_sizes=(7,), pad_end=0)
-        _test((10, 4000), 1024, 512, fft_size=1500, onesided=False, window_sizes=(1024,), pad_end=0)
-
-        _test((2, 5), 4, 2, fft_size=5, normalized=True, onesided=False, window_sizes=(4,), pad_end=1)
-        _test((4, 150), 90, 45, fft_size=100, normalized=True, onesided=False, window_sizes=(90,), pad_end=0)
-        _test((10,), 7, 2, fft_size=33, normalized=True, onesided=False, window_sizes=(7,), pad_end=0)
-        _test((10, 4000), 1024, 512, fft_size=1500, normalized=True, onesided=False, window_sizes=(1024,), pad_end=0)
+                _test((2, 5), 4, 2, fft_size=5, window_sizes=(4,), **kwargs)
+                _test((4, 150), 90, 45, fft_size=100, window_sizes=(90,), **kwargs)
+                _test((10,), 7, 2, fft_size=33, window_sizes=(7,), **kwargs)
+                _test((10, 4000), 1024, 512, fft_size=1500, window_sizes=(1024,), **kwargs)
 
         _test((10, 4, 2), 1, 1, expected_error=RuntimeError)
         _test((10,), 11, 1, expected_error=RuntimeError)
