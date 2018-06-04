@@ -125,6 +125,28 @@ class ProcessGroupGlooTest(TestCase):
         for p in self.processes:
             p.join(timeout)
 
+    def test_broadcast_ops(self):
+        pg = c10d.ProcessGroupGloo(self.store, self.rank, self.size)
+
+        def broadcast(xs, rootRank, rootTensor):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = rootRank
+            opts.rootTensor = rootTensor
+            work = pg.broadcast(xs, opts)
+            work.wait()
+
+        # Every rank is root once, every tensor index is root once
+        for i in range(self.size):
+            for j in range(2):
+                xs = [
+                    torch.Tensor([self.rank * self.size + 0.0]),
+                    torch.Tensor([self.rank * self.size + 1.0]),
+                ]
+
+                broadcast(xs, i, j)
+                self.assertEqual(torch.Tensor([i * self.size + j]), xs[0])
+                self.assertEqual(torch.Tensor([i * self.size + j]), xs[1])
+
     def test_allreduce_ops(self):
         pg = c10d.ProcessGroupGloo(self.store, self.rank, self.size)
 
@@ -153,6 +175,7 @@ class ProcessGroupGlooTest(TestCase):
         x = torch.Tensor([self.rank + 1.0])
         allreduce(x, c10d.ReduceOp.MAX)
         self.assertEqual(torch.Tensor([self.size]), x)
+
 
 if __name__ == '__main__':
     unittest.main()
