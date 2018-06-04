@@ -4979,7 +4979,7 @@ class TestNN(NNTestCase):
         x = torch.randn(64, 8).abs_()
 
         # argmax in shortlist
-        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2.)
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2., head_bias=True)
         asfm.head.weight.data.abs_()
         asfm.head.bias.data.abs_()
         asfm.head.weight.data[asfm.shortlist_size:, :].zero_()
@@ -4988,7 +4988,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
 
         # argmax outside of shortlist
-        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2.)
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2., head_bias=True)
         asfm.head.weight.data.abs_()
         asfm.head.bias.data.abs_()
         asfm.head.weight.data[:asfm.shortlist_size, :].zero_()
@@ -4997,7 +4997,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
 
         # half of the argmax in shortlist, half in clusters
-        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2.)
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2., head_bias=True)
         asfm.head.weight.data.abs_()
         asfm.head.bias.data.abs_()
 

@@ -52,6 +52,10 @@ class AdaptiveLogSoftmaxWithLoss(Module):
       for less frequent words having larger indices,
       and indices starting from :math:`1`).
 
+    * :attr:`head_bias` if set to True, adds a bias term to the 'head' of the
+      adaptive softmax. See paper for details. Set to False in the official
+      implementation.
+
     .. warning::
         Labels passed as inputs to this module should be sorted accoridng to
         their frequency. This means that the most frequent label should be
@@ -94,7 +98,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         https://en.wikipedia.org/wiki/Zipf%27s_law
     """
 
-    def __init__(self, in_features, n_classes, cutoffs, div_value=4.):
+    def __init__(self, in_features, n_classes, cutoffs, div_value=4., head_bias=False):
         super(AdaptiveLogSoftmaxWithLoss, self).__init__()
 
         cutoffs = list(cutoffs)
@@ -113,12 +117,13 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         self.n_classes = n_classes
         self.cutoffs = cutoffs + [n_classes]
         self.div_value = div_value
+        self.head_bias = head_bias
 
         self.shortlist_size = self.cutoffs[0]
         self.n_clusters = len(self.cutoffs) - 1
         self.head_size = self.shortlist_size + self.n_clusters
 
-        self.head = Linear(self.in_features, self.head_size)
+        self.head = Linear(self.in_features, self.head_size, bias=self.head_bias)
         self.tail = ModuleList()
 
         for i in range(self.n_clusters):
