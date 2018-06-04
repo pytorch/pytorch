@@ -1175,6 +1175,28 @@ class TestNN(NNTestCase):
         self.assertEqual(net.l, l3)
         self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
 
+    def test_module_to_argparse(self):
+        net = nn.Sequential(nn.Linear(3, 3))
+        cpu = torch.device('cpu')
+        with self.assertRaises(TypeError):
+            net.to(cpu, True)
+        with self.assertRaises(TypeError):
+            net.to(torch.long)
+        with self.assertRaises(TypeError):
+            net.to(None, True)
+        with self.assertRaises(TypeError):
+            net.to(cpu, torch.long, True)
+        with self.assertRaises(TypeError):
+            net.to(cpu, dtype=torch.long, non_blocking=True)
+        with self.assertRaises(TypeError):
+            net.to([])
+        with self.assertRaises(TypeError):
+            net.to({}, non_blocking=True)
+        with self.assertRaises(TypeError):
+            net.to(torch.tensor(3, dtype=torch.long), non_blocking=True)
+        with self.assertRaises(TypeError):
+            net.to(cpu, torch.tensor(3, dtype=torch.long), non_blocking=True)
+
     def test_type(self):
         l = nn.Linear(10, 20)
         net = nn.Module()
@@ -1203,22 +1225,22 @@ class TestNN(NNTestCase):
             self.assertIsInstance(l.weight.data, torch.FloatTensor)
             self.assertIsInstance(l.bias.data, torch.FloatTensor)
             self.assertIsInstance(net.indices, torch.LongTensor)
-            net.to("cuda", torch.double)
+            net.to("cuda", torch.double, True)
             self.assertIsInstance(l.weight.data, torch.cuda.DoubleTensor)
             self.assertIsInstance(l.bias.data, torch.cuda.DoubleTensor)
             self.assertIsInstance(net.indices, torch.cuda.LongTensor)
-            net.to(device="cuda:0", dtype=torch.half)
+            net.to(torch.empty(1, device="cuda:0", dtype=torch.half))
             self.assertIsInstance(l.weight.data, torch.cuda.HalfTensor)
             self.assertIsInstance(l.bias.data, torch.cuda.HalfTensor)
             self.assertIsInstance(net.indices, torch.cuda.LongTensor)
-        net.to(torch.device("cpu"))
+        net.to(torch.device("cpu"), non_blocking=True)
         self.assertIsInstance(l.weight.data, torch.HalfTensor)
         self.assertIsInstance(l.bias.data, torch.HalfTensor)
         self.assertIsInstance(net.indices, torch.LongTensor)
         net.type(torch.FloatTensor)
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)
-        net.type(torch.DoubleTensor)
+        net.to(torch.DoubleTensor(1))
         self.assertIsInstance(l.weight.data, torch.DoubleTensor)
         self.assertIsInstance(l.bias.data, torch.DoubleTensor)
         if TEST_CUDA:

@@ -1858,26 +1858,28 @@ class TestTorch(TestCase):
         self.assertIs(torch.float32, a.to(dtype=torch.float32).dtype)
 
         if torch.cuda.is_available():
-            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
-                b = torch.tensor(5., device=cuda)
-                self.assertEqual(b.device, b.to(cuda).device)
-                self.assertEqual(a.device, b.to('cpu').device)
-                self.assertEqual(b.device, a.to(cuda).device)
-                self.assertIs(torch.int32, b.to('cpu', dtype=torch.int32).dtype)
-                self.assertEqual(a.device, b.to('cpu', dtype=torch.int32).device)
-                self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
-                self.assertEqual(b.device, b.to(dtype=torch.int32).device)
+            for non_blocking in [True, False]:
+                for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                    b = torch.tensor(5., device=cuda)
+                    self.assertEqual(b.device, b.to(cuda, non_blocking=non_blocking).device)
+                    self.assertEqual(a.device, b.to('cpu', non_blocking=non_blocking).device)
+                    self.assertEqual(b.device, a.to(cuda, non_blocking=non_blocking).device)
+                    self.assertIs(torch.int32, b.to('cpu', dtype=torch.int32, non_blocking=non_blocking).dtype)
+                    self.assertEqual(a.device, b.to('cpu', dtype=torch.int32, non_blocking=non_blocking).device)
+                    self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
+                    self.assertEqual(b.device, b.to(dtype=torch.int32).device)
 
     def test_to_with_tensor(self):
         a = torch.tensor(5)
         self.assertEqual(a.device, a.to(a).device)
 
         if torch.cuda.is_available():
-            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
-                b = torch.tensor(5., device=cuda)
-                self.assertEqual(b.device, b.to(b).device)
-                self.assertEqual(a.device, b.to(a).device)
-                self.assertEqual(b.device, a.to(b).device)
+            for non_blocking in [True, False]:
+                for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                    b = torch.tensor(5., device=cuda)
+                    self.assertEqual(b.device, b.to(b, non_blocking=non_blocking).device)
+                    self.assertEqual(a.device, b.to(a, non_blocking=non_blocking).device)
+                    self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
 
     @staticmethod
     def _test_empty_full(self, dtypes, layout, device):

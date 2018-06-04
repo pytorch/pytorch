@@ -2003,15 +2003,20 @@ Here are the ways to call ``to``:
 
     Returns a Tensor with the specified :attr:`dtype`
 
-.. function:: to(device, dtype=None) -> Tensor
+.. function:: to(device=None, dtype=None, non_blocking=False) -> Tensor
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
+    When :attr:`non_blocking`, tries to convert asynchronously with respect to
+    the host if possible, e.g., converting a CPU Tensor with pinned memory to a
+    CUDA Tensor.
 
-.. function:: to(other) -> Tensor
+.. function:: to(other, non_blocking=False) -> Tensor
 
-    Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as the Tensor
-    :attr:`other`.
+    Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
+    the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
+    asynchronously with respect to the host if possible, e.g., converting a CPU
+    Tensor with pinned memory to a CUDA Tensor.
 
 Example::
 
@@ -2030,7 +2035,7 @@ Example::
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
 
     >>> other = torch.randn((), dtype=torch.float64, device=cuda0)
-    >>> tensor.to(other)
+    >>> tensor.to(other, non_blocking=True)
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
 
