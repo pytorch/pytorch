@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include <ATen/Error.h>
+#include <ATen/Backtrace.h>
 #include <ATen/ATenGeneral.h>
 
 namespace at {
