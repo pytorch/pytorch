@@ -924,6 +924,21 @@ class TestJit(TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
 
+    def test_index_put(self):
+        ten = torch.zeros(3, 3)
+        mask = torch.Tensor([[True, True, True],
+                             [True, False, False],
+                             [True, True, False]]).byte()
+
+        def test_fn(ten, mask):
+            ten[mask] = torch.ones(6)
+            return ten
+
+        traced_test_fn = torch.jit.trace(ten, mask)(test_fn)
+
+        ten = torch.rand(3, 3)
+        self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
+
 
 class TestScript(TestCase):
 
