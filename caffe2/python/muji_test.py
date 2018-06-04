@@ -59,6 +59,13 @@ class TestMuji(test_util.TestCase):
         else:
             print('Skipping allreduce with 4 gpus. Not peer access ready.')
 
+    def testAllreduceWithFourGPUsAndTwoGroups(self):
+        pattern = workspace.GetCudaPeerAccessPattern()
+        if pattern.shape[0] >= 4 and np.all(pattern[:2, :2]) and np.all(pattern[2:4, 2:4]):
+            self.RunningAllreduceWithGPUs([0, 1, 2, 3], muji.Allreduce4Group2)
+        else:
+            print('Skipping allreduce with 4 gpus and 2 groups. Not peer access ready.')
+
     def testAllreduceWithEightGPUs(self):
         pattern = workspace.GetCudaPeerAccessPattern()
         if (
@@ -69,3 +76,7 @@ class TestMuji(test_util.TestCase):
                 list(range(8)), muji.Allreduce8)
         else:
             print('Skipping allreduce with 8 gpus. Not peer access ready.')
+
+
+if __name__ == '__main__':
+    unittest.main()
