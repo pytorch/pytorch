@@ -8,13 +8,18 @@
 namespace caffe2 {
 
 template <typename T>
+inline __host__ __device__ T Square(const T& x) {
+  return x * x;
+}
+
+template <typename T>
 __global__ void
 TanGradientCUDAKernel(const int N, const T* dY, const T* X, T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
 #if __CUDA_ARCH__ >= 350
-    dX[i] = __ldg(dY + i) / cos(__ldg(X + i) * __ldg(X + i));
+    dX[i] = __ldg(dY + i) / Square(cos(__ldg(X + i)));
 #else
-    dX[i] = dY[i] / cos(X[i] * X[i]);
+    dX[i] = dY[i] / Square(cos(X[i]));
 #endif
   }
 }
