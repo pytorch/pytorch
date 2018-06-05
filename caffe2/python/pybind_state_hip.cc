@@ -5,8 +5,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "caffe2/core/common_miopen.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/common_miopen.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/operator_fallback_hip.h"
 
 namespace caffe2 {

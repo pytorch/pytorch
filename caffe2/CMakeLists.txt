@@ -251,8 +251,7 @@ if(BUILD_CAFFE2)
     HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
     set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
 
-    INCLUDE_DIRECTORIES(/opt/rocm/include /opt/rocm/hiprand/include /opt/rocm/rocrand/include /opt/rocm/miopen/include /data/Thrust/thrust/system/cuda/detail/cub-hip)
-    #LINK_DIRECTORIES(/opt/rocm/lib /opt/rocm/hiprand/lib /opt/rocm/rocrand/lib /opt/rocm/miopen/lib)
+    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS rocrand hiprand rocblas MIOpen)
     target_include_directories(
       caffe2_hip PUBLIC ${Caffe2_HIP_INCLUDES})
     target_include_directories(

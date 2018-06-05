@@ -445,7 +445,12 @@ if(BUILD_CAFFE2)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
+    set(Caffe2_HIP_GCC_COMPILE_FLAGS "-D__HIP_PLATFORM_HCC__=1")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Caffe2_HIP_GCC_COMPILE_FLAGS}")
+    INCLUDE_DIRECTORIES(/opt/rocm/include /opt/rocm/hiprand/include /opt/rocm/rocrand/include /opt/rocm/miopen/include /data/Thrust/thrust/system/cuda/detail/cub-hip)
+    LINK_DIRECTORIES(/opt/rocm/lib /opt/rocm/hiprand/lib /opt/rocm/rocrand/lib /opt/rocm/miopen/lib)
     set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
+    set(CMAKE_HIP_CREATE_SHARED_LIBRARY "${HIP_HIPCC_EXECUTABLE} <CMAKE_SHARED_LIBRARY_CXX_FLAGS> ${CMAKE_CXX_FLAGS} <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> <SONAME_FLAG><TARGET_SONAME> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>" )
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${Caffe2_HIP_INCLUDES} ${thrust_INCLUDE_DIRS})
     set(Caffe2_HIP_DEPENDENCY_LIBS
@@ -453,7 +458,7 @@ if(BUILD_CAFFE2)
 
     # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas)
+         rocrand hiprand rocblas MIOpen)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()

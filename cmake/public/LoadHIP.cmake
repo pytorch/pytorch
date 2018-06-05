@@ -123,5 +123,6 @@ IF(HIP_FOUND)
   set(hiprand_INCLUDE_DIRS ${ROCM_PATH}/include/hiprand PARENT_SCOPE)
   set(miopen_INCLUDE_DIRS ${ROCM_PATH}/include/miopen PARENT_SCOPE)
   set(rocblas_INCLUDE_DIRS ${ROCM_PATH}/include PARENT_SCOPE)
+  set(rocm_INCLUDE_DIRS ${ROCM_PATH}/include PARENT_SCOPE)
   
 ENDIF()

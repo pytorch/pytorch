@@ -8,7 +8,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 // This macro is here just to allow us to experiment with padding values that
 // determines, when we have an odd number of pads, which side gets the one
 // additional pad value, the head side, or the tail side. Setting it to false
