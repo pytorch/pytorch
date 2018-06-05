@@ -1,4 +1,4 @@
-## @package utils
+# @package utils
 # Module caffe2.python.utils
 from __future__ import absolute_import
 from __future__ import division
@@ -326,3 +326,35 @@ def debug(f):
         return DebugMode.run(func)
 
     return wrapper
+
+
+def BuildUniqueMutexIter(
+    init_net,
+    net,
+    iter="optimizer_iteration",
+    iter_mutex="iteration_mutex",
+    iter_val=0
+):
+    '''
+    Often, a mutex guarded iteration counter is needed. This function creates a
+    mutex iter in the net uniquely (if the iter already existing, it does
+    nothing)
+
+    This function returns the iter blob
+    '''
+    from caffe2.python import core
+    if not init_net.BlobIsDefined(iter):
+        # Add training operators.
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+            iteration = init_net.ConstantFill(
+                [],
+                iter,
+                shape=[1],
+                value=iter_val,
+                dtype=core.DataType.INT64,
+            )
+            iter_mutex = init_net.CreateMutex([], [iter_mutex])
+            net.AtomicIter([iter_mutex, iteration], [iteration])
+    else:
+        iteration = init_net.GetBlobRef
+    return iteration
