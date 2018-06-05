@@ -78,12 +78,29 @@ float_types_no_half = [
 ]
 
 
+dtype_lookup = {
+    'Double': torch.float64,
+    'Float': torch.float32,
+    'Half': torch.float16,
+    'Byte': torch.uint8,
+    'Char': torch.int8,
+    'Short': torch.int16,
+    'Int': torch.int32,
+    'Long': torch.int64
+}
+
+
 def number(floating, integer, t):
     name = type(t).__name__
     if 'Double' in name or 'Float' in name or 'Half' in name:
         return floating
     else:
         return integer
+
+
+def type_to_dtype(t):
+    name = t.__name__[:-6]  # Extract name
+    return dtype_lookup[name]
 
 S = 10
 M = 50
@@ -401,8 +418,10 @@ tests = [
     ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
-    ('__lshift__', lambda t: torch.pow(2, torch.arange(1., 5.)), lambda t: [2], None, [torch.FloatTensor]),
-    ('__rshift__', lambda t: torch.pow(2, torch.arange(4., 8.)), lambda t: [4], None, [torch.FloatTensor]),
+    ('__lshift__', lambda t: torch.pow(2, torch.arange(1, 5, dtype=type_to_dtype(t))),
+        lambda t: [2], None, signed_types),
+    ('__rshift__', lambda t: torch.pow(2, torch.arange(3, 7, dtype=type_to_dtype(t))),
+        lambda t: [2], None, signed_types),
     # lapack tests
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
