@@ -452,7 +452,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(BUILD_CAFFE2)
+if(BUILD_CAFFE2 OR BUILD_ATEN)
   include(cmake/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
