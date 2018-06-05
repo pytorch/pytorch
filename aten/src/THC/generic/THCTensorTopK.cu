@@ -110,9 +110,9 @@ THC_API void THCTensor_(topk)(THCState* state,
 
   // Based on required index size, run the algorithm with the
   // appropriate index type
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, input) &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, topK) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, indices)) {
+  if (THCTensor_canUse32BitIndexMath(state, input) &&
+      THCTensor_canUse32BitIndexMath(state, topK) &&
+      THCTensor_canUse32BitIndexMath(state, indices)) {
     RUN_T(uint32_t);
   } else {
     RUN_T(uint64_t);

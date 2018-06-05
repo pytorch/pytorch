@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "generic/BCECriterion.cu"
 #else
 
-#include "THCApply.cuh"
-
 void THNN_(BCECriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
