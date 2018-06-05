@@ -15,6 +15,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCUDA() const override;
   bool hasCuDNN() const override;
   cudaStream_t getCurrentCUDAStream(THCState*) const override;
+  cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device) const override;
   struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const override;
   struct cudaDeviceProp* getDeviceProperties(THCState*, int device) const override;
   int64_t current_device() const override;
