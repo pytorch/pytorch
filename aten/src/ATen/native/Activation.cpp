@@ -34,36 +34,36 @@ Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Genera
 }
 
 Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
-  auto lambd_tensor = at::zeros_like(self).fill_(lambd.toTensor());
-  auto out_tensor = self.clone();
+  auto lambd_tensor = lambd.toTensor().toType(self.type().scalarType()).toBackend(self.is_cuda() ? Backend::CUDA : Backend::CPU);
+  auto out_tensor = at::zeros_like(self);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_cpu", [&] {
+    scalar_t* lambd_tensor_d = lambd_tensor.data<scalar_t>();
     at::CPU_tensor_apply2<scalar_t, scalar_t>(
-        out_tensor,
-        lambd_tensor,
-        [](scalar_t& out_tensor_val,
-           scalar_t& lambd_tensor_val) {
-             if (out_tensor_val >= -lambd_tensor_val && out_tensor_val <= lambd_tensor_val) {
-               out_tensor_val = convert<scalar_t, double>(0.0);
-             }
+      self,
+      out_tensor,
+      [lambd_tensor_d](
+        scalar_t& self_val,
+        scalar_t& out_tensor_val) {
+          out_tensor_val = (self_val >= -*lambd_tensor_d && self_val <= *lambd_tensor_d) ? convert<scalar_t, double>(0.0) : self_val;
     });
   });
   return out_tensor;
 }
 
 Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
-  auto lambd_tensor = at::zeros_like(self).fill_(lambd);
-  auto out_tensor = grad.clone();
+  auto lambd_tensor = lambd.toTensor().toType(self.type().scalarType()).toBackend(self.is_cuda() ? Backend::CUDA : Backend::CPU);
+  auto out_tensor = at::zeros_like(self);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_backward_cpu", [&] {
+    scalar_t* lambd_tensor_d = lambd_tensor.data<scalar_t>();
     at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
-        out_tensor,
-        lambd_tensor,
-        self,
-        [](scalar_t& out_tensor_val,
-           scalar_t& lambd_tensor_val,
-           scalar_t& self_val) {
-             if (self_val >= -lambd_tensor_val && self_val <= lambd_tensor_val) {
-               out_tensor_val = convert<scalar_t, double>(0.0);
-             }
+      self,
+      grad,
+      out_tensor,
+      [lambd_tensor_d](
+        scalar_t& self_val,
+        scalar_t& grad_val,
+        scalar_t& out_tensor_val) {
+          out_tensor_val = (self_val >= -*lambd_tensor_d && self_val <= *lambd_tensor_d) ? convert<scalar_t, double>(0.0) : grad_val;
     });
   });
   return out_tensor;

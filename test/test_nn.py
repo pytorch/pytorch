@@ -5534,6 +5534,7 @@ def add_test(test, decorator=None):
     else:
         add(cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
+
 def wrap_functional(fn, **kwargs):
     class FunctionalModule(nn.Module):
         def forward(self, *args):
