@@ -35,7 +35,11 @@ __device__ __forceinline__ bool warp_has_collision(int val) {
   for (int i = 1; i <= 16; i++) {
     dup |= (WARP_SHFL(val, (laneId + i) % 32) == val);
   }
+#if CUDA_VERSION < 9000
   return __any(dup) != 0;
+#else
+  return __any_sync(dup) != 0;
+#endif
 }
 
 // parallelizes over features
