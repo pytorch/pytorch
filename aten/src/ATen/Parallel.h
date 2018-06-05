@@ -51,4 +51,35 @@ void parallel_for(
   }
 }
 
+template <class scalar_t, class F, class SF>
+inline scalar_t parallel_reduce(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    scalar_t ident,
+    F f,
+    SF sf) {
+  internal::init_tbb_num_threads();
+
+#ifdef __PPC64__
+  using default_partitioner_type = tbb::simple_partitioner;
+#else
+  using default_partitioner_type = tbb::affinity_partitioner;
+#endif
+
+  thread_local static default_partitioner_type ap;
+
+  if ((end - begin) < grain_size) {
+    return f(begin, end, ident);
+  }
+  return tbb::parallel_reduce(
+      tbb::blocked_range<int64_t>(begin, end, grain_size),
+      scalar_t(ident),
+      [f](const tbb::blocked_range<int64_t>& r, scalar_t init) {
+        return f(r.begin(), r.end(), init);
+      },
+      sf,
+      ap);
+}
+
 } // namespace at
