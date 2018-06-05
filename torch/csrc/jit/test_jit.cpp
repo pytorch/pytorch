@@ -34,7 +34,7 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
-#include "onnx/onnx.pb.h"
+#include "onnx/onnx_pb.h"
 
 
 #include <vector>
@@ -878,8 +878,9 @@ void testControlFlow() {
 }
 
 void testProto() {
-    onnx_c2::ModelProto proto;
-      proto.set_producer_name("foo");
+  onnx_c2::ModelProto proto;
+//  ::ONNX_NAMESPACE::ModelProto proto;
+  proto.set_producer_name("foo");
 }
 
 std::string runJITCPPTests() {

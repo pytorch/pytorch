@@ -330,6 +330,7 @@ class build_deps(PytorchCommand):
         check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
         check_file(os.path.join(third_party_path, 'catch', 'CMakeLists.txt'))
+        check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
 
         check_pydep('yaml', 'pyyaml')
         check_pydep('typing', 'typing')
@@ -619,12 +620,12 @@ else:
 
 include_dirs += [
     cwd,
-    os.path.join(cwd, "torch", "csrc"),
-    third_party_path + "/pybind11/include",
     tmp_install_path + "/include",
     tmp_install_path + "/include/TH",
     tmp_install_path + "/include/THNN",
     tmp_install_path + "/include/ATen",
+    third_party_path + "/pybind11/include",
+    os.path.join(cwd, "torch", "csrc"),
     "build/third_party",
 ]
 
