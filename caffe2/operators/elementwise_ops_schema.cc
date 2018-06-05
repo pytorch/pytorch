@@ -1,5 +1,6 @@
+#include "caffe2/operators/elementwise_ops.h"
+
 #include "caffe2/core/operator_gradient.h"
-#include "caffe2/operators/elementwise_op.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
@@ -56,6 +57,11 @@ OPERATOR_SCHEMA(Add)
     .IdenticalTypeAndShapeOfInput(0)
     .FillUsing(MathDocGenerator("addition"))
     .InheritOnnxSchema("Add");
+OPERATOR_SCHEMA(AddGradient)
+    .NumInputs(3)
+    .NumOutputs(2)
+    .AllowInplace({{0, 0}, {1, 0}});
+
 OPERATOR_SCHEMA(Sub)
     .NumInputs(2)
     .NumOutputs(1)
@@ -64,6 +70,11 @@ OPERATOR_SCHEMA(Sub)
     .IdenticalTypeAndShapeOfInput(0)
     .FillUsing(MathDocGenerator("subtraction"))
     .InheritOnnxSchema("Sub");
+OPERATOR_SCHEMA(SubGradient)
+    .NumInputs(3)
+    .NumOutputs(2)
+    .AllowInplace({{0, 0}, {1, 0}});
+
 OPERATOR_SCHEMA(Mul)
     .NumInputs(2)
     .NumOutputs(1)
@@ -72,6 +83,11 @@ OPERATOR_SCHEMA(Mul)
     .IdenticalTypeAndShapeOfInput(0)
     .FillUsing(MathDocGenerator("multiplication"))
     .InheritOnnxSchema("Mul");
+OPERATOR_SCHEMA(MulGradient)
+    .NumInputs(3)
+    .NumOutputs(2)
+    .AllowInplace({{0, 0}, {1, 0}});
+
 OPERATOR_SCHEMA(Div)
     .NumInputs(2)
     .NumOutputs(1)
@@ -80,7 +96,7 @@ OPERATOR_SCHEMA(Div)
     .IdenticalTypeAndShapeOfInput(0)
     .FillUsing(MathDocGenerator("division"))
     .InheritOnnxSchema("Div");
-OPERATOR_SCHEMA(DivGradient).NumInputs(3).NumOutputs(2).AllowInplace({{0, 0}});
+OPERATOR_SCHEMA(DivGradient).NumInputs(4).NumOutputs(2).AllowInplace({{0, 0}});
 
 OPERATOR_SCHEMA(SumReduceLike)
     .NumInputs(2)
@@ -119,159 +135,6 @@ For example, the following tensor shapes are supported:
         "Second operand. With broadcasting can be of smaller size than A. "
         "If broadcasting is disabled it should be of the same size.")
     .Output(0, "C", "Result, has same dimensions and type as B");
-
-class GetAddGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    if (!ArgumentHelper::HasArgument(Def(), "broadcast")) {
-      SetDense(0, GO(0));
-      SetDense(1, GO(0));
-      return vector<OperatorDef>();
-    }
-    SetDense(0, GO(0));
-
-    return SingleGradientDef(
-        "SumReduceLike",
-        "",
-        vector<string>{GO(0), I(1)},
-        vector<string>{GI(1)});
-  }
-};
-REGISTER_GRADIENT(Add, GetAddGradient);
-
-// TODO(jiayq): Although we have Sub gradient implemented, we are still missing
-// the Negative unary operator to be implemented.
-class GetSubGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    if (!ArgumentHelper::HasArgument(Def(), "broadcast")) {
-      SetDense(0, GO(0));
-      return SingleGradientDef(
-          "Negative", "", vector<string>{GO(0)}, vector<string>{GI(1)});
-    } else {
-      SetDense(0, GO(0));
-      vector<OperatorDef> grad_ops;
-      grad_ops.push_back(CreateOperatorDef(
-          "Negative",
-          "",
-          vector<string>{GO(0)},
-          vector<string>{GI(1) + "_autogen_pre_red"}));
-
-      Argument axis, axis_str, order;
-      if (ArgumentHelper::HasArgument(Def(), "axis")) {
-        axis = GetArgument(Def(), "axis");
-      } else {
-        axis = MakeArgument<int>("axis", -1);
-      }
-      if (ArgumentHelper::HasArgument(Def(), "axis_str")) {
-        axis_str = GetArgument(Def(), "axis_str");
-      } else {
-        axis_str = MakeArgument<string>("axis_str", "");
-      }
-      if (ArgumentHelper::HasArgument(Def(), "order")) {
-        order = GetArgument(Def(), "order");
-      } else {
-        order = MakeArgument<string>("order", "NCHW");
-      }
-      grad_ops.push_back(CreateOperatorDef(
-          "SumReduceLike",
-          "",
-          vector<string>{GI(1) + "_autogen_pre_red", I(1)},
-          vector<string>{GI(1)},
-          vector<Argument>{axis, axis_str, order}));
-
-      return grad_ops;
-    }
-  }
-  // Make sure the broadcast argument is not copied over.
-  bool CopyArguments() const override {
-    return false;
-  }
-};
-REGISTER_GRADIENT(Sub, GetSubGradient);
-
-class GetMulGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    CAFFE_ENFORCE(
-        Def().input(0) != Def().output(0) && Def().input(1) != Def().output(0),
-        "Gradient computation cannot be carried out if Mul uses in-place "
-        "computation: ",
-        ProtoDebugString(Def()));
-    if (!ArgumentHelper::HasArgument(Def(), "broadcast")) {
-      return vector<OperatorDef>{
-          CreateOperatorDef(
-              "Mul", "", vector<string>{GO(0), I(1)}, vector<string>{GI(0)}),
-          CreateOperatorDef(
-              "Mul", "", vector<string>{GO(0), I(0)}, vector<string>{GI(1)})};
-    } else {
-      Argument broadcast, axis, axis_str, order;
-      if (ArgumentHelper::HasArgument(Def(), "broadcast")) {
-        broadcast = GetArgument(Def(), "broadcast");
-      } else {
-        broadcast = MakeArgument<int>("broadcast", 0);
-      }
-      if (ArgumentHelper::HasArgument(Def(), "axis")) {
-        axis = GetArgument(Def(), "axis");
-      } else {
-        axis = MakeArgument<int>("axis", -1);
-      }
-      if (ArgumentHelper::HasArgument(Def(), "axis_str")) {
-        axis_str = GetArgument(Def(), "axis_str");
-      } else {
-        axis_str = MakeArgument<string>("axis_str", "");
-      }
-      if (ArgumentHelper::HasArgument(Def(), "order")) {
-        order = GetArgument(Def(), "order");
-      } else {
-        order = MakeArgument<string>("order", "NCHW");
-      }
-
-      vector<OperatorDef> grad_ops;
-      grad_ops.push_back(CreateOperatorDef(
-          "Mul",
-          "mul_grad_1st_op",
-          vector<string>{GO(0), I(1)},
-          vector<string>{GI(0)},
-          vector<Argument>{broadcast, axis, axis_str, order}));
-      grad_ops.push_back(CreateOperatorDef(
-          "Mul",
-          "mul_gradient_2nd_op",
-          vector<string>{GO(0), I(0)},
-          vector<string>{GI(1) + "_autogen_pre_red"}));
-
-      grad_ops.push_back(CreateOperatorDef(
-          "SumReduceLike",
-          "mul_with_broadcast_grad_3",
-          vector<string>{GI(1) + "_autogen_pre_red", I(1)},
-          vector<string>{GI(1)},
-          vector<Argument>{axis, axis_str, order}));
-
-      return grad_ops;
-    }
-  }
-
-  // Make sure the broadcast argument is not copied over.
-  bool CopyArguments() const override {
-    return false;
-  }
-};
-REGISTER_GRADIENT(Mul, GetMulGradient);
-
-class GetDivGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    CAFFE_ENFORCE(
-        !ArgumentHelper::HasArgument(Def(), "broadcast"),
-        "Gradient not ready yet for Div with broadcasting.");
-    return SingleGradientDef(
-        "DivGradient",
-        "",
-        vector<string>{I(1), O(0), GO(0)},
-        vector<string>{GI(0), GI(1)});
-  }
-};
-REGISTER_GRADIENT(Div, GetDivGradient);
 
 std::function<void(OpSchema&)> ComparisonDocGenerator(
     const char* name,
@@ -324,11 +187,12 @@ Performs element-wise {desc} comparison `{name}` (with limited broadcast support
       .FillUsing(ComparisonDocGenerator(symbol, desc));                        \
   SHOULD_NOT_DO_GRADIENT(name)
 
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(EQ, "==", "equal to");
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(NE, "!=", "not equal to");
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LT, "<", "less than");
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LE, "<=", "less or equal than");
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GT, ">", "greater than");
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GE, ">=", "greater or equal than");
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(EQ, "==", "equality");
 
 std::function<void(OpSchema&)> LogicalDocGenerator(const char* name) {
   return [=](OpSchema& schema) {
@@ -354,17 +218,56 @@ Both input operands should be of type `bool`.
 }
 
 #define CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(name, symbol, onnx_schema) \
-  OPERATOR_SCHEMA(name)                                   \
-      .NumInputs(2)                                       \
-      .NumOutputs(1)                                      \
-      .AllowInplace({{0, 0}})                             \
-      .FillUsing(LogicalDocGenerator(symbol))             \
-      .InheritOnnxSchema(onnx_schema);                    \
+  OPERATOR_SCHEMA(name)                                                \
+      .NumInputs(2)                                                    \
+      .NumOutputs(1)                                                   \
+      .AllowInplace({{0, 0}})                                          \
+      .FillUsing(LogicalDocGenerator(symbol))                          \
+      .InheritOnnxSchema(onnx_schema);                                 \
   SHOULD_NOT_DO_GRADIENT(name)
 
 CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Or, "or", "Or");
 CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(And, "and", "And");
 CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Xor, "xor", "Xor");
+
+#undef CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP
+
+std::function<void(OpSchema&)> BitwiseDocGenerator(const char* name) {
+  return [=](OpSchema& schema) {
+    string doc = R"DOC(
+Performs element-wise bitwise operation `{name}` (with limited broadcast support).
+Both input operands should be of type `bool`.
+{broadcast_doc})DOC";
+    ReplaceAll(doc, "{name}", name);
+    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    schema.SetDoc(doc);
+    schema.Arg("broadcast", "Pass 1 to enable broadcasting");
+    schema.Arg(
+        "axis",
+        "If set, defines the broadcast dimensions. See doc for details.");
+    schema.Input(0, "A", "First operand.");
+    schema.Input(
+        1,
+        "B",
+        "Second operand. With broadcasting can be of smaller size than A. "
+        "If broadcasting is disabled it should be of the same size.");
+    schema.Output(0, "C", "Result, has same dimensions and type with A.");
+  };
+}
+
+#define CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(name, symbol) \
+  OPERATOR_SCHEMA(name)                                   \
+      .NumInputs(2)                                       \
+      .NumOutputs(1)                                      \
+      .AllowInplace({{0, 0}})                             \
+      .FillUsing(LogicalDocGenerator(symbol));            \
+  SHOULD_NOT_DO_GRADIENT(name)
+
+CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(BitwiseOr, "bitwise_or");
+CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(BitwiseAnd, "bitwise_and");
+CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(BitwiseXor, "bitwise_xor");
+
+#undef CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP
 
 OPERATOR_SCHEMA(Not)
     .NumInputs(1)
@@ -374,5 +277,13 @@ OPERATOR_SCHEMA(Not)
     .Output(0, "Y", "Output tensor of type `bool`.")
     .InheritOnnxSchema("Not");
 SHOULD_NOT_DO_GRADIENT(Not);
+
+OPERATOR_SCHEMA(Sign)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(Performs element-wise sign.)DOC")
+    .Input(0, "X", "Input tensor.")
+    .Output(0, "Y", "Output tensor.");
+SHOULD_NOT_DO_GRADIENT(Sign);
 
 } // namespace caffe2
