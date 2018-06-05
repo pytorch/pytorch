@@ -6,8 +6,14 @@
 
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
-#include "ATen/optional.h"
 #include "ATen/cpu/vec256/vec256.h"
+#include "ATen/optional.h"
+
+#ifdef __PPC64__
+using default_partitioner_type = tbb::simple_partitioner;
+#else
+using default_partitioner_type = tbb::affinity_partitioner;
+#endif
 
 namespace at { namespace native { namespace {
 
