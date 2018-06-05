@@ -273,6 +273,7 @@ ELSE (MKL_LIBRARIES)
   SET(MKL_VERSION)
 ENDIF (MKL_LIBRARIES)
 
+set(MKL_FIND_REQUIRED Off)
 # Standard termination
 IF(NOT MKL_FOUND AND MKL_FIND_REQUIRED)
   MESSAGE(FATAL_ERROR "MKL library not found. Please specify library location")

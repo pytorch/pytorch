@@ -171,7 +171,7 @@ def gen_jit_dispatch(declarations, out):
             # the first argument, that is then followed by a number of positional args.
             if arg['simple_type'] == 'TensorList':
                 kw_assignments.append('size_t _Arg_idx_{} = _Arg_idx;'.format(i))
-                kw_assignments.append('_Arg_idx += {};'.format(num_dynamic_inputs))
+                kw_assignments.append('_Arg_idx += varargs_length - {};'.format(static_inputs))
                 arguments.append(
                     'peekSlice(stack, _Arg_idx_{}, varargs_length - {}, varargs_length)'.format(i, static_inputs))
             elif arg['simple_type'] in default_only_types:

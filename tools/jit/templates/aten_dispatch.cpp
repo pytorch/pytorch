@@ -80,6 +80,7 @@ std::unordered_set<Symbol> tensor_vararg_fns = {
   aten::cat,
   aten::stack,
   aten::index,
+  aten::index_put,
 };
 
 template<size_t N>
