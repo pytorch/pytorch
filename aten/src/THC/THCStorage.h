@@ -9,7 +9,4 @@
 #include "generic/THCStorage.h"
 #include "THCGenerateAllTypes.h"
 
-// This exists to have a data-type independent way of freeing (necessary for THPPointer).
-THC_API void THCStorage_free(THCState *state, THCStorage *self);
-
 #endif

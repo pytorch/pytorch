@@ -89,6 +89,18 @@ static inline const char * toString(ScalarType t) {
 #undef DEFINE_CASE
 }
 
+static inline size_t elementSize(ScalarType t) {
+#define CASE_ELEMENTSIZE_CASE(ctype,name,_2) \
+  case ScalarType:: name : return sizeof(ctype);
+
+  switch(t) {
+    AT_FORALL_SCALAR_TYPES(CASE_ELEMENTSIZE_CASE)
+    default:
+      AT_ERROR("Unknown ScalarType");
+  }
+#undef CASE_ELEMENTSIZE_CASE
+}
+
 static inline bool isIntegralType(ScalarType t) {
   return (t == ScalarType::Byte ||
           t == ScalarType::Char ||
