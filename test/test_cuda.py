@@ -401,6 +401,8 @@ tests = [
     ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
+    ('__lshift__', lambda t: torch.pow(2, torch.arange(1., 5.)), lambda t: [2], None, [torch.FloatTensor]),
+    ('__rshift__', lambda t: torch.pow(2, torch.arange(4., 8.)), lambda t: [4], None, [torch.FloatTensor]),
     # lapack tests
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
@@ -480,6 +482,8 @@ custom_half_precision = {
     'tanh': 1e-3,
     'trace': 1e-3,
     'var': 1e-3,
+    '__lshift__': 1e-3,
+    '__rshift__': 1e-3,
 }
 
 simple_pointwise = [
