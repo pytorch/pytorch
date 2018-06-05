@@ -53,7 +53,7 @@ for root, _directories, files in os.walk(os.path.join(out_dir, "torch")):
             if reduce(lambda result, exclude: source.endswith(exclude) or result, ignore_files, False):
                 continue
             # Update contents.
-            with open(source, "r+", encoding="utf-8") as f:
+            with open(source, "r+") as f:
                 contents = f.read()
                 contents = contents.replace("WITH_CUDA", "WITH_ROCM")
                 contents = contents.replace("CUDA_VERSION", "0")
