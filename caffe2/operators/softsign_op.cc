@@ -1,40 +1,49 @@
-#include "caffe2/operators/elementwise_op.h"
-#include "caffe2/utils/math.h"
+#include "caffe2/operators/softsign_op.h"
+
+#include <algorithm>
+#include <functional>
 
 namespace caffe2 {
 
-struct SoftsignCPUFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CPUContext* /*device_context*/) {
-    ConstEigenVectorArrayMap<T> x_arr(x, n);
-    EigenVectorMap<T>(y, n) = (1 + x_arr.abs()).inverse() * x_arr;
-  }
-};
+template <>
+template <typename T>
+bool SoftsignFunctor<CPUContext>::
+operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
+  ConstEigenVectorArrayMap<T> X_arr(X, N);
+  EigenVectorMap<T>(Y, N) = (T(1) + X_arr.abs()).inverse() * X_arr;
+  return true;
+}
 
-struct SoftsignGradientCPUFunctor {
-  template <typename T>
-  inline void Run(
-      const int n,
-      const T* x,
-      const T* dy,
-      T* dx,
-      CPUContext* /*device_context*/) {
-    ConstEigenVectorArrayMap<T> dy_arr(dy, n);
-    ConstEigenVectorArrayMap<T> x_arr(x, n);
-    EigenVectorMap<T>(dx, n) = dy_arr * (1 + x_arr.abs()).pow(2).inverse();
-  }
-};
+template <>
+template <typename T>
+bool SoftsignGradientFunctor<CPUContext>::Forward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& /* X_dims */,
+    const T* dY,
+    const T* X,
+    T* dX,
+    CPUContext* /* context */) const {
+  const int size = std::accumulate(
+      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+  ConstEigenVectorArrayMap<T> dY_arr(dY, size);
+  ConstEigenVectorArrayMap<T> X_arr(X, size);
+  EigenVectorMap<T>(dX, size) =
+      dY_arr * (T(1) + X_arr.abs()).square().inverse();
+  return true;
+}
 
 REGISTER_CPU_OPERATOR(
     Softsign,
-    UnaryElementwiseOp<TensorTypes<float>, CPUContext, SoftsignCPUFunctor>);
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        SoftsignFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(
     SoftsignGradient,
     BinaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
-        WithoutBroadcast<SoftsignGradientCPUFunctor>>);
+        SoftsignGradientFunctor<CPUContext>>);
 
 OPERATOR_SCHEMA(Softsign)
     .NumInputs(1)
@@ -100,7 +109,7 @@ Y:
 OPERATOR_SCHEMA(SoftsignGradient)
     .NumInputs(2)
     .NumOutputs(1)
-    .AllowInplace({{1, 0}})
+    .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
 Calculates the softsign gradient (sgn(x)/(1+|x|)^2) of the given input tensor
 element-wise.
@@ -113,9 +122,11 @@ element-wise.
         "The softsign gradient (sgn(x)/(1+|x|)^2) values of the input tensor "
         "computed element-wise");
 
+namespace {
+
 class GetSoftsignGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+  std::vector<OperatorDef> GetGradientDefs() override {
     CAFFE_ENFORCE(
         I(0) != O(0),
         "Cannot compute softsign gradient "
@@ -124,10 +135,12 @@ class GetSoftsignGradient : public GradientMakerBase {
     return SingleGradientDef(
         "SoftsignGradient",
         "",
-        vector<string>{I(0), GO(0)},
-        vector<string>{GI(0)});
+        std::vector<std::string>{GO(0), I(0)},
+        std::vector<std::string>{GI(0)});
   }
 };
+
+} // namespace
 
 REGISTER_GRADIENT(Softsign, GetSoftsignGradient);
 
