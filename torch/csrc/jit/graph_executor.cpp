@@ -350,6 +350,7 @@ private:
       // do not work on variables
 
       // They also may assume that concrete sizes/strides are availiable
+      UnrollLoops(graph);
 
       //TODO: create peephole optimizations that are safe to run
       // when we are using variables, and when we do not know sizes.
@@ -358,7 +359,6 @@ private:
       // it works fine on variables.
       BatchMM(graph);
       FuseGraph(graph);
-      UnrollLoops(graph);
     }
   }
   // we need to run some passes to ensure the graph will run correctly

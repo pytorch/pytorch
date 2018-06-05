@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 namespace torch { namespace jit {
@@ -13,11 +14,8 @@ static constexpr int64_t kMaxBodySize = 16;
 static constexpr int64_t kMaxBodyRepeats = 64;
 
 bool isTrueConstant(Value *val) {
-  Node *producer = val->node();
-  if (producer->kind() != prim::Constant)
-    return false;
-  auto value = producer->t(attr::value);
-  return value.type() == at::CPU(at::kByte) && value.dim() == 0 && value.toCLong() == 1;
+  at::optional<bool> maybe_value = constant_as<bool>(val);
+  return maybe_value && *maybe_value;
 }
 
 bool isForLoop(Node* node) {
@@ -28,12 +26,13 @@ bool isForLoop(Node* node) {
   return isTrueConstant(start_cond) && isTrueConstant(continue_cond);
 }
 
+// Counts the size of this block, stopping and returning once reaches limit instructions.
 int64_t limitedBlockSize(Block *body, int64_t limit) {
   auto it = body->nodes().begin();
   auto end = body->nodes().end();
   for (int64_t i = 0; i < limit; ++i, ++it) {
     for (Block *subblock : it->blocks()) {
-      i += limitedBlockSize(subblock, limit);
+      i += limitedBlockSize(subblock, limit - i);
     }
     if (it == end) {
       return i;
@@ -44,13 +43,6 @@ int64_t limitedBlockSize(Block *body, int64_t limit) {
 
 bool isSmallBlock(Block *body) {
   return limitedBlockSize(body, kMaxBodySize + 1) <= kMaxBodySize;
-}
-
-at::optional<int64_t> getConstantLength(Node *loop) {
-  Value *trip_count = loop->inputs().at(0);
-  if (trip_count->node()->kind() != prim::Constant)
-    return at::nullopt;
-  return {trip_count->node()->t(attr::value).toCLong()};
 }
 
 // XXX: This function can only be called with a loop that is guaranteed to execute EXACTLY ONCE.
@@ -89,11 +81,13 @@ void inlineBody(Node *loop) {
 
 void repeatBody(Block *body, int64_t times) {
   // We will be adding nodes to the body, so cache the initial start and end.
-  // XXX: they are both inclusive
+  // XXX: they are both inclusive, because the exclusive body_end would point to
+  //      return_node, which would move further away if we were to add nodes, and we
+  //      would enter an infinite loop.
   auto body_start = body->nodes().begin();
   auto body_end = std::prev(body->nodes().end());
   auto graph = body->owningGraph();
-  WithInsertPoint insert_point_guard { body->return_node() };
+  WithInsertPoint insert_point_guard { body };
 
   std::unordered_map<Value*, Value*> value_map;
   auto get_value = [&](Value *v) {
@@ -123,12 +117,12 @@ void repeatBody(Block *body, int64_t times) {
   }
 
   // Update outputs of the body
-  const std::vector<Value*> orig_outputs = body->outputs();
-  for (int64_t i = orig_outputs.size() - 1; i >= 0; --i) {
+  const std::vector<Value*> new_outputs = fmap(body->outputs(), get_value);
+  for (int64_t i = new_outputs.size() - 1; i >= 0; --i) {
     body->eraseOutput(i);
   }
-  for (Value *output : orig_outputs) {
-    body->registerOutput(get_value(output));
+  for (Value *output : new_outputs) {
+    body->registerOutput(output);
   }
 
   // It's likely that we have some dead nodes now - for example the "true" constant
@@ -168,7 +162,8 @@ void unroll(Node *loop) {
 
   // Some optimization for constant-length loops. If we know they won't run too many
   // times, then we can unroll them entirely.
-  int64_t const_len = getConstantLength(loop).value_or(-1);
+  Value *trip_count = loop->inputs().at(0);
+  int64_t const_len = constant_as<int64_t>(trip_count).value_or(-1);
   if (const_len != -1 && const_len < kMaxBodyRepeats) {
     repeatBody(body, const_len);
     inlineBody(loop);
