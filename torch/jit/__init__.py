@@ -533,13 +533,13 @@ class ScriptMeta(type(torch._C.ScriptModule)):
     # a pybind11 type
     def __init__(cls, name, bases, attrs):
         # find all the script methods
-        cls.original_methods = {}
+        cls.__original_methods = {}
         methods = []
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
                 delattr(cls, k)
                 methods.append(v)
-                cls.original_methods[v.original_method.__name__] = v.original_method
+                cls.__original_methods[v.original_method.__name__] = v.original_method
         # after the user's __init__ register all the script methods
         # with the module
         original_init = getattr(cls, '__init__', lambda self: None)
@@ -572,8 +572,8 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
 
     def __getattr__(self, attr):
         if self._has_method(attr):
-            if attr in self.__class__.original_methods:
-                original_method = self.__class__.original_methods[attr]
+            if attr in self.__class__.__original_methods:
+                original_method = self.__class__.__original_methods[attr]
                 script_method = self._get_method(attr)
                 return functools.wraps(original_method)(script_method)
             else:
