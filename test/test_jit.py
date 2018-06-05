@@ -1604,6 +1604,26 @@ class TestScript(TestCase):
         slope = torch.tensor([0.5])
         self.checkScript(fn, [x, slope], optimize=True)
 
+    def test_script_docstring(self):
+        @torch.jit.script
+        def with_docstring(x):
+            """test str"""
+            y = x
+            """y is the same as x"""
+            return y
+        self.assertEqual(with_docstring.__doc__, 'test str')
+
+    def test_script_method_docstring(self):
+        class A(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def with_docstring(self, x):
+                """test str"""
+                y = x
+                """y is the same as x"""
+                return y
+        a = A()
+        self.assertEqual(a.with_docstring.__doc__, 'test str')
+
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
             def __init__(self):
