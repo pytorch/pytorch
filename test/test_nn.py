@@ -2944,7 +2944,7 @@ class TestNN(NNTestCase):
         self.assertNotIn('buf', l.__dict__)  # should be stored in l._buffers
         l.buf = buf
         self.assertIn('buf', l.state_dict())
-        self.assertIs(l.state_dict()['buf'], buf)
+        self.assertEqual(l.state_dict()['buf'], buf)
 
     def test_Conv2d_inconsistent_types(self):
         inputs = Variable(torch.randn(4, 1, 7, 7).float())

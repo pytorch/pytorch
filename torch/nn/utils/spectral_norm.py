@@ -54,7 +54,12 @@ class SpectralNorm(object):
         u = normalize(weight.new_empty(height).normal_(0, 1), dim=0, eps=fn.eps)
         delattr(module, fn.name)
         module.register_parameter(fn.name + "_org", weight)
-        module.register_buffer(fn.name, weight)
+        # We still need to assign weight back as fn.name because all sorts of
+        # things may assume that it exists, e.g., nn.init. However, we can't
+        # directly assign as it could be an nn.Parameter and gets added as a
+        # parameter. Instead, we assign weight.data, which will just be added
+        # as plain attribute, and also supports nn.init due to shared storage.
+        setattr(module, fn.name, weight.data)
         module.register_buffer(fn.name + "_u", u)
 
         module.register_forward_pre_hook(fn)
