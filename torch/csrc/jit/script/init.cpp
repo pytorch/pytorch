@@ -4,6 +4,14 @@
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/python_tracer.h"
 
+#include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -416,7 +424,7 @@ void initJitScriptBindings(PyObject* module) {
         return bool(self.find_method(name));
       })
       .def("_method_names", [](Module& self) {
-        using Item = detail::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
+        using Item = torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
         return fmap(self.get_methods(), [](const Item & item) {
           return (*item)->name();
         });
