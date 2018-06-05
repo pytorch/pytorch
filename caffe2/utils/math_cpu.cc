@@ -1137,10 +1137,10 @@ DEFINE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(Mul, *)
   }                                                         \
   DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(T, Sub, -)
 
-DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(float);
-DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(double);
-DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(std::int32_t);
-DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(std::int64_t);
+DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(float)
+DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(double)
+DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(std::int32_t)
+DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(std::int64_t)
 
 #undef DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION
 
@@ -1171,8 +1171,10 @@ DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(std::int64_t);
   }                                                                \
   DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(T, Div, /)
 
-DEFINE_EIGEN_2D_BROADCAST_DIV_FUNCTION(float);
-DEFINE_EIGEN_2D_BROADCAST_DIV_FUNCTION(double);
+DEFINE_EIGEN_2D_BROADCAST_DIV_FUNCTION(float)
+DEFINE_EIGEN_2D_BROADCAST_DIV_FUNCTION(double)
+DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(std::int32_t, Div, /)
+DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(std::int64_t, Div, /)
 
 #undef DEFINE_EIGEN_2D_BROADCAST_DIV_FUNCTION
 
@@ -1435,6 +1437,33 @@ DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DELEGATE_2D_BROADCAST_BINARY_FUNCTION
 
+#define DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(T)   \
+  template <>                                     \
+  void RowwiseDiv<T, CPUContext, true>(           \
+      const int rows,                             \
+      const int cols,                             \
+      const T* A,                                 \
+      const T* B,                                 \
+      T* C,                                       \
+      CPUContext*) {                              \
+    RowwiseBinaryOp<T, T, std::divides<T>, true>( \
+        rows, cols, std::divides<T>(), A, B, C);  \
+  }                                               \
+  template <>                                     \
+  void ColwiseDiv<T, CPUContext, true>(           \
+      const int rows,                             \
+      const int cols,                             \
+      const T* A,                                 \
+      const T* B,                                 \
+      T* C,                                       \
+      CPUContext*) {                              \
+    ColwiseBinaryOp<T, T, std::divides<T>, true>( \
+        rows, cols, std::divides<T>(), A, B, C);  \
+  }
+DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int32_t)
+DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int64_t)
+#undef DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION
+
 #define DELEGATE_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op) \
   template <>                                                   \
   void Func<TIn, CPUContext>(                                   \
@@ -1543,11 +1572,9 @@ DEFINE_BROADCAST_COMPARE_FUNCTION(GE, std::greater_equal)
 DEFINE_BROADCAST_BINARY_FUNCTION(Add, std::plus)
 DEFINE_BROADCAST_BINARY_FUNCTION(Sub, std::minus)
 DEFINE_BROADCAST_BINARY_FUNCTION(Mul, std::multiplies)
+DEFINE_BROADCAST_BINARY_FUNCTION(Div, std::divides)
 
 #undef DEFINE_BROADCAST_BINARY_FUNCTION
-
-DELEGATE_BROADCAST_BINARY_FUNCTION(float, float, Div, std::divides);
-DELEGATE_BROADCAST_BINARY_FUNCTION(double, double, Div, std::divides);
 
 DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, And, std::logical_and)
 DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Or, std::logical_or)

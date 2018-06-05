@@ -91,11 +91,11 @@ bool DivFunctor<CPUContext>::Backward(
 
 REGISTER_CPU_OPERATOR(
     Div,
-    BinaryElementwiseOp<FloatTypes, CPUContext, DivFunctor<CPUContext>>);
+    BinaryElementwiseOp<NumericTypes, CPUContext, DivFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(
     DivGradient,
     BinaryElementwiseGradientOp<
-        FloatTypes,
+        NumericTypes,
         CPUContext,
         DivFunctor<CPUContext>>);
 

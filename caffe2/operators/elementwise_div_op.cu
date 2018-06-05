@@ -305,11 +305,11 @@ bool DivFunctor<CUDAContext>::Backward(
 
 REGISTER_CUDA_OPERATOR(
     Div,
-    BinaryElementwiseOp<FloatTypes, CUDAContext, DivFunctor<CUDAContext>>);
+    BinaryElementwiseOp<NumericTypes, CUDAContext, DivFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     DivGradient,
     BinaryElementwiseGradientOp<
-        FloatTypes,
+        NumericTypes,
         CUDAContext,
         DivFunctor<CUDAContext>>);
 
