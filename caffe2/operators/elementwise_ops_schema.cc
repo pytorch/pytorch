@@ -57,7 +57,7 @@ OPERATOR_SCHEMA(Add)
     .IdenticalTypeAndShapeOfInput(0)
     .FillUsing(MathDocGenerator("addition"))
     .InheritOnnxSchema("Add");
-OPERATOR_SCHEMA(AddGradient).NumInputs(4).NumOutputs(2);
+OPERATOR_SCHEMA(AddGradient).NumInputs(3).NumOutputs(2);
 
 OPERATOR_SCHEMA(Sub)
     .NumInputs(2)
@@ -67,7 +67,7 @@ OPERATOR_SCHEMA(Sub)
     .IdenticalTypeAndShapeOfInput(0)
     .FillUsing(MathDocGenerator("subtraction"))
     .InheritOnnxSchema("Sub");
-OPERATOR_SCHEMA(SubGradient).NumInputs(4).NumOutputs(2);
+OPERATOR_SCHEMA(SubGradient).NumInputs(3).NumOutputs(2);
 
 OPERATOR_SCHEMA(Mul)
     .NumInputs(2)
@@ -77,7 +77,7 @@ OPERATOR_SCHEMA(Mul)
     .IdenticalTypeAndShapeOfInput(0)
     .FillUsing(MathDocGenerator("multiplication"))
     .InheritOnnxSchema("Mul");
-OPERATOR_SCHEMA(MulGradient).NumInputs(4).NumOutputs(2);
+OPERATOR_SCHEMA(MulGradient).NumInputs(3).NumOutputs(2);
 
 OPERATOR_SCHEMA(Div)
     .NumInputs(2)

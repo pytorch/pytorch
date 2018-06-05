@@ -21,7 +21,7 @@ class GetSubGradient final : public GradientMakerBase {
     return SingleGradientDef(
         "SubGradient",
         "",
-        std::vector<std::string>{GO(0), I(0), I(1), O(0)},
+        std::vector<std::string>{GO(0), I(0), I(1)},
         std::vector<std::string>{GI(0), GI(1)});
   }
 };

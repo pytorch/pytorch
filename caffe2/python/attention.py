@@ -77,16 +77,15 @@ def _calc_attention_logits_from_sum_match(
     scope,
 ):
     # [encoder_length, batch_size, encoder_output_dim]
-    decoder_hidden_encoder_outputs_sum_tanh = model.net.Tanh(
+    decoder_hidden_encoder_outputs_sum = model.net.Tanh(
         decoder_hidden_encoder_outputs_sum,
-        s(scope, 'decoder_hidden_encoder_outputs_sum_tanh'),
-        # decoder_hidden_encoder_outputs_sum,
+        decoder_hidden_encoder_outputs_sum,
     )
 
     # [encoder_length, batch_size, 1]
     attention_logits = brew.fc(
         model,
-        decoder_hidden_encoder_outputs_sum_tanh,
+        decoder_hidden_encoder_outputs_sum,
         s(scope, 'attention_logits'),
         dim_in=encoder_output_dim,
         dim_out=1,

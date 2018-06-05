@@ -304,7 +304,6 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
     const auto& dC = Input(0);
     const auto& A = Input(1);
     const auto& B = Input(2);
-    const auto& C = Input(3);
     auto* dA = Output(0);
     auto* dB = Output(1);
     vector<int> A_dims;
@@ -324,8 +323,11 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
       std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
       std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
     }
-    const auto* C_data =
-        C.template data<typename OutputTypeMap::template type<T>>();
+    const typename OutputTypeMap::template type<T>* C_data = nullptr;
+    if (InputSize() == 4) {
+      const auto& C = Input(3);
+      C_data = C.template data<typename OutputTypeMap::template type<T>>();
+    }
     const auto* dC_data =
         dC.template data<typename GradientTypeMap::template type<T>>();
     const T* A_data = A.template data<T>();
