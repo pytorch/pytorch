@@ -1133,7 +1133,7 @@ class TestScript(TestCase):
         out = func(x, y)
         self.assertEqual(func(x, y), x + y)
 
-        grad = torch.randn(2, 3)
+        grad = torch.randn(2, 3, dtype=torch.float)
         out.backward(grad)
         self.assertEqual(x.grad, grad)
         self.assertEqual(y.grad, grad.sum(dim=0))

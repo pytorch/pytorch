@@ -158,7 +158,7 @@ std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
     fn->stride = strides();
     fn->storage_offset = data_.storage_offset();
     fn->set_next_edges(collect_next_edges(base_));
-    fn->set_num_inputs(1);
+    fn->bump_inputs(base_.type(), sizes());
     grad_fn_ = std::move(fn);
     attr_version = current_version;
   }

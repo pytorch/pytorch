@@ -75,7 +75,7 @@ class TestAutograd(TestCase):
         x = torch.randn(5, 5, requires_grad=True)
         y = torch.randn(5, 5, requires_grad=True)
         result = cls.apply(x, 2, y)
-        go = torch.ones(1, requires_grad=True)
+        go = torch.ones((), requires_grad=True)
         result.sum().backward(go, create_graph=True)
 
         self.assertEqual(x.grad.data, y.data + torch.ones(5, 5))
@@ -495,7 +495,6 @@ class TestAutograd(TestCase):
 
     def test_sparse_backward(self):
         class FixedGradientFunction(Function):
-
             def __init__(self, grad):
                 self.grad = grad
 
@@ -524,15 +523,15 @@ class TestAutograd(TestCase):
         dense_fn = FixedGradientFunction(dense_grad)
 
         # sparse first
-        x = torch.randn(5, 5, requires_grad=True)
+        x = torch.randn(size, requires_grad=True)
         (sparse_fn1(x) + dense_fn(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
         # dense first
-        x = torch.randn(5, 5, requires_grad=True)
+        x = torch.randn(size, requires_grad=True)
         (dense_fn(x) + sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
         # sparse only
-        x = torch.randn(5, 5, requires_grad=True)
+        x = torch.randn(size, requires_grad=True)
         (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
