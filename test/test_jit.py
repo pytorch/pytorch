@@ -1165,6 +1165,24 @@ class TestScript(TestCase):
             def func(x):
                 return torch.cat((x, x), x, dim=0)
 
+    def test_cat_lifts(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.cat([x, x], dim=1)
+
+        @torch.jit.script
+        def foo2(x):
+            return torch.cat([], dim=1)
+
+        @torch.jit.script
+        def foo3(x):
+            return torch.cat([x], dim=1)
+
+        self.assertExpected(
+            canonical(foo.graph) +
+            canonical(foo2.graph) +
+            canonical(foo3.graph))
+
     def test_func_call(self):
         script = '''
         def add(a, b):
