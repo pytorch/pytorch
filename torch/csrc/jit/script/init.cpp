@@ -4,6 +4,14 @@
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/python_tracer.h"
 
+#include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -248,11 +256,11 @@ struct ModuleValue : public SugaredValue {
 
   // select an attribute on it, e.g. `this.field`
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
-    if(at::optional<NamedModule&> v = module->find_module(field)) {
+    if(NamedModule* v = module->find_module(field)) {
       return std::make_shared<ModuleValue>(v->module);
-    } else if(at::optional<Method&> v = module->find_method(field)) {
+    } else if(Method* v = module->find_method(field)) {
       return std::make_shared<MethodValue>(module, *v);
-    } else if(at::optional<NamedParameter&> v = module->find_parameter(field)) {
+    } else if(NamedParameter* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     }
     // This can also be a call to a non-script module, or a plain
@@ -330,11 +338,11 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 }
 
 static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const Module & m) {
-  for(auto & params : m.get_parameters()) {
-    values.push_back(params.slot());
+  for(auto & param : m.get_parameters()) {
+    values.push_back(param->slot());
   }
   for(const auto & sub : m.get_modules()) {
-    gatherParametersAndBuffers(values, *sub.module);
+    gatherParametersAndBuffers(values, *sub->module);
   }
 }
 
@@ -378,8 +386,8 @@ void initJitScriptBindings(PyObject* module) {
         auto & modules = self.get_modules();
         py::tuple result(modules.size());
         for(size_t i = 0; i < modules.size(); ++i) {
-          auto & nm = modules[i];
-          result[i] = std::make_pair(nm.name, nm.module);
+          auto & item = modules[i];
+          result[i] = std::make_pair(item.key, item.value);
         }
         return result;
       })
@@ -390,9 +398,9 @@ void initJitScriptBindings(PyObject* module) {
           auto & p = parameters[i];
           py::tuple r(3);
           result[i] = std::make_tuple(
-            p.name,
-            static_cast<const autograd::Variable&>(*p.slot()),
-            p.is_buffer);
+            p.key,
+            static_cast<const autograd::Variable&>(*p->slot()),
+            p->is_buffer);
 
         }
         return result;
@@ -416,8 +424,9 @@ void initJitScriptBindings(PyObject* module) {
         return bool(self.find_method(name));
       })
       .def("_method_names", [](Module& self) {
-        return fmap(self.get_methods(), [](const std::unique_ptr<Method> & m) {
-          return m->name();
+        using Item = torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
+        return fmap(self.get_methods(), [](const Item & item) {
+          return (*item)->name();
         });
       })
       .def("_create_method_from_trace", [](
