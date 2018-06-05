@@ -129,6 +129,8 @@ void Variable::Impl::set_data(Tensor new_data) {
   data_ = std::move(new_data);
   if (data_.type() != *type_) {
     type_ = VariableType::getType(data_);
+    // Clear grad_accumulator if it exists, since it stores the old type info.
+    grad_accumulator_.reset();
   }
 }
 
