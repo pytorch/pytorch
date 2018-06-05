@@ -437,7 +437,7 @@ void initJitScriptBindings(PyObject* module) {
           self.create_method(name, std::move(graph), std::move(parameters));
       });
 
-  py::class_<Method>(m, "ScriptMethod")
+  py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
     .def("graph", [&](Method& self) {
       return self.graph();
     })
