@@ -1,50 +1,81 @@
-#include <cmath>
+#include "caffe2/operators/sigmoid_op.h"
+
+#include <algorithm>
+#include <functional>
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/elementwise_op.h"
 
 namespace caffe2 {
 
+namespace {
+
 template <typename T>
-__global__ void SigmoidKernel(const int N, const T* x, T* y) {
+__global__ void SigmoidKernel(const int N, const T* X, T* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    y[i] = 1. / (1. + exp(-x[i]));
+#if __CUDA_ARCH__ >= 350
+    Y[i] = T(1) / (T(1) + exp(-__ldg(X + i)));
+#else
+    Y[i] = T(1) / (T(1) + exp(-X[i]));
+#endif
   }
 }
 
 template <typename T>
-__global__ void SigmoidGradientKernel(const int N, const T* y, const T* dy,
-                              T* dx) {
+__global__ void
+SigmoidGradientKernel(const int N, const T* dY, const T* Y, T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    dx[i] = dy[i] * y[i] * (1. - y[i]);
+#if __CUDA_ARCH__ >= 350
+    dX[i] = __ldg(dY + i) * __ldg(Y + i) * (T(1) - __ldg(Y + i));
+#else
+    dX[i] = dY[i] * Y[i] * (T(1) - Y[i]);
+#endif
   }
 }
 
-struct SigmoidCUDAFunctor {
-  template <typename T>
-  inline void operator()(const int n, const T* x,
-                         T* y, CUDAContext* device_context) {
-    SigmoidKernel<T><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
-                    0, device_context->cuda_stream()>>>(n, x, y);
-    return;
-  }
-};
+} // namespace
 
-struct SigmoidGradientCUDAFunctor {
-  template <typename T>
-  inline void Run(const int n, const T* y, const T* dy,
-                  T* dx, CUDAContext* device_context) {
-    SigmoidGradientKernel<T><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
-                            0, device_context->cuda_stream()>>>(n, y, dy, dx);
-    return;
-  }
-};
+template <>
+template <typename T>
+bool SigmoidFunctor<CUDAContext>::
+operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
+  SigmoidKernel<T>
+      <<<CAFFE_GET_BLOCKS(N),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(N, X, Y);
+  return true;
+}
+
+template <>
+template <typename T>
+bool SigmoidGradientFunctor<CUDAContext>::Forward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& /* Y_dims */,
+    const T* dY,
+    const T* Y,
+    T* dX,
+    CUDAContext* context) const {
+  const int size = std::accumulate(
+      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+  SigmoidGradientKernel<T>
+      <<<CAFFE_GET_BLOCKS(size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(size, dY, Y, dX);
+  return true;
+}
 
 REGISTER_CUDA_OPERATOR(
     Sigmoid,
-    UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SigmoidCUDAFunctor>);
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CUDAContext,
+        SigmoidFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
-    SigmoidGradient, BinaryElementwiseOp<
-        TensorTypes<float>, CUDAContext,
-        WithoutBroadcast<SigmoidGradientCUDAFunctor>>);
-}  // namespace caffe2
+    SigmoidGradient,
+    BinaryElementwiseOp<
+        TensorTypes<float>,
+        CUDAContext,
+        SigmoidGradientFunctor<CUDAContext>>);
+
+} // namespace caffe2

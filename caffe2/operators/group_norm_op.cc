@@ -38,7 +38,7 @@ void GroupNormForward(
     const int i_mu = index[0] * dims[kGDim] + index[kGDim];
     const int i_gamma = index[kGDim] * dims[kDDim] + index[kDDim];
     Y[i] = gamma[i_gamma] * (X[i] - mu[i_mu]) * rsig[i_mu] + beta[i_gamma];
-    math::internal::IncreaseIndexInDims(4, dims.data(), index.data());
+    math::utils::IncreaseIndexInDims(4, dims.data(), index.data());
   }
 }
 
@@ -59,7 +59,7 @@ void ComputeInternalGradients(
     const int i_gamma = index[kGDim] * dims[kDDim] + index[kDDim];
     ds[i_mu] += gamma[i_gamma] * dY[i] * X[i];
     db[i_mu] += gamma[i_gamma] * dY[i];
-    math::internal::IncreaseIndexInDims(4, dims.data(), index.data());
+    math::utils::IncreaseIndexInDims(4, dims.data(), index.data());
   }
 }
 
@@ -102,7 +102,7 @@ void GroupNormBackward(
     dX[i] = gamma[i_gamma] * dY[i] * rsig[i_mu] + (u - v) * denom;
     dgamma[i_gamma] += dY[i] * (X[i] - mu[i_mu]) * rsig[i_mu];
     dbeta[i_gamma] += dY[i];
-    math::internal::IncreaseIndexInDims(4, dims.data(), index.data());
+    math::utils::IncreaseIndexInDims(4, dims.data(), index.data());
   }
 }
 
