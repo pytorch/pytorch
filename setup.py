@@ -498,7 +498,6 @@ class build_ext(build_ext_parent):
     def build_extensions(self):
         # If also building Caffe2 python, then we need this extra logic copied
         # from the old setup_caffe2.py
-        print("HI calling build_extensions with {}".format(self.extensions))
         if FULL_CAFFE2:
             pybind_exts = [
                     'caffe2.python.caffe2_pybind11_state',
@@ -515,12 +514,8 @@ class build_ext(build_ext_parent):
                     continue
                 fullname = self.get_ext_fullname(ext.name)
                 filename = self.get_ext_filename(fullname)
-                print("{}: {}".format(i, ext))
-                print("{} fullname: {}".format(i, fullname))
-                print("{} filename: {}".format(i, filename))
 
                 src = os.path.join(tmp_install_path, sp_dir, filename)
-                print("{} src: {}".format(i, src))
                 if not os.path.exists(src):
                     print("{} does not exist".format(src))
                     del self.extensions[i]
@@ -529,7 +524,6 @@ class build_ext(build_ext_parent):
                     dst_dir = os.path.dirname(dst)
                     if not os.path.exists(dst_dir):
                         os.makedirs(dst_dir)
-                    print("{} dst: {}".format(i, dst))
                     self.copy_file(src, dst)
                     i += 1
         distutils.command.build_ext.build_ext.build_extensions(self)

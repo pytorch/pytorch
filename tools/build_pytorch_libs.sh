@@ -259,10 +259,7 @@ function build_caffe2() {
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
 
   # Install Python proto files
-  if [[ $WITH_CAFFE2_PYTHON -ne 0 ]]; then
-    echo "I am im $(pwd)"
-    echo "INSTALL_DIR is $INSTALL_DIR"
-    echo "BASE_DIR is $BASE_DIR"
+  if [[ $WITH_CAFFE2_PYTHON ]]; then
     find . -name proto
     for proto_file in ./caffe/proto/*.py; do
       cp $proto_file "$BASE_DIR/caffe/proto/"
