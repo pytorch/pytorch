@@ -1,7 +1,6 @@
 #include "ATen/native/cpu/UnaryOpsKernel.h"
 
 #include <cmath>
-#include <iostream>
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
 #include "ATen/cpu/vec256/vec256.h"
@@ -13,51 +12,51 @@ namespace {
 
 using namespace vec256;
 
-template <class scalar_t, class F>
-static void parallel_apply(Tensor& result, const Tensor& self, F f) {
-  internal::init_tbb_num_threads();
-
-static default_partitioner_type ap;
-
-  auto arr_out = result.data<scalar_t>();
-  auto arr_in = self.data<scalar_t>();
-  int64_t size = self.numel();
-  int64_t grain_size = 2048;
-  if (size < grain_size) {
-    map(f, arr_out, arr_in, size);
-  } else {
-    tbb::parallel_for(
-        tbb::blocked_range<int64_t>(0, size, grain_size),
-        [&](const tbb::blocked_range<int64_t>& r) {
-          map(f, arr_out + r.begin(), arr_in + r.begin(), r.end() - r.begin());
-        },
-        ap);
-  }
-}
-
 static void abs_kernel(Tensor& result, const Tensor& self) {
   AT_DISPATCH_ALL_TYPES(self.type(), "abs", [&] {
-    parallel_apply<scalar_t>(
-        result,
-        self,
-        [](const Vec256<scalar_t>& x) { return x.abs(); });  });
+    scalar_t* out = result.data<scalar_t>();
+    scalar_t* in = self.data<scalar_t>();
+    int64_t size = self.numel();
+    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
+      map([](const Vec256<scalar_t>& x) { return x.abs(); },
+          out + begin,
+          in + begin,
+          end - begin);
+    });
+  });
 }
 
 static void rsqrt_kernel(Tensor& result, const Tensor& self) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "rsqrt", [&] {
-    parallel_apply<scalar_t>(
-        result,
-        self,
-        [](const Vec256<scalar_t>& x) { return Vec256<scalar_t>((scalar_t)(1)) / x.sqrt(); });  });
+    scalar_t* out = result.data<scalar_t>();
+    scalar_t* in = self.data<scalar_t>();
+    int64_t size = self.numel();
+    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
+      map(
+          [](const Vec256<scalar_t>& x) {
+            return Vec256<scalar_t>((scalar_t)(1)) / x.sqrt();
+          },
+          out + begin,
+          in + begin,
+          end - begin);
+    });
+  });
 }
 
-#define IMPLEMENT_FLOAT_KERNEL(op)                                             \
-  static void op##_kernel(Tensor& result, const Tensor& self) {                \
-    AT_DISPATCH_FLOATING_TYPES(self.type(), #op, [&] {                         \
-      parallel_apply<scalar_t>(                                                \
-          result, self, [](const Vec256<scalar_t>& x) { return x.op(); }); \
-    });                                                                        \
-  }                                                                            \
+#define IMPLEMENT_FLOAT_KERNEL(op)                                        \
+  static void op##_kernel(Tensor& result, const Tensor& self) {           \
+    AT_DISPATCH_FLOATING_TYPES(self.type(), #op, [&] {                    \
+      scalar_t* out = result.data<scalar_t>();                            \
+      scalar_t* in = self.data<scalar_t>();                               \
+      int64_t size = self.numel();                                        \
+      parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
+        map([](const Vec256<scalar_t>& x) { return x.op(); },             \
+            out + begin,                                                  \
+            in + begin,                                                   \
+            end - begin);                                                 \
+      });                                                                 \
+    });                                                                   \
+  }                                                                       \
   REGISTER_DISPATCH(op##Impl, &op##_kernel)
 
 } // anonymous namespace
