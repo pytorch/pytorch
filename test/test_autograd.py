@@ -2342,6 +2342,10 @@ class TestAutograd(TestCase):
                 out.backward()
 
 
+class TestAutogradGenerated(TestCase):
+    pass
+
+
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
@@ -3168,6 +3172,228 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     'test_slogdet_symmetric',
 }
 
+# known to be failing in tracer
+EXCLUDE_TRACED = {
+    'test___getitem___adv_index',
+    'test___getitem___adv_index_beg',
+    'test___getitem___adv_index_comb',
+    'test___getitem___adv_index_dup',
+    'test___getitem___adv_index_end',
+    'test___getitem___adv_index_mid',
+    'test___getitem___adv_index_sub',
+    'test___getitem___adv_index_sub_2',
+    'test___getitem___adv_index_sub_3',
+    'test___getitem___adv_index_var',
+    'test___radd___scalar_constant',
+    'test___rmul___scalar_constant',
+    'test___rsub___scalar_constant',
+    'test_add_scalar',
+    'test_add_scalar_constant',
+    'test_addmm_broadcast_lhs_coef',
+    'test_addmm_coef',
+    'test_addmm_scalar_broadcast_lhs_coef',
+    'test_expand_scalar_to_scalar',
+    'test_index_add_dim',
+    'test_index_add_dim_neg0',
+    'test_index_add_scalar_all_dim',
+    'test_index_add_scalar_all_dim_neg0',
+    'test_index_add_scalar_input_dim',
+    'test_index_add_scalar_input_dim_neg0',
+    'test_index_copy_dim',
+    'test_index_copy_dim_neg0',
+    'test_index_copy_scalar_all_dim',
+    'test_index_copy_scalar_all_dim_neg0',
+    'test_index_copy_scalar_input_dim',
+    'test_index_copy_scalar_input_dim_neg0',
+    'test_index_fill_dim',
+    'test_index_fill_dim_neg0',
+    'test_index_fill_scalar_both_dim',
+    'test_index_fill_scalar_both_dim_neg0',
+    'test_index_fill_scalar_index_dim',
+    'test_index_fill_scalar_index_dim_neg0',
+    'test_index_fill_scalar_input_dim',
+    'test_index_fill_scalar_input_dim_neg0',
+    'test_index_fill_variable_dim',
+    'test_index_fill_variable_dim_neg0',
+    'test_masked_fill',
+    'test_masked_fill_broadcast_rhs',
+    'test_masked_fill_scalar',
+    'test_masked_fill_scalar_broadcast_rhs',
+    'test_masked_fill_scalar_variable',
+    'test_masked_fill_tensor',
+    'test_masked_scatter',
+    'test_masked_scatter_broadcast_rhs',
+    'test_masked_scatter_scalar',
+    'test_masked_scatter_scalar_broadcast_rhs',
+    'test_mul_scalar',
+    'test_mul_scalar_constant',
+    'test_scatter_add_dim0',
+    'test_scatter_add_dim0_neg0',
+    'test_scatter_add_dim1',
+    'test_scatter_add_dim1_neg0',
+    'test_scatter_add_scalar_all_dim0',
+    'test_scatter_add_scalar_all_dim0_neg0',
+    'test_scatter_dim0',
+    'test_scatter_dim0_neg0',
+    'test_scatter_dim1',
+    'test_scatter_dim1_neg0',
+    'test_scatter_scalar_all_dim0',
+    'test_scatter_scalar_all_dim0_neg0',
+    'test_sigmoid_scalar',
+    'test_sub_scalar_constant',
+    'test_tanh_scalar',
+    'test_unsqueeze_last_neg0',
+    'test_unsqueeze_middle_neg0',
+}
+
+# known to be failing in script
+EXCLUDE_SCRIPT = {
+    'test_add',
+    'test_add_broadcast_all',
+    'test_add_broadcast_lhs',
+    'test_add_broadcast_rhs',
+    'test_add_scalar',
+    'test_add_scalar_broadcast_lhs',
+    'test_add_scalar_broadcast_rhs',
+    'test_add_scalar_constant',
+    'test_addcdiv_scalar_scale',
+    'test_addcdiv_scalar_scale_broadcast_lhs',
+    'test_addcdiv_scalar_scale_broadcast_rhs',
+    'test_addcdiv_scale',
+    'test_addcdiv_scale_broadcast_all',
+    'test_addcdiv_scale_broadcast_rhs',
+    'test_addcmul_scalar_scale',
+    'test_addcmul_scalar_scale_broadcast_lhs',
+    'test_addcmul_scalar_scale_broadcast_rhs',
+    'test_addcmul_scale',
+    'test_addcmul_scale_broadcast_all',
+    'test_addcmul_scale_broadcast_rhs',
+    'test_clamp_max',
+    'test_clamp_max_scalar',
+    'test_clamp_min',
+    'test_clamp_min_scalar',
+    'test_max_elementwise',
+    'test_max_elementwise_broadcast_all',
+    'test_max_elementwise_broadcast_lhs',
+    'test_max_elementwise_broadcast_rhs',
+    'test_max_scalar_elementwise_broadcast_lhs',
+    'test_min_elementwise',
+    'test_min_elementwise_broadcast_all',
+    'test_min_elementwise_broadcast_lhs',
+    'test_min_elementwise_broadcast_rhs',
+    'test_min_scalar_elementwise_broadcast_lhs',
+    'test_mul_scalar',
+    'test_mul_scalar_constant',
+    'test_norm_inf',
+    'test_renorm_norm_inf',
+    'test_sigmoid_scalar',
+    'test_split',
+    'test_split_size_list',
+    'test_split_size_list_dim',
+    'test_split_size_list_dim_neg0',
+    'test_sub',
+    'test_sub_broadcast_all',
+    'test_sub_broadcast_lhs',
+    'test_sub_broadcast_rhs',
+    'test_sub_scalar_broadcast_lhs',
+    'test_sub_scalar_broadcast_rhs',
+    'test_sub_scalar_constant',
+    'test_tanh_scalar',
+    'test_unsqueeze_last_neg0',
+    'test_unsqueeze_middle_neg0',
+    'test_addbmm_broadcast_lhs_coef',
+    'test_addbmm_coef',
+    'test_addbmm_scalar_broadcast_lhs_coef',
+    'test_addmm_broadcast_lhs_coef',
+    'test_addmm_coef',
+    'test_addmm_scalar_broadcast_lhs_coef',
+    'test_addmv_broadcast_lhs_coef',
+    'test_addmv_coef',
+    'test_addmv_scalar_broadcast_lhs_coef',
+    'test_addr_broadcast_lhs_coef',
+    'test_addr_coef',
+    'test_baddbmm_broadcast_lhs_coef',
+    'test_baddbmm_coef',
+    'test_baddbmm_scalar_broadcast_lhs_coef',
+    'test_expand',
+    'test_expand_1_element',
+    'test_expand_new_dim',
+    'test_expand_new_dim_front_old_front_1',
+    'test_expand_scalar_to_dims',
+    'test_expand_scalar_to_scalar',
+    'test_expand_size',
+    'test_index_add_dim',
+    'test_index_add_dim_neg0',
+    'test_index_add_scalar_all_dim',
+    'test_index_add_scalar_all_dim_neg0',
+    'test_index_add_scalar_input_dim',
+    'test_index_add_scalar_input_dim_neg0',
+    'test_index_copy_dim',
+    'test_index_copy_dim_neg0',
+    'test_index_copy_scalar_all_dim',
+    'test_index_copy_scalar_all_dim_neg0',
+    'test_index_copy_scalar_input_dim',
+    'test_index_copy_scalar_input_dim_neg0',
+    'test_index_fill_dim',
+    'test_index_fill_dim_neg0',
+    'test_index_fill_scalar_both_dim',
+    'test_index_fill_scalar_both_dim_neg0',
+    'test_index_fill_scalar_index_dim',
+    'test_index_fill_scalar_index_dim_neg0',
+    'test_index_fill_scalar_input_dim',
+    'test_index_fill_scalar_input_dim_neg0',
+    'test_index_fill_variable_dim',
+    'test_index_fill_variable_dim_neg0',
+    'test_masked_fill',
+    'test_masked_fill_broadcast_rhs',
+    'test_masked_fill_scalar',
+    'test_masked_fill_scalar_broadcast_rhs',
+    'test_masked_fill_scalar_variable',
+    'test_masked_fill_tensor',
+    'test_masked_scatter',
+    'test_masked_scatter_broadcast_rhs',
+    'test_masked_scatter_scalar',
+    'test_masked_scatter_scalar_broadcast_rhs',
+    'test_max_scalar_elementwise',
+    'test_max_scalar_elementwise_broadcast_rhs',
+    'test_min_scalar_elementwise',
+    'test_min_scalar_elementwise_broadcast_rhs',
+    'test_permute',
+    'test_permute_neg_dim',
+    'test_permute_scalar',
+    'test_repeat',
+    'test_repeat_scalar',
+    'test_repeat_single_number',
+    'test_repeat_unsqueeze',
+    'test_reshape',
+    'test_reshape_1d',
+    'test_reshape_scalar_to_1d',
+    'test_reshape_scalar_to_scalar',
+    'test_reshape_size',
+    'test_scatter_add_dim0',
+    'test_scatter_add_dim0_neg0',
+    'test_scatter_add_dim1',
+    'test_scatter_add_dim1_neg0',
+    'test_scatter_add_scalar_all_dim0',
+    'test_scatter_add_scalar_all_dim0_neg0',
+    'test_scatter_dim0',
+    'test_scatter_dim0_neg0',
+    'test_scatter_dim1',
+    'test_scatter_dim1_neg0',
+    'test_scatter_scalar_all_dim0',
+    'test_scatter_scalar_all_dim0_neg0',
+    'test_view',
+    'test_view_1d',
+    'test_view_scalar_to_1d',
+    'test_view_scalar_to_scalar',
+    'test_view_size',
+    'test_where',
+    'test_where_broadcast_all',
+    'test_where_scalar',
+    'test_where_scalar_broadcast_mask',
+    'test_where_scalar_broadcast_non_mask',
+}
+
 
 def exclude_tensor_method(name, test_name):
     # there are no tensor equivalents for these (inplace or out)
@@ -3253,17 +3479,67 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqual(self_variable.type(), self_variable.grad.type())
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
-for test in method_tests:
-    name, self_size, args = test[:3]
+
+# make a new function where all non-tensor arguments in 'args' have been partially
+# applied, and all tensor arguments remain.
+# used to trace functions when some arguments are not tensors
+def partial_apply_nontensors(fn, args):
+    source = ['t' if isinstance(arg, torch.Tensor) else 's' for arg in args]
+
+    def new_fn(*tensors_):
+        tensors = iter(tensors_)
+        return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)))
+
+    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
+
+
+def create_traced_fn(fn):
+    def traced_fn(*inputs):
+        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs)
+        traced = torch.jit.trace(*inputs_tensors)(fn_tensors)
+        return traced(*inputs_tensors)
+    return traced_fn
+
+script_template = '''
+def the_method({}):
+    return {}
+'''
+
+
+def create_script_fn(method_name, is_functional, output_process_fn):
+    def script_fn(*args):
+        formals = []
+        tensors = []
+        actuals = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                name = 'i{}'.format(len(formals))
+                formals.append(name)
+                actuals.append(name)
+                tensors.append(arg)
+            else:
+                actuals.append(str(arg))
+        if is_functional:
+            call = 'torch.{}({})'.format(method_name, ', '.join(actuals))
+        else:
+            call = '{}.{}({})'.format(actuals[0], method_name, ', '.join(actuals[1:]))
+        script = script_template.format(', '.join(formals), call)
+        CU = torch.jit.CompilationUnit(script)
+        return output_process_fn(CU.the_method(*tensors))
+    return script_fn
+
+
+def add_test(
+        name,
+        self_size,
+        args,
+        variant_name='',
+        dim_args_idx=(),
+        skipTestIf=(),
+        output_process_fn=lambda x: x):
     basic_test_name = 'test_' + name
-    if len(test) >= 4 and test[3] != '':
-        basic_test_name += '_' + test[3]
-
-    dim_args_idx = test[4] if len(test) >= 5 else []
-
-    skipTestIf = test[5] if len(test) >= 6 else []
-
-    output_process_fn = test[6] if len(test) >= 7 else lambda x: x
+    if variant_name != '':
+        basic_test_name += '_' + variant_name
 
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
@@ -3301,6 +3577,14 @@ for test in method_tests:
                 if not is_inplace and name not in EXCLUDE_GRADCHECK:
                     run_grad_and_gradgrad_checks(self, name, test_name, fn,
                                                  output_variable, (self_variable,) + args_variable)
+                    if test_name not in EXCLUDE_TRACED:
+                        run_grad_and_gradgrad_checks(self, name, test_name, create_traced_fn(fn),
+                                                     output_variable, (self_variable,) + args_variable)
+
+                    if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
+                        run_grad_and_gradgrad_checks(self, name, test_name,
+                                                     create_script_fn(name, False, output_process_fn),
+                                                     output_variable, (self_variable,) + args_variable)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -3313,6 +3597,14 @@ for test in method_tests:
                     # could run the gradchecks again, but skip since we did it for the methods above.
                     run_functional_checks(self, test_name, name, fn,
                                           False, f_args_variable, f_args_tensor)
+
+                    if not is_inplace and test_name not in EXCLUDE_TRACED:
+                        run_functional_checks(self, test_name, name, create_traced_fn(fn),
+                                              False, f_args_variable, f_args_tensor)
+
+                    if not is_inplace and test_name not in EXCLUDE_SCRIPT:
+                        run_functional_checks(self, test_name, name, create_script_fn(name, True, output_process_fn),
+                                              False, f_args_variable, f_args_tensor)
 
                 # check for correct type of input.data and input.grad.data
                 if not is_inplace:
@@ -3377,8 +3669,10 @@ for test in method_tests:
         for skip in skipTestIf:
             do_test = skip(do_test)
 
-        setattr(TestAutograd, test_name, do_test)
+        setattr(TestAutogradGenerated, test_name, do_test)
 
+for test in method_tests:
+    add_test(*test)
 
 if __name__ == '__main__':
     run_tests()
