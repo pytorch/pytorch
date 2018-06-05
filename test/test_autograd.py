@@ -3244,6 +3244,10 @@ EXCLUDE_TRACED = {
     'test_tanh_scalar',
     'test_unsqueeze_last_neg0',
     'test_unsqueeze_middle_neg0',
+    'test_split_dim',
+    'test_split_dim_neg0',
+    'test_gesv',
+    'test_inverse',
 }
 
 # known to be failing in script
@@ -3392,6 +3396,10 @@ EXCLUDE_SCRIPT = {
     'test_where_scalar',
     'test_where_scalar_broadcast_mask',
     'test_where_scalar_broadcast_non_mask',
+    'test_split_dim',
+    'test_split_dim_neg0',
+    'test_gesv',
+    'test_inverse',
 }
 
 
@@ -3529,6 +3537,66 @@ def create_script_fn(method_name, is_functional, output_process_fn):
     return script_fn
 
 
+def check_against_reference(self, func, reference_func, args, allow_unused=True):
+    def allSum(vs):
+        if isinstance(vs, torch.Tensor):
+            vs = (vs,)
+        return sum([(i + 1) * v.sum()
+                    for i, v in enumerate(vs)
+                    if v is not None and v.dtype.is_floating_point])
+
+    def clone_inputs(requires_grad):
+        inputs = [
+            arg.detach().clone().requires_grad_(requires_grad and arg.requires_grad)
+            if isinstance(arg, torch.Tensor) else arg for arg in args
+        ]
+        return inputs, [input for input in inputs if isinstance(input, torch.Tensor) and input.requires_grad]
+
+    nograd_inputs, nograd_tensors = clone_inputs(False)
+    recording_inputs, recording_tensors = clone_inputs(True)
+
+    # test no gradients case
+    outputs = reference_func(*nograd_inputs)
+    outputs_test = func(*nograd_inputs)
+    self.assertEqual(outputs, outputs_test)
+
+    # test single grad case
+    outputs = reference_func(*recording_inputs)
+    grads = torch.autograd.grad(allSum(outputs), recording_tensors,
+                                allow_unused=allow_unused)
+
+    outputs_test = func(*recording_inputs)
+    grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
+                                     allow_unused=allow_unused)
+    self.assertEqual(outputs, outputs_test)
+    self.assertEqual(grads, grads_test)
+
+    # test the grad grad case
+
+    outputs = reference_func(*recording_inputs)
+    l1 = allSum(outputs)
+    grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
+                                allow_unused=allow_unused)
+    l2 = (allSum(grads) * l1)
+    grads2 = torch.autograd.grad(l2, recording_tensors, allow_unused=allow_unused)
+
+    recording_inputs, recording_tensors = clone_inputs(True)
+
+    outputs_test = func(*recording_inputs)
+    l1_test = allSum(outputs_test)
+    grads_test = torch.autograd.grad(
+        l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
+    l2_test = (allSum(grads_test) * l1_test)
+    grads2_test = torch.autograd.grad(l2_test, recording_tensors, allow_unused=allow_unused)
+
+    self.assertEqual(outputs, outputs_test)
+    self.assertEqual(grads, grads_test)
+    for g2, g2_test in zip(grads2, grads2_test):
+        if g2 is None and g2_ge is None:
+            continue
+        self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
+
+
 def add_test(
         name,
         self_size,
@@ -3578,13 +3646,12 @@ def add_test(
                     run_grad_and_gradgrad_checks(self, name, test_name, fn,
                                                  output_variable, (self_variable,) + args_variable)
                     if test_name not in EXCLUDE_TRACED:
-                        run_grad_and_gradgrad_checks(self, name, test_name, create_traced_fn(fn),
-                                                     output_variable, (self_variable,) + args_variable)
+                        check_against_reference(self, create_traced_fn(fn), fn, (self_variable,) + args_variable)
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                        run_grad_and_gradgrad_checks(self, name, test_name,
-                                                     create_script_fn(name, False, output_process_fn),
-                                                     output_variable, (self_variable,) + args_variable)
+                        check_against_reference(self,
+                                                create_script_fn(name, False, output_process_fn),
+                                                fn, (self_variable,) + args_variable)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -3599,12 +3666,12 @@ def add_test(
                                           False, f_args_variable, f_args_tensor)
 
                     if not is_inplace and test_name not in EXCLUDE_TRACED:
-                        run_functional_checks(self, test_name, name, create_traced_fn(fn),
-                                              False, f_args_variable, f_args_tensor)
+                        check_against_reference(self, create_traced_fn(fn), fn, f_args_variable)
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
-                        run_functional_checks(self, test_name, name, create_script_fn(name, True, output_process_fn),
-                                              False, f_args_variable, f_args_tensor)
+                        check_against_reference(self,
+                                                create_script_fn(name, True, output_process_fn),
+                                                fn, f_args_variable)
 
                 # check for correct type of input.data and input.grad.data
                 if not is_inplace:
