@@ -14,38 +14,47 @@ namespace torch {
 namespace detail {
 
 /// A simple ordered dictionary implementation, akin to Python's `OrderedDict`.
-template <typename T>
+template <typename Key, typename Value>
 class OrderedDict {
  public:
   struct Item {
-    Item(std::string key_, T value_)
+    Item(Key key_, Value value_)
         : key(std::move(key_)), value(std::move(value_)) {}
 
-    T& operator*() {
+    Value& operator*() {
       return value;
     }
-    const T& operator*() const {
+    const Value& operator*() const {
       return value;
     }
-    T* operator->() {
+    Value* operator->() {
       return &value;
     }
-    const T* operator->() const {
+    const Value* operator->() const {
       return &value;
     }
 
-    const std::string key;
-    T value;
+    const Key key;
+    Value value;
   };
+
+  // The lifetime of an iterator is bound to the lifetime of the `OrderedDict`.
+  // Further, any `insert()` operation may invalidate all iterators
+  // pointing into the vector.
 
   using Iterator = typename std::vector<Item>::iterator;
   using ConstIterator = typename std::vector<Item>::const_iterator;
 
-  OrderedDict() = default;
+  /// Constructs the `OrderedDict` with a string that should describe the kind
+  /// of value stored in this `OrderedDict`, for example 'parameter' or
+  /// 'module'.
+  explicit OrderedDict(std::string subject = "Key")
+      : subject_(std::move(subject)) {}
 
   // Copy we have to do ourselves, because items' keys are const, so we have to
   // re-insert the items.
-  OrderedDict(const OrderedDict& other) : index_(other.index_) {
+  OrderedDict(const OrderedDict& other)
+      : index_(other.index_), subject_(other.subject_) {
     for (const auto& item : other.items_) {
       items_.push_back(item);
     }
@@ -54,9 +63,10 @@ class OrderedDict {
   OrderedDict& operator=(const OrderedDict& other) {
     index_ = other.index_;
     items_.clear();
-    for (const auto& item : other.items_) {
+    for (auto& item : other.items_) {
       items_.push_back(item);
     }
+    subject_ = other.subject_;
     return *this;
   }
 
@@ -67,7 +77,8 @@ class OrderedDict {
 
   ~OrderedDict() = default;
 
-  /*implicit */ OrderedDict(std::initializer_list<Item> initializer_list) {
+  /*implicit */ OrderedDict(std::initializer_list<Item> initializer_list)
+      : OrderedDict("Key") {
     items_.reserve(initializer_list.size());
     for (auto& item : initializer_list) {
       // Copy the key here and move it into the index.
@@ -116,27 +127,27 @@ class OrderedDict {
     return items_[index];
   }
 
-  T& operator[](const std::string& key) {
+  Value& operator[](const Key& key) {
     return get(key);
   }
 
-  const T& operator[](const std::string& key) const {
+  const Value& operator[](const Key& key) const {
     return get(key);
   }
 
-  template <typename Key, typename Value>
-  T& insert(Key&& key, Value&& value) {
-    AT_CHECK(index_.count(key) == 0, "Key '", key, "' already present");
+  template <typename K, typename V>
+  Value& insert(K&& key, V&& value) {
+    AT_CHECK(index_.count(key) == 0, subject_, " '", key, "' already defined");
     // Copy `key` here and move it into the index.
-    items_.emplace_back(key, std::forward<Value>(value));
-    index_.emplace(std::forward<Key>(key), size() - 1);
+    items_.emplace_back(key, std::forward<V>(value));
+    index_.emplace(std::forward<K>(key), size() - 1);
     return items_.back().value;
   }
 
   /// Allows calling `insert` with an initializer list for the value, e.g.
   /// `insert(key, {...})`.
-  T& insert(std::string key, T&& value) {
-    return insert<std::string, T>(std::move(key), std::move(value));
+  Value& insert(Key key, Value&& value) {
+    return insert<Key, Value>(std::move(key), std::move(value));
   }
 
   void update(OrderedDict&& other) {
@@ -153,34 +164,34 @@ class OrderedDict {
     }
   }
 
-  T* find(const std::string& str) noexcept {
-    auto iterator = index_.find(str);
+  Value* find(const Key& key) noexcept {
+    auto iterator = index_.find(key);
     if (iterator == index_.end()) {
       return nullptr;
     }
     return &items_[iterator->second].value;
   }
 
-  const T* find(const std::string& str) const noexcept {
-    auto iterator = index_.find(str);
+  const Value* find(const Key& key) const noexcept {
+    auto iterator = index_.find(key);
     if (iterator == index_.end()) {
       return nullptr;
     }
     return &items_[iterator->second].value;
   }
 
-  T& get(const std::string& key) {
+  Value& get(const Key& key) {
     if (auto* value = find(key)) {
       return *value;
     }
-    AT_ERROR("No such key: '", key, "'");
+    AT_ERROR(subject_, " '", key, "' is not defined");
   }
 
-  const T& get(const std::string& key) const {
+  const Value& get(const Key& key) const {
     if (auto* value = find(key)) {
       return *value;
     }
-    AT_ERROR("No such key: '", key, "'");
+    AT_ERROR(subject_, " '", key, "' is not defined");
   }
 
   void clear() {
@@ -196,9 +207,14 @@ class OrderedDict {
     return items_.empty();
   }
 
+  const std::string& subject() const noexcept {
+    return subject_;
+  }
+
  private:
-  std::unordered_map<std::string, size_t> index_;
+  std::unordered_map<Key, size_t> index_;
   std::vector<Item> items_;
+  std::string subject_;
 };
 } // namespace detail
 } // namespace torch

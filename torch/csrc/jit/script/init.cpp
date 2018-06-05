@@ -416,7 +416,7 @@ void initJitScriptBindings(PyObject* module) {
         return bool(self.find_method(name));
       })
       .def("_method_names", [](Module& self) {
-        using Item = detail::OrderedDict<std::unique_ptr<Method>>::Item;
+        using Item = detail::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
         return fmap(self.get_methods(), [](const Item & item) {
           return (*item)->name();
         });

@@ -107,7 +107,7 @@ class Module {
 
  private:
   template <typename T>
-  using OrderedDict = torch::detail::OrderedDict<T>;
+  using OrderedDict = torch::detail::OrderedDict<std::string, T>;
 
   template <typename Derived>
   friend class CloneableModule;

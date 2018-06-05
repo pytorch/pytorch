@@ -12,7 +12,9 @@
 
 using namespace torch;
 using namespace torch::nn;
-using namespace torch::detail;
+
+template <typename T>
+using OrderedDict = detail::OrderedDict<std::string, T>;
 
 using Catch::StartsWith;
 
@@ -159,6 +161,7 @@ TEST_CASE("make_unique") {
 TEST_CASE("ordered-dict") {
   SECTION("is empty after default construction") {
     OrderedDict<int> dict;
+    REQUIRE(dict.subject() == "Key");
     REQUIRE(dict.is_empty());
     REQUIRE(dict.size() == 0);
   }
@@ -182,8 +185,9 @@ TEST_CASE("ordered-dict") {
     OrderedDict<int> dict;
     dict.insert("a", 1);
     dict.insert("b", 2);
-    REQUIRE_THROWS_WITH(dict.get("foo"), StartsWith("No such key: 'foo'"));
-    REQUIRE_THROWS_WITH(dict.get(""), StartsWith("No such key: ''"));
+    REQUIRE_THROWS_WITH(
+        dict.get("foo"), StartsWith("Key 'foo' is not defined"));
+    REQUIRE_THROWS_WITH(dict.get(""), StartsWith("Key '' is not defined"));
   }
 
   SECTION("can initialize from list") {
@@ -196,9 +200,9 @@ TEST_CASE("ordered-dict") {
   SECTION("insert throws when passed elements that are present") {
     OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
     REQUIRE_THROWS_WITH(
-        dict.insert("a", 1), StartsWith("Key 'a' already present"));
+        dict.insert("a", 1), StartsWith("Key 'a' already defined"));
     REQUIRE_THROWS_WITH(
-        dict.insert("b", 1), StartsWith("Key 'b' already present"));
+        dict.insert("b", 1), StartsWith("Key 'b' already defined"));
   }
 
   SECTION("front() returns the first item") {
@@ -243,8 +247,9 @@ TEST_CASE("ordered-dict") {
 
   SECTION("operator[] throws when passed keys that are not present") {
     OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
-    REQUIRE_THROWS_WITH(dict.get("foo"), StartsWith("No such key: 'foo'"));
-    REQUIRE_THROWS_WITH(dict.get(""), StartsWith("No such key: ''"));
+    REQUIRE_THROWS_WITH(
+        dict.get("foo"), StartsWith("Key 'foo' is not defined"));
+    REQUIRE_THROWS_WITH(dict.get(""), StartsWith("Key '' is not defined"));
   }
 
   SECTION("update inserts all items from another OrderedDict") {
@@ -261,7 +266,7 @@ TEST_CASE("ordered-dict") {
     OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
     OrderedDict<int> dict2 = {{"a", 1}};
     REQUIRE_THROWS_WITH(
-        dict2.update(dict), StartsWith("Key 'a' already present"));
+        dict2.update(dict), StartsWith("Key 'a' already defined"));
   }
 
   SECTION("Can iterate items") {
@@ -329,5 +334,16 @@ TEST_CASE("ordered-dict") {
     REQUIRE(!dict.is_empty());
     REQUIRE(dict["a"].first == 1);
     REQUIRE(dict["a"].second == 2);
+  }
+
+  SECTION("Error messages include the what") {
+    OrderedDict<int> dict("Penguin");
+    REQUIRE(dict.subject() == "Penguin");
+    dict.insert("a", 1);
+    REQUIRE(!dict.is_empty());
+    REQUIRE_THROWS_WITH(
+        dict.get("b"), StartsWith("Penguin 'b' is not defined"));
+    REQUIRE_THROWS_WITH(
+        dict.insert("a", 1), StartsWith("Penguin 'a' already defined"));
   }
 }

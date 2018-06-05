@@ -45,7 +45,7 @@ std::shared_ptr<Module> Module::clone() const {
 std::map<std::string, Variable> Module::parameters() const {
   std::map<std::string, Variable> ret;
   for (const auto& child : children_) {
-    for (auto& p : (*child)->parameters()) {
+    for (auto& p : child.value->parameters()) {
       ret[child.key + "." + p.first] = p.second;
     }
   }
