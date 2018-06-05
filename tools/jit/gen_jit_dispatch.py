@@ -97,9 +97,11 @@ def is_jit_op(decl):
     # we currently only support vararg tensor lists when they are the _first_ argument
     # and the only tensor argument
     arguments = decl['arguments']
-    has_tensorlist = any(arg['simple_type'] == 'TensorList' for arg in arguments)
-    num_tensor_args = sum(map(is_tensor_arg, arguments))
-    if has_tensorlist and (num_tensor_args != 1 or arguments[0]['simple_type'] != 'TensorList'):
+    # Only support a single TensorList arg
+    if sum(arg['simple_type'] == 'TensorList' for arg in arguments) > 1:
+        return False
+    # omit einsum
+    if any(arg['simple_type'] == 'std::string' for arg in arguments):
         return False
 
     return ((not decl['api_name'].endswith('_') or is_magic_method(decl['api_name'])) and
@@ -162,15 +164,27 @@ def gen_jit_dispatch(declarations, out):
             num_dynamic_inputs = static_inputs
 
         real_inputs = count()
+        if has_tensorlist:
+            kw_assignments.append('size_t _Arg_idx = 0;')
         for i, arg in enumerate(decl['arguments']):
             # XXX: we currently support only TensorList ops that have a TensorList as
             # the first argument, that is then followed by a number of positional args.
             if arg['simple_type'] == 'TensorList':
-                arguments.append('peekSlice(stack, 0, varargs_length - {}, varargs_length)'.format(static_inputs))
+                kw_assignments.append('size_t _Arg_idx_{} = _Arg_idx;'.format(i))
+                kw_assignments.append('_Arg_idx += varargs_length - {};'.format(static_inputs))
+                arguments.append(
+                    'peekSlice(stack, _Arg_idx_{}, varargs_length - {}, varargs_length)'.format(i, static_inputs))
             elif arg['simple_type'] in default_only_types:
                 arguments.append(arg['default'])
             elif is_tensor_arg(arg):
-                arguments.append('std::move(peek(stack, {}, {}))'.format(next(real_inputs), static_inputs))
+                if has_tensorlist:
+                    kw_assignments.append('size_t _Arg_idx_{} = _Arg_idx++;'.format(i))
+                    arg_idx = '_Arg_idx_{}'.format(i)
+                    peek_length = 'varargs_length'
+                else:
+                    arg_idx = next(real_inputs)
+                    peek_length = static_inputs
+                arguments.append('std::move(peek(stack, {}, {}))'.format(arg_idx, peek_length))
             elif is_positional_arg[i]:
                 template_kwargs = dict(type=arg['simple_type'],
                                        name=arg['name'],
