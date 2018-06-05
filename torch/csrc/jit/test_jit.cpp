@@ -34,7 +34,7 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
-#include "onnx/onnx/onnx.pb.h"
+#include "onnx/onnx.pb.h"
 
 
 #include <vector>
