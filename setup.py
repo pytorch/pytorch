@@ -115,7 +115,7 @@ from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
-    WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS
+    WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS, WITH_C10D
 
 
 ################################################################################
@@ -345,9 +345,9 @@ class build_deps(PytorchCommand):
         if WITH_DISTRIBUTED:
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
-                # c10d has hard dependency on Linux through Gloo at the moment
-                libs += ['c10d']
             libs += ['THD']
+        if WITH_C10D:
+            libs += ['c10d']
         build_libs(libs)
 
         # Use copies instead of symbolic files.
@@ -791,12 +791,10 @@ if WITH_DISTRIBUTED:
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
 
-    # c10d has hard dependency on Linux through Gloo at the moment
-    if sys.platform.startswith('linux'):
-        main_sources += [
-            "torch/csrc/c10d/init.cpp",
-        ]
-        main_link_args += [C10D_GLOO_LIB, C10D_LIB]
+if WITH_C10D:
+    extra_compile_args += ['-DWITH_C10D']
+    main_sources += ['torch/csrc/c10d/init.cpp']
+    main_link_args += [C10D_GLOO_LIB, C10D_LIB]
 
 if WITH_CUDA:
     nvtoolext_lib_name = None

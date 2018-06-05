@@ -28,7 +28,6 @@
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/autograd/python_legacy_variable.h"
 #include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/c10d/c10d.h"
 #include "torch/csrc/tensor/python_tensor.h"
 #include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/utils/python_strings.h"
@@ -41,6 +40,10 @@
 
 #ifdef WITH_CUDNN
 #include "cudnn.h"
+#endif
+
+#ifdef WITH_C10D
+#include "torch/csrc/c10d/c10d.h"
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -487,6 +490,8 @@ static PyObject* initModule() {
 #endif
 #ifdef WITH_DISTRIBUTED
   THPUtils_addPyMethodDefs(methods, THDPModule_methods());
+#endif
+#ifdef WITH_C10D
   THPUtils_addPyMethodDefs(methods, torch::c10d::python_functions());
 #endif
 
