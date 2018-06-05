@@ -3569,6 +3569,19 @@
     - double p
 ]]
 [[
+  name: _cpu_bernoulli_
+  backends:
+    - CPU
+  cname: bernoulli
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
+    - double p
+]]
+[[
   name: _th_bernoulli
   types:
     - Float
