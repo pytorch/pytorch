@@ -85,6 +85,10 @@ def number(floating, integer, t):
     else:
         return integer
 
+
+def cast_tensor(tensor, t):
+    return t(tensor.size()).copy_(tensor)
+
 S = 10
 M = 50
 
@@ -401,6 +405,10 @@ tests = [
     ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
+    ('__lshift__', lambda t: torch.pow(2, cast_tensor(torch.arange(1, 5), t)),
+        lambda t: [2], None, signed_types),
+    ('__rshift__', lambda t: torch.pow(2, cast_tensor(torch.arange(3, 7), t)),
+        lambda t: [2], None, signed_types),
     # lapack tests
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
@@ -480,6 +488,8 @@ custom_half_precision = {
     'tanh': 1e-3,
     'trace': 1e-3,
     'var': 1e-3,
+    '__lshift__': 1e-3,
+    '__rshift__': 1e-3,
 }
 
 simple_pointwise = [
