@@ -324,8 +324,7 @@ if [[ -n $pytorch_too ]]; then
 fi
 
 if [[ -z $slim ]]; then
-  add_package 'numpy' '==1.11'
-  add_package 'opencv' '==3.1.0'
+  add_package 'opencv' '<3.4'
 else
   caffe2_cmake_args+=("-DUSE_OPENCV=OFF")
 fi
