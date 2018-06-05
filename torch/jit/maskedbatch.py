@@ -27,7 +27,7 @@ class MaskedBatch(object):
                  for d in range(len(dims))]
         data = examples[0].new(bs, *sizes).zero_()
         mask_sizes = [s if dims[d] else 1 for d, s in enumerate(sizes)]
-        mask = examples[0].new(bs, *mask_sizes).zero_()
+        mask = examples[0].new(bs, *mask_sizes).zero_().byte()
         mask.requires_grad = False
         for i, x in enumerate(examples):
             inds = [slice(0, x.size(d + 1)) if b else slice(None)
@@ -59,3 +59,20 @@ class MaskedBatch(object):
         if dim == 0 or not self.dims[dim - 1]:
             return self.data.size(dim)
         raise ValueError("use size_as_tensor for dynamic dimensions")
+
+    @staticmethod
+    def unbind(batch, dim):
+        if isinstance(batch, tuple) and len(batch) == 3:
+            batch = MaskedBatch(*batch)
+        if dim == 0:
+            raise ValueError("cannot unbind over batch dimension")
+        dims = tuple(b for d, b in enumerate(batch.dims) if d != dim - 1)
+        dims = torch.tensor(dims).byte()
+        if batch.dims[dim - 1]:
+            return tuple((data, mask, dims)
+                         for data, mask in zip(torch.unbind(batch.data, dim),
+                                               torch.unbind(batch.mask, dim)))
+        else:
+            mask = batch.mask.squeeze(dim)
+            return tuple((data, mask, dims)
+                         for data in torch.unbind(batch.data, dim))

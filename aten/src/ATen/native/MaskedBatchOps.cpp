@@ -70,21 +70,27 @@ std::tuple<Tensor, Tensor, Tensor> b_mm(TensorList self, TensorList other) {
         std::to_string(self.size()));
   }
   if (other.size() == 3) {
-    auto data = at::bmm(self[0] * self[1], other[0] * other[1]);
+    auto data = at::bmm(self[0] * self[1].type_as(self[0]), other[0] * other[1].type_as(other[0]));
     auto mask = at::bmm(self[1].narrow(2, 0, 1), other[1].narrow(1, 0, 1));
     auto dims = at::cat(
         std::vector<at::Tensor>({self[2].narrow(0, 0, 1),
                                  other[2].narrow(0, 1, other[2].size(0) - 1)}));
     return std::make_tuple(data, mask, dims);
   } else if (other.size() == 1) {
-    auto data = at::bmm(
-        self[0] * self[1],
-        other[0].unsqueeze(0).expand(
-            {self[0].size(0), other[0].size(0), other[0].size(1)}));
-    auto mask = self[1].narrow(2, 0, 1);
-    auto dims = at::cat(std::vector<at::Tensor>(
-        {self[2].narrow(0, 0, 1), self[2].type().tensor({1})}));
-    return std::make_tuple(data, mask, dims);
+    if(self[0].dim() == 2){
+      auto data = at::mm(self[0], other[0]);
+      return std::make_tuple(data, self[1], self[2].type().tensor({1}));
+    }
+    else{
+      auto data = at::bmm(
+          self[0] * self[1].type_as(self[0]),
+          other[0].unsqueeze(0).expand(
+              {self[0].size(0), other[0].size(0), other[0].size(1)}));
+      auto mask = self[1].narrow(2, 0, 1);
+      auto dims = at::cat(std::vector<at::Tensor>(
+          {self[2].narrow(0, 0, 1), self[2].type().tensor({1})}));
+      return std::make_tuple(data, mask, dims);
+    }
   }
   throw std::invalid_argument(
       "1 or 3 tensor in input 'other' TensorList expected, found " +
@@ -104,8 +110,8 @@ std::tuple<Tensor, Tensor, Tensor> b_matmul(TensorList self, TensorList other) {
   }
   int d1 = self[2].size(0);
   int d2 = other[2].size(0);
-  auto data1 = self[0] * self[1];
-  auto data2 = other[0] * other[1];
+  auto data1 = self[0] * self[1].type_as(self[0]);
+  auto data2 = other[0] * other[1].type_as(other[0]);
   if (d1 == 1)
     data1 = data1.unsqueeze(-2);
   if (d2 == 1)
@@ -168,7 +174,7 @@ std::tuple<Tensor, Tensor, Tensor> b_view(TensorList self, IntList sizes_new) {
     dims_new[i - 1] = (sizes_new[i] == -1);
   }
   return std::make_tuple(
-      self[0].view(data_sizes), self[1].view(mask_sizes), dims_new);
+      self[0].view(IntList(data_sizes)), self[1].view(IntList(mask_sizes)), dims_new);
 }
 
 // special operators
@@ -184,7 +190,8 @@ std::tuple<Tensor, Tensor, Tensor> b_update(TensorList self, TensorList other) {
         "3 tensor in input 'other' TensorList expected, found " +
         std::to_string(other.size()));
   }
-  auto update_mask = other[1]; // TODO: maybe third arguments needed
+  // TODO: maybe third arguments needed
+  auto update_mask = other[1];
   auto data = at::where(update_mask, other[0], self[0]);
   return std::make_tuple(data, update_mask, other[2]);
 }

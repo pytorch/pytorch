@@ -1040,14 +1040,34 @@ class TestTorch(TestCase):
         ybs = torch.b_view(batch, (5, -1, 4))
         self.mb_assert_allclose(ys, MaskedBatch(*ybs))
 
+    def test_maskedbatch_for_loop(self):
+        def for_single(x, h0):
+            h = h0
+            for xt in torch.unbind(x, 1):
+                h += xt
+            return h
+
+        def for_batch(x, h0):
+            h = h0
+            for xt in MaskedBatch.unbind(x, 1):
+                h = torch.b_update(h, torch.b_add(h, xt))
+                h = torch.b_synchronize(h)
+            return h
+
+        xs, batch = self.mb_rand(5, (True, 3), (False, 2))
+        hs, h_batch = self.mb_rand(5, (False, 2))
+        ys = [for_single(xs[j], hs[j]) for j in range(5)]
+        ybs = for_batch(batch, h_batch)
+        self.mb_assert_allclose(ys, MaskedBatch(*ybs))
+
     def test_maskedbatch_lstm(self):
-        class SlowLSTM(torch.nn.Module):
+        class SlowLSTMCell(torch.nn.Module):
             def __init__(self, input_size, hidden_size, bias=True, dropout=0.0):
                 import torch.nn.functional as F
                 from torch import Tensor as T
                 from torch.nn import Parameter as P
                 from torch.autograd import Variable as V
-                super(SlowLSTM, self).__init__()
+                super(SlowLSTMCell, self).__init__()
                 self.input_size = input_size
                 self.hidden_size = hidden_size
                 self.bias = bias
@@ -1086,9 +1106,6 @@ class TestTorch(TestCase):
 
             def forward_single(self, x, hidden):
                 h, c = hidden
-                h = h.view(h.size(1), -1)
-                c = c.view(c.size(1), -1)
-                x = x.view(x.size(1), -1)
                 # Linear mappings
                 i_t = torch.mm(x, self.w_xi) + torch.mm(h, self.w_hi) + self.b_i
                 f_t = torch.mm(x, self.w_xf) + torch.mm(h, self.w_hf) + self.b_f
@@ -1102,22 +1119,13 @@ class TestTorch(TestCase):
                 c_t.tanh_()
                 c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
                 h_t = torch.mul(o_t, torch.tanh(c_t))
-                # Reshape for compatibility
-                h_t = h_t.view(1, h_t.size(0), -1)
-                c_t = c_t.view(1, c_t.size(0), -1)
                 if self.dropout > 0.0:
                     F.dropout(h_t, p=self.dropout, training=self.training, inplace=True)
-                # return h_t, (h_t, c_t)
-                return h_t
+                return h_t, c_t
 
             def forward_batch(self, x, hidden):
                 bs = x[0].size(0)
                 h, c = hidden
-                h = h.view(1, h.size(1), -1)
-                c = c.view(1, c.size(1), -1)
-                x = torch.b_view(x, (bs, x[0].size(1), x[0].size(2)))
-                h = (h.expand(bs, -1, -1), x[1], x[2])
-                c = (c.expand(bs, -1, -1), x[1], x[2])
                 # Linear mappings
                 i_t = torch.b_add(torch.b_add(torch.b_mm(x, (self.w_xi,)), torch.b_mm(h, (self.w_hi,))), (self.b_i,))
                 f_t = torch.b_add(torch.b_add(torch.b_mm(x, (self.w_xf,)), torch.b_mm(h, (self.w_hf,))), (self.b_f,))
@@ -1131,21 +1139,38 @@ class TestTorch(TestCase):
                 c_t = torch.b_tanh(c_t)
                 c_t = torch.b_add(torch.b_mul(c, f_t), torch.b_mul(i_t, c_t))
                 h_t = torch.b_mul(o_t, torch.b_tanh(c_t))
-                # Reshape for compatibility
-                h_t = torch.b_view(h_t, (bs, h_t[0].size(1), h_t[0].size(2)))
-                c_t = torch.b_view(c_t, (bs, c_t[0].size(1), c_t[0].size(2)))
                 if self.dropout > 0.0:
                     F.dropout(h_t, p=self.dropout, training=self.training, inplace=True)
-                # return h_t, (h_t, c_t)
-                return h_t
+                return h_t, c_t
 
-        batch_size, input_size, hidden_size = 5, 3, 2
+        class SlowLSTM(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, bias=True, dropout=0.0):
+                super(SlowLSTM, self).__init__()
+                self.cell = SlowLSTMCell(input_size, hidden_size, bias, dropout)
+
+            def forward_single(self, x, hidden):
+                hx, cx = hidden
+                for xt in torch.unbind(x, 1):
+                    hx, cx = self.cell.forward_single(xt, (hx, cx))
+                return hx
+
+            def forward_batch(self, x, hidden):
+                hx, cx = hidden
+                for xt in MaskedBatch.unbind(x, 1):
+                    h_new, c_new = self.cell.forward_batch(xt, (hx, cx))
+                    hx = torch.b_update(hx, h_new)
+                    cx = torch.b_update(cx, c_new)
+                    hx = torch.b_synchronize(hx)
+                    cx = torch.b_synchronize(cx)
+                return hx
+
+        batch_size, input_size, hidden_size = 10, 3, 2
         lstm = SlowLSTM(input_size, hidden_size)
-        xs, batch = self.mb_rand(batch_size, (False, 4), (False, input_size))
-        hx = torch.randn(1, 4, hidden_size)
-        cx = torch.randn(1, 4, hidden_size)
-        ys = [lstm.forward_single(xs[j], (hx, cx)) for j in range(batch_size)]
-        ybs = lstm.forward_batch(batch, (hx, cx))
+        xs, batch = self.mb_rand(batch_size, (True, 4), (False, input_size))
+        hx, h_batch = self.mb_rand(batch_size, (False, hidden_size))
+        cx, c_batch = self.mb_rand(batch_size, (False, hidden_size))
+        ys = [lstm.forward_single(xs[j], (hx[j], cx[j])) for j in range(batch_size)]
+        ybs = lstm.forward_batch(batch, (h_batch, c_batch))
         self.mb_assert_allclose(ys, MaskedBatch(*ybs))
 
     def test_csub(self):
