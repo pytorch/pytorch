@@ -85,6 +85,8 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
       return ::gloo::ReductionFunction<T>::min;
     case ReduceOp::MAX:
       return ::gloo::ReductionFunction<T>::max;
+    case ReduceOp::UNUSED:
+      break;
   }
 
   throw std::runtime_error("Unhandled ReduceOp");
@@ -92,7 +94,7 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
 
 std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
   std::vector<cudaStream_t> streams(entry.streams.size());
-  for (auto i = 0; i < entry.streams.size(); i++) {
+  for (size_t i = 0; i < entry.streams.size(); i++) {
     streams[i] = entry.streams[i].getStream();
   }
   return streams;
@@ -103,7 +105,7 @@ std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
 void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
   CUDADevice deviceGuard;
   const auto& key = entry->key;
-  for (auto i = 0; i < key.devices.size(); i++) {
+  for (size_t i = 0; i < key.devices.size(); i++) {
     const auto& device = key.devices[i];
     auto publicStream = THCState_getCurrentStreamOnDevice(thcState, device);
     auto privateStream = entry->streams[i].getStream();
@@ -138,7 +140,7 @@ bool ProcessGroupGloo::WorkGloo::isSuccess() const {
 void ProcessGroupGloo::WorkGloo::synchronize() {
   if (cuda_) {
     auto thcState = ::at::globalContext().lazyInitCUDA();
-    for (auto i = 0; i < devices_.size(); i++) {
+    for (size_t i = 0; i < devices_.size(); i++) {
       auto stream = THCState_getCurrentStreamOnDevice(thcState, devices_[i]);
       auto event = events_[i].getEvent();
       C10D_CUDA_CHECK(cudaStreamWaitEvent(stream, event, 0));
@@ -174,7 +176,7 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
       CUDADevice deviceGuard;
       devices_ = entry.key.devices;
       events_.resize(devices_.size());
-      for (auto i = 0; i < devices_.size(); i++) {
+      for (size_t i = 0; i < devices_.size(); i++) {
         deviceGuard.setDevice(devices_[i]);
         events_[i] = CUDAEvent::create();
         const auto& event = events_[i].getEvent();
@@ -218,7 +220,7 @@ ProcessGroupGloo::ProcessGroupGloo(
   }
 
   threads_.resize(options.threads);
-  for (int i = 0; i < threads_.size(); i++) {
+  for (size_t i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this);
   }
 
@@ -297,6 +299,8 @@ void ProcessGroupGloo::createAlgorithm(AlgorithmEntry& entry) {
     case CollectiveType::BROADCAST:
       GENERATE_ALL_TYPES(key.type->scalarType(), createBroadcast, entry);
       return;
+    case CollectiveType::UNUSED:
+      break;
   }
 
   throw std::runtime_error("Unhandled collective type");
@@ -387,7 +391,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   // Allocate source tensors for this entry
   auto& srcSizes = key.srcSizes;
   entry->src.resize(srcSizes.size());
-  for (int i = 0; i < srcSizes.size(); i++) {
+  for (size_t i = 0; i < srcSizes.size(); i++) {
     deviceGuard.setDevice(key.type->is_cuda() ? key.devices[i] : -1);
     entry->src[i] = key.type->tensor(srcSizes[i]);
   }
@@ -396,7 +400,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   if (key.type->is_cuda()) {
     entry->streams.resize(key.devices.size());
     entry->events.resize(key.devices.size());
-    for (auto i = 0; i < key.devices.size(); i++) {
+    for (size_t i = 0; i < key.devices.size(); i++) {
       deviceGuard.setDevice(key.devices[i]);
       entry->streams[i] = CUDAStream::create();
       entry->events[i] = CUDAEvent::create();
@@ -466,7 +470,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     synchronizeStreams(thcState_, entry);
     entry->run = [=]() mutable {
       entry->algorithm->run();
-      for (auto i = 0; i < tensors.size(); i++) {
+      for (size_t i = 0; i < tensors.size(); i++) {
         // The THCStreamGuard is a RAII wrapper for temporarily
         // overriding the current THCStream. This also sets the
         // current device to the stream's device.
@@ -477,7 +481,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   } else {
     entry->run = [=]() mutable {
       entry->algorithm->run();
-      for (auto i = 0; i < tensors.size(); i++) {
+      for (size_t i = 0; i < tensors.size(); i++) {
         tensors[i].copy_(entry->src[i]);
       }
     };
@@ -502,7 +506,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   auto entry = checkout(key);
 
   // Copy input tensors
-  for (auto i = 0; i < tensors.size(); i++) {
+  for (size_t i = 0; i < tensors.size(); i++) {
     entry->src[i].copy_(tensors[i]);
   }
 
@@ -512,7 +516,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     synchronizeStreams(thcState_, entry);
     entry->run = [=]() mutable {
       entry->algorithm->run();
-      for (auto i = 0; i < tensors.size(); i++) {
+      for (size_t i = 0; i < tensors.size(); i++) {
         // The THCStreamGuard is a RAII wrapper for temporarily
         // overriding the current THCStream. This also sets the
         // current device to the stream's device.
@@ -523,7 +527,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   } else {
     entry->run = [=]() mutable {
       entry->algorithm->run();
-      for (auto i = 0; i < tensors.size(); i++) {
+      for (size_t i = 0; i < tensors.size(); i++) {
         tensors[i].copy_(entry->src[i]);
       }
     };
