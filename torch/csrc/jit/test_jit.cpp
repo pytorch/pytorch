@@ -878,8 +878,7 @@ void testControlFlow() {
 }
 
 void testProto() {
-  onnx_c2::ModelProto proto;
-//  ::ONNX_NAMESPACE::ModelProto proto;
+  ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
 }
 

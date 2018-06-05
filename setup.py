@@ -52,6 +52,10 @@
 #     specify which CUDA architectures to build for.
 #     ie `TORCH_CUDA_ARCH_LIST="6.0;7.0"`
 #
+#   ONNX_NAMESPACE
+#     specify a namespace for ONNX built here rather than the hard-coded
+#     one in this file; needed to build with other frameworks that share ONNX.
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -135,6 +139,10 @@ NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
 if max_jobs is not None:
     NUM_JOBS = min(NUM_JOBS, int(max_jobs))
+
+ONNX_NAMESPACE = os.getenv("ONNX_NAMESPACE")
+if not ONNX_NAMESPACE:
+    ONNX_NAMESPACE = "onnx_torch"
 
 # Ninja
 try:
@@ -277,6 +285,7 @@ def build_libs(libs):
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
     my_env["NUM_JOBS"] = str(NUM_JOBS)
+    my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
     if not IS_WINDOWS:
         if WITH_NINJA:
             my_env["CMAKE_GENERATOR"] = '-GNinja'
@@ -664,7 +673,7 @@ if IS_WINDOWS:
     else:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopb.lib')
 
-main_compile_args = ['-D_THP_CORE']
+main_compile_args = ['-D_THP_CORE', '-DONNX_NAMESPACE=' + ONNX_NAMESPACE]
 main_libraries = ['shm']
 main_link_args = CAFFE2_LIBS + [NANOPB_STATIC_LIB]
 main_sources = [
