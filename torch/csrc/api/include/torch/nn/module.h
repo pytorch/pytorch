@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/tensor.h>
+#include <torch/detail/ordered_dict.h>
 
 #include <torch/csrc/autograd/variable.h>
 
@@ -93,26 +94,29 @@ class Module {
   }
 
  protected:
-  Variable register_parameter(const std::string& name, at::Tensor tensor);
-  Variable register_buffer(const std::string& name, at::Tensor tensor);
+  autograd::Variable& register_parameter(std::string name, at::Tensor tensor);
+  autograd::Variable& register_buffer(std::string name, at::Tensor tensor);
 
   template <typename ModuleType>
   std::shared_ptr<ModuleType> register_module(
-      const std::string& name,
-      const std::shared_ptr<ModuleType>& module) {
-    const auto pair = children_.emplace(name, module);
-    AT_CHECK(pair.second, "Module has already been registered");
-    return module;
+      std::string name,
+      std::shared_ptr<ModuleType> module) {
+    auto& base_module = children_.insert(std::move(name), std::move(module));
+    return std::static_pointer_cast<ModuleType>(base_module);
   }
 
  private:
+  template <typename T>
+  using OrderedDict = torch::detail::OrderedDict<std::string, T>;
+
   template <typename Derived>
   friend class CloneableModule;
 
   virtual void clone_(Module& other);
 
-  std::unordered_map<std::string, Variable> parameters_;
-  std::unordered_map<std::string, std::shared_ptr<Module>> children_;
+  OrderedDict<autograd::Variable> parameters_;
+  OrderedDict<autograd::Variable> buffers_;
+  OrderedDict<std::shared_ptr<Module>> children_;
 
   /// The module's name (e.g. "LSTM").
   mutable at::optional<std::string> name_;
@@ -151,13 +155,11 @@ class CloneableModule : public Module {
     copy->parameters_.clear();
     copy->children_.clear();
     copy->reset();
-    for (auto& parameter : parameters_) {
-      copy->parameters_.at(parameter.first)
-          .data()
-          .copy_(parameter.second.data());
+    for (const auto& parameter : parameters_) {
+      copy->parameters_[parameter.key].data().copy_(parameter->data());
     }
-    for (auto& child : children_) {
-      copy->children_.at(child.first)->clone_(*child.second);
+    for (const auto& child : children_) {
+      copy->children_[child.key]->clone_(*child.value);
     }
     return copy;
   }
