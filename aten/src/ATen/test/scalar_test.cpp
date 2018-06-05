@@ -72,7 +72,8 @@ void test_overflow() {
 
 TEST_CASE( "scalar test", "[]" ) {
 
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::Backend::CUDA);
 
   Scalar what = 257;
   Scalar bar = 3.0;
@@ -83,7 +84,7 @@ TEST_CASE( "scalar test", "[]" ) {
   REQUIRE_NOTHROW(gen.seed());
   auto && C = at::globalContext();
   if(at::hasCUDA()) {
-    auto & CUDAFloat = C.getType(Backend::CPU,ScalarType::Float);
+    auto & CUDAFloat = C.getType(Backend::CUDA,ScalarType::Float);
     auto t2 = zeros(CUDAFloat, {4,4});
     cout << &t2 << "\n";
     cout << "AFTER GET TYPE " << &CUDAFloat << "\n";

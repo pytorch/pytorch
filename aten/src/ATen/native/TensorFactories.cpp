@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <sstream>
 
-    namespace at {
+namespace at {
 namespace native {
 
 Tensor arange(const Type& dtype, Scalar start, Scalar end, Scalar step) {
@@ -48,7 +48,7 @@ Tensor& empty_out(Tensor& result, IntList size) {
 // TODO: remove when we have Type support in the IR
 
 #define DEFINE_CAST_OP(_1, n, _2)                                \
-  Tensor _cast_##_1(const Tensor& self, bool non_blocking) {     \
+  Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
     auto& target_type = self.type().toScalarType(ScalarType::n); \
     if (self.type() == target_type)                              \
       return self;                                               \
@@ -104,7 +104,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
 
 Tensor full(const Type& dtype, IntList size, Scalar fill_value) {
   if (dtype.is_sparse()) {
-    AT_ERROR("full(...) is not implemented for sparse types, got: %s", dtype.toString());
+    AT_ERROR("full(...) is not implemented for sparse types, got: ", dtype.toString());
   }
   auto result = dtype.tensor(size);
   return result.fill_(fill_value);
@@ -112,7 +112,7 @@ Tensor full(const Type& dtype, IntList size, Scalar fill_value) {
 
 Tensor& full_out(Tensor& result, IntList size, Scalar fill_value) {
   if (result.is_sparse()) {
-    AT_ERROR("full(...) is not implemented for sparse types, got: %s", result.type().toString());
+    AT_ERROR("full(...) is not implemented for sparse types, got: ", result.type().toString());
   }
   result.resize_(size);
   return result.fill_(fill_value);
@@ -178,6 +178,42 @@ Tensor rand_like(const Tensor& self, const Type& dtype) {
   return at::native::rand(dtype, self.sizes());
 }
 
+Tensor randint(const Type& dtype, int64_t high, IntList size, Generator* generator) {
+  Tensor result = dtype.tensor(size);
+  return result.random_(0, high, generator);
+}
+
+Tensor randint(const Type& dtype, int64_t low, int64_t high, IntList size, Generator* generator) {
+  Tensor result = dtype.tensor(size);
+  return result.random_(low, high, generator);
+}
+
+Tensor& randint_out(Tensor& result, int64_t high, IntList size, Generator* generator) {
+  result.resize_(size);
+  return result.random_(0, high, generator);
+}
+
+Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntList size, Generator* generator) {
+  result.resize_(size);
+  return result.random_(low, high, generator);
+}
+
+Tensor randint_like(const Tensor& self, int64_t high) {
+  return at::native::randint_like(self, high, self.type());
+}
+
+Tensor randint_like(const Tensor& self, int64_t low, int64_t high) {
+  return at::native::randint_like(self, low, high, self.type());
+}
+
+Tensor randint_like(const Tensor& self, int64_t high, const Type& dtype) {
+  return at::native::randint(dtype, high, self.sizes(), nullptr);
+}
+
+Tensor randint_like(const Tensor& self, int64_t low, int64_t high, const Type& dtype) {
+  return at::native::randint(dtype, low, high, self.sizes(), nullptr);
+}
+
 Tensor randn(const Type& dtype, IntList size, Generator* generator) {
   Tensor result = dtype.tensor(size);
   return result.normal_(0, 1, generator);
@@ -231,9 +267,9 @@ Tensor randperm(const Type& dtype, int64_t n, Generator* generator) {
 }
 
 Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
-  if (n <= 0) {
+  if (n < 0) {
     std::ostringstream oss;
-    oss << "n must be strictly positive, got " << n;
+    oss << "n must be non-negative, got " << n;
     throw std::runtime_error(oss.str());
   }
   if (result.type().backend() != at::kCPU) {

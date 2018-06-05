@@ -14,6 +14,14 @@ import os
 import collections
 from subprocess import Popen, PIPE
 import zipfile
+import itertools
+
+# When onnx is built against a version of protobuf that is older than
+# that which is vendored with caffe2, onnx will crash if caffe2's
+# vendored protobuf is loaded first. We can work around this by
+# importing onnx first, which will cause it to go out and pick up the
+# system protobuf.
+import onnx.backend
 
 import caffe2
 from caffe2.python import core, workspace, rnn_cell, gru_cell
@@ -26,12 +34,12 @@ from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto
 import onnx.numpy_helper
 import onnx.defs
 import onnx.optimizer
+import onnx.shape_inference
 from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
 
 from caffe2.python.onnx.workspace import Workspace
 from caffe2.python.onnx.backend_rep import Caffe2Rep
 from caffe2.python.onnx.backend_cpp_rep import Caffe2CppRep
-from caffe2.python.onnx.helper import dummy_name
 
 import caffe2.python._import_c_extension as C
 
@@ -82,12 +90,20 @@ def convertAttributeProto(onnx_arg):
         return onnx_arg.s
     elif onnx_arg.HasField('t'):
         return onnx_arg.t  # this is a proto!
+    elif onnx_arg.HasField('g'):
+        return Caffe2Backend._graph_to_net(onnx_arg.g, Caffe2Backend._known_opset_version)
     elif len(onnx_arg.floats):
         return list(onnx_arg.floats)
     elif len(onnx_arg.ints):
         return list(onnx_arg.ints)
     elif len(onnx_arg.strings):
         return list(onnx_arg.strings)
+    elif len(onnx_arg.graphs):
+        retval = []
+        # TODO: this doesn't work with RNN ops
+        for g in onnx_arg.graphs:
+            retval.append(Caffe2Backend._graph_to_net(g, Caffe2Backend._known_opset_version))
+        return retval
     else:
         raise ValueError("Unsupported ONNX attribute: {}".format(onnx_arg))
 
@@ -152,6 +168,8 @@ class Caffe2Backend(Backend):
         'Less':                  'LT',
         'Greater':               'GT',
         'Unsqueeze':             'ExpandDims',
+        'Loop':                  'ONNXWhile',
+        'Tile':                  'NumpyTile',
     }
 
     _global_renamed_attrs = {'kernel_shape': 'kernels'}
@@ -159,40 +177,55 @@ class Caffe2Backend(Backend):
         'Squeeze':              {'axes': 'dims'},
         'Unsqueeze':            {'axes': 'dims'},
         'Transpose':            {'perm': 'axes'},
-        'Upsample':             {'mode': ''},
+        'Upsample':             {'mode': '',
+                                 'scales': ''},
         'ConvTranspose':        {'output_padding': 'adjs'},
         'Selu':                 {'gamma': 'scale'},
+        'If':                   {'then_branch': 'then_net',
+                                 'else_branch': 'else_net'}
     }
 
     # operators whose behavior is different beyond renaming
     # the value is an attribute of this class that is a
     # function from ToffeIR node_def to caffe2 op_def
     _special_operators = {
-        'LSTM': '_create_lstm',
-        'GRU': '_create_gru',
-        'RNN': '_create_rnn',
+        'LSTM': '_create_rnn_variant',
+        'GRU': '_create_rnn_variant',
+        'RNN': '_create_rnn_variant',
+        'Loop': '_create_loop',
+        'If': '_create_if',
+        'Upsample': '_create_upsample',
     }
+
+    # Dummy name generator
+    _dummy_name = C.DummyName()
+
+    @classmethod
+    def dummy_name(cls):
+        return cls._dummy_name.new_dummy_name()
 
     # NB: By default, you will use the LATEST definition of the operator,
     # so this interface MAY make BC-breaking changes.  Specify an
     # opset_version if you don't want this to version.
     @classmethod
     def run_node(cls, node, inputs, device='CPU', opset_version=_known_opset_version, outputs_info=None):
-        super(Caffe2Backend, cls).run_node(node, inputs, device=device, outputs_info=outputs_info)
+        super(Caffe2Backend, cls).run_node(node, inputs, device=device,
+                                           outputs_info=outputs_info, opset_version=opset_version)
 
         device_option = get_device_option(Device(device))
-        with Workspace(), core.DeviceScope(device_option):  # temporary!
+        ws = Workspace()
+        with core.DeviceScope(device_option):  # temporary!
             if isinstance(inputs, dict):
                 for key, value in inputs.items():
-                    workspace.FeedBlob(key, value)
+                    ws.FeedBlob(key, value)
             else:
                 assert len(node.input) == len(inputs), "{}: expected {} but got {}".format(
                     node.op_type, len(node.input), len(inputs))
                 for key, value in zip(node.input, inputs):
-                    workspace.FeedBlob(key, value)
+                    ws.FeedBlob(key, value)
 
             ops = []
-            cbackend = C.Caffe2Backend()
+            cbackend = C.Caffe2Backend(cls._dummy_name)
             ops_str = cbackend.convert_node(node.SerializeToString(), opset_version)
             for s in ops_str[0] + ops_str[1]:
                 op = caffe2_pb2.OperatorDef()
@@ -207,8 +240,8 @@ class Caffe2Backend(Backend):
                 for op in ops2:
                     op.device_option.CopyFrom(device_option)
                 print("\nC++:\n{}\nPython:\n{}".format(ops, ops2))
-            workspace.RunOperatorsOnce(ops)
-            output_values = [workspace.FetchBlob(name) for name in node.output]
+            ws.RunOperatorsOnce(ops)
+            output_values = [ws.FetchBlob(name) for name in node.output]
             return namedtupledict('Outputs', node.output)(*output_values)
 
     @classmethod
@@ -265,389 +298,318 @@ class Caffe2Backend(Backend):
         return c2_op
 
     @classmethod
-    def _rnn_shape_inference(cls, init_model, pred_model, n, input_blob, W):
-        # ad-hoc, informally-specified, bug-ridden, slow
-        # implementation of shape inference
-
-        # if the weight matrices are directly provided as
-        # initializers, their dimensions should be available in the
-        # init net model.
-        for x in init_model.graph.input:
-            if x.name == W:
-                return x.type.tensor_type.shape.dim[1].dim_value
-
-        # otherwise, assume that the input_blob is either a direct
-        # graph input, or another rnn op of the same type. This
-        # matches the pattern produced by exporting from pytorch
-        # (where the weight matrices are unusable for this purpose due
-        # to reshaping operations that lose shape information).
-        for x in pred_model.graph.input:
-            if x.name == input_blob:
-                return x.type.tensor_type.shape.dim[2].dim_value
-
-        curr = n
-        while True:
-            for x in pred_model.graph.input:
-                if x.name == curr.inputs[0] and curr.op_type == 'Gather':
-                    return x.type.tensor_type.shape.dim[1].dim_value
-            prev = [x for x in map(OnnxNode, pred_model.graph.node) if x.outputs[0] == curr.inputs[0]]
-            if len(prev) != 1:
-                return
-            prev = prev[0]
-            if prev.op_type == n.op_type:
-                return prev.attrs['hidden_size']
-            if prev.op_type == 'Transpose':
-                for x in pred_model.graph.input:
-                    if x.name == prev.inputs[0]:
-                        return x.type.tensor_type.shape.dim[2].dim_value
-            curr = prev
+    def _rnn_reform_weights(cls, reforms, name, hidden_size, init_net, gates, reorder_indices):
+        for name_from, name_to, do_concat, extra_dims in reforms:
+            gate_blobs = ['%s/%s_%s' % (name, prefix, name_to) for prefix in gates]
+            for i, x in enumerate(gate_blobs):
+                dim0 = i * hidden_size, (i+1) * hidden_size
+                starts, ends = zip(dim0, *extra_dims)
+                init_net.Slice(name_from, x, starts=starts, ends=ends)
+            if do_concat:
+                reordered_gate_blobs = [gate_blobs[i] for i in reorder_indices]
+                init_net.Concat(reordered_gate_blobs, ['%s/%s' % (name, name_to), cls.dummy_name()], axis=0)
 
     @classmethod
-    def _create_rnn(cls, init_model, pred_model, n, opset_version):
+    def _make_rnn_direction(cls, input_blob, B, W, R, initial_states_and_names, sequence_lens,
+                            pred_mh, init_net,
+                            input_size, hidden_size, num_gates, direction_offset,
+                            Bi, Br, W_, R_,
+                            reform, make_cell, keep_outputs):
+        name = cls.dummy_name()
+
+        # input and recurrence biases are squashed together in onnx
+        # but not in caffe2
+        gates_hidden_size = num_gates * hidden_size
+        bias_offset = 2 * direction_offset * gates_hidden_size
+        weight_offset = direction_offset * gates_hidden_size
+        Bi = init_net.Slice(B, name + Bi,
+                            starts=[bias_offset + 0 * gates_hidden_size],
+                            ends  =[bias_offset + 1 * gates_hidden_size])
+        Br = init_net.Slice(B, name + Br,
+                            starts=[bias_offset + 1 * gates_hidden_size],
+                            ends  =[bias_offset + 2 * gates_hidden_size])
+        W_ = init_net.Slice(W, name + W_,
+                            starts=[weight_offset + 0 * gates_hidden_size, 0],
+                            ends  =[weight_offset + 1 * gates_hidden_size,-1])
+        R_ = init_net.Slice(R, name + R_,
+                            starts=[weight_offset + 0 * gates_hidden_size, 0],
+                            ends  =[weight_offset + 1 * gates_hidden_size,-1])
+
+        initial_states_sliced = []
+        for initial_state, name_suffix in initial_states_and_names:
+            initial_states_sliced.append(
+                pred_mh.net.Slice(initial_state, name + name_suffix,
+                                  starts=[direction_offset + 0, 0, 0],
+                                  ends  =[direction_offset + 1,-1,-1]))
+
+        if direction_offset == 1:
+            if sequence_lens is not None:
+                seq_lens_for_reverse = sequence_lens
+            else:
+                input_shape = pred_mh.net.Shape(input_blob, name + '/input_shape')
+                batch_size = pred_mh.net.Slice(input_shape, name + '/batch_size_slice', starts=[1], ends=[2])
+                seq_len = pred_mh.net.Slice(input_shape, name + '/seq_len_slice', starts=[0], ends=[1])
+                dummy_sequence_lens = pred_mh.net.Tile([seq_len, batch_size], name + '/dummy_sequence_lens', axis=0)
+                pred_mh.net.Reshape(dummy_sequence_lens, [dummy_sequence_lens, cls.dummy_name()], shape=[-1])
+                seq_lens_for_reverse = pred_mh.net.Cast(dummy_sequence_lens, name + '/seq_lens_for_reverse', to=core.DataType.INT32)
+        reform(Bi, Br, W_, R_, name, hidden_size, init_net)
+
+        if direction_offset == 1:
+            input = pred_mh.net.ReversePackedSegs(
+                [input_blob, seq_lens_for_reverse], name + "/input-reversed")
+        else:
+            input = input_blob
+
+        outputs = keep_outputs(list(make_cell(
+            pred_mh,
+            input,
+            sequence_lens,
+            initial_states_sliced,
+            input_size,
+            hidden_size,
+            name,
+            drop_states=False,
+            forward_only=True,
+        )))
+
+        if direction_offset == 1:
+            outputs[0] = pred_mh.net.ReversePackedSegs(
+                [outputs[0], seq_lens_for_reverse], name + "/output-reversed")
+
+        return outputs
+
+    @classmethod
+    def _create_upsample(cls, init_model, pred_model, n, opset_version):
+        c2_op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
+        if len(n.attrs['scales']) != 4:
+            raise ValueError("The scales argument should have size 4")
+        elif not (np.isclose(n.attrs['scales'][0], 1) and np.isclose(n.attrs['scales'][1], 1)):
+            raise ValueError("The first two elements in the scales argument must be 1")
+        c2_op.arg.extend([caffe2.python.utils.MakeArgument('height_scale', n.attrs['scales'][2])])
+        c2_op.arg.extend([caffe2.python.utils.MakeArgument('width_scale', n.attrs['scales'][3])])
+
+        return c2_op
+
+    @classmethod
+    def _create_rnn_variant(cls, init_model, pred_model, n, opset_version):
         assert init_model is not None, "cannot convert RNNs without access to the full model"
         assert pred_model is not None, "cannot convert RNNs without access to the full model"
 
         attrs = dict(n.attrs) # make a copy, which is safe to mutate
         hidden_size = attrs.pop('hidden_size')
-        activation = force_unicode(attrs.pop('activations', ('tanh',))[0])
         direction = force_unicode(attrs.pop('direction', 'forward'))
+
+        if n.op_type == 'RNN':
+            activation = force_unicode(attrs.pop('activations', ('tanh',))[0])
+        elif n.op_type == 'GRU':
+            linear_before_reset = attrs.pop('linear_before_reset', 0)
+
         assert not attrs, "unsupported RNN attributes: " + str(attrs.keys())
-        assert direction in ['forward', 'bidirectional'], "unsupported backwards RNN"
+        assert direction in ['forward', 'bidirectional'], "unsupported backwards RNN/GRU/LSTM"
 
-        input_blob, W, R, B, sequence_lens, initial_h = n.inputs
+        if n.op_type in ['RNN', 'GRU']:
+            input_blob, W, R, B, sequence_lens, initial_h = n.inputs
+        elif n.op_type == 'LSTM':
+            input_blob, W, R, B, sequence_lens, initial_h, initial_c = n.inputs
 
         if sequence_lens == "":
             sequence_lens = None
 
-        input_size = cls._rnn_shape_inference(init_model, pred_model, n, input_blob, W)
-        if input_size is None:
-            raise RuntimeError("best-effort shape inference for RNN input failed")
+        for x in itertools.chain(init_model.graph.input,
+                                 init_model.graph.value_info,
+                                 pred_model.graph.input,
+                                 pred_model.graph.value_info):
+            if x.name == W:
+                input_size = x.type.tensor_type.shape.dim[2].dim_value
+                break
+        else:
+            raise RuntimeError("best-effort shape inference for RNN/GRU/LSTM failed")
 
-        init_net = core.Net("init-net")
         pred_mh = ModelHelper()
+        init_net = core.Net("init-net")
 
-        def make_rnn(direction_offset):
-            name = dummy_name()
+        init_net.Reshape(W, [W, cls.dummy_name()], shape=[1,-1,0])
+        init_net.Squeeze(W, W, dims=[0])
+        init_net.Reshape(R, [R, cls.dummy_name()], shape=[1,-1,0])
+        init_net.Squeeze(R, R, dims=[0])
+        init_net.Reshape(B, [B, cls.dummy_name()], shape=[1,-1])
+        init_net.Squeeze(B, B, dims=[0])
 
-            # input and recurrence biases are squashed together in
-            # onnx but not in caffe2
+        if n.op_type == 'RNN':
+            def reform(*args):
+                pass
 
-            bias_offset = 2 * direction_offset * hidden_size
-            init_net.Slice(B, name + "/i2h_b",
-                           starts=[bias_offset + 0 * hidden_size],
-                           ends  =[bias_offset + 1 * hidden_size])
-            init_net.Slice(B, name + "/gates_t_b",
-                           starts=[bias_offset + 1 * hidden_size],
-                           ends  =[bias_offset + 2 * hidden_size])
+            def make_cell(*args, **kwargs):
+                return rnn_cell.BasicRNN(*args, activation=activation, **kwargs)
 
-            weight_offset = direction_offset * hidden_size
-            init_net.Slice(W, name + '/i2h_w',
-                           starts=[weight_offset + 0 * hidden_size, 0],
-                           ends  =[weight_offset + 1 * hidden_size,-1])
-            init_net.Slice(R, name + '/gates_t_w',
-                           starts=[weight_offset + 0 * hidden_size, 0],
-                           ends  =[weight_offset + 1 * hidden_size,-1])
+            def make_rnn(direction_offset):
+                return cls._make_rnn_direction(
+                    input_blob, B, W, R, [(initial_h, '/initial_h')], sequence_lens,
+                    pred_mh, init_net, input_size, hidden_size, 1, direction_offset,
+                    "/i2h_b", "/gates_t_b", "/i2h_w", "/gates_t_w",
+                    reform, make_cell, lambda x: x)
 
-            initial_h_sliced = name + '/initial_h'
-            init_net.Slice(initial_h, initial_h_sliced,
-                           starts=[direction_offset + 0, 0, 0],
-                           ends  =[direction_offset + 1,-1,-1])
+        elif n.op_type == 'GRU':
+            def reform(Bi, Br, W_, R_, name, hidden_size, init_net):
+                # caffe2 has a different order from onnx. We need to rearrange
+                #  z r h  -> r z h
+                reforms = ((W_, 'i2h_w',    True,  [(0,-1)]),
+                           (R_, 'gate_t_w', False, [(0,-1)]),
+                           (Bi, 'i2h_b',    True,  []),
+                           (Br, 'gate_t_b', False, []))
+                cls._rnn_reform_weights(reforms, name, hidden_size, init_net,
+                                        ['update', 'reset', 'output'], [1, 0, 2])
 
-            if direction_offset == 1:
-                input = pred_mh.net.ReversePackedSegs(
-                    [input_blob, sequence_lens], name + "/input-reversed")
-            else:
-                input = input_blob
+            def make_cell(*args, **kwargs):
+                return gru_cell.GRU(*args, linear_before_reset=linear_before_reset, **kwargs)
 
-            hidden_t_all, hidden_t_last = rnn_cell.BasicRNN(
-                pred_mh,
-                input,
-                sequence_lens,
-                [initial_h_sliced],
-                input_size,
-                hidden_size,
-                name,
-                drop_states=False,
-                forward_only=True,
-                activation=activation
-            )
+            def make_rnn(direction_offset):
+                return cls._make_rnn_direction(
+                    input_blob, B, W, R, [(initial_h, '/initial_h')], sequence_lens,
+                    pred_mh, init_net, input_size, hidden_size, 3, direction_offset,
+                    "_bias_i2h", "_bias_gates", "/i2h_w_pre", "/gates_t_w_pre",
+                    reform, make_cell, lambda x: x)
 
-            if direction_offset == 1:
-                hidden_t_all = pred_mh.net.ReversePackedSegs(
-                    [hidden_t_all, sequence_lens], name + "/output-reversed")
+        elif n.op_type == 'LSTM':
+            def reform(Bi, Br, W_, R_, name, hidden_size, init_net):
+                # caffe2 has a different order from onnx. We need to rearrange
+                #   i o f c -> i f o c
+                reforms = ((W_, 'i2h_w',     True, [(0, -1)]),
+                           (R_, 'gates_t_w', True, [(0, -1)]),
+                           (Bi, 'i2h_b'    , True, []),
+                           (Br, 'gates_t_b', True, []))
+                cls._rnn_reform_weights(reforms, name, hidden_size, init_net,
+                                        ['input', 'output', 'forget', 'cell'], [0, 2, 1, 3])
 
-            return hidden_t_all, hidden_t_last
+            def make_cell(*args, **kwargs):
+                return rnn_cell.LSTM(*args, **kwargs)
+
+            def make_rnn(direction_offset):
+                return cls._make_rnn_direction(
+                    input_blob, B, W, R, [(initial_h, '/initial_h'), (initial_c, '/initial_c')], sequence_lens,
+                    pred_mh, init_net, input_size, hidden_size, 4, direction_offset,
+                    "/i2h_b", "/gates_t_b", "/i2h_w", "/gates_t_w",
+                    reform, make_cell, lambda x: [x[0], x[1], x[3]])
 
         if direction == 'forward':
-            hidden_t_all, hidden_t_last = make_rnn(0)
+            outputs = make_rnn(0)
 
-            # in the forward case, storage is shared between the two
-            # outputs. We need to decouple them so that the
-            # VariableLengthSequencePadding only mutates n.outputs[0]
-            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
+            # in the forward case, storage is shared between the
+            # last outputs. We need to decouple them so that the
+            # VariableLengthSequencePadding only mutates
+            # n.outputs[0]
+            for i in range(1, len(outputs)):
+                pred_mh.net.Copy(outputs[i], n.outputs[i])
 
-            pred_mh.net = pred_mh.net.Clone(
-                "dummy-clone-net",
-                blob_remap={ hidden_t_all: n.outputs[0] }
-            )
+            if sequence_lens is not None:
+                pred_mh.net.VariableLengthSequencePadding(
+                    [outputs[0], sequence_lens], [outputs[0]])
+            pred_mh.net.ExpandDims([outputs[0]], [n.outputs[0]], dims=[1])
         elif direction == 'bidirectional':
-            hidden_t_all_f, hidden_t_last_f = make_rnn(0)
-            hidden_t_all_b, hidden_t_last_b = make_rnn(1)
-            pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
-                               [n.outputs[0], dummy_name()], axis=2)
-            pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], dummy_name()], axis=0)
+            outputs_f = make_rnn(0)
+            outputs_b = make_rnn(1)
 
-        if sequence_lens is not None:
-            pred_mh.net.VariableLengthSequencePadding(
-                [n.outputs[0], sequence_lens], [n.outputs[0]])
+            concatted_output, _ = pred_mh.net.Concat(
+                [outputs_f[0], outputs_b[0]], [cls.dummy_name(), cls.dummy_name()], axis=2)
+            if sequence_lens is not None:
+                pred_mh.net.VariableLengthSequencePadding(
+                    [concatted_output, sequence_lens], [concatted_output])
+            reshaped_output, _ = pred_mh.net.Reshape(concatted_output, [cls.dummy_name(), cls.dummy_name()], shape=[0,0,-1,2])
+            pred_mh.net.Transpose(reshaped_output, n.outputs[0], axes=[0,3,1,2])
+            for i in range(1, len(n.outputs)):
+                pred_mh.net.Concat([outputs_f[i], outputs_b[i]],
+                                   [n.outputs[i], cls.dummy_name()], axis=0)
 
-        return Caffe2Ops(list(pred_mh.Proto().op),
-                         list(init_net.Proto().op),
-                         list(pred_mh.Proto().external_input))
+        # We want to decide whether to put all of our weight-reshaping
+        # operators in the init net or the predict net. We can put
+        # them in the init net iff the inputs to those operators are
+        # already available, either as graph initializers, or as the
+        # output of other operators in the init net. The latter case
+        # occurs, for example, when exporting from pytorch to onnx.
+        # In most production use, we expect has_initializers to be
+        # true.
+        initializers = {i.name for i in init_model.graph.initializer}
+        outputs = {output for node in init_model.graph.node for output in node.output}
+        has_initializers = all(x in initializers or x in outputs for x in (W, R, B))
+
+        pred_ops = []
+        init_ops = []
+        (init_ops if has_initializers else pred_ops).extend(init_net.Proto().op)
+        pred_ops.extend(pred_mh.Proto().op)
+
+        return Caffe2Ops(pred_ops, init_ops, list(pred_mh.Proto().external_input))
 
     @classmethod
-    def _create_lstm(cls, init_model, pred_model, n, opset_version):
-        assert init_model is not None, "cannot convert LSTMs without access to the full model"
-        assert pred_model is not None, "cannot convert LSTMs without access to the full model"
-
-        attrs = dict(n.attrs) # make a copy, which is safe to mutate
-        hidden_size = attrs.pop('hidden_size')
-        direction = force_unicode(attrs.pop('direction', 'forward'))
-        assert not attrs, "unsupported LSTM attributes: " + str(attrs.keys())
-        assert direction in ['forward', 'bidirectional'], "unsupported backwards LSTM"
-
-        input_blob, W, R, B, sequence_lens, initial_h, initial_c = n.inputs
-
-        if sequence_lens == "":
-            sequence_lens = None
-
-        input_size = cls._rnn_shape_inference(init_model, pred_model, n, input_blob, W)
-        if input_size is None:
-            raise RuntimeError("best-effort shape inference for LSTM input failed")
-
-        init_net = core.Net("init-net")
-        pred_mh = ModelHelper()
-
-        def make_lstm(direction_offset):
-            name = dummy_name()
-
-            # input and recurrence biases are squashed together in
-            # onnx but not in caffe2
-
-            bias_offset = 8 * direction_offset * hidden_size
-            Bi = init_net.Slice(B, name + "_bias_i2h",
-                                starts=[bias_offset + 0 * hidden_size],
-                                ends  =[bias_offset + 4 * hidden_size])
-            Br = init_net.Slice(B, name + "_bias_gates",
-                                starts=[bias_offset + 4 * hidden_size],
-                                ends  =[bias_offset + 8 * hidden_size])
-
-            weight_offset = 4 * direction_offset * hidden_size
-            W_ = init_net.Slice(W, name + '/i2h_w_pre',
-                                starts=[weight_offset + 0 * hidden_size, 0],
-                                ends  =[weight_offset + 4 * hidden_size,-1])
-            R_ = init_net.Slice(R, name + '/gates_t_w_pre',
-                                starts=[weight_offset + 0 * hidden_size, 0],
-                                ends  =[weight_offset + 4 * hidden_size,-1])
-
-            # caffe2 has a different order from onnx. We need to rearrange
-            #   i o f c -> i f o c
-            reforms = ((W_, 'i2h_w',     [(0, -1)]),
-                       (R_, 'gates_t_w', [(0, -1)]),
-                       (Bi, 'i2h_b'    , []),
-                       (Br, 'gates_t_b', []))
-            for name_from, name_to, extra_dims in reforms:
-                xi, xo, xf, xc = [name_from + suffix for suffix in ("_i", "_o", "_f", "_c")]
-                for i, x in enumerate([xi, xo, xf, xc]):
-                    dim0 = i * hidden_size, (i+1) * hidden_size
-                    starts, ends = zip(dim0, *extra_dims)
-                    init_net.Slice(name_from, x, starts=starts, ends=ends)
-                init_net.Concat([xi, xf, xo, xc], ['%s/%s' % (name, name_to), dummy_name()], axis=0)
-
-            initial_h_sliced = name + '/initial_h'
-            init_net.Slice(initial_h, initial_h_sliced,
-                           starts=[direction_offset + 0, 0, 0],
-                           ends  =[direction_offset + 1,-1,-1])
-            initial_c_sliced = name + '/initial_c'
-            init_net.Slice(initial_c, initial_c_sliced,
-                           starts=[direction_offset + 0, 0, 0],
-                           ends  =[direction_offset + 1,-1,-1])
-
-            if direction_offset == 1:
-                input = pred_mh.net.ReversePackedSegs(
-                    [input_blob, sequence_lens], name + "/input-reversed")
-            else:
-                input = input_blob
-
-            hidden_t_all, hidden_t_last, _, cell_last, params = rnn_cell.LSTM(
-                pred_mh,
-                input,
-                sequence_lens,
-                [initial_h_sliced, initial_c_sliced],
-                input_size,
-                hidden_size,
-                name,
-                drop_states=False,
-                forward_only=True,
-                return_params=True
-            )
-
-            if direction_offset == 1:
-                hidden_t_all = pred_mh.net.ReversePackedSegs(
-                    [hidden_t_all, sequence_lens], name + "/output-reversed")
-
-            return hidden_t_all, hidden_t_last, cell_last
-
-        if direction == 'forward':
-            hidden_t_all, hidden_t_last, cell_last = make_lstm(0)
-
-            # in the forward case, storage is shared between the three
-            # outputs. We need to decouple them so that the
-            # VariableLengthSequencePadding only mutates n.outputs[0]
-            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
-            pred_mh.net.Copy(cell_last, n.outputs[2])
-
-            pred_mh.net = pred_mh.net.Clone(
-                "dummy-clone-net",
-                blob_remap={ hidden_t_all: n.outputs[0] }
-            )
-        elif direction == 'bidirectional':
-            hidden_t_all_f, hidden_t_last_f, cell_last_f = make_lstm(0)
-            hidden_t_all_b, hidden_t_last_b, cell_last_b = make_lstm(1)
-            pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
-                               [n.outputs[0], dummy_name()], axis=2)
-            pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], dummy_name()], axis=0)
-            pred_mh.net.Concat([cell_last_f, cell_last_b],
-                               [n.outputs[2], dummy_name()], axis=0)
-
-        if sequence_lens is not None:
-            pred_mh.net.VariableLengthSequencePadding(
-                [n.outputs[0], sequence_lens], [n.outputs[0]])
-
-        return Caffe2Ops(list(pred_mh.Proto().op),
-                         list(init_net.Proto().op),
-                         list(pred_mh.Proto().external_input))
+    def _create_control_op(cls, init_model, pred_model, n, opset_version):
+        control_inputs = []
+        if '__control_inputs' in n.attrs:
+            control_inputs.extend(n.attrs['__control_inputs'])
+        node = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
+        node.control_input.extend(control_inputs)
+        return Caffe2Ops([node], [], [])
 
     @classmethod
-    def _create_gru(cls, init_model, pred_model, n, opset_version):
-        assert init_model is not None, "cannot convert GRUs without access to the full model"
-        assert pred_model is not None, "cannot convert GRUs without access to the full model"
+    def _remove_ssa(cls, net, remap_dict):
+        for op in net.op:
+            for i, name in enumerate(op.output):
+                if name in remap_dict:
+                    op.output[i] = remap_dict[name]
+        for i, out in enumerate(net.external_output):
+            if out in remap_dict:
+                net.external_output[i] = remap_dict[out]
 
-        attrs = dict(n.attrs) # make a copy, which is safe to mutate
-        hidden_size = attrs.pop('hidden_size')
-        linear_before_reset = attrs.pop('linear_before_reset', 0)
-        direction = force_unicode(attrs.pop('direction', 'forward'))
-        assert not attrs, "unsupported GRU attributes: " + str(attrs.keys())
-        assert direction in ['forward', 'bidirectional'], "unsupported backwards GRU"
+    @classmethod
+    def _create_if(cls, init_model, pred_model, n, opset_version):
+        ops = cls._create_control_op(init_model, pred_model, n, opset_version)
+        assert ops[0][0].type == 'If'
+        if_op = ops[0][0]
+        then_net = else_net = None
+        for arg in if_op.arg:
+            if arg.name == 'then_net':
+                then_net = arg.n
+            if arg.name == 'else_net':
+                else_net = arg.n
+        assert then_net and else_net
+        then_net_outs = then_net.external_output
+        else_net_outs = else_net.external_output
+        op_outputs = if_op.output
+        assert len(then_net_outs) == len(else_net_outs)
+        assert len(else_net_outs) == len(op_outputs)
+        then_net_remap = {}
+        else_net_remap = {}
+        # Un-SSA branch outputs - since we're emitting everything into the same
+        # namespace we don't need the graph output names and the op output
+        # names to be unique
+        for then_name, else_name, op_name in zip(then_net_outs, else_net_outs, op_outputs):
+            then_net_remap[then_name] = op_name
+            else_net_remap[else_name] = op_name
+        cls._remove_ssa(then_net, then_net_remap)
+        cls._remove_ssa(else_net, else_net_remap)
+        return ops
 
-        input_blob, W, R, B, sequence_lens, initial_h = n.inputs
+    @classmethod
+    def _create_loop(cls, init_model, pred_model, n, opset_version):
+        ops = cls._create_control_op(init_model, pred_model, n, opset_version)
+        assert ops[0][0].type == 'ONNXWhile'
+        while_op = ops[0][0]
+        while_op.arg.extend([caffe2.python.utils.MakeArgument('has_trip_count', True)])
+        while_op.arg.extend([caffe2.python.utils.MakeArgument('has_cond', True)])
+        while_op.arg.extend([caffe2.python.utils.MakeArgument('disable_scopes', True)])
+        control_inputs = []
+        for arg in while_op.arg:
+            if arg.name == '__control_inputs':
+                control_inputs = arg.strings
+        num_loop_carried_deps = 0
+        for arg in while_op.arg:
+            if arg.name == 'body':
+                num_loop_carried_deps = len(arg.n.external_input) - 2
+                arg.n.external_input.extend(control_inputs)
+        while_op.arg.extend([
+            caffe2.python.utils.MakeArgument('num_loop_carried_deps',
+                                             num_loop_carried_deps)
+        ])
 
-        if sequence_lens == "":
-            sequence_lens = None
-
-        input_size = cls._rnn_shape_inference(init_model, pred_model, n, input_blob, W)
-        if input_size is None:
-            raise RuntimeError("best-effort shape inference for GRU input failed")
-
-        init_net = core.Net("init-net")
-        pred_mh = ModelHelper()
-
-        def make_gru(direction_offset):
-            name = dummy_name()
-
-            # input and recurrence biases are squashed together in
-            # onnx but not in caffe2
-
-            bias_offset = 6 * direction_offset * hidden_size
-            Bi = init_net.Slice(B, name + "_bias_i2h",
-                                starts=[bias_offset + 0 * hidden_size],
-                                ends  =[bias_offset + 3 * hidden_size])
-            Br = init_net.Slice(B, name + "_bias_gates",
-                                starts=[bias_offset + 3 * hidden_size],
-                                ends  =[bias_offset + 6 * hidden_size])
-
-            weight_offset = 3 * direction_offset * hidden_size
-            W_ = init_net.Slice(W, name + '/i2h_w_pre',
-                                starts=[weight_offset + 0 * hidden_size, 0],
-                                ends  =[weight_offset + 3 * hidden_size,-1])
-            R_ = init_net.Slice(R, name + '/gates_t_w_pre',
-                                starts=[weight_offset + 0 * hidden_size, 0],
-                                ends  =[weight_offset + 3 * hidden_size,-1])
-
-            # caffe2 has a different order from onnx. We need to rearrange
-            #  z r h  -> r z h
-            reforms = ((W_, 'i2h_w',    True,  [(0,-1)]),
-                       (R_, 'gate_t_w', False, [(0,-1)]),
-                       (Bi, 'i2h_b',    True,  []),
-                       (Br, 'gate_t_b', False, []))
-            for name_from, name_to, do_concat, extra_dims in reforms:
-                xz, xr, xh = ['%s/%s_%s' % (name, prefix, name_to) for prefix in ('update', 'reset', 'output')]
-                for i, x in enumerate([xz, xr, xh]):
-                    dim0 = i * hidden_size, (i+1) * hidden_size
-                    starts, ends = zip(dim0, *extra_dims)
-                    init_net.Slice(name_from, x, starts=starts, ends=ends)
-                if do_concat:
-                    init_net.Concat([xr, xz, xh], ['%s/%s' % (name, name_to), dummy_name()], axis=0)
-
-            initial_h_sliced = name + '/initial_h'
-            init_net.Slice(initial_h, initial_h_sliced,
-                           starts=[direction_offset + 0, 0, 0],
-                           ends  =[direction_offset + 1,-1,-1])
-
-            if direction_offset == 1:
-                input = pred_mh.net.ReversePackedSegs(
-                    [input_blob, sequence_lens], name + "/input-reversed")
-            else:
-                input = input_blob
-
-            hidden_t_all, hidden_t_last = gru_cell.GRU(
-                pred_mh,
-                input,
-                sequence_lens,
-                [initial_h_sliced],
-                input_size,
-                hidden_size,
-                name,
-                drop_states=False,
-                forward_only=True,
-                linear_before_reset=linear_before_reset
-            )
-
-            if direction_offset == 1:
-                hidden_t_all = pred_mh.net.ReversePackedSegs(
-                    [hidden_t_all, sequence_lens], name + "/output-reversed")
-
-            return hidden_t_all, hidden_t_last
-
-        if direction == 'forward':
-            hidden_t_all, hidden_t_last = make_gru(0)
-
-            # in the forward case, storage is shared between the two
-            # outputs. We need to decouple them so that the
-            # VariableLengthSequencePadding only mutates n.outputs[0]
-            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
-
-            pred_mh.net = pred_mh.net.Clone(
-                "dummy-clone-net",
-                blob_remap={ hidden_t_all: n.outputs[0] }
-            )
-        elif direction == 'bidirectional':
-            hidden_t_all_f, hidden_t_last_f = make_gru(0)
-            hidden_t_all_b, hidden_t_last_b = make_gru(1)
-            pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
-                               [n.outputs[0], dummy_name()], axis=2)
-            pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], dummy_name()], axis=0)
-
-        if sequence_lens is not None:
-            pred_mh.net.VariableLengthSequencePadding(
-                [n.outputs[0], sequence_lens], [n.outputs[0]])
-
-        return Caffe2Ops(list(pred_mh.Proto().op),
-                         list(init_net.Proto().op),
-                         list(pred_mh.Proto().external_input))
+        return ops
 
     @classmethod
     def _substitute_raw_value(cls, tp, raw_values_dict):
@@ -724,7 +686,8 @@ class Caffe2Backend(Backend):
     def optimize_onnx(input, init=False, predict=False):
         passes =  ['fuse_consecutive_transposes',
                    'eliminate_nop_transpose',
-                   'fuse_transpose_into_gemm']
+                   'fuse_transpose_into_gemm',
+                   'lift_lexical_references']
         if init:
             passes.append('split_init')
         if predict:
@@ -744,11 +707,10 @@ class Caffe2Backend(Backend):
                 with z.open(name, 'r') as blob_file:
                     raw_values_dict[name] = blob_file.read()
 
-        cls._external_value_resolution_pass(model, raw_values_dict)
-        return cls.prepare(model, device, **kwargs)
+        return cls.prepare(model, device, raw_values_dict=raw_values_dict, **kwargs)
 
     @classmethod
-    def prepare(cls, model, device='CPU', **kwargs):
+    def prepare(cls, model, device='CPU', raw_values_dict=None, **kwargs):
         '''
         For Onnx Caffe2Backend, we require that init_graph don't initialize the actual input of the predict_graph,
 
@@ -756,7 +718,8 @@ class Caffe2Backend(Backend):
         initializer of the predict_graph, "img" is not initalized. We don't have a check for this, since
         there is no way we can know which blob is the input of the predict_graph.
         '''
-        super(Caffe2Backend, cls).prepare(model, device, **kwargs)
+        if not kwargs.pop('no_check_UNSAFE', False):
+            super(Caffe2Backend, cls).prepare(model, device, **kwargs)
         opset_version = None
         for imp in model.opset_import:
             if not imp.HasField("domain") or imp.domain == "":
@@ -771,9 +734,10 @@ class Caffe2Backend(Backend):
             else:
                 opset_version = 1
 
+        model = onnx.shape_inference.infer_shapes(model)
+
         # Check whether we have RNN related ops
-        pred_model = ModelProto()
-        pred_model.ParseFromString(cls.optimize_onnx(model.SerializeToString(), predict=True))
+        pred_model = cls.optimize_onnx(model, predict=True)
         rnn_nodes = []
         for node in pred_model.graph.node:
             if node.op_type in {'LSTM', 'GRU', 'RNN'}:
@@ -788,8 +752,7 @@ class Caffe2Backend(Backend):
         if use_cpp_backend:
             c2_rnn_ops = []
             if rnn_nodes:
-                init_model = ModelProto()
-                init_model.ParseFromString(cls.optimize_onnx(model.SerializeToString(), init=True))
+                init_model = cls.optimize_onnx(model, init=True)
                 for node in rnn_nodes:
                     c2ops = cls._onnx_node_to_caffe2_op(
                         init_model, pred_model, node, opset_version)
@@ -799,7 +762,9 @@ class Caffe2Backend(Backend):
                     c2_rnn_ops.append(C.Caffe2Ops(init_ops, ops, external_inputs))
                 del init_model
 
-            cbackend = C.Caffe2Backend()
+            cbackend = C.Caffe2Backend(cls._dummy_name)
+            if raw_values_dict:
+                cls._external_value_resolution_pass(model, raw_values_dict)
             rep = cbackend.prepare(model.SerializeToString(), device, c2_rnn_ops)
             # For testing
             # Dump the net descriptions to file for comparison with the Python ones
@@ -819,6 +784,11 @@ class Caffe2Backend(Backend):
             ws = Workspace()
             device_option = get_device_option(Device(device))
 
+            init_net, predict_net = cls._onnx_model_to_caffe2_net(model, device, opset_version, False)
+
+            if raw_values_dict:
+                cls._external_value_resolution_pass(model, raw_values_dict)
+
             # Directly load initializer data into blobs in workspace
             cls._direct_initialize_parameters(
                 model.graph.initializer,
@@ -837,7 +807,6 @@ class Caffe2Backend(Backend):
 
             uninitialized = [value_info.name for value_info in model.graph.input if value_info.name not in initialized]
 
-            init_net, predict_net = cls._onnx_model_to_caffe2_net(model, device, opset_version, False)
             if "ONNX_CAFFE2_DEBUG" in os.environ:
                 with open("python.txt", "w") as f:
                     f.write("pred_net: \n{}".format(predict_net))
@@ -848,7 +817,7 @@ class Caffe2Backend(Backend):
     @classmethod
     # TODO: This method needs a refactor for clarity
     def _onnx_node_to_caffe2_op(cls, init_model, pred_model, node_def, opset_version):
-        cbackend = C.Caffe2Backend()
+        cbackend = C.Caffe2Backend(cls._dummy_name)
         if cbackend.support_onnx_import(node_def.op_type):
             op_strs = cbackend.convert_node(node_def.SerializeToString(), opset_version)
             init_ops = []
@@ -874,6 +843,11 @@ class Caffe2Backend(Backend):
             ops = [ops]
         return Caffe2Ops(ops, [], [])
 
+    _broadcast_operators = {
+        'Add',
+        'Sub',
+    }
+
     @classmethod
     def _common_onnx_node_to_caffe2_op(cls, init_model, pred_model, onnx_node, opset_version):
         """
@@ -894,6 +868,7 @@ class Caffe2Backend(Backend):
         c2_op.output.extend(onnx_node.outputs)
         c2_op.name = onnx_node.name
 
+
         onnx_op_type = onnx_node.op_type
         broken_version = cls._broken_operators.get(onnx_op_type, float('Inf'))
         if broken_version <= opset_version:
@@ -912,6 +887,13 @@ class Caffe2Backend(Backend):
                 return cls._global_renamed_attrs[k]
             return k
         c2_op.arg.extend(onnx_node.attrs.caffe2(kmap=kmap))
+        if c2_op.type in cls._broadcast_operators:
+            already_broadcast = False
+            for arg in c2_op.arg:
+                if arg.name == 'broadcast':
+                    already_broadcast = True
+            if not already_broadcast:
+                c2_op.arg.extend([caffe2.python.utils.MakeArgument('broadcast', 1)])
 
         return c2_op
 
@@ -929,14 +911,31 @@ class Caffe2Backend(Backend):
         return names
 
     @classmethod
+    def _graph_to_net(cls, onnx_graph, opset_version):
+        net = caffe2_pb2.NetDef()
+        for node in onnx_graph.node:
+            try:
+                c2ops = cls._onnx_node_to_caffe2_op(
+                    None, None, node, opset_version)
+            except Exception as e:
+                success = False
+                print('ONNX FATAL:', e)
+                continue
+            net.op.extend(c2ops.init_ops)
+            net.op.extend(c2ops.ops)
+            net.external_input.extend(c2ops.interface_blobs)
+        net.external_output.extend(
+            value_info.name for value_info in onnx_graph.output)
+        net.external_input.extend(
+            value_info.name for value_info in onnx_graph.input)
+        return net
+
+    @classmethod
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
         device_option = get_device_option(Device(device))
 
-        init_model = ModelProto()
-        init_model.ParseFromString(cls.optimize_onnx(onnx_model.SerializeToString(), init=True))
-
-        pred_model = ModelProto()
-        pred_model.ParseFromString(cls.optimize_onnx(onnx_model.SerializeToString(), predict=True))
+        init_model = cls.optimize_onnx(onnx_model, init=True)
+        pred_model = cls.optimize_onnx(onnx_model, predict=True)
 
         init_net = caffe2_pb2.NetDef()
         pred_net = caffe2_pb2.NetDef()
@@ -947,7 +946,7 @@ class Caffe2Backend(Backend):
         if include_initializers:
             init_net.op.extend(cls._create_tensor_filling_op(tp) for tp in onnx_model.graph.initializer)
 
-        dummy_name(cls._all_names_in_graph(init_model.graph) | cls._all_names_in_graph(pred_model.graph))
+        cls._dummy_name.reset(cls._all_names_in_graph(init_model.graph) | cls._all_names_in_graph(pred_model.graph))
 
         success = True
         for net, model in ( (init_net, init_model), (pred_net, pred_model) ):
@@ -960,7 +959,7 @@ class Caffe2Backend(Backend):
                     success = False
                     print('ONNX FATAL:', e)
                     continue
-                (init_net if include_initializers else net).op.extend(c2ops.init_ops)
+                init_net.op.extend(c2ops.init_ops)
                 net.op.extend(c2ops.ops)
                 net.external_input.extend(c2ops.interface_blobs)
             net.external_output.extend(

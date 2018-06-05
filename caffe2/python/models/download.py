@@ -9,6 +9,9 @@ import os
 import sys
 import signal
 import re
+import json
+
+from caffe2.proto import caffe2_pb2
 
 # Import urllib
 try:
@@ -142,6 +145,53 @@ def validModelName(name):
     if not re.match("^[/0-9a-zA-Z_-]+$", name):
         return False
     return True
+
+class ModelDownloader:
+    def _model_dir(self, model):
+        caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
+        models_dir = os.getenv('CAFFE2_MODELS', os.path.join(caffe2_home, 'models'))
+        return os.path.join(models_dir, model)
+
+    def _download(self, model):
+        model_dir = self._model_dir(model)
+        assert not os.path.exists(model_dir)
+        os.makedirs(model_dir)
+        for f in ['predict_net.pb', 'init_net.pb', 'value_info.json']:
+            url = getURLFromName(model, f)
+            dest = os.path.join(model_dir, f)
+            try:
+                try:
+                    downloadFromURLToFile(url, dest,
+                                          show_progress=False)
+                except TypeError:
+                    # show_progress not supported prior to
+                    # Caffe2 78c014e752a374d905ecfb465d44fa16e02a28f1
+                    # (Sep 17, 2017)
+                    downloadFromURLToFile(url, dest)
+            except Exception as e:
+                print("Abort: {reason}".format(reason=e))
+                print("Cleaning up...")
+                deleteDirectory(model_dir)
+                exit(1)
+
+    def get_c2_model(self, model_name):
+        model_dir = self._model_dir(model_name)
+        if not os.path.exists(model_dir):
+            self._download(model_name)
+        c2_predict_pb = os.path.join(model_dir, 'predict_net.pb')
+        c2_predict_net = caffe2_pb2.NetDef()
+        with open(c2_predict_pb, 'rb') as f:
+            c2_predict_net.ParseFromString(f.read())
+        c2_predict_net.name = model_name
+
+        c2_init_pb = os.path.join(model_dir, 'init_net.pb')
+        c2_init_net = caffe2_pb2.NetDef()
+        with open(c2_init_pb, 'rb') as f:
+            c2_init_net.ParseFromString(f.read())
+        c2_init_net.name = model_name + '_init'
+
+        value_info = json.load(open(os.path.join(model_dir, 'value_info.json')))
+        return c2_init_net, c2_predict_net, value_info
 
 
 if __name__ == "__main__":

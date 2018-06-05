@@ -37,6 +37,7 @@ class AdaptiveWeight(ModelLayer):
         else:
             assert len(weights) == self.num
             weights = np.array(weights).astype(np.float32)
+            assert min(weights) > 0, 'initial weights must be non-negative'
             values = np.log(1. / 2. / weights)
             initializer = (
                 'GivenTensorFill', {

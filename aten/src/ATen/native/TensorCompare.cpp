@@ -64,7 +64,7 @@ bool is_nonzero(const Tensor& self) {
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   if (condition.type().scalarType() != ScalarType::Byte) {
-    AT_ERROR("Expected condition to have ScalarType Byte, but got ScalarType %s",
+    AT_ERROR("Expected condition to have ScalarType Byte, but got ScalarType ",
                   toString(condition.type().scalarType()));
   }
   Tensor b_condition, b_self, b_other;
@@ -95,7 +95,7 @@ Tensor argmax(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 Tensor argmax(const Tensor& self) {
-  return std::get<1>(self.contiguous().view({-1}).max(/*dim=*/0));
+  return std::get<1>(self.reshape({-1}).max(/*dim=*/0));
 }
 
 Tensor argmin(const Tensor& self, int64_t dim, bool keepdim) {
@@ -103,7 +103,7 @@ Tensor argmin(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 Tensor argmin(const Tensor& self) {
-  return std::get<1>(self.contiguous().view({-1}).min(/*dim=*/0));
+  return std::get<1>(self.reshape({-1}).min(/*dim=*/0));
 }
 
 // `argmin` and `argmax` are exposed in C++ but not in Python, where we only

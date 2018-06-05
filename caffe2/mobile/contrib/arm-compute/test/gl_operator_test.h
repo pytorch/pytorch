@@ -38,7 +38,7 @@ void PopulateCPUBlob(Workspace *ws, bool random, std::string name,
   }
 }
 
-template<typename T = half>
+template<typename T = DataType>
 void compareNetResult(Workspace& ws,
                       NetDef& cpu_net, NetDef& gpu_net,
                       string cpu_blob="ref_Y",
@@ -70,52 +70,51 @@ void compareNetResult(Workspace& ws,
   }
 }
 
-template<typename T = half>
+template<typename T = DataType>
 void compareNetResult4D(Workspace& ws,
                         NetDef& cpu_net, NetDef& gpu_net,
                         string cpu_blob="ref_Y",
                         string gpu_blob="gpu_Y",
                         double tol=0.05) {
-  ws.RunNetOnce(cpu_net);
-  ws.RunNetOnce(gpu_net);
+  LOG(INFO) << "[C2DEBUG] running gpu net";
+  bool gpu_success = ws.RunNetOnce(gpu_net);
+  LOG(INFO) << "[C2DEBUG] after gpu net";
+  bool cpu_success = ws.RunNetOnce(cpu_net);
+  LOG(INFO) << "[C2DEBUG] after cpu net";
 
+  if (!gpu_success || !cpu_success) {
+    LOG(ERROR) << "[C2DEBUG] cpu or gpu net failed.";
+    return;
+  }
   Blob *cpu_out = ws.GetBlob(cpu_blob);
   Blob *gpu_out = ws.GetBlob(gpu_blob);
-  auto &g_ = gpu_out->Get<GLTensor<T>>();
 
   EXPECT_NE(nullptr, cpu_out);
   EXPECT_NE(nullptr, gpu_out);
 
-  TensorCPU g;
   auto &t = cpu_out->Get<TensorCPU>();
-  g.Resize(g_.dims());
-  T *buffer = g_.map();
-  char *byte_buffer = (char *)buffer;
-  auto info = g_.get_underlying()->info();
-
-  CAFFE_ENFORCE(byte_buffer != NULL);
-  auto C = t.dim32(1);
-  auto H = t.dim32(2);
-  auto W = t.dim32(3);
   int diff_num = 0;
-#define get_elem(_a, _b, _c)                                            \
-  (half *)&byte_buffer[info->offset_element_in_bytes(                   \
-      arm_compute::Coordinates(_a, _b, _c))]
-  for (auto c = 0; c < C; ++c) {
-    for (auto h = 0; h < H; ++h) {
-      for (auto w = 0; w < W; ++w) {
-        auto t_elem = t.data<float>()[(c * H + h) * W + w];
-        auto g_elem = get_elem(w, h, c);
-
-        if (!isnan(t_elem) && (std::abs(t_elem - float(*g_elem)) > tol + tol * std::abs(t_elem))) {
-            diff_num++;
-        }
-        CHECK(diff_num <= 0.03 * C*H*W);
+  if (gpu_out->IsType<TensorCPU>()) {
+    auto& g = gpu_out->Get<TensorCPU>();
+    for (auto i = 0; i < t.size(); ++i) {
+      auto t_elem = t.data<float>()[i];
+      auto g_elem = g.data<float>()[i];
+      if (!isnan(t_elem) && (std::abs(t_elem - g_elem) > tol + tol * std::abs(t_elem))) {
+        diff_num++;
+      }
+    }
+  } else if (gpu_out->IsType<GLTensor<T>>()) {
+    TensorCPU g;
+    getTensorCPU(gpu_out->Get<GLTensor<T>>(), g);
+    for (auto i = 0; i < t.size(); ++i) {
+      auto t_elem = t.data<float>()[i];
+      auto g_elem = g.data<float>()[i];
+      if (!isnan(t_elem) && (std::abs(t_elem - g_elem) > tol + tol * std::abs(t_elem))) {
+        diff_num++;
       }
     }
   }
-#undef get_elem
-  g_.unmap();
+  CHECK(diff_num <= 0.03 * t.size());
 }
 
 

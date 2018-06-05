@@ -1,8 +1,7 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Function, Variable
-from torch.autograd.function import once_differentiable
+from torch.autograd import Function
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _finfo, broadcast_all, lazy_property
@@ -18,10 +17,9 @@ class Gamma(ExponentialFamily):
 
     Example::
 
-        >>> m = Gamma(torch.Tensor([1.0]), torch.Tensor([1.0]))
+        >>> m = Gamma(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # Gamma distributed with concentration=1 and rate=1
-         0.1046
-        [torch.FloatTensor of size 1]
+        tensor([ 0.1046])
 
     Args:
         concentration (float or Tensor): shape parameter of the distribution
@@ -53,8 +51,7 @@ class Gamma(ExponentialFamily):
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(shape)
-        data = value.data if isinstance(value, Variable) else value
-        data.clamp_(min=_finfo(value).tiny)  # do not record in autograd graph
+        value.detach().clamp_(min=_finfo(value).tiny)  # do not record in autograd graph
         return value
 
     def log_prob(self, value):

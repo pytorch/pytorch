@@ -40,7 +40,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
-  if (TensorUtils<THCTensor>::overlappingIndices(state, tensor)) {
+  if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
     oldTensor = tensor;
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
@@ -49,11 +49,11 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
       TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
       TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, tensor);
+      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<real, unsigned int> srcInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, src);
+      getTensorInfo<real, THCTensor, unsigned int>(state, src);
     TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -76,11 +76,11 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
     }
   } else {
     TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, tensor);
+      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
     TensorInfo<real, uint64_t> srcInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, src);
+      getTensorInfo<real, THCTensor, uint64_t>(state, src);
     TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
     RUN(uint64_t, -1, real);
     THCudaCheck(cudaGetLastError());
   }
@@ -133,7 +133,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
   THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
-  if (TensorUtils<THCTensor>::overlappingIndices(state, tensor)) {
+  if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
     oldTensor = tensor;
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
@@ -142,11 +142,11 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
       TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
       TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, tensor);
+      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<real, unsigned int> srcInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, src);
+      getTensorInfo<real, THCTensor, unsigned int>(state, src);
     TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -165,11 +165,11 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
     }
   } else {
     TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, tensor);
+      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
     TensorInfo<real, uint64_t> srcInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, src);
+      getTensorInfo<real, THCTensor, uint64_t>(state, src);
     TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
 
     RUN(uint64_t, -1, real)
   }
@@ -220,7 +220,7 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
   THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
-  if (TensorUtils<THCTensor>::overlappingIndices(state, tensor)) {
+  if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
     oldTensor = tensor;
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
@@ -229,11 +229,11 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
       TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
       TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, tensor);
+      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<real, unsigned int> srcInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, src);
+      getTensorInfo<real, THCTensor, unsigned int>(state, src);
     TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -252,11 +252,11 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
     }
   } else {
     TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, tensor);
+      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
     TensorInfo<real, uint64_t> srcInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, src);
+      getTensorInfo<real, THCTensor, uint64_t>(state, src);
     TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
 
     RUN(uint64_t, -1, real)
   }
@@ -305,7 +305,7 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
-  if (TensorUtils<THCTensor>::overlappingIndices(state, tensor)) {
+  if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
     oldTensor = tensor;
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
@@ -313,9 +313,9 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, tensor) &&
       TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, tensor);
+      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
@@ -334,9 +334,9 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
     }
   } else {
     TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, tensor);
+      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
     TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, index);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
 
     RUN(uint64_t, -1, real);
   }

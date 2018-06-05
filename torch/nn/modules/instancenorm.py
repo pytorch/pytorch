@@ -9,24 +9,38 @@ class _InstanceNorm(_BatchNorm):
             num_features, eps, momentum, affine, track_running_stats)
 
     def _check_input_dim(self, input):
-        return NotImplemented
+        raise NotImplementedError
 
-    def _load_state_dict_key_mismatch(self, full_name, name, is_missing):
-        if not is_missing and not self.track_running_stats and \
-                name in ('running_mean', 'running_var'):
-            raise KeyError(
-                'Unexpected running stats buffer "{name}" in state_dict for '
-                '{klass} with track_running_stats=False. If you are trying to '
-                'load a checkpoint saved before 0.4.0, this may be expected '
-                'because {klass} does not track running stats by default '
-                'anymore since 0.4.0. If running stats are not used, remove '
-                'them from state_dict before calling load_state_dict. '
-                'Otherwise, set track_running_stats=True in {klass} to use '
-                'running stats. See the documentation of {klass} for more '
-                'details.'
-                .format(name=full_name, klass=self.__class__.__name__))
-        super(_InstanceNorm, self)._load_state_dict_key_mismatch(
-            full_name, name, is_missing)
+    def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs):
+        try:
+            version = state_dict._metadata[prefix[:-1]]["version"]
+        except (AttributeError, KeyError):
+            version = None
+        # at version 1: removed running_mean and running_var when
+        # track_running_stats=False (default)
+        if version is None and not self.track_running_stats:
+            running_stats_keys = []
+            for name in ('running_mean', 'running_var'):
+                key = prefix + name
+                if key in state_dict:
+                    running_stats_keys.append(key)
+            if len(running_stats_keys) > 0:
+                error_msgs.append(
+                    'Unexpected running stats buffer(s) {names} for {klass} '
+                    'with track_running_stats=False. If state_dict is a '
+                    'checkpoint saved before 0.4.0, this may be expected '
+                    'because {klass} does not track running stats by default '
+                    'since 0.4.0. Please remove these keys from state_dict. If '
+                    'the running stats are actually needed, instead set '
+                    'track_running_stats=True in {klass} to enable them. See '
+                    'the documentation of {klass} for details.'
+                    .format(names=" and ".join('"{}"'.format(k) for k in running_stats_keys),
+                            klass=self.__class__.__name__))
+                for key in running_stats_keys:
+                    state_dict.pop(key)
+
+        super(_InstanceNorm, self)._load_from_state_dict(
+            state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs)
 
     def forward(self, input):
         self._check_input_dim(input)

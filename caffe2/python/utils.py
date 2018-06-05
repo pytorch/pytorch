@@ -323,6 +323,6 @@ def debug(f):
     def wrapper(*args, **kwargs):
         def func():
             return f(*args, **kwargs)
-        DebugMode.run(func)
+        return DebugMode.run(func)
 
     return wrapper

@@ -51,6 +51,7 @@ cmake .. ^
   -DBUILD_TEST=OFF ^
   -DCMAKE_BUILD_TYPE=%CMAKE_BUILD_TYPE% ^
   -DUSE_CUDA=%USE_CUDA% ^
+  -DCUDA_ARCH_NAME=Maxwell ^
   -DUSE_NNPACK=OFF ^
   -DUSE_CUB=OFF ^
   -DUSE_GLOG=OFF ^
@@ -64,7 +65,7 @@ cmake .. ^
   || goto :label_error
 
 :: Actually run the build
-cmake --build . --config %CMAKE_BUILD_TYPE% || goto :label_error
+cmake --build . --config %CMAKE_BUILD_TYPE% -- /maxcpucount:%NUMBER_OF_PROCESSORS% || goto :label_error
 
 echo "Caffe2 built successfully"
 cd %ORIGINAL_DIR%

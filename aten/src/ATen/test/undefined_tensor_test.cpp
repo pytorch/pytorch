@@ -9,7 +9,7 @@
 using namespace at;
 
 TEST_CASE( "undefined tensor test", "[]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.
   Tensor und;

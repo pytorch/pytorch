@@ -168,8 +168,16 @@ inline __host__ __device__ half exp(half a) {
   return THCNumerics<half>::exp(a);
 }
 
+inline __host__ __device__ half log10(half a) {
+  return THCNumerics<half>::log10(a);
+}
+
 inline __host__ __device__ half log1p(half a) {
   return THCNumerics<half>::log1p(a);
+}
+
+inline __host__ __device__ half log2(half a) {
+  return THCNumerics<half>::log2(a);
 }
 
 inline __host__ __device__ half expm1(half a) {
@@ -188,7 +196,7 @@ inline __host__ __device__ half tanh(half a) {
   return THCNumerics<half>::tanh(a);
 }
 
-#if defined(_MSC_VER) && CUDA_VERSION >= 9000
+#if defined(_MSC_VER) && CUDA_VERSION >= 9000 || defined(__HIP_PLATFORM_HCC__)
 inline __host__ __device__ half operator+(half a, int b) {
   return THCNumerics<half>::add(a, ScalarConvert<int, half>::to(b));
 }

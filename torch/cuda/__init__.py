@@ -112,7 +112,7 @@ def _check_capability():
             warnings.warn(incorrect_binary_warn % (d, name, 8000, CUDA_VERSION))
         elif CUDA_VERSION < 9000 and major >= 7:
             warnings.warn(incorrect_binary_warn % (d, name, 9000, CUDA_VERSION))
-        elif capability == (3, 0) or capability == (5, 0) or major < 3:
+        elif capability == (3, 0) or major < 3:
             warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
 
 
@@ -216,7 +216,7 @@ class device(object):
     """
 
     def __init__(self, idx):
-        self.idx = idx
+        self.idx = int(idx)
         self.prev_idx = -1
 
     def __enter__(self):

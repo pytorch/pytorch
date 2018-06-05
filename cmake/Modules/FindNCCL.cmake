@@ -14,7 +14,7 @@
 # install NCCL in the same location as the CUDA toolkit.
 # See https://github.com/caffe2/caffe2/issues/1601
 
-set(NCCL_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA NCCL")
+set(NCCL_ROOT_DIR $ENV{NCCL_ROOT_DIR} CACHE PATH "Folder contains NVIDIA NCCL")
 
 find_path(NCCL_INCLUDE_DIRS
   NAMES nccl.h
@@ -24,8 +24,15 @@ find_path(NCCL_INCLUDE_DIRS
   ${NCCL_ROOT_DIR}/include
   ${CUDA_TOOLKIT_ROOT_DIR}/include)
 
+IF ($ENV{USE_STATIC_NCCL})
+  MESSAGE(STATUS "USE_STATIC_NCCL detected. Linking against static NCCL library")
+  SET(NCCL_LIBNAME "libnccl_static.a")
+ELSE()
+  SET(NCCL_LIBNAME "nccl")
+ENDIF()
+
 find_library(NCCL_LIBRARIES
-  NAMES nccl
+  NAMES ${NCCL_LIBNAME}
   HINTS
   ${NCCL_LIB_DIR}
   ${NCCL_ROOT_DIR}

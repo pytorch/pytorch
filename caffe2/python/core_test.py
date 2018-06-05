@@ -238,10 +238,6 @@ class TestCreateOperator(test_util.TestCase):
         self.assertEqual(arg_map["arg2"].s, b"2")
         self.assertEqual(list(arg_map["arg3"].ints), [1, 2, 3])
 
-    def testCreateWithNoneKwarg(self):
-        with self.assertRaises(ValueError):
-            core.CreateOperator("Ludicrous", "x", "y", arg1=None)
-
 
 class TestAutoNaming(test_util.TestCase):
     def assertOperatorListEqual(self, operatorDefList1, operatorDefList2):
@@ -532,6 +528,66 @@ class TestDeviceOption(test_util.TestCase):
         self.assertFalse(core.device_option_equal(opt1, opt2))
 
 
+class TestInferDeviceCpuOnly(test_util.TestCase):
+    def test_inject_copy(self):
+        '''
+        Test inject cross device copies - this is a no-op on CPU only devices.
+        '''
+        send_node = 'node:0'
+        recv_node = 'node:1'
+        # Using placeholder ops for send/recv. Placeholder ops are
+        # decorator/fake ops that don't have operator schema.
+        placeholder_send = 'Placeholder:Dummy:Send'
+        placeholder_recv = 'Placeholder:Dummy:Recv'
+
+        # init_net.
+        init_net = core.Net("init_net")
+        with core.DeviceScope(0, node_name=send_node):
+            init_net.XavierFill([], 'fc_w', shape=[10, 100])
+            init_net.ConstantFill([], 'fc_b', shape=[10, ])
+
+        # train_net.
+        train_net = core.Net("train_net")
+        train_net.Proto().external_input.extend(['fc_w', 'fc_b'])
+        with core.DeviceScope(0, node_name=send_node):
+            op = core.CreateOperator(
+                placeholder_send, ["fc_w", 'fc_b'], [],
+                dst_node=recv_node)
+            train_net.Proto().op.extend([op])
+        with core.DeviceScope(0, node_name=recv_node):
+            # Let's rename the recv blob i.e. fc_w -> fc_w_recv.
+            op = core.CreateOperator(
+                placeholder_recv, [], ['fc_w_recv', 'fc_b'],
+                src_node=send_node)
+            train_net.Proto().op.extend([op])
+            train_net.FC(["data", 'fc_w_recv', 'fc_b'], "fc1")
+
+        # Inject cross device copies.
+        init_net, x_dev_state = core.InjectCrossDeviceCopies(
+            init_net,
+            placeHolderOps=[placeholder_send, placeholder_recv])
+        train_net, x_dev_state = core.InjectCrossDeviceCopies(
+            train_net, x_dev_state,
+            placeHolderOps=[placeholder_send, placeholder_recv])
+
+        # Verify: No Copy operators should be injected since it is CPU only.
+        op = train_net.Proto().op[0]
+        self.assertEqual(op.type, placeholder_send)
+        self.assertEqual(op.device_option.device_type, 0)
+        self.assertEqual(op.input[0], "fc_w")
+        self.assertEqual(op.input[1], "fc_b")
+        op = train_net.Proto().op[1]
+        self.assertEqual(op.type, placeholder_recv)
+        self.assertEqual(op.device_option.device_type, 0)
+        self.assertEqual(op.output[0], "fc_w_recv")
+        self.assertEqual(op.output[1], "fc_b")
+        op = train_net.Proto().op[2]
+        self.assertEqual(op.type, "FC")
+        self.assertEqual(op.device_option.device_type, 0)
+        self.assertEqual(op.input[1], "fc_w_recv")
+        self.assertEqual(op.input[2], "fc_b")
+
+
 @unittest.skipIf(not workspace.has_gpu_support, 'No GPU support')
 class TestInferDevice(test_util.TestCase):
 
@@ -557,10 +613,24 @@ class TestInferDevice(test_util.TestCase):
         with core.DeviceScope(op_option):
             op = core.CreateOperator(op_name, inputs, outputs)
         input_dev, output_dev = core.InferOpBlobDevices(op)
-        for in_dev in input_dev:
-            self.assertEqual(in_dev, in_option)
-        for out_dev in output_dev:
-            self.assertEqual(out_dev, out_option)
+        if isinstance(in_option, list):
+            assert len(in_option) == len(input_dev), \
+                'Length of input device option should match' \
+                '{} vs. {}'.format(in_option, input_dev)
+            for in_dev, in_opt in zip(input_dev, in_option):
+                self.assertEqual(in_dev, in_opt)
+        else:
+            for in_dev in input_dev:
+                self.assertEqual(in_dev, in_option)
+        if isinstance(out_option, list):
+            assert len(out_option) == len(output_dev), \
+                'Length of output device option should match' \
+                '{} vs. {}'.format(out_option, output_dev)
+            for out_dev, out_opt in zip(output_dev, out_option):
+                self.assertEqual(out_dev, out_opt)
+        else:
+            for out_dev in output_dev:
+                self.assertEqual(out_dev, out_option)
 
     def test_infer_device(self):
         self._test_op(
@@ -572,17 +642,20 @@ class TestInferDevice(test_util.TestCase):
             outputs=["fc_1"]
         )
 
+    def test_infer_device_split_by_lengths(self):
+        self._test_op(
+            "SplitByLengths",
+            [self.cuda_option, self.cpu_option],
+            self.cuda_option,
+            op_option=self.cuda_option,
+            inputs=["data", "fc_w"],
+            outputs=["fc_1"]
+        )
+
     def test_infer_device_cross_device(self):
         self._test_op("CopyGPUToCPU", self.cuda_option, self.cpu_option)
         self._test_op("CopyCPUToGPU", self.cpu_option, self.cuda_option)
-        self._test_op("EnsureCPUOutput", self.cuda_option, self.cpu_option)
         self._test_op("CopyFromCPUInput", self.cpu_option, self.cuda_option)
-        self._test_op(
-            "EnsureCPUOutput",
-            self.cpu_option,
-            self.cpu_option,
-            op_option=self.cpu_option
-        )
         self._test_op(
             "CopyFromCPUInput",
             self.cpu_option,
@@ -947,7 +1020,7 @@ external_input: "data"
         with core.DeviceScope(cpu_device[0]):
             op = core.CreateOperator(
                 placeholder_send, [weight, bias], [],
-                dst_node=recv_node, callsite_id=0)
+                dst_node=recv_node)
             init_net._net.op.extend([op])
 
         # train_net
@@ -956,7 +1029,7 @@ external_input: "data"
             # XXX. replace hardcoded op name. Move test to net_transforms.
             op = core.CreateOperator(
                 placeholder_recv, [], [weight, bias],
-                src_node=send_node, callsite_id=0)
+                src_node=send_node)
             train_net._net.op.extend([op])
             train_net.FC(["data", weight, bias], "fc1")
 

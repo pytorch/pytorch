@@ -21,6 +21,23 @@ def sigmoid_cross_entropy_with_logits_grad(x, z):
     return z - sigmoid(x)
 
 
+def sigmoid_cross_entropy_with_logits_with_log_D_trick(x, z):
+    return -(2 * z - 1.) * np.log(sigmoid(x))
+
+
+def sigmoid_cross_entropy_with_logits_with_log_D_trick_grad(x, z):
+    return (2 * z - 1.) * (1 - sigmoid(x))
+
+
+def unjoined_sigmoid_cross_entropy(x, z):
+    return -z * x + (1. - z) * np.maximum(x, 0) \
+        + (1. - z) * np.log(1 + np.exp(-np.abs(x)))
+
+
+def unjoined_sigmoid_cross_entropy_grad(x, z):
+    return z - (1. - z) / (1. + np.exp(-x))
+
+
 class TestCrossEntropyOps(hu.HypothesisTestCase):
     @given(
         inputs=st.lists(
@@ -42,27 +59,56 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
                 ),
             )
         ),
+        options=st.one_of(
+            st.tuples(st.just(True), st.just(False)),
+            st.tuples(st.just(False), st.just(True)),
+            st.tuples(st.just(False), st.just(False))
+        ),
         **hu.gcs
     )
-    def test_sigmoid_cross_entropy_with_logits(self, inputs, gc, dc):
+    def test_sigmoid_cross_entropy_with_logits(
+        self, inputs, options, gc, dc
+    ):
         logits, targets = inputs
+        log_D_trick, unjoined_lr_loss = options
 
         def sigmoid_xentr_logit_ref(logits, targets):
-            s = sigmoid_cross_entropy_with_logits(logits, targets)
+            if unjoined_lr_loss:
+                s = unjoined_sigmoid_cross_entropy(logits, targets)
+            else:
+                s = (
+                    sigmoid_cross_entropy_with_logits(logits, targets)
+                    if not log_D_trick else
+                    sigmoid_cross_entropy_with_logits_with_log_D_trick(
+                        logits, targets
+                    )
+                )
             m = np.mean(s, axis=len(logits.shape) - 1)
             return (m, )
 
         def sigmoid_xentr_logit_grad_ref(g_out, outputs, fwd_inputs):
             fwd_logits, fwd_targets = fwd_inputs
             inner_size = fwd_logits.shape[-1]
-            m = fwd_targets - sigmoid(fwd_logits)
+            if unjoined_lr_loss:
+                m = unjoined_sigmoid_cross_entropy_grad(logits, targets)
+            else:
+                m = (
+                    sigmoid_cross_entropy_with_logits_grad(fwd_logits, fwd_targets)
+                    if not log_D_trick else
+                    sigmoid_cross_entropy_with_logits_with_log_D_trick_grad(
+                        fwd_logits, fwd_targets
+                    )
+                )
+            # m = fwd_targets - sigmoid(fwd_logits)
             g_in = -np.expand_dims(g_out, axis=-1) * m / inner_size
             return (g_in, None)
 
         op = core.CreateOperator(
-            'SigmoidCrossEntropyWithLogits',
-            ['logits', 'targets'],
-            ['xentropy'])
+            'SigmoidCrossEntropyWithLogits', ['logits', 'targets'],
+            ['xentropy'],
+            log_D_trick=log_D_trick,
+            unjoined_lr_loss=unjoined_lr_loss
+        )
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
@@ -70,6 +116,82 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
             reference=sigmoid_xentr_logit_ref,
             output_to_grad='xentropy',
             grad_reference=sigmoid_xentr_logit_grad_ref)
+
+    @given(
+        log_D_trick=st.just(False),
+        **hu.gcs_cpu_only
+    )
+    def test_cross_entropy_and_unjoied_cross_entropy_relation(
+        self, log_D_trick, gc, dc
+    ):
+        logits = np.array([1.4720, 0.3500, -0.6529, -1.1908, 0.8357,
+                    -1.0774, -0.3395, -0.2469, 0.6708, -1.8332], dtype='f')
+        targets = np.array([1., 1., 1., 1., 1., 1., 0., 0., 0., 0.], dtype='f')
+        lr_size = targets.size
+        unjoined_lr_loss = False
+
+        def sigmoid_xentr_logit_ref(logits, targets):
+            if unjoined_lr_loss:
+                s = unjoined_sigmoid_cross_entropy(logits, targets)
+            else:
+                s = sigmoid_cross_entropy_with_logits(logits, targets)
+            m = np.mean(s, axis=len(logits.shape) - 1)
+            return (m, )
+
+        def sigmoid_xentr_logit_grad_ref(g_out, outputs, fwd_inputs):
+            fwd_logits, fwd_targets = fwd_inputs
+            inner_size = fwd_logits.shape[-1]
+            if unjoined_lr_loss:
+                m = unjoined_sigmoid_cross_entropy_grad(logits, targets)
+            else:
+                m = sigmoid_cross_entropy_with_logits_grad(
+                    fwd_logits, fwd_targets)
+
+            # m = fwd_targets - sigmoid(fwd_logits)
+            g_in = -np.expand_dims(g_out, axis=-1) * m / inner_size
+            return (g_in, None)
+
+        op = core.CreateOperator(
+            'SigmoidCrossEntropyWithLogits', ['logits', 'targets'],
+            ['xentropy'],
+            log_D_trick=log_D_trick,
+            unjoined_lr_loss=unjoined_lr_loss
+        )
+        output_lr = self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[logits, targets],
+            reference=sigmoid_xentr_logit_ref,
+            output_to_grad='xentropy',
+            grad_reference=sigmoid_xentr_logit_grad_ref)
+
+        # Unjoined dataset where labels change later
+        logits = np.array([1.4720, 0.3500, -0.6529, -1.1908, 0.8357,
+                    -1.0774, -0.3395, -0.2469, 0.6708, -1.8332, 1.4720, 0.3500,
+                    -0.6529, -1.1908, 0.8357, -1.0774], dtype='f')
+        targets = np.array([0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                            0., 1., 1., 1., 1., 1., 1.], dtype='f')
+        unjoined_lr_loss = True
+        unjoined_lr_size = targets.size
+
+        op = core.CreateOperator(
+            'SigmoidCrossEntropyWithLogits', ['logits', 'targets'],
+            ['xentropy'],
+            log_D_trick=log_D_trick,
+            unjoined_lr_loss=unjoined_lr_loss
+        )
+        outputs_unjoined_lr = self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[logits, targets],
+            reference=sigmoid_xentr_logit_ref,
+            output_to_grad='xentropy',
+            grad_reference=sigmoid_xentr_logit_grad_ref)
+
+        self.assertAlmostEqual(
+            output_lr[0].item(0) * lr_size / unjoined_lr_size,
+            outputs_unjoined_lr[0].item(0),
+            delta=0.0001)
 
     @given(
         inputs=st.lists(

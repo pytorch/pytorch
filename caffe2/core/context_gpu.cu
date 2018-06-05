@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "THCCachingAllocator.h"
 #include "cub/util_allocator.cuh"
 
 #include "caffe2/core/asan.h"
@@ -14,9 +15,11 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/string_utils.h"
 
-CAFFE2_DEFINE_string(caffe2_cuda_memory_pool, "",
-              "Sets the memory pool used by caffe2. Possible values are "
-              "none, cnmen and cub.");
+CAFFE2_DEFINE_string(
+    caffe2_cuda_memory_pool,
+    "",
+    "Sets the memory pool used by caffe2. Possible values are "
+    "none, cnmem, thc and cub.");
 
 // For description of CUB caching allocator configuration, see
 // https://nvlabs.github.io/cub/structcub_1_1_caching_device_allocator.html
@@ -32,6 +35,7 @@ CAFFE2_DEFINE_int(caffe2_cub_max_bin, 10,
 CAFFE2_DEFINE_int(caffe2_cub_max_managed_mb, 10 * 1024,
              "If using cub as the memory allocators, sets the maximum amount "
              "of memory managed in gigabytes");
+
 CAFFE2_DEFINE_bool(
     caffe2_cub_print_allocation_events,
     false,
@@ -60,8 +64,10 @@ thread_local ThreadLocalCUDAObjects CUDAContext::cuda_objects_;
 // Static global variables for setting up the memory pool.
 CudaMemoryPoolType g_cuda_memory_pool_type;
 
-// For cub allocator
-unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
+std::unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
+
+std::unique_ptr<THCCachingAllocator> g_thc_allocator;
+
 // an unordered map that holds the map from the cuda memory pointer to the
 // device id that it is allocated from. This is used in the cuda memory pool
 // cases, where we need the device id to carry out the deletion.
@@ -192,6 +198,9 @@ static void Caffe2SetCUDAMemoryPool() {
     // Sets up cub.
     g_cuda_memory_pool_type = CudaMemoryPoolType::CUB;
     SetUpCub();
+  } else if (FLAGS_caffe2_cuda_memory_pool == "thc") {
+    g_cuda_memory_pool_type = CudaMemoryPoolType::THC;
+    g_thc_allocator.reset(new THCCachingAllocator());
   } else {
     CAFFE_THROW("Unrecognized cuda memory pool type: ",
                 FLAGS_caffe2_cuda_memory_pool);
@@ -339,6 +348,13 @@ std::pair<void*, MemoryDeleter> CUDAContext::New(size_t nbytes) {
       g_size_map[ptr] = nbytes;
     }
     return {ptr, Delete};
+  case CudaMemoryPoolType::THC:
+    CUDA_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
+    if (FLAGS_caffe2_gpu_memory_tracking) {
+      g_size_map[ptr] = nbytes;
+      g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
+    }
+    return {ptr, Delete};
   }
   return {nullptr, Delete};
 }
@@ -383,6 +399,13 @@ void CUDAContext::Delete(void* ptr) {
     VLOG(2) << "CUB freeing pointer " << ptr << " on device " << it->second;
     CUDA_ENFORCE(g_cub_allocator->DeviceFree(it->second, ptr));
     g_cuda_device_affiliation.erase(it);
+    break;
+  }
+  case CudaMemoryPoolType::THC: {
+    CUDA_ENFORCE(g_thc_allocator->Free(ptr));
+    if (FLAGS_caffe2_gpu_memory_tracking) {
+      g_cuda_device_affiliation.erase(g_cuda_device_affiliation.find(ptr));
+    }
     break;
   }
   }

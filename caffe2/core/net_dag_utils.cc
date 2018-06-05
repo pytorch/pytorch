@@ -115,6 +115,7 @@ void updateOperatorNodes(
       node.is_chain_start_ = false;
     }
     node.runtime_parent_count_ = 0;
+    node.scheduled_.clear();
   }
 }
 } // namespace

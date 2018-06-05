@@ -56,6 +56,9 @@ _(prim, Reverse) \
 _(prim, Return) \
 _(prim, Store) \
 _(prim, Undefined) \
+_(prim, Starred) \
+_(prim, TupleConstruct) \
+_(prim, TupleUnpack)
 /* end */
 
 // Workaround for some not-yet-defined ATen symbols, see
@@ -82,16 +85,27 @@ FORALL_ATEN_EXTRA_SYMBOLS(_)
 
 #define FORALL_ONNX_SYMBOLS(_) \
 _(onnx, Add) \
+_(onnx, Concat) \
 _(onnx, Constant) \
+_(onnx, ConstantFill) \
 _(onnx, Div) \
 _(onnx, GRU) \
+_(onnx, Gather) \
 _(onnx, Gemm) \
 _(onnx, LSTM) \
 _(onnx, Mul) \
 _(onnx, Pow) \
 _(onnx, RNN) \
+_(onnx, Shape) \
+_(onnx, Size) \
+_(onnx, Slice) \
+_(onnx, Squeeze) \
 _(onnx, Sub) \
 _(onnx, Transpose) \
+_(onnx, Unsqueeze) \
+_(onnx, Loop) \
+_(onnx, If) \
+_(onnx, Reshape)
 /* end */
 
 // These symbols are attribute keys.  They are shared between both ONNX and ATen
@@ -101,13 +115,17 @@ _(onnx, Transpose) \
 
 #define FORALL_ATTR_EXTRA_SYMBOLS(_) \
 _(attr, Subgraph) \
+_(attr, axes) \
 _(attr, axis) \
 _(attr, broadcast) \
-_(attr, device) \
+_(attr, direction) \
+_(attr, ends) \
 _(attr, inplace) \
+_(attr, input_as_shape) \
 _(attr, is_zero) \
 _(attr, perm) \
 _(attr, sizes) \
+_(attr, starts) \
 _(attr, transA) \
 _(attr, transB) \
 /* end */
@@ -161,6 +179,8 @@ constexpr size_t unique_tag_bits = 8;
 constexpr size_t unique_bits = sizeof(unique_t) * 8 - unique_tag_bits;
 constexpr unique_t unique_mask = (1ULL << unique_bits) - 1;
 
+static const std::string domain_prefix = "org.pytorch.";
+
 // A Symbol is like an interned string, but with a little extra
 // structure; it is namespaced via SymbolNamespace and the resulting
 // intern pointers support efficient namespace testing.
@@ -171,6 +191,9 @@ struct Symbol {
 
   // Get a Symbol for a qualified string like "attr::bar"
   static Symbol fromQualString(const std::string & s);
+
+  // Get a Symbol from a domain and an unqualified string like "org.pytorch.attr" and "bar"
+  static Symbol fromDomainAndUnqualString(const std::string & d, const std::string & s);
 
   // Constructors for our various namespaced strings.  This will construct
   // the appropriate namespaced string, e.g., "attr::foo" for the
@@ -213,6 +236,10 @@ struct Symbol {
   // a lot of printf style macros use it.
   const char * toDisplayString() const;
 
+  // Give a string corresponding to the domain name for the symbol,
+  // e.g., "org.pytorch.aten".
+  std::string domainString() const;
+
 private:
   explicit Symbol(SymbolNamespace ns, const std::string & s);
   unique_t value;
@@ -247,7 +274,7 @@ DEFINE_BUILTINS(prim, FORALL_PRIM_SYMBOLS)
 namespace std {
   template<>
   struct hash<torch::jit::Symbol> {
-    std::size_t operator()(torch::jit::Symbol s) const {
+    size_t operator()(torch::jit::Symbol s) const {
       return std::hash<uint32_t>()(static_cast<uint32_t>(s));
     }
   };

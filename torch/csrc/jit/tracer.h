@@ -8,9 +8,6 @@
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
-#ifndef NO_PYTHON
-#include "torch/csrc/utils/pybind.h"
-#endif
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -22,10 +19,6 @@ namespace torch { namespace jit { namespace tracer {
 
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
-
-#ifndef NO_PYTHON
-std::string getPythonInterpreterStackTrace();
-#endif
 
 namespace detail {
 
@@ -62,8 +55,45 @@ inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
   return fmap(vars, &VariableFlags::of);
 }
 
-}
+} // namespace detail
 
+
+// This is meant to be used as a thread local place, where we can store extra
+// info that gets lost when we call into ATen from Python bindings. One example
+// for when this happens is when we get an IntList argument with e.g. sizes for
+// view. When tracing, those might be tensors, which let us encode extra data
+// dependencies, but once they get to the ATen call where we actually have the
+// tracing logic, they get converted into a raw IntList, and we loose all
+// information. To prevent this, we temporarily stash it in here.
+struct ArgumentStash {
+  struct IntListTrace : std::vector<Value*> {
+    IntListTrace(int size)
+      : std::vector<Value*>(size, nullptr) {}
+  };
+
+  static bool empty() {
+    return stash.intlists.empty();
+  }
+
+  static void stashIntListElem(const std::string& arg_name,
+                               size_t size,
+                               size_t idx,
+                               const Variable& var);
+
+  static bool hasIntList(const std::string& arg_name) {
+    return stash.intlists.count(arg_name) > 0;
+  }
+
+  static IntListTrace popIntList(const std::string& arg_name) {
+    auto info = std::move(stash.intlists.at(arg_name));
+    stash.intlists.erase(arg_name);
+    return info;
+  }
+
+private:
+  static thread_local ArgumentStash stash;
+  std::unordered_map<std::string, IntListTrace> intlists;
+};
 
 // Should a function which takes 'vars' as inputs be traced?
 // It suffices for ONE variable to be tracing: any "untraced" variables
@@ -184,7 +214,7 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
 // reference to at::Tensor buffer to call unsafeGetTH, but you can't get this
 // out of a const vector (silly std::vector...)
 inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
-    variable_list inputs, std::size_t num_stages) {
+    variable_list inputs, size_t num_stages) {
   auto state = std::make_shared<TracingState>(num_stages);
   for (auto& input : inputs) {
     auto * value_state = detail::getValueState(state, input, false);
@@ -244,19 +274,36 @@ struct PreTraceInfo {
 };
 
 PreTraceInfo preRecordTrace(Symbol op, at::ArrayRef<Variable> inputs);
-#ifndef NO_PYTHON
-PreTraceInfo preRecordPythonTrace(
-    THPObjectPtr pyobj, std::string arg_types, at::ArrayRef<Variable> inputs,
-    pyobj_list scalar_args);
-
-std::shared_ptr<Graph> createGraphByTracing(
-        py::function func,
-        variable_list inputs,
-        size_t num_inputs);
-#endif
 void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
 
+autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
 
+void recordSourceLocation(Node* n);
+void setRecordSourceLocation(void (*v)(Node*));
 
+// We must record the nodes of inputs before we actually carry out
+// the operation, because an inplace operation may destroy the information
+// we're interested in.  See #4480.
+template<typename F>
+PreTraceInfo makePreTraceInfo(at::ArrayRef<Variable> inputs, F ctor) {
+  PreTraceInfo info;
+  info.state = getTracingState(inputs);
+  auto& graph = info.state->graph;
+  auto state_lock = info.state->lock();
+
+  Node *n = ctor(info.state, *graph);
+  recordSourceLocation(n);
+
+  for (Variable input : inputs) {
+    n->addInput(getValueTrace(info.state, input));
+  }
+
+  // NB: Order matters. This must append after inputs but before outputs.
+  graph->appendNode(n);
+
+  info.n = n;
+
+  return info;
+}
 
 }}} // namespace torch::jit::tracer

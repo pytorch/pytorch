@@ -70,6 +70,7 @@ message QTensorProto {
   required bool is_signed = 5;
   repeated int32 data = 6 [packed = true];
   optional string name = 7;
+  optional TensorProto.DataType data_type = 8 [default = INT32];
 }
 
 // TensorProtos stores multiple TensorProto objects in one single proto. This
@@ -114,8 +115,11 @@ enum DeviceType {
   CUDA = 1;                   // CUDA.
   MKLDNN = 2;                 // Reserved for explicit MKLDNN
   OPENGL = 3;                 // OpenGL
+  OPENCL = 4;                 // OpenCL
+  IDEEP = 5;                  // IDEEP.
+  HIP = 6;                    // AMD HIP
   // Change the following number if you add more devices in the code.
-  COMPILE_TIME_MAX_DEVICE_TYPES = 4;
+  COMPILE_TIME_MAX_DEVICE_TYPES = 7;
   ONLY_FOR_TEST = 20901701;   // This device type is only for test.
 }
 
@@ -138,6 +142,10 @@ message DeviceOption {
   optional string node_name = 4;
   // [CPU and Linux specific] NUMA node id
   optional int32 numa_node_id = 5 [default = -1];
+  // [general] Extra information passed, not used at execution time currently.
+  repeated string extra_info = 6;
+  // [HIP specific] the hip gpu id.
+  optional int32 hip_gpu_id = 7;
 }
 
 // Operator Definition.

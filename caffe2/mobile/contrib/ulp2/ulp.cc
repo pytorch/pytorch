@@ -292,7 +292,7 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
 }
 
 void run2b1bConvGeneric(QConvState* state, const ConvArgs& args, const TensorCPU& X, TensorCPU* Y) {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
   if (run2b1bConvNeon(state, args, X, Y)) {
     return;
   }

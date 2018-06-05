@@ -207,6 +207,22 @@ class CreateTreeCursorOp : public Operator<CPUContext> {
   std::vector<std::string> fields_;
 };
 
+class GetCursorOffsetOp : public Operator<CPUContext> {
+ public:
+  GetCursorOffsetOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
+    Output(0)->Resize(cursor->offsets.size());
+    auto* output = Output(0)->mutable_data<int>();
+    for (size_t i = 0; i < cursor->offsets.size(); ++i) {
+      output[i] = cursor->offsets[i];
+    }
+    return true;
+  }
+};
+
 class ResetCursorOp : public Operator<CPUContext> {
  public:
   ResetCursorOp(const OperatorDef& operator_def, Workspace* ws)
@@ -1009,6 +1025,7 @@ class TrimDatasetOp : public Operator<CPUContext> {
 REGISTER_CPU_OPERATOR(CreateTreeCursor, CreateTreeCursorOp);
 REGISTER_CPU_OPERATOR(ResetCursor, ResetCursorOp);
 REGISTER_CPU_OPERATOR(ReadNextBatch, ReadNextBatchOp);
+REGISTER_CPU_OPERATOR(GetCursorOffset, GetCursorOffsetOp);
 REGISTER_CPU_OPERATOR(ComputeOffset, ComputeOffsetOp);
 REGISTER_CPU_OPERATOR(SortAndShuffle, SortAndShuffleOp);
 REGISTER_CPU_OPERATOR(ReadRandomBatch, ReadRandomBatchOp);
@@ -1124,6 +1141,13 @@ ReadNextBatch is thread safe.
     .Output(0, "field_0", "Tensor containing the next batch for field 0.")
     .Arg("batch_size", "Number of top-level entries to read.");
 
+OPERATOR_SCHEMA(GetCursorOffset)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc("Get the current offset in the cursor.")
+    .Input(0, "cursor", "A blob containing a pointer to the cursor.")
+    .Output(0, "offsets", "Tensor containing the offsets for the cursor.");
+
 OPERATOR_SCHEMA(ComputeOffset)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -1214,16 +1238,77 @@ OPERATOR_SCHEMA(Append)
     .NumOutputs(1)
     .EnforceInplace({{0, 0}})
     .SetDoc(R"DOC(
-Append input 2 to the end of input 1.
-Input 1 must be the same as output, that is, it is required to be in-place.
-Input 1 may have to be re-allocated in order for accommodate to the new size.
-Currently, an exponential growth ratio is used in order to ensure amortized
-constant time complexity.
-All except the outer-most dimension must be the same between input 1 and 2.
+Append input `B` to the end of input `A`.
+
+- It is required that this operation run in-place, meaning that the input `A` blob must match the output blob.
+- All except the outer-most dimension must be the same between `A` and `B`.
+- Input `A` may have to be re-allocated in order for accommodate to the new size. Currently, an exponential growth ratio is used in order to ensure amortized constant time complexity.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/dataset_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Append",
+    ["A", "B"],
+    ["A"],
+)
+
+workspace.FeedBlob("A", np.random.randint(10, size=(1,3,3)))
+workspace.FeedBlob("B", np.random.randint(10, size=(2,3,3)))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("A:", workspace.FetchBlob("A"))
+
+```
+
+**Result**
+
+```
+
+A:
+[[[3 8 7]
+  [1 6 6]
+  [5 0 6]]]
+B:
+[[[4 3 1]
+  [7 9 6]
+  [9 4 5]]
+
+ [[7 7 4]
+  [9 8 7]
+  [1 6 6]]]
+A:
+[[[3 8 7]
+  [1 6 6]
+  [5 0 6]]
+
+ [[4 3 1]
+  [7 9 6]
+  [9 4 5]]
+
+ [[7 7 4]
+  [9 8 7]
+  [1 6 6]]]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "dataset", "The tensor to be appended to.")
-    .Input(1, "new_data", "Tensor to append to the end of dataset.")
-    .Output(0, "dataset", "Same as input 0, representing the mutated tensor.");
+    .Input(0, "A", "(*Tensor*): base input tensor of shape $(N, d_1, d_2, ..., d_n)$")
+    .Input(1, "B", "(*Tensor*): second input tensor of shape $(M, d_1, d_2, ..., d_n)$ to be appended to the base")
+    .Output(0, "A", "(*Tensor*): output tensor of shape $(N+M, d_1, d_2, ..., d_n)$");
 
 OPERATOR_SCHEMA(AtomicAppend)
     .NumInputs(3, INT_MAX)

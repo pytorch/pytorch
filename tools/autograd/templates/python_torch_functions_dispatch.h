@@ -32,6 +32,38 @@ static void maybe_initialize_cuda(const at::Type &type) {
   }
 }
 
+// manual dispatch code for clamp
+inline Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp(min, max);
+}
+inline Tensor dispatch_clamp_min(const Tensor & self, Scalar min) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp_min(min);
+}
+inline Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp_max(max);
+}
+inline Tensor & dispatch_clamp(const Tensor & self, Scalar min, Scalar max, Tensor result) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(result);
+  return at::clamp_out(result, self, min, max);
+}
+inline Tensor & dispatch_clamp_min(const Tensor & self, Scalar min, Tensor result) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(result);
+  return at::clamp_min_out(result, self, min);
+}
+inline Tensor & dispatch_clamp_max(const Tensor & self, Scalar max, Tensor result) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(result);
+  return at::clamp_max_out(result, self, max);
+}
+
 ${py_method_dispatch}
 
 }} // namespace torch::autograd

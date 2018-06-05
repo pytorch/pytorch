@@ -3,7 +3,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/Error.h"
 
-#include "ATen/cuda/AccumulateType.cuh"
+#include "ATen/AccumulateType.h"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
@@ -12,6 +12,7 @@
 #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
+
 #include <THCUNN/THCHalfAutoNumerics.cuh>
 
 #include <thrust/execution_policy.h>
@@ -92,7 +93,7 @@ __global__ void embedding_backward_kernel(
   int64_t* input, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
   int64_t* count, int64_t numel, int64_t stride, int padding_idx) {
 
-  using accscalar_t = cuda::acc_type<scalar_t>;
+  using accscalar_t = acc_type<scalar_t, true>;
   int idx = blockIdx.x * 4 + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
@@ -169,15 +170,15 @@ __global__ void renorm_kernel(
     } else if (norm_type == 2) {
       v += x * x;
     } else {
-      v += std::pow(x, norm_type);
+      v += THCNumerics<accscalar_t>::pow(x, norm_type);
     }
   }
 
-  using Op = ReduceAdd<accscalar_t, accscalar_t>;
+  using Op = ReduceAdd<accscalar_t>;
   v = reduceBlock<accscalar_t>(sdata, blockDim.x, v, Op(), 0);
 
   if (tid == 0) {
-    sdata[0] = std::pow(v, scalar_cast<accscalar_t>(1.0 / norm_type));
+    sdata[0] = THCNumerics<accscalar_t>::pow(v, scalar_cast<accscalar_t>(1.0 / norm_type));
   }
   __syncthreads();
 
@@ -213,7 +214,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
    dim3 block(128);
 
    AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
-     using cuda_scalar_t = cuda::type<scalar_t>;
+     using cuda_scalar_t = cuda::into_type<scalar_t>;
      embedding_backward_feature_kernel<<<grid, block, 0, stream>>>(
        indices.data<int64_t>(),
        grad.data<cuda_scalar_t>(),
@@ -289,7 +290,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
   dim3 block(32, 4);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     embedding_backward_kernel<<<grid, block, 0, stream>>>(
       sorted_indices.data<int64_t>(),
       orig_indices.data<int64_t>(),
@@ -324,7 +325,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   auto indices_data = device_ptr(indices.data<int64_t>());
 
   // FIXME: thrust::unique only removes consecutive elements that are equal.
-  // We have race conditions when indices contains duplicates which are not
+  // We have race conditions when indices contain duplicates which are not
   // adjacent
   auto unique_indices = indices.type().tensor(indices.numel());
   auto unique_data = device_ptr(unique_indices.data<int64_t>());
@@ -336,8 +337,8 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   int dim = self.stride(0);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "embedding_backward", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
-    using accscalar_t = cuda::acc_type<cuda_scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
+    using accscalar_t = acc_type<cuda_scalar_t, true>;
     renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
       self.data<cuda_scalar_t>(),
       unique_indices.data<int64_t>(),

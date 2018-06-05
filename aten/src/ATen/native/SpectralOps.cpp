@@ -31,31 +31,40 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
   }
   if (!at::isFloatingType(self.type().scalarType())) {
     std::ostringstream ss;
-    ss << "Expected an input tensor of floating types, but got input "
+    ss << "Expected an input tensor of floating types, but got input="
        << self.type() << self.sizes();
     throw std::runtime_error(ss.str());
   }
 
   auto signal_tensor_ndim = signal_ndim + static_cast<int>(complex_input);  // add complex dim
-  if (self.dim() != signal_tensor_ndim && self.dim() != signal_tensor_ndim + 1) {
+  if (self.dim() < signal_tensor_ndim) {
     std::ostringstream ss;
     ss << "Given signal_ndim=" << signal_ndim << ", expected an input tensor "
-       << "of " << signal_tensor_ndim << "D or " << signal_tensor_ndim + 1
-       << "D (batch mode)";
+       << "of at least" << signal_tensor_ndim << "D";
     if (complex_input) {
       ss << " (complex input adds an extra dimension)";
     }
-    ss << ", but got input " << self.type() << self.sizes();
+    ss << ", but got input=" << self.type() << self.sizes();
     throw std::runtime_error(ss.str());
   }
-  bool is_batched = self.dim() == signal_tensor_ndim + 1;
+
+  auto self_shape = self.sizes();
+  auto batch_ndim = self.dim() - signal_tensor_ndim;
 
   Tensor input = self;
-
-  if (!is_batched) {
+  // flatten the batch dims
+  if (batch_ndim == 0) {
+    // slightly faster path for non-batch mode
     input = input.unsqueeze(0);
+  } else if (batch_ndim > 1) {
+    std::vector<int64_t> flatten_input_shape(signal_tensor_ndim + 1);
+    std::copy(self_shape.begin() + batch_ndim, self_shape.end(), flatten_input_shape.begin() + 1);
+    flatten_input_shape[0] = -1;
+    input = input.reshape(flatten_input_shape);
+
   }
-  // now we assume that input is batched
+
+  // now we assume that input is batched as [ B x signal_dims... ]
 
   if (complex_input) {
     if (input.size(signal_ndim + 1) != 2) {
@@ -104,8 +113,8 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
         std::ostringstream ss;
         ss << "Expected given signal_sizes=" << signal_sizes << " to have same "
            << "shape with input at signal dimension " << i << ", but got "
-           << "signal_sizes[" << i << "] = " << signal_sizes[i] << " and "
-           << "input.size(" << i + (int)is_batched << ") = " << input_size;
+           << "signal_sizes=" << signal_sizes << " and input=" << self.type()
+           << self.sizes();
         throw std::runtime_error(ss.str());
       }
     }
@@ -119,12 +128,18 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
                                      checked_signal_sizes, normalized, onesided,
                                      output_sizes);
 
-  // un-batch if needed
-  if (!is_batched) {
-    return output.squeeze_(0);
-  } else {
-    return output;
+  // unflatten the batch dims
+  if (batch_ndim == 0) {
+    // slightly faster path for non-batch mode
+    output = output.squeeze(0);
+  } else if (batch_ndim > 1) {
+    auto output_ndim = self.dim() + static_cast<int>(complex_output) - static_cast<int>(complex_input);
+    std::vector<int64_t> unflatten_output_shape(output_ndim);
+    std::copy(self_shape.begin(), self_shape.begin() + batch_ndim, unflatten_output_shape.begin());
+    std::copy(output_sizes.begin() + 1, output_sizes.end(), unflatten_output_shape.begin() + batch_ndim);
+    output = output.reshape(unflatten_output_shape);
   }
+  return output;
 }
 
 Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
@@ -140,14 +155,14 @@ Tensor ifft(const Tensor& self, const int64_t signal_ndim, const bool normalized
 }
 
 Tensor rfft(const Tensor& self, const int64_t signal_ndim, const bool normalized,
-           const bool onesided) {
+            const bool onesided) {
   return _fft(self, signal_ndim, /* complex_input */ false,
               /* complex_output */ true, /* inverse */ false, {}, normalized,
               onesided);
 }
 
-Tensor irfft(const Tensor& self, const int64_t signal_ndim,  IntList signal_sizes,
-            const bool normalized, const bool onesided) {
+Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalized,
+             const bool onesided,  IntList signal_sizes) {
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ false, /* inverse */ true, signal_sizes,
               normalized, onesided);

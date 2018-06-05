@@ -1,6 +1,11 @@
 /**
  * Simple registry implementation in Caffe2 that uses static variables to
  * register object creators during program initialization time.
+ *
+ * WARNING: this registry is not entirely thread-safe, as reads to
+ * the registry are not protected by a mutex.  The safest mode of use
+ * is to dlopen() *all* dynamic libraries that may write to the library
+ * and synchronize prior to performing any reads on the registry.
  */
 #ifndef CAFFE2_CORE_REGISTRY_H_
 #define CAFFE2_CORE_REGISTRY_H_
@@ -18,7 +23,7 @@
 namespace caffe2 {
 
 template <typename KeyType>
-inline void PrintOffendingKey(const KeyType& key) {
+inline void PrintOffendingKey(const KeyType& /*key*/) {
   printf("[key type printing not supported]\n");
 }
 

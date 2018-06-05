@@ -1,6 +1,5 @@
 import torch
 from torch.autograd.function import InplaceFunction
-from torch.autograd import Variable
 from itertools import repeat
 
 

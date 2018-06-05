@@ -40,7 +40,7 @@ namespace at {
     /// Construct an MatrixRef from an ArrayRef and outer stride.
     /*implicit*/ MatrixRef(ArrayRef<T> arr, size_type stride0)
       : arr(arr), stride0(stride0) {
-        AT_ASSERT(arr.size() % stride0 == 0, "MatrixRef: ArrayRef size %d not divisible by stride %d", arr.size(), stride0)
+        AT_CHECK(arr.size() % stride0 == 0, "MatrixRef: ArrayRef size ", arr.size(), " not divisible by stride ", stride0)
       }
 
     /// @}
@@ -59,7 +59,7 @@ namespace at {
       } else if (dim == 1) {
         return stride0;
       } else {
-        AT_ASSERT(0, "MatrixRef: out of bounds dimension %d; expected 0 or 1", dim);
+        AT_CHECK(0, "MatrixRef: out of bounds dimension ", dim, "; expected 0 or 1");
       }
     }
 

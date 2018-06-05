@@ -7,7 +7,7 @@
 namespace torch { namespace autograd {
 
 struct SymbolicContext {
-  jit::Graph* graph;
+  jit::Block* block;
 };
 
 struct symbolic_unconvertible : public std::runtime_error {

@@ -63,7 +63,7 @@ void APMeter::value(Tensor& val) {
    Tensor range = val.type().range(0,curoutputs.size(0));
 
    // loop over all classes:
-   for(uint64_t k = 0; k < curoutputs.size(1); ++k) {
+   for(long k = 0; k < curoutputs.size(1); ++k) {
 
       // sort scores:
       outputbuffer = curoutputs.narrow( 1, k, 1);
@@ -78,7 +78,7 @@ void APMeter::value(Tensor& val) {
       double * precision_d = precision.data<double>();
       // compute average precision:
       val_d[k] = .0;
-      for(uint64_t n = 0; n < precision.size(0); ++n) {
+      for(long n = 0; n < precision.size(0); ++n) {
          if(targetbuffer_d[n] != 0.)
             val_d[k] += precision_d[n];
       }

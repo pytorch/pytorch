@@ -52,7 +52,10 @@ void SortAndLimitRoIsByScores(Eigen::Ref<const EArrXf> scores, int n,
   // Reuse a comparator based on scores and store a copy of RoIs that
   // will be truncated and manipulated below
   auto comp = [&scores](int lhs, int rhs) {
-    return scores(lhs) > scores(rhs);
+    if (scores(lhs) > scores(rhs)) return true;
+    if (scores(lhs) < scores(rhs)) return false;
+    // To ensure the sort is stable
+    return lhs < rhs;
   };
   ERArrXXf rois_copy = rois;
   // Note that people have found nth_element + sort to be much faster
@@ -115,15 +118,6 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   int num_rpn_lvls = rpn_max_level_ - rpn_min_level_ + 1;
   CAFFE_ENFORCE_EQ(InputSize(), 2 * num_rpn_lvls);
 
-  // roi_in: (N, 5)
-  const auto& first_roi_in = Input(0);
-  const auto N = first_roi_in.dim(0);
-  CAFFE_ENFORCE_EQ(first_roi_in.dims(), (vector<TIndex>{N, 5}));
-
-  // score_in: (N)
-  const auto& first_score_in = Input(num_rpn_lvls);
-  CAFFE_ENFORCE_EQ(first_score_in.dims(), (vector<TIndex>{N}));
-
   int num_roi_lvls = roi_max_level_ - roi_min_level_ + 1;
   CAFFE_ENFORCE_EQ(OutputSize(), num_roi_lvls + 2);
 
@@ -131,31 +125,34 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   // rois are in [[batch_idx, x0, y0, x1, y2], ...] format
   // Combine predictions across all levels and retain the top scoring
   //
-  // TODO: This makes the assumption that roi size at each level is the same.
-  //
   // equivalent to python code
   //   roi_inputs = inputs[:num_rpn_lvls]
   //   score_inputs = inputs[num_rpn_lvls:]
   //   rois = np.concatenate([blob.data for blob in roi_inputs])
   //   scores = np.concatenate([blob.data for blob in score_inputs]).squeeze()
-  ERArrXXf rois(N * num_rpn_lvls, 5);
-  EArrXf scores(N * num_rpn_lvls);
+  int proposal_num = 0;
   for (int i = 0; i < num_rpn_lvls; i++) {
-    // roi_in: (N, 5)
     const auto& roi_in = Input(i);
-    CAFFE_ENFORCE_EQ(roi_in.dims(), (vector<TIndex>{N, 5}));
+    proposal_num += roi_in.dim(0);
+  }
+  ERArrXXf rois(proposal_num, 5);
+  EArrXf scores(proposal_num);
+  int len = 0;
+  for (int i = 0; i < num_rpn_lvls; i++) {
+    const auto& roi_in = Input(i);
+    const int n = roi_in.dim(0);
 
-    Eigen::Map<const ERArrXXf> roi(roi_in.data<float>(), N, 5);
-    rois.block(i * N, 0, N, 5) = roi;
+    Eigen::Map<const ERArrXXf> roi(roi_in.data<float>(), n, 5);
+    rois.block(len, 0, n, 5) = roi;
 
-    // score_in: (N)
     const auto& score_in = Input(num_rpn_lvls + i);
-    CAFFE_ENFORCE_EQ(score_in.dims(), (vector<TIndex>{N}));
 
     // No need to squeeze, since we are reshaping when converting to Eigen
     // https://docs.scipy.org/doc/numpy/reference/generated/numpy.squeeze.html
-    Eigen::Map<const EArrXf> score(score_in.data<float>(), N);
-    scores.segment(i * N, N) = score;
+    Eigen::Map<const EArrXf> score(score_in.data<float>(), n);
+    scores.segment(len, n) = score;
+
+    len += n;
   }
 
   // Grab only top rpn_post_nms_topN rois
@@ -265,82 +262,82 @@ will change.
     .Input(
         0,
         "rpn_rois_fpn2",
-        "RPN proposals for FPN level 2, size (n x 5), "
+        "RPN proposals for FPN level 2, "
         "format (image_index, x1, y1, x2, y2). See rpn_rois "
         "documentation from GenerateProposals.")
     .Input(
         1,
         "rpn_rois_fpn3",
-        "RPN proposals for FPN level 3, size (n x 5), "
+        "RPN proposals for FPN level 3, "
         "format (image_index, x1, y1, x2, y2). See rpn_rois "
         "documentation from GenerateProposals.")
     .Input(
         2,
         "rpn_rois_fpn4",
-        "RPN proposals for FPN level 4, size (n x 5), "
+        "RPN proposals for FPN level 4, "
         "format (image_index, x1, y1, x2, y2). See rpn_rois "
         "documentation from GenerateProposals.")
     .Input(
         3,
         "rpn_rois_fpn5",
-        "RPN proposals for FPN level 5, size (n x 5), "
+        "RPN proposals for FPN level 5, "
         "format (image_index, x1, y1, x2, y2). See rpn_rois "
         "documentation from GenerateProposals.")
     .Input(
         4,
         "rpn_rois_fpn6",
-        "RPN proposals for FPN level 6, size (n x 5), "
+        "RPN proposals for FPN level 6, "
         "format (image_index, x1, y1, x2, y2). See rpn_rois "
         "documentation from GenerateProposals.")
     .Input(
         5,
         "rpn_roi_probs_fpn2",
-        "RPN objectness probabilities for FPN level 2, size (n). "
+        "RPN objectness probabilities for FPN level 2. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
         6,
         "rpn_roi_probs_fpn3",
-        "RPN objectness probabilities for FPN level 3, size (n). "
+        "RPN objectness probabilities for FPN level 3. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
         7,
         "rpn_roi_probs_fpn4",
-        "RPN objectness probabilities for FPN level 4, size (n). "
+        "RPN objectness probabilities for FPN level 4. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
         8,
         "rpn_roi_probs_fpn5",
-        "RPN objectness probabilities for FPN level 5, size (n). "
+        "RPN objectness probabilities for FPN level 5. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Input(
         9,
         "rpn_roi_probs_fpn6",
-        "RPN objectness probabilities for FPN level 6, size (n). "
+        "RPN objectness probabilities for FPN level 6. "
         "See rpn_roi_probs documentation from GenerateProposals.")
     .Output(
         0,
         "rois",
         "Top proposals limited to rpn_post_nms_topN total, "
-        "size (n x 5), format (image_index, x1, y1, x2, y2)")
+        "format (image_index, x1, y1, x2, y2)")
     .Output(
         1,
         "rois_fpn2",
-        "RPN proposals for ROI level 2, size (n x 5), "
+        "RPN proposals for ROI level 2, "
         "format (image_index, x1, y1, x2, y2)")
     .Output(
         2,
         "rois_fpn3",
-        "RPN proposals for ROI level 3, size (n x 5), "
+        "RPN proposals for ROI level 3, "
         "format (image_index, x1, y1, x2, y2)")
     .Output(
         3,
         "rois_fpn4",
-        "RPN proposals for ROI level 4, size (n x 5), "
+        "RPN proposals for ROI level 4, "
         "format (image_index, x1, y1, x2, y2)")
     .Output(
         4,
         "rois_fpn5",
-        "RPN proposals for ROI level 5, size (n x 5), "
+        "RPN proposals for ROI level 5, "
         "format (image_index, x1, y1, x2, y2)")
     .Output(
         5,

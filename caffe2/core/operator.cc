@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator_gradient.h"
@@ -32,6 +33,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
       event_(caffe2::make_unique<Event>(device_option_)) {
+  static GlobalInitIsCalledGuard guard;
   for (const string& input_str : operator_def.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(
@@ -48,9 +50,11 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   for (const string& output_str : operator_def.output()) {
     outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));
   }
+
+  type_ = operator_def.type();
 }
 
-vector<TensorShape> OperatorBase::InputTensorShapes() {
+vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
     tps.push_back(GetTensorShapeOfBlob(blob));
@@ -300,6 +304,13 @@ CAFFE_DEFINE_REGISTRY(
 CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CUDA, CUDAOperatorRegistry);
 
 CAFFE_DEFINE_REGISTRY(
+    HIPOperatorRegistry,
+    OperatorBase,
+    const OperatorDef&,
+    Workspace*);
+CAFFE_REGISTER_DEVICE_TYPE(DeviceType::HIP, HIPOperatorRegistry);
+
+CAFFE_DEFINE_REGISTRY(
     GradientRegistry,
     GradientMakerBase,
     const OperatorDef&, const vector<GradientWrapper>&);
@@ -358,15 +369,15 @@ GradientOpsMeta GetGradientForOp(
   return meta;
 }
 
-static TensorShapes InferBlobShapesAndTypes(
+TensorShapes InferBlobShapesAndTypes(
     CaffeMap<string, TensorShape>& blob_desc,
-    const vector<std::unique_ptr<NetDef>>& nets) {
+    const vector<NetDef*>& nets) {
   for (auto& defptr : nets) {
     // Hack to work with auto split gradients
     CaffeMap<string, string> unmatched_sum_blobs;
     CaffeMap<string, TensorShape> reshape_cache;
 
-    for (const OperatorDef& op : defptr.get()->op()) {
+    for (const OperatorDef& op : defptr->op()) {
       // Hack to ignore queues
       if (op.type().find("Dequeue") != std::string::npos ||
           op.type().find("Enqueue") != std::string::npos) {
@@ -532,7 +543,7 @@ TensorShape GetTensorShapeOfBlob(const Blob* b) {
 
 TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
-    const vector<std::unique_ptr<NetDef>>& nets) {
+    const vector<NetDef*>& nets) {
   CaffeMap<string, TensorShape> blob_desc;
   // Populate shapes from workplace
   const std::vector<string>& ws_blobs = ws->Blobs();
@@ -546,13 +557,13 @@ TensorShapes InferBlobShapesAndTypesFromWorkspace(
 
 TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
-    const vector<std::unique_ptr<NetDef>>& nets) {
+    const vector<NetDef*>& nets) {
   CaffeMap<string, TensorShape> blob_desc;
   // Populate shapes from known blobs
   for (const auto& blob : blob_dimensions) {
     TensorShape tp;
     for (auto d : blob.second) {
-      CAFFE_ENFORCE_GT(d, 0);
+      CAFFE_ENFORCE_GE(d, 0, blob.first);
       tp.add_dims(d);
     }
     blob_desc[blob.first] = tp;
@@ -590,6 +601,10 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
 
       if (blob_device.device_type() == CUDA &&
           blob_device.cuda_gpu_id() != op_device.cuda_gpu_id()) {
+        mismatches[blob_name] = std::make_pair(op_device, blob_device);
+      }
+      else if (blob_device.device_type() == HIP &&
+          blob_device.hip_gpu_id() != op_device.hip_gpu_id()) {
         mismatches[blob_name] = std::make_pair(op_device, blob_device);
       }
     }

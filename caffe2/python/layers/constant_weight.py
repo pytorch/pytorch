@@ -22,7 +22,7 @@ class ConstantWeight(ModelLayer):
         super(ConstantWeight,
               self).__init__(model, name, input_record, **kwargs)
         self.output_schema = schema.Scalar(
-            np.float32, self.get_next_blob_reference('adaptive_weight')
+            np.float32, self.get_next_blob_reference('constant_weight')
         )
         self.data = self.input_record.field_blobs()
         self.num = len(self.data)

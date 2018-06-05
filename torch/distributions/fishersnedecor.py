@@ -13,10 +13,9 @@ class FisherSnedecor(Distribution):
 
     Example::
 
-        >>> m = FisherSnedecor(torch.Tensor([1.0]), torch.Tensor([2.0]))
+        >>> m = FisherSnedecor(torch.tensor([1.0]), torch.tensor([2.0]))
         >>> m.sample()  # Fisher-Snedecor-distributed with df1=1 and df2=2
-         0.2453
-        [torch.FloatTensor of size 1]
+        tensor([ 0.2453])
 
     Args:
         df1 (float or Tensor): degrees of freedom parameter 1

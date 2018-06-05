@@ -3,6 +3,8 @@
 #include "THCBlas.h"
 #include "THCTensorCopy.h"
 #include "THCNumerics.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 
 #include "generic/THCTensorMathBlas.cu"
 #include "THCGenerateAllTypes.h"

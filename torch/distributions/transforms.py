@@ -3,7 +3,6 @@ import numbers
 import weakref
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property)
@@ -64,7 +63,7 @@ class Transform(object):
             the codomain. Transforms that are not bijective should at least
             maintain the weaker pseudoinverse properties
             ``t(t.inv(t(x)) == t(x)`` and ``t.inv(t(t.inv(y))) == t.inv(y)``.
-        sign (int or Variable): For bijective univariate transforms, this
+        sign (int or Tensor): For bijective univariate transforms, this
             should be +1 or -1 depending on whether transform is monotone
             increasing or decreasing.
         event_dim (int): Number of dimensions that are correlated together in

@@ -43,7 +43,14 @@ class ComputeNormForBlobs(NetModifier):
                     blob, net.Name()))
 
             norm_name = net.NextScopedBlob(prefix=blob + self._field_name_suffix)
-            norm = net.LpNorm(blob, norm_name, p=p, average=compute_averaged_norm)
+            cast_blob = net.Cast(
+                blob,
+                net.NextScopedBlob(prefix=blob + '_float'),
+                to=core.DataType.FLOAT
+            )
+            norm = net.LpNorm(
+                cast_blob, norm_name, p=p, average=compute_averaged_norm
+            )
 
             if self._logging_frequency >= 1:
                 net.Print(norm, [], every_n=self._logging_frequency)

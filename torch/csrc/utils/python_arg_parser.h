@@ -20,28 +20,32 @@
 //   }
 
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <string>
 #include <sstream>
 #include <vector>
 #include <ATen/ATen.h>
 
-#include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Device.h"
 #include "torch/csrc/Dtype.h"
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Generator.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/tensor/python_tensor.h"
+#include "torch/csrc/utils/device.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/numpy_stub.h"
 
 namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, DTYPE, LAYOUT
+  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, DEVICE, STRING
 };
 
 struct FunctionParameter;
@@ -55,7 +59,7 @@ struct ParsedArgs {
 };
 
 struct PythonArgParser {
-  explicit PythonArgParser(std::vector<std::string> fmts);
+  explicit PythonArgParser(std::vector<std::string> fmts, bool traceable=false);
 
   template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
@@ -68,15 +72,18 @@ private:
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
   ssize_t max_args;
+  bool traceable;
 };
 
 struct PythonArgs {
-  PythonArgs(int idx, const FunctionSignature& signature, PyObject** args)
+  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args)
     : idx(idx)
+    , traceable(traceable)
     , signature(signature)
     , args(args) {}
 
   int idx;
+  bool traceable;
   const FunctionSignature& signature;
   PyObject** args;
 
@@ -90,9 +97,16 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
   inline std::unique_ptr<at::Storage> storage(int i);
-  inline const THPDtype& dtype(int i);
-  inline const THPDtype& dtypeWithDefault(int i, const THPDtype& default_dtype);
+  inline at::ScalarType scalartype(int i);
+  inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
+  inline at::optional<at::ScalarType> scalartypeOptional(int i);
   inline const THPLayout& layout(int i);
+  inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
+  inline Device device(int i);
+  inline Device deviceWithDefault(int i, const Device& default_device);
+  inline int64_t deviceInt64(int i);
+  inline at::optional<Device> deviceOptional(int i);
+  inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -140,7 +154,7 @@ struct FunctionParameter {
     bool default_bool;
     int64_t default_int;
     double default_double;
-    THPDtype* default_dtype;
+    at::ScalarType default_scalartype;
     THPLayout* default_layout;
   };
 };
@@ -148,7 +162,7 @@ struct FunctionParameter {
 template<int N>
 inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
   if (N < max_args) {
-    throw ValueError("dst does not have enough capacity, expected %d (got %d)",
+    throw ValueError("PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
         (int)max_args, N);
   }
   return raw_parse(args, kwargs, dst.args);
@@ -232,7 +246,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   PyObject* arg = args[i];
   auto size = signature.params[i].size;
   if (size > 0 && THPUtils_checkLong(arg)) {
-    return std::vector<int64_t>(size, THPUtils_unpackLong(arg));
+    return std::vector<int64_t>(size, THPUtils_unpackIndex(arg));
   }
   auto tuple = PyTuple_Check(arg);
   size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
@@ -240,7 +254,17 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
-      res[idx] = THPUtils_unpackLong(obj);
+      // Elements of torch.Size are tensors during tracing, and we need to record extra
+      // information before they are turned into an IntList
+      if (traceable && THPVariable_Check(obj)) {
+        auto & var = THPVariable_Unpack(obj);
+        jit::tracer::ArgumentStash::stashIntListElem(
+            signature.params[i].name, size, idx, var);
+        res[idx] = var.toCLong();
+        continue;
+      } else {
+        res[idx] = THPUtils_unpackIndex(obj);
+      }
     } catch (std::runtime_error &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),
@@ -250,26 +274,87 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   return res;
 }
 
-inline const THPDtype& PythonArgs::dtypeWithDefault(int i, const THPDtype& default_dtype) {
-  if (!args[i]) return default_dtype;
-  return dtype(i);
+inline at::ScalarType PythonArgs::scalartypeWithDefault(int i, at::ScalarType default_scalartype) {
+  if (!args[i]) return default_scalartype;
+  return scalartype(i);
 }
 
-inline const THPDtype& PythonArgs::dtype(int i) {
+inline at::ScalarType PythonArgs::scalartype(int i) {
   if (!args[i]) {
-    auto dtype = signature.params[i].default_dtype;
-    if (!dtype) {
-      const auto& type = torch::tensor::get_default_tensor_type();
-      dtype = torch::getDtype(type.scalarType(), type.is_cuda());
-    }
-    return *dtype;
+    auto scalartype = signature.params[i].default_scalartype;
+    return (scalartype == at::ScalarType::Undefined) ?
+            torch::tensor::get_default_tensor_type().scalarType() : scalartype;
   }
-  return *reinterpret_cast<THPDtype*>(args[i]);
+  return reinterpret_cast<THPDtype*>(args[i])->scalar_type;
+}
+
+inline at::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
+  if (!args[i]) return at::nullopt;
+  return scalartype(i);
 }
 
 inline const THPLayout& PythonArgs::layout(int i) {
   if (!args[i]) return *signature.params[i].default_layout;
   return *reinterpret_cast<THPLayout*>(args[i]);
+}
+
+inline const THPLayout& PythonArgs::layoutWithDefault(int i, const THPLayout& default_layout) {
+  if (!args[i]) return default_layout;
+  return layout(i);
+}
+
+static std::string cuda_str = "cuda";
+static std::string cpu_str = "cpu";
+static std::string cuda_prefix = "cuda:";
+static std::string cpu_prefix = "cpu:";
+
+inline Device PythonArgs::device(int i) {
+  if (!args[i]) {
+    const auto& default_tensor_type = torch::tensor::get_default_tensor_type();
+    const auto device_type = torch::getDeviceType(default_tensor_type);
+    return Device(device_type, -1, true);
+  }
+  if (THPDevice_Check(args[i])) {
+    auto device = reinterpret_cast<THPDevice*>(args[i]);
+    return device->device;
+  }
+  if (THPUtils_checkLong(args[i])) {
+    auto index = THPUtils_unpackLong(args[i]);
+    return Device(DeviceType::CUDA, index, index == -1);
+  }
+  std::string device_str = THPUtils_unpackString(args[i]);
+  if (device_str == cpu_str) {
+    return Device(DeviceType::CPU, -1, true);
+  } else if (device_str == cuda_str) {
+    return Device(DeviceType::CUDA, -1, true);
+  } else if (device_str.compare(0, cpu_prefix.length(), cpu_prefix) == 0) {
+    auto device_index = std::stoi(device_str.substr(cpu_prefix.length()));
+    return Device(DeviceType::CPU, device_index, false);
+  } else if (device_str.compare(0, cuda_prefix.length(), cuda_prefix) == 0) {
+    auto device_index = std::stoi(device_str.substr(cuda_prefix.length()));
+    return Device(DeviceType::CUDA, device_index, false);
+  }
+  throw torch::TypeError("only \"cuda\" and \"cpu\" are valid device types, got %s", device_str.c_str());
+}
+
+inline Device PythonArgs::deviceWithDefault(int i, const Device& default_device) {
+  if (!args[i]) return default_device;
+  return device(i);
+}
+
+inline int64_t PythonArgs::deviceInt64(int i) {
+  auto dev = device(i);
+  return dev.deviceInt64();
+}
+
+inline at::optional<Device> PythonArgs::deviceOptional(int i) {
+  if (!args[i]) return at::nullopt;
+  return device(i);
+}
+
+inline std::string PythonArgs::string(int i) {
+  if (!args[i]) return "";
+  return THPUtils_unpackString(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64(int i) {

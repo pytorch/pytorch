@@ -89,19 +89,19 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
   int dimH = 2;
   int dimW = 3;
   int64_t sizeB = 1;
-  int64_t sizeD;
-  int64_t isizeT;
-  int64_t isizeH;
-  int64_t isizeW;
+  int64_t sizeD = 0;
+  int64_t isizeT = 0;
+  int64_t isizeH = 0;
+  int64_t isizeW = 0;
 
-  int64_t istrideB;
-  int64_t istrideD;
-  int64_t istrideT;
-  int64_t istrideH;
-  int64_t istrideW;
+  int64_t istrideB = 0;
+  int64_t istrideD = 0;
+  int64_t istrideT = 0;
+  int64_t istrideH = 0;
+  int64_t istrideW = 0;
 
-  real *input_data;
-  real *output_data;
+  real *input_data = nullptr;
+  real *output_data = nullptr;
 
 
   THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,

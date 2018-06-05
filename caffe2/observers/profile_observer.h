@@ -26,7 +26,6 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/observers/operator_attaching_net_observer.h"
-#include "caffe2/operators/rnn/rnn_capable_operator_observer.h"
 
 namespace caffe2 {
 
@@ -51,13 +50,13 @@ class ProfileCounter {
 };
 
 class ProfileOperatorObserver : public ProfileCounter,
-                                public RNNCapableOperatorObserver {
+                                public ObserverBase<OperatorBase> {
  public:
   explicit ProfileOperatorObserver(OperatorBase* subject) = delete;
   explicit ProfileOperatorObserver(
       OperatorBase* subject,
       ProfileObserver* netObserver)
-      : RNNCapableOperatorObserver(subject), netObserver_(netObserver) {
+      : ObserverBase<OperatorBase>(subject), netObserver_(netObserver) {
     if (subject) {
       net_position_ = subject->net_position();
     }
@@ -74,7 +73,7 @@ class ProfileOperatorObserver : public ProfileCounter,
 
   std::unique_ptr<ObserverBase<OperatorBase>> rnnCopy(
       OperatorBase* subject,
-      int rnnOrder) const override;
+      int rnn_order) const override;
 
   void Dump() const;
 
@@ -90,6 +89,7 @@ class ProfileOperatorObserver : public ProfileCounter,
  protected:
   ProfileObserver* netObserver_;
   int net_position_; // Needed because this is not visible in RNN Executor
+  int rnn_order_ = OperatorBase::kNoNetPositionSet;
 
  private:
   void Start() override;

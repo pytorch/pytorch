@@ -27,4 +27,4 @@ OPERATOR_SCHEMA(ChannelShuffleGradient)
     .IdenticalTypeAndShape()
     .NumInputs(1)
     .NumOutputs(1);
-}
+} // namespace caffe2

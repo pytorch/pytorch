@@ -12,16 +12,8 @@ import caffe2.python.hypothesis_test_util as hu
 
 
 class TestArgOps(hu.HypothesisTestCase):
-    def argmax_ref(self, X, axis, keepdims):
-            indices = np.argmax(X, axis=axis)
-            if keepdims:
-                out_dims = list(X.shape)
-                out_dims[axis] = 1
-                indices = indices.reshape(tuple(out_dims))
-            return [indices]
-
     @given(X=hu.tensor(dtype=np.float32), axis=st.integers(-1, 5),
-            keepdims=st.booleans(), **hu.gcs)
+           keepdims=st.booleans(), **hu.gcs)
     def test_argmax(self, X, axis, keepdims, gc, dc):
         if axis >= len(X.shape):
             axis %= len(X.shape)
@@ -41,7 +33,7 @@ class TestArgOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
 
     @given(X=hu.tensor(dtype=np.float32), axis=st.integers(-1, 5),
-            keepdims=st.booleans(), **hu.gcs)
+           keepdims=st.booleans(), **hu.gcs)
     def test_argmin(self, X, axis, keepdims, gc, dc):
         if axis >= len(X.shape):
             axis %= len(X.shape)

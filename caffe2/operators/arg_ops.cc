@@ -2,7 +2,6 @@
 
 #include <functional>
 
-#include "caffe2/operators/arg_ops_eigen.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -11,11 +10,11 @@ namespace {
 
 template <typename T, class Compare, class Context>
 void ComputeArgImpl(
-    const T* X,
     const TIndex prev_size,
     const TIndex next_size,
     const TIndex n,
     const Compare& comp,
+    const T* X,
     TIndex* Y,
     Context* context) {
   math::Set<TIndex, Context>(prev_size * next_size, TIndex(0), Y, context);
@@ -35,40 +34,34 @@ void ComputeArgImpl(
 
 } // namespace
 
-template <typename T, class Context>
-bool ArgMaxOp<T, Context>::Compute(
-    const T* X,
+template <>
+template <typename T>
+bool ArgMaxReducer<CPUContext>::operator()(
     const TIndex prev_size,
     const TIndex next_size,
     const TIndex n,
-    TIndex* Y) {
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  arg_ops_eigen::ComputeArgMaxEigen(
-      Eigen::DefaultDevice(), X, prev_size, next_size, n, Y);
-#else // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ComputeArgImpl(X, prev_size, next_size, n, std::greater<T>(), Y, &context_);
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+    const T* X,
+    TIndex* Y,
+    CPUContext* context) const {
+  ComputeArgImpl(prev_size, next_size, n, std::greater<T>(), X, Y, context);
   return true;
 }
 
-template <typename T, class Context>
-bool ArgMinOp<T, Context>::Compute(
-    const T* X,
+template <>
+template <typename T>
+bool ArgMinReducer<CPUContext>::operator()(
     const TIndex prev_size,
     const TIndex next_size,
     const TIndex n,
-    TIndex* Y) {
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  arg_ops_eigen::ComputeArgMinEigen(
-      Eigen::DefaultDevice(), X, prev_size, next_size, n, Y);
-#else // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ComputeArgImpl(X, prev_size, next_size, n, std::less<T>(), Y, &context_);
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
+    const T* X,
+    TIndex* Y,
+    CPUContext* context) const {
+  ComputeArgImpl(prev_size, next_size, n, std::less<T>(), X, Y, context);
   return true;
 }
 
-REGISTER_CPU_OPERATOR(ArgMax, ArgMaxOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ArgMin, ArgMinOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(ArgMax, ArgOp<CPUContext, ArgMaxReducer<CPUContext>>);
+REGISTER_CPU_OPERATOR(ArgMin, ArgOp<CPUContext, ArgMinReducer<CPUContext>>);
 
 namespace {
 

@@ -13,7 +13,7 @@ using namespace at;
 
 TEST_CASE( "dlconvertor", "[cpu]" ) {
 
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   INFO( "convert ATen to DLTensor" );
 

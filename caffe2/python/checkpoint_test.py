@@ -36,7 +36,7 @@ def build_pipeline(node_id):
 
         epoch_reader = ReaderWithLimit(full_reader, num_iter=3)
         pipe(epoch_reader, processor=inc_total)
-        Job.current().add_stop_signal(epoch_reader.data_finished())
+        Job.current().add_stop_condition(epoch_reader.data_finished())
     return [total]
 
 
@@ -76,15 +76,15 @@ class TestCheckpoint(TestCase):
                 return output_fetcher.outputs()[0].fetch()
 
             session, checkpoint = builder()
-            compiled_job = job.compile(LocalSession)
-            num_epochs = JobRunner(compiled_job, checkpoint).train(session)
+            job.compile(LocalSession)
+            num_epochs = JobRunner(job, checkpoint).train(session)
             self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
             self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
 
             for initial_epoch in range(1, num_epochs + 1):
                 session, checkpoint = builder()
                 JobRunner(
-                    compiled_job,
+                    job,
                     checkpoint, resume_from_epoch=initial_epoch
                 ).train(session)
                 self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
@@ -134,8 +134,8 @@ class TestCheckpoint(TestCase):
                 with Job() as job:
                     for node_id in range(num_nodes):
                         build_pipeline(node_id)
-                compiled_job = job.compile(LocalSession)
-                checkpoint.init(compiled_job.nodes_to_checkpoint())
+                job.compile(LocalSession)
+                checkpoint.init(job.nodes_to_checkpoint())
 
                 for node_id in range(num_nodes):
                     epoch = 5
@@ -156,14 +156,14 @@ class TestCheckpoint(TestCase):
                 with Cluster():
                     with Job() as job:
                         build_pipeline(node_id)
-                    compiled_job = job.compile(LocalSession)
-                    job_runner = JobRunner(compiled_job, checkpoint)
+                    job.compile(LocalSession)
+                    job_runner = JobRunner(job, checkpoint)
                     num_epochs = job_runner.train(session)
                 self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
 
-                # There are 12 global blobs after finishing up the job runner.
+                # There are 17 global blobs after finishing up the job runner.
                 # (only blobs on init_group are checkpointed)
-                self.assertEquals(len(ws.blobs), 12)
+                self.assertEquals(len(ws.blobs), 17)
 
             ws = workspace.C.Workspace()
             session = LocalSession(ws)
@@ -175,8 +175,8 @@ class TestCheckpoint(TestCase):
                 with Job() as job:
                     for node_id in range(num_nodes):
                         build_pipeline(node_id)
-                compiled_job = job.compile(LocalSession)
-                job_runner = JobRunner(compiled_job, checkpoint)
+                job.compile(LocalSession)
+                job_runner = JobRunner(job, checkpoint)
                 job_runner.load_blobs_from_checkpoints(
                     blob_names=model_blob_names, epoch=1, session=session)
 
@@ -221,10 +221,10 @@ class TestCheckpoint(TestCase):
                 with Cluster():
                     with Job() as job:
                         build_pipeline(node_id)
-                    compiled_job = job.compile(LocalSession)
+                    job.compile(LocalSession)
                     local_upload_builder = UploadToLocalFile(upload_dir)
                     job_runner = JobRunner(
-                        compiled_job, checkpoint,
+                        job, checkpoint,
                         upload_task_group_builder=local_upload_builder)
                     num_epochs = job_runner.train(session)
                     self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
@@ -255,8 +255,8 @@ class TestCheckpoint(TestCase):
             with Cluster():
                 with Job() as job:
                     build_pipeline(node_id)
-                compiled_job = job.compile(LocalSession)
-                job_runner = JobRunner(compiled_job, checkpoint)
+                job.compile(LocalSession)
+                job_runner = JobRunner(job, checkpoint)
                 num_epochs = job_runner.train(session)
             # make sure all epochs are executed even though saving the checkpoint failed
             # Saving checkpoint failure should not cause job failure
@@ -319,16 +319,16 @@ class TestCheckpoint(TestCase):
             with Job() as job:
                 outputs = build_pipeline(node_id=0)
             output_fetcher = Task(step=core.Net('empty'), outputs=outputs)
-            compiled_job = job.compile(LocalSession)
+            job.compile(LocalSession)
 
             def fetch_total(session):
                 session.run(output_fetcher)
                 return output_fetcher.outputs()[0].fetch()
 
-            num_epochs = JobRunner(compiled_job, checkpoint).train(session)
+            num_epochs = JobRunner(job, checkpoint).train(session)
             for initial_epoch in range(1, num_epochs + 1):
                 JobRunner(
-                    compiled_job,
+                    job,
                     checkpoint,
                     resume_from_epoch=initial_epoch
                 ).train(session)

@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <stdarg.h>
 #include <string>
 #include <vector>
@@ -50,7 +50,7 @@ bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
       if (!THPUtils_checkLong(item)) {
         return false;
       }
-      storage->data[i] = THPUtils_unpackLong(item);
+      THLongStorage_set(storage, i, THPUtils_unpackLong(item));
     }
     result  = std::move(storage);
     return true;
@@ -96,7 +96,7 @@ bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStora
     if (!THPUtils_checkLong(arg)) {
       return false;
     }
-    result->data[i] = THPUtils_unpackLong(arg);
+    THLongStorage_set(result, i, THPUtils_unpackLong(arg));
   }
   return true;
 }

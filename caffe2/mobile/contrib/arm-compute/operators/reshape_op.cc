@@ -17,7 +17,6 @@ template <typename T>
 bool GLReshapeOp<T>::RunOnDevice() {
   auto *Xblob = OperatorBase::Inputs()[0];
   auto X = GLContext::getGLTensor<T>(Xblob);
-  LOG(INFO) << "[C2DEBUG] X: " << X->dim32(0) << " " << X->dim32(1) << " " << X->dim32(2) << " " << X->dim32(3);
   auto arg = OperatorBase::GetRepeatedArgument<int>("shape");
   for (int i = 0; i < arg.size(); ++i) {
     LOG(INFO) << "[C2DEBUG] shape: " << arg[i];

@@ -41,6 +41,7 @@ set +e
 nvcc_path=$(which nvcc)
 if [[ -z "$nvcc_path" ]]; then
   nvcc_path="/usr/local/cuda/bin/nvcc"
+  export PATH="/usr/local/cuda/bin:$PATH"
 fi
 set -e
 if [ ! -f "$nvcc_path" ] && ! $force; then

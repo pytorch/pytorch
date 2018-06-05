@@ -42,14 +42,15 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::lerp,
   aten::lgamma,
   aten::log,
+  aten::log10,
   aten::log1p,
+  aten::log2,
   aten::lt,
   aten::max,
   aten::min,
   aten::mul,
   aten::ne,
   aten::neg,
-  aten::ones,
   aten::pow,
   aten::reciprocal,
   aten::remainder,
@@ -63,18 +64,36 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::tan,
   aten::tanh,
   aten::trunc,
-  aten::zeros,
   aten::_sigmoid_backward,
   aten::_tanh_backward,
 };
 
 bool isSimpleMap(Node *node) {
-  if(simple_mappable.count(node->kind())) {
-    if(node->kind() == aten::min || node->kind() == aten::max)
-      return node->inputs().size() == 2; // unary min/max is a reduction...
-    return true;
+  if(simple_mappable.count(node->kind()) == 0)
+    return false;
+  if((node->kind() == aten::min || node->kind() == aten::max) && node->inputs().size() == 1)
+    return false;
+  // Make sure that the node doesn't broadcast.
+  JIT_ASSERT(node->inputs().size() > 0);
+  TensorType* expected_type = node->inputs()[0]->type()->cast<TensorType>();
+  if (!expected_type)
+    return false;
+  static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual) {
+    TensorType* actual = _actual->cast<TensorType>();
+    return actual &&
+           expected->scalarType() == actual->scalarType() &&
+           expected->device() == actual->device() &&
+           expected->sizes() == actual->sizes();
+  };
+  for (Value * val : node->inputs()) {
+    if (!equal_modulo_strides(expected_type, val->type()))
+      return false;
   }
-  return false;
+  for (Value * val : node->outputs()) {
+    if (!equal_modulo_strides(expected_type, val->type()))
+      return false;
+  }
+  return true;
 }
 
 struct GraphFuser {
@@ -90,11 +109,14 @@ struct GraphFuser {
   GraphFuser(Block * block)
   : block(block) {}
 
-  int getDevice(Node * node) {
+  at::optional<int> getDevice(Node * node) {
     if(node->kind() == prim::FusionGroup) {
       return node->i(attr::device);
     }
-    return node->output()->type()->expect<TensorType>()->device();
+    if(auto tt = node->output()->type()->cast<TensorType>()) {
+      return tt->device();
+    }
+    return at::nullopt;
   }
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
@@ -187,11 +209,11 @@ struct GraphFuser {
     // if the consumer allInputsAreThisProducer(consumer,producer)
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
-    int consumer_device = getDevice(consumer);
+    at::optional<int> consumer_device = getDevice(consumer);
     return isFusable(producer->node()) &&
       allUsersAreThisConsumerOrOccurAfterIt(consumer, producer) &&
-      consumer_device == getDevice(producer->node()) &&
-      (consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
+      consumer_device && consumer_device == getDevice(producer->node()) &&
+      (*consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
   }
 
   // insert a producer node into a consuming fusion group.
@@ -212,7 +234,7 @@ struct GraphFuser {
     std::unordered_map<Value*, Value*> inner_to_outer;
     auto inner_inputs = producer_subgraph->inputs();
     auto outer_inputs = producer_group->inputs();
-    for (std::size_t i = 0; i < inner_inputs.size(); ++i) {
+    for (size_t i = 0; i < inner_inputs.size(); ++i) {
       inner_to_outer[inner_inputs[i]] = outer_inputs[i];
     }
 
@@ -225,13 +247,13 @@ struct GraphFuser {
       temporary_nodes.emplace_back(outer);
       auto inner_outputs = inner->outputs();
       auto outer_outputs = outer->outputs();
-      for (std::size_t i = 0; i < inner_outputs.size(); ++i)
+      for (size_t i = 0; i < inner_outputs.size(); ++i)
         inner_to_outer[inner_outputs[i]] = outer_outputs[i];
     }
 
     // Replace uses of producer_group outputs and destroy the producer
     auto subgraph_outputs = producer_subgraph->outputs();
-    for (std::size_t i = 0; i < subgraph_outputs.size(); ++i) {
+    for (size_t i = 0; i < subgraph_outputs.size(); ++i) {
       auto outer_output = inner_to_outer.at(subgraph_outputs[i]);
       producer_group->outputs()[i]->replaceAllUsesWith(outer_output);
     }
@@ -245,7 +267,7 @@ struct GraphFuser {
       Node *merged = mergeNodeIntoGroup(consumer_group, node);
       // If any of the outputs are still used then we need to add them
       auto outputs = node->outputs();
-      for (std::size_t i = 0; i < outputs.size(); ++i) {
+      for (size_t i = 0; i < outputs.size(); ++i) {
         auto output = outputs[i];
         if (output->uses().size() == 0) continue;
         consumer_subgraph->registerOutput(merged->outputs()[i]);
@@ -299,7 +321,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
-    auto group = block->owningGraph()->createFusionGroup(getDevice(n));
+    auto group = block->owningGraph()->createFusionGroup(getDevice(n).value());
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];

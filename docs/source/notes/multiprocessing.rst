@@ -9,8 +9,8 @@ memory and will only send a handle to another process.
 
 .. note::
 
-    When a :class:`~torch.autograd.Variable` is sent to another process, both
-    the :attr:`Variable.data` and :attr:`Variable.grad.data` are going to be
+    When a :class:`~torch.Tensor` is sent to another process, both
+    the :attr:`~torch.Tensor` data and :attr:`torch.Tensor.grad` are going to be
     shared.
 
 This allows to implement various training methods, like Hogwild, A3C, or any
@@ -119,6 +119,6 @@ example below as well::
             p.start()
             processes.append(p)
         for p in processes:
-          p.join()
+            p.join()
 
 .. __: https://github.com/pytorch/examples/tree/master/mnist_hogwild

@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -322,7 +323,7 @@ struct ConvolutionArgs {
 
 // Hashing machinery for ConvolutionParams
 struct ParamsHash {
-  std::size_t operator()(const ConvolutionParams& params) const {
+  size_t operator()(const ConvolutionParams& params) const {
     auto ptr = reinterpret_cast<const uint8_t*>(&params);
     uint32_t value = 0x811C9DC5;
     for (int i = 0; i < (int)sizeof(ConvolutionParams); ++i) {

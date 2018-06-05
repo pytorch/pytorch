@@ -129,31 +129,49 @@ def is_storage(obj):
 
 
 def set_default_tensor_type(t):
-    r"""Sets the default ``torch.Tensor`` type to type :attr:`t`.
+    r"""Sets the default ``torch.Tensor`` type to floating point tensor type
+    :attr:`t`. This type will also be used as default floating point type for
+    type inference in :func:`torch.tensor`.
+
+    The default floating point tensor type is initially ``torch.FloatTensor``.
 
     Args:
-        t (type or string): the tensor type or its name
+        t (type or string): the floating point tensor type or its name
 
     Example::
 
-        >>> torch.set_default_tensor_type("torch.FloatTensor")
-        >>> torch.Tensor([1.2, 3])
-
-         1.2000
-         3.0000
-        [torch.FloatTensor of size (2,)]
-
-        >>> torch.set_default_tensor_type(torch.double)
-        >>> torch.Tensor([1.2, 3])
-
-         1.2000
-         3.0000
-        [torch.DoubleTensor of size (2,)]
+        >>> torch.tensor([1.2, 3]).dtype    # initial default for floating point is torch.float32
+        torch.float32
+        >>> torch.set_default_tensor_type(torch.DoubleTensor)
+        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        torch.float64
 
     """
     if isinstance(t, _string_classes):
         t = _import_dotted_name(t)
     _C._set_default_tensor_type(t)
+
+
+def set_default_dtype(d):
+    r"""Sets the default floating point dtype to :attr:`d`. This type will be
+    used as default floating point type for type inference in
+    :func:`torch.tensor`.
+
+    The default floating point dtype is initially ``torch.float32``.
+
+    Args:
+        d (:class:`torch.dtype`): the floating point dtype to make the default
+
+    Example::
+
+        >>> torch.tensor([1.2, 3]).dtype           # initial default for floating point is torch.float32
+        torch.float32
+        >>> torch.set_default_dtype(torch.float64)
+        >>> torch.tensor([1.2, 3]).dtype           # a new floating point tensor
+        torch.float64
+
+    """
+    _C._set_default_dtype(d)
 
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
 from .serialization import save, load
@@ -265,6 +283,7 @@ import torch.jit
 import torch.random
 import torch.distributions
 import torch.testing
+import torch.backends.mkl
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
 
 _C._init_names(list(torch._storage_classes))

@@ -44,6 +44,7 @@ class HelperWrapper(object):
         'softmax': softmax,
         'instance_norm': instance_norm,
         'spatial_bn': spatial_bn,
+        'spatial_gn': spatial_gn,
         'relu': relu,
         'prelu': prelu,
         'tanh': tanh,

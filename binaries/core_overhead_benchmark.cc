@@ -220,4 +220,4 @@ static void BM_TensorAllocDeallocCUDA(benchmark::State& state) {
 }
 BENCHMARK(BM_TensorAllocDeallocCUDA);
 
-BENCHMARK_MAIN()
+BENCHMARK_MAIN();

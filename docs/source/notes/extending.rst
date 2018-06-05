@@ -107,8 +107,8 @@ numerical approximations using small finite differences::
     # gradcheck takes a tuple of tensors as input, check if your gradient
     # evaluated with these tensors are close enough to numerical
     # approximations and returns True if they all verify this condition.
-    input = (Variable(torch.randn(20,20).double(), requires_grad=True), Variable(torch.randn(30,20).double(), requires_grad=True),)
-    test = gradcheck(Linear.apply, input, eps=1e-6, atol=1e-4)
+    input = (torch.randn(20,20,dtype=torch.double,requires_grad=True), torch.randn(30,20,dtype=torch.double,requires_grad=True))
+    test = gradcheck(linear, input, eps=1e-6, atol=1e-4)
     print(test)
 
 Extending :mod:`torch.nn`
@@ -132,7 +132,7 @@ Since :mod:`~torch.nn` heavily utilizes :mod:`~torch.autograd`, adding a new
 :class:`Module` requires implementing a :class:`~torch.autograd.Function`
 that performs the operation and can compute the gradient. From now on let's
 assume that we want to implement a ``Linear`` module and we have the function
-implementated as in the listing above. There's very little code required to
+implemented as in the listing above. There's very little code required to
 add this. Now, there are two functions that need to be implemented:
 
 - ``__init__`` (*optional*) - takes in arguments such as kernel sizes, numbers

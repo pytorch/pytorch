@@ -1,18 +1,17 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Function, Variable
+from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import _finfo, broadcast_all
+from torch.distributions.utils import _finfo, broadcast_all, clamp_probs
 
 
 def _dirichlet_sample_nograd(concentration):
     probs = torch._standard_gamma(concentration)
     probs /= probs.sum(-1, True)
-    eps = _finfo(probs).eps
-    return probs.clamp_(min=eps, max=1 - eps)
+    return clamp_probs(probs)
 
 
 # This helper is exposed for testing.
@@ -42,11 +41,9 @@ class Dirichlet(ExponentialFamily):
 
     Example::
 
-        >>> m = Dirichlet(torch.Tensor([0.5, 0.5]))
+        >>> m = Dirichlet(torch.tensor([0.5, 0.5]))
         >>> m.sample()  # Dirichlet distributed with concentrarion concentration
-         0.1046
-         0.8954
-        [torch.FloatTensor of size 2]
+        tensor([ 0.1046,  0.8954])
 
     Args:
         concentration (Tensor): concentration parameter of the distribution
@@ -64,7 +61,7 @@ class Dirichlet(ExponentialFamily):
     def rsample(self, sample_shape=()):
         shape = self._extended_shape(sample_shape)
         concentration = self.concentration.expand(shape)
-        if isinstance(concentration, Variable):
+        if isinstance(concentration, torch.Tensor):
             return _Dirichlet.apply(concentration)
         return _dirichlet_sample_nograd(concentration)
 
@@ -77,11 +74,11 @@ class Dirichlet(ExponentialFamily):
 
     @property
     def mean(self):
-        return self.concentration / self.concentration.sum(-1)
+        return self.concentration / self.concentration.sum(-1, True)
 
     @property
     def variance(self):
-        con0 = self.concentration.sum(-1)
+        con0 = self.concentration.sum(-1, True)
         return self.concentration * (con0 - self.concentration) / (con0.pow(2) * (con0 + 1))
 
     def entropy(self):

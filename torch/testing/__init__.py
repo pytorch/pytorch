@@ -9,8 +9,8 @@ __all__ = [
     'assert_allclose', 'make_non_contiguous', 'rand_like', 'randn_like'
 ]
 
-rand_like = torch._C._VariableFunctions.rand_like
-randn_like = torch._C._VariableFunctions.randn_like
+rand_like = torch.rand_like
+randn_like = torch.randn_like
 
 
 def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True):
@@ -85,11 +85,8 @@ def make_non_contiguous(tensor):
 
 
 def get_all_dtypes():
-    cpu_dtypes = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-                  torch.float16, torch.float32, torch.float64]
-    cuda_dtypes = [torch.cuda.uint8, torch.cuda.int8, torch.cuda.int16, torch.cuda.int32, torch.cuda.int64,
-                   torch.cuda.float16, torch.cuda.float32, torch.cuda.float64]
-    return cpu_dtypes + cuda_dtypes
+    return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float16, torch.float32, torch.float64]
 
 
 # 'dtype': (rtol, atol)

@@ -146,7 +146,7 @@ THC_API void THCTensor_(dimApplyMode)(THCState *state,
   } else {
     // Loop through the values and recurse
     for (int i = 0; i < THCTensor_(size)(state, input, curDim); ++i) {
-      position->data[curDim] = i;
+      THLongStorage_data(position)[curDim] = i;
       THCTensor_(dimApplyMode)(state, values, indices, input, sortBuffer, dimension, position, curDim + 1);
     }
   }
@@ -222,8 +222,8 @@ THC_API void THCTensor_(mode)(THCState *state,
     indicesTransposed = THCudaLongTensor_newTranspose(state, indices, dimension, ndim-1);
 
     // Set-up TensorInfo structs for passing to kernel
-    TensorInfo<real, unsigned int> tiValues = getTensorInfo<THCTensor, unsigned int>(state, valuesTransposed);
-    TensorInfo<int64_t, unsigned int> tiIndices = getTensorInfo<THCudaLongTensor, unsigned int>(state, indicesTransposed);
+    TensorInfo<real, unsigned int> tiValues = getTensorInfo<real, THCTensor, unsigned int>(state, valuesTransposed);
+    TensorInfo<int64_t, unsigned int> tiIndices = getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, indicesTransposed);
 
     // The number of blocks is the number of slices that we need to calculate the mode for. Each block
     // is responsible for computing a single mode

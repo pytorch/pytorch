@@ -1,7 +1,7 @@
 #ifndef THP_H
 #define THP_H
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <stdbool.h>
 #include <TH/TH.h>
 #include <THS/THS.h>

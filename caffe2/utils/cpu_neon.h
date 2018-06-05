@@ -2,7 +2,7 @@
 #define CAFFE2_UTILS_CPU_NEON_H_
 
 // Provides a variety of ARM NEON-specific utility functions
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
 #include <arm_neon.h>
 
 namespace caffe2 {
@@ -48,6 +48,6 @@ inline void vst4_u8_aligned(uint8_t* p, uint8x8x4_t v) {
 
 }  // namespace caffe2
 
-#endif // __ARM_NEON__
+#endif //  defined(__ARM_NEON__) || defined(__ARM_NEON)
 
 #endif  // CAFFE2_UTILS_CPU_NEON_H_

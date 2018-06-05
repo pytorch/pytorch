@@ -67,10 +67,10 @@ struct TensorUtils {
     static bool allSameDevice(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
     static void copyIgnoringOverlaps(THCState* state,                   \
                                      TENSOR_TYPE* dst, TENSOR_TYPE* src); \
-    /* Determines if the given tensor has overlapping data points (i.e., */ \
-    /* is there more than one index into the tensor that references */  \
-    /* the same piece of data)? */                                      \
-    static bool overlappingIndices(THCState* state, TENSOR_TYPE* t);    \
+    /* Returns false if there is no possibility that the tensor    */   \
+    /* has more than one index that references the same datapoint, */   \
+    /* true otherwise.                                             */   \
+    static bool maybeOverlappingIndices(THCState* state, TENSOR_TYPE* t);    \
     /* Can we use 32 bit math for indexing? */                          \
     static bool canUse32BitIndexMath(THCState* state, TENSOR_TYPE* t, ptrdiff_t max_elem=INT32_MAX);  \
     /* Are all tensors 32-bit indexable? */                             \
@@ -117,9 +117,10 @@ TENSOR_UTILS(THCudaHalfTensor, half, float);
 // TensorInfos can then be passed to CUDA kernels, but we can use the static functions
 // defined above to perform Tensor Operations that are appropriate for each
 // TensorType.
-template <typename TensorType, typename IndexType>
-TensorInfo<typename TensorUtils<TensorType>::DataType, IndexType>
+template <typename ScalarType, typename TensorType, typename IndexType>
+TensorInfo<ScalarType, IndexType>
 getTensorInfo(THCState* state, TensorType* t) {
+  static_assert(std::is_same<ScalarType, typename TensorUtils<TensorType>::DataType>::value, "ScalarType must match");
   IndexType sz[MAX_CUTORCH_DIMS];
   IndexType st[MAX_CUTORCH_DIMS];
 
@@ -129,7 +130,7 @@ getTensorInfo(THCState* state, TensorType* t) {
     st[i] = TensorUtils<TensorType>::getStride(state, t, i);
   }
 
-  return TensorInfo<typename TensorUtils<TensorType>::DataType, IndexType>(
+  return TensorInfo<ScalarType, IndexType>(
     TensorUtils<TensorType>::getData(state, t), dims, sz, st);
 }
 
@@ -168,7 +169,7 @@ struct ScalarNegate<half> {
 template <>
 struct ScalarInv<half> {
   static __host__ __device__ half to(const half v) {
-#ifdef __CUDA_ARCH__
+#if defined (__CUDA_ARCH_) || defined(__HIP_PLATFORM_HCC__)
     return __float2half(1.0f / __half2float(v));
 #else
     float fv = THC_half2float(v);

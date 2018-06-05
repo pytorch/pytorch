@@ -115,19 +115,21 @@ class OperatorBase : public Observable<OperatorBase> {
   }
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
-  vector<TensorShape> InputTensorShapes();
+  vector<TensorShape> InputTensorShapes() const;
 
-  virtual void WaitEvent(const Event& ev, int stream_id = -1) {
+  virtual void WaitEvent(const Event& ev, int /*stream_id */ = -1) {
     ev.Finish();
   }
 
   inline void Wait(const OperatorBase& other, int stream_id = -1) {
-    WaitEvent(other.event(), stream_id);
+    if (!other.IsEventDisabled()) {
+      WaitEvent(other.event(), stream_id);
+    }
   }
 
   virtual void WaitEvents(
       const std::vector<const Event*>& events,
-      int stream_id = -1) {
+      int /*stream_id*/ = -1) {
     for (const auto& ev : events) {
       ev->Finish();
     }
@@ -162,20 +164,20 @@ class OperatorBase : public Observable<OperatorBase> {
         if (HasAsyncPart()) {
           RecordEvent();
         } else {
-          event().SetFinished();
+          SetEventFinished();
         }
       } else {
-        event().SetFinished(getErrorMsg().c_str());
+        SetEventFinished(getErrorMsg().c_str());
       }
       return result;
     } catch (EnforceNotMet& err) {
-      event().SetFinished(err.what());
+      SetEventFinished(err.what());
       throw;
     } catch (const std::exception& err) {
-      event().SetFinished(err.what());
+      SetEventFinished(err.what());
       throw;
     } catch (...) {
-      event().SetFinished(getErrorMsg().c_str());
+      SetEventFinished(getErrorMsg().c_str());
       throw;
     }
   }
@@ -276,8 +278,7 @@ class OperatorBase : public Observable<OperatorBase> {
   }
 
   const std::string& type() const {
-    CAFFE_ENFORCE(operator_def_.get() != nullptr);
-    return operator_def_->type();
+    return type_;
   }
 
   void annotate_engine(const std::string& engine) {
@@ -304,6 +305,7 @@ class OperatorBase : public Observable<OperatorBase> {
   std::shared_ptr<const OperatorDef> operator_def_;
   DeviceOption device_option_;
   std::string engine_;
+  std::string type_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
 
@@ -312,8 +314,14 @@ class OperatorBase : public Observable<OperatorBase> {
   ExecutorHelper* helper_ = nullptr;
 
  protected:
-  virtual void RecordEvent(const char* err_msg = nullptr) {
+  virtual void RecordEvent(const char* /*err_msg*/ = nullptr) {
     CAFFE_NOT_IMPLEMENTED;
+  }
+
+  void SetEventFinished(const char* err_msg = nullptr) {
+    if (event_) {
+      event_->SetFinished(err_msg);
+    }
   }
 
   std::string getErrorMsg() {
@@ -421,15 +429,19 @@ class Operator : public OperatorBase {
         AddRelatedBlobInfo(&err);
       }
       this->RecordLastFailedOpNetPosition();
+      StopAllObservers();
       throw;
     } catch (...) {
       this->RecordLastFailedOpNetPosition();
+      StopAllObservers();
       throw;
     }
   }
 
   bool RunAsync(int stream_id = 0) final {
     try {
+      StartAllObservers();
+
       context_.SwitchToDevice(stream_id);
       auto result = RunOnDevice();
       if (result) {
@@ -438,12 +450,15 @@ class Operator : public OperatorBase {
         } else {
           // Manually set CPU operator's event status to finished,
           // unless this is an async CPU operator
-          event().SetFinished();
+          SetEventFinished();
         }
       } else {
-        event().SetFinished(getErrorMsg().c_str());
+        SetEventFinished(getErrorMsg().c_str());
         this->RecordLastFailedOpNetPosition();
       }
+
+      StopAllObservers();
+
       return result;
     } catch (EnforceNotMet& err) {
       if (has_debug_def()) {
@@ -451,16 +466,19 @@ class Operator : public OperatorBase {
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
-      event().SetFinished(err.what());
+      SetEventFinished(err.what());
       this->RecordLastFailedOpNetPosition();
+      StopAllObservers();
       throw;
     } catch (const std::exception& err) {
-      event().SetFinished(err.what());
+      SetEventFinished(err.what());
       this->RecordLastFailedOpNetPosition();
+      StopAllObservers();
       throw;
     } catch (...) {
-      event().SetFinished(getErrorMsg().c_str());
+      SetEventFinished(getErrorMsg().c_str());
       this->RecordLastFailedOpNetPosition();
+      StopAllObservers();
       throw;
     }
   }
@@ -765,6 +783,30 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_CUDNN_OPERATOR(name, ...) \
   REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__)
 
+// Macros for HIP operators
+CAFFE_DECLARE_REGISTRY(
+    HIPOperatorRegistry,
+    OperatorBase,
+    const OperatorDef&,
+    Workspace*);
+#define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
+  CAFFE_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
+#define REGISTER_HIP_OPERATOR(name, ...)                           \
+  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
+  }                                                                 \
+  CAFFE_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
+#define REGISTER_HIP_OPERATOR_STR(str_name, ...) \
+  CAFFE_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
+
+#define REGISTER_HIP_OPERATOR_WITH_ENGINE(name, engine, ...) \
+  CAFFE_REGISTER_CLASS(                                       \
+      HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+
+#define REGISTER_MIOPEN_OPERATOR(name, ...) \
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__)
+
 // StaticLinkingProtector is a helper class that ensures that the Caffe2
 // library is linked correctly with whole archives (in the case of static
 // linking). What happens is that when CreateOperator is called for the first
@@ -845,13 +887,17 @@ void SetOpEnginePref(
 
 TensorShape GetTensorShapeOfBlob(const Blob* b);
 
+TensorShapes InferBlobShapesAndTypes(
+    CaffeMap<string, TensorShape>& blob_desc,
+    const vector<NetDef*>& nets);
+
 TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
-    const vector<std::unique_ptr<NetDef>>& nets);
+    const vector<NetDef*>& nets);
 
 TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
-    const vector<std::unique_ptr<NetDef>>& nets);
+    const vector<NetDef*>& nets);
 
 std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
     OperatorBase& op,

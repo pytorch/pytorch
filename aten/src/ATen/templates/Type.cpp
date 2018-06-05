@@ -1,4 +1,7 @@
 #include "ATen/Type.h"
+
+// ${generated_comment}
+
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
 #include "ATen/Scalar.h"
@@ -6,15 +9,18 @@
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/UndefinedType.h"
+#include <ATen/detail/VariableHooksInterface.h>
 
 #include <iostream>
-${type_headers}
+${cpu_type_headers}
 
 namespace at {
 
-void Type::registerAll(Context * context) {
-  ${type_registrations}
-  context->type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
+void Type::registerCPU(Context * context) {
+  ${cpu_type_registrations}
+  context->type_registry[static_cast<int>(IsVariable::NotVariable)]
+                        [static_cast<int>(Backend::Undefined)]
+                        [static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
 }
 
 Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
@@ -24,7 +30,7 @@ Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const
 }
 
 Tensor Type::copy(const Tensor & src, bool non_blocking) const {
-  AT_ASSERT(src.defined(), "attempt to copy an undefined tensor");
+  AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   if (is_sparse()) {
     auto indices = src._indices();
     auto values = src._values();
@@ -32,7 +38,7 @@ Tensor Type::copy(const Tensor & src, bool non_blocking) const {
     auto & this_dense_idx = this_dense.toScalarType(ScalarType::Long);
     auto indices_copy = this_dense_idx.copy(indices, non_blocking);
     auto values_copy = this_dense.copy(values, non_blocking);
-    return sparse_coo_tensor(indices_copy, values_copy, src.sizes());
+    return _sparse_coo_tensor_unsafe(indices_copy, values_copy, src.sizes());
   } else {
     Tensor r = this->tensor(src.sizes());
     r.copy_(src, non_blocking);

@@ -70,8 +70,7 @@ OPERATOR_SCHEMA(Dropout)
       vector<TensorShape> out;
       ArgumentHelper argsHelper(def);
       out.push_back(in[0]);
-      auto output_mask = !argsHelper.GetSingleArgument<bool>("is_test", 0);
-      if (output_mask) {
+      if (def.output().size() == 2) {
         out.push_back(in[0]);
         out[1].set_data_type(TensorProto_DataType_BOOL);
       }

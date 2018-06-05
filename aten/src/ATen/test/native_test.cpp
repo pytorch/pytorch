@@ -143,31 +143,21 @@ void test(Type & T, Type & AccT) {
 
   // _standard_gamma_grad
   SECTION( "_standard_gamma_grad" ) {
-    if (!T.is_cuda()) {
-      // check empty
-      auto empty = ones(T, {0});
-      REQUIRE_EQUAL(empty, empty._standard_gamma_grad(empty));
+    // check empty
+    auto empty = ones(T, {0});
+    REQUIRE_EQUAL(empty, empty._standard_gamma_grad(empty));
 
-      // check scalar equals one element
-      auto one_scalar = ones(T, {}).mul(5);
-      auto one_with_dim = ones(T, {1}).mul(5);
-      REQUIRE_ALLCLOSE(one_scalar._standard_gamma_grad(one_scalar),
-                      one_with_dim._standard_gamma_grad(one_with_dim).sum());
+    // check scalar equals one element
+    auto one_scalar = ones(T, {}).mul(5);
+    auto one_with_dim = ones(T, {1}).mul(5);
+    REQUIRE_ALLCLOSE(one_scalar._standard_gamma_grad(one_scalar),
+		     one_with_dim._standard_gamma_grad(one_with_dim).sum());
 
-      // check mixing types
-      Type & DT = CPU(kDouble);
-      auto t1 = randn(T, {3, 4});
-      auto t2 = randn(DT, {3, 4});
-      REQUIRE_THROWS_WITH(t1._standard_gamma_grad(t2), Catch::StartsWith("expected scalar type"));
-    } else {
-      auto ct1 = randn(T, {3, 4});
-      auto ct2 = randn(T, {3, 4});
-      auto t1 = randn(T.toBackend(Backend::CPU), {3, 4});
-      REQUIRE_THROWS_WITH(ct1._standard_gamma_grad(ct2), "not implemented");
-      REQUIRE_THROWS_WITH(ct1._standard_gamma_grad(t1), "not implemented");
-      REQUIRE_THROWS_WITH(t1._standard_gamma_grad(ct2), "CUDA Backend");
-    }
-	}
+    // check mixing types
+    auto t1 = randn(T, {3, 4});
+    auto t2 = randn(T, {3, 4}).toType(kDouble);
+    REQUIRE_THROWS_WITH(t1._standard_gamma_grad(t2), Catch::StartsWith("expected scalar type"));
+  }
 
   SECTION( "where" ) {
     // empty
@@ -189,13 +179,13 @@ void test(Type & T, Type & AccT) {
 }
 
 TEST_CASE( "native test CPU", "[cpu]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   test(CPU(kFloat), CPU(kDouble));
 }
 
 TEST_CASE( "native test CUDA", "[cuda]" ) {
-  manual_seed(123);
+  manual_seed(123, at::Backend::CUDA);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat), CUDA(kDouble));

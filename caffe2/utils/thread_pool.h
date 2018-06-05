@@ -69,6 +69,13 @@ class TaskThreadPool {
     return threads_.size();
   }
 
+  /**
+   * The number of available (i.e. idle) threads in this thread pool.
+   */
+  size_t num_available() const {
+    return available_;
+  }
+
   /// @brief Add task to the thread pool if a thread is currently available.
   template <typename Task>
   void runTask(Task task) {

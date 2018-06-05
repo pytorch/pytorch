@@ -15,13 +15,14 @@
 
 namespace at {
 namespace vec256 {
+namespace {
 
 template <typename T>
 std::ostream& operator<<(std::ostream& stream, const Vec256<T>& vec) {
-  T buf[Vec256<T>::size()];
+  T buf[Vec256<T>::size];
   vec.store(buf);
   stream << "vec[";
-  for (int i = 0; i != vec.size(); i++) {
+  for (int i = 0; i != Vec256<T>::size; i++) {
     if (i != 0) {
       stream << ", ";
     }
@@ -31,5 +32,4 @@ std::ostream& operator<<(std::ostream& stream, const Vec256<T>& vec) {
   return stream;
 }
 
-}
-}
+}}}

@@ -51,8 +51,28 @@ class ReservoirSamplingOp final : public Operator<Context> {
     auto* pos_to_object =
         OutputSize() > POS_TO_OBJECT ? Output(POS_TO_OBJECT) : nullptr;
     if (pos_to_object) {
+      if (!output_initialized) {
+        // Cleaning up in case the reservoir got reset.
+        pos_to_object->Resize(0);
+      }
       pos_to_object->Reserve(std::vector<TIndex>{numToCollect_}, &context_);
     }
+
+    auto* object_to_pos_map = OutputSize() > OBJECT_TO_POS_MAP
+        ? OperatorBase::Output<MapType64To32>(OBJECT_TO_POS_MAP)
+        : nullptr;
+
+    if (object_to_pos_map && !output_initialized) {
+      object_to_pos_map->clear();
+    }
+
+    auto* num_visited_tensor = Output(NUM_VISITED);
+    CAFFE_ENFORCE_EQ(1, num_visited_tensor->size());
+    auto* num_visited = num_visited_tensor->template mutable_data<int64_t>();
+    if (!output_initialized) {
+      *num_visited = 0;
+    }
+    CAFFE_ENFORCE_GE(*num_visited, 0);
 
     if (num_entries == 0) {
       if (!output_initialized) {
@@ -93,19 +113,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
     auto block_bytesize = block_size * input.itemsize();
     const auto* input_data = static_cast<const char*>(input.raw_data());
 
-    auto* num_visited_tensor = Output(NUM_VISITED);
-    CAFFE_ENFORCE_EQ(1, num_visited_tensor->size());
-    auto* num_visited = num_visited_tensor->template mutable_data<int64_t>();
-    if (!output_initialized) {
-      *num_visited = 0;
-    }
-    CAFFE_ENFORCE_GE(*num_visited, 0);
-
     const auto start_num_visited = *num_visited;
-
-    auto* object_to_pos_map = OutputSize() > OBJECT_TO_POS_MAP
-        ? OperatorBase::Output<MapType64To32>(OBJECT_TO_POS_MAP)
-        : nullptr;
 
     std::set<int64_t> eligible_object_ids;
     if (object_to_pos_map) {

@@ -18,6 +18,7 @@ class TestCase(unittest.TestCase):
     def assertSameOutputs(self, outputs1, outputs2, decimal=7):
         self.assertEqual(len(outputs1), len(outputs2))
         for o1, o2 in zip(outputs1, outputs2):
+            self.assertEqual(o1.dtype, o2.dtype)
             np.testing.assert_almost_equal(o1, o2, decimal=decimal)
 
     def add_test_case(name, test_func):

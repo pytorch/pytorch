@@ -24,15 +24,33 @@ import caffe2.python.onnx.backend as c2
 import numpy as np
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 
-from caffe2.python.onnx.helper import dummy_name
 from caffe2.python.onnx.tests.test_utils import TestCase
+
+import caffe2.python._import_c_extension as C
 
 
 class TestCaffe2Basic(TestCase):
     def test_dummy_name(self):
-        n1 = dummy_name()
-        n2 = dummy_name()
+        g = C.DummyName()
+        n1 = g.new_dummy_name()
+        n2 = g.new_dummy_name()
         assert n1 != n2, "Got same names in different calls: {}".format(n1)
+
+    def test_check_arguments(self):
+        X = np.random.randn(3, 2).astype(np.float32)
+        Y = np.random.randn(3, 2).astype(np.float32)
+        Z = np.zeros((3, 2)).astype(np.float32)
+
+        b2 = C.Caffe2Backend()
+
+        node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], broadcast = 0)
+        output = b2.convert_node(node_def.SerializeToString(), 6)
+
+        bad_node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], foo = 42, bar = 56)
+        with self.assertRaisesRegexp(
+            RuntimeError,
+            ".*?Don't know how to map unexpected argument (foo|bar) \(from operator .*?\).*$"):
+            output = b2.convert_node(bad_node_def.SerializeToString(), 6)
 
     def test_relu_graph(self):
         X = np.random.randn(3, 2).astype(np.float32)
@@ -59,7 +77,7 @@ class TestCaffe2Basic(TestCase):
         weight = np.array([[1, 0], [0, 1]])
         graph_def = make_graph(
             [make_node("Add", ["X", "Y"], ["Z0"]),
-             make_node("Cast", ["Z0"], ["Z"], to="float"),
+             make_node("Cast", ["Z0"], ["Z"], to=onnx.TensorProto.FLOAT),
              make_node("Mul", ["Z", "weight"], ["W0"]),
              make_node("Tanh", ["W0"], ["W1"]),
              make_node("Sigmoid", ["W1"], ["W2"]),
@@ -188,6 +206,42 @@ class TestCaffe2Basic(TestCase):
             np.testing.assert_almost_equal(output[0], vals)
             np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
 
+    def test_tensor_filling_ops_c_backend(self):
+        for dtype in [
+                onnx.TensorProto.FLOAT,
+                onnx.TensorProto.DOUBLE,
+                onnx.TensorProto.BOOL,
+                onnx.TensorProto.INT8,
+                onnx.TensorProto.INT16,
+                onnx.TensorProto.INT32,
+                onnx.TensorProto.INT64,
+                onnx.TensorProto.UINT8,
+                onnx.TensorProto.UINT16,
+                onnx.TensorProto.UINT32,
+        ]:
+            shape = (1, 2, 3)
+            vals = np.random.randn(*shape)
+            if dtype != onnx.TensorProto.BOOL:
+                vals *= 5
+            vals = vals.astype(
+                mapping.TENSOR_TYPE_TO_NP_TYPE[dtype])
+            tensor = make_tensor(
+                name='test-tensor-{}'.format(dtype),
+                data_type=dtype,
+                dims=[1, 2, 3],
+                vals=vals.flatten().tolist(),
+            )
+            b = C.Caffe2Backend()
+            op = caffe2_pb2.OperatorDef()
+            op.ParseFromString(b._build_tensor_filling_op(tensor.SerializeToString(), ''))
+            self.assertEqual(len(op.input), 0)
+            self.assertEqual(op.output, [tensor.name])
+            ws, output = c2_native_run_op(op, inputs=[])
+            self.assertEqual(len(output), 1)
+            np.testing.assert_almost_equal(output[0], vals)
+            np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
+
+
     def test_slice(self):
         X = np.random.randn(1, 2, 3).astype(np.float32)
         starts = np.array([0, 1, 0], dtype=np.int32)
@@ -206,7 +260,7 @@ class TestCaffe2Basic(TestCase):
                 ends=ends,
             ),
         ])
-        ws, (Y,) = c2_native_run_net(
+        ws, c2_outputs = c2_native_run_net(
             init_net=None,
             predict_net=predict_net,
             inputs=[X])
@@ -216,13 +270,43 @@ class TestCaffe2Basic(TestCase):
             value_info={
                 'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape)
             })
-        Y, = c2.run_model(onnx_model, inputs=[X])
-        np.testing.assert_almost_equal(Y, X[:, 1:2, :])
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
+
+    def test_cast(self):
+        X = np.random.randn(1, 2, 3).astype(np.float32)
+
+        for to_type in ['INT8', caffe2_pb2.TensorProto.INT8,
+                        'DOUBLE', caffe2_pb2.TensorProto.DOUBLE]:
+            predict_net = caffe2_pb2.NetDef()
+            predict_net.name = 'test-cast-net'
+            predict_net.external_input[:] = ['X']
+            predict_net.external_output[:] = ['Y']
+            predict_net.op.extend([
+                core.CreateOperator(
+                    'Cast',
+                    inputs=['X'],
+                    outputs=['Y'],
+                    to=to_type,
+                ),
+            ])
+            ws, c2_outputs = c2_native_run_net(
+                init_net=None,
+                predict_net=predict_net,
+                inputs=[X])
+
+            onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+                predict_net=predict_net,
+                value_info={
+                    'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape)
+                })
+            onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+            self.assertSameOutputs(c2_outputs, onnx_outputs)
 
 
 class TestCaffe2End2End(TestCase):
     def _model_dir(self, model):
-        caffe2_home = os.path.expanduser(os.getenv('ONNX_HOME', '~/.caffe2'))
+        caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
         models_dir = os.getenv('ONNX_MODELS', os.path.join(caffe2_home, 'models'))
         return os.path.join(models_dir, model)
 
@@ -306,7 +390,6 @@ class TestCaffe2End2End(TestCase):
     def test_inception_v2(self):
         self._test_net('inception_v2')
 
-    @unittest.skip('Need to add support for ConstantFill operator')
     def test_squeezenet(self):
         self._test_net('squeezenet')
 

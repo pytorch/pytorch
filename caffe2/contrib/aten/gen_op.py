@@ -28,11 +28,14 @@ parser.add_argument("--yaml_dir", default="aten/src/ATen/ATen",
 parser.add_argument("--output_prefix", default="", help="")
 parser.add_argument(
     "--install_dir", default=".", help="where to put generated file")
-parser.add_argument("--third_party_root", default="", help="caffe2 third_party")
+parser.add_argument("--aten_root", default="", help="root directory of aten")
 args, _ = parser.parse_known_args()
 
-if args.third_party_root:
-    sys.path.append(os.path.join(args.third_party_root, "aten/src/ATen"))
+if args.aten_root:
+    if not os.path.exists(args.aten_root):
+        raise ValueError('aten_root ({}) does not exist'.format(
+            args.aten_root))
+    sys.path.append(os.path.join(args.aten_root, 'src', 'ATen'))
     from code_template import CodeTemplate as CT
 else:
     from src.ATen.code_template import CodeTemplate as CT

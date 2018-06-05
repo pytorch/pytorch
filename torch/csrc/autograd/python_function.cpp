@@ -1,6 +1,6 @@
 #include "torch/csrc/autograd/python_function.h"
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <structmember.h>
 #include <unordered_map>
 #include <unordered_set>
@@ -16,6 +16,7 @@
 #include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
@@ -395,7 +396,7 @@ static void _wrap_outputs(THPFunction *self,
       }
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
-      var.reset_grad();
+      var.grad().reset();
       var.clear_hooks();
       if (auto grad_acc_fn = var.try_get_grad_accumulator()) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
@@ -407,7 +408,7 @@ static void _wrap_outputs(THPFunction *self,
     } else if (is_input) {
       // An input has been returned, but it wasn't modified. Return it as a view
       // so that we can attach a new grad_fn to the Variable.
-      var = var.slice();
+      var = var.view_as(var);
       var.set_gradient_edge({cdata, output_nr});
     } else if (cdata) {
       var.set_gradient_edge({cdata, output_nr});
@@ -603,18 +604,6 @@ static void _trace_post_record(
   auto state_lock = trace_info.state->lock();
   trace_info.n->i_(attr::inplace, is_inplace);
 
-  // See definition in function.cpp.
-  THPObjectPtr passes_py_bool {PyObject_GetAttrString(op_obj, "is_traceable")};
-  if (!passes_py_bool) throw python_error();
-  bool passes_state_transparently = passes_py_bool == Py_True;
-  // NB: this path is executed only for forward of Python functions, so there's no need to check
-  // tracing_state->in_eval_subgraph (it's always false, because they are never part of backward
-  // subgraphs AND we don't even materialize the forward function).
-  if (!passes_state_transparently) {
-    // TODO: sgross and ezyang don't know if this is right
-    tracer::nontraceableBackwardSubgraph(input_vars, output_vars);
-    Function::set_up_context_edge(trace_info.n, input_vars, output_vars);
-  }
 }
 
 PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const UnpackedInput& unpacked,

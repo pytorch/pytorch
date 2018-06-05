@@ -1,6 +1,7 @@
 #pragma once
 
 #include "caffe2/core/common.h"
+#include "caffe2/onnx/helper.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "onnx/onnx_pb.h"
 
@@ -17,9 +18,16 @@ using ::ONNX_NAMESPACE::GraphProto;
 using ::ONNX_NAMESPACE::ModelProto;
 using ::ONNX_NAMESPACE::NodeProto;
 using ::ONNX_NAMESPACE::TensorProto;
+} // namespace
+
 using ConvertedResult =
     std::pair<std::vector<NodeProto>, std::vector<TensorProto>>;
-} // namespace
+
+// Rewrite Caffe2 nets into SSA forms. Notice that we will preserve the external
+// output names for predict net.
+std::unordered_map<std::string, std::string> SsaRewrite(
+    caffe2::NetDef* init_net,
+    caffe2::NetDef* pred_net);
 
 class OnnxExporter {
   using SpecialOpConverter = ConvertedResult (OnnxExporter::*)(
@@ -27,12 +35,26 @@ class OnnxExporter {
       const std::unordered_map<std::string, caffe2::TensorShape>&);
 
  public:
+  OnnxExporter(DummyName* dummy = nullptr, bool legacy_mode = false)
+      : legacy_mode_(legacy_mode) {
+    if (dummy) {
+      dummy_ = std::shared_ptr<DummyName>(dummy, [](DummyName*) {});
+    } else {
+      dummy_ = std::make_shared<DummyName>();
+    }
+  }
+
   ConvertedResult Caffe2OpToOnnxNodes(
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 
+  void InitOpToTensorProto(const caffe2::OperatorDef& def, TensorProto* tensor);
  private:
   ConvertedResult CommonCaffe2OpToOnnxNodes(const caffe2::OperatorDef& def);
+
+  ConvertedResult CreateCastNodes(
+      const caffe2::OperatorDef& def,
+      const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 
   ConvertedResult CreateConvPoolNodes(
       const caffe2::OperatorDef& def,
@@ -81,6 +103,12 @@ class OnnxExporter {
       get_per_op_renamed_attrs() const;
   const std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>&
   get_special_operators() const;
+
+  // To generate onnx models with opset < 6
+  bool legacy_mode_{false};
+
+  // Dummy name generator
+  std::shared_ptr<DummyName> dummy_;
 };
 } // namespace onnx
 } // namespace caffe2

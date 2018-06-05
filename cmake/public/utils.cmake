@@ -1,5 +1,14 @@
+##############################################################################
+# Macro to update cached options.
+macro (caffe2_update_option variable value)
+  get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
+  set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+endmacro()
+
+
+##############################################################################
+# Add an interface library definition that is dependent on the source.
 macro(caffe2_interface_library SRC DST)
-  # Add an interface library definition that is dependent on the source.
   add_library(${DST} INTERFACE)
   add_dependencies(${DST} ${SRC})
   # Depending on the nature of the source library as well as the compiler,
@@ -18,9 +27,8 @@ macro(caffe2_interface_library SRC DST)
           ${DST} INTERFACE -WHOLEARCHIVE:$<TARGET_FILE:${SRC}>)
     else()
       # Assume everything else is like gcc
-      target_link_libraries(
-          ${DST} INTERFACE
-          "-Wl,--whole-archive $<TARGET_FILE:${SRC}> -Wl,--no-whole-archive")
+      target_link_libraries(${DST} INTERFACE
+          "-Wl,--whole-archive,$<TARGET_FILE:${SRC}> -Wl,--no-whole-archive")
     endif()
     # Link all interface link libraries of the src target as well.
     # For static library, we need to explicitly depend on all the libraries
@@ -43,8 +51,8 @@ macro(caffe2_interface_library SRC DST)
         $<TARGET_PROPERTY:${SRC},LINK_LIBRARIES>)
   elseif(${__src_target_type} STREQUAL "SHARED_LIBRARY")
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
-      target_link_libraries(
-          ${DST} INTERFACE -Wl,--no-as-needed ${SRC} -Wl,--as-needed)
+      target_link_libraries(${DST} INTERFACE
+          "-Wl,--no-as-needed,$<TARGET_FILE:${SRC}> -Wl,--as-needed")
     else()
       target_link_libraries(${DST} INTERFACE ${SRC})
     endif()
@@ -95,4 +103,69 @@ function(caffe2_binary_target target_name_or_src)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
   install(TARGETS ${__target} DESTINATION bin)
+endfunction()
+
+
+##############################################################################
+# Multiplex between loading executables for CUDA versus HIP (AMD Software Stack).
+# Usage:
+#   torch_cuda_based_add_executable(cuda_target)
+#
+macro(torch_cuda_based_add_executable cuda_target)
+  IF (USE_ROCM)
+    hip_add_executable(${cuda_target} ${ARGN})
+  ELSEIF(USE_CUDA)
+    cuda_add_executable(${cuda_target} ${ARGN})
+  ELSE()
+
+  ENDIF()
+endmacro()
+
+
+##############################################################################
+# Multiplex between adding libraries for CUDA versus HIP (AMD Software Stack).
+# Usage:
+#   torch_cuda_based_add_library(cuda_target)
+#
+macro(torch_cuda_based_add_library cuda_target)
+  IF (USE_ROCM)
+    hip_add_library(${cuda_target} ${ARGN})
+  ELSEIF(USE_CUDA)
+    cuda_add_library(${cuda_target} ${ARGN})
+  ELSE()
+  ENDIF()
+endmacro()
+
+
+##############################################################################
+# Add ATen compile options.
+# Usage:
+#   aten_compile_options(lib_name)
+function(aten_compile_options libname)
+  target_compile_options(${libname}
+    PRIVATE
+    -Wall
+    -Wextra
+    -fexceptions
+    -Wno-missing-field-initializers
+    -Wno-type-limits
+    -Wno-unused-parameter
+    -Wno-unknown-warning-option
+    -Wno-unknown-pragmas)
+  if ($ENV{WERROR})
+    target_compile_options(${libname} PRIVATE -Werror)
+  endif()
+endfunction()
+
+
+##############################################################################
+# Set ATen target properties.
+# Usage:
+#   aten_set_target_props(lib_name)
+function(aten_set_target_props libname)
+  if(MSVC AND AT_MKL_MT)
+    set_target_properties(${libname} PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
+  endif()
 endfunction()

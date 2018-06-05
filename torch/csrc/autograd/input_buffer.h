@@ -3,7 +3,7 @@
 // The InputBuffer class accumulates a list of Variables for use by a
 // function. It implements logic to avoid modifying the passed
 // values in-place (adding an input twice will accumulate the result).
-// This behaviour needed and used only in backward graphs.
+// This behaviour is needed and used only in backward graphs.
 
 #include <vector>
 #include <utility>
@@ -26,7 +26,7 @@ struct InputBuffer {
 
   int device() const;
 
-  Variable operator[](std::size_t pos) { return buffer[pos]; }
+  Variable operator[](size_t pos) { return buffer[pos]; }
 
   // Returns the inputs as a list of variables. Destroys given InputBuffer.
   static std::vector<Variable> variables(InputBuffer&& buffer);

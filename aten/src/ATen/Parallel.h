@@ -3,6 +3,12 @@
 #include <tbb/tbb.h>
 #include <cstddef>
 
+#ifdef __PPC64__
+using default_partitioner_type = tbb::simple_partitioner;
+#else
+using default_partitioner_type = tbb::affinity_partitioner;
+#endif
+
 namespace at {
 namespace internal {
 // This needs to be called before the first use of any algorithm such as
@@ -15,7 +21,7 @@ namespace internal {
 // for a certain number of workers. If there are multiple threads making
 // a request at the size of the maximum number of threads, they will
 // be allocated a number proportional to the other requests.
-void init_tbb_num_threads();
+AT_API void init_tbb_num_threads();
 // This parameter is heuristically chosen to determine the minimum number of
 // work that warrants paralellism. For example, when summing an array, it is
 // deemed inefficient to parallelise over arrays shorter than 32768. Further,
@@ -34,7 +40,8 @@ T parallel_reduce(
   internal::init_tbb_num_threads();
 
   T result_;
-  static tbb::affinity_partitioner ap;
+  static default_partitioner_type ap;
+
   if (end - start < internal::TBB_GRAIN_SIZE) {
     result_ = f(data, start, end, init_);
   } else {
@@ -60,7 +67,7 @@ void parallel_reduce_2d(
     T* outarr_) {
   internal::init_tbb_num_threads();
 
-  static tbb::affinity_partitioner ap;
+  static default_partitioner_type ap;
 
   size_t max_i_ =
       (numel && num_rows && num_cols) ? numel / (num_rows * num_cols) : 0;

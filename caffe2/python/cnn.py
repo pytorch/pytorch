@@ -161,6 +161,9 @@ class CNNModelHelper(ModelHelper):
     def SpatialBN(self, *args, **kwargs):
         return brew.spatial_bn(self, *args, order=self.order, **kwargs)
 
+    def SpatialGN(self, *args, **kwargs):
+        return brew.spatial_gn(self, *args, order=self.order, **kwargs)
+
     def InstanceNorm(self, *args, **kwargs):
         return brew.instance_norm(self, *args, order=self.order, **kwargs)
 

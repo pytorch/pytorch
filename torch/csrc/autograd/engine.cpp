@@ -38,6 +38,11 @@ static constexpr int NO_DEVICE = -2;
 // handling reentrant backwards calls; see Note [Reentrant backwards]
 static thread_local int worker_device = NO_DEVICE;
 
+// This variable is true if ALL invocations in the stack of re-entrant engine
+// invocations are imperative backwards. This special variable is needed for the
+// gradient checkpointing feature only.
+static thread_local bool checkpoint_valid = true;
+
 // XXX: Changes to the way multithreading works in execute should be done with
 // great care. Right now the implementation guarantees that a single function's
 // apply will never be entered concurrently (even if multiple graphs are
@@ -59,6 +64,7 @@ struct FunctionTask {
     , inputs(std::move(inputs)) {}
 };
 
+// Returns true when t2 should be (weakly) BEFORE t1 in the queue.
 struct CompareFunctionTaskTime {
   bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
     return t1.fn->sequence_nr() < t2.fn->sequence_nr();
@@ -146,6 +152,7 @@ struct GraphTask {
   // run in a "default" mode, which means that all next_edges we encounter should
   // get executed. If it's not empty, only functions that have an entry and this entry
   // has needed == True should be executed.
+  // exec_info.empty() means it's .backward(), otherwise it's .grad().
   std::unordered_map<Function*, ExecInfo> exec_info;
   std::vector<Variable> captured_vars;
 
@@ -154,6 +161,10 @@ struct GraphTask {
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
   int owner;
+
+  bool can_checkpoint() {
+    return exec_info.empty();
+  }
 
   GraphTask(bool keep_graph, bool grad_mode)
     : exception()
@@ -278,6 +289,8 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, variab
 }
 
 static variable_list call_function(FunctionTask& task) {
+  bool prev_checkpoint_valid_state = checkpoint_valid;
+  checkpoint_valid = task.base->can_checkpoint() && prev_checkpoint_valid_state;
   auto& fn = *task.fn;
   auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
 
@@ -285,7 +298,7 @@ static variable_list call_function(FunctionTask& task) {
     fn.will_release_variables();
   }
   auto outputs = fn(inputs);
-
+  checkpoint_valid = prev_checkpoint_valid_state;
   return call_post_hooks(fn, std::move(outputs), std::move(inputs));
 }
 
@@ -455,7 +468,7 @@ auto Engine::execute(const edge_list& input_roots,
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock);
-  for (std::size_t i = 0; i < final_callbacks.size(); ++i) {
+  for (size_t i = 0; i < final_callbacks.size(); ++i) {
     cb_lock.unlock();
     final_callbacks[i]();
     cb_lock.lock();
@@ -464,16 +477,32 @@ auto Engine::execute(const edge_list& input_roots,
   return graph_task.captured_vars;
 }
 
-#ifdef NO_PYTHON
-Engine& Engine::getDefaultEngine() {
+// note that when python is present, this base engine will be overriden
+// with a PythonEngine. Because this typically happens before get_default_engine
+// is called, this base engine will never be created.
+static Engine& get_base_engine() {
   static Engine engine;
   return engine;
 }
-#endif
+
+std::atomic<EngineStub> engine_stub(get_base_engine);
+
+void set_default_engine_stub(EngineStub stub) {
+  engine_stub.store(stub);
+}
+
+
+Engine& Engine::get_default_engine() {
+  return engine_stub.load()();
+}
 
 void Engine::queue_callback(std::function<void()> callback) {
   std::lock_guard<std::mutex> lock(post_callbacks_lock);
   final_callbacks.emplace_back(std::move(callback));
+}
+
+bool Engine::is_checkpoint_valid() {
+  return checkpoint_valid;
 }
 
 auto Engine::ready_queue(int device) -> ReadyQueue& {
@@ -523,7 +552,7 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
   struct Frame {
     Frame (Function *fn) : fn(fn), next_next_fn(0) {}
     Function *fn;
-    std::size_t next_next_fn;
+    size_t next_next_fn;
 
     Function* get_next_fn() {
       const auto & next = fn->next_edges();
@@ -563,6 +592,5 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
     }
   }
 }
-
 
 }} // namespace torch::autograd

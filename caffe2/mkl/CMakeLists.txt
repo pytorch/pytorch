@@ -1,4 +1,4 @@
-if(BLAS STREQUAL "MKL")
+if(USE_MKL AND USE_MKLML)
   message(STATUS "Including MKL operators")
 
   # ---[ CPU files.

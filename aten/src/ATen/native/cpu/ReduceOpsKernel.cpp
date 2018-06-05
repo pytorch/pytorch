@@ -1,14 +1,15 @@
 #include "ATen/native/cpu/ReduceOpsKernel.h"
 
 #include <numeric>
+#include <iterator>
+#include <algorithm>
 
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
 #include "ATen/optional.h"
 #include "ATen/cpu/vec256/vec256.h"
 
-namespace at {
-namespace native {
+namespace at { namespace native { namespace {
 
 using namespace vec256;
 
@@ -27,7 +28,7 @@ static void parallel_for(int64_t end, int64_t step, bool parallelize, F func) {
   }
 }
 
-static tbb::affinity_partitioner ap;
+static default_partitioner_type ap;
 
 // Vectorized reduction defined by reduce operation `Op` with identity `ident`.
 // The reduction is built on top of reduce128, which reduces down a column
@@ -55,6 +56,14 @@ struct Reduction {
 
     int64_t n = self.size(*dim);
     int64_t stride = self.stride(*dim);
+    // A contiguous tensor does not need to hold a meaningful stride
+    // if the corresponding size is 1
+    if (n == 1) {
+      stride = 1;
+      for (int64_t i = self.ndimension() - 1; i > *dim; i--) {
+        stride *= self.size(i);
+      }
+    }
     int64_t batch = numel / (n * stride);
     bool paralellize = batch * n > internal::TBB_GRAIN_SIZE;
     parallel_for(batch, 1, paralellize, [=](int64_t b) {
@@ -100,7 +109,7 @@ struct Reduction {
     static_assert(sizeof(acc) == 128, "accumulator should be 128 bytes");
     for (int64_t row = 0; row != rows; row++) {
       for (int j = 0; j != 4; j++) {
-        auto val = Vec::s_load(&data[row * stride + j * Vec::size]);
+        auto val = Vec::loadu(&data[row * stride + j * Vec::size]);
         acc[j] = Reduce()(acc[j], val);
       }
     }
@@ -118,10 +127,14 @@ struct Reduction {
     });
 
     if (cols_rounded != cols) {
+#if !defined(__APPLE__)
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
       scalar_t buf[WIDTH];
-      for (int64_t j = 0; j != cols - cols_rounded; j++) {
-        buf[j] = ident;
-      }
+
+      // Initializes the entire (tiny) array to avoid uninitialized warnings
+      std::fill(std::begin(buf), std::end(buf), ident);
+
       for (int64_t row = 0; row != rows; row++) {
         for (int64_t j = 0; j != cols - cols_rounded; j++) {
           auto val = data[row * stride + j + cols_rounded];
@@ -147,8 +160,9 @@ static void prod_kernel_impl(Tensor& result, const Tensor& self, at::optional<in
   });
 }
 
+}  // anonymous namespace
+
 REGISTER_DISPATCH(sum_kernel, &sum_kernel_impl);
 REGISTER_DISPATCH(prod_kernel, &prod_kernel_impl);
 
-}
-}
+}}  // namespace at::native

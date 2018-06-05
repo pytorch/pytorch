@@ -18,6 +18,15 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
     const std::shared_ptr<Graph>& graph,
     const std::vector<at::Tensor>& initializers,
     int64_t onnx_opset_version,
-    bool defer_weight_export = false);
+    bool defer_weight_export = false,
+    bool export_raw_ir = false);
+
+// For testing purposes
+std::string PrettyPrintExportedGraph(
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<at::Tensor> & initializers,
+    int64_t onnx_opset_version,
+    bool defer_weight_export,
+    bool export_raw_ir);
 
 }}

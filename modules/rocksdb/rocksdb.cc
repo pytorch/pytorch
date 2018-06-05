@@ -16,6 +16,7 @@
 
 #include "caffe2/core/db.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/module.h"
 #include "caffe2/core/flags.h"
 #include "rocksdb/db.h"
 #include "rocksdb/utilities/leveldb_options.h"

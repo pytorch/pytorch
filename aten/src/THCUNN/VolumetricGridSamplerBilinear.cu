@@ -56,9 +56,9 @@ __global__ void VolumetricGridSamplerBilinear_updateOutput_kernel(
     Dtype iz = grid[n][d][h][w][2];
 
     // normalize ix, iy, iz from [-1, 1] to [0, IW-1] & [0, IH-1] & [0, ID-1]
-    ix = ScalarConvert<float,Dtype>::to(((ix + 1) / 2) * (IW-1));
-    iy = ScalarConvert<float,Dtype>::to(((iy + 1) / 2) * (IH-1));
-    iz = ScalarConvert<float,Dtype>::to(((iz + 1) / 2) * (ID-1));
+    ix = ScalarConvert<float,Dtype>::to(((ix + 1.f) / 2) * (IW-1));
+    iy = ScalarConvert<float,Dtype>::to(((iy + 1.f) / 2) * (IH-1));
+    iz = ScalarConvert<float,Dtype>::to(((iz + 1.f) / 2) * (ID-1));
 
     // get corner pixel values from (x, y, z)
     // for 4d, we used north-east-south-west
@@ -201,9 +201,9 @@ __global__ void VolumetricGridSamplerBilinear_updateGradInput_kernel(
     Dtype giz = ScalarConvert<int,Dtype>::to(0);
 
     // normalize ix, iy, iz from [-1, 1] to [0, IW-1] & [0, IH-1] & [0, ID-1]
-    ix = ScalarConvert<float,Dtype>::to(((ix + 1) / 2) * (IW-1));
-    iy = ScalarConvert<float,Dtype>::to(((iy + 1) / 2) * (IH-1));
-    iz = ScalarConvert<float,Dtype>::to(((iz + 1) / 2) * (ID-1));
+    ix = ScalarConvert<float,Dtype>::to(((ix + 1.f) / 2) * (IW-1));
+    iy = ScalarConvert<float,Dtype>::to(((iy + 1.f) / 2) * (IH-1));
+    iz = ScalarConvert<float,Dtype>::to(((iz + 1.f) / 2) * (ID-1));
 
     // get corner pixel values from (x, y, z)
     // for 4d, we used north-east-south-west

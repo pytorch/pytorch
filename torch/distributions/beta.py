@@ -13,10 +13,9 @@ class Beta(ExponentialFamily):
 
     Example::
 
-        >>> m = Beta(torch.Tensor([0.5]), torch.Tensor([0.5]))
+        >>> m = Beta(torch.tensor([0.5]), torch.tensor([0.5]))
         >>> m.sample()  # Beta distributed with concentration concentration1 and concentration0
-         0.1046
-        [torch.FloatTensor of size 1]
+        tensor([ 0.1046])
 
     Args:
         concentration1 (float or Tensor): 1st concentration parameter of the distribution
@@ -50,7 +49,7 @@ class Beta(ExponentialFamily):
     def rsample(self, sample_shape=()):
         value = self._dirichlet.rsample(sample_shape).select(-1, 0)
         if isinstance(value, Number):
-            value = self._dirichlet.concentration.new([value])
+            value = self._dirichlet.concentration.new_tensor(value)
         return value
 
     def log_prob(self, value):
@@ -66,7 +65,7 @@ class Beta(ExponentialFamily):
     def concentration1(self):
         result = self._dirichlet.concentration[..., 0]
         if isinstance(result, Number):
-            return torch.Tensor([result])
+            return torch.tensor([result])
         else:
             return result
 
@@ -74,7 +73,7 @@ class Beta(ExponentialFamily):
     def concentration0(self):
         result = self._dirichlet.concentration[..., 1]
         if isinstance(result, Number):
-            return torch.Tensor([result])
+            return torch.tensor([result])
         else:
             return result
 

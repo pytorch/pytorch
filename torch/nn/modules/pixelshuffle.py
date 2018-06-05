@@ -23,7 +23,7 @@ class PixelShuffle(Module):
     Examples::
 
         >>> ps = nn.PixelShuffle(3)
-        >>> input = torch.Tensor(1, 9, 4, 4)
+        >>> input = torch.tensor(1, 9, 4, 4)
         >>> output = ps(input)
         >>> print(output.size())
         torch.Size([1, 1, 12, 12])

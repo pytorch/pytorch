@@ -64,6 +64,41 @@ OPERATOR_SCHEMA(BatchPermutationGradient)
         "dX",
         "Gradient of forward input 0 (X).");
 
+template <>
+bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
+  const auto& X = Input(0);
+  const auto& indices = Input(1);
+  auto* Y = Output(0);
+
+  CAFFE_ENFORCE_EQ(indices.ndim(), 1, "indices must be 1-d");
+  CAFFE_ENFORCE_EQ(
+    X.dim32(0), indices.dim32(0),
+    "X.dim32(0) must be equal to indices.dim32(0)",
+    "(",
+    X.dim32(0),
+    " vs. ",
+    indices.dim32(0),
+    ")");
+
+  Y->ResizeLike(X);
+
+  const int N = X.dim32(0);
+  const int C = X.dim32(1);
+  const int H = X.dim32(2);
+  const int W = X.dim32(3);
+
+  const float *src = X.template data<float>();
+  float *dst = Y->template mutable_data<float>();
+
+  for (int i = 0; i < N; i++) {
+    int idx = indices.template data<int>()[i];
+
+    std::memcpy(dst + i * C * H * W, src + idx * C * H * W, sizeof(float) * C * H * W);
+  }
+
+  return true;
+}
+
 class GetBatchPermutationGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {

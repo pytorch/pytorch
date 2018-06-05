@@ -16,7 +16,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > inferExpandGeometry(cons
 inline void check_defined(std::initializer_list<std::reference_wrapper<const Tensor>> tensors, const char *api_name) {
   for (auto& t : tensors) {
     if (!t.get().defined()) {
-      AT_ERROR("%s(...) called with an undefined Tensor", api_name);
+      AT_ERROR(api_name, "(...) called with an undefined Tensor");
     }
   }
 }
@@ -26,7 +26,7 @@ inline std::tuple<Tensor> expand_inplace(const Tensor &tensor, const Tensor &to_
     return std::make_tuple(to_expand);
   }
 
-  return std::make_tuple(to_expand.expand(tensor.sizes()));
+  return std::make_tuple(to_expand.expand(tensor.sizes(), /*implicit=*/true)); // see [expand implicit]
 }
 
 inline std::tuple<Tensor> expand_inplace(const Tensor &tensor, const Tensor &to_expand, const char *api_name) {
@@ -39,7 +39,9 @@ inline std::tuple<Tensor, Tensor> expand_inplace(const Tensor &tensor, const Ten
     return std::make_tuple(to_expand1, to_expand2);
   }
 
-  return std::make_tuple(to_expand1.expand(tensor.sizes()), to_expand2.expand(tensor.sizes()));
+  return std::make_tuple(
+      to_expand1.expand(tensor.sizes(), /*implicit=*/true), // see [expand implicit]
+      to_expand2.expand(tensor.sizes(), /*implicit=*/true));
 }
 
 inline std::tuple<Tensor, Tensor> expand_inplace(const Tensor &tensor, const Tensor &to_expand1, const Tensor &to_expand2,
@@ -54,7 +56,9 @@ inline std::tuple<Tensor, Tensor> expand_outplace(const Tensor &to_expand1, cons
   }
 
   auto expanded_size = infer_size(to_expand1.sizes(), to_expand2.sizes());
-  return std::make_tuple(to_expand1.expand(expanded_size), to_expand2.expand(expanded_size));
+  return std::make_tuple(
+      to_expand1.expand(expanded_size, /*implicit=*/true), // see [expand implicit]
+      to_expand2.expand(expanded_size, /*implicit=*/true));
 }
 
 inline std::tuple<Tensor, Tensor> expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, const char *api_name) {
@@ -71,7 +75,10 @@ inline std::tuple<Tensor, Tensor, Tensor> expand_outplace(const Tensor &to_expan
 
   auto expanded_size12 = infer_size(to_expand1.sizes(), to_expand2.sizes());
   auto expanded_size = infer_size(expanded_size12, to_expand3.sizes());
-  return std::make_tuple(to_expand1.expand(expanded_size), to_expand2.expand(expanded_size), to_expand3.expand(expanded_size));
+  return std::make_tuple(
+      to_expand1.expand(expanded_size, /*implicit=*/true), // see [expand implicit]
+      to_expand2.expand(expanded_size, /*implicit=*/true),
+      to_expand3.expand(expanded_size, /*implicit=*/true));
 }
 
 inline std::tuple<Tensor, Tensor, Tensor> expand_outplace(const Tensor &to_expand1,
@@ -87,7 +94,7 @@ inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntList sizes) {
     return std::make_tuple(to_expand);
   }
 
-  return std::make_tuple(to_expand.expand(sizes));
+  return std::make_tuple(to_expand.expand(sizes, /*implicit=*/true)); // see [expand implicit]
 }
 
 inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntList sizes, const char *api_name) {
@@ -117,7 +124,7 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
     } else if (to_expand[i].sizes().equals(sizes)) {
       result[i] = to_expand[i];
     } else {
-      result[i] = to_expand[i].expand(sizes);
+      result[i] = to_expand[i].expand(sizes, /*implicit=*/true); // see [expand implicit]
     }
   }
   return result;

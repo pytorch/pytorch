@@ -40,6 +40,9 @@ void addGlobalMethods(pybind11::module& m);
 // Expose Workspace, Net, Blob
 void addObjectMethods(pybind11::module& m);
 
+// Get current workspace
+Workspace* GetCurrentWorkspace();
+
 class BlobFetcherBase {
  public:
   struct FetchedBlob {

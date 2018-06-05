@@ -2,6 +2,7 @@
 #define CAFFE2_CORE_COMMON_H_
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -146,6 +147,17 @@ private:                                                                       \
 #define CAFFE2_API CAFFE2_IMPORT
 #endif
 
+#ifdef CAFFE2_BUILD_OBSERVER_LIB
+#define CAFFE2_OBSERVER_API CAFFE2_EXPORT
+#else
+#define CAFFE2_OBSERVER_API CAFFE2_IMPORT
+#endif
+
+
+#if defined(_MSC_VER)
+#define NOMINMAX
+#endif
+
 // make_unique is a C++14 feature. If we don't have 14, we will emulate
 // its behavior. This is copied from folly/Memory.h
 #if __cplusplus >= 201402L ||                                              \
@@ -218,6 +230,12 @@ using std::stoi;
 using std::stod;
 #endif // defined(__ANDROID__) || defined(CAFFE2_FORCE_STD_STRING_FALLBACK_TEST)
 
+#if defined(__ANDROID__) && !defined(__NDK_MAJOR__)
+using ::round;
+#else
+using std::round;
+#endif // defined(__ANDROID__) && !defined(__NDK_MAJOR__)
+
 // dynamic cast reroute: if RTTI is disabled, go to reinterpret_cast
 template <typename Dst, typename Src>
 inline Dst dynamic_cast_if_rtti(Src ptr) {
@@ -262,11 +280,13 @@ class SkipIndices<> {
 // as the underlying boolean variable is going to be switched on when one
 // loads libcaffe2_gpu.so.
 bool HasCudaRuntime();
+bool HasHipRuntime();
 namespace internal {
 // Sets the Cuda Runtime flag that is used by HasCudaRuntime(). You should
 // never use this function - it is only used by the Caffe2 gpu code to notify
 // Caffe2 core that cuda runtime has been loaded.
 void SetCudaRuntimeFlag();
+void SetHipRuntimeFlag();
 }
 // Returns which setting Caffe2 was configured and built with (exported from
 // CMake)

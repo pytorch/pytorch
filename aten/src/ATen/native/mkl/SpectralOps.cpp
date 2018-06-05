@@ -22,6 +22,7 @@ Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
 #include "ATen/ATen.h"
 #include "ATen/Config.h"
 #include "ATen/Dispatch.h"
+#include "ATen/Utils.h"
 #include "ATen/NativeFunctions.h"
 
 #include <algorithm>
@@ -44,6 +45,7 @@ namespace at { namespace native {
 // conjugate symmetry. See native/SpectralUtils.h for more details.
 // The following structs are used to fill in the other half with symmetry in
 // case of real-to-complex transform with onesided=False flag.
+// See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
 
 template <typename scalar_t>
 static inline void _fft_fill_with_conjugate_symmetry_slice(Tensor& output,
@@ -165,9 +167,15 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
                 IntList output_sizes) {
   int64_t batch = self.size(0);
   Tensor input = self;
-  // real/imag dimension must be like complex type
-  if (complex_input && input.stride(-1) != 1) {
-    input = input.contiguous();
+  // real/imag dimension must aligned when viewed as of complex type
+  if (complex_input) {
+    bool need_contiguous = input.stride(-1) != 1;
+    for (int64_t i = 0; !need_contiguous && i <= signal_ndim; i++) {
+      need_contiguous |= input.stride(i) % 2 != 0;
+    }
+    if (need_contiguous) {
+      input = input.contiguous();
+    }
   }
 
   // check if we can use MKL because MKL_LONG is 32bit on some OS, e.g. Windows
@@ -230,9 +238,6 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   }
   // create descriptor with signal size
   std::vector<MKL_LONG> mkl_signal_sizes(checked_signal_sizes.begin(), checked_signal_sizes.end());
-  for (int64_t i = 0; i < signal_ndim; i++) {
-    mkl_signal_sizes[i] = checked_signal_sizes[i];
-  }
   DftiDescriptor descriptor;
   descriptor.init(prec, signal_type, signal_ndim, mkl_signal_sizes.data());
   // out of place FFT
@@ -263,7 +268,7 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   }
   // rescale if needed by normalized flag or inverse transform
   if (normalized || inverse) {
-    auto signal_numel = std::accumulate(checked_signal_sizes.begin(), checked_signal_sizes.end(), 1, std::multiplies<int64_t>());
+    auto signal_numel = at::prod_intlist(checked_signal_sizes);
     double double_scale;
     if (normalized) {
       double_scale = 1.0 / std::sqrt(static_cast<double>(signal_numel));

@@ -68,7 +68,7 @@ def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
     grad_input_padding = _grad_input_padding(grad_output, input_size, stride,
                                              padding, kernel_size)
 
-    return torch._C._VariableFunctions.conv_transpose1d(
+    return torch.conv_transpose1d(
         grad_output, weight, bias, stride, padding, grad_input_padding, groups,
         dilation)
 
@@ -111,9 +111,8 @@ def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
     input = input.contiguous().view(1, input.shape[0] * input.shape[1],
                                     input.shape[2])
 
-    grad_weight = torch._C._VariableFunctions.conv1d(input, grad_output, bias,
-                                                     dilation, padding, stride,
-                                                     in_channels * min_batch)
+    grad_weight = torch.conv1d(input, grad_output, bias, dilation, padding,
+                               stride, in_channels * min_batch)
 
     grad_weight = grad_weight.contiguous().view(
         min_batch, grad_weight.shape[1] // min_batch, grad_weight.shape[2])
@@ -160,7 +159,7 @@ def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
     grad_input_padding = _grad_input_padding(grad_output, input_size, stride,
                                              padding, kernel_size)
 
-    return torch._C._VariableFunctions.conv_transpose2d(
+    return torch.conv_transpose2d(
         grad_output, weight, bias, stride, padding, grad_input_padding, groups,
         dilation)
 
@@ -205,9 +204,8 @@ def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
     input = input.contiguous().view(1, input.shape[0] * input.shape[1],
                                     input.shape[2], input.shape[3])
 
-    grad_weight = torch._C._VariableFunctions.conv2d(input, grad_output, bias,
-                                                     dilation, padding, stride,
-                                                     in_channels * min_batch)
+    grad_weight = torch.conv2d(input, grad_output, bias, dilation, padding,
+                               stride, in_channels * min_batch)
 
     grad_weight = grad_weight.contiguous().view(
         min_batch, grad_weight.shape[1] // min_batch, grad_weight.shape[2],
@@ -256,7 +254,7 @@ def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
     grad_input_padding = _grad_input_padding(grad_output, input_size, stride,
                                              padding, kernel_size)
 
-    return torch._C._VariableFunctions.conv_transpose3d(
+    return torch.conv_transpose3d(
         grad_output, weight, bias, stride, padding, grad_input_padding, groups,
         dilation)
 
@@ -301,9 +299,8 @@ def conv3d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
                                     input.shape[2], input.shape[3],
                                     input.shape[4])
 
-    grad_weight = torch._C._VariableFunctions.conv3d(input, grad_output, bias,
-                                                     dilation, padding, stride,
-                                                     in_channels * min_batch)
+    grad_weight = torch.conv3d(input, grad_output, bias, dilation, padding,
+                               stride, in_channels * min_batch)
 
     grad_weight = grad_weight.contiguous().view(
         min_batch, grad_weight.shape[1] // min_batch, grad_weight.shape[2],

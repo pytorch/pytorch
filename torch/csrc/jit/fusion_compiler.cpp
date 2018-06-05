@@ -4,8 +4,11 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/variable_tensor_functions.h"
+
 #include "ATen/ATen.h"
 #ifdef WITH_CUDA
+#include "THC/THC.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
 #include <cuda.h>
@@ -162,7 +165,9 @@ std::string encodeRHS(Node * n) {
     {aten::abs, "absf(${0})"},
     {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
     {aten::log, "logf(${0})"},
+    {aten::log10, "log10f(${0})"},
     {aten::log1p, "log1pf(${0})"},
+    {aten::log2,  "log2f(${0})"},
     {aten::lgamma, "lgammaf(${0})"},
     {aten::exp, "expf(${0})"},
     {aten::expm1, "expm1f(${0})"},
@@ -343,7 +348,9 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
 // Note dims[0] - we need to dynamically allocate the dims.
 struct TensorInfo {
   void * data;
+#pragma GCC diagnostic ignored "-Wpedantic"
   uint32_t sizes_strides[0];
+#pragma GCC diagnostic pop
 
   uint32_t* sizes(size_t nDim) { return &sizes_strides[0]; }
   uint32_t* strides(size_t nDim) { return &sizes_strides[nDim]; }
@@ -437,9 +444,9 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
     arguments.push_back(ti);
   };
   arguments.push_back(&numel);
-  for (std::size_t i = 0; i < input_desc.size(); ++i)
+  for (size_t i = 0; i < input_desc.size(); ++i)
     addTensorInfo(input_desc[i], inputs[i]);
-  for (std::size_t i = 0; i < output_desc.size(); ++i) {
+  for (size_t i = 0; i < output_desc.size(); ++i) {
     auto & c = concat_desc[i];
     at::Tensor o = outputs[i];
     if(c.nSubtensors == 1) {
@@ -469,7 +476,7 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector
   outputs.clear();
   outputs.reserve(outputDescriptors().size());
   for(auto & od : outputDescriptors()) {
-    outputs.push_back(at::getType(backend(),od.scalar_type).tensor());
+    outputs.push_back(torch::getType(backend(),od.scalar_type).tensor());
   }
   launch_with_tensors(inputs, outputs);
 }
@@ -544,13 +551,19 @@ protected:
      // it is possible that this is the first cuda call on this thread
      // so make sure we initialize the Driver API's context
      // cudaFree(0) accomplishes this.
-     cudaFree(0);
-
+     CUcontext pctx = 0;
+     TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
+     if (!pctx) {
+        std::unique_lock<std::mutex> cudaFreeMutexLock(
+            *(THCCachingAllocator_getCudaFreeMutex()));
+        cudaFree(0);
+     }
+     CUstream stream = at::globalContext().getCurrentCUDAStream();
      TORCH_CU_CHECK(cuLaunchKernel(
        function,
        numBlocks, 1, 1,
        blockSize, 1, 1,
-       0, nullptr,
+       0, stream,
        arguments,
        nullptr));
   }
@@ -663,7 +676,7 @@ static void runCompiler(FusionCompilerConfig & config, const std::string & cpp_f
     config.openmp = false; // disable for future compiles
     return runCompiler(config, cpp_file, so_file);
   }
-  JIT_ASSERT(r == 0);
+  JIT_ASSERTM(r == 0, "Failed to compile a fused CPU kernel");
 }
 
 
@@ -690,11 +703,12 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     cpp_file.sync();
     runCompiler(config, cpp_file.name(), so_file.name());
     if(config.debug) {
-      std::cout << compilation_unit << "\n";
       disas(so_file.name());
     }
     so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
+#pragma GCC diagnostic ignored "-Wpedantic"
     kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name.c_str()));
+#pragma GCC diagnostic pop
   }
 protected:
   virtual at::Backend backend() const override {

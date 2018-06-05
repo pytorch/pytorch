@@ -24,7 +24,7 @@ from onnx import (defs, checker, helper, numpy_helper, mapping,
 from onnx.helper import make_tensor, make_tensor_value_info, make_attribute, make_model
 import numpy as np
 
-from caffe2.python.onnx.helper import c2_native_run_net, dummy_name
+from caffe2.python.onnx.helper import c2_native_run_net
 from caffe2.python.onnx.error import Unsupported
 
 import caffe2.python._import_c_extension as C
@@ -73,6 +73,13 @@ class Caffe2Frontend(object):
     }
 
     _special_operators = {}
+
+    # Dummy name generator
+    _dummy_name = C.DummyName()
+
+    @classmethod
+    def dummy_name(cls):
+        return cls._dummy_name.new_dummy_name()
 
     @classmethod
     def _common_caffe2_arg_to_onnx_attr(cls, op_def, arg):
@@ -130,7 +137,7 @@ class Caffe2Frontend(object):
     def caffe2_op_to_onnx_node(cls, op_def, shapes):
         if C.support_onnx_export(op_def.type):
             shape_list = list(shapes.values())
-            node_strs, tensor_strs = C.export_to_onnx(op_def.SerializeToString(), shapes)
+            node_strs, tensor_strs = C.export_to_onnx(cls._dummy_name, op_def.SerializeToString(), shapes)
             nodes = []
             for s in node_strs:
                 node = NodeProto()
@@ -230,8 +237,7 @@ class Caffe2Frontend(object):
                 shape=value_info[name][1])
             for name in predict_net.external_input)
 
-        dummy_name(cls._all_names_in_net(predict_net) |
-                   cls._all_names_in_net(init_net))
+        cls._dummy_name.reset(cls._all_names_in_net(predict_net) | cls._all_names_in_net(init_net))
 
         for op in predict_net.op:
             shapes = {}
@@ -259,41 +265,16 @@ class Caffe2Frontend(object):
             for name in predict_net.external_output
             if name in all_output)
 
-        checker.check_graph(graph_def)
         return graph_def
 
     @classmethod
     def caffe2_init_net_to_initializer(cls, init_net):
-        initializer = []
+        ws, _ = c2_native_run_net(init_net=None, predict_net=init_net, inputs=[])
+        output_names = []
         for op in init_net.op:
-            assert not op.input
-            try:
-                data_type, field_name = {
-                    'GivenTensorFill': (TensorProto.FLOAT, 'floats'),
-                    'GivenTensorInt64Fill': (TensorProto.INT64, 'ints'),
-                    'GivenTensorIntFill': (TensorProto.INT32, 'ints'),
-                    'GivenTensorBoolFill': (TensorProto.BOOL, 'ints'),
-                    'GivenTensorStringFill': (TensorProto.STRING, 'strings'),
-                }[op.type]
-            except KeyError:
-                raise RuntimeError(
-                    "Can not translate init_net with operator '{}' "
-                    "to initializer".format(op.type)
-                )
-            raw = (data_type != TensorProto.STRING)
-            args = {a.name: a for a in op.arg}
-            vals = getattr(args['values'], field_name)
-            if raw:
-                vals = np.asarray(
-                    vals,
-                    dtype=mapping.TENSOR_TYPE_TO_NP_TYPE[data_type]).tobytes()
-            initializer.append(make_tensor(
-                name=op.output[0],
-                data_type=data_type,
-                dims=args['shape'].ints,
-                vals=vals,
-                raw=raw,
-            ))
+            output_names.extend(op.output)
+        initializer = [numpy_helper.from_array(ws.FetchBlob(name), name=name)
+                       for name in sorted(set(output_names))]
         return initializer
 
     @classmethod
@@ -306,6 +287,10 @@ class Caffe2Frontend(object):
                 init_net.op.remove(fake_init)
             del fake_inits[:]
             del fake_inits
+
+    @classmethod
+    def ssa_rewrite(cls, net, init_net, value_info):
+        return cls._ssa_rewrite(net, init_net, value_info)
 
     @classmethod
     def _ssa_rewrite(cls, net, init_net, value_info):
@@ -354,3 +339,4 @@ class Caffe2Frontend(object):
 caffe2_net_to_onnx_graph = Caffe2Frontend.caffe2_net_to_onnx_graph
 caffe2_net_to_onnx_model = Caffe2Frontend.caffe2_net_to_onnx_model
 caffe2_init_net_to_initializer = Caffe2Frontend.caffe2_init_net_to_initializer
+ssa_rewrite = Caffe2Frontend.ssa_rewrite

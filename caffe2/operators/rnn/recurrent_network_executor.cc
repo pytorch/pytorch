@@ -73,7 +73,7 @@ bool ThreadedRecurrentNetworkExecutor::RunBackwards(int T) {
  * Runs a single op and updates its dependencies when finished. If
  * dependent ops are ready to run, adds them to the task_queue.
  */
-void ThreadedRecurrentNetworkExecutor::RunOp(OpTask job, int thread_id) {
+void ThreadedRecurrentNetworkExecutor::RunOp(OpTask job, int /*thread_id*/) {
   bool first_timestep =
       ((job.forward() && job.timestep == 0) ||
        (job.backward() && job.timestep == job.T - 1));

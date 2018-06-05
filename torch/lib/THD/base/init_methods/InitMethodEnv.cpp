@@ -43,11 +43,14 @@ rank_type maybeLoadEnv(const char* env_name, int value, std::string parameter_na
 
 } // anonymous namespace
 
-InitMethod::Config initEnv(int world_size, std::string group_name, int rank) {
+InitMethod::Config initEnv(std::string argument, /* unused */
+                           int world_size_r,
+                           std::string group_name,
+                           int rank) {
   InitMethod::Config config;
 
   config.rank = maybeLoadEnv(RANK_ENV, rank, "rank");
-  config.world_size = maybeLoadEnv(WORLD_SIZE_ENV, world_size, "world_size");
+  config.world_size = maybeLoadEnv(WORLD_SIZE_ENV, world_size_r, "world_size");
 
   if (group_name != "") {
     throw std::runtime_error("group_name is not supported in env:// init method");

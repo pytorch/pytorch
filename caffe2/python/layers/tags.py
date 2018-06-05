@@ -62,6 +62,12 @@ class Tags(object):
     """
     Valid tag prefixes for distributed training framework.
     """
+    """
+    Used to pass on info to the 'extra_info' field in the net
+    Proto. Typically to provide info for distributed training.
+    """
+    EXTRA_INFO = 'extra_info:'
+
     DT_TAGS = (SPARSE_SHARDED, SPARSE_DONT_SHARD, COMPONENT)
 
     # In certain cases we want to have different schema for training and
@@ -70,6 +76,11 @@ class Tags(object):
     # to mark operators that will be removed from prediction and should
     # override schema for predictors.
     PREDICTION_SCHEMA = 'prediction_schema'
+
+    # This is to mark layers in the feature transform process.
+    FEATURE_TRANSFORM = 'feature_transform'
+    # This is to mark the output layers in the feature transform process
+    FEATURE_TRANSFORM_SCHEMA = 'feature_transform_schema'
 
     def __init__(self, tags):
         if not isinstance(tags, list):

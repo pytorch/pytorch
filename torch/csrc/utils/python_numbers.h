@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <stdint.h>
 #include <stdexcept>
 #include "torch/csrc/Exceptions.h"
@@ -55,6 +55,32 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
     throw std::runtime_error("Overflow when unpacking long");
   }
   return (int64_t)value;
+}
+
+inline bool THPUtils_checkIndex(PyObject *obj) {
+  if (PyBool_Check(obj)) {
+    return false;
+  }
+  if (THPUtils_checkLong(obj)) {
+    return true;
+  }
+  auto index = THPObjectPtr(PyNumber_Index(obj));
+  if (!index) {
+    PyErr_Clear();
+    return false;
+  }
+  return true;
+}
+
+inline int64_t THPUtils_unpackIndex(PyObject* obj) {
+  if (!THPUtils_checkLong(obj)) {
+    auto index = THPObjectPtr(PyNumber_Index(obj));
+    if (index == nullptr) {
+      throw python_error();
+    }
+    obj = index.get();
+  }
+  return THPUtils_unpackLong(obj);
 }
 
 inline bool THPUtils_checkDouble(PyObject* obj) {

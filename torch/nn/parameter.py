@@ -24,4 +24,4 @@ class Parameter(torch.Tensor):
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
     def __repr__(self):
-        return super(Parameter, self).__repr__().replace('Variable', 'Parameter')
+        return 'Parameter containing:\n' + super(Parameter, self).__repr__()

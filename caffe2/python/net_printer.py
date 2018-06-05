@@ -21,10 +21,13 @@ class Visitor(object):
     @classmethod
     def register(cls, Type):
         if not(hasattr(cls, 'visitors')):
-            cls.visitors = []
+            cls.visitors = {}
+        else:
+            assert Type not in cls.visitors, \
+                '{} already registered!'.format(Type)
 
         def _register(func):
-            cls.visitors.append((Type, func))
+            cls.visitors[Type] = func
             return func
 
         return _register
@@ -32,11 +35,14 @@ class Visitor(object):
     def __call__(self, obj, *args, **kwargs):
         if obj is None:
             return
-        for Type, func in self.__class__.visitors:
-            if isinstance(obj, Type):
-                return func(self, obj, *args, **kwargs)
-        raise TypeError('%s: unsupported object type: %s' % (
-            self.__class__.__name__, type(obj)))
+
+        Type = type(obj)
+        if Type not in self.__class__.visitors:
+            raise TypeError('%s: unsupported object type: %s' % (
+                self.__class__.__name__, Type))
+
+        func = self.__class__.visitors[Type]
+        return func(self, obj, *args, **kwargs)
 
 
 class Analyzer(Visitor):
@@ -291,6 +297,7 @@ def print_op(text, op):
             with text.context('arg: %s' % arg.name):
                 text(arg.n)
 
+
 @Printer.register(NetDef)
 def print_net_def(text, net_def):
     if text.c2_syntax:
@@ -382,8 +389,8 @@ def print_task_group(text, tg, header=None):
 def print_job(text, job):
     text(job.init_group, 'Job.current().init_group')
     text(job.epoch_group, 'Job.current().epoch_group')
-    with text.context('Job.current().stop_signals'):
-        for out in job.stop_signals:
+    with text.context('Job.current().stop_conditions'):
+        for out in job.stop_conditions:
             text.add(_print_task_output(out))
     text(job.download_group, 'Job.current().download_group')
     text(job.exit_group, 'Job.current().exit_group')

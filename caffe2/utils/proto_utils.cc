@@ -28,6 +28,17 @@ const ::std::string& GetEmptyStringAlreadyInited() {
 
 }  // namespace caffe
 
+namespace ONNX_NAMESPACE {
+
+// ONNX wrapper functions for protobuf's GetEmptyStringAlreadyInited() function
+// used to avoid duplicated global variable in the case when protobuf
+// is built with hidden visibility.
+const ::std::string& GetEmptyStringAlreadyInited() {
+  return ::google::protobuf::internal::GetEmptyStringAlreadyInited();
+}
+
+}  // namespace ONNX_NAMESPACE
+
 namespace caffe2 {
 
 // Caffe2 wrapper functions for protobuf's GetEmptyStringAlreadyInited() function
@@ -49,25 +60,47 @@ std::string DeviceTypeName(const int32_t& d) {
       return "CUDA";
     case OPENGL:
       return "OPENGL";
+    case OPENCL:
+      return "OPENCL";
     case MKLDNN:
       return "MKLDNN";
+    case IDEEP:
+      return "IDEEP";
+    case HIP:
+      return "HIP";
     default:
       CAFFE_THROW(
           "Unknown device: ",
           d,
           ". If you have recently updated the caffe2.proto file to add a new "
-          "device type, did you forget to update the TensorDeviceTypeName() "
+          "device type, did you forget to update the DeviceTypeName() "
           "function to reflect such recent changes?");
       // The below code won't run but is needed to suppress some compiler
       // warnings.
       return "";
   }
-};
+}
+
+int DeviceId(const DeviceOption& option) {
+  switch (option.device_type()) {
+    case CPU:
+      return option.numa_node_id();
+    case CUDA:
+      return option.cuda_gpu_id();
+    case MKLDNN:
+      return option.numa_node_id();
+    case HIP:
+      return option.hip_gpu_id();
+    default:
+      CAFFE_THROW("Unknown device id for device type: ", option.device_type());
+  }
+}
 
 bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
   return (
       lhs.device_type() == rhs.device_type() &&
       lhs.cuda_gpu_id() == rhs.cuda_gpu_id() &&
+      lhs.hip_gpu_id() == rhs.hip_gpu_id() &&
       lhs.node_name() == rhs.node_name() &&
       lhs.numa_node_id() == rhs.numa_node_id());
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 

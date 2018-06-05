@@ -83,4 +83,27 @@ std::pair<std::string, std::string> discoverMaster(std::vector<std::string> addr
   return std::make_pair(master_address, my_address);
 }
 
+rank_type getRank(const std::vector<int>& ranks, int assigned_rank,
+                  size_t order) {
+  if (assigned_rank >= 0) {
+    return assigned_rank;
+  } else {
+    std::vector<bool> taken_ranks(ranks.size());
+    for (auto rank : ranks) {
+      if (rank >= 0)
+        taken_ranks[rank] = true;
+    }
+
+    auto unassigned = std::count(ranks.begin(), ranks.begin() + order, -1) + 1;
+    rank_type rank = 0;
+    while (true) {
+      if (!taken_ranks[rank]) unassigned--;
+      if (unassigned == 0) break;
+      rank++;
+    }
+
+    return rank;
+  }
+
+}
 }

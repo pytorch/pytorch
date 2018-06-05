@@ -17,9 +17,11 @@ set(src
   MSEMeter.cc
 )
 
-add_library(xtmeter ${TH_LINK_STYLE} ${src})
-target_link_libraries(xtmeter ATen)
+add_library(xtmeter SHARED ${src})
+target_link_libraries(xtmeter ATen_cpu_library)
+target_include_directories(xtmeter PRIVATE ${ATen_CPU_INCLUDE})
 
 add_executable(test-meter test/basic.cc ${BACKWARD_ENABLE})
 # add_backward(test-meter)
 target_link_libraries(test-meter xtmeter)
+target_include_directories(test-meter PRIVATE ${ATen_CPU_INCLUDE})

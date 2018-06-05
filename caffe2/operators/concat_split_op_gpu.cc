@@ -8,4 +8,6 @@ REGISTER_CUDA_OPERATOR(Concat, ConcatOp<CUDAContext>);
 // Backward compatibility settings
 REGISTER_CUDA_OPERATOR(DepthSplit, SplitOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(DepthConcat, ConcatOp<CUDAContext>);
-}  // namespace caffe2
+
+REGISTER_CUDA_OPERATOR(SplitByLengths, SplitByLengthsOp<CUDAContext>);
+} // namespace caffe2

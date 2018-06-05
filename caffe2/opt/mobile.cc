@@ -1,12 +1,16 @@
-#include "mobile.h"
-#include "nomnigraph/Converters/Caffe2.h"
+#include "caffe2/opt/mobile.h"
+#include "caffe2/core/logging.h"
+#include "caffe2/opt/converter.h"
+#include "caffe2/opt/fusion.h"
+#include "caffe2/opt/passes.h"
 
 namespace caffe2 {
 namespace opt {
 
-caffe2::NetDef addNNPACK(caffe2::NetDef net, bool low_memory) {
-  auto nn = nom::converters::convertFromCaffe2Proto(net);
-  for (auto node : nn.dataFlow.getMutableNodes()) {
+using namespace nom;
+
+void addNNPACK(repr::NNModule* nn, bool low_memory) {
+  for (auto node : nn->dataFlow.getMutableNodes()) {
     auto* nodeData = node->data().get(); // Let graph retain ownership.
 
     // Skip blobs.
@@ -61,7 +65,10 @@ caffe2::NetDef addNNPACK(caffe2::NetDef net, bool low_memory) {
 
     // We're good to use our engine.
     auto annotation = conv->getMutableAnnotation();
-    auto* op = static_cast<caffe2::OperatorDef*>(annotation->getSaved());
+    if (!annotation || !isa<Caffe2Annotation>(annotation)) {
+      continue;
+    }
+    auto* op = dyn_cast<Caffe2Annotation>(annotation)->getMutableOperatorDef();
     op->set_engine(engine);
     if (!low_memory) {
       auto* precompute_argument = op->add_arg();
@@ -69,8 +76,74 @@ caffe2::NetDef addNNPACK(caffe2::NetDef net, bool low_memory) {
       precompute_argument->set_s("PRECOMPUTE");
     }
   }
-  return nom::converters::convertToCaffe2Proto(nn);
 }
+
+namespace {
+
+inline bool isNNPACKConvReluEfficient(
+    const std::string& algo,
+    const repr::Conv& conv) {
+  if (algo == "AUTO" || algo == "") {
+    for (auto stride : conv.getStrides()) {
+      if (stride > 1) {
+        return false;
+      }
+    }
+    for (auto kernel : conv.getKernelShape()) {
+      if (kernel < 2) {
+        return false;
+      }
+    }
+  } else if (!(algo == "WINOGRAD" || algo == "WINOGRAD_FP16" ||
+               algo == "FT8x8" || algo == "FT16x16")) {
+    return false;
+  }
+  return true;
+}
+
+} // namespace
+
+void fuseNNPACKConvRelu(repr::NNModule* nn) {
+  auto should_fuse = [](const repr::Conv& conv) {
+    const auto annotation = conv.getAnnotation();
+    if (!annotation || !isa<Caffe2Annotation>(annotation)) {
+      return false;
+    }
+    const auto* op = dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
+
+    // We only want to fuse for fast NNPACK convs
+    if (op->engine() != "NNPACK") {
+      return false;
+    }
+    caffe2::string algo = "AUTO";
+    for (const auto arg : op->arg()) {
+      if (arg.name() == "algo") {
+        algo = arg.s();
+      }
+    }
+    if (!isNNPACKConvReluEfficient(algo, conv)) {
+      return false;
+    }
+    return true;
+  };
+
+  auto postprocess = [](repr::NNGraph::NodeRef conv_node) {
+    auto conv = repr::nn::get<repr::Conv>(conv_node);
+    auto annotation = conv->getMutableAnnotation();
+    if (!annotation || !isa<Caffe2Annotation>(annotation)) {
+      return;
+    }
+    auto* op = dyn_cast<Caffe2Annotation>(annotation)->getMutableOperatorDef();
+    auto* arg = op->add_arg();
+    arg->set_name("activation");
+    arg->set_s("Relu");
+  };
+
+  fuseActivation<repr::Conv, repr::Relu>(nn, should_fuse, postprocess);
+}
+
+REGISTER_OPT_PASS_FROM_FUNC(FuseNNPACKConvRelu, fuseNNPACKConvRelu);
+REGISTER_OPT_PASS_FROM_FUNC(AddNNPACK, addNNPACK);
 
 } // namespace opt
 } // namespace caffe2

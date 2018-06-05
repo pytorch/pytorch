@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, workspace
+from caffe2.python import core
 from caffe2.proto import caffe2_pb2
 from onnx.backend.base import BackendRep, namedtupledict
 
@@ -29,34 +29,33 @@ class Caffe2Rep(BackendRep):
 
     def run(self, inputs, **kwargs):
         super(Caffe2Rep, self).run(inputs, **kwargs)
-        with self.workspace:
-            with core.DeviceScope(self.predict_net.device_option):
-                if isinstance(inputs, dict):
-                    with core.NameScope(self._name_scope):
-                        for key, value in inputs.items():
-                            workspace.FeedBlob(key, value)
-                elif isinstance(inputs, list) or isinstance(inputs, tuple):
-                    if len(self.uninitialized) != len(inputs):
-                        raise RuntimeError('Expected {} values for uninitialized '
-                                           'graph inputs ({}), but got {}.'.format(
-                                               len(self.uninitialized),
-                                               ', '.join(self.uninitialized),
-                                               len(inputs)))
-                    for i, value in enumerate(inputs):
-                        # namescope already baked into protobuf
-                        workspace.FeedBlob(self.uninitialized[i], value)
-                else:
-                    # single input
-                    workspace.FeedBlob(self.uninitialized[0], inputs)
-                if not self.nets_created:
-                    workspace.CreateNet(self.init_net)
-                    workspace.CreateNet(self.predict_net)
-                    self.nets_created = True
-                if not self.ran_init_net:
-                    workspace.RunNet(self.init_net.name)
-                    self.ran_init_net = True
-                workspace.RunNet(self.predict_net.name)
-            output_values = [workspace.FetchBlob(name)
-                             for name in self.predict_net.external_output]
-            return namedtupledict('Outputs',
-                                  self.predict_net.external_output)(*output_values)
+        with core.DeviceScope(self.predict_net.device_option):
+            if isinstance(inputs, dict):
+                with core.NameScope(self._name_scope):
+                    for key, value in inputs.items():
+                        self.workspace.FeedBlob(key, value)
+            elif isinstance(inputs, list) or isinstance(inputs, tuple):
+                if len(self.uninitialized) != len(inputs):
+                    raise RuntimeError('Expected {} values for uninitialized '
+                                       'graph inputs ({}), but got {}.'.format(
+                                           len(self.uninitialized),
+                                           ', '.join(self.uninitialized),
+                                           len(inputs)))
+                for i, value in enumerate(inputs):
+                    # namescope already baked into protobuf
+                    self.workspace.FeedBlob(self.uninitialized[i], value)
+            else:
+                # single input
+                self.workspace.FeedBlob(self.uninitialized[0], inputs)
+            if not self.nets_created:
+                self.workspace.CreateNet(self.init_net)
+                self.workspace.CreateNet(self.predict_net)
+                self.nets_created = True
+            if not self.ran_init_net:
+                self.workspace.RunNet(self.init_net.name)
+                self.ran_init_net = True
+            self.workspace.RunNet(self.predict_net.name)
+        output_values = [self.workspace.FetchBlob(name)
+                         for name in self.predict_net.external_output]
+        return namedtupledict('Outputs',
+                              self.predict_net.external_output)(*output_values)

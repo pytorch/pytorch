@@ -17,10 +17,9 @@ class Geometric(Distribution):
 
     Example::
 
-        >>> m = Geometric(torch.Tensor([0.3]))
+        >>> m = Geometric(torch.tensor([0.3]))
         >>> m.sample()  # underlying Bernoulli has 30% chance 1; 70% chance 0
-         2
-        [torch.FloatTensor of size 1]
+        tensor([ 2.])
 
     Args:
         probs (Number, Tensor): the probabilty of sampling `1`. Must be in range (0, 1]

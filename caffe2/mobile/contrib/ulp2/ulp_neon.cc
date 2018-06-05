@@ -8,7 +8,7 @@ namespace caffe2 {
 // devices (Snapdragon 820).
 constexpr size_t kL1CacheSizeBytes = 16 * 1024;
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
 
 // Applies 2-bit uniform quantization to the floating point data at Xdata,
 // storing QC bytes into XQdata (i.e. reading 8 * QC floats from Xdata).

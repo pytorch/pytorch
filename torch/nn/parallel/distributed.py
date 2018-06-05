@@ -77,7 +77,7 @@ class DistributedDataParallel(Module):
         Parameters are never broadcast between processes. The module performs
         an all-reduce step on gradients and assumes that they will be modified
         by the optimizer in all processes in the same way. Buffers
-        (e.g. BatchNorm stats) are broadcast form the module in process of rank
+        (e.g. BatchNorm stats) are broadcast from the module in process of rank
         0, to all other replicas in the system in every iteration.
 
     .. warning::
@@ -92,6 +92,9 @@ class DistributedDataParallel(Module):
         broadcast_buffers: flag that enables syncing (broadcasting) buffers of
                            the module at beginning of the forward function.
                            (default: True)
+
+    Attributes:
+        module (Module): the module to be parallelized
 
     Example::
 

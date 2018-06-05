@@ -148,6 +148,14 @@ class OpSchema {
   OpSchema& TensorInferenceFunction(TensorInferenceFunctionType function);
 
   /**
+   * A wrapper that makes an infer tensor function to return unknown
+   * shape for all outputs if any one of the inputs has unknown shape
+   */
+
+  static TensorInferenceFunctionType NeedsAllInputShapes(
+      TensorInferenceFunctionType f);
+
+  /**
    * @brief Sets the corresponding onnx schema name
    */
   OpSchema& InheritOnnxSchema(const std::string& onnx_schema_name);
@@ -176,9 +184,10 @@ class OpSchema {
    * an operator such as FLOPs, total memory use and parameters.
    */
   struct Cost {
-    uint64_t flops; // Floating point operations.
-    uint64_t bytes_moved; // Total memory used.
-    uint64_t params_bytes; // Memory footprint of parameters
+    uint64_t flops{0}; // Floating point operations.
+    uint64_t bytes_read{0}; // Total memory read.
+    uint64_t bytes_written{0}; // Total memory written.
+    uint64_t params_bytes{0}; // Memory footprint of parameters
   };
   /**
    * @brief Registers a function that takes in an OperatorDef
@@ -467,14 +476,28 @@ inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
   return dims;
 }
 
+// Helper function
+inline uint64_t nElemFromDim(const TensorShape& X) {
+  uint64_t nElem = X.dims_size() > 0 ? 1 : 0;
+  for (int i = 0; i < X.dims_size(); ++i) {
+    nElem *= X.dims(i);
+  }
+  return nElem;
+}
+
 // Helper function for infer op inputs and outputs device information.
 inline std::pair<std::vector<DeviceOption>, std::vector<DeviceOption>>
 InferOpInputOutputDevice(const OperatorDef& op) {
   auto op_schema = OpSchemaRegistry::Schema(op.type());
-  CAFFE_ENFORCE(
-      op_schema, "Device inference failed. No schema for: ", op.type());
-  // TODO(wyiming) : add try catch here.
-  return op_schema->InferDevice(op);
+  if (op_schema) {
+    // op_schema found
+    return op_schema->InferDevice(op);
+
+  } else {
+    // No schema for op.type registered
+    auto temp_schema = OpSchema();
+    return temp_schema.InferDevice(op);
+  }
 }
 
 template <uint64_t OpsPerPoint>
@@ -483,14 +506,15 @@ OpSchema::Cost PointwiseCostInference(
     const vector<TensorShape>& inputs) {
   struct OpSchema::Cost c;
   const TensorShape X = inputs[0];
-  uint64_t size = 1;
-
-  for (auto i = 0; i < X.dims().size(); ++i) {
-    size *= X.dims(i);
+  uint64_t nElemX = nElemFromDim(X);
+  uint64_t nElemRead = 0;
+  for (int i = 0; i < inputs.size(); ++i) {
+    nElemRead += nElemFromDim(inputs[i]);
   }
 
-  c.flops = size * OpsPerPoint;
-  c.bytes_moved = size * sizeof(X.data_type());
+  c.flops = nElemX * OpsPerPoint;
+  c.bytes_read = nElemRead * sizeof(X.data_type());
+  c.bytes_written = nElemX * sizeof(X.data_type());
   return c;
 }
 
@@ -498,23 +522,17 @@ OpSchema::Cost PointwiseCostInference(
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                            \
-  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) =      \
+#define OPERATOR_SCHEMA(name)                                     \
+  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
+  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
-#define OPERATOR_SCHEMA_STR(name)                                  \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(schema_registration) = \
-      &OpSchemaRegistry::NewSchema(name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                            \
-  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) =      \
+#define OPERATOR_SCHEMA(name)                                     \
+  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
+  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
-#define OPERATOR_SCHEMA_STR(name)                                  \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(schema_registration) = \
-      1 ? nullptr : &OpSchemaRegistry::NewSchema(name, __FILE__, __LINE__)
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 

@@ -31,7 +31,7 @@ static PyObject * THPStorage_(isPinned)(THPStorage *self)
   HANDLE_TH_ERRORS
 #if defined(WITH_CUDA)
   cudaPointerAttributes attr;
-  cudaError_t err = cudaPointerGetAttributes(&attr, self->cdata->data);
+  cudaError_t err = cudaPointerGetAttributes(&attr, THStorage_(data)(LIBRARY_STATE self->cdata));
   if (err != cudaSuccess) {
     cudaGetLastError();
     Py_RETURN_FALSE;
@@ -155,20 +155,20 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   THStorage* storage = THStorage_(newWithSize)(count);
 
 #if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
-  memcpy(storage->data, src + offset, count);
+  memcpy(THStorage_(data)(storage), src + offset, count);
 #elif defined(TH_REAL_IS_SHORT)
-  THP_decodeInt16Buffer(storage->data, src + offset, byte_order, count);
+  THP_decodeInt16Buffer(THStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_INT)
-  THP_decodeInt32Buffer(storage->data, src + offset, byte_order, count);
+  THP_decodeInt32Buffer(THStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_LONG)
   // TODO: remove the cast
-  THP_decodeInt64Buffer((int64_t*) storage->data, src + offset, byte_order, count);
+  THP_decodeInt64Buffer((int64_t*) THStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_HALF)
-  THP_decodeHalfBuffer(storage->data, src + offset, byte_order, count);
+  THP_decodeHalfBuffer(THStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_FLOAT)
-  THP_decodeFloatBuffer(storage->data, src + offset, byte_order, count);
+  THP_decodeFloatBuffer(THStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_DOUBLE)
-  THP_decodeDoubleBuffer(storage->data, src + offset, byte_order, count);
+  THP_decodeDoubleBuffer(THStorage_(data)(storage), src + offset, byte_order, count);
 #else
 #error "Unknown type"
 #endif
@@ -302,7 +302,7 @@ PyObject * THPStorage_(_rootStorage)(THPStorage *self)
   THStorage *root = self->cdata;
   while (root->flag & TH_STORAGE_VIEW)
     root = root->view;
-  size_t offset = self->cdata->data - root->data;
+  size_t offset = THStorage_(data)(LIBRARY_STATE self->cdata) - THStorage_(data)(LIBRARY_STATE root);
   THStorage_(retain)(LIBRARY_STATE root);
   THPObjectPtr storage(THPStorage_(New)(root));
   PyObject *result = Py_BuildValue("(NN)", storage.get(), PyLong_FromLong(offset));

@@ -3,13 +3,10 @@
 
 #include "THGeneral.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 #define _MERSENNE_STATE_N 624
 #define _MERSENNE_STATE_M 397
 
-/* Struct definition is moved to THGenerator.h, because THRandom.h
+/* Struct definition is moved to THGenerator.hpp, because THRandom.h
 needs to be C-compatible in order to be included in C FFI extensions. */
 typedef struct THGenerator THGenerator;
 typedef struct THGeneratorState THGeneratorState;
@@ -63,12 +60,6 @@ TH_API double THRandom_normal(THGenerator *_generator, double mean, double stdv)
 */
 TH_API double THRandom_exponential(THGenerator *_generator, double lambda);
 
-/** Generates a random number from a standard Gamma distribution.
-    The Gamma density is proportional to $x^{alpha-1} exp(-x)$
-    The shape parameter alpha (a.k.a. k) is a positive real number.
-*/
-TH_API double THRandom_standard_gamma(THGenerator *_generator, double alpha);
-
 /** Returns a random number from a Cauchy distribution.
     The Cauchy density is $p(x) = sigma/(pi*(sigma^2 + (x-median)^2))$
 */
@@ -88,7 +79,5 @@ TH_API int THRandom_geometric(THGenerator *_generator, double p);
 
 /* Returns true with probability $p$ and false with probability $1-p$ (p > 0). */
 TH_API int THRandom_bernoulli(THGenerator *_generator, double p);
-#ifdef __cplusplus
-}
-#endif
+
 #endif

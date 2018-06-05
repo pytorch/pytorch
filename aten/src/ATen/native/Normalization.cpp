@@ -2,10 +2,9 @@
 #include "ATen/NativeFunctions.h"
 
 #include "ATen/Config.h"
-#if AT_CUDNN_ENABLED()
-#include "THC/THC.h"
-#include "ATen/cudnn/cudnn-wrapper.h"
-#endif
+
+#include "ATen/detail/CUDAHooksInterface.h"
+
 #include <vector>
 
 namespace at { namespace native {
@@ -44,7 +43,6 @@ Tensor batch_norm(
   }
 
   bool use_cudnn = false;
-#if AT_CUDNN_ENABLED()
   use_cudnn = (input.type().is_cuda()
                && (input.type().scalarType() != at::kHalf
                  || weight.type().scalarType() == at::kFloat)
@@ -52,19 +50,16 @@ Tensor batch_norm(
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
                && input.size(0) <= 131070
-               && cudnn_enabled && CUDNN_VERSION >= 5110L);
-#else
-  (void)cudnn_enabled; // avoid unused parameter warning
-#endif
+               && detail::getCUDAHooks().compiledWithCuDNN()
+               && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
-#if AT_CUDNN_ENABLED()
-  if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
+  if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
     return std::get<0>(at::cudnn_batch_norm(
                         input, weight, bias,
                         running_mean, running_var,
                         training, momentum, eps));
   }
-#endif
+
   return at::thnn_batch_norm(
             input, weight, bias,
             running_mean, running_var, training, momentum, eps);
