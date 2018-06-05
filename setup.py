@@ -532,7 +532,7 @@ class build_ext(build_ext_parent):
                     print("{} dst: {}".format(i, dst))
                     self.copy_file(src, dst)
                     i += 1
-        super().build_extensions()
+        distutils.command.build_ext.build_ext.build_extensions(self)
 
 
 class build(distutils.command.build.build):
