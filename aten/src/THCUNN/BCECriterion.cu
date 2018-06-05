@@ -31,7 +31,7 @@ struct bce_functor
     Dtype input = thrust::get<0>(x);
     Dtype t = thrust::get<1>(x);
     assert(input >= 0. && input <= 1.);
-    return - (t * THCNumerics<Acctype>::log(input + eps<Acctype>()) + (Acctype(1)- t) * THCNumerics<Acctype>::log(Acctype(1) - input + eps<Acctype>()));
+    return - (t * THCNumerics<Acctype>::log(input + eps<Acctype>()) + (Acctype(1)- t) * THCNumerics<Acctype>::log(Acctype(1) - input));
   }
 };
 
@@ -47,7 +47,7 @@ struct bce_updateOutput_no_reduce_functor
     assert(*input >= 0. && *input <= 1.);
     *output = ScalarConvert<Acctype, Dtype>::to(
         -(*target * THCNumerics<Acctype>::log(*input + eps<Acctype>()) +
-          (Acctype(1) - *target) * THCNumerics<Acctype>::log(Acctype(1) - *input + eps<Acctype>())));
+          (Acctype(1) - *target) * THCNumerics<Acctype>::log(Acctype(1) - *input)));
   }
 };
 
@@ -63,7 +63,7 @@ struct bce_functor_weights
     Dtype w = thrust::get<2>(x);
     assert(input >= 0. && input <= 1.);
     return - w * (t * THCNumerics<Acctype>::log(input + eps<Acctype>()) +
-        (Acctype(1) - t) * THCNumerics<Acctype>::log(Acctype(1) - input + eps<Acctype>()));
+        (Acctype(1) - t) * THCNumerics<Acctype>::log(Acctype(1) - input));
   }
 };
 

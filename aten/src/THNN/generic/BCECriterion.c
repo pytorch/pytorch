@@ -24,7 +24,7 @@ void THNN_(BCECriterion_updateOutput)(
         THAssertMsg(x >= 0. && x <= 1.,
           "input value should be between 0~1, but got %f",
 		      (double) x);
-		    *output_data = -(log(x + EPS) * y + log(1. - x + EPS) * (1. - y));
+		    *output_data = -(log(x + EPS) * y + log(1. - x) * (1. - y));
     );
 		if (weights) {
       THTensor_(cmul)(output, output, weights);
@@ -43,7 +43,7 @@ void THNN_(BCECriterion_updateOutput)(
       THAssertMsg(x >= 0. && x <= 1.,
         "input value should be between 0~1, but got %f",
 		  (double) x);
-      sum -= (log(x + EPS) * y + log(1. - x + EPS) * (1. - y)) * w;
+      sum -= (log(x + EPS) * y + log(1. - x) * (1. - y)) * w;
     );
   } else {
     TH_TENSOR_APPLY2(real, input, real, target,
@@ -52,7 +52,7 @@ void THNN_(BCECriterion_updateOutput)(
       THAssertMsg(x >= 0. && x <= 1.,
         "input value should be between 0~1, but got %f",
 		  (double) x);
-      sum -= log(x + EPS) * y + log(1. - x + EPS) * (1. - y);
+      sum -= log(x + EPS) * y + log(1. - x) * (1. - y);
     );
   }
 
