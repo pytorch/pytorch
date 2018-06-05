@@ -385,26 +385,26 @@ __global__ void
 
 #define LSTM_FORWARD(ITYPE, DIM) THNN_(LSTMForward)             \
   <real, ITYPE, DIM>                                            \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>        \
+  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>        \
   (inputI, hiddenI,                                             \
    bias1I, bias2I, cxI, hyI, cyI,                               \
    hid_size, totalElements);
 
 #define LSTM_BACKWARD(ITYPE, DIM) THNN_(LSTMBackward)           \
   <real, ITYPE, DIM>                                            \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>        \
+  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>        \
   (storageI, gradingatesI, cxI, cyI,                            \
    gradoutI, gradoutcI, gradincxI,                              \
    hid_size, totalElements);
 
 #define GRU_FORWARD(ITYPE, DIM) THNN_(GRUForward)<real, ITYPE, DIM> \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>            \
+  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>            \
   (inputI, hiddenI, bias1I, bias2I, hxI, hyI, storageI,             \
    hid_size, totalElements);
 
 #define GRU_BACKWARD(ITYPE, DIM) THNN_(GRUBackward)                     \
   <real, ITYPE, DIM>                                                    \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>                \
+  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>                \
   (gradininputI, gradinhiddenI, gradoutI, gradinhxI, storageI,                        \
    hid_size, totalElements);
 
@@ -438,7 +438,9 @@ void THNN_(LSTM_forw_ind_wrap)(
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THAssertMsg(getApplyGrid(state, totalElements, grid),
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THAssertMsg(getApplyGrid(state, totalElements, grid, curDevice),
           "Could not get grid size for pointwise apply.");
 
   TINFO inputI = getTensorInfo<real, THCTensor, INDTYPE>(state, input);
@@ -531,7 +533,9 @@ void THNN_(LSTM_back_ind_wrap)(
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THAssertMsg(getApplyGrid(state, totalElements, grid),
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THAssertMsg(getApplyGrid(state, totalElements, grid, curDevice),
               "Could not get grid size for pointwise apply");
 
   TINFO storageI = getTensorInfo<real, THCTensor, INDTYPE>(state, storage);
@@ -620,7 +624,9 @@ void THNN_(GRU_forw_ind_wrap)(
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THAssertMsg(getApplyGrid(state, totalElements, grid),
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THAssertMsg(getApplyGrid(state, totalElements, grid, curDevice),
               "Could not get grid size for pointwise apply.");
 
   TINFO inputI = getTensorInfo<real, THCTensor, INDTYPE>(state, input);
@@ -717,7 +723,9 @@ void THNN_(GRU_back_ind_wrap)(
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THAssertMsg(getApplyGrid(state, totalElements, grid),
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THAssertMsg(getApplyGrid(state, totalElements, grid, curDevice),
           "Could not get grid size for pointwise apply");
 
   TINFO gradininputI = getTensorInfo<real, THCTensor, INDTYPE>(state, gradInInput);

@@ -76,7 +76,7 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
       (*allocator->malloc)(allocatorContext,
                            (void**)&(storage->data_ptr),
                            size * sizeof(real),
-                           THCState_getCurrentStream(state));
+                           THCState_getCurrentStreamOnDevice(state, device));
     if(err != cudaSuccess){
       free(storage);
     }
