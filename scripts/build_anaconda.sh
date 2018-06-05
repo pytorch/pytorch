@@ -324,7 +324,7 @@ if [[ -n $pytorch_too ]]; then
 fi
 
 if [[ -z $slim ]]; then
-  add_package 'opencv'
+  add_package 'opencv' '<3.4'
 else
   caffe2_cmake_args+=("-DUSE_OPENCV=OFF")
 fi
@@ -355,13 +355,8 @@ else
 fi
 
 # Change flags based on target gcc ABI
+# Default conda channels use gcc 7.2, conda-forge uses gcc 4.8.5
 if [[ "$(uname)" != 'Darwin' && "$GCC_USE_C11" -eq 0 ]]; then
-  # opencv 3.3.1 in conda-forge doesn't have imgcodecs, and opencv 3.1.0
-  # requires numpy 1.12
-  remove_lines_with 'opencv'
-  add_package 'opencv' '==3.1.0'
-
-  # Default conda channels use gcc 7.2, conda-forge uses gcc 4.8.5
   caffe2_cmake_args+=("-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=0")
   conda_channel+=('-c conda-forge')
 fi
