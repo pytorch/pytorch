@@ -41,6 +41,13 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state['step'] = 0
                 state['sum'] = torch.full_like(p.data, initial_accumulator_value)
+    
+    
+    def __setstate__(self, state):
+        super(Adagrad, self).__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('eps', 1e-10)
+    
 
     def share_memory(self):
         for group in self.param_groups:
