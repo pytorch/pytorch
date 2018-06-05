@@ -128,7 +128,7 @@ IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 WITH_ROCM = check_env_flag('WITH_ROCM')
 
-FULL_CAFFE2 = check_env_flag('WITH_CAFFE2')
+FULL_CAFFE2 = check_env_flag('FULL_CAFFE2')
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
 
 NUM_JOBS = multiprocessing.cpu_count()
@@ -300,8 +300,7 @@ def build_libs(libs):
         build_libs_cmd += ['--with-distributed-mw']
 
     if FULL_CAFFE2:
-        build_libs_cmd += ['--with-caffe2']
-        build_libs_cmd += ['--with-caffe2-python']
+        build_libs_cmd += ['--full-caffe2']
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         print("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
