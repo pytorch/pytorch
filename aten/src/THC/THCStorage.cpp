@@ -48,7 +48,7 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
       (*allocator->malloc)(allocatorContext,
                            (void**)&(storage->data_ptr),
                            size * at::elementSize(scalar_type),
-                           THCState_getCurrentStream(state));
+                           THCState_getCurrentStreamOnDevice(state, device));
     if(err != cudaSuccess){
       free(storage);
     }
@@ -96,7 +96,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
       self->allocatorContext,
       (void**)&(data_ptr),
       self->size * elementSize,
-      size * elementSize, THCState_getCurrentStream(state));
+      size * elementSize, THCState_getCurrentStreamOnDevice(state, device));
     if (err != cudaSuccess) {
       THCudaCheck(err);
     }
@@ -122,7 +122,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
       (*self->allocator->malloc)(self->allocatorContext,
                                  (void**)&(data),
                                  size * elementSize,
-                                 THCState_getCurrentStream(state));
+                                 THCState_getCurrentStreamOnDevice(state, device));
     THCudaCheck(err);
 
     if (self->data_ptr) {
