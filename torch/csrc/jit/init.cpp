@@ -130,7 +130,7 @@ void initJITBindings(PyObject *module) {
       return s.autograd_fallback_graph;
     });
 
-  py::class_<GraphExecutor>(m, "GraphExecutor")
+  py::class_<GraphExecutor>(m, "GraphExecutor", py::dynamic_attr())
       .def(
           py::init([](py::function func,
                       variable_list inputs,
