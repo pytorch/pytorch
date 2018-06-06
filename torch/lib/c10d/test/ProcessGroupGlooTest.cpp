@@ -139,10 +139,10 @@ class CollectiveTest {
 std::vector<std::vector<at::Tensor>> copyTensors(
     const std::vector<std::vector<at::Tensor>>& inputs) {
   std::vector<std::vector<at::Tensor>> outputs(inputs.size());
-  for (auto i = 0; i < inputs.size(); i++) {
+  for (size_t i = 0; i < inputs.size(); i++) {
     const auto& input = inputs[i];
     std::vector<at::Tensor> output(input.size());
-    for (auto j = 0; j < input.size(); j++) {
+    for (size_t j = 0; j < input.size(); j++) {
       output[j] = input[j].toBackend(at::kCPU);
     }
     outputs[i] = std::move(output);
