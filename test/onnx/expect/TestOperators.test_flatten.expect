@@ -134,7 +134,7 @@ graph {
     op_type: "Cast"
     attribute {
       name: "to"
-      i: 11
+      i: 7
       type: INT
     }
   }
