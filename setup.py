@@ -151,9 +151,12 @@ lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 tmp_install_path = lib_path + "/tmp_install"
 
-# Base Pytorch command to avoid implementing initialize/finalize_options in
-# every subclass
+
 class PytorchCommand(setuptools.Command):
+    """
+    Base Pytorch command to avoid implementing initialize/finalize_options in
+    every subclass
+    """
     user_options = []
 
     def initialize_options(self):
@@ -189,6 +192,8 @@ if not WITH_NINJA:
 
 # Patch for linking with ccache
 original_link = distutils.unixccompiler.UnixCCompiler.link
+
+
 def patched_link(self, *args, **kwargs):
     _cxx = self.compiler_cxx
     self.compiler_cxx = None
@@ -223,6 +228,7 @@ else:
     except Exception:
         pass
 
+
 class create_version_file(PytorchCommand):
     def run(self):
         global version, cwd
@@ -252,11 +258,13 @@ Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
 '''.strip()
 
+
 def check_pydep(importname, module):
     try:
         importlib.import_module(importname)
     except ImportError:
         raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+
 
 # Calls build_pytorch_libs.sh/bat with the correct env variables
 def build_libs(libs):
@@ -305,6 +313,7 @@ def build_libs(libs):
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         print("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
         sys.exit(1)
+
 
 # Build all dependent libraries
 class build_deps(PytorchCommand):
@@ -499,9 +508,9 @@ class build_ext(build_ext_parent):
         # from the old setup_caffe2.py
         if FULL_CAFFE2:
             pybind_exts = [
-                    'caffe2.python.caffe2_pybind11_state',
-                    'caffe2.python.caffe2_pybind11_state_gpu'
-                    ]
+                'caffe2.python.caffe2_pybind11_state',
+                'caffe2.python.caffe2_pybind11_state_gpu',
+            ]
             # The cmake of Caffe2 puts these in the site-packages rather than
             # the build directory like the other torch extensions
             sp_dir = distutils.sysconfig.get_python_lib(prefix='')
