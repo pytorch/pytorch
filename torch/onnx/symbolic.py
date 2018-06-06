@@ -604,8 +604,8 @@ def type_as(g, self, other):
         return self
 
     if other.isTensor():
-        other_type_name = other.type().scalarType().lower()
-        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[scalar_name_to_pytorch[other_type_name]])
+        other_type_name = other.type().scalarType()
+        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
     else:
         # We don't know the type of other, bail by emitting ATen
         return g.op("ATen", self, other, operator_s="type_as")
