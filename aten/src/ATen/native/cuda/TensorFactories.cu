@@ -43,44 +43,45 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     throw std::runtime_error(oss.str());
   }
 
-  auto result_tmp = result;
-  if (result.type().scalarType() == at::ScalarType::Half) {
-    // Make sure n is within range of Half
-    assert(Scalar(n).toHalf());
-    result_tmp = CUDA(kFloat).tensor();
-  }
-  result_tmp.resize_({n});
+  AT_DISPATCH_ALL_TYPES_AND_HALF(
+    result.type(), "randperm_out_cuda", [&] {
+      AT_CHECK(Scalar(n).to<scalar_t>(),
+        "n is too large for result tensor type: '", result.type().toString(), "'");
+    }
+  );
 
-  if (n < 30000) {  // For small inputs, we offload it to CPU instead.
-    auto result_cpu = result_tmp.type().toBackend(kCPU).tensor({n});
-    randperm_out(result_cpu, n, generator);
-    result_tmp.copy_(result_cpu);
+  result.resize_({n});
+
+  if (result.type().scalarType() == at::ScalarType::Half) {
+    auto result_float = CUDA(kFloat).tensor({n});
+    result.copy_(randperm_out_cuda(result_float, n, generator));
   } else {
-    // Generate random values for the keys array
-    AT_DISPATCH_ALL_TYPES(
-      result_tmp.type(), "randperm_out_cuda", [&] {
-        using cuda_scalar_t = cuda::into_type<scalar_t>;
+    if (n < 30000) {  // For small inputs, we offload it to CPU instead.
+      auto result_cpu = result.type().toBackend(kCPU).tensor({n});
+      randperm_out(result_cpu, n, generator);
+      result.copy_(result_cpu);
+    } else {
+      // Generate random values for the keys array
+      AT_DISPATCH_ALL_TYPES(
+        result.type(), "randperm_out_cuda", [&] {
+          using cuda_scalar_t = cuda::into_type<scalar_t>;
 
-        auto keys = result_tmp.type().tensor(result_tmp.sizes()).random_(generator);
+          auto keys = result.type().tensor(result.sizes()).random_(generator);
 
-        auto result_data = thrust::device_ptr<cuda_scalar_t>(result_tmp.data<cuda_scalar_t>());
-        auto keys_data = thrust::device_ptr<cuda_scalar_t>(keys.data<cuda_scalar_t>());
+          auto result_data = thrust::device_ptr<cuda_scalar_t>(result.data<cuda_scalar_t>());
+          auto keys_data = thrust::device_ptr<cuda_scalar_t>(keys.data<cuda_scalar_t>());
 
-        auto state = globalContext().getTHCState();
-        THCThrustAllocator thrustAlloc(state);
-        auto policy = thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state));
+          auto state = globalContext().getTHCState();
+          THCThrustAllocator thrustAlloc(state);
+          auto policy = thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state));
 
-        thrust::sequence(policy, result_data, result_data + n);
+          thrust::sequence(policy, result_data, result_data + n);
 
-        // Use the sorted order of keys to rearrange the result array
-        thrust::sort_by_key(policy, keys_data, keys_data + n, result_data);
-      }
-    );
-  }
-
-  if (result.type().scalarType() == at::ScalarType::Half) {
-    result.resize_({n});
-    result.copy_(result_tmp);
+          // Use the sorted order of keys to rearrange the result array
+          thrust::sort_by_key(policy, keys_data, keys_data + n, result_data);
+        }
+      );
+    }
   }
 
   return result;
