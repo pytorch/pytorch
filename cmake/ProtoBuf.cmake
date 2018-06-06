@@ -20,7 +20,7 @@ macro(custom_protobuf_find)
     option(protobuf_BUILD_SHARED_LIBS "" ${BUILD_SHARED_LIBS})
   endif()
   # We will make sure that protobuf and caffe2 uses the same msvc runtime.
-  option(protobuf_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+  option(protobuf_MSVC_STATIC_RUNTIME "" ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
 
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
     set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
