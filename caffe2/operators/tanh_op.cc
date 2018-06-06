@@ -7,14 +7,17 @@
 namespace caffe2 {
 
 template <>
-template <typename T>
-bool TanhFunctor<CPUContext>::
-operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
+template <>
+bool TanhFunctor<CPUContext>::operator()<float>(
+    const int N,
+    const float* X,
+    float* Y,
+    CPUContext* /* context */) const {
 #ifdef CAFFE2_USE_ACCELERATE
   vvtanhf(Y, X, &N);
 #else
-  ConstEigenVectorArrayMap<T> X_arr(X, N);
-  EigenVectorMap<T>(Y, N) = 1 - 2 * ((X_arr * 2).exp() + 1).inverse();
+  ConstEigenVectorArrayMap<float> X_arr(X, N);
+  EigenVectorMap<float>(Y, N) = 1 - 2 * ((X_arr * 2).exp() + 1).inverse();
 #endif
   return true;
 }
@@ -38,11 +41,14 @@ bool TanhGradientFunctor<CPUContext>::Forward(
 
 REGISTER_CPU_OPERATOR(
     Tanh,
-    UnaryElementwiseOp<FloatTypes, CPUContext, TanhFunctor<CPUContext>>);
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        TanhFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(
     TanhGradient,
     BinaryElementwiseOp<
-        FloatTypes,
+        TensorTypes<float>,
         CPUContext,
         TanhGradientFunctor<CPUContext>>);
 
