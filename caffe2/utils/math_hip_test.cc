@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 #include "caffe2/core/context.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/operators/utility_ops.h"
 #include "caffe2/utils/math.h"
