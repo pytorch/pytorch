@@ -19,7 +19,6 @@ using NumericTypes = TensorTypes<int32_t, int64_t, float, double>;
 using IntTypes = TensorTypes<int32_t, int64_t>;
 using BoolTypes = TensorTypes<bool>;
 using IntBoolTypes = TensorTypes<int32_t, int64_t, bool>; // discrete types
-using FloatTypes = TensorTypes<float, double>;
 
 struct SameTypeAsInput {
   template <typename T>
