@@ -175,6 +175,7 @@ if(BUILD_CAFFE2)
 endif()
 
 # Compile exposed libraries.
+list(APPEND Caffe2_CPU_SRCs $<TARGET_OBJECTS:c10>)
 add_library(caffe2 ${Caffe2_CPU_SRCS})
 if (BUILD_CAFFE2)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
