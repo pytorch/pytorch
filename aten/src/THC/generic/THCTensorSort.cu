@@ -109,7 +109,7 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
 
   // The constructed key/value tensor info is used to select the slice
   // we are sorting on a per-block basis
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, key)) {
+  if (THCTensor_canUse32BitIndexMath(state, key)) {
     TensorInfo<real, unsigned int> keyInfo =
       getTensorInfo<real, THCTensor, unsigned int>(state, key);
     keyInfo.reduceDim(dim);
