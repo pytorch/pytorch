@@ -309,10 +309,10 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
 
   if (flag) {
     THCTensor_kernel_varOuterDim<T, AccT, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
+        tgt->template data<T>(), src->template data<T>(), num_orows, num_irows, row_size);
   } else {
     THCTensor_kernel_varOuterDim<T, AccT, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_orows, num_irows, row_size);
+        tgt->template data<T>(), src->template data<T>(), num_orows, num_irows, row_size);
   }
 
   cudaError errcode = cudaGetLastError();
@@ -450,10 +450,10 @@ __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, Tenso
 
   if (flag) {
     THCTensor_kernel_varInnermostDim<T, AccT, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
+        tgt->template data<T>(), src->template data<T>(), num_rows, row_size);
   } else {
     THCTensor_kernel_varInnermostDim<T, AccT, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-        TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
+        tgt->template data<T>(), src->template data<T>(), num_rows, row_size);
   }
 
   cudaError errcode = cudaGetLastError();
@@ -527,9 +527,9 @@ THC_transformReduceOuterDimIndex(THCState *state,
 
   kernelTransformReduceOuterDimIndex
     <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-      TensorUtils<TensorTypeK>::getData(state, tgt1),
-      TensorUtils<TensorTypeIndex>::getData(state, tgt2),
-      TensorUtils<TensorTypeK>::getData(state, src),
+      tgt1->template data<ScalarTypeK>(),
+      tgt2->template data<ScalarTypeIndex>(),
+      src->template data<ScalarTypeK>(),
       num_orows, num_irows, row_size, init, binary_op);
 
   THCudaCheck(cudaGetLastError());
@@ -624,9 +624,9 @@ THC_transformReduceInnermostDimIndex(THCState *state,
 
   kernelTransformReduceInnermostDimIndex
     <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-      TensorUtils<TensorTypeK>::getData(state, tgt1),
-      TensorUtils<TensorTypeIndex>::getData(state, tgt2),
-      TensorUtils<TensorTypeK>::getData(state, src),
+      tgt1->template data<ScalarTypeK>(),
+      tgt2->template data<ScalarTypeIndex>(),
+      src->template data<ScalarTypeK>(),
       num_rows, row_size, init, binary_op);
 
   THCudaCheck(cudaGetLastError());
