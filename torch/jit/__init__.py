@@ -367,9 +367,9 @@ def _script_graph(fn, _frames_up=0):
     return _jit_script_compile(ast, rcb)
 
 
-def script(fn, _frames_up=0):
+def script(fn, optimize=True, _frames_up=0):
     graph = _script_graph(fn, _frames_up=_frames_up + 1)
-    return functools.wraps(fn)(torch._C.GraphExecutor(graph, True))
+    return functools.wraps(fn)(torch._C.GraphExecutor(graph, optimize))
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))

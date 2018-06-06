@@ -16,6 +16,7 @@
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
@@ -76,6 +77,7 @@ void initJITBindings(PyObject *module) {
      auto tensor_inputs = createVariableTensorList(inputs);
      PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
    })
+   .def("_jit_pass_loop_unrolling", UnrollLoops)
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will
