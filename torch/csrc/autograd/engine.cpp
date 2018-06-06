@@ -289,6 +289,8 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, variab
 }
 
 static bool is_compatible_type(const at::Type& expected, const at::Type& actual) {
+  // Types are compatible if they exactly match or if the gradient is a sparse
+  // version of the expected type.
   return expected == actual || (actual.is_sparse() &&
       expected == actual.toBackend(toDense(actual.backend())));
 }
@@ -306,6 +308,8 @@ static void validate_outputs(const edge_list& edges, const variable_list& grads,
     if (!edge.is_valid()) continue;
 
     const auto& metadata = edge.function->input_metadata(edge.input_nr);
+    std::cout << i << " " << metadata.shape() << " " << metadata.type() << "\n";
+
     const auto& output = grads[i];
     if (!output.defined()) {
       // FIXME: TestJit.test_ge_optimized fails this assertion.

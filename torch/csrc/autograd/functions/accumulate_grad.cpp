@@ -18,7 +18,7 @@ namespace torch { namespace autograd {
 AccumulateGrad::AccumulateGrad(Variable variable_)
     : Function(/*sequence_nr=*/UINT64_MAX)
     , variable(std::move(variable_)) {
-  bump_inputs(variable.type(), variable.sizes());
+  add_input_metadata(variable.type(), variable.sizes());
 }
 
 auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {

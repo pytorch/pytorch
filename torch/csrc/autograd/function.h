@@ -127,16 +127,16 @@ struct Function : std::enable_shared_from_this<Function> {
   // Marker for expected undefined input
   struct undefined_input {};
 
-  /// Increments the number of inputs of the function and returns the previous
-  /// value. Type and shape are the expected properties of the input.
-  uint32_t bump_inputs(const at::Type& type, at::IntList shape) noexcept {
+  /// Adds the type and shape metadata for a new input. Returns the index of
+  /// of the new input.
+  uint32_t add_input_metadata(const at::Type& type, at::IntList shape) noexcept {
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back(type, shape);
     return input_nr;
   }
 
   /// Adds a placeholder for an input that will not be used.
-  uint32_t bump_inputs(undefined_input u) noexcept {
+  uint32_t add_input_metadata(undefined_input u) noexcept {
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back();
     return input_nr;
@@ -370,13 +370,14 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
 /// `input_nr` thus equal to `function->num_inputs()`. Additionally, it
 /// increments the `Function`'s number of inputs by one. Approximately
 /// equivalent to `variable.set_gradient_edge(function,
-/// function->bump_inputs())`. If you don't want the `Function`'s `num_inputs`
-/// to be incremented, use `set_gradient_edge` directly.
+/// function->add_input_metadata(variable.type(), variable.sizes()))`.
+/// If you don't want the `Function`'s `num_inputs` to be incremented, use
+/// `set_gradient_edge` directly.
 inline void create_gradient_edge(
     Variable& variable,
     std::shared_ptr<Function> function) {
   // Copy before move.
-  const auto input_nr = function->bump_inputs(variable.type(), variable.sizes());
+  const auto input_nr = function->add_input_metadata(variable.type(), variable.sizes());
   variable.set_gradient_edge({std::move(function), input_nr});
 }
 

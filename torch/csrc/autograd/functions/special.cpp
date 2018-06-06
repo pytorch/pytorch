@@ -18,7 +18,7 @@ namespace torch { namespace autograd {
 // in next_edges per output).
 struct Replicate : public Function {
   Replicate(const at::Type& type, at::IntList shape) : Function() {
-    bump_inputs(type, shape);
+    add_input_metadata(type, shape);
   }
 
   virtual variable_list apply(const variable_list& inputs) {
@@ -277,7 +277,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
     // perform any allocations until we actually see repeated outputs.
     if (repeated_outputs.count(&output) > 0) {
       auto & replicate = output.grad_fn();
-      auto input_nr = bump_inputs(output.type(), output.sizes());
+      auto input_nr = add_input_metadata(output.type(), output.sizes());
       replicate->add_next_edge({this_shared, input_nr});
     } else {
       autograd::create_gradient_edge(output, this_shared);

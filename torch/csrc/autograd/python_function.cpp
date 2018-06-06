@@ -425,7 +425,7 @@ static void _wrap_outputs(THPFunction *self,
     // to set_history wins.
     auto var = as_variable(obj, i);
     if (cdata) {
-      auto output_nr = cdata->bump_inputs(var.type(), var.sizes());
+      auto output_nr = cdata->add_input_metadata(var.type(), var.sizes());
       TORCH_ASSERT(i == (int)output_nr);
     }
     set_history(var, i, is_input, is_modified, is_differentiable);

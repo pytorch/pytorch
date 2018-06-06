@@ -359,7 +359,7 @@ static void throw_error_out_requires_grad(const char* name) {
 
 static void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && var.defined()) {
-    grad_fn->bump_inputs(var.type(), var.sizes());
+    grad_fn->add_input_metadata(var.type(), var.sizes());
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
@@ -369,10 +369,10 @@ static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> gr
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
-        auto output_nr = grad_fn->bump_inputs(var.type(), var.sizes());
+        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
         const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
       } else {
-        grad_fn->bump_inputs(Function::undefined_input());
+        grad_fn->add_input_metadata(Function::undefined_input());
       }
     }
   }
@@ -383,10 +383,10 @@ static void set_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
-        auto output_nr = grad_fn->bump_inputs(var.type(), var.sizes());
+        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
         const_cast<Variable&>(var).set_gradient_edge({grad_fn, output_nr});
       } else {
-        grad_fn->bump_inputs(Function::undefined_input());
+        grad_fn->add_input_metadata(Function::undefined_input());
       }
     }
   }

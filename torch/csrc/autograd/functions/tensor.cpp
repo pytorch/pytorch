@@ -42,7 +42,7 @@ CopySlices::CopySlices(
       fn(std::move(fn_)) {
   // Take the next_edges of fn as our own, except for index 0 which goes
   // to base instead of the view.
-  bump_inputs(base_var.type(), base_var.sizes());
+  add_input_metadata(base_var.type(), base_var.sizes());
   const auto num_outputs = fn->num_outputs();
   next_edges_.reserve(num_outputs);
   add_next_edge(base_var.gradient_edge());
