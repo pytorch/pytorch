@@ -25,6 +25,7 @@ import sys
 import traceback
 import os
 
+
 # Mac os specific message
 if (sys.platform == 'darwin' and 'leveldb' in C.registered_dbs()):
     print('If you are using homebrew leveldb on a Mac OS, you might see an '
@@ -35,7 +36,7 @@ if (sys.platform == 'darwin' and 'leveldb' in C.registered_dbs()):
 # Convenience redirections to functions inside scope.
 DeviceScope = scope.DeviceScope
 NameScope = scope.NameScope
-
+Tags = scope.Tags
 
 # Bring datatype enums to the main namespace
 class DataType:
@@ -82,7 +83,14 @@ def IsOperatorWithEngine(op_type, engine):
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
-def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None, numa_node_id=None):
+def DeviceOption(
+    device_type,
+    cuda_gpu_id=0,
+    random_seed=None,
+    node_name=None,
+    numa_node_id=None,
+    extra_info=None,
+):
     option = caffe2_pb2.DeviceOption()
     option.device_type = device_type
     option.cuda_gpu_id = cuda_gpu_id
@@ -93,6 +101,11 @@ def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None, n
     if numa_node_id is not None:
         assert device_type == caffe2_pb2.CPU
         option.numa_node_id = numa_node_id
+    if extra_info is not None:
+        # option.extra_info.extend(extra_info)
+        option.extra_info[:] = merge_extra_info(
+            option.extra_info, extra_info
+        )
     return option
 
 
@@ -317,6 +330,45 @@ def _RectifyInputOutput(blobs, net=None):
         )
 
 
+def merge_extra_info(extra_info_1, extra_info_2, separator=":"):
+    """
+    Merges two extra_info inputs into one. Conflicting values will raise value error.
+
+    Arguments:
+        extra_info_1: key:value string list
+        extra_info_2: key:value string list
+        separator: string, separates key and value in each key:value string
+    Returns:
+        merged extra_info: key:value string list, sorted by the key
+
+    """
+    def _convert_extra_info_to_tags(extra_info, separator=":"):
+        try:
+            if extra_info is None:
+                return None
+            else:
+                tags = {
+                    key_value.split(separator, 1)[0]: key_value.split(separator, 1)[1]
+                    for key_value in extra_info
+                }
+                return tags
+        except Exception as err:
+            raise ValueError(
+                "extra_info format error:{} extra_info={}".format(err, extra_info)
+            )
+
+    tags_1 = _convert_extra_info_to_tags(extra_info_1, separator)
+    tags_2 = _convert_extra_info_to_tags(extra_info_2, separator)
+    tags = scope.merge_tags(tags_1, tags_2)
+
+    if tags is None:
+        return None
+    else:
+        return [
+            key + separator + value for key, value in sorted(tags.items())
+        ]
+
+
 def CreateOperator(
     operator_type,
     inputs,
@@ -356,11 +408,23 @@ def CreateOperator(
         operator.device_option.CopyFrom(device_option)
     elif scope.CurrentDeviceScope() is not None:
         operator.device_option.CopyFrom(scope.CurrentDeviceScope())
+
+    # If scope.CurrentTags() is set, merge it into device_option.extra_info
+    if scope.CurrentTags() is not None:
+        extra_info = [
+            key + ":" + value for key, value in sorted(scope.CurrentTags().items())
+        ]
+        if operator.device_option is None:
+            operator.device_option.CopyFrom(DeviceOption(0, extra_info=extra_info))
+        else:
+            operator.device_option.extra_info[:] = merge_extra_info(
+                operator.device_option.extra_info, extra_info
+            )
+
     if engine is not None:
         operator.engine = engine
     # random seed is defined in the device option, so we need to do special
     # care.
-
     if 'random_seed' in kwargs:
         operator.device_option.random_seed = kwargs['random_seed']
         del kwargs['random_seed']

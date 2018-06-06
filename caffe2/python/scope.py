@@ -18,6 +18,16 @@ _NAMESCOPE_SEPARATOR = '/'
 _threadlocal_scope = threading.local()
 
 
+def CurrentTags():
+    """
+    Return the current Tags context
+    """
+    global _threadlocal_scope
+    if not hasattr(_threadlocal_scope, "tags"):
+        _threadlocal_scope.tags = None
+    return _threadlocal_scope.tags
+
+
 def CurrentNameScope():
     global _threadlocal_scope
     if not hasattr(_threadlocal_scope, "namescope"):
@@ -30,6 +40,50 @@ def CurrentDeviceScope():
     if not hasattr(_threadlocal_scope, "devicescope"):
         _threadlocal_scope.devicescope = None
     return _threadlocal_scope.devicescope
+
+
+def merge_tags(old_tags, new_tags):
+    merged_new_tags = {} if new_tags is None else new_tags.copy()
+    if old_tags is not None:
+        for key, value in old_tags.items():
+            if key in merged_new_tags:
+                if value != merged_new_tags[key]:
+                    raise ValueError(
+                        "Tags conflict detected: key {} has"
+                        "old value {}, then gets a new value {}".format(
+                            key, value, merged_new_tags[key]
+                        )
+                    )
+            else:
+                merged_new_tags[key] = value
+    return merged_new_tags
+
+
+@contextlib.contextmanager
+def Tags(new_tags):
+    """
+    Defines the Tags context
+    Arguments:
+        new_tags: dict of string:string, defines the new context of Tags
+
+    return:
+        new Tags context, which merges current Tags context with the new new_tags
+    """
+
+    global _threadlocal_scope
+    if new_tags is None:
+        new_tags={}
+    assert isinstance(
+        new_tags, dict
+    ), "Tags takes in a dict of string:string as its argument."
+    old_tags = CurrentTags()
+
+    merged_new_tags = merge_tags(old_tags, new_tags)
+    _threadlocal_scope.tags = merged_new_tags
+    try:
+        yield
+    finally:
+        _threadlocal_scope.tags = old_tags
 
 
 @contextlib.contextmanager
