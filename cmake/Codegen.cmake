@@ -19,6 +19,10 @@ install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
 
 # ---[ ATen specific
 if (BUILD_ATEN)
+  # Select threadpool at compile time
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DCPU_THREADPOOL_OPENMP")
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DCPU_THREADPOOL_OPENMP")
+
   # SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
   # so we need to set these commands here rather than in src/TH
   IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
