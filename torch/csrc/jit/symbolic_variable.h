@@ -65,37 +65,37 @@ struct SymbolicVariable {
   }
   SymbolicVariable operator>(at::Scalar rhs) const {
     Node * n;
-    auto r = create(aten::gt, {*this}, 1, &n)[0].typeLike(*this);
+    auto r = create(aten::gt, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
     n->t_(attr::other, rhs.toTensor());
     return r;
   }
   SymbolicVariable operator<(at::Scalar rhs) const {
     Node * n;
-    auto r = create(aten::lt, {*this}, 1, &n)[0].typeLike(*this);
+    auto r = create(aten::lt, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
     n->t_(attr::other, rhs.toTensor());
     return r;
   }
   SymbolicVariable operator>=(at::Scalar rhs) const {
     Node * n;
-    auto r = create(aten::ge, {*this}, 1, &n)[0].typeLike(*this);
+    auto r = create(aten::ge, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
     n->t_(attr::other, rhs.toTensor());
     return r;
   }
   SymbolicVariable operator<=(at::Scalar rhs) const {
     Node * n;
-    auto r = create(aten::le, {*this}, 1, &n)[0].typeLike(*this);
+    auto r = create(aten::le, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
     n->t_(attr::other, rhs.toTensor());
     return r;
   }
   SymbolicVariable operator==(at::Scalar rhs) const {
     Node * n;
-    auto r = create(aten::eq, {*this}, 1, &n)[0].typeLike(*this);
+    auto r = create(aten::eq, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
     n->t_(attr::other, rhs.toTensor());
     return r;
   }
   SymbolicVariable operator!=(at::Scalar rhs) const {
     Node * n;
-    auto r = create(aten::ne, {*this}, 1, &n)[0].typeLike(*this);
+    auto r = create(aten::ne, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
     n->t_(attr::other, rhs.toTensor());
     return r;
   }
@@ -202,6 +202,13 @@ private:
   SymbolicVariable typeLike(SymbolicVariable other) {
     if (auto other_type = other.v->type()->cast<TensorType>())
       v->setType(other_type->contiguous());
+    return *this;
+  }
+  SymbolicVariable typeLikeWithScalarType(SymbolicVariable other, at::ScalarType type) {
+    if (auto other_type = other.v->type()->cast<TensorType>()){
+      auto new_type = other_type->toScalarType(type)->cast<TensorType>()->contiguous();
+      v->setType(new_type);
+    }
     return *this;
   }
   static Symbol a(const char * s_) {

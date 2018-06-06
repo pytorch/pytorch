@@ -137,6 +137,13 @@ struct TensorType : public Type {
     t->strides_ = TensorType::contiguousStridesOf(sizes_);
     return t;
   }
+
+  TypePtr toScalarType(at::ScalarType type){
+    auto t = std::make_shared<TensorType>(*this);
+    t->scalar_type_ = type;
+    return t;
+  }
+
   virtual bool operator==(const Type& rhs) const override {
     if(rhs.kind() != kind())
       return false;
