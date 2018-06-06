@@ -3900,6 +3900,9 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_signal_window_functions(self, device='cpu'):
+        if not TEST_SCIPY:
+            raise unittest.SkipTest('Scipy not found')
+
         def test(name):
             torch_method = getattr(torch, name + '_window')
             for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
@@ -3917,7 +3920,6 @@ class TestTorch(TestCase):
         for window in ['hann', 'hamming', 'bartlett', 'blackman']:
             test(window)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_signal_window_functions(self):
         self._test_signal_window_functions(self)
 
