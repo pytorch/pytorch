@@ -8,7 +8,7 @@ namespace caffe2 {
 
 template <>
 template <>
-bool TanhFunctor<CPUContext>::operator()(
+bool TanhFunctor<CPUContext>::operator()<float>(
     const int N,
     const float* X,
     float* Y,
