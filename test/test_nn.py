@@ -6288,7 +6288,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6297,7 +6296,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6306,7 +6304,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine_simple_average',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6315,7 +6312,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6324,7 +6320,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6333,7 +6328,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input_not_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6341,7 +6335,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6350,7 +6343,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_simple_average',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6359,7 +6351,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6368,7 +6359,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6377,7 +6367,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6385,7 +6374,6 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6394,7 +6382,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_simple_average',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6403,7 +6390,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6412,7 +6398,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6421,7 +6406,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -6429,7 +6413,6 @@ new_module_tests = [
         input_size=(4, 3, 15),
         cudnn=True,
         check_eval=True,
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -6438,7 +6421,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -6446,7 +6428,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -6455,7 +6436,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -6463,7 +6443,6 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -6472,7 +6451,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6481,7 +6459,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_elementwise_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6490,7 +6467,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_elementwise_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6499,7 +6475,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_elementwise_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6508,7 +6483,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6517,7 +6491,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6526,7 +6499,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNorm
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6535,7 +6507,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6544,7 +6515,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6553,7 +6523,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6562,7 +6531,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='Conv1d',
