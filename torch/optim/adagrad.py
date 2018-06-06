@@ -14,12 +14,13 @@ class Adagrad(Optimizer):
         lr (float, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        eps (float, optional): term to add to improve numerical stability (default: 1e-10)
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
     """
 
-    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0):
+    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0, eps=1e-10):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= lr_decay:
@@ -28,9 +29,11 @@ class Adagrad(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if not 0.0 <= initial_accumulator_value:
             raise ValueError("Invalid initial_accumulator_value value: {}".format(initial_accumulator_value))
+        if not 0.0 <= eps:
+            raise ValueError("Invalid epsilon value: {}".format(eps))
 
         defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay,
-                        initial_accumulator_value=initial_accumulator_value)
+                        initial_accumulator_value=initial_accumulator_value, eps=eps)
         super(Adagrad, self).__init__(params, defaults)
 
         for group in self.param_groups:
@@ -38,6 +41,12 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state['step'] = 0
                 state['sum'] = torch.full_like(p.data, initial_accumulator_value)
+
+    def __setstate__(self, state):
+        super(Adagrad, self).__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('lr', 1e-2)
+            group.setdefault('eps', 1e-2)
 
     def share_memory(self):
         for group in self.param_groups:
@@ -63,6 +72,7 @@ class Adagrad(Optimizer):
 
                 grad = p.grad.data
                 state = self.state[p]
+                eps = group['eps']
 
                 state['step'] += 1
 
@@ -86,11 +96,11 @@ class Adagrad(Optimizer):
                         return constructor(grad_indices, values, size)
                     state['sum'].add_(make_sparse(grad_values.pow(2)))
                     std = state['sum']._sparse_mask(grad)
-                    std_values = std._values().sqrt_().add_(1e-10)
+                    std_values = std._values().sqrt_().add_(eps)
                     p.data.add_(-clr, make_sparse(grad_values / std_values))
                 else:
                     state['sum'].addcmul_(1, grad, grad)
-                    std = state['sum'].sqrt().add_(1e-10)
+                    std = state['sum'].sqrt().add_(eps)
                     p.data.addcdiv_(-clr, grad, std)
 
         return loss
