@@ -20,14 +20,14 @@ class IDEEPSumOp final : public IDEEPOperator {
 
     } else {
       vector<itensor> inputs;
-      vector<float> scales(InputSize(), 1.0);
-      const auto dims = Input(0).get_dims();
+      const vector<float> scales(InputSize(), 1.0);
+      const auto dims = X.get_dims();
       for (int i = 0; i < InputSize(); ++i) {
         if (Input(i).get_dims() != dims) {
           CAFFE_ENFORCE_EQ(
               dims,
               Input(i).get_dims(),
-              "Broadcast is not yet supported with MKLDNN.");
+              "Broadcast is not yet supported with IDEEP.");
         }
         inputs.emplace_back(Input(i));
       }
