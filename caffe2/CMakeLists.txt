@@ -251,7 +251,15 @@ endif()
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
   HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
-  HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS} ${Caffe2_GPU_SRCS})
+
+  # Set necessary HIPCC Flags
+  SET(HIP_HCC_FLAGS "-DAT_MIOPEN_ENABLED=1 -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
+  SET(Caffe2_HIP_CXX_FLAGS "-DAT_MIOPEN_ENABLED=1 -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${Caffe2_HIP_CXX_FLAGS}")
+
+  # Since the HIP_ADD_LIBRARY is a MACRO, we need to set HIP_HCC_FLAGS prior to calling it.
+  # Also, Since HIP_INCLUDE_DIRECTORIES is a MACRO, we must call it before HIP_ADD_LIBRARY.
+  HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
+
   set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
 
   target_include_directories(
