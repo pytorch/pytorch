@@ -359,35 +359,35 @@ static void throw_error_out_requires_grad(const char* name) {
 
 static void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && var.defined()) {
-    grad_fn->set_num_inputs(1);
+    grad_fn->add_input_metadata(var.type(), var.sizes());
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
 
 static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->set_num_inputs(vars.size());
-    uint32_t output_nr = 0;
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
+        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
         const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
+      } else {
+        grad_fn->add_input_metadata(Function::undefined_input());
       }
-      output_nr++;
     }
   }
 }
 
 static void set_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->set_num_inputs(vars.size());
-    uint32_t output_nr = 0;
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
+        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
         const_cast<Variable&>(var).set_gradient_edge({grad_fn, output_nr});
+      } else {
+        grad_fn->add_input_metadata(Function::undefined_input());
       }
-      output_nr++;
     }
   }
 }
@@ -428,7 +428,6 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->set_num_inputs(1);
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }

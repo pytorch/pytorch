@@ -18,7 +18,7 @@ FUNCTION_DECLARATION = CodeTemplate("""\
 struct ${op} : public ${superclass} {
   using ${superclass}::${superclass};
   variable_list apply(const variable_list& grads) override;
-  std::string name() override { return "${op}"; }
+  std::string name() const override { return "${op}"; }
   void release_variables() override {
     ${release_variables}
   }
