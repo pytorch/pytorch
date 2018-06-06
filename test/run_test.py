@@ -35,7 +35,6 @@ TESTS = [
 ]
 
 WINDOWS_BLACKLIST = [
-    'c10d',
     'distributed',
 ]
 
