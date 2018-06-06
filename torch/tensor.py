@@ -260,6 +260,13 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).btrifact(pivot=pivot)
 
+    def stft(self, n_fft, hop_length=None, win_length=None, window=None,
+             center=True, pad_mode='reflect', normalized=False, onesided=True):
+        r"""See :func:`torch.stft`
+        """
+        return torch.stft(self, n_fft, hop_length, win_length, window, center,
+                          pad_mode, normalized, onesided)
+
     def resize(self, *sizes):
         warnings.warn("non-inplace resize is deprecated")
         from torch.autograd._functions import Resize

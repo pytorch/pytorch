@@ -20,8 +20,8 @@ from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
-    run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, \
-    PY3, NO_MULTIPROCESSING_SPAWN, skipIfNoZeroSize
+    TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
+    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfNoZeroSize
 from multiprocessing.reduction import ForkingPickler
 
 if TEST_NUMPY:
@@ -29,6 +29,9 @@ if TEST_NUMPY:
 
 if TEST_SCIPY:
     from scipy import signal
+
+if TEST_LIBROSA:
+    import librosa
 
 SIZE = 100
 
@@ -4447,100 +4450,61 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_stft(self, device='cpu'):
-        def naive_stft(x, frame_length, hop, fft_size=None, normalized=False,
-                       onesided=True, window=None, pad_end=0):
-            if fft_size is None:
-                fft_size = frame_length
-            x = x.clone()
+        if not TEST_LIBROSA:
+            raise unittest.SkipTest('librosa not found')
+
+        def librosa_stft(x, n_fft, hop_length, win_length, window, center):
             if window is None:
-                window = x.new_ones(frame_length)
+                window = np.ones(n_fft if win_length is None else win_length)
             else:
-                window = window.clone()
+                window = window.cpu().numpy()
             input_1d = x.dim() == 1
             if input_1d:
                 x = x.view(1, -1)
-            batch = x.size(0)
-            if pad_end > 0:
-                x_pad = x.new(batch, pad_end).fill_(0)
-                x = torch.cat([x, x_pad], 1)
-            length = x.size(1)
-            if TEST_NUMPY and TEST_SCIPY:
-                sp_result = signal.stft(
-                    x,
-                    nperseg=frame_length,
-                    noverlap=frame_length - hop,
-                    window=window,
-                    nfft=fft_size,
-                    return_onesided=onesided,
-                    boundary=None,
-                    padded=False,
-                )[2].transpose((0, 2, 1)) * np.abs(window.sum().item())
-                result = torch.Tensor(np.stack([sp_result.real, sp_result.imag], -1))
-            else:
-                if onesided:
-                    return_size = int(fft_size / 2) + 1
-                else:
-                    return_size = fft_size
-                result = x.new(batch, int((length - frame_length) / float(hop)) + 1, return_size, 2)
-                for w in range(return_size):  # freq
-                    radians = torch.arange(float(frame_length)) * w * 2 * math.pi / fft_size
-                    radians = radians.type_as(x)
-                    re_kernel = radians.cos().mul_(window)
-                    im_kernel = -radians.sin().mul_(window)
-                    for b in range(batch):
-                        for i, t in enumerate(range(0, length - frame_length + 1, hop)):
-                            seg = x[b, t:(t + frame_length)]
-                            re = seg.dot(re_kernel)
-                            im = seg.dot(im_kernel)
-                            result[b, i, w, 0] = re
-                            result[b, i, w, 1] = im
-            if normalized:
-                result /= frame_length ** 0.5
+            result = []
+            for xi in x:
+                ri = librosa.stft(xi.cpu().numpy(), n_fft, hop_length, win_length, window, center=center).T
+                result.append(torch.from_numpy(np.stack([ri.real, ri.imag], -1)))
+            result = torch.stack(result, 0)
             if input_1d:
                 result = result[0]
             return result
 
-        def _test(sizes, frame_length, hop, fft_size=None, normalized=False,
-                  onesided=True, window_sizes=None, pad_end=0, expected_error=None):
+        def _test(sizes, n_fft, hop_length=None, win_length=None, win_sizes=None,
+                  center=True, expected_error=None):
             x = torch.randn(*sizes, device=device)
-            if window_sizes is not None:
-                window = torch.randn(*window_sizes, device=device)
+            if win_sizes is not None:
+                window = torch.randn(*win_sizes, device=device)
             else:
                 window = None
             if expected_error is None:
-                result = x.stft(frame_length, hop, fft_size, normalized, onesided, window, pad_end)
-                ref_result = naive_stft(x, frame_length, hop, fft_size, normalized, onesided, window, pad_end)
-                self.assertEqual(result, ref_result, 7e-6, 'stft result')
+                result = x.stft(n_fft, hop_length, win_length, window, center=center)
+                ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
+                self.assertEqual(result, ref_result, 7e-6, 'stft comparison against librosa')
             else:
                 self.assertRaises(expected_error,
-                                  lambda: x.stft(frame_length, hop, fft_size, normalized, onesided, window, pad_end))
+                                  lambda: x.stft(n_fft, hop_length, win_length, window, center=center))
 
-        for normalized, onesided in product([True, False], repeat=2):
-            for pad_end in [0, 3]:
-                kwargs = dict(normalized=normalized, onesided=onesided, pad_end=pad_end)
+        for center in [True, False]:
+            _test((10,), 7, center=center)
+            _test((10, 4000), 1024, center=center)
 
-                _test((2, 5), 4, 2, **kwargs)
-                _test((4, 150), 90, 45, **kwargs)
-                _test((10,), 7, 2, **kwargs)
-                _test((10, 4000), 1024, 512, **kwargs)
+            _test((10,), 7, 2, center=center)
+            _test((10, 4000), 1024, 512, center=center)
 
-                _test((2, 5), 4, 2, window_sizes=(4,), **kwargs)
-                _test((4, 150), 90, 45, window_sizes=(90,), **kwargs)
-                _test((10,), 7, 2, window_sizes=(7,), **kwargs)
-                _test((10, 4000), 1024, 512, window_sizes=(1024,), **kwargs)
+            _test((10,), 7, 2, win_sizes=(7,), center=center)
+            _test((10, 4000), 1024, 512, win_sizes=(1024,), center=center)
 
-                _test((2, 5), 4, 2, fft_size=5, window_sizes=(4,), **kwargs)
-                _test((4, 150), 90, 45, fft_size=100, window_sizes=(90,), **kwargs)
-                _test((10,), 7, 2, fft_size=33, window_sizes=(7,), **kwargs)
-                _test((10, 4000), 1024, 512, fft_size=1500, window_sizes=(1024,), **kwargs)
+            # spectral oversample
+            _test((10,), 7, 2, win_length=5, center=center)
+            _test((10, 4000), 1024, 512, win_length=100, center=center)
 
         _test((10, 4, 2), 1, 1, expected_error=RuntimeError)
-        _test((10,), 11, 1, expected_error=RuntimeError)
-        _test((10,), 0, 1, pad_end=4, expected_error=RuntimeError)
-        _test((10,), 15, 1, pad_end=4, expected_error=RuntimeError)
-        _test((10,), 5, -4, expected_error=RuntimeError)
-        _test((10,), 5, 4, window_sizes=(11,), expected_error=RuntimeError)
-        _test((10,), 5, 4, window_sizes=(1, 1), expected_error=RuntimeError)
+        _test((10,), 11, 1, center=False, expected_error=RuntimeError)
+        _test((10,), -1, 1, expected_error=RuntimeError)
+        _test((10,), 3, win_length=5, expected_error=RuntimeError)
+        _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
+        _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
     def test_stft(self):
         self._test_stft(self)

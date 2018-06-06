@@ -1250,9 +1250,10 @@
 - func: stack_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
-- func: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool normalized=false, bool onesided=true, Tensor? window={}, int64_t pad_end=0) -> Tensor
+- func: stft(Tensor self, int64_t n_fft, int64_t hop_length, int64_t win_length, Tensor? window={}, bool normalized=false, bool onesided=true) -> Tensor
   python_default_init:
-    fft_size: frame_length
+    hop_length: n_fft >> 2
+    win_length: n_fft
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
   device_guard: false

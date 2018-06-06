@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from operator import mul
 from functools import reduce
 import math
@@ -10,6 +11,7 @@ __all__ = [
     'btriunpack',
     'isnan',
     'split',
+    'stft',
     'unique',
 ]
 
@@ -133,6 +135,67 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         P = None
 
     return P, L, U
+
+
+def stft(input, n_fft, hop_length=None, win_length=None, window=None,
+         center=True, pad_mode='reflect', normalized=False, onesided=True):
+    r"""Short-time Fourier transform (STFT).
+
+    Ignoring the batch dimension, this method computes the following expression:
+
+    .. math::
+        X[m, \omega] = \sum_{k = 0}^{\text{win_length}}%
+                            window[k]\ input[m \times hop_length + k]\ %
+                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win_length}}},
+
+    where :math:`m` is the index of the sliding window, and :math:`\omega` is
+    the frequency that :math:`0 \leq \omega <` :attr:`n_fft`. When
+    :attr:`onesided` is the default value ``True``, only values for
+    :math:`\omega` in range :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n_fft}}{2} \right\rfloor + 1\right]`
+    are returned because the real-to-complex transform satisfies the Hermitian
+    symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n_fft} - \omega]^*`.
+
+    The :attr:`input` tensor must be 1-D sequence :math:`(T)` or 2-D a batch of
+    sequences :math:`(N \times T)`. If :attr:`win_length` is ``None``, it is
+    default to same value as :attr:`n_fft`. :attr:`window` can be a
+    1-D tensor of size :attr:`win_length`, e.g., see
+    :meth:`torch.hann_window`. If :attr:`window` is the default value ``None``,
+    it is treated as if having :math:`1` everywhere in the frame.
+    :attr:`pad_end` indicates the amount of zero padding at the end of
+    :attr:`input` before STFT. If :attr:`normalized` is set to ``True``, the
+    function returns the normalized STFT results, i.e., multiplied by
+    :math:`(frame\_length)^{-0.5}`.
+
+    Returns the real and the imaginary parts together as one tensor of size
+    :math:`(* \times N \times 2)`, where :math:`*` is the shape of input :attr:`input`,
+    :math:`N` is the number of :math:`\omega` s considered depending on
+    :attr:`n_fft` and :attr:`return_onesided`, and each pair in the last
+    dimension represents a complex number as real part and imaginary part.
+
+    Arguments:
+        input (Tensor): the input tensor
+        win_length (int): the size of window frame and STFT filter
+        hop_length (int): the distance between neighboring sliding window frames
+        n_fft (int, optional): size of Fourier transform. Default: ``None``
+        normalized (bool, optional): controls whether to return the normalized STFT results
+             Default: ``False``
+        onesided (bool, optional): controls whether to return half of results to
+            avoid redundancy Default: ``True``
+        window (Tensor, optional): the optional window function. Default: ``None``
+        pad_end (int, optional): implicit zero padding at the end of :attr:`input`. Default: 0
+
+    Returns:
+        Tensor: A tensor containing the STFT result
+    """
+    # TODO: after having proper ways to map Python strings to ATen Enum, move
+    #       this and F.pad to ATen.
+    if center:
+        signal_dim = input.dim()
+        extended_shape = [1] * (3 - signal_dim) + list(input.size())
+        pad = int(n_fft // 2)
+        input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
+        input = input.view(input.shape[-signal_dim:])
+    return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
 def isnan(tensor):
