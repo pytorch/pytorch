@@ -2,20 +2,9 @@
 #define TH_GENERIC_FILE "generic/THTensor.hpp"
 #else
 
-typedef struct THTensor
-{
-    int64_t *size;
-    int64_t *stride;
-    int nDimension;
-
-    // Note: storage->size may be greater than the recorded size
-    // of a tensor
-    THStorage *storage;
-    ptrdiff_t storageOffset;
-    std::atomic<int> refcount;
-
-    char flag;
-
+// This allows one to write generic functions (i.e. functions that work across all THRealTensor types)
+// without having to explicitly cast the THRealTensor.
+typedef struct THTensor : _THTensor {
 } THTensor;
 
 #endif
