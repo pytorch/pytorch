@@ -5,6 +5,7 @@
 #include "cudnn-wrapper.h"
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
+#include "ATen/cuda/ATenCUDAGeneral.h"
 #include <cuda.h>
 
 #if CUDNN_VERSION < 7000
@@ -129,7 +130,7 @@ private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
 };
 
-class TensorDescriptor
+class AT_CUDA_API TensorDescriptor
   : public Descriptor<cudnnTensorStruct,
                       &cudnnCreateTensorDescriptor,
                       &cudnnDestroyTensorDescriptor>
