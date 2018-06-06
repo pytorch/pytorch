@@ -386,12 +386,13 @@ def emit_schema(jit_decls, out):
     def emit(decl):
         arguments = [a for a in decl['arguments'] if a['simple_type'] not in default_only_types]
         n = get_name(decl['name'])
+        n_args = len(arguments)
+        n_returns = len(decl['returns'])
+        env['arguments'].append('// Arguments for {} ({} args, {} returns)'.format(decl['name'], n_args, n_returns))
         for a in arguments:
             emit_arg(a, False)
         for a in decl['returns']:
             emit_arg(a, True)
-        n_args = len(arguments)
-        n_returns = len(decl['returns'])
         env['operators'].append('{{ {}, {}, {} }}, // FunctionSchema("{}", <{} arguments>, <{} returns>) '.format(
             n, n_args, n_returns, decl['name'], n_args, n_returns))
 
