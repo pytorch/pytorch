@@ -1653,6 +1653,41 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
 
+    def test_randperm_cuda(self):
+        cuda = torch.device('cuda:0')
+
+        # For small inputs, randperm is offloaded to CPU instead
+        with torch.random.fork_rng(devices=[0]):
+            res1 = torch.randperm(100, device=cuda)
+        res2 = torch.cuda.LongTensor()
+        torch.randperm(100, out=res2, device=cuda)
+        self.assertEqual(res1, res2, 0)
+
+        with torch.random.fork_rng(devices=[0]):
+            res1 = torch.randperm(100000, device=cuda)
+        res2 = torch.cuda.LongTensor()
+        torch.randperm(100000, out=res2, device=cuda)
+        self.assertEqual(res1, res2, 0)
+
+        with torch.random.fork_rng(devices=[0]):
+            res1 = torch.randperm(100, dtype=torch.half, device=cuda)
+        res2 = torch.cuda.HalfTensor()
+        torch.randperm(100, out=res2, device=cuda)
+        self.assertEqual(res1, res2, 0)
+
+        with torch.random.fork_rng(devices=[0]):
+            res1 = torch.randperm(50000, dtype=torch.half, device=cuda)
+        res2 = torch.cuda.HalfTensor()
+        torch.randperm(50000, out=res2, device=cuda)
+        self.assertEqual(res1, res2, 0)
+
+        # randperm of 0 elements is an empty tensor
+        res1 = torch.randperm(0, device=cuda)
+        res2 = torch.cuda.LongTensor(5)
+        torch.randperm(0, out=res2, device=cuda)
+        self.assertEqual(res1.numel(), 0)
+        self.assertEqual(res2.numel(), 0)
+
     def test_random_neg_values(self):
         TestTorch._test_random_neg_values(self, use_cuda=True)
 
