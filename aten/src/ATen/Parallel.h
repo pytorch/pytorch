@@ -33,13 +33,9 @@ void parallel_for(
     F f) {
   internal::init_tbb_num_threads();
 
-#ifdef __PPC64__
   using default_partitioner_type = tbb::simple_partitioner;
-#else
-  using default_partitioner_type = tbb::affinity_partitioner;
-#endif
 
-  thread_local static default_partitioner_type ap;
+  default_partitioner_type ap;
 
   if ((end - begin) < grain_size) {
     f(begin, end);
@@ -61,13 +57,9 @@ inline scalar_t parallel_reduce(
     SF sf) {
   internal::init_tbb_num_threads();
 
-#ifdef __PPC64__
   using default_partitioner_type = tbb::simple_partitioner;
-#else
-  using default_partitioner_type = tbb::affinity_partitioner;
-#endif
 
-  thread_local static default_partitioner_type ap;
+  default_partitioner_type ap;
 
   if ((end - begin) < grain_size) {
     return f(begin, end, ident);
