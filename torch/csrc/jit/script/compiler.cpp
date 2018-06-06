@@ -290,20 +290,6 @@ static bool isTensorSubtype(Value* v) {
   return v->type()->isSubtypeOf(*DynamicType::get());
 }
 
-// if a value is a constant then try to turn into type T using the
-// same rules as the interpreter
-template<typename T>
-at::optional<T> constant_as(Value* v) {
-  if(v->node()->kind() != prim::Constant)
-    return at::nullopt;
-  auto tensor = v->node()->t(attr::value);
-  try {
-    return tensor_as<T>(std::move(tensor));
-  } catch (tensor_conversion_error& err) {
-    return at::nullopt;
-  }
-}
-
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<at::IntList>(input);
   if(list)
