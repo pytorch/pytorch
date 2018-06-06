@@ -49,6 +49,14 @@ set(C10D_SRCS
   )
 
 add_library(c10d ${C10D_SRCS})
+target_compile_options(c10d PUBLIC
+  -Wall
+  -Wextra
+  -Wno-unused-parameter
+  -Wno-missing-field-initializers
+  -Wno-write-strings
+  -Wno-unknown-pragmas
+  )
 target_link_libraries(c10d PUBLIC caffe2_gpu)
 
 # c10d links to Caffe2/ATen, but the targets don't add TH/THC to the include path
