@@ -187,7 +187,8 @@ class TestCase(unittest.TestCase):
         # Wraps the tested method if we should do CUDA memory check.
         test_method = getattr(self, method_name)
         self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
-        if self._do_cuda_memory_leak_check:
+        # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
+        if self._do_cuda_memory_leak_check and not IS_WINDOWS:
             # the import below may initialize CUDA context, so we do it only if
             # self._do_cuda_memory_leak_check is True.
             from common_cuda import TEST_CUDA
