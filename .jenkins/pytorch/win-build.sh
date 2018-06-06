@@ -33,11 +33,6 @@ cat >ci_scripts/build_pytorch.bat <<EOL
 
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
-:: Install MKL
-if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/mkl_2018.2.185_no_tbb.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl )
-set CMAKE_INCLUDE_PATH=%cd%\\mkl\\include
-set LIB=%cd%\\mkl\\lib;%LIB
-
 :: Install MAGMA
 if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet && 7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma )
 set MAGMA_HOME=%cd%\\magma
@@ -61,7 +56,7 @@ if "%REBUILD%"=="" (
   .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
 )
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
-if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 tbb)
+if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 mkl mkl-include)
 
 :: Install ninja
 if "%REBUILD%"=="" ( pip install ninja )
