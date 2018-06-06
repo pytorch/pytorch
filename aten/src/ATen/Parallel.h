@@ -33,17 +33,13 @@ void parallel_for(
     F f) {
   internal::init_tbb_num_threads();
 
-  using default_partitioner_type = tbb::simple_partitioner;
-
-  default_partitioner_type ap;
-
   if ((end - begin) < grain_size) {
     f(begin, end);
   } else {
     tbb::parallel_for(
         tbb::blocked_range<int64_t>(begin, end, grain_size),
         [f](const tbb::blocked_range<int64_t>& r) { f(r.begin(), r.end()); },
-        ap);
+        tbb::simple_partitioner());
   }
 }
 
@@ -57,10 +53,6 @@ inline scalar_t parallel_reduce(
     SF sf) {
   internal::init_tbb_num_threads();
 
-  using default_partitioner_type = tbb::simple_partitioner;
-
-  default_partitioner_type ap;
-
   if ((end - begin) < grain_size) {
     return f(begin, end, ident);
   }
@@ -71,7 +63,7 @@ inline scalar_t parallel_reduce(
         return f(r.begin(), r.end(), init);
       },
       sf,
-      ap);
+      tbb::simple_partitioner());
 }
 
 } // namespace at
