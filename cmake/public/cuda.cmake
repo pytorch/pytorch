@@ -331,7 +331,7 @@ if ((NOT EXISTS ${TORCH_CUDA_ARCH_LIST}) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST})
       "pytorch.")
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
 endif()
-if (EXISTS {CUDA_ARCH_NAME})
+if (EXISTS ${CUDA_ARCH_NAME})
   message(WARNING
       "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
       "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
