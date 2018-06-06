@@ -85,6 +85,11 @@ void PerfNetObserver::Stop() {
 
       p.latency = static_cast<const PerfOperatorObserver*>(observerMap_[op])
                       ->getMilliseconds();
+#ifndef CAFFE2_IOS
+      auto cost = static_cast<const PerfOperatorObserver*>(observerMap_[op])
+                      ->getAnalyticalCost();
+      p.flops = cost.flops;
+#endif // CAFFE2_MOBILE
 
       p.engine = op->engine();
       p.type = op->type();
