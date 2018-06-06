@@ -5,8 +5,9 @@
 #include <assert.h>
 #include "THCGeneral.h"
 #include "THCHalf.h"
-#include "THCTensor.h"
+#include "THCTensor.hpp"
 #include "THCTensorInfo.cuh"
+#include "THCTensor.hpp"
 
 /// A utility for accessing THCuda*Tensor types in a generic manner
 
@@ -39,42 +40,11 @@ struct TensorUtils {
                                                                         \
     static TENSOR_TYPE* newTensor(THCState* state);                     \
     static TENSOR_TYPE* newContiguous(THCState* state, TENSOR_TYPE* t); \
-    static THLongStorage* newSizeOf(THCState* state, TENSOR_TYPE* t);   \
-    static void retain(THCState* state, TENSOR_TYPE* t);                \
-    static void free(THCState* state, TENSOR_TYPE* t);                  \
     static void freeCopyTo(THCState* state, TENSOR_TYPE* src,           \
                            TENSOR_TYPE* dst);                           \
-    static void resize(THCState* state, TENSOR_TYPE* out,               \
-                       THLongStorage* sizes,                            \
-                       THLongStorage* strides);                         \
-    static void resizeAs(THCState* state, TENSOR_TYPE* dst,             \
-                         TENSOR_TYPE* src);                             \
-    static void squeeze1d(THCState *state, TENSOR_TYPE *dst,            \
-                          TENSOR_TYPE *src, int dimension);             \
-    static void unsqueeze1d(THCState *state, TENSOR_TYPE *dst,          \
-                          TENSOR_TYPE *src, int dimension);             \
-    static void preserveReduceDimSemantics(                             \
-                          THCState *state, TENSOR_TYPE *tensor,         \
-                          int in_dims, int64_t dimension, int keepdim); \
     static DATA_TYPE* getData(THCState* state, TENSOR_TYPE* t);         \
-    static ptrdiff_t getNumElements(THCState* state, TENSOR_TYPE* t);   \
-    static int64_t getSize(THCState* state, TENSOR_TYPE* t, int dim);   \
-    static int64_t getStride(THCState* state, TENSOR_TYPE* t, int dim); \
-    static int getDims(THCState* state, TENSOR_TYPE* t);                \
-    static bool isContiguous(THCState* state, TENSOR_TYPE* t);          \
-    static bool allContiguous(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
-    static int getDevice(THCState* state, TENSOR_TYPE* t);              \
-    static bool allSameDevice(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
     static void copyIgnoringOverlaps(THCState* state,                   \
                                      TENSOR_TYPE* dst, TENSOR_TYPE* src); \
-    /* Returns false if there is no possibility that the tensor    */   \
-    /* has more than one index that references the same datapoint, */   \
-    /* true otherwise.                                             */   \
-    static bool maybeOverlappingIndices(THCState* state, TENSOR_TYPE* t);    \
-    /* Can we use 32 bit math for indexing? */                          \
-    static bool canUse32BitIndexMath(THCState* state, TENSOR_TYPE* t, ptrdiff_t max_elem=INT32_MAX);  \
-    /* Are all tensors 32-bit indexable? */                             \
-    static bool all32BitIndexable(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
   }
 
 TENSOR_UTILS(THCudaByteTensor, uint8_t, int64_t);
@@ -124,10 +94,10 @@ getTensorInfo(THCState* state, TensorType* t) {
   IndexType sz[MAX_CUTORCH_DIMS];
   IndexType st[MAX_CUTORCH_DIMS];
 
-  int dims = TensorUtils<TensorType>::getDims(state, t);
+  int dims = THCTensor_nDimension(state, t);
   for (int i = 0; i < dims; ++i) {
-    sz[i] = TensorUtils<TensorType>::getSize(state, t, i);
-    st[i] = TensorUtils<TensorType>::getStride(state, t, i);
+    sz[i] = THCTensor_size(state, t, i);
+    st[i] = THCTensor_stride(state, t, i);
   }
 
   return TensorInfo<ScalarType, IndexType>(

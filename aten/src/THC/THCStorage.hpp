@@ -47,6 +47,8 @@ THC_API THCStorage* THCStorage_newWithAllocator(THCState *state,
                                         THCDeviceAllocator* allocator,
                                         void* allocatorContext);
 
+THC_API void THCStorage_retain(THCState *state, THCStorage *storage);
+
 // This exists to have a data-type independent way of freeing (necessary for THPPointer).
 THC_API void THCStorage_free(THCState *state, THCStorage *self);
 

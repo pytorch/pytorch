@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "generic/SmoothL1Criterion.cu"
 #else
 
-#include "THCApply.cuh"
-
 void THNN_(SmoothL1Criterion_updateOutput)(
            THCState *state,
            THCTensor *input,
