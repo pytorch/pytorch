@@ -73,6 +73,8 @@ set(C10D_SRCS
   )
 
 add_library(c10d ${C10D_SRCS})
+set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET c10d PROPERTY CXX_STANDARD 11)
 target_compile_options(c10d PUBLIC
   -Wall
   -Wextra
@@ -117,6 +119,8 @@ if(MPI_FOUND)
     ProcessGroupMPI.cpp
   )
   add_library(c10d_mpi ${C10D_MPI_SRCS})
+  set_property(TARGET c10d_mpi PROPERTY POSITION_INDEPENDENT_CODE ON)
+  set_property(TARGET c10d_mpi PROPERTY CXX_STANDARD 11)
   target_include_directories(c10d_mpi PUBLIC ${MPI_INCLUDE_PATH})
   target_link_libraries(c10d_mpi PUBLIC c10d ${MPI_LIBRARIES})
   copy_header(ProcessGroupMPI.hpp)
