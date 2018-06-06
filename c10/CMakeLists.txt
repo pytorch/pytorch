@@ -1,4 +1,4 @@
-project(c10 LANGUAGES CXX)
+project(c10 CXX C)
 
 set(LIB_SOURCES
         dummy.cpp
@@ -8,7 +8,7 @@ set(TEST_SOURCES
         dummy_test.cpp
 )
 
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "MSVC")
+if(MSVC)
   # TODO Also add some warning options that MSVC can understand
   set(WARNING_OPTIONS "")
 else()
@@ -36,7 +36,7 @@ else()
         -Wundef
         -Werror
         )
-endif(WIN32)
+endif()
 
 add_library(${PROJECT_NAME} OBJECT ${LIB_SOURCES})
 target_compile_options(${PROJECT_NAME} PRIVATE ${WARNING_OPTIONS})
@@ -47,4 +47,4 @@ if(BUILD_TEST)
     target_compile_options(${PROJECT_NAME}_test PRIVATE ${WARNING_OPTIONS})
     target_link_libraries(${PROJECT_NAME}_test gtest_main)
     install(TARGETS ${PROJECT_NAME}_test DESTINATION test)
-endif(BUILD_TEST)
+endif()
