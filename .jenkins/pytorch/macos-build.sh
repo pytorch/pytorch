@@ -1,6 +1,6 @@
 #!/bin/bash
 
-COMPACT_JOB_NAME=pytorch-macos-10.13-py3-build-test
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export PATH="/usr/local/bin:$PATH"
@@ -22,6 +22,18 @@ git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 
 # Build PyTorch
+if [[ "${JOB_BASE_NAME}" == *cuda9.2* ]]; then
+  export CUDA_VERSION=9.2
+  export TORCH_CUDA_ARCH_LIST=5.2
+  export PATH=/Developer/NVIDIA/CUDA-${CUDA_VERSION}/bin${PATH:+:${PATH}}
+  export DYLD_LIBRARY_PATH=/Developer/NVIDIA/CUDA-${CUDA_VERSION}/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}
+  export CUDA_HOME=/Developer/NVIDIA/CUDA-${CUDA_VERSION}
+  export NO_CUDA=0
+
+  # We need to do this for install_name_tool to be found
+  export PATH=/Applications/Xcode9.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:$PATH
+fi
+
 export MACOSX_DEPLOYMENT_TARGET=10.9
 export CXX=clang++
 export CC=clang
