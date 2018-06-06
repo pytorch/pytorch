@@ -114,7 +114,7 @@ void THCTensor_resizeNd(THCState *state, _THCTensor *self, int nDimension, int64
     if(totalSize+self->storageOffset > 0)
     {
       if(!self->storage)
-        self->storage = THCStorage_new(state, self->storage->scalar_type);
+        THError("Tensor: invalid null storage");
       if(totalSize+self->storageOffset > self->storage->size)
         THCStorage_resize(state, self->storage, totalSize+self->storageOffset);
     }
@@ -140,8 +140,11 @@ void THCTensor_setStorageNd(THCState *state, _THCTensor *self, THCStorage *stora
   /* storage */
   if(self->storage != storage)
   {
-    if(self->storage)
-      THCStorage_free(state, self->storage);
+    if (!self->storage) {
+      THError("Tensor: invalid null storage");
+    }
+    auto scalar_type = self->storage->scalar_type;
+    THCStorage_free(state, self->storage);
 
     if(storage)
     {
@@ -149,7 +152,7 @@ void THCTensor_setStorageNd(THCState *state, _THCTensor *self, THCStorage *stora
       THCStorage_retain(state, self->storage);
     }
     else
-      self->storage = THCStorage_new(state, self->storage->scalar_type);
+      self->storage = THCStorage_new(state, scalar_type);
   }
 
   /* storageOffset */
