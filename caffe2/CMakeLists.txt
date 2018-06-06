@@ -244,8 +244,8 @@ endif()
 # ---[ Caffe2 HIP sources.
 if(BUILD_CAFFE2)
   if(USE_ROCM)
-    set(Caffe2_HIP_GCC_COMPILE_FLAGS "-D__HIP_PLATFORM_HCC__=1")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Caffe2_HIP_GCC_COMPILE_FLAGS}")
+    set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Caffe2_HIP_CXX_FLAGS}")
     HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
     set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
 
