@@ -149,7 +149,6 @@ struct CursorBase<T>::Collector {
 };
 
 // Explicitly instantiate the CursorBase template for all types we need.
-//
 template class CursorBase<nn::Module>;
 template class CursorBase<const nn::Module>;
 template class CursorBase<autograd::Variable>;

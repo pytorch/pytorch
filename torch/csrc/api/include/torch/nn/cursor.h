@@ -2,7 +2,7 @@
 
 #include <torch/csrc/autograd/variable.h>
 
-#include <cstdint>
+#include <cstddef>
 #include <iterator>
 #include <limits>
 #include <string>
@@ -22,7 +22,8 @@ class Module;
 namespace torch {
 namespace detail {
 /// Provides hierarchical iteration support, with convenient iterator functions
-/// like `map` or `find`.
+/// like `map` or `find`. A cursor's lifetime is bound to the lifetime of the
+/// module hierarchy into which it points.
 template <typename T>
 class CursorBase {
  public:
@@ -37,10 +38,11 @@ class CursorBase {
     T& operator*();
     T* operator->();
 
-    // These are references into a `Module`'s containers
     const std::string key;
     T& value;
   };
+
+  // Iterators are valid for the lifetime of the cursor.
 
   // Picks either `const_iterator` or `iterator` as the iterator type, depending
   // on whether `T` is const.
@@ -62,7 +64,8 @@ class CursorBase {
   // module.modules().begin()`, since `iterator` would be pointing to a `vector`
   // that gets destructed at the end of the expression. This is not a problem
   // for range loops, as they capture the range expression (the thing to the
-  // right of the colon in `for (auto x : ...)`) before iteration.
+  // right of the colon in `for (auto x : ...)`) before iteration. This is
+  // smart.
   Iterator begin() & noexcept;
   Iterator end() & noexcept;
 
