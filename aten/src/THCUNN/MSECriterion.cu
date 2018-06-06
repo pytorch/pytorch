@@ -3,6 +3,7 @@
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCThrustAllocator.cuh"
+#include "THCApply.cuh"
 
 #include <thrust/fill.h>
 #include <thrust/functional.h>

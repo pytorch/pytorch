@@ -3,8 +3,7 @@
 #else
 
 THC_API int THCTensor_(getDevice)(THCState* state, const THCTensor* tensor) {
-  if (!tensor->storage) return -1;
-  return THCStorage_(getDevice)(state, tensor->storage);
+  return THCTensor_getDevice(state, tensor);
 }
 
 #endif

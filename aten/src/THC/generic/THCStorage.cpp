@@ -139,8 +139,7 @@ void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char fla
 
 void THCStorage_(retain)(THCState *state, THCStorage *self)
 {
-  if(self && (self->flag & TH_STORAGE_REFCOUNTED))
-    self->refcount++;
+  THCStorage_retain(state, self);
 }
 
 int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage)

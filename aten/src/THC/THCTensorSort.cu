@@ -29,7 +29,7 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(      \
       info, numSlices, sliceSize, info.strides[collapseDim])
 
-  if (TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, t)) {
+  if (THCTensor_canUse32BitIndexMath(state, t)) {
     TensorInfo<int64_t, uint32_t> info =
       getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, t);
     info.reduceDim(dim);

@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "generic/AbsCriterion.cu"
 #else
 
-#include "THCApply.cuh"
-
 void THNN_(AbsCriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
