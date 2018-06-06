@@ -602,7 +602,12 @@ def index_select(g, self, index, dim):
 def type_as(g, self, other):
     if self.isTensor() and other.isTensor() and self.type().scalarType() == other.type().scalarType():
         return self
+
+    if other.isTensor():
+        other_type_name = other.type().scalarType().lower()
+        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[scalar_name_to_pytorch[other_type_name]])
     else:
+        # We don't know the type of other, bail by emitting ATen
         return g.op("ATen", self, other, operator_s="type_as")
 
 
