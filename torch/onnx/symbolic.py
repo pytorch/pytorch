@@ -600,12 +600,10 @@ def index_select(g, self, index, dim):
 
 
 def type_as(g, self, other):
-    if self.type().scalarType() == other.type().scalarType():
-        # no-op
+    if self.isTensor() and other.isTensor() and self.type().scalarType() == other.type().scalarType():
         return self
     else:
-        other_type_name = self.type().scalarType().lower()
-        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[scalar_name_to_pytorch[other_type_name]])
+        return g.op("ATen", self, other, operator_s="type_as")
 
 
 # ignore clone operators that are inserted by PyTorch autograd
