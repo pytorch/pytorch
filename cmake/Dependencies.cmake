@@ -1139,6 +1139,13 @@ if (BUILD_ATEN)
     set(AT_CUDNN_ENABLED 1)
   ENDIF()
 
+  IF (NOT USE_ROCM) # OR NOT MIOPEN_FOUND)
+    MESSAGE(STATUS "MIOpen not found. Compiling without MIOpen support")
+    set(AT_MIOPEN_ENABLED 0)
+  ELSE()
+    set(AT_MIOPEN_ENABLED 1)
+  ENDIF()
+
   if (NO_MKLDNN)
     message("disabling MKLDNN because NO_MKLDNN is set")
     set(AT_MKLDNN_ENABLED 0)
