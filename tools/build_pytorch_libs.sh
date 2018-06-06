@@ -81,12 +81,10 @@ C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=686926
 C_FLAGS="${C_FLAGS} -DOMPI_SKIP_MPICXX=1"
 LDFLAGS="-L\"$INSTALL_DIR/lib\" "
-LD_POSTFIX=".so.1"
-LD_POSTFIX_UNVERSIONED=".so"
+LD_POSTFIX=".so"
 if [[ $(uname) == 'Darwin' ]]; then
     LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
-    LD_POSTFIX=".1.dylib"
-    LD_POSTFIX_UNVERSIONED=".dylib"
+    LD_POSTFIX=".dylib"
 else
     LDFLAGS="$LDFLAGS -Wl,-rpath,\$ORIGIN"
 fi
@@ -139,6 +137,9 @@ function build() {
       nanopb ) BUILD_C_FLAGS=$C_FLAGS" -fPIC -fexceptions";;
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
+  # TODO: The *_LIBRARIES cmake variables should eventually be
+  # deprecated because we are using .cmake files to handle finding
+  # installed libraries instead
   ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
               ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
@@ -177,9 +178,6 @@ function build() {
   popd
 
   local lib_prefix=$INSTALL_DIR/lib/lib$1
-  if [ -f "$lib_prefix$LD_POSTFIX" ]; then
-    rm -rf -- "$lib_prefix$LD_POSTFIX_UNVERSIONED"
-  fi
 
   if [[ $(uname) == 'Darwin' ]]; then
     pushd "$INSTALL_DIR/lib"
