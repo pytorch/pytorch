@@ -329,7 +329,7 @@ if ((NOT EXISTS ${TORCH_CUDA_ARCH_LIST}) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST})
       "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
       "env variable. This will become a FATAL_ERROR in future version of "
       "pytorch.")
-  set(TORCH_CUDA_ARCH_LIST ENV{TORCH_CUDA_ARCH_LIST})
+  set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
 endif()
 if (EXISTS {CUDA_ARCH_NAME})
   message(WARNING
