@@ -7,6 +7,7 @@
 #include <cassert>
 #include <thread>
 
+
 namespace at { namespace internal {
 
 // thread_local variable with internal linkage
@@ -51,4 +52,5 @@ void init_tbb_num_threads() {
     num_threads_ = num_threads;
   }
 }
-}} // namespace at::internal
+} // namespace internal
+} // namespace at

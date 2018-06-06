@@ -34,10 +34,10 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_lstm.*'  # Seems LSTM case has some problem
                      '|test_simple_rnn.*'  # Seems simple RNN case has some problem
                      '|test_gru.*'  # Seems GRU case has some problem
-                     '|test_upsample.*'  # Upsample is redesigned in ONNX
                      '|test_prelu.*'  # PRelu is not compliant with ONNX yet
                      '|test_operator_repeat.*'  # Tile is not compliant with ONNX yet
                      '|test_.*pool_.*same.*'  # Does not support pool same.
+                     '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

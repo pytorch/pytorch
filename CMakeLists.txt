@@ -30,6 +30,15 @@ if(NOT DEFINED BLAS_SET_BY_USER)
   set(BLAS_SET_BY_USER ${BLAS_SET_BY_USER} CACHE STRING "Marks whether BLAS was manually set by user or auto-detected")
 endif()
 
+# These lines are an attempt to make find_package(cuda) pick up
+# libcuda.dylib, and not cuda.framework.  It doesn't work all
+# the time, but it seems to help for some users.
+# TODO: replace this with a more robust fix
+if(APPLE)
+  set(CMAKE_FIND_FRAMEWORK LAST)
+  set(CMAKE_FIND_APPBUNDLE LAST)
+endif()
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -123,9 +132,6 @@ cmake_dependent_option(
     WITH_CUDA "Legacy CUDA" ON
     "USE_CUDA" OFF)
 cmake_dependent_option(
-    WITH_ROCM "Legacy ROCm" ON
-    "USE_ROCM" OFF)
-cmake_dependent_option(
     NO_CUDA "Legacy no CUDA" OFF
     "USE_CUDA" ON)
 cmake_dependent_option(
@@ -216,6 +222,9 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-warning-option")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
   if ($ENV{WERROR})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
   endif($ENV{WERROR})

@@ -444,9 +444,9 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
     arguments.push_back(ti);
   };
   arguments.push_back(&numel);
-  for (std::size_t i = 0; i < input_desc.size(); ++i)
+  for (size_t i = 0; i < input_desc.size(); ++i)
     addTensorInfo(input_desc[i], inputs[i]);
-  for (std::size_t i = 0; i < output_desc.size(); ++i) {
+  for (size_t i = 0; i < output_desc.size(); ++i) {
     auto & c = concat_desc[i];
     at::Tensor o = outputs[i];
     if(c.nSubtensors == 1) {

@@ -94,9 +94,7 @@ class MultivariateNormal(Distribution):
 
         >>> m = MultivariateNormal(torch.zeros(2), torch.eye(2))
         >>> m.sample()  # normally distributed with mean=`[0,0]` and covariance_matrix=`I`
-        -0.2102
-        -0.5429
-        [torch.FloatTensor of size 2]
+        tensor([-0.2102, -0.5429])
 
     Args:
         loc (Tensor): mean of the distribution

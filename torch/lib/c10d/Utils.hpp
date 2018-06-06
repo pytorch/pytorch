@@ -70,10 +70,8 @@ inline std::vector<std::vector<int64_t>> getSizes(
 }
 
 inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
-  std::vector<int> devices;
-  const auto& type = tensors[0].type();
-  if (type.is_cuda()) {
-    devices.resize(tensors.size());
+  std::vector<int> devices(tensors.size(), -1);
+  if (tensors[0].type().is_cuda()) {
     for (auto i = 0; i < tensors.size(); i++) {
       devices[i] = tensors[i].storage()->getDevice();
     }

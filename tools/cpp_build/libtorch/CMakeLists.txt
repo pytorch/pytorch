@@ -97,7 +97,7 @@ if(NOT NO_CUDA)
   endif()
 endif()
 
-add_definitions(-DNO_PYTHON -D_FORCE_INLINES)
+add_definitions(-DUSE_CATCH -D_FORCE_INLINES)
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -243,7 +243,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
   ${TORCH_SRC_DIR}/csrc/onnx/onnx.cpp
   ${TORCH_SRC_DIR}/csrc/onnx/onnx.pb.cpp
-  ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
   ${TORCH_SRC_DIR}/csrc/torch.cpp)
 
 if (NOT NO_API)

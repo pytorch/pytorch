@@ -54,7 +54,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
-vector<TensorShape> OperatorBase::InputTensorShapes() {
+vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
     tps.push_back(GetTensorShapeOfBlob(blob));
@@ -302,6 +302,13 @@ CAFFE_DEFINE_REGISTRY(
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CUDA, CUDAOperatorRegistry);
+
+CAFFE_DEFINE_REGISTRY(
+    HIPOperatorRegistry,
+    OperatorBase,
+    const OperatorDef&,
+    Workspace*);
+CAFFE_REGISTER_DEVICE_TYPE(DeviceType::HIP, HIPOperatorRegistry);
 
 CAFFE_DEFINE_REGISTRY(
     GradientRegistry,
@@ -594,6 +601,10 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
 
       if (blob_device.device_type() == CUDA &&
           blob_device.cuda_gpu_id() != op_device.cuda_gpu_id()) {
+        mismatches[blob_name] = std::make_pair(op_device, blob_device);
+      }
+      else if (blob_device.device_type() == HIP &&
+          blob_device.hip_gpu_id() != op_device.hip_gpu_id()) {
         mismatches[blob_name] = std::make_pair(op_device, blob_device);
       }
     }

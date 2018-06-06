@@ -1187,10 +1187,6 @@ Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
   return src_expanded.expand_as(target);
 }
 
-// NB: This currently is PURPOSELY outside of the anonymous namespace, because
-// we are manually calling it from some legacy batchnorm invocation code.  Once
-// that code moves into derivatives.yaml, this can be moved into the anonymous
-// namespace, BUT NOT BEFORE THEN.
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & input,
     const Tensor & gamma,

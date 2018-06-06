@@ -399,7 +399,20 @@ if(USE_CUDA)
     # caffe2::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-        caffe2::cuda caffe2::cufft caffe2::curand caffe2::nvrtc)
+        caffe2::cufft caffe2::curand)
+    if(BUILD_CAFFE2)
+      # Don't be deceived!  caffe2::cuda is the low-level DRIVER API,
+      # not the actual CUDA library.  Caffe2 depends directly on nvrtc
+      # and needs it, but ATen doesn't use it at all, and so the
+      # dependency is unnecessary.
+      #
+      # BTW, if you change this so that PyTorch has this dependency
+      # again, make sure Mac OS X GPU builds still work; there's
+      # a decent chance the library finding algorithm picked up
+      # on cuda.framework, which is totally not going to work when
+      # linking.
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
+    endif()
     if(CAFFE2_FOUND_CUDNN)
       LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
     else()
@@ -438,13 +451,34 @@ if(USE_CUDA)
   endif()
 endif()
 
+# ---[ HIP
+if(BUILD_CAFFE2)
+  include(cmake/public/LoadHIP.cmake)
+  if(PYTORCH_FOUND_HIP)
+    message(INFO "Compiling with HIP for AMD.")
+    caffe2_update_option(USE_ROCM ON)
+
+    set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
+    set(Caffe2_HIP_INCLUDES
+      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${Caffe2_HIP_INCLUDES} ${thrust_INCLUDE_DIRS})
+    set(Caffe2_HIP_DEPENDENCY_LIBS
+      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
+
+    # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
+    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
+      roc::rocblas)
+  else()
+    caffe2_update_option(USE_ROCM OFF)
+  endif()
+endif()
+
 # ---[ ROCm
-if(USE_ROCM)
+if(USE_ROCM AND NOT BUILD_CAFFE2)
  include_directories(${HIP_PATH}/include)
  include_directories(${HIPBLAS_PATH}/include)
  include_directories(${HIPSPARSE_PATH}/include)
  include_directories(${HIPRNG_PATH}/include)
- linclude_directories(${THRUST_PATH})
+ include_directories(${THRUST_PATH})
 
  # load HIP cmake module and load platform id
  EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig -P OUTPUT_VARIABLE PLATFORM)
@@ -664,6 +698,11 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # We will build onnx as static libs and embed it directly into the binary.
   set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+  # Do not do post-processing if caffe2 is not included in the build,
+  # otherwise the caffe2 protobuf symbols will not be found
+  if (BUILD_CAFFE2 AND CAFFE2_LINK_LOCAL_PROTOBUF)
+    set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
+  endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
   include_directories(${ONNX_INCLUDE_DIRS})
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DONNX_NAMESPACE=${ONNX_NAMESPACE}")

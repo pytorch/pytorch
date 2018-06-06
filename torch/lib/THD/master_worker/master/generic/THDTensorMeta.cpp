@@ -15,7 +15,7 @@ static void THDTensor_(_resize)(THDTensor *self, int nDimension, int64_t *size, 
   bool hasRequiredSize = true;
 
   nDimension_ = 0;
-  for (std::size_t d = 0; d < nDimension; d++) {
+  for (size_t d = 0; d < nDimension; d++) {
     if (size[d] > 0) {
       nDimension_++;
       if ((self->nDimension > d) && (size[d] != self->size[d]))
@@ -97,7 +97,7 @@ void THDTensor_(_squeeze1d)(THDTensor *self, THDTensor *src, int dimension) {
   THDTensor_(set)(self, src);
 
   if (src->size[dimension] == 1 && src->nDimension > 1) {
-    for (std::size_t d = dimension; d < self->nDimension-1; d++) {
+    for (size_t d = dimension; d < self->nDimension-1; d++) {
       self->size[d] = self->size[d+1];
       self->stride[d] = self->stride[d+1];
     }

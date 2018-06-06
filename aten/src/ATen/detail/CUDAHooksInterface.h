@@ -62,6 +62,10 @@ struct AT_API CUDAHooksInterface {
     AT_ERROR("cannot getCurrentCUDAStream() without ATen_cuda library");
   }
 
+  virtual cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device) const {
+    AT_ERROR("cannot getCurrentCUDAStream() without ATen_cuda library");
+  }
+
   virtual struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const {
     AT_ERROR("cannot getCurrentDeviceProperties() without ATen_cuda library");
   }

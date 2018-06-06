@@ -635,6 +635,7 @@ main_sources = [
     "torch/csrc/serialization.cpp",
     "torch/csrc/jit/init.cpp",
     "torch/csrc/jit/interpreter.cpp",
+    "torch/csrc/jit/python_interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/fusion_compiler.cpp",
     "torch/csrc/jit/graph_executor.cpp",
