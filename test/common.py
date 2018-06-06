@@ -94,6 +94,7 @@ def get_cuda_memory_usage():
     # we don't need CUDA synchronize because the statistics are not tracked at
     # actual freeing, but at when marking the block as free.
     num_devices = torch.cuda.device_count()
+    torch.cuda.synchronize()
     gc.collect()
     return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
 
