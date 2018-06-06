@@ -17,7 +17,7 @@
 namespace torch {
 namespace detail {
 template <typename T>
-struct CursorBase;
+class CursorBase;
 } // namespace detail
 } // namespace torch
 
@@ -128,7 +128,7 @@ class Module {
   template <typename Derived>
   friend class CloneableModule;
   template <typename T>
-  friend struct detail::CursorBase;
+  friend class detail::CursorBase;
 
   virtual void clone_(Module& other);
 
