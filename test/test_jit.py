@@ -154,17 +154,16 @@ class TestJit(TestCase):
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
-    # index-2 is not implemented in interpreter
-    @unittest.expectedFailure
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
-        y = torch.tensor([0], dtype=torch.int64, requires_grad=True)
+        y = torch.tensor([0], dtype=torch.int64)
 
-        @torch.jit.compile(nderivs=0)
         def fn(x, y):
             return x[y]
 
-        fn(x, y)  # Fails
+        fn_traced = torch.jit.trace(x, y)(fn)
+
+        self.assertEqual(fn(x, y), fn_traced(x, y))
 
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
@@ -924,6 +923,21 @@ class TestJit(TestCase):
         out_test = addmm(mat, mat1, mat2, alpha, beta)
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
+
+    def test_index_put(self):
+        ten = torch.zeros(3, 3)
+        mask = torch.Tensor([[True, True, True],
+                             [True, False, False],
+                             [True, True, False]]).byte()
+
+        def test_fn(ten, mask):
+            ten[mask] = torch.ones(6)
+            return ten
+
+        traced_test_fn = torch.jit.trace(ten, mask)(test_fn)
+
+        ten = torch.rand(3, 3)
+        self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
 
 class TestScript(TestCase):
