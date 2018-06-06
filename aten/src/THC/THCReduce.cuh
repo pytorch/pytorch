@@ -267,7 +267,8 @@ inline bool getContigReduceGrid(ptrdiff_t elements, dim3& grid) {
 
 // Performs a reduction out[..., 0, ...] = reduce_i(modify(in[..., i, ...])) for
 // all in where i and the out's 0 are indexed at dimension `dim`
-template <typename TensorType, 
+template <typename ScalarType,
+typename TensorType,
 typename ModifyOp, 
 typename ReduceOp,
 typename FinalizeOp,
@@ -281,6 +282,7 @@ bool THC_reduceDim(THCState* state,
                    AccT init,
                    int dim,
                    int keepdim) {
+  static_assert(std::is_same<ScalarType, typename TensorUtils<TensorType>::DataType>::value, "ScalarType must match");
   ptrdiff_t inElements = TensorUtils<TensorType>::getNumElements(state, in);
 
   int64_t reductionSize = TensorUtils<TensorType>::getSize(state, in, dim);
@@ -360,7 +362,7 @@ bool THC_reduceDim(THCState* state,
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, OUT, IN)                                      \
   if (contigReduction) {                                                \
-    kernelReduceContigDim<typename TensorUtils<TensorType>::DataType,   \
+    kernelReduceContigDim<ScalarType,                                   \
                           TYPE, AccT, ModifyOp, ReduceOp, FinalizeOp,   \
                           OUT, IN>                                      \
       <<<grid, block, smemSize, THCState_getCurrentStream(state)>>>     \
@@ -369,7 +371,7 @@ bool THC_reduceDim(THCState* state,
   } else {                                                              \
     if(block.y == 1){                                                   \
         kernelReduceNoncontigDim<                                       \
-                          typename TensorUtils<TensorType>::DataType,   \
+                          ScalarType,                                   \
                           TYPE, AccT, ModifyOp, ReduceOp, FinalizeOp,   \
                           OUT, IN>                                      \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>          \
@@ -377,7 +379,7 @@ bool THC_reduceDim(THCState* state,
         (TYPE) outElements, init, modifyOp, reduceOp, finalizeOp);      \
     }else{                                                              \
         kernelReduceNoncontigDim_shared<                                \
-                          typename TensorUtils<TensorType>::DataType,   \
+                          ScalarType,                                   \
                           TYPE, AccT, ModifyOp, ReduceOp, FinalizeOp,   \
                           OUT, IN>                                      \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>          \
@@ -418,26 +420,26 @@ bool THC_reduceDim(THCState* state,
 
   if (TensorUtils<TensorType>::canUse32BitIndexMath(state, out) &&
       TensorUtils<TensorType>::canUse32BitIndexMath(state, in)) {
-    TensorInfo<typename TensorUtils<TensorType>::DataType,
+    TensorInfo<ScalarType,
                unsigned int> outInfo =
-      getTensorInfo<TensorType, unsigned int>(state, out);
+      getTensorInfo<ScalarType, TensorType, unsigned int>(state, out);
     outInfo.collapseDims();
 
-    TensorInfo<typename TensorUtils<TensorType>::DataType,
+    TensorInfo<ScalarType,
                unsigned int> inInfo =
-      getTensorInfo<TensorType, unsigned int>(state, in);
+      getTensorInfo<ScalarType, TensorType, unsigned int>(state, in);
     inInfo.reduceDim(dim);
     inInfo.collapseDims();
     HANDLE_OUT_CASE(unsigned int, outInfo.dims, inInfo.dims);
   } else {
-    TensorInfo<typename TensorUtils<TensorType>::DataType,
+    TensorInfo<ScalarType,
                uint64_t> outInfo =
-      getTensorInfo<TensorType, uint64_t>(state, out);
+      getTensorInfo<ScalarType, TensorType, uint64_t>(state, out);
     outInfo.collapseDims();
 
-    TensorInfo<typename TensorUtils<TensorType>::DataType,
+    TensorInfo<ScalarType,
                uint64_t> inInfo =
-      getTensorInfo<TensorType, uint64_t>(state, in);
+      getTensorInfo<ScalarType, TensorType, uint64_t>(state, in);
     inInfo.reduceDim(dim);
     inInfo.collapseDims();
 

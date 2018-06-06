@@ -222,8 +222,8 @@ THC_API void THCTensor_(mode)(THCState *state,
     indicesTransposed = THCudaLongTensor_newTranspose(state, indices, dimension, ndim-1);
 
     // Set-up TensorInfo structs for passing to kernel
-    TensorInfo<real, unsigned int> tiValues = getTensorInfo<THCTensor, unsigned int>(state, valuesTransposed);
-    TensorInfo<int64_t, unsigned int> tiIndices = getTensorInfo<THCudaLongTensor, unsigned int>(state, indicesTransposed);
+    TensorInfo<real, unsigned int> tiValues = getTensorInfo<real, THCTensor, unsigned int>(state, valuesTransposed);
+    TensorInfo<int64_t, unsigned int> tiIndices = getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, indicesTransposed);
 
     // The number of blocks is the number of slices that we need to calculate the mode for. Each block
     // is responsible for computing a single mode

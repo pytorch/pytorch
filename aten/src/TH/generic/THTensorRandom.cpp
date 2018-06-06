@@ -2,6 +2,12 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.cpp"
 #else
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#include <cpuinfo.h>
+
 #include "THGenerator.hpp"
 
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
@@ -51,10 +57,93 @@ void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p)
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_geometric(_generator, p););
 }
 
+#ifdef TH_BLAS_MKL
+#define BERNOULLI_OMP 800
+#define TH_OMP_OVERHEAD_THRESHOLD_COPY 20000
+
+void iBernoulli_generate_copy(THTensor *self, THGenerator *_generator, const double p)
+{
+  int64_t seed = THRandom_random(_generator);
+  int64_t n = THTensor_(nElement)(self);
+  int contig = THTensor_(isContiguous)(self);
+  int *tmp = NULL;
+  THIntTensor* intTensor = NULL;
+
+  if (contig) {
+#ifdef TH_REAL_IS_INT
+    tmp = THIntTensor_data(self);
+#else
+    tmp = (int*)THAlloc(n*sizeof(int));
+#endif
+  } else {
+    intTensor = THIntTensor_new();
+    THIntTensor_resizeNd(intTensor, self->nDimension, self->size, NULL);
+    tmp = THIntTensor_data(intTensor);
+  }
+
+#ifdef _OPENMP
+  size_t nthr = !omp_in_parallel() && n >= BERNOULLI_OMP ? omp_get_num_threads() : 1;
+#pragma omp parallel num_threads(nthr) firstprivate(nthr)
+  {
+    size_t tid = omp_get_thread_num();
+    int64_t seg_len_tmp = n / nthr;
+    int64_t line_index_offset = tid * seg_len_tmp;
+    int64_t line_seg_len = (tid == nthr - 1)? (n-line_index_offset) : seg_len_tmp;
+#else
+  {
+    int64_t line_index_offset = 0;
+    int64_t line_seg_len = n;
+#endif
+
+    if (line_seg_len > 0) {
+      VSLStreamStatePtr stream;
+      vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+      vslSkipAheadStream(stream, line_index_offset);
+      viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, line_seg_len,
+        tmp + line_index_offset, p);
+      vslDeleteStream(&stream);
+
+#ifndef TH_REAL_IS_INT
+      if (contig) {
+        real* self_seg = THTensor_(data)(self) + line_index_offset;
+        int* tmp_seg = tmp + line_index_offset;
+        THVector_(cvtFromInt)(self_seg, tmp_seg, line_seg_len);
+      }
+#endif
+    }
+  }
+
+  if(contig) {
+#ifndef TH_REAL_IS_INT
+    THFree(tmp);
+#endif
+  } else {
+#ifdef _OPENMP
+    TH_TENSOR_APPLY2_OMP(n, 1, 0, int, intTensor, real, self, *self_data = *intTensor_data;, TH_OMP_OVERHEAD_THRESHOLD_COPY)
+#else
+    TH_TENSOR_APPLY2(int, intTensor, real, self, *self_data = *intTensor_data;)
+#endif
+    THIntTensor_free(intTensor);
+  }
+
+}
+
+#endif
+
 void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p)
 {
+#ifdef TH_BLAS_MKL
+  if(cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
+    std::lock_guard<std::mutex> lock(_generator->mutex);
+    iBernoulli_generate_copy(self, _generator, p);
+  } else {
+    std::lock_guard<std::mutex> lock(_generator->mutex);
+    TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_bernoulli(_generator, p););
+  }
+#else
   std::lock_guard<std::mutex> lock(_generator->mutex);
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_bernoulli(_generator, p););
+#endif
 }
 
 void THTensor_(bernoulli_FloatTensor)(THTensor *self, THGenerator *_generator, THFloatTensor *p)

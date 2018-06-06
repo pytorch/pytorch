@@ -147,7 +147,7 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
   auto min_idx = index.min().toCLong();
   if (max_idx >= dim_size) {
     AT_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
-  } 
+  }
   if (min_idx < -dim_size) {
     AT_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
   }
@@ -247,6 +247,18 @@ Tensor index(const Tensor & self, TensorList indices) {
   Tensor src, linearIndex;
   std::tie(src, linearIndex) = makeLinearIndex(self, indices);
   return src.take(linearIndex);
+}
+
+Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value) {
+  if (indices.size() > (size_t)self.dim()) {
+   AT_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  }
+
+  Tensor src, linearIndex, expandedValue;
+  std::tie(src, linearIndex) = makeLinearIndex(self, indices);
+  std::tie(expandedValue) = expand_inplace(linearIndex, value);
+  Tensor dst = src.clone();
+  return dst.put_(linearIndex, expandedValue);
 }
 
 Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value) {

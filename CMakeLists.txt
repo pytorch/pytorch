@@ -30,6 +30,15 @@ if(NOT DEFINED BLAS_SET_BY_USER)
   set(BLAS_SET_BY_USER ${BLAS_SET_BY_USER} CACHE STRING "Marks whether BLAS was manually set by user or auto-detected")
 endif()
 
+# These lines are an attempt to make find_package(cuda) pick up
+# libcuda.dylib, and not cuda.framework.  It doesn't work all
+# the time, but it seems to help for some users.
+# TODO: replace this with a more robust fix
+if(APPLE)
+  set(CMAKE_FIND_FRAMEWORK LAST)
+  set(CMAKE_FIND_APPBUNDLE LAST)
+endif()
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.

@@ -199,7 +199,6 @@ target_compile_options(caffe2 INTERFACE "-std=c++11")
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
-set_target_properties(caffe2 PROPERTIES VERSION 1 SOVERSION 1)
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
 caffe2_interface_library(caffe2 caffe2_library)
 list(APPEND Caffe2_MAIN_LIBS caffe2_library)
@@ -236,7 +235,6 @@ if(USE_CUDA OR (USE_ROCM AND NOT BUILD_CAFFE2))
 
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)
-  set_target_properties(caffe2_gpu PROPERTIES VERSION 1 SOVERSION 1)
 
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)

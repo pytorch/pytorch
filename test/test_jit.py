@@ -79,7 +79,7 @@ def get_lstm_inputs(device):
     input = torch.randn(3, 10, dtype=torch.float, device=device)
     hx = torch.randn(3, 20, dtype=torch.float, device=device)
     cx = torch.randn(3, 20, dtype=torch.float, device=device)
-    module = nn.LSTMCell(10, 20).to(torch.float, device)  # Just to allocate weights with correct sizes
+    module = nn.LSTMCell(10, 20).to(device, torch.float)  # Just to allocate weights with correct sizes
     return (input, hx, cx) + tuple(p.requires_grad_(False) for p in module.parameters())
 
 
@@ -92,7 +92,7 @@ def get_fn(file_name, script_path):
     return fn
 
 
-class TestJit(TestCase):
+class JitTestCase(TestCase):
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, aten=False)
         self.assertExpectedGraph(trace, *args, **kwargs)
@@ -109,21 +109,6 @@ class TestJit(TestCase):
         graph = torch._C._jit_pass_canonicalize(graph)
         torch._C._jit_pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
-
-    def assertExportImport(self, trace, inputs):
-        initializers = []
-
-        def run(graph):
-            return torch._C.GraphExecutor(graph, False)(*inputs)
-
-        proto, _ = trace.graph().export(initializers, onnx_opset_version=0,
-                                        defer_weight_export=False, export_raw_ir=True)
-        self.assertFalse(initializers)
-
-        imported_graph, initializers = torch._C._jit_import_graph(proto)
-        self.assertFalse(initializers)
-
-        self.assertEqual(run(trace.graph()), run(imported_graph))
 
     def run_pass(self, name, trace):
         if isinstance(trace, torch._C.Graph):
@@ -143,6 +128,23 @@ class TestJit(TestCase):
             trace.set_graph(graph)
         return graph
 
+
+class TestJit(JitTestCase):
+    def assertExportImport(self, trace, inputs):
+        initializers = []
+
+        def run(graph):
+            return torch._C.GraphExecutor(graph, False)(*inputs)
+
+        proto, _ = trace.graph().export(initializers, onnx_opset_version=0,
+                                        defer_weight_export=False, export_raw_ir=True)
+        self.assertFalse(initializers)
+
+        imported_graph, initializers = torch._C._jit_import_graph(proto)
+        self.assertFalse(initializers)
+
+        self.assertEqual(run(trace.graph()), run(imported_graph))
+
     def test_simple(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0.7], requires_grad=True)
@@ -154,17 +156,16 @@ class TestJit(TestCase):
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
-    # index-2 is not implemented in interpreter
-    @unittest.expectedFailure
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
-        y = torch.tensor([0], dtype=torch.int64, requires_grad=True)
+        y = torch.tensor([0], dtype=torch.int64)
 
-        @torch.jit.compile(nderivs=0)
         def fn(x, y):
             return x[y]
 
-        fn(x, y)  # Fails
+        fn_traced = torch.jit.trace(x, y)(fn)
+
+        self.assertEqual(fn(x, y), fn_traced(x, y))
 
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
@@ -704,7 +705,10 @@ class TestJit(TestCase):
         nograd_inputs = reference_tensors
         recording_inputs = [t.clone().requires_grad_() for t in reference_tensors]
 
-        ge = torch.jit.trace(*input_tensors, optimize=optimize)(func)
+        if isinstance(func, torch._C.Graph):
+            ge = torch._C.GraphExecutor(func, optimize)
+        else:
+            ge = torch.jit.trace(*input_tensors, optimize=optimize)(func)
 
         # test no gradients case
 
@@ -925,8 +929,23 @@ class TestJit(TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
 
+    def test_index_put(self):
+        ten = torch.zeros(3, 3)
+        mask = torch.Tensor([[True, True, True],
+                             [True, False, False],
+                             [True, True, False]]).byte()
 
-class TestScript(TestCase):
+        def test_fn(ten, mask):
+            ten[mask] = torch.ones(6)
+            return ten
+
+        traced_test_fn = torch.jit.trace(ten, mask)(test_fn)
+
+        ten = torch.rand(3, 3)
+        self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
+
+
+class TestScript(JitTestCase):
 
     @contextmanager
     def capture_stdout(self):
@@ -982,7 +1001,7 @@ class TestScript(TestCase):
             source = textwrap.dedent(inspect.getsource(script))
             self.checkScript(source, inputs, optimize, outputs, script.__name__, capture_output, frames_up=2)
             # Continue checking the Python frontend
-            ge = torch.jit.script(script, _frames_up=1)
+            ge = torch.jit.script(script, optimize, _frames_up=1)
 
         if capture_output:
             with self.capture_stdout() as captured:
@@ -1385,18 +1404,15 @@ class TestScript(TestCase):
         self.checkScript(func, inputs, optimize=True)
 
     def test_script_for_in_range(self):
-        script = '''
-        def test_for_in_range():
+        def fn():
             c = 0
             for i in range(100):
                 c += i
             return c
-        '''
-        self.checkScript(script, [], outputs=[4950], optimize=True, name='test_for_in_range')
+        self.checkScript(fn, (), outputs=4950, optimize=True)
 
     def test_script_for_in_range_dynamic(self):
-        script = '''
-        def test_script_for_in_range_dynamic():
+        def fn():
             c = 0
             for i in range(100):
                 acc = 0
@@ -1404,8 +1420,7 @@ class TestScript(TestCase):
                     acc += j
                 c += acc
             return c
-        '''
-        self.checkScript(script, [], outputs=[161700], optimize=True, name='test_script_for_in_range_dynamic')
+        self.checkScript(fn, (), optimize=False)
 
     def test_script_for_in_range_ast(self):
         @torch.jit.script
@@ -1603,6 +1618,26 @@ class TestScript(TestCase):
         x = torch.arange(-3., 4)
         slope = torch.tensor([0.5])
         self.checkScript(fn, [x, slope], optimize=True)
+
+    def test_script_docstring(self):
+        @torch.jit.script
+        def with_docstring(x):
+            """test str"""
+            y = x
+            """y is the same as x"""
+            return y
+        self.assertEqual(with_docstring.__doc__, 'test str')
+
+    def test_script_method_docstring(self):
+        class A(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def with_docstring(self, x):
+                """test str"""
+                y = x
+                """y is the same as x"""
+                return y
+        a = A()
+        self.assertEqual(a.with_docstring.__doc__, 'test str')
 
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
@@ -2719,7 +2754,7 @@ class TestScript(TestCase):
                 b = x
             return a
 
-        self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), False)
+        self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), optimize=False)
 
     def test_intlist_args(self):
         def func_1(x):
@@ -2899,6 +2934,78 @@ class TestScript(TestCase):
             return a + 1.0 - a
 
         self.checkScript(test_rand, ())
+
+    def test_loop_unrolling(self):
+        def fn(x):
+            y = 0
+            for i in range(x):
+                y += i
+            return y
+
+        graph = torch.jit._script_graph(fn)
+        self.run_pass('loop_unrolling', graph)
+        self.assertExpectedGraph(graph)
+        self.checkScript(fn, (torch.tensor(10),))
+
+    def test_loop_unrolling_const(self):
+        def fn():
+            y = 0
+            for i in range(10):
+                y += 1
+            return y
+
+        def fn2():
+            y = 0
+            for i in range(10):
+                y += i
+            return y
+
+        def check(fn, name):
+            graph = torch.jit._script_graph(fn)
+            self.run_pass('loop_unrolling', graph)
+            self.assertExpectedGraph(graph, subname=name)
+            self.checkScript(fn, ())
+
+        check(fn, 'add_const')
+        check(fn2, 'add_iter')
+
+    def test_loop_unrolling_nested(self):
+        def fn(x):
+            y = 0
+            for i in range(10):
+                for j in range(x):
+                    y += j
+            return y
+
+        graph = torch.jit._script_graph(fn)
+        self.run_pass('loop_unrolling', graph)
+        self.assertExpectedGraph(graph)
+        self.checkScript(fn, (torch.tensor(10),))
+
+    def test_loop_unroll_unused_counter(self):
+        def fn(x):
+            y = 0
+            for i in range(x):
+                y += 1
+            return y
+
+        graph = torch.jit._script_graph(fn)
+        self.run_pass('loop_unrolling', graph)
+        self.assertExpectedGraph(graph)
+
+    def test_loop_unroll_negative(self):
+        def fn(x):
+            y = 0
+            for i in range(x):
+                y += 1
+            return y
+
+        self.checkScript(fn, (torch.tensor(-20),))
+        self.checkScript(fn, (torch.tensor(-2),))
+        self.checkScript(fn, (torch.tensor(-1),))
+        self.checkScript(fn, (torch.tensor(0),))
+        self.checkScript(fn, (torch.tensor(1),))
+        self.checkScript(fn, (torch.tensor(2),))
 
 
 # Smoke tests for export methods

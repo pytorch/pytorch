@@ -384,4 +384,12 @@ at::Type& get_default_tensor_type() {
   return *default_tensor_type;
 }
 
+Device getDevice(const at::Tensor& tensor) {
+  if (tensor.type().is_cuda()) {
+    return torch::Device(torch::DeviceType::CUDA, tensor.get_device(), false);
+  } else {
+    return torch::Device(torch::DeviceType::CPU, -1, true);
+  }
+}
+
 }} // namespace torch::tensor
