@@ -1,19 +1,17 @@
-#include <Eigen/Core>
-#include "caffe2/operators/elementwise_op.h"
+#include "caffe2/operators/sqrt_op.h"
+
+#include <string>
+#include <vector>
 
 namespace caffe2 {
 
-struct SqrtCPUFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CPUContext* /*device_context*/) {
-    EigenVectorArrayMap<T>(y, n) = ConstEigenVectorArrayMap<T>(x, n).sqrt();
-  }
-};
-
 REGISTER_CPU_OPERATOR(
     Sqrt,
-    UnaryElementwiseOp<TensorTypes<float>, CPUContext, SqrtCPUFunctor>);
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        SqrtFunctor<CPUContext>>);
+
 // Input: X, output: Y
 OPERATOR_SCHEMA(Sqrt)
     .NumInputs(1)
@@ -26,24 +24,30 @@ Computes the element-wise sqrt of the input.
     .Input(0, "X", "ND input tensor")
     .Output(0, "Y", "ND input tensor");
 
+namespace {
+
 class GetSqrtGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+  std::vector<OperatorDef> GetGradientDefs() override {
     Argument scale_arg;
     scale_arg.set_name("scale");
     scale_arg.set_f(0.5);
-    return vector<OperatorDef>{CreateOperatorDef(
-                                   "Scale",
-                                   "",
-                                   std::vector<string>{GO(0)},
-                                   std::vector<string>{GI(0)},
-                                   std::vector<Argument>{scale_arg}),
-                               CreateOperatorDef(
-                                   "Div",
-                                   "",
-                                   std::vector<string>{GI(0), O(0)},
-                                   std::vector<string>{GI(0)})};
+    return std::vector<OperatorDef>{CreateOperatorDef(
+                                        "Scale",
+                                        "",
+                                        std::vector<std::string>{GO(0)},
+                                        std::vector<std::string>{GI(0)},
+                                        std::vector<Argument>{scale_arg}),
+                                    CreateOperatorDef(
+                                        "Div",
+                                        "",
+                                        std::vector<std::string>{GI(0), O(0)},
+                                        std::vector<std::string>{GI(0)})};
   }
 };
+
+} // namespace
+
 REGISTER_GRADIENT(Sqrt, GetSqrtGradient);
+
 } // namespace caffe2

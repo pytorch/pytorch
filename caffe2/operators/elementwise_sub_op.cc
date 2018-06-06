@@ -1,10 +1,33 @@
-#include "caffe2/operators/elementwise_op.h"
+#include "caffe2/operators/elementwise_sub_op.h"
 
 namespace caffe2 {
 
-// See the operations supported here:
-// https://eigen.tuxfamily.org/dox-devel/group__QuickRefPage.html
-#define EIGEN_SUB(x, y) ((x) - (y))
-EIGEN_FUNCTOR(Sub, EIGEN_SUB, NumericTypes, SameTypeAsInput);
-#undef EIGEN_SUB
-}
+REGISTER_CPU_OPERATOR(
+    Sub,
+    BinaryElementwiseOp<NumericTypes, CPUContext, SubFunctor<CPUContext>>);
+REGISTER_CPU_OPERATOR(
+    SubGradient,
+    BinaryElementwiseGradientOp<
+        NumericTypes,
+        CPUContext,
+        SubFunctor<CPUContext>>);
+
+namespace {
+
+class GetSubGradient final : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+
+  std::vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "SubGradient",
+        "",
+        std::vector<std::string>{GO(0), I(0), I(1)},
+        std::vector<std::string>{GI(0), GI(1)});
+  }
+};
+
+} // namespace
+
+REGISTER_GRADIENT(Sub, GetSubGradient);
+
+} // namespace caffe2
