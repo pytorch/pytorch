@@ -38,5 +38,6 @@ class IDEEPSumOp final : public IDEEPOperator {
 };
 
 REGISTER_IDEEP_OPERATOR(Sum, IDEEPSumOp);
+REGISTER_IDEEP_OPERATOR(Add, IDEEPSumOp);
 
 } // namespace caffe2
