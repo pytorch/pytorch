@@ -155,7 +155,7 @@ def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
     outputs = []
     for device, chunk, stream in zip(devices, chunks, streams):
         with torch.cuda.device(device), torch.cuda.stream(stream):
-            outputs.append(chunk.cuda(device, non_blocking=True))
+            outputs.append(chunk.cuda(torch.device('cuda:%d'%device), non_blocking=True))
     return tuple(outputs)
 
 
@@ -192,7 +192,7 @@ def gather(tensors, dim=0, destination=None):
     if destination == -1:
         result = tensors[0].new().cpu().resize_(expected_size)
     else:
-        result = tensors[0].new(expected_size, device=destination)
+        result = tensors[0].new(*tuple(expected_size), device=torch.device('cuda:%d'%destination))
 
     chunk_start = 0
     # TODO: if copying to CPU, allocate a pinned buffer, do async copies to it,
