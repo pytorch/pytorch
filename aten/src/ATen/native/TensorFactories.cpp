@@ -263,17 +263,14 @@ THGenerator* get_generator(at::Generator* gen) {
 
 Tensor randperm(const Type& dtype, int64_t n, Generator* generator) {
   Tensor result = dtype.tensor(n);
-  return at::native::randperm_out(result, n, generator);
+  return at::randperm_out(result, n, generator);
 }
 
-Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
+Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   if (n < 0) {
     std::ostringstream oss;
     oss << "n must be non-negative, got " << n;
     throw std::runtime_error(oss.str());
-  }
-  if (result.type().backend() != at::kCPU) {
-    throw std::runtime_error("randperm is only implemented for CPU");
   }
 
   result.resize_({n});

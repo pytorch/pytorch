@@ -800,6 +800,9 @@
 
 - func: randperm_out(Tensor result, int64_t n, *, Generator* generator=nullptr) -> Tensor
   variants: function
+  dispatch:
+    CPU: randperm_out_cpu
+    CUDA: randperm_out_cuda
 
 - func: range(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
   variants: function
