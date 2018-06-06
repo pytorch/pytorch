@@ -22,6 +22,11 @@ def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
 
 
+if not c10d.is_available():
+    print('c10d not available, skipping tests')
+    sys.exit(0)
+
+
 class StoreTestBase(object):
     def _create_store(self, i):
         raise RuntimeError("implement this")
