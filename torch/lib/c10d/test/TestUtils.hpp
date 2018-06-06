@@ -36,6 +36,11 @@ class Semaphore {
 };
 
 std::string tmppath() {
+  const char* tmpfile = getenv("TMPFILE");
+  if (tmpfile) {
+    return std::string(tmpfile);
+  }
+
   const char* tmpdir = getenv("TMPDIR");
   if (tmpdir == nullptr) {
     tmpdir = "/tmp";
