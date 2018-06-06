@@ -139,6 +139,11 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     holds for all elements of analytical gradient :math:`a` and numerical
     gradient :math:`n`.
 
+    .. note::
+        The default values are designed for :attr:`input` of double precision.
+        This check will likely fail if :attr:`input` is of single precision,
+        i.e., ``FloatTensor``.
+
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor or a tuple of Tensors
@@ -230,6 +235,11 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
 
     holds for all elements of analytical gradient :math:`a` and numerical
     gradient :math:`n`.
+
+    .. note::
+        The default values are designed for :attr:`input` of double precision.
+        This check will likely fail if :attr:`input` is of single precision,
+        i.e., ``FloatTensor``.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns

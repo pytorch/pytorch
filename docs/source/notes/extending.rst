@@ -99,13 +99,10 @@ non-Variable arguments::
             return grad_output * ctx.constant, None
 
 .. note::
-    To implement custom double backward (i.e., second order derivatives) for a
-    custom :class:`~torch.autograd.function`, e.g., named ``MyFunction``, we can
-    define another custom  :class:`~torch.autograd.function`, e.g., named
-    ``MyFunctionBackward``, where the ``MyFunctionBackward.forward`` method
-    implements the backward pass of ``MyFunction`` and is called in
-    ``MyFunction.backward`` method, and ``MyFunctionBackward.backward`` method
-    implements the custom double backward computation for ``MyFunction``.
+    Inputs to ``backward``, i.e., :attr:`grad_output`, can also be Tensors that
+    track history. So if ``backward`` is implemented with differentiable
+    operations, (e.g., invocation of another custom
+    :class:`~torch.autograd.function`), higher order derivatives will work.
 
 You probably want to check if the backward method you implemented actually
 computes the derivatives of your function. It is possible by comparing with
