@@ -385,7 +385,8 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      if (output.ne(output).any().toCByte()) {
+      AutoGPU guard(output);
+      if (output.defined() && output.ne(output).any().toCByte()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
         throw std::runtime_error(ss.str());
