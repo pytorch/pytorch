@@ -46,6 +46,7 @@ class Adagrad(Optimizer):
         super(Adagrad, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('lr', 1e-2)
+            group.setdefault('eps', 1e-2)
 
     def share_memory(self):
         for group in self.param_groups:
