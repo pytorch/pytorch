@@ -35,9 +35,9 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
-  tensors.push_back(tensor);
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
+    tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
       at::DeviceGuard _device_guard(device);
       tensors.push_back(type.tensor(tensor.sizes()));
@@ -48,9 +48,9 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
   {
 #endif
     auto & gpu_type = type.toBackend(type.is_sparse() ? at::kSparseCUDA : at::kCUDA);
-    for (auto device : devices.slice(1)) {
-      at::DeviceGuard _device_guard(device);
-      tensors.push_back(gpu_type.copy(tensor, true));
+    for (auto device : devices) {
+      AutoGPU _gpu_guard(device);
+      tensors.push_back(tensor.toType(gpu_type, true));
     }
   }
   return tensors;
