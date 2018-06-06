@@ -45,7 +45,10 @@ bool SwishGradientOp<CPUContext>::DoRunWithType() {
 
 REGISTER_CPU_OPERATOR(
     Swish,
-    UnaryElementwiseOp<FloatTypes, CPUContext, SwishFunctor<CPUContext>>);
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        SwishFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(SwishGradient, SwishGradientOp<CPUContext>);
 
 // Input: X, output: Y
