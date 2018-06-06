@@ -32,7 +32,7 @@ void THNN_(BCECriterion_updateOutput)(
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
-
+  THCThrustAllocator thrustAlloc(state);
   thrust::device_ptr<real> input_data(THCTensor_(data)(state, input));
   thrust::device_ptr<real> target_data(THCTensor_(data)(state, target));
 
@@ -41,6 +41,7 @@ void THNN_(BCECriterion_updateOutput)(
     weights = THCTensor_(newContiguous)(state, weights);
     thrust::device_ptr<real> weights_data(THCTensor_(data)(state, weights));
     sum = thrust::transform_reduce(
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
       thrust::make_zip_iterator(thrust::make_tuple(input_data, target_data, weights_data)),
       thrust::make_zip_iterator(thrust::make_tuple(input_data+size, target_data+size, weights_data+size)),
       bce_functor_weights<real, accreal>(),
@@ -50,6 +51,7 @@ void THNN_(BCECriterion_updateOutput)(
     THCTensor_(free)(state, weights);
   } else {
     sum = thrust::transform_reduce(
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
       thrust::make_zip_iterator(thrust::make_tuple(input_data, target_data)),
       thrust::make_zip_iterator(thrust::make_tuple(input_data+size, target_data+size)),
       bce_functor<real, accreal>(),
