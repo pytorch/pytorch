@@ -5935,7 +5935,13 @@ class TestTorch(TestCase):
         else:
             data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2)
 
+        # print('flip0', data.flip(0))
+        # print('data', data)
         self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2), data.flip(0))
+        print("data", data, "flip1", data.flip(1))
+        self.assertEqual(torch.tensor([3, 4, 1, 2, 7, 8, 5, 6]).view(2, 2, 2), data.flip(1))
+        # print('flip2', data.flip(2))
+        self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2), data.flip(2))
         self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
         self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
 
