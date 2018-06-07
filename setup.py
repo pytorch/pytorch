@@ -582,8 +582,10 @@ library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.so')]
-if WITH_CUDA or WITH_ROCM:
+if WITH_CUDA:
     CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
+if WITH_ROCM:
+    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_hip.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 
@@ -592,14 +594,18 @@ NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if IS_DARWIN:
     CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.dylib')]
-    if WITH_CUDA or WITH_ROCM:
+    if WITH_CUDA:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_gpu.dylib'))
+    if WITH_ROCM:
+        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_hip.dylib'))
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
     CAFFE2_LIBS = [os.path.join(lib_path, 'caffe2.lib')]
-    if WITH_CUDA or WITH_ROCM:
+    if WITH_CUDA:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
+    if WITH_ROCM:
+        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
     if DEBUG:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
     else:

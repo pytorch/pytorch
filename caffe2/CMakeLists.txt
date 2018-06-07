@@ -329,7 +329,7 @@ if(BUILD_CAFFE2)
   # Aten tests should only run when Caffe2 is not built
   set(__aten_test_dir "test/aten")
 endif()
-if(BUILD_ATEN)
+if(BUILD_ATEN AND NOT USE_ROCM)
   foreach(test_src ${ATen_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
