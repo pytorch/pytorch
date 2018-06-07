@@ -115,7 +115,7 @@ class define_context(object):
 
 
 def _get_active_context(cls, val=None, required=True):
-    ctx_info = context_registry().get(cls)
+    ctx_info = _context_registry().get(cls)
     if val is not None:
         assert isinstance(val, cls), (
             'Wrong context type. Expected: %s, got %s.' % (cls, type(val)))
