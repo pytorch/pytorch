@@ -153,11 +153,11 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
   THCudaCheck(cudaGetLastError());
 }
 
-void sortViaThrust(THCState* state,
-                   THCTensor* sorted,
-                   THCudaLongTensor* indices,
-                   THCTensor* input,
-                   int dim, bool dir) {
+void THCTensor_(sortViaThrust)(THCState* state,
+                               THCTensor* sorted,
+                               THCudaLongTensor* indices,
+                               THCTensor* input,
+                               int dim, bool dir) {
   int nDims = THCTensor_(nDimension)(state, input);
 
   ptrdiff_t totalElements = THCTensor_(nElement)(state, input);
@@ -327,7 +327,7 @@ THC_API void THCTensor_(sort)(THCState* state,
   } else {
     // Otherwise, fall back upon Thrust, which handles all other cases
     // (potentially slowly, with extra copies/memory allocations)
-    sortViaThrust(state, sorted, indices, input, dim, (bool) order);
+    THCTensor_(sortViaThrust)(state, sorted, indices, input, dim, (bool) order);
   }
 
   THCudaCheck(cudaGetLastError());
