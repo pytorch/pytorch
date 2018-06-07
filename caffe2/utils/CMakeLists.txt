@@ -27,6 +27,7 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
 file(GLOB_RECURSE tmp *_test.cc)
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${tmp})
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
+exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_HIP_SRCS})
 
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
 # pthreadpool with a very similar interface. Neither NNPACK, nor this
