@@ -4060,7 +4060,7 @@ Example::
             [ 2,  0,  2]])
     and values:
     tensor([ 3.,  4.,  5.])
-    
+ 
     >>> torch.sparse_coo_tensor(i, v)  # Shape inference
     torch.sparse.FloatTensor of size (2,3) with indices:
     tensor([[ 0,  1,  1],
