@@ -1700,7 +1700,8 @@
           default: "false"
 ]]
 [[
-  name: norm
+  name: th_norm
+  cname: norm
   types:
     - floating_point
   backends:
@@ -1724,6 +1725,18 @@
           return toBackend(toDense(backend())).tensor({}).fill_(result);
         }
         // aten_custom_call is followed by the generated call to normall
+]]
+[[
+  name: norm
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  options:
     - cname: norm
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
