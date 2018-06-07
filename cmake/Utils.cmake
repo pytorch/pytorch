@@ -251,3 +251,39 @@ function(print_target_properties tgt)
     endif()
   endforeach(prop)
 endfunction(print_target_properties)
+
+
+###
+# Helper function to add style warning options to the given target
+function(target_enable_style_warnings TARGET)
+  if(MSVC)
+    # TODO Also add some warning options that MSVC can understand
+    set(WARNING_OPTIONS "")
+  else()
+    set(WARNING_OPTIONS
+            -Wall
+            -Wextra
+            -Wold-style-cast
+            -Wno-missing-braces
+            -Wcast-align
+            -Wcast-qual
+            -Wctor-dtor-privacy
+            -Wdisabled-optimization
+            -Wformat=2
+            -Winit-self
+            -Wmissing-include-dirs
+            -Woverloaded-virtual
+            -Wredundant-decls
+            -Wshadow
+            -Wsign-promo
+            -Wstrict-overflow=5
+            -fdiagnostics-show-option
+            -Wconversion
+            -Wpedantic
+            -Wno-gnu-zero-variadic-macro-arguments
+            -Wundef
+            -Werror
+            )
+  endif()
+  target_compile_options(${TARGET} PRIVATE ${WARNING_OPTIONS})
+endfunction(target_enable_style_warnings)
