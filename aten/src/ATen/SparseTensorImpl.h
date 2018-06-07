@@ -42,6 +42,10 @@ public:
   void * unsafeGetTH(bool retain) override;
   std::unique_ptr<Storage> storage() override;
 
+  // Some ops do some manual size fiddling.
+  // TODO: Figure out a more safe way to provide this functionality
+  std::vector<int64_t>& _sizes_mut() const;
+
   // WARNING: This function does NOT preserve invariants of dimI/dimV with
   // respect to indices and values
   void raw_resize_(int64_t dimI, int64_t dimV, ArrayRef<int64_t> size) {
@@ -61,22 +65,7 @@ public:
   // This used to be called THSTensor_(_move)
   // NB: This used to be able to avoid a refcount bump, but I was too lazy to
   // make it happen
-  void set_indices_and_values(const Tensor& indices, const Tensor& values) {
-    bool empty = values.dim() == 0;
-    if (!empty) {
-      AT_CHECK(indices.dim() == 2, "indices must be nDim x nnz");
-      AT_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz");
-      AT_CHECK(indices.size(0) == dimI_, "indices has incorrect first dimension, expected ", dimI_, ", got ", indices.size(0));
-      AT_CHECK(values.dim() == dimV_ + 1, "values has incorrect number of dimensions, expected ", dimV_ + 1, ", got ", values.dim());
-    } else {
-      AT_CHECK(indices.dim() == 0, "if values is empty, indices must be empty too");
-    }
-    indices_ = indices;
-    values_ = values;
-    nnz_ = empty ? 0 : values.size(0);
-    coalesced_ = 0;
-  }
-
+  void set_indices_and_values(const Tensor& indices, const Tensor& values);
 };
 
 } // namespace at

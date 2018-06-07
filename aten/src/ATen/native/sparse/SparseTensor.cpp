@@ -9,6 +9,7 @@ namespace at { namespace native {
 // Just for documentary purposes
 using SparseTensor = Tensor;
 using LongTensor = Tensor;
+using SparseType = Type;
 
 namespace {
   // This is an internal utility function for getting at the SparseTensorImpl,
@@ -52,9 +53,6 @@ Tensor _indices(const SparseTensor& self) {
     // we can remove the special case.
     return _get_sparse_impl(self)->indices();
   }
-  // TODO: I'm not sure how I feel about the fact that the indices tensor
-  // can be larger than nnz.  This came from the original implementation
-  // but it seems safer to just rule out this particular state.
   return _get_sparse_impl(self)->indices().narrow(1, 0, nnz);
 }
 
@@ -72,9 +70,9 @@ Tensor values(const SparseTensor& self) {
  ******************************************************************************/
 
 /* Empty init */
-SparseTensor new_sparse(const Type& dtype) {
+SparseTensor new_sparse(const SparseType& dtype) {
   // TODO: Hmm... this const_cast business seems a bit dodgy
-  return SparseTensor(new SparseTensorImpl(const_cast<Type*>(&dtype)), /* retain */ false);
+  return SparseTensor(new SparseTensorImpl(const_cast<SparseType*>(&dtype)), /* retain */ false);
 }
 
 /*** Helper methods ***/
@@ -97,7 +95,13 @@ namespace {
   }
 
   // Does NOT make copies of indices/values
-  SparseTensor _new_with_dims_and_tensor_sparse(const Type& dtype, int64_t dimI, int64_t dimV, ArrayRef<int64_t> sizes, const LongTensor& indices, const Tensor& values) {
+  SparseTensor _new_with_dims_and_tensor_sparse(
+      const SparseType& dtype,
+      int64_t dimI,
+      int64_t dimV,
+      ArrayRef<int64_t> sizes,
+      const LongTensor& indices,
+      const Tensor& values) {
     SparseTensor self = new_sparse(dtype);
     _raw_resize_sparse(self, dimI, dimV, sizes);
     _alias_into_sparse(self, indices, values);
@@ -106,8 +110,9 @@ namespace {
 }
 
 /* Pointer-copy init */
-// TODO: dtype can probably be inferred here
-SparseTensor new_with_tensor_sparse(const Type& dtype, const LongTensor& indices, const Tensor& values) {
+SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& values) {
+  const SparseType& dtype = values.type().toSparse();
+
   // If sizes are not given, it is inferred as max index of each dim.
   int64_t dimI = indices.size(0);
   int64_t dimV = values.dim() - 1;
@@ -125,15 +130,15 @@ SparseTensor new_with_tensor_sparse(const Type& dtype, const LongTensor& indices
   return _new_with_dims_and_tensor_sparse(dtype, dimI, dimV, computed_sizes, indices, values);
 }
 
-SparseTensor new_with_size_sparse(const Type& dtype, ArrayRef<int64_t> size) {
+SparseTensor new_with_size_sparse(const SparseType& dtype, ArrayRef<int64_t> size) {
   SparseTensor self = new_sparse(dtype);
   _raw_resize_sparse(self, size.size(), 0, size);
   return self;
 }
 
 // NB: Got rid of the sizes == NULL case
-// TODO: dtype can probably be inferred
-SparseTensor new_with_tensor_and_size_unsafe_sparse(const Type& dtype, const LongTensor& indices, const Tensor& values, ArrayRef<int64_t> sizes) {
+SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, const Tensor& values, ArrayRef<int64_t> sizes) {
+  const SparseType& dtype = values.type().toSparse();
   if (indices.dim() == 0 && values.dim() == 0) {
     return new_with_size_sparse(dtype, sizes);
   }
@@ -144,8 +149,8 @@ SparseTensor new_with_tensor_and_size_unsafe_sparse(const Type& dtype, const Lon
 }
 
 // NB: Got rid of the sizes == NULL case
-// TODO: dtype can probably be inferred
-SparseTensor new_with_tensor_and_size_sparse(const Type& dtype, const LongTensor& indices, const Tensor& values, ArrayRef<int64_t> sizes) {
+SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Tensor& values, ArrayRef<int64_t> sizes) {
+  const SparseType& dtype = values.type().toSparse();
   if (indices.dim() == 0 && values.dim() == 0) {
     return new_with_size_sparse(dtype, sizes);
   }
@@ -185,7 +190,7 @@ SparseTensor clone_sparse(const SparseTensor& self) {
 
 SparseTensor transpose_sparse(const SparseTensor& self, int64_t d1, int64_t d2) {
   SparseTensor other = clone_sparse(self);
-  other.transpose_(d1, d2); // TODO: fix me
+  other.transpose_(d1, d2);
   return other;
 }
 
@@ -193,24 +198,27 @@ SparseTensor transpose_sparse(const SparseTensor& self, int64_t d1, int64_t d2) 
  * reshaping methods
  ******************************************************************************/
 
-// This is handy utility function which: (1) sets nnz and (2) resizes
+/*
+// We should implement a utility function which: (1) sets nnz and (2) resizes
 // indices/values to hold enough space to fit nnz, if nnz is larger than
 // the previous amount.  This ensures that we maintain the nnz invariant.
 void _resize_nnz_(const SparseTensor& self, int64_t nnz) {
 }
-
-// Helper, I guess???
-bool is_same_size_as_sparse(const SparseTensor& self, const SparseTensor& src) {
-  return self._dimI() == src._dimI() && self._dimV() == src._dimV() && self.sizes().equals(src.sizes());
-}
+*/
 
 void resize_sparse(const SparseTensor& self, ArrayRef<int64_t> size) {
   _raw_resize_sparse(self, size.size(), 0, size);
 }
 
+namespace {
+  bool _is_same_size_as_sparse(const SparseTensor& self, const SparseTensor& src) {
+    return self._dimI() == src._dimI() && self._dimV() == src._dimV() && self.sizes().equals(src.sizes());
+  }
+}
+
 // register as resize_as_
 void resize_as_sparse(const SparseTensor& self, const SparseTensor& src) {
-  if (!is_same_size_as_sparse(self, src)) {
+  if (!_is_same_size_as_sparse(self, src)) {
     _raw_resize_sparse(self, src._dimI(), src._dimV(), src.sizes());
   }
 }
@@ -219,9 +227,7 @@ void resize_as_sparse(const SparseTensor& self, const SparseTensor& src) {
 
 Tensor sparse_to_dense(const SparseTensor& self) {
   Tensor dst = self.type().toBackend(toDense(self.type().backend())).zeros(self.sizes());
-  // TODO: fix me
-  // spcadd(dst, dst, 1, self);
-  return dst;
+  return dst.add_(self);
 }
 
 void copy_sparse(const SparseTensor& self, const SparseTensor& src) {
@@ -232,11 +238,9 @@ void copy_sparse(const SparseTensor& self, const SparseTensor& src) {
   _get_sparse_impl(self)->set_nnz(src._nnz());
 }
 
-// TODO: not sure if this should be _out
-// Maybe should be plain ref?
-void transpose_inplace_sparse(const SparseTensor& self, int64_t d1, int64_t d2) {
+void transpose_sparse_(const SparseTensor& self, int64_t d1, int64_t d2) {
   int64_t dimI = self._dimI();
-  AT_CHECK(d1 < dimI && d2 < dimI, "Tranposed dimensions should be sparse.  Got dimI: ", dimI, ", d1: ", d1, ", d2: ", d2);
+  AT_CHECK(d1 < dimI && d2 < dimI, "Transposed dimensions should be sparse.  Got dimI: ", dimI, ", d1: ", d1, ", d2: ", d2);
   LongTensor indices = self._indices();
   auto indices_accessor = indices.accessor<int64_t, 2>();
   auto nnz = self._nnz();
@@ -245,12 +249,8 @@ void transpose_inplace_sparse(const SparseTensor& self, int64_t d1, int64_t d2) 
     indices_accessor[d1][i] = indices_accessor[d2][i];
     indices_accessor[d2][i] = tmp;
   }
-  /*
-  // TODO!!!
-  int64_t tmp = self.size(d1);
-  self.sizes()[d1] = self.sizes()[d2]; // TODO: dunno if this works
-  self.sizes()[d2] = tmp;
-  */
+  auto& sizes = _get_sparse_impl(self)->_sizes_mut(); // TODO: Do this more safely
+  std::swap(sizes[d1], sizes[d2]);
 }
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {

@@ -48,15 +48,13 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 
 // NB: Don't need zeros, zeros_like, already implemented in TensorFactories
 
-// TODO: Stop doing these an in-place implementations, there really isn't any utility
-// to it
+// TODO: Where it would be helpful, de-out some of these functions.  They are
+// written this way because that's how it was done in THS.
 
 // TODO: put this into the public API
 bool isSameTensor(const Tensor& lhs, const Tensor& rhs) {
   return lhs.unsafeGetTensorImpl() == rhs.unsafeGetTensorImpl();
 }
-
-// TODO: deduplicate the code here
 
 SparseTensor& mul_out_sparse(SparseTensor& r, const SparseTensor& t, Scalar value) {
   if (isSameTensor(r, t)) {
@@ -73,7 +71,7 @@ SparseTensor& mul_out_sparse(SparseTensor& r, const SparseTensor& t, Scalar valu
 }
 
 SparseTensor& pow_out_sparse(SparseTensor& r, const SparseTensor& t, Scalar value) {
-  // AT_CHECK(value.toCDouble() != 0, "cannot raise to zeroth power on sparse tensor; it would make the result tensor dense");
+  AT_CHECK(value.toDouble() != 0, "cannot raise to zeroth power on sparse tensor; it would make the result tensor dense");
 
   if (isSameTensor(r, t)) {
     r._values().pow_(value);
@@ -202,7 +200,9 @@ SparseTensor& cadd_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, Scalar
 }
 
 SparseTensor& csub_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, Scalar value, const SparseTensor& src) {
-  // SIGH... We're doing two dispatches here for no good reason
+  // UGH... We're doing two dispatches on scalar type here for no good reason.
+  // NB: I tried adding an operator- to Scalar, but there isn't any good way
+  // to negate the tensor, because I have a TensorBase...
   AT_DISPATCH_ALL_TYPES(
       t.type(), "csub_sparse", [&] {
         scalar_t cast_value = value.to<scalar_t>();
@@ -213,57 +213,35 @@ SparseTensor& csub_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, Scalar
 }
 
 /* Internal slice operations */
+
 // NB: This function used to take in buffers which can be reused across calls;
 // we dropped it because there is no select_out implementation at the moment
-
-void _mul_slice_sparse(
+// NB: This function is called in a tight loop!
+template <typename scalar_t>
+static void _mul_slice_sparse(
     const Tensor& dst,
+    TensorAccessor<scalar_t, 1> dst_accessor,
     const Tensor& src1,
+    TensorAccessor<scalar_t, 1> src1_accessor,
     const Tensor& src2,
+    TensorAccessor<scalar_t, 1> src2_accessor,
     int64_t dim,
     int64_t dstIdx,
     int64_t src1Idx,
     int64_t src2Idx
     ) {
-  /*
-  if (src.dim() > 1) {
-  */
+  if (src1.dim() > 1) {
     Tensor src1Buffer = src1.select(dim, src1Idx);
     Tensor src2Buffer = src2.select(dim, src2Idx);
     Tensor dstBuffer = dst.select(dim, dstIdx);
     dstBuffer.addcmul_(src1Buffer, src2Buffer);
-  /*
   } else {
-    // There used to be a fastpath for 1D case, but it is annoying to do atm.
-    THTensor_(fastSet1d)(dst, dstIdx, THTensor_(fastGet1d)(src1, src1Idx) * THTensor_(fastGet1d)(src2, src2Idx));
+    dst_accessor[dstIdx] = src1_accessor[src1Idx] * src2_accessor[src2Idx];
   }
-  */
 }
 
-void _div_slice_sparse(
-    const Tensor& dst,
-    const Tensor& src1,
-    const Tensor& src2,
-    int64_t dim,
-    int64_t dstIdx,
-    int64_t src1Idx,
-    int64_t src2Idx
-    ) {
-  /*
-  if (src.dim() > 1) {
-  */
-    Tensor src1Buffer = src1.select(dim, src1Idx);
-    Tensor src2Buffer = src2.select(dim, src2Idx);
-    Tensor dstBuffer = dst.select(dim, dstIdx);
-    dstBuffer.addcdiv_(src1Buffer, src2Buffer);
-  /*
-  } else {
-    // There used to be a fastpath for 1D case, but it is annoying to do atm.
-    THTensor_(fastSet1d)(dst, dstIdx, THTensor_(fastGet1d)(src1, src1Idx) / THTensor_(fastGet1d)(src2, src2Idx));
-  }
-  */
-}
 
+// NB: divslice was removed as dead code
 
 SparseTensor& cmul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const SparseTensor& src_) {
   AT_CHECK(t_.sizes().equals(src_.sizes()), "cadd operands have incompatible sizes");
@@ -293,29 +271,37 @@ SparseTensor& cmul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const
   auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
   auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
-  while (t_i < t_nnz && s_i < s_nnz) {
-    match = 1;
-    for (d = 0; d < dimI; d++) {
-      if (t_indices_accessor[d][t_i] < src_indices_accessor[d][s_i]) {
-        t_i++;
-        match = 0;
-        break;
+  AT_DISPATCH_ALL_TYPES(
+      r_values.type(), "cmul_out_sparse", [&] {
+        auto r_accessor = r_values.accessor<scalar_t, 1>();
+        auto t_accessor = t_values.accessor<scalar_t, 1>();
+        auto s_accessor = s_values.accessor<scalar_t, 1>();
+
+        while (t_i < t_nnz && s_i < s_nnz) {
+          match = 1;
+          for (d = 0; d < dimI; d++) {
+            if (t_indices_accessor[d][t_i] < src_indices_accessor[d][s_i]) {
+              t_i++;
+              match = 0;
+              break;
+            }
+            if (t_indices_accessor[d][t_i] > src_indices_accessor[d][s_i]) {
+              s_i++;
+              match = 0;
+              break;
+            }
+          }
+          if (!match) continue;
+          for (d = 0; d < dimI; d++) {
+            r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
+          }
+          _mul_slice_sparse<scalar_t>(r_values, r_accessor, t_values, t_accessor, s_values, s_accessor, 0, r_i, t_i, s_i);
+          r_i++;
+          t_i++;
+          s_i++;
+        }
       }
-      if (t_indices_accessor[d][t_i] > src_indices_accessor[d][s_i]) {
-        s_i++;
-        match = 0;
-        break;
-      }
-    }
-    if (!match) continue;
-    for (d = 0; d < dimI; d++) {
-      r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
-    }
-    _mul_slice_sparse(r_values, t_values, s_values, 0, r_i, t_i, s_i);
-    r_i++;
-    t_i++;
-    s_i++;
-  }
+  );
 
   _get_sparse_impl(r)->set_nnz(r_i);
   _get_sparse_impl(r)->set_coalesced(true);
@@ -372,6 +358,10 @@ void spaddmm_out_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k
   scalar_t* dense_ptr = dense.data<scalar_t>();
   scalar_t* r_ptr = r.data<scalar_t>();
 
+  int64_t dense_stride0 = dense.stride(0);
+  int64_t dense_stride1 = dense.stride(1);
+  int64_t r_stride0 = r.stride(0);
+  int64_t r_stride1 = r.stride(1);
 #pragma omp parallel for private(h, i) schedule(static) if (nnz > 10000)
   for (h = 0; h < dim_i; h++) {
     int64_t i_start = csr_accessor[h];
@@ -382,10 +372,8 @@ void spaddmm_out_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k
       if (col >= 0 && col < dim_j) {
         thblas::axpy<scalar_t>(dim_k,
             cast_alpha * val,
-            // TODO: check the generated code here, and load stride
-            // into a temp var if it's bad
-            dense_ptr + col * dense.stride(0), dense.stride(1),
-            r_ptr + h * r.stride(0), r.stride(1));
+            dense_ptr + col * dense_stride0, dense_stride1,
+            r_ptr + h * r_stride0, r_stride1);
       } else {
         AT_ERROR("index out of bound. spmm: ", col, " not between 1 and ", dim_j);
       }
@@ -495,6 +483,10 @@ SparseTensor& sspaddmm_out_sparse_cpu(
   auto indices_accessor = indices.accessor<int64_t, 2>();
   auto newi_accessor = newi.accessor<int64_t, 2>();
 
+  int64_t dense_stride0 = dense.stride(0);
+  int64_t dense_stride1 = dense.stride(1);
+  int64_t newv_stride0 = newv.stride(0);
+
   AT_DISPATCH_ALL_TYPES(
       values.type(), "sspmm", [&] {
         auto values_accessor = values.accessor<scalar_t, 1>();
@@ -511,11 +503,8 @@ SparseTensor& sspaddmm_out_sparse_cpu(
             if (col >= 0 && col < dim_j) {
               thblas::axpy<scalar_t>(dim_k,
                   cast_alpha * val,
-                  // TODO: factor stride out
-                  dense_ptr + col * dense.stride(0), dense.stride(1),
-                  // TODO: I'm pretty sure newv stride is known cuz it's
-                  // contiguous
-                  newv_ptr + p * newv.stride(0), 1);
+                  dense_ptr + col * dense_stride0, dense_stride1,
+                  newv_ptr + p * newv_stride0, 1);
             } else {
               AT_ERROR("index out of bound. sspmm: ", col, " not between 1 and ", dim_j);
             }
@@ -583,8 +572,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, Scalar alpha, const SparseTe
   int64_t outNnz = i + 1;
   indices.resize_({1, outNnz});
   Tensor values = dense.type().tensor({outNnz, n});
-  // TODO!!!
-  // newSparse->size[0] = outNnz;
+  _get_sparse_impl(newSparse)->_sizes_mut()[0] = outNnz; // TODO: use something safer
 
   // Compute output values tensor with sparse * dense multiplication
   spaddmm_out_sparse_cpu(values, 0, values, alpha, newSparse, dense);
