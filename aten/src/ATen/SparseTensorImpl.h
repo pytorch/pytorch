@@ -44,7 +44,7 @@ public:
 
   // Some ops do some manual size fiddling.
   // TODO: Figure out a more safe way to provide this functionality
-  std::vector<int64_t>& _sizes_mut() const;
+  std::vector<int64_t>& _sizes_mut() { return size_; }
 
   // WARNING: This function does NOT preserve invariants of dimI/dimV with
   // respect to indices and values
