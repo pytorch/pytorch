@@ -653,6 +653,10 @@ C10D_GLOO_LIB = os.path.join(lib_path, 'libc10d_gloo.a')
 
 # static library only
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
+if DEBUG:
+    PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.a')
+else:
+    PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobuf.a')
 
 if IS_DARWIN:
     CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.dylib')]
@@ -670,12 +674,14 @@ if IS_WINDOWS:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
     if DEBUG:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
+        PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.lib')
     else:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopb.lib')
+        PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobuf.lib')
 
 main_compile_args = ['-D_THP_CORE', '-DONNX_NAMESPACE=' + ONNX_NAMESPACE]
 main_libraries = ['shm']
-main_link_args = CAFFE2_LIBS + [NANOPB_STATIC_LIB]
+main_link_args = CAFFE2_LIBS + [NANOPB_STATIC_LIB, PROTOBUF_STATIC_LIB]
 main_sources = [
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
@@ -1008,6 +1014,7 @@ if __name__ == '__main__':
         package_data={
             'torch': [
                 'lib/*.so*',
+                'lib/*.a',
                 'lib/*.dylib*',
                 'lib/*.dll',
                 'lib/*.lib',
