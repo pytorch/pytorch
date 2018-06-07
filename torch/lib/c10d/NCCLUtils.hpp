@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nccl.h>
+#include <memory>
 
 #define C10D_NCCL_CHECK(cmd) do {                             \
   ncclResult_t error = cmd;                                   \

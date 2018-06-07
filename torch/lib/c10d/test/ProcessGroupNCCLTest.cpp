@@ -227,10 +227,13 @@ int main(int argc, char** argv) {
     std::cout << "Multi-node world size: " << size << " rank: " << rank
               << std::endl;
   }
-
-  TemporaryFile file;
-  testAllreduce(file.path, rank, size);
-  testBroadcast(file.path, rank, size);
-
+  {
+    TemporaryFile file;
+    testAllreduce(file.path, rank, size);
+  }
+  {
+    TemporaryFile file;
+    testBroadcast(file.path, rank, size);
+  }
   return EXIT_SUCCESS;
 }

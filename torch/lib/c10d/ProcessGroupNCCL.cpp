@@ -80,7 +80,8 @@ void syncStreams(
   CUDADevice gpuGuard;
   for (auto i = 0; i < devices.size(); ++i) {
     gpuGuard.setDevice(devices[i]);
-    auto currentThcStream = THCState_getCurrentStream(thcState);
+    auto currentThcStream = THCState_getCurrentStreamOnDevice(thcState,
+        devices[i]);
     CUDAStream& ncclStream = ncclStreams[i];
     CUDAEvent& ncclEvent = ncclEvents[i];
 
@@ -94,12 +95,10 @@ void syncStreams(
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<int>& devices)
     : devices_(devices) {
-  // GPU deviceGuard
   CUDADevice gpuGuard;
   cudaEvents_.resize(devices.size());
   // Now create the CUDA events
   for (auto i = 0; i < devices.size(); ++i) {
-    // Guard the GPU
     gpuGuard.setDevice(devices[i]);
     cudaEvents_[i] = CUDAEvent::create(cudaEventDisableTiming);
   }
@@ -107,24 +106,26 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<int>& devices)
 
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 
-// Checking the work's corresponding CUDA events' status
+// Check if the NCCL kernels are queued on the GPUs
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() const {
+  return true;
+}
+
+// Helper that checks if the NCCL kernels are completed on the GPUs
+bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() const {
   CUDADevice gpuGuard;
   for (auto i = 0; i < devices_.size(); ++i) {
-    // Get to the device
     gpuGuard.setDevice(devices_[i]);
     auto& cudaEvent = cudaEvents_[i];
-    // Query the event
+    // Checking the work's corresponding CUDA events' status
     auto ret = cudaEventQuery(cudaEvent.getEvent());
     if (ret != cudaSuccess && ret != cudaErrorNotReady) {
-      // Throw directly
       C10D_CUDA_CHECK(ret);
     }
     if (ret == cudaErrorNotReady) {
       return false;
     }
   }
-  return true;
 }
 
 // Same as synchronize(), and will always return true
@@ -138,9 +139,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
   auto thcState = ::at::globalContext().lazyInitCUDA();
   CUDADevice gpuGuard;
   for (auto i = 0; i < devices_.size(); ++i) {
-    // Get to the device
     gpuGuard.setDevice(devices_[i]);
-    auto thcStream = THCState_getCurrentStream(thcState);
+    auto thcStream = THCState_getCurrentStreamOnDevice(thcState, devices_[i]);
     auto& cudaEvent = cudaEvents_[i];
     // Let THC stream wait for the NCCL stream
     C10D_CUDA_CHECK(cudaStreamWaitEvent(thcStream, cudaEvent.getEvent(), 0));
@@ -148,17 +148,14 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
-  throw std::runtime_error(
-      "isSuccess() is not supported by NCCL process "
-      "group's work, isCompleted() and wait() will "
-      "either succeed or throw");
+  return true;
 }
 
 const std::exception& ProcessGroupNCCL::WorkNCCL::exception() const {
   throw std::runtime_error(
       "exception() is not supported by NCCL process "
-      "group's work, isCompleted() and wait() will "
-      "either succeed or throw");
+      "group's work, since isSuccess() will always return true, and "
+      "isCompleted() and wait() will either succeed or throw");
 }
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -181,7 +178,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLId(
         reinterpret_cast<uint8_t*>(ncclId),
         reinterpret_cast<uint8_t*>(ncclId) + NCCL_UNIQUE_ID_BYTES);
     store_->set(devicesKey, ncclIdVal);
-    // Other ranks get to the store
+  // Other ranks get to the store
   } else {
     auto ncclIdVal = store_->get(devicesKey);
     // Just a sanity check
@@ -201,7 +198,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // Sanity check
   if (devicesKey.empty()) {
     throw std::runtime_error(
-        "Not able to create/get the Nccl Comm since "
+        "Not able to create/get the NCCL Communicator since "
         "the GPU devices are not known");
   }
   if (devNCCLCommMap_.find(devicesKey) != devNCCLCommMap_.end()) {
@@ -222,7 +219,6 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // Broadcast so that each process can have a unique NCCL ID
   broadcastUniqueNCCLId(devicesKey, &ncclId);
 
-  // GPU deviceGuard
   CUDADevice gpuGuard;
 
   std::vector<CUDAEvent> eventVal;
@@ -239,12 +235,15 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     int numRanks = getSize() * devices.size();
     int rank = getRank() * devices.size() + i;
 
-    // Guard the GPU
     gpuGuard.setDevice(devices[i]);
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclId);
 
     // Also create the NCCL streams and events
     streamVal[i] = CUDAStream::create();
+    // Event created using cudaEventDisableTiming flag and not
+    // cudaEventBlockingSync flag will provide the best performance when used
+    // with cudaStreamWaitEvent() and cudaEventQuery(). Since we here don't
+    // measure the performance using cudaEvent, this should be set.
     eventVal[i] = CUDAEvent::create(cudaEventDisableTiming);
   }
 
@@ -342,7 +341,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
 
   auto devices = getDevicesOfTensors(tensors);
   auto key = getKeyFromDevices(devices);
-  // Get the NCCL communicators
   auto& ncclComms = getNCCLComm(key, devices);
 
   // First let NCCL streams wait for THC stream
@@ -351,16 +349,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  // Guard GPU device
   CUDADevice gpuGuard;
 
-  // Queue the NCCL kernel
   C10D_NCCL_CHECK(ncclGroupStart());
 
   for (auto i = 0; i < tensors.size(); ++i) {
-    // Get to the device
     gpuGuard.setDevice(devices[i]);
-    // Use the NCCL stream
     CUDAStream& ncclStream = ncclStreams_[key][i];
 
     C10D_NCCL_CHECK(ncclAllReduce(
@@ -394,24 +388,20 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
 
   auto devices = getDevicesOfTensors(tensors);
   auto key = getKeyFromDevices(devices);
-  // Get the NCCL communicators
   auto& ncclComms = getNCCLComm(key, devices);
+
   // First let NCCL streams wait for THC stream
   syncStreams(thcState_, devices, ncclEvents_[key], ncclStreams_[key]);
 
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  // Guard GPU device
   CUDADevice gpuGuard;
 
-  // Queue the NCCL kernel
   C10D_NCCL_CHECK(ncclGroupStart());
 
   for (auto i = 0; i < tensors.size(); ++i) {
-    // Get to the device
     gpuGuard.setDevice(devices[i]);
-    // Use the NCCL stream
     CUDAStream& ncclStream = ncclStreams_[key][i];
     // root rank of the the GPU
     int root = opts.rootRank * tensors.size() + opts.rootTensor;

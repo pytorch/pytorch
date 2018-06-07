@@ -20,7 +20,7 @@ namespace c10d {
 // specifically, each NCCL call is scheduled on a separate CUDA stream that is
 // different from the current THC CUDA stream. This is for the purpose of
 // achieving potentially concurrency and better performance. As a result,
-// it is the caller's responsibilty to make sure that the CUDA stream his/her
+// it is the callers' responsibilty to make sure that the CUDA stream their
 // code works on (the THC stream) needs to wait for the NCCL operation from
 // this class.
 //
@@ -29,12 +29,16 @@ namespace c10d {
 // either WorkNCCL::wait() or WorkNCCL::synchronize(), both achieves the same
 // functionality and are synonyms.
 //
-// Note that WorkNCCL::isSuccess() and WorkNCCL::exception() are not supported
-// by NCCL process group single it's single threaded. Every NCCL or CUDA failure
-// will simply raise std::runtime_error.
+// Note that WorkNCCL::isSuccess() and WorkNCCL::isCompleted() will always
+// return true since ProcessGroupNCCL is single threaded. Every single NCCL
+// or CUDA failure will simply raise std::runtime_error.
 //
-// Also note that WorkNCCL::isCompleted() will check if the NCCL op has
-// completed on the GPU (not just scheduled).
+// Therefore, WorkNCCL::exception() is not supported since isSuccess() always
+// returns true.
+//
+// Also note that WorkNCCL::finishedGPUExecution() is a helper function only
+// provided by ProcessGroupNCCL to check if the NCCL operation of WorkNCCL has
+// finished execution on the GPU (not just scheduled).
 //
 // Example on using the NCCL process group
 //
@@ -66,7 +70,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Non-blocking operation
     bool wait() override;
 
-    // Not supported by WorkNCCL
+    // Will always return true
     bool isSuccess() const override;
 
     // Same as wait()
@@ -74,6 +78,10 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Not supported by WorkNCCL
     const std::exception& exception() const override;
+
+    // Helper function that checks if the NCCL kernels have finished
+    // execution on the GPUs
+    bool finishedGPUExecution() const;
 
    protected:
     // The cached list of CUDA devices to operate on
