@@ -176,7 +176,8 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
     device_reduce<T>(Adata, Cdata, count, &sum_buffer_, &context_);
   } else {
     size_t pre, n, post;
-    std::tie(pre, n, post) = ComputeLegacyBroadcastSizes(A, B, axis_);
+    std::tie(pre, n, post) =
+        elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
     // because we check shape(B) \in shape(A) before,
     // post and pre cannot be 1 at same time
     if (post == 1) {
