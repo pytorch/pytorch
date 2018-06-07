@@ -522,7 +522,22 @@ in the dataset later as (true) positive example.
 )DOC")
     .NumInputs(2)
     .NumOutputs(1)
-    .IdenticalTypeAndShapeOfInputDim(0, 0)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      CAFFE_ENFORCE_EQ(in[0].dims_size(), in[1].dims_size());
+      for (size_t i = 0; i < in[0].dims_size(); ++i) {
+        CAFFE_ENFORCE_EQ(in[0].dims(i), in[1].dims(i));
+      }
+      vector<TensorShape> out(1);
+      out[0] = in[1];
+      if (!in[0].dims().empty()) {
+        for (size_t i = 0; i + 1 < in[0].dims_size(); ++i) {
+          out[0].add_dims(in[0].dims(i));
+        }
+      }
+      out[0].set_data_type(in[0].data_type());
+      return out;
+    })
     .SetDoc(R"DOC(
 Given two matrices logits and targets, of same shape,
 (batch_size, num_classes), computes the sigmoid cross entropy between the two.
@@ -539,7 +554,22 @@ OPERATOR_SCHEMA(SigmoidCrossEntropyWithLogitsGradient)
 OPERATOR_SCHEMA(WeightedSigmoidCrossEntropyWithLogits)
     .NumInputs(3)
     .NumOutputs(1)
-    .IdenticalTypeAndShapeOfInputDim(0, 0)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      CAFFE_ENFORCE_EQ(in[0].dims_size(), in[1].dims_size());
+      for (size_t i = 0; i < in[0].dims_size(); ++i) {
+        CAFFE_ENFORCE_EQ(in[0].dims(i), in[1].dims(i));
+      }
+      vector<TensorShape> out(1);
+      out[0] = in[1];
+      if (!in[0].dims().empty()) {
+        for (size_t i = 0; i + 1 < in[0].dims_size(); ++i) {
+          out[0].add_dims(in[0].dims(i));
+        }
+      }
+      out[0].set_data_type(in[0].data_type());
+      return out;
+    })
     .SetDoc(R"DOC(
 Given three matrices: logits, targets, weights, all of the same shape,
 (batch_size, num_classes), computes the weighted sigmoid cross entropy between
