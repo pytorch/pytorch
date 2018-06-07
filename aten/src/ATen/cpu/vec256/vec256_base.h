@@ -22,7 +22,7 @@ namespace {
 template <class T>
 struct Vec256 {
 private:
-  T values[32 / sizeof(T)];
+  T values[32 / sizeof(T)] = {0};
 public:
   static constexpr int size = 32 / sizeof(T);
   Vec256() {}
