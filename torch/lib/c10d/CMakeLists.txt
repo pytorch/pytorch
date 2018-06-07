@@ -1,13 +1,10 @@
 cmake_minimum_required(VERSION 3.2 FATAL_ERROR)
 
 # Find modules.
-# Note: this does NOT include <root>/cmake/Modules, because that woud
-# make find_package resolve to <root>cmake/Modules/FindGloo.cmake
-# instead of resolving to ../tmp_install/share/cmake/Gloo.
 list(APPEND CMAKE_MODULE_PATH
   /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/public
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules_NCCL_enhanced
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules_CUDA_fix)
 
 # Polyfill for upstream FindCUDA
@@ -22,7 +19,11 @@ if(NOT Caffe2_FOUND)
 endif()
 
 find_package(Gloo REQUIRED)
-if(NOT Gloo_FOUND)
+if(Gloo_FOUND)
+  message(STATUS "Gloo_LIBRARY: ${Gloo_LIBRARY}")
+  message(STATUS "Gloo_NATIVE_LIBRARY: ${Gloo_NATIVE_LIBRARY}")
+  message(STATUS "Gloo_INCLUDE_DIR: ${Gloo_INCLUDE_DIR}")
+else()
   message(FATAL_ERROR "Gloo not found")
 endif()
 
@@ -38,7 +39,7 @@ endif()
 find_package(NCCL)
 IF(NCCL_FOUND)
   message(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
-  message(STATUS "NCCL_INCLUDE_DIR: ${NCCL_INCLUDE_DIR}")
+  message(STATUS "NCCL_INCLUDE_DIRS: ${NCCL_INCLUDE_DIRS}")
   IF(NCCL_MAJOR_VERSION AND NOT (NCCL_MAJOR_VERSION LESS 2))
     message(STATUS "NCCL Version 2 or higher found, will "
                    "compile with NCCL distributed backend")
@@ -91,7 +92,7 @@ set(C10D_GLOO_SRCS
 
 add_library(c10d_gloo ${C10D_GLOO_SRCS})
 target_include_directories(c10d_gloo PUBLIC ${GLOO_INCLUDE_DIR})
-target_link_libraries(c10d_gloo PUBLIC c10d gloo gloo_cuda)
+target_link_libraries(c10d_gloo PUBLIC c10d ${Gloo_NATIVE_LIBRARY} ${Gloo_LIBRARY})
 
 if(MPI_FOUND)
   set(C10D_MPI_SRCS
@@ -107,7 +108,7 @@ if(DISTRIBUTED_NCCL_FOUND)
     ProcessGroupNCCL.cpp
   )
   add_library(c10d_nccl ${C10D_NCCL_SRCS})
-  target_include_directories(c10d_nccl PUBLIC ${NCCL_INCLUDE_DIR})
+  target_include_directories(c10d_nccl PUBLIC ${NCCL_INCLUDE_DIRS})
   target_link_libraries(c10d_nccl PUBLIC c10d ${NCCL_LIBRARIES})
 endif()
 
