@@ -9,7 +9,7 @@ import threading
 import six
 
 
-class ContextInfo(object):
+class _ContextInfo(object):
     def __init__(self, cls, allow_default, arg_name):
         self.cls = cls
         self.allow_default = allow_default
@@ -39,12 +39,12 @@ class ContextInfo(object):
         return self._stack[-1]
 
 
-class ContextRegistry(object):
+class _ContextRegistry(object):
     def __init__(self):
         self._ctxs = {}
 
     def register(self, ctx_info):
-        assert isinstance(ctx_info, ContextInfo)
+        assert isinstance(ctx_info, _ContextInfo)
         assert (ctx_info.cls not in self._ctxs), (
             'Context %s already registered' % ctx_info.cls)
         self._ctxs[ctx_info.cls] = ctx_info
@@ -54,10 +54,10 @@ class ContextRegistry(object):
         return self._ctxs[cls]
 
 
-_CONTEXT_REGISTRY = ContextRegistry()
+_CONTEXT_REGISTRY = _ContextRegistry()
 
 
-def context_registry():
+def _context_registry():
     global _CONTEXT_REGISTRY
     return _CONTEXT_REGISTRY
 
@@ -84,8 +84,8 @@ def __call__(self, func):
 
 
 @classmethod
-def current(cls, value=None, required=True):
-    return get_active_context(cls, value, required)
+def _current(cls, value=None, required=True):
+    return _get_active_context(cls, value, required)
 
 
 class define_context(object):
@@ -99,8 +99,8 @@ class define_context(object):
                 cls, cls._ctx_class))
         cls._ctx_class = cls
 
-        context_registry().register(
-            ContextInfo(cls, self.allow_default, self.arg_name)
+        _context_registry().register(
+            _ContextInfo(cls, self.allow_default, self.arg_name)
         )
 
         cls._prev_enter = cls.__enter__ if hasattr(cls, '__enter__') else None
@@ -109,12 +109,12 @@ class define_context(object):
         cls.__enter__ = __enter__
         cls.__exit__ = __exit__
         cls.__call__ = __call__
-        cls.current = current
+        cls.current = _current
 
         return cls
 
 
-def get_active_context(cls, val=None, required=True):
+def _get_active_context(cls, val=None, required=True):
     ctx_info = context_registry().get(cls)
     if val is not None:
         assert isinstance(val, cls), (
