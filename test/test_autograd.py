@@ -2293,6 +2293,19 @@ class TestAutograd(TestCase):
     def test_set_requires_grad_only_for_floats(self):
         self._test_set_requires_grad_only_for_floats(self, False)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_rnn_backward_to_input_but_not_parameters_cuda(self):
+        # this checks whether it is possible to not require
+        # weight parameters, but require inputs, see #7722
+        dev = torch.device('cuda')
+        l = torch.nn.LSTM(2, 3).to(dev)
+        for p in l.parameters():
+            p.requires_grad = False
+        s = torch.randn(1, 1, 2, requires_grad=True, device=dev)
+        out, _ = l(s)
+        out.sum().backward()
+        self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
