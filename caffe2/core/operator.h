@@ -189,7 +189,7 @@ class OperatorBase : public Observable<OperatorBase> {
 
     bool found_input;
     if (err->caller() != nullptr) {
-      for (int i = 0; i < inputs_.size(); i++) {
+      for (size_t i = 0; i < inputs_.size(); i++) {
         if (inputs_[i]->GetRaw() == err->caller()) {
           found_input = true;
           err->AppendMessage(
@@ -197,7 +197,7 @@ class OperatorBase : public Observable<OperatorBase> {
           break;
         }
       }
-      for (int i = 0; i < outputs_.size(); i++) {
+      for (size_t i = 0; i < outputs_.size(); i++) {
         if (outputs_[i]->GetRaw() == err->caller()) {
           if (found_input) {
             err->AppendMessage("\n OR ");
