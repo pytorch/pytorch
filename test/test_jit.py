@@ -1142,6 +1142,239 @@ class TestScript(JitTestCase):
         self.checkScript(func3, (a, b), optimize=True)
         self.checkScript(func4, (a, b), optimize=True)
 
+    def test_literal_add(self):
+        # int + int -> int
+        def func1(zero):
+            c = 8 + 2
+            return zero + c
+
+        # int + float -> float
+        def func2(zero):
+            c = 5 + 3.1
+            return zero + c
+
+        # float + int -> float
+        def func3(zero):
+            c = 8.2 + 2
+            return zero + c
+
+        # float + float -> float
+        def func4(zero):
+            c = 3.14 * 0.125
+            return zero + c
+
+        zero = torch.tensor(0.)
+        self.checkScript(func1, (zero,), optimize=True)
+        self.checkScript(func2, (zero,), optimize=True)
+        self.checkScript(func3, (zero,), optimize=True)
+        self.checkScript(func4, (zero,), optimize=True)
+
+    def test_literal_sub(self):
+        # int - int -> int
+        def func1(zero):
+            c = 8 - 2
+            return zero + c
+
+        # int - float -> float
+        def func2(zero):
+            c = 5 + 3.1
+            return zero + c
+
+        # float - int -> float
+        def func3(zero):
+            c = 8.2 - 2
+            return zero + c
+
+        # float - float -> float
+        def func4(zero):
+            c = 3.14 - 0.125
+            return zero + c
+
+        zero = torch.tensor(0.)
+        self.checkScript(func1, (zero,), optimize=True)
+        self.checkScript(func2, (zero,), optimize=True)
+        self.checkScript(func3, (zero,), optimize=True)
+        self.checkScript(func4, (zero,), optimize=True)
+
+    def test_literal_mul(self):
+        # int * int -> int
+        def func1(zero):
+            c = 8 * 2
+            return zero + c
+
+        # int * float -> float
+        def func2(zero):
+            c = 5 * 3.1
+            return zero + c
+
+        # float * int -> float
+        def func3(zero):
+            c = 8.2 * 2
+            return zero + c
+
+        # float * float -> float
+        def func4(zero):
+            c = 3.14 * 0.125
+            return zero + c
+
+        zero = torch.tensor(0.)
+        self.checkScript(func1, (zero,), optimize=True)
+        self.checkScript(func2, (zero,), optimize=True)
+        self.checkScript(func3, (zero,), optimize=True)
+        self.checkScript(func4, (zero,), optimize=True)
+
+    # TODO: turn this on for py3 (and add PY3 division semantics)
+    @unittest.skipIf(not PY2, "div follows py2 semantics right now")
+    def test_literal_div(self):
+        # int / int -> float (py3) or int (py2)
+        def func1(zero):
+            c = 8 / 2
+            return zero + c
+
+        # int / int -> float (py3) or int (py2)
+        def func2(zero):
+            c = 1 / 2
+            return zero + c
+
+        # int / float -> float
+        def func3(zero):
+            c = 5 / 3.1
+            return zero + c
+
+        # float / int -> float
+        def func4(zero):
+            c = 8.2 / 2
+            return zero + c
+
+        # float / float -> float
+        def func5(zero):
+            c = 3.14 / 0.125
+            return zero + c
+
+        zero = torch.tensor(0.)
+        self.checkScript(func1, (zero,), optimize=True)
+        self.checkScript(func2, (zero,), optimize=True)
+        self.checkScript(func3, (zero,), optimize=True)
+        self.checkScript(func4, (zero,), optimize=True)
+        self.checkScript(func5, (zero,), optimize=True)
+
+    def test_literal_math(self):
+        # float math
+        def func1(zero):
+            a = 1.
+            b = 2.
+            c = 3.5
+            d = a + b * c + a * (b - c) / -b
+            return zero + d
+
+        # int math
+        def func2(zero):
+            a = 1
+            b = 2
+            c = -3
+            d = (b * b * c) / c + a - b * a
+            return zero + d
+
+        # mix int, float math
+        def func3(zero):
+            a = 1
+            b = 2.1
+            c = -3
+            d = a * b + c + c * a + b / -a
+            return zero + d
+
+        zero = torch.tensor(0.)
+        self.checkScript(func1, (zero,), optimize=True)
+        self.checkScript(func2, (zero,), optimize=True)
+        self.checkScript(func3, (zero,), optimize=True)
+
+    def _test_tensor_literal_math(self, device='cpu'):
+        # TODO: when we support passing literals into functions,
+        # these tests can look a lot nicer.
+        def addi(t):
+            return t + 2
+
+        def addf(t):
+            return t + 5.4321
+
+        def subi(t):
+            return t - 2
+
+        def subf(t):
+            return t - 5.4321
+
+        def muli(t):
+            return t * 2
+
+        def mulf(t):
+            return t * 5.4321
+
+        def divi(t):
+            return t / 2
+
+        def divf(t):
+            return t / 5.4321
+
+        def addir(t):
+            return 2 + t
+
+        def addfr(t):
+            return 5.4321 + t
+
+        def subir(t):
+            return 2 - t
+
+        def subfr(t):
+            return 5.4321 - t
+
+        def mulir(t):
+            return 2 - t
+
+        def mulfr(t):
+            return 5.4321 * t
+
+        def divir(t):
+            return 2 / t
+
+        def divfr(t):
+            return 5.4321 / t
+
+        float_tensor = torch.randn(5, 5, device=device)
+        long_tensor = torch.randint(-5, 5, (5, 5), dtype=torch.long, device=device)
+        long_tensor[long_tensor == 0] = 2
+
+        py2_only = [divi, divir]
+        fns = [addi, addf, subi, subf, muli, mulf, divf,
+               addir, addfr, subir, subfr, mulir, mulfr, divfr]
+        if PY2:
+            fns.extend(py2_only)
+        tensors = [float_tensor, long_tensor]
+
+        for fn in fns:
+            for tensor in tensors:
+                self.checkScript(fn, (tensor,), optimize=True)
+
+    def test_tensor_literal_math(self):
+        self._test_tensor_literal_math()
+
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_tensor_literal_math_cuda(self):
+        self._test_tensor_literal_math(dtype='cuda')
+
+    def test_tensor_literal_math_expect(self):
+        @torch.jit.script
+        def func(x):
+            a = 17
+            b = -3.14
+            c = a + b
+            return x + c
+
+        x = torch.randn(2, 3, dtype=torch.float)
+        out = func(x)
+
+        self.assertExpected(str(func.graph), subname='graph')
+        self.assertExpected(str(func.graph_for(x)), subname='graph_for')
+
     def test_expand(self):
         @torch.jit.script
         def func(x, y):

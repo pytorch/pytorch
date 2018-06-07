@@ -1,0 +1,15 @@
+graph(%x : Dynamic) {
+  %a : int = prim::Constant[value={17}]()
+  %2 : float = prim::Constant[value={3.14}]()
+  %3 : Dynamic = prim::Cast(%2)
+  %b : float = aten::neg(%3)
+  %6 : Dynamic = prim::Cast(%a)
+  %7 : Dynamic = aten::type_as(%6, %b)
+  %8 : Dynamic = prim::Cast(%b)
+  %9 : Dynamic = aten::type_as(%8, %b)
+  %c : float = aten::add[alpha={1}](%7, %9)
+  %12 : Dynamic = prim::Cast(%c)
+  %13 : Dynamic = aten::type_as(%12, %x)
+  %14 : Dynamic = aten::add[alpha={1}](%x, %13)
+  return (%14);
+}
