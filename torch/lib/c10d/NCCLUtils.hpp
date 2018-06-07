@@ -3,16 +3,16 @@
 #include <nccl.h>
 #include <memory>
 
-#define C10D_NCCL_CHECK(cmd) do {                             \
-  ncclResult_t error = cmd;                                   \
-  if (error != ncclSuccess) {                                 \
-    std::string err = "NCCL error in: " +                     \
-                      std::string(__FILE__) + ":" +           \
-                      std::to_string(__LINE__) + ", " +       \
-                      std::string(ncclGetErrorString(error)); \
-    throw std::runtime_error(err);                            \
-  }                                                           \
-} while (0)
+#define C10D_NCCL_CHECK(cmd)                                              \
+  do {                                                                    \
+    ncclResult_t error = cmd;                                             \
+    if (error != ncclSuccess) {                                           \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" + \
+          std::to_string(__LINE__) + ", " +                               \
+          std::string(ncclGetErrorString(error));                         \
+      throw std::runtime_error(err);                                      \
+    }                                                                     \
+  } while (0)
 
 namespace c10d {
 
@@ -29,14 +29,13 @@ class NCCLComm {
     }
   }
 
-  static std::shared_ptr<NCCLComm> create(int numRanks,
-                                          int rank,
-                                          ncclUniqueId commId) {
+  static std::shared_ptr<NCCLComm> create(
+      int numRanks,
+      int rank,
+      ncclUniqueId commId) {
     auto comm = std::make_shared<NCCLComm>();
-    C10D_NCCL_CHECK(ncclCommInitRank(&(comm->ncclComm_),
-                                     numRanks,
-                                     commId,
-                                     rank));
+    C10D_NCCL_CHECK(
+        ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank));
     return comm;
   }
 

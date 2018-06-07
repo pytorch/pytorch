@@ -80,8 +80,8 @@ void syncStreams(
   CUDADevice gpuGuard;
   for (auto i = 0; i < devices.size(); ++i) {
     gpuGuard.setDevice(devices[i]);
-    auto currentThcStream = THCState_getCurrentStreamOnDevice(thcState,
-        devices[i]);
+    auto currentThcStream =
+        THCState_getCurrentStreamOnDevice(thcState, devices[i]);
     CUDAStream& ncclStream = ncclStreams[i];
     CUDAEvent& ncclEvent = ncclEvents[i];
 
@@ -126,6 +126,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() const {
       return false;
     }
   }
+  return true;
 }
 
 // Same as synchronize(), and will always return true
@@ -178,7 +179,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLId(
         reinterpret_cast<uint8_t*>(ncclId),
         reinterpret_cast<uint8_t*>(ncclId) + NCCL_UNIQUE_ID_BYTES);
     store_->set(devicesKey, ncclIdVal);
-  // Other ranks get to the store
+    // Other ranks get to the store
   } else {
     auto ncclIdVal = store_->get(devicesKey);
     // Just a sanity check
