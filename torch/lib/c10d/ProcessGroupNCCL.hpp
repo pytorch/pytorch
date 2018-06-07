@@ -122,7 +122,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   void tensorCheckHelper(
       const std::vector<at::Tensor>& input,
       const std::vector<at::Tensor>& output,
-      size_t outputOverInput = 1);
+      int outputOverInput = 1);
 
   // Store that is used to exchange each Ranks's NCCL unique ID
   std::shared_ptr<Store> store_;

@@ -170,7 +170,7 @@ void testAllreduce(const std::string& path, int rank, int size) {
   const int totalNumGPUs = test.numDevices() * size;
   const auto expected = (totalNumGPUs * (totalNumGPUs - 1)) / 2;
   auto tensors = test.getTensors();
-  for (auto j = 0; j < tensors.size(); j++) {
+  for (size_t j = 0; j < tensors.size(); j++) {
     auto& tensor = tensors[j];
     auto data = tensor.data<float>();
     for (auto k = 0; k < tensor.numel(); k++) {
@@ -198,7 +198,7 @@ void testBroadcast(const std::string& path, int rank, int size) {
       // Check results
       const auto expected = (rootRank * numDevices + rootTensor);
       auto tensors = test.getTensors();
-      for (auto j = 0; j < tensors.size(); j++) {
+      for (size_t j = 0; j < tensors.size(); j++) {
         auto& tensor = tensors[j];
         auto data = tensor.data<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
