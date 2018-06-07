@@ -89,7 +89,7 @@ if(USE_CUDA)
   endif()
 endif()
 
-add_definitions(-DUSE_CATCH -D_FORCE_INLINES)
+add_definitions(-DUSE_CATCH -D_FORCE_INLINES -DONNX_NAMESPACE=${ONNX_NAMESPACE})
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
