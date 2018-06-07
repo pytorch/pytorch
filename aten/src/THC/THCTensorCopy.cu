@@ -163,7 +163,7 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
 
       THCudaCheck(cudaMemcpyAsync(
                     dstContig->template data<ScalarTypeDst>(),
-                    srcContig->template data<ScalarTypeSrc>(),
+                    srcContig->template data<ScalarTypeDst>(),
                     totalElements *
                     sizeof(ScalarTypeDst),
                     cudaMemcpyDeviceToDevice,
