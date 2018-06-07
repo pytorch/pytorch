@@ -393,13 +393,16 @@ endif()
 
 # ---[ CUDA
 if(USE_CUDA)
+  # public/*.cmake uses CAFFE2_USE_*
+  set(CAFFE2_USE_CUDA ${USE_CUDA})
+  set(CAFFE2_USE_CUDNN ${USE_CUDNN})
+  set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
-  if(CAFFE2_FOUND_CUDA)
+  if(CAFFE2_USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
     # caffe2::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-        caffe2::cufft caffe2::curand)
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::curand)
     if(BUILD_CAFFE2)
       # Don't be deceived!  caffe2::cuda is the low-level DRIVER API,
       # not the actual CUDA library.  Caffe2 depends directly on nvrtc
@@ -413,25 +416,30 @@ if(USE_CUDA)
       # linking.
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
     endif()
-    if(CAFFE2_FOUND_CUDNN)
-      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+    if(CAFFE2_USE_CUDNN)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
     else()
       if(BUILD_CAFFE2)
         # TODO: Get rid of special case for Caffe2 where we require
         # CUDA *and* cuDNN to be installed.
         message(WARNING
-            "Not compiling with CUDA since cuDNN is missing. Suppress "
-            "this warning with -DUSE_CUDA=OFF.")
+          "Not compiling with CUDA since cuDNN is missing. Suppress "
+          "this warning with -DUSE_CUDA=OFF.")
         caffe2_update_option(USE_CUDA OFF)
         caffe2_update_option(USE_CUDNN OFF)
+        caffe2_update_option(USE_TENSORRT OFF)
+        set(CAFFE2_USE_CUDA OFF)
+        set(CAFFE2_USE_CUDNN OFF)
+        set(CAFFE2_USE_TENSORRT OFF)
       else()
         message(WARNING
-            "Not compiling with cuDNN. Suppress this warning with "
-            "-DUSE_CUDNN=OFF.")
+          "Not compiling with cuDNN. Suppress this warning with "
+          "-DUSE_CUDNN=OFF.")
         caffe2_update_option(USE_CUDNN OFF)
+        set(CAFFE2_USE_CUDNN OFF)
       endif()
     endif()
-    if(USE_CUDA)
+    if(CAFFE2_USE_CUDA)
       if(CAFFE2_STATIC_LINK_CUDA)
         # When statically linking, this must be the order of the libraries
         LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
@@ -439,15 +447,22 @@ if(USE_CUDA)
       else()
         LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
       endif()
-      if(USE_TENSORRT)
+      if(CAFFE2_USE_TENSORRT)
         list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
+      else()
+        caffe2_update_option(USE_TENSORRT OFF)
       endif()
     endif()
   else()
     message(WARNING
-        "Not compiling with CUDA. Suppress this warning with "
-        "-DUSE_CUDA=OFF.")
+      "Not compiling with CUDA. Suppress this warning with "
+      "-DUSE_CUDA=OFF.")
     caffe2_update_option(USE_CUDA OFF)
+    caffe2_update_option(USE_CUDNN OFF)
+    caffe2_update_option(USE_TENSORRT OFF)
+    set(CAFFE2_USE_CUDA OFF)
+    set(CAFFE2_USE_CUDNN OFF)
+    set(CAFFE2_USE_TENSORRT OFF)
   endif()
 endif()
 

@@ -1,8 +1,5 @@
 # ---[ cuda
 
-set(CAFFE2_FOUND_CUDA FALSE)
-set(CAFFE2_FOUND_CUDNN FALSE)
-
 # Find CUDA.
 find_package(CUDA 7.0)
 if(NOT CUDA_FOUND)
@@ -10,9 +7,9 @@ if(NOT CUDA_FOUND)
     "Caffe2: CUDA cannot be found. Depending on whether you are building "
     "Caffe2 or a Caffe2 dependent library, the next warning / error will "
     "give you more info.")
+  set(CAFFE2_USE_CUDA OFF)
   return()
 endif()
-set(CAFFE2_FOUND_CUDA TRUE)
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
@@ -94,13 +91,11 @@ find_package_handle_standard_args(
 if(NOT CUDNN_FOUND)
   message(WARNING
     "Caffe2: Cannot find cuDNN library. Turning the option off")
-  set(USE_CUDNN OFF)
-else()
-  set(CAFFE2_FOUND_CUDNN TRUE)
+  set(CAFFE2_USE_CUDNN OFF)
 endif()
 
 # Optionally, find TensorRT
-if (${USE_TENSORRT})
+if(CAFFE2_USE_TENSORRT)
   find_path(TENSORRT_INCLUDE_DIR NvInfer.h
     HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES include)
@@ -112,12 +107,12 @@ if (${USE_TENSORRT})
   if(NOT TENSORRT_FOUND)
     message(WARNING
       "Caffe2: Cannot find TensorRT library. Turning the option off")
-    set(USE_TENSORRT OFF)
+    set(CAFFE2_USE_TENSORRT OFF)
   endif()
 endif()
 
-# ---[ Exract versions
-if (CAFFE2_FOUND_CUDNN)
+# ---[ Extract versions
+if(CAFFE2_USE_CUDNN)
   # Get cuDNN version
   file(READ ${CUDNN_INCLUDE_DIR}/cudnn.h CUDNN_HEADER_CONTENTS)
   string(REGEX MATCH "define CUDNN_MAJOR * +([0-9]+)"
@@ -189,7 +184,7 @@ set_property(
 
 # cudnn
 # static linking is handled by USE_STATIC_CUDNN environment variable
-if(${USE_CUDNN})
+if(CAFFE2_USE_CUDNN)
   add_library(caffe2::cudnn UNKNOWN IMPORTED)
   set_property(
       TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
@@ -231,7 +226,7 @@ set_property(
     ${CUDA_INCLUDE_DIRS})
 
 # TensorRT
-if(${USE_TENSORRT})
+if(CAFFE2_USE_TENSORRT)
   add_library(caffe2::tensorrt UNKNOWN IMPORTED)
   set_property(
       TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
