@@ -2232,17 +2232,10 @@
           kwarg_only: True
 ]]
 [[
-  name: add_
+  name: th_add_
   return: argument 0
+  variants: function
   options:
-    - cname: add_scaled
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
     - cname: cadd
       aten_sparse: True
       arguments:
@@ -2265,6 +2258,37 @@
         - THSTensor* other
 ]]
 [[
+  name: add_
+  return: argument 0
+  options:
+    - cname: add_scaled
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real other
+        - arg: real alpha
+          default: AS_REAL(1)
+          kwarg_only: True
+]]
+[[
+  name: th_sub
+  variants:
+    - function
+  return: argument 0
+  options:
+    - cname: csub
+      aten_sparse: True
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - arg: THTensor* self
+          broadcast: other fallback
+        - arg: real alpha
+          default: AS_REAL(1)
+          kwarg_only: True
+        - THTensor* other
+]]
+[[
   name: sub
   variants:
     - method
@@ -2280,13 +2304,17 @@
         - arg: real alpha
           default: AS_REAL(1)
           kwarg_only: True
+]]
+[[
+  name: th_sub_
+  return: argument 0
+  options:
     - cname: csub
       aten_sparse: True
       arguments:
-        - arg: THTensor* result
-          output: True
+        - THTensor* self
         - arg: THTensor* self
-          broadcast: other fallback
+          broadcast: other inplace fallback
         - arg: real alpha
           default: AS_REAL(1)
           kwarg_only: True
@@ -2304,16 +2332,6 @@
         - arg: real alpha
           default: AS_REAL(1)
           kwarg_only: True
-    - cname: csub
-      aten_sparse: True
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THTensor* other
 ]]
 [[
   name: mul

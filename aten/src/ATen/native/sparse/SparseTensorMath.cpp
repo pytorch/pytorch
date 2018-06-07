@@ -211,16 +211,22 @@ SparseTensor add_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scal
   return r;
 }
 
-SparseTensor& csub_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, Scalar value, const SparseTensor& src) {
+SparseTensor& sub_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
   // UGH... We're doing two dispatches on scalar type here for no good reason.
   // NB: I tried adding an operator- to Scalar, but there isn't any good way
   // to negate the tensor, because I have a TensorBase...
   AT_DISPATCH_ALL_TYPES(
-      t.type(), "csub_sparse", [&] {
+      t.type(), "sub_sparse", [&] {
         scalar_t cast_value = value.to<scalar_t>();
         add_out_sparse_cpu(r, t, src, -cast_value);
       }
   );
+  return r;
+}
+
+SparseTensor sub_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
+  SparseTensor r = t.type().tensor();
+  sub_out_sparse_cpu(r, t, src, alpha);
   return r;
 }
 

@@ -92,4 +92,27 @@ Tensor add(const Tensor& self, SparseTensorRef other, Scalar alpha) {
   return r;
 }
 
+Tensor& add_(Tensor& self, SparseTensorRef other, Scalar alpha) {
+  return native::add_out(self, self, other, alpha);
+}
+
+
+Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
+  if (_has_native(self)) {
+    return native_sub_out(result, self, other, alpha);
+  } else {
+    return th_sub_out(result, self, other, alpha);
+  }
+}
+
+Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
+  Tensor r = self.type().tensor();
+  return native::sub_out(r, self, other, alpha);
+  return r;
+}
+
+Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
+  return native::sub_out(self, self, other, alpha);
+}
+
 }} // namespace at::native
