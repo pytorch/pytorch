@@ -437,7 +437,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         if (step.has_num_concurrent_instances()) {
           numThreads *= step.num_concurrent_instances();
         }
-        for (int64_t i = 0; i < numThreads; ++i) {
+        for (size_t i = 0; i < numThreads; ++i) {
           threads.emplace_back(worker);
         }
         for (auto& thread : threads) {
