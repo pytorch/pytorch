@@ -167,10 +167,12 @@
     - THTensor* self
 ]]
 [[
-  name: clone
+  name: th_clone
   cname: newClone
   return: THTensor*
   aten_sparse: True
+  variants:
+    - function
   cpu_half: True
   arguments:
     - THTensor* self
@@ -187,9 +189,11 @@
 ]]
 [[
   name: resizeAs_
-  python_name: resize_as_
+  python_name: th_resize_as_
   cname: resizeAs
   aten_sparse: True
+  variants:
+    - function
   return: self
   scalar_check: the_template_->isScalar()
   arguments:
@@ -1708,7 +1712,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   options:
     - cname: normall

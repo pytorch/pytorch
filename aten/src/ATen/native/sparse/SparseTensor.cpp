@@ -216,8 +216,7 @@ namespace {
   }
 }
 
-// register as resize_as_
-void resize_as_sparse(const SparseTensor& self, const SparseTensor& src) {
+void resize_as_sparse_(const SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     _raw_resize_sparse(self, src._dimI(), src._dimV(), src.sizes());
   }
@@ -322,7 +321,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
 
 void sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const SparseTensor& mask) {
   AT_CHECK(mask.is_coalesced(), "mask is uncoalesced");
-  resize_as_sparse(r, mask);
+  resize_as_sparse_(r, mask);
   if (mask._nnz() == 0) {
     r.zero_();
     return;
