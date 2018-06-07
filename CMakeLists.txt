@@ -60,7 +60,7 @@ cmake_dependent_option(
     BUILD_TEST "Build Caffe2 C++ test binaries (need gtest and gbenchmark)" OFF
     "BUILD_CAFFE2" OFF)
 cmake_dependent_option(
-    INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
+    INSTALL_TEST "Install test binaries if BUILD_TEST is on" OFF
     "BUILD_TEST" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
