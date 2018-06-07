@@ -328,7 +328,7 @@ def emit_body(declaration):
     def reference_args(args):
         res = []
         for arg in args:
-            if arg['type'] == 'SparseTensor':
+            if arg['type'] == 'SparseTensorRef':
                 res.append('{}.tref'.format(arg['name']))
             else:
                 res.append(arg['name'])
@@ -538,7 +538,7 @@ def unpack_args(env, declaration):
 
         dynamic_type = arg['dynamic_type']
         is_nullable = arg.get('is_nullable', False)
-        ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensor']
+        ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
         suffix = '_opt' if is_nullable else ''
 
         body.append(UNPACK_TENSOR.substitute(
