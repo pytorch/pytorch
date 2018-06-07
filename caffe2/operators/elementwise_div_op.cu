@@ -7,6 +7,7 @@
 #include <cub/cub.cuh>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/elementwise_ops_utils.h"
 
 namespace caffe2 {
 
@@ -295,7 +296,8 @@ bool DivFunctor<CUDAContext>::Backward(
       C_broadcast_dims.data());
   std::vector<int> A_axes;
   std::vector<int> B_axes;
-  ComputeBinaryBroadcastBackwardAxes(A_dims, B_dims, &A_axes, &B_axes);
+  elementwise_ops_utils::ComputeBinaryBroadcastBackwardAxes(
+      A_dims, B_dims, &A_axes, &B_axes);
   ComputeDivAGradientCUDA<TGrad, TIn>(
       C_broadcast_dims, B_broadcast_dims, A_axes, dC, B, dA, context);
   ComputeDivBGradientCUDA<TGrad, TIn, TOut>(
