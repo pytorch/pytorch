@@ -41,7 +41,7 @@ struct bce_functor
     Dtype t = thrust::get<1>(x);
     assert(input >= 0. && input <= 1.);
     return - (t * safe_log<Acctype>(ScalarConvert<Dtype, Acctype>::to(input))
-        + (Acctype(1)- t) * safe_log<Acctype>(Acctype(1) - input));
+        + (Acctype(1) - t) * safe_log<Acctype>(Acctype(1) - input));
   }
 };
 
