@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "caffe2/operators/elementwise_ops.h"
+#include "caffe2/operators/elementwise_ops_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -44,10 +45,12 @@ struct AddFunctor {
       TGrad* dB,
       Context* context) const {
     const std::vector<int> C_dims =
-        ComputeBinaryBroadcastForwardDims(A_dims, B_dims);
+        elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
+            A_dims, B_dims);
     std::vector<int> A_axes;
     std::vector<int> B_axes;
-    ComputeBinaryBroadcastBackwardAxes(A_dims, B_dims, &A_axes, &B_axes);
+    elementwise_ops_utils::ComputeBinaryBroadcastBackwardAxes(
+        A_dims, B_dims, &A_axes, &B_axes);
     math::ReduceSum(
         C_dims.size(),
         C_dims.data(),
