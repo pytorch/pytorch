@@ -77,7 +77,7 @@ def is_magic_method(api_name):
     return api_name.startswith('__') and api_name.endswith('__')
 
 
-blacklisted_types = {'SparseTensor', 'Storage', 'ScalarType', 'optional<ScalarType>', 'std::string'}
+blacklisted_types = {'SparseTensorRef', 'Storage', 'ScalarType', 'optional<ScalarType>', 'std::string'}
 default_only_types = {'Generator'}
 
 

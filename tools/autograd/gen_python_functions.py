@@ -129,12 +129,12 @@ def should_generate_python_binding(declaration):
             return False
 
     # TODO: fix handling of SparseTensor. We don't want to generate Python
-    # bindings to SparseTensor overloads, such as add(Tensor, SparseTensor),
+    # bindings to SparseTensor overloads, such as add(Tensor, SparseTensorRef),
     # since the Tensor-based signature already dynamically dispatches correctly.
     # However, _sparse_mask only has a SparseTensor signature so we need to bind
     # that function.
     for arg in declaration['arguments']:
-        if arg['type'] == 'SparseTensor' and declaration['name'] != '_sparse_mask':
+        if arg['type'] == 'SparseTensorRef' and declaration['name'] != '_sparse_mask':
             return False
 
     return True
@@ -207,7 +207,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
     unpack_methods = {
         'const Tensor &': 'tensor',
-        'SparseTensor': 'tensor',
+        'SparseTensorRef': 'tensor',
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
@@ -310,8 +310,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
             if typename == 'Storage &':
                 expr = '*' + expr
-            if typename == 'SparseTensor':
-                expr = 'SparseTensor({})'.format(expr)
+            if typename == 'SparseTensorRef':
+                expr = 'SparseTensorRef({})'.format(expr)
 
             dispatch_type = typename
             if dispatch_type == 'Tensor':
@@ -542,7 +542,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if not has_self:
                 # Use 'input' instead of 'self' for NN functions
                 signature = signature.replace('Tensor self', 'Tensor input')
-            signature = signature.replace('SparseTensor', 'Tensor')
+            signature = signature.replace('SparseTensorRef', 'Tensor')
             if dictionary['base'].get('deprecated', False):
                 signature += '|deprecated'
             env['signatures'].append('"{}",'.format(signature))
