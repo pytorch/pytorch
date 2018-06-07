@@ -52,7 +52,7 @@ if(BUILD_ATEN)
 endif()
 
 # ---[ Caffe2 build
-if(BUILD_CAFFE2 OR BUILD_ATEN)
+if(BUILD_CAFFE2)
   # Note: the folders that are being commented out have not been properly
   # addressed yet.
   add_subdirectory(proto)
@@ -253,8 +253,8 @@ if(USE_ROCM)
   HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
 
   # Set necessary HIPCC Flags
-  SET(HIP_HCC_FLAGS "-DAT_MIOPEN_ENABLED=1 -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
-  SET(Caffe2_HIP_CXX_FLAGS "-DAT_MIOPEN_ENABLED=1 -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${Caffe2_HIP_CXX_FLAGS}")
+  SET(HIP_HCC_FLAGS "-fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
+  SET(Caffe2_HIP_CXX_FLAGS "-fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${Caffe2_HIP_CXX_FLAGS}")
 
   # Since the HIP_ADD_LIBRARY is a MACRO, we need to set HIP_HCC_FLAGS prior to calling it.
   # Also, Since HIP_INCLUDE_DIRECTORIES is a MACRO, we must call it before HIP_ADD_LIBRARY.
@@ -267,10 +267,13 @@ if(USE_ROCM)
   target_include_directories(
     caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
+  aten_set_target_props(caffe2_hip)
   target_link_libraries(caffe2_hip PUBLIC caffe2)
-  target_link_libraries(caffe2_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
+  target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
-  set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
+  # https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
+  # To avoid having to do above, keep this commented.
+  # set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
 
   caffe2_interface_library(caffe2_hip caffe2_hip_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)

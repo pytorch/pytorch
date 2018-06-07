@@ -110,7 +110,7 @@ IF(HIP_FOUND)
   find_package(hiprand REQUIRED)
   find_package(rocblas REQUIRED)
   find_package(miopen REQUIRED)
-  find_package(hipblas REQUIRED)
+  # find_package(hipblas REQUIRED) Bug with the CMake file in Hipblas.
   #find_package(hipsparse REQUIRED)
 
   # TODO: hip_hcc has an interface include flag "-hc" which is only
@@ -122,6 +122,8 @@ IF(HIP_FOUND)
   # however currently it's just the lib name
   FIND_LIBRARY(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
   FIND_LIBRARY(hiprand_LIBRARIES hiprand HINTS ${HIPRAND_PATH}/lib)
+  FIND_LIBRARY(hiprng_LIBRARIES hiprng HINTS ${HIPRNG_PATH}/lib)
+  FIND_LIBRARY(hipblas_LIBRARIES hipblas HINTS ${HIPBLAS_PATH}/lib)
   FIND_LIBRARY(hipsparse_LIBRARIES hipsparse HINTS ${HIPSPARSE_PATH}/lib)
 
   set(thrust_INCLUDE_DIRS ${THRUST_PATH} ${THRUST_PATH}/thrust/system/cuda/detail/cub-hip)
