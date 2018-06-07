@@ -55,7 +55,7 @@ T* CursorBase<T>::find(const std::string& key) noexcept {
 }
 
 template <typename T>
-T& CursorBase<T>::get(const std::string& key) {
+T& CursorBase<T>::at(const std::string& key) {
   if (auto* value = find(key)) {
     return *value;
   }
@@ -64,7 +64,7 @@ T& CursorBase<T>::get(const std::string& key) {
 
 template <typename T>
 T& CursorBase<T>::operator[](const std::string& key) {
-  return get(key);
+  return at(key);
 }
 
 template <typename T>
@@ -73,7 +73,7 @@ bool CursorBase<T>::contains(const std::string& key) noexcept {
 }
 
 template <typename T>
-size_t CursorBase<T>::count() const noexcept {
+size_t CursorBase<T>::size() const noexcept {
   return items_.size();
 }
 

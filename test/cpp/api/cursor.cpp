@@ -117,7 +117,7 @@ TEST_CASE("cursor/module") {
     }
 
     SECTION("Count works for flat models") {
-      REQUIRE(cursor.count() == model.m.size());
+      REQUIRE(cursor.size() == model.m.size());
     }
 
     SECTION("find() finds the correct modules when given a valid key") {
@@ -131,15 +131,15 @@ TEST_CASE("cursor/module") {
       REQUIRE(cursor.find("bar") == nullptr);
     }
 
-    SECTION("get() returns the correct modules when given a valid key") {
-      REQUIRE(&cursor.get("0") == &model[0]);
-      REQUIRE(&cursor.get("1") == &model[1]);
-      REQUIRE(&cursor.get("2") == &model[2]);
+    SECTION("at() returns the correct modules when given a valid key") {
+      REQUIRE(&cursor.at("0") == &model[0]);
+      REQUIRE(&cursor.at("1") == &model[1]);
+      REQUIRE(&cursor.at("2") == &model[2]);
     }
 
-    SECTION("get() throws when given an invalid key") {
-      REQUIRE_THROWS_WITH(cursor.get("foo"), StartsWith("No such key: 'foo'"));
-      REQUIRE_THROWS_WITH(cursor.get("bar"), StartsWith("No such key: 'bar'"));
+    SECTION("at() throws when given an invalid key") {
+      REQUIRE_THROWS_WITH(cursor.at("foo"), StartsWith("No such key: 'foo'"));
+      REQUIRE_THROWS_WITH(cursor.at("bar"), StartsWith("No such key: 'bar'"));
     }
 
     SECTION("operator[] returns the correct modules when given a valid key") {
@@ -204,10 +204,10 @@ TEST_CASE("cursor/module") {
 
     SECTION("children() returns only the first level of submodules") {
       auto children = model.children();
-      REQUIRE(children.count() == 3);
-      REQUIRE(&children.get("0") == &model[0]);
-      REQUIRE(&children.get("1") == &model[1]);
-      REQUIRE(&children.get("2") == &model[2]);
+      REQUIRE(children.size() == 3);
+      REQUIRE(&children.at("0") == &model[0]);
+      REQUIRE(&children.at("1") == &model[1]);
+      REQUIRE(&children.at("2") == &model[2]);
       REQUIRE(!children.contains("0.0"));
       size_t count = 0;
       for (auto& child : children) {

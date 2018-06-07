@@ -21,9 +21,22 @@ class Module;
 
 namespace torch {
 namespace detail {
-/// Provides hierarchical iteration support, with convenient iterator functions
-/// like `map` or `find`. A cursor's lifetime is bound to the lifetime of the
-/// module hierarchy into which it points.
+/// A cursor provides hierarchical iteration support, with convenient iterator
+/// functions like `map` or `find`.
+///
+/// Fundamentally, cursors are similar to `std::map`, with `[]`, `.at()`,
+/// `.size()` etc. When iterating over a cursor, use `.key()` to get the
+/// associated string, and dereference the returned item or use `.value()` to
+/// get the associated value (e.g. the variable, the module or the buffer).
+///
+/// Note that cursors *eagerly* collect items. So if you want to perform many
+/// operations with a single cursor, it is better to store it in a local
+/// variable. This also you means should not store iterators into a temporary
+/// cursor, e.g. do not write `auto iterator = module.parameters().begin()`, as
+/// the parameter cursor will die at the end of the expression.
+///
+/// A cursor's lifetime is bound to the lifetime of the module hierarchy into
+/// which it points.
 template <typename T>
 class CursorBase {
  public:
@@ -116,16 +129,16 @@ class CursorBase {
 
   /// Attempts to find a value for the given `key`. If found, returns a
   /// reference to the value. If not, throws an exception.
-  T& get(const std::string& key);
+  T& at(const std::string& key);
 
-  /// Equivalent to `get(key)`.
+  /// Equivalent to `at(key)`.
   T& operator[](const std::string& key);
 
   /// Returns true if an item with the given `key` exists.
   bool contains(const std::string& key) noexcept;
 
   /// Counts the number of items available.
-  size_t count() const noexcept;
+  size_t size() const noexcept;
 
  protected:
   /// Helper struct to collect items.

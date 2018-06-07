@@ -176,7 +176,7 @@ void RNNBase<Derived>::flatten_parameters_for_cudnn() {
   // alias would break the assumptions of the uniqueness check in
   // Module.named_parameters().
   // But I'm not sure if this is the case for us
-  if (unique_data_ptrs.size() != params.count()) {
+  if (unique_data_ptrs.size() != params.size()) {
     return;
   }
 

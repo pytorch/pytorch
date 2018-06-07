@@ -90,7 +90,7 @@ class Module {
   template <class Archive>
   void save(Archive& ar) const {
     auto params = parameters();
-    size_t size = params.count();
+    size_t size = params.size();
     ar(size);
     for (auto& p : params) {
       ar(p.key, p.value);

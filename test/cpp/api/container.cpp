@@ -62,7 +62,7 @@ TEST_CASE("containers") {
         REQUIRE(y.size(i) == 2);
       }
 
-      REQUIRE(model->parameters().get("weight").grad().numel() == 3 * 2 * 3);
+      REQUIRE(model->parameters()["weight"].grad().numel() == 3 * 2 * 3);
     }
     SECTION("2d") {
       SECTION("even") {
@@ -79,7 +79,7 @@ TEST_CASE("containers") {
         }
 
         REQUIRE(
-            model->parameters().get("weight").grad().numel() == 3 * 2 * 3 * 3);
+            model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 3);
       }
 
       SECTION("uneven") {
@@ -96,7 +96,7 @@ TEST_CASE("containers") {
         }
 
         REQUIRE(
-            model->parameters().get("weight").grad().numel() == 3 * 2 * 3 * 2);
+            model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 2);
       }
     }
     SECTION("3d") {
@@ -113,7 +113,7 @@ TEST_CASE("containers") {
       }
 
       REQUIRE(
-          model->parameters().get("weight").grad().numel() ==
+          model->parameters()["weight"].grad().numel() ==
           3 * 2 * 3 * 3 * 3);
     }
   }
@@ -130,7 +130,7 @@ TEST_CASE("containers") {
       REQUIRE(y.size(0) == 10);
       REQUIRE(y.size(1) == 2);
 
-      REQUIRE(model->parameters().get("weight").grad().numel() == 2 * 5);
+      REQUIRE(model->parameters()["weight"].grad().numel() == 2 * 5);
     }
   }
 
@@ -169,7 +169,7 @@ TEST_CASE("containers") {
       REQUIRE(y.size(1) == 2);
 
       REQUIRE(
-          model->parameters().get("table").grad().numel() == 2 * dict_size);
+          model->parameters()["table"].grad().numel() == 2 * dict_size);
     }
 
     SECTION("list") {
@@ -253,7 +253,7 @@ TEST_CASE("containers_cuda", "[cuda]") {
     REQUIRE(y.size(0) == 10);
     REQUIRE(y.size(1) == 2);
 
-    REQUIRE(model->parameters().get("weight").grad().numel() == 2 * 5);
+    REQUIRE(model->parameters()["weight"].grad().numel() == 2 * 5);
   }
 
   SECTION("2") {
@@ -270,6 +270,6 @@ TEST_CASE("containers_cuda", "[cuda]") {
     REQUIRE(y.size(0) == 10);
     REQUIRE(y.size(1) == 2);
 
-    REQUIRE(model->parameters().get("weight").grad().numel() == 2 * 5);
+    REQUIRE(model->parameters()["weight"].grad().numel() == 2 * 5);
   }
 }

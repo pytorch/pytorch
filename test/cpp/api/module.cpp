@@ -142,12 +142,12 @@ TEST_CASE("module/clone") {
     auto m1param = module->parameters();
     auto m2param = module2->parameters();
     for (auto& param : m1param) {
-      REQUIRE(!pointer_equal(param.value, m2param.get(param.key)));
-      REQUIRE(param->allclose(m2param.get(param.key)));
+      REQUIRE(!pointer_equal(param.value, m2param[param.key]));
+      REQUIRE(param->allclose(m2param[param.key]));
       param->data().mul_(2);
     }
     for (auto& param : m1param) {
-      REQUIRE(!param->allclose(m2param.get(param.key)));
+      REQUIRE(!param->allclose(m2param[param.key]));
     }
   }
 
@@ -219,7 +219,7 @@ TEST_CASE("module/parameters") {
   TestModule module;
 
   SECTION("has correct number of parameters") {
-    REQUIRE(module.parameters().count() == 3);
+    REQUIRE(module.parameters().size() == 3);
   }
 
   SECTION("contains parameters with the correct name") {
