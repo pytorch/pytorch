@@ -132,6 +132,8 @@ DEBUG = check_env_flag('DEBUG')
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
+FULL_CAFFE2 = check_env_flag('FULL_CAFFE2')	
+BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
