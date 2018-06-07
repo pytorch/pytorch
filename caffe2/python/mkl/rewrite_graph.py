@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import copy
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
+import caffe2.python._import_c_extension as C
 
 
 def rewrite_init_net_simple(net):
@@ -58,6 +59,11 @@ def rewrite_run_net_simple(net):
         op.device_option.MergeFrom(
             core.DeviceOption(device_type=caffe2_pb2.MKLDNN))
         op.engine = ""
+
+    # Fuse Conv-Relu for IDEEP
+    if ideep:
+        net.ParseFromString(
+                C.transform_optimizeForIDEEP(net.SerializeToString()))
 
 
 def rewrite_model_helper_simple(model):
