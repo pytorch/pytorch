@@ -528,6 +528,13 @@ if(BUILD_CAFFE2)
       include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
     endif()
   endif()
+  if(USE_ROCM)
+    include_directories($ENV{THRUST_ROOT})
+    #For cub-hip
+    include_directories($ENV{THRUST_ROOT}/thrust/system/cuda/detail/cub-hip)
+    message(STATUS "Found Thrust: $ENV{THRUST_ROOT}")
+    message(STATUS "Found cub-hip: $ENV{THRUST_ROOT}/thrust/system/cuda/detail/cub-hip")
+  endif()
 endif()
 
 if(USE_GLOO)
