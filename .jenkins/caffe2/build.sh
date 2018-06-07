@@ -84,6 +84,7 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
   CMAKE_ARGS+=("-DBUILD_BINARY=ON")
+  CMAKE_ARGS+=("-DBUILD_TEST=ON")
   CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
   CMAKE_ARGS+=("-DUSE_ZSTD=ON")
   "${ROOT_DIR}/scripts/build_android.sh" ${CMAKE_ARGS[*]} "$@"
