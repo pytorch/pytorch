@@ -22,10 +22,10 @@ if(CUDA_FOUND)
   # compiling with, e.g., if a ccache nvcc is fed to us by CUDA_NVCC_EXECUTABLE
   # but the PATH is not consistent with CUDA_HOME.  It's better safe
   # than sorry: make sure everything is consistent.
-  set(file "${PROJECT_BINARY_DIR}/detect_cuda_version.c")
+  set(file "${PROJECT_BINARY_DIR}/detect_cuda_version.cc")
   file(WRITE ${file} ""
     "#include <cuda.h>\n"
-    "#include <stdio.h>\n"
+    "#include <cstdio>\n"
     "int main() {\n"
     "  printf(\"%d.%d\", CUDA_VERSION / 1000, (CUDA_VERSION / 10) % 100);\n"
     "  return 0;\n"
