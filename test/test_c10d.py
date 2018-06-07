@@ -29,7 +29,7 @@ if not c10d.is_available():
 
 class StoreTestBase(object):
     def _create_store(self, i):
-        raise RuntimeError("implement this")
+        raise RuntimeError("not implemented")
 
     def _test_set_get(self, fs):
         fs.set("key0", "value0")
@@ -54,24 +54,6 @@ class FileStoreTest(TestCase, StoreTestBase):
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         return c10d.TCPStore(TCP_ADDR, TCP_PORT, True)
-
-
-class ProcessGroupTestBase(object):
-    def _spawn(self, size):
-        processes = []
-        for rank in range(size):
-            name = 'process ' + str(rank)
-            process = multiprocessing.Process(target=self._run, name=name, args=(rank,))
-            process.start()
-            processes.append(process)
-        return processes
-
-    def _run(self, rank):
-        self.rank = rank
-        # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
-        # We're retreiving a corresponding test and executing it.
-        getattr(self, self.id().split(".")[2])()
-        sys.exit(0)
 
 
 class ProcessGroupGlooTest(TestCase):
@@ -100,12 +82,9 @@ class ProcessGroupGlooTest(TestCase):
 
     def setUp(self):
         self.rank = self.MAIN_PROCESS_RANK
-        self.size = 16
+        self.size = 4
         self.file = tempfile.NamedTemporaryFile()
-        self.store = c10d.FileStore(self.file.name)
-        self.processes = []
-        for rank in range(int(self.size)):
-            self.processes.append(self._spawn_process(rank))
+        self.processes = [self._spawn_process(rank) for rank in range(int(self.size))]
 
     def tearDown(self):
         for p in self.processes:
@@ -131,7 +110,8 @@ class ProcessGroupGlooTest(TestCase):
             p.join(timeout)
 
     def test_broadcast_ops(self):
-        pg = c10d.ProcessGroupGloo(self.store, self.rank, self.size)
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.size)
 
         def broadcast(xs, rootRank, rootTensor):
             opts = c10d.BroadcastOptions()
@@ -153,7 +133,8 @@ class ProcessGroupGlooTest(TestCase):
                 self.assertEqual(torch.Tensor([i * self.size + j]), xs[1])
 
     def test_allreduce_ops(self):
-        pg = c10d.ProcessGroupGloo(self.store, self.rank, self.size)
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.size)
 
         def allreduce(x, op):
             opts = c10d.AllreduceOptions()

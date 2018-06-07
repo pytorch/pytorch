@@ -9,8 +9,6 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/pybind.h"
 
-namespace py = pybind11;
-
 namespace torch {
 namespace c10d {
 
@@ -35,7 +33,7 @@ PyObject* c10d_init(PyObject* _unused) {
               [](::c10d::Store& store,
                  const std::string& key,
                  const std::string& value) {
-                std::vector<unsigned char> value_(value.begin(), value.end());
+                std::vector<uint8_t> value_(value.begin(), value.end());
                 store.set(key, value_);
               },
               py::call_guard<py::gil_scoped_release>())
