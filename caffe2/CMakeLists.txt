@@ -402,7 +402,7 @@ if(BUILD_CAFFE2)
       install(TARGETS caffe2_pybind11_state_gpu DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
     endif()
 
-    if(USE_HIP)
+    if(USE_ROCM)
       add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
@@ -438,6 +438,14 @@ if(BUILD_CAFFE2)
             TARGET windows_python_copy_lib POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy
             $<TARGET_FILE:caffe2_pybind11_state_gpu>
+            ${CMAKE_BINARY_DIR}/caffe2/python)
+      endif()
+      if (USE_ROCM)
+        add_dependencies(windows_python_copy_lib caffe2_pybind11_state_hip)
+        add_custom_command(
+            TARGET windows_python_copy_lib POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+            $<TARGET_FILE:caffe2_pybind11_state_hip>
             ${CMAKE_BINARY_DIR}/caffe2/python)
       endif()
     endif()
