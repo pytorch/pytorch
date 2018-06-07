@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+
 if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # ---[ Generate and install header and cpp files
   include(../../../cmake/Codegen.cmake)
