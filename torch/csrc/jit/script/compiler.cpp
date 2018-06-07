@@ -153,6 +153,36 @@ struct Environment {
     return nullptr;
   }
 
+  static bool validNonSubtypeAssign(const TypePtr to, const TypePtr from) {
+    if (isPythonScalarType(from)) {
+      return isTensorSubtype(to);
+    }
+    if (isTensorSubtype(from)) {
+      return isPythonScalarType(to);
+    }
+    if (from->kind() != to->kind()) {
+      return false;
+    }
+    if (from->kind() == TypeKind::ListType) {
+      auto to_elt = to->cast<ListType>()->getElementType();
+      auto from_elt = from->cast<ListType>()->getElementType();
+      return validNonSubtypeAssign(to_elt, from_elt);
+    }
+    if (from->kind() == TypeKind::TupleType) {
+      auto to_elts = to->cast<TupleType>()->elements();
+      auto from_elts = from->cast<TupleType>()->elements();
+      if (to_elts.size() != from_elts.size()) {
+        return false;
+      }
+      for (size_t i = 0; i < to_elts.size(); i++) {
+        if (!validNonSubtypeAssign(to_elts[i], from_elts[i])) {
+          return false;
+        }
+      }
+      return true;
+    }
+  }
+
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
     if (as_simple_value)
@@ -175,8 +205,12 @@ struct Environment {
         << ". Only reassignments to first-class values are allowed";
       }
       if(!as_simple_value->type()->isSubtypeOf(*interpreterType(simple_parent->type()))) {
-        throw ErrorReport(loc) << "variable '" << name << "' previously has type " << simple_parent->type()->name()
-        << " but is now being assigned to a value of type " << as_simple_value->type()->name();
+        // Sometimes we assign an int to a tensor and vice versa.
+        // This does not emit a prim::Cast node, but maybe it should.
+        if (!validNonSubtypeAssign(simple_parent->type(), as_simple_value->type())) {
+          throw ErrorReport(loc) << "variable '" << name << "' previously has type " << simple_parent->type()->name()
+          << " but is now being assigned to a value of type " << as_simple_value->type()->name();
+        }
       }
     }
     if (as_simple_value &&
