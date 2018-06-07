@@ -283,18 +283,18 @@ bool THC_reduceDim(THCState* state,
                    int dim,
                    int keepdim) {
   static_assert(std::is_same<ScalarType, typename TensorUtils<TensorType>::DataType>::value, "ScalarType must match");
-  ptrdiff_t inElements = TensorUtils<TensorType>::getNumElements(state, in);
+  ptrdiff_t inElements = THCTensor_nElement(state, in);
 
-  int64_t reductionSize = TensorUtils<TensorType>::getSize(state, in, dim);
-  int64_t reductionStride = TensorUtils<TensorType>::getStride(state, in, dim);
+  int64_t reductionSize = THCTensor_size(state, in, dim);
+  int64_t reductionStride = THCTensor_stride(state, in, dim);
   ptrdiff_t outElements = inElements / reductionSize;
 
-  if (TensorUtils<TensorType>::getDims(state, out) > MAX_CUTORCH_DIMS ||
-      TensorUtils<TensorType>::getDims(state, in) > MAX_CUTORCH_DIMS) {
+  if (THCTensor_nDimension(state, out) > MAX_CUTORCH_DIMS ||
+      THCTensor_nDimension(state, in) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (TensorUtils<TensorType>::getDims(state, in) == 0) {
+  if (THCTensor_nDimension(state, in) == 0) {
     // Zero-dim tensor; do nothing
     return true;
   }
@@ -343,13 +343,13 @@ bool THC_reduceDim(THCState* state,
   // Resize out to correspond to the reduced size with keepdim=True.
 
   // Preserve noncontiguities by unsqueezing out if necessary
-  TensorUtils<TensorType>::preserveReduceDimSemantics(
-      state, out, TensorUtils<TensorType>::getDims(state, in), dim, keepdim);
+  THCTensor_preserveReduceDimSemantics(
+      state, out, THCTensor_nDimension(state, in), dim, keepdim);
 
   // Resize out
-  THLongStorage* sizes = TensorUtils<TensorType>::newSizeOf(state, in);
+  THLongStorage* sizes = THCTensor_newSizeOf(state, in);
   THLongStorage_set(sizes, dim, 1);
-  TensorUtils<TensorType>::resize(state, out, sizes, NULL);
+  THCTensor_resize(state, out, sizes, NULL);
   THLongStorage_free(sizes);
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -418,8 +418,8 @@ bool THC_reduceDim(THCState* state,
     }                                                     \
   }
 
-  if (TensorUtils<TensorType>::canUse32BitIndexMath(state, out) &&
-      TensorUtils<TensorType>::canUse32BitIndexMath(state, in)) {
+  if (THCTensor_canUse32BitIndexMath(state, out) &&
+      THCTensor_canUse32BitIndexMath(state, in)) {
     TensorInfo<ScalarType,
                unsigned int> outInfo =
       getTensorInfo<ScalarType, TensorType, unsigned int>(state, out);
@@ -459,7 +459,7 @@ bool THC_reduceDim(THCState* state,
 
 
   if (!keepdim) {
-    TensorUtils<TensorType>::squeeze1d(state, out, out, dim);
+    THCTensor_squeeze1d(state, out, out, dim);
   }
   return true;
 }

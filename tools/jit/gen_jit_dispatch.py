@@ -77,7 +77,7 @@ def is_magic_method(api_name):
     return api_name.startswith('__') and api_name.endswith('__')
 
 
-blacklisted_types = {'SparseTensor', 'Storage', 'ScalarType', 'optional<ScalarType>'}
+blacklisted_types = {'SparseTensorRef', 'Storage', 'ScalarType', 'optional<ScalarType>', 'std::string'}
 default_only_types = {'Generator'}
 
 
@@ -97,9 +97,8 @@ def is_jit_op(decl):
     # we currently only support vararg tensor lists when they are the _first_ argument
     # and the only tensor argument
     arguments = decl['arguments']
-    has_tensorlist = any(arg['simple_type'] == 'TensorList' for arg in arguments)
-    num_tensor_args = sum(map(is_tensor_arg, arguments))
-    if has_tensorlist and (num_tensor_args != 1 or arguments[0]['simple_type'] != 'TensorList'):
+    # Only support a single TensorList arg
+    if sum(arg['simple_type'] == 'TensorList' for arg in arguments) > 1:
         return False
 
     return ((not decl['api_name'].endswith('_') or is_magic_method(decl['api_name'])) and
@@ -157,25 +156,54 @@ def gen_jit_dispatch(declarations, out):
             # from the end of the stack
             static_inputs = sum(is_positional_arg) - 1
             num_dynamic_inputs = 'varargs_length'
+            tensorlist_idx = [i for i, arg in enumerate(decl['arguments']) if arg['simple_type'] == 'TensorList'][0]
         else:
             static_inputs = sum(is_positional_arg)
             num_dynamic_inputs = static_inputs
 
-        real_inputs = count()
+        real_inputs = 0
         for i, arg in enumerate(decl['arguments']):
-            # XXX: we currently support only TensorList ops that have a TensorList as
-            # the first argument, that is then followed by a number of positional args.
+            # This conditional allows us to process argument lists with a flattened argument list
+            # with a single TensorList. Given the sequence of arguments:
+            # a b c [d e f g] h i # [] is the list
+            #
+            # 1. For the section where we are processing positional inputs before the
+            #    TensorList:
+            #    a b c [d e f g] h i # [] is the list
+            #    ~~~~~~~~~~~~ <- N
+            #   we set this view_length to the total number of varargs inputs (i.e. the length)
+            #   of the whole argument list. This means that indexing into the list using peek()
+            #   we will retrieve arguments ar their true indices (i.e. peek at 0 points to a,
+            #   1 points to b, etc...). Similarly, we can use peekSlice() to index into the
+            #   list itself this way.
+            # 2. After the list:
+            #    a b c [d e f g] h i # [] is the list
+            #                 ~~~~~~ <- N
+            #   Here we set the view length to static_inputs. In our example,
+            #   we effectively ignore the fact that we have a list here. What is
+            #   significant is that our index i is equivalent when the view length
+            #   is right-justified, whether we have the list or not. Concretely,
+            #   indexing h or i from `a b c [d e f g] h i` is equvalent to indexing
+            #   h or i from `a b c h i`.
+            view_length = 'varargs_length' if has_tensorlist and i < tensorlist_idx else static_inputs
+
             if arg['simple_type'] == 'TensorList':
-                arguments.append('peekSlice(stack, 0, varargs_length - {}, varargs_length)'.format(static_inputs))
+                # NOTE: don't advance real_inputs here. After this we are going
+                # to switch over to indexing from the end as if we only had
+                # the static arguments.
+                arguments.append('peekSlice(stack, {}, varargs_length - {}, varargs_length)'
+                                 .format(real_inputs, static_inputs))
             elif arg['simple_type'] in default_only_types:
                 arguments.append(arg['default'])
             elif is_tensor_arg(arg):
-                arguments.append('std::move(peek(stack, {}, {}))'.format(next(real_inputs), static_inputs))
+                arguments.append('std::move(peek(stack, {}, {}))'.format(real_inputs, view_length))
+                real_inputs += 1
             elif is_positional_arg[i]:
                 template_kwargs = dict(type=arg['simple_type'],
                                        name=arg['name'],
-                                       i=next(real_inputs),
-                                       N=static_inputs)
+                                       i=real_inputs,
+                                       N=view_length)
+                real_inputs += 1
 
                 if is_sized_intlist_arg(arg):
                     assign = POS_INTLIST_ASSIGNMENT.substitute(size=arg['size'],
@@ -358,12 +386,13 @@ def emit_schema(jit_decls, out):
     def emit(decl):
         arguments = [a for a in decl['arguments'] if a['simple_type'] not in default_only_types]
         n = get_name(decl['name'])
+        n_args = len(arguments)
+        n_returns = len(decl['returns'])
+        env['arguments'].append('// Arguments for {} ({} args, {} returns)'.format(decl['name'], n_args, n_returns))
         for a in arguments:
             emit_arg(a, False)
         for a in decl['returns']:
             emit_arg(a, True)
-        n_args = len(arguments)
-        n_returns = len(decl['returns'])
         env['operators'].append('{{ {}, {}, {} }}, // FunctionSchema("{}", <{} arguments>, <{} returns>) '.format(
             n, n_args, n_returns, decl['name'], n_args, n_returns))
 

@@ -59,6 +59,12 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   return storage;
 }
 
+void THCStorage_retain(THCState *state, THCStorage *self)
+{
+  if(self && (self->flag & TH_STORAGE_REFCOUNTED))
+    self->refcount++;
+}
+
 void THCStorage_free(THCState *state, THCStorage *self)
 {
   if(!(self->flag & TH_STORAGE_REFCOUNTED))

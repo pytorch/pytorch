@@ -11,9 +11,9 @@
 /requirements.txt @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /torch/csrc/api/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ebetica @goldsborough
 /test/cpp/api/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ebetica @goldsborough
-/torch/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
-/torch/csrc/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
-/torch/csrc/jit/passes/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
-/test/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
-/scripts/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer
+/torch/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
+/torch/csrc/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
+/torch/csrc/jit/passes/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
+/test/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
+/scripts/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
 /torch/lib/c10d/ @apaszke @pietern @teng-li

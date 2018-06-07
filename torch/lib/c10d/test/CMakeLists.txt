@@ -1,5 +1,4 @@
 cuda_add_library(c10d_cuda_test CUDATest.cu)
-target_compile_options(c10d_cuda_test PUBLIC "-std=c++11")
 target_link_libraries(c10d_cuda_test c10d)
 
 function(c10d_add_test test_src)

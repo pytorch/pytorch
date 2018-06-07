@@ -574,6 +574,8 @@
 - func: index_copy_(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
   variants: method
 
+- func: index_put(Tensor self, TensorList indices, Tensor values) -> Tensor
+
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
@@ -798,6 +800,9 @@
 
 - func: randperm_out(Tensor result, int64_t n, *, Generator* generator=nullptr) -> Tensor
   variants: function
+  dispatch:
+    CPU: randperm_out_cpu
+    CUDA: randperm_out_cuda
 
 - func: range(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
   variants: function

@@ -219,7 +219,7 @@ class TypeMeta {
   template <typename T>
   static void _Ctor(void* ptr, size_t n) {
     T* typed_ptr = static_cast<T*>(ptr);
-    for (int i = 0; i < n; ++i) {
+    for (size_t i = 0; i < n; ++i) {
       new (typed_ptr + i) T;
     }
   }
@@ -231,7 +231,7 @@ class TypeMeta {
   static void _Copy(const void* src, void* dst, size_t n) {
     const T* typed_src = static_cast<const T*>(src);
     T* typed_dst = static_cast<T*>(dst);
-    for (int i = 0; i < n; ++i) {
+    for (size_t i = 0; i < n; ++i) {
       typed_dst[i] = typed_src[i];
     }
   }
@@ -253,7 +253,7 @@ class TypeMeta {
   template <typename T>
   static void _Dtor(void* ptr, size_t n) {
     T* typed_ptr = static_cast<T*>(ptr);
-    for (int i = 0; i < n; ++i) {
+    for (size_t i = 0; i < n; ++i) {
       typed_ptr[i].~T();
     }
   }

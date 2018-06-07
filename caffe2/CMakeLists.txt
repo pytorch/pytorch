@@ -8,8 +8,6 @@ if(BUILD_ATEN)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)
-  # Disable contrib for root-level build
-  set(ATEN_NO_CONTRIB ON)
   add_subdirectory(../aten aten)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
@@ -182,6 +180,7 @@ if(BUILD_CAFFE2)
 endif()
 
 # Compile exposed libraries.
+list(APPEND Caffe2_CPU_SRCs $<TARGET_OBJECTS:c10>)
 add_library(caffe2 ${Caffe2_CPU_SRCS})
 if (BUILD_CAFFE2)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
@@ -204,7 +203,6 @@ target_compile_options(caffe2 INTERFACE "-std=c++11")
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
-set_target_properties(caffe2 PROPERTIES VERSION 1 SOVERSION 1)
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
 caffe2_interface_library(caffe2 caffe2_library)
 list(APPEND Caffe2_MAIN_LIBS caffe2_library)
@@ -241,7 +239,6 @@ if(USE_CUDA)
 
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)
-  set_target_properties(caffe2_gpu PROPERTIES VERSION 1 SOVERSION 1)
 
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
@@ -312,7 +309,9 @@ if(BUILD_CAFFE2)
         target_compile_features(${test_name} PRIVATE cxx_range_for)
       endif()
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
-      install(TARGETS ${test_name} DESTINATION test)
+      if (INSTALL_TEST)
+        install(TARGETS ${test_name} DESTINATION test)
+      endif()
     endforeach()
 
     if(USE_ROCM)

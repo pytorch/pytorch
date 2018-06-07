@@ -2,12 +2,15 @@
 #include "common.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
+#include "THCThrustAllocator.cuh"
+#include "THCApply.cuh"
 
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/transform.h>
 #include <thrust/transform_reduce.h>
+#include <thrust/system/cuda/execution_policy.h>
 
 template <typename T>
 inline __host__ __device__ T eps();

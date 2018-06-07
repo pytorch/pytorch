@@ -36,7 +36,7 @@ namespace torch { namespace autograd {
 // don't want to make the codegen do the dispatch manually)
 static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, v.toTensor()); }
-static void setattr(jit::Node* n, jit::Symbol name, SparseTensor s)        { n->t_(name, s.tref); }
+static void setattr(jit::Node* n, jit::Symbol name, SparseTensorRef s)     { n->t_(name, s.tref); }
 static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
@@ -60,7 +60,7 @@ void failPositionalAttr() {
 
 static void setposattr(jit::Node* n, size_t idx, const char *name, int64_t v)             { genericInsertInput(n, idx, v); }
 static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Scalar& v)   { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensor s)        { failPositionalAttr(); }
+static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensorRef s)     { failPositionalAttr(); }
 static void setposattr(jit::Node* n, size_t idx, const char *name, const at::IntList& v)  {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasIntList(name)) {
@@ -236,8 +236,8 @@ Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
   return checked_cast_variable(t, name, pos).data();
 }
 
-SparseTensor VariableType::unpack(SparseTensor t, const char * name, int pos) {
-  return SparseTensor(checked_cast_variable(t.tref, name, pos).data());
+SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
+  return SparseTensorRef(checked_cast_variable(t.tref, name, pos).data());
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
@@ -359,35 +359,35 @@ static void throw_error_out_requires_grad(const char* name) {
 
 static void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && var.defined()) {
-    grad_fn->set_num_inputs(1);
+    grad_fn->add_input_metadata(var.type(), var.sizes());
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
 
 static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->set_num_inputs(vars.size());
-    uint32_t output_nr = 0;
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
+        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
         const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
+      } else {
+        grad_fn->add_input_metadata(Function::undefined_input());
       }
-      output_nr++;
     }
   }
 }
 
 static void set_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->set_num_inputs(vars.size());
-    uint32_t output_nr = 0;
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
+        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
         const_cast<Variable&>(var).set_gradient_edge({grad_fn, output_nr});
+      } else {
+        grad_fn->add_input_metadata(Function::undefined_input());
       }
-      output_nr++;
     }
   }
 }
@@ -428,7 +428,6 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->set_num_inputs(1);
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }

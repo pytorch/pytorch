@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "generic/SoftMarginCriterion.cu"
 #else
 
-#include "THCApply.cuh"
-
 void THNN_(SoftMarginCriterion_updateOutput)(
            THCState *state,
            THCTensor *input,

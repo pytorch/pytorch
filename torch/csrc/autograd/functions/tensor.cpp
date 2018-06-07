@@ -36,12 +36,13 @@ CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
     std::shared_ptr<Function> fn_)
-    : Function(/*num_inputs=*/1),
+    : Function(),
       base(base_var),
       view(std::move(view_)),
       fn(std::move(fn_)) {
   // Take the next_edges of fn as our own, except for index 0 which goes
   // to base instead of the view.
+  add_input_metadata(base_var.type(), base_var.sizes());
   const auto num_outputs = fn->num_outputs();
   next_edges_.reserve(num_outputs);
   add_next_edge(base_var.gradient_edge());

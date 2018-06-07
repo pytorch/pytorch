@@ -17,6 +17,7 @@ WITH_NNPACK=0
 WITH_MKLDNN=0
 WITH_GLOO_IBVERBS=0
 WITH_DISTRIBUTED_MW=0
+FULL_CAFFE2=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
       --with-cuda)
@@ -36,6 +37,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --with-distributed-mw)
           WITH_DISTRIBUTED_MW=1
+          ;;
+      --full-caffe2)
+          FULL_CAFFE2=1
           ;;
       *)
           break
@@ -81,12 +85,10 @@ C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=686926
 C_FLAGS="${C_FLAGS} -DOMPI_SKIP_MPICXX=1"
 LDFLAGS="-L\"$INSTALL_DIR/lib\" "
-LD_POSTFIX=".so.1"
-LD_POSTFIX_UNVERSIONED=".so"
+LD_POSTFIX=".so"
 if [[ $(uname) == 'Darwin' ]]; then
     LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
-    LD_POSTFIX=".1.dylib"
-    LD_POSTFIX_UNVERSIONED=".dylib"
+    LD_POSTFIX=".dylib"
 else
     LDFLAGS="$LDFLAGS -Wl,-rpath,\$ORIGIN"
 fi
@@ -139,6 +141,9 @@ function build() {
       nanopb ) BUILD_C_FLAGS=$C_FLAGS" -fPIC -fexceptions";;
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
+  # TODO: The *_LIBRARIES cmake variables should eventually be
+  # deprecated because we are using .cmake files to handle finding
+  # installed libraries instead
   ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
               ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
@@ -177,9 +182,6 @@ function build() {
   popd
 
   local lib_prefix=$INSTALL_DIR/lib/lib$1
-  if [ -f "$lib_prefix$LD_POSTFIX" ]; then
-    rm -rf -- "$lib_prefix$LD_POSTFIX_UNVERSIONED"
-  fi
 
   if [[ $(uname) == 'Darwin' ]]; then
     pushd "$INSTALL_DIR/lib"
@@ -224,9 +226,9 @@ function build_caffe2() {
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-      -DBUILD_CAFFE2=OFF \
+      -DBUILD_CAFFE2=$FULL_CAFFE2 \
       -DBUILD_ATEN=ON \
-      -DBUILD_PYTHON=OFF \
+      -DBUILD_PYTHON=$FULL_CAFFE2 \
       -DBUILD_BINARY=OFF \
       -DBUILD_SHARED_LIBS=ON \
       -DUSE_CUDA=$WITH_CUDA \
@@ -249,6 +251,17 @@ function build_caffe2() {
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
+
+  # Install Python proto files
+  if [[ $FULL_CAFFE2 -ne 0 ]]; then
+    find . -name proto
+    for proto_file in ./caffe/proto/*.py; do
+      cp $proto_file "$BASE_DIR/caffe/proto/"
+    done
+    for proto_file in ./caffe2/proto/*.py; do
+      cp $proto_file "$BASE_DIR/caffe2/proto/"
+    done
+  fi
   popd
 }
 

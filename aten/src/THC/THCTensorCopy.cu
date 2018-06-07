@@ -27,13 +27,13 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
   static_assert(std::is_same<ScalarTypeDst, typename TensorUtils<TensorTypeDst>::DataType>::value, "ScalarTypeDst must match");
   static_assert(std::is_same<ScalarTypeSrc, typename TensorUtils<TensorTypeSrc>::DataType>::value, "ScalarTypeSrc must match");
 
-  ptrdiff_t totalElements = TensorUtils<TensorTypeDst>::getNumElements(state, dst);
+  ptrdiff_t totalElements = THCTensor_nElement(state, dst);
 
   THArgCheck(totalElements ==
-             TensorUtils<TensorTypeSrc>::getNumElements(state, src),
+             THCTensor_nElement(state, src),
              2, "sizes do not match");
 
-  if (TensorUtils<TensorTypeDst>::getDims(state, dst) == 0) {
+  if (THCTensor_nDimension(state, dst) == 0) {
     // Zero-dim tensor; copy nothing
     return;
   }
@@ -47,13 +47,13 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
   // contiguous).
   // -AND: both tensors have the same type.
   bool sameType = isSameType<TensorTypeSrc, TensorTypeDst>();
-  bool srcContig = TensorUtils<TensorTypeSrc>::isContiguous(state, src);
-  bool dstContig = TensorUtils<TensorTypeDst>::isContiguous(state, dst);
+  bool srcContig = THCTensor_isContiguous(state, src);
+  bool dstContig = THCTensor_isContiguous(state, dst);
   bool memcpyEligible =
     ((srcContig && dstContig) || (totalElements == 1)) && sameType;
 
-  int srcDev = TensorUtils<TensorTypeSrc>::getDevice(state, src);
-  int dstDev = TensorUtils<TensorTypeDst>::getDevice(state, dst);
+  int srcDev = THCTensor_getDevice(state, src);
+  int dstDev = THCTensor_getDevice(state, dst);
   int oldDev = curGPU();
 
   // Try to enable p2p access. This also handles the case srcDev == dstDev.
@@ -140,7 +140,7 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
         // Types are different
         // Copy into the new format, contiguous, on the source device
         srcContig = TensorUtils<TensorTypeDst>::newTensor(state);
-        TensorUtils<TensorTypeDst>::resizeAs(state, srcContig, dst);
+        THCTensor_resizeAs(state, srcContig, dst);
 
         bool succ =
           THC_pointwiseApply2<ScalarTypeDst,
@@ -170,12 +170,12 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
                     copyStream));
 
       // We are done with the src
-      TensorUtils<TensorTypeDst>::free(state, srcContig);
+      THCTensor_free(state, srcContig);
 
       if (dst != dstContig) {
         TensorUtils<TensorTypeDst>::freeCopyTo(state, dstContig, dst);
       } else {
-        TensorUtils<TensorTypeDst>::free(state, dstContig);
+        THCTensor_free(state, dstContig);
       }
 
       // We're still on srcDev at this point
