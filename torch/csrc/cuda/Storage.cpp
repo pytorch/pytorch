@@ -19,7 +19,7 @@
 #include <THC/THCGenerateAllTypes.h>
 
 template<>
-void THPPointer<THStorage>::free() {
+void THPPointer<THCStorage>::free() {
   if (ptr)
     THCStorage_free(LIBRARY_STATE ptr);
 }

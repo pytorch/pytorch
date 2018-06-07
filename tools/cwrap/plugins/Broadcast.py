@@ -51,7 +51,7 @@ class Broadcast(CWrapPlugin):
     def getPreArgStringTemplate(self, type=None):
         if type is None:
             ret = """THTensor *${arg_op_other}_save = ${arg_op_other};
-                     THTensorPtr ${arg_op_other}_guard(nullptr);\n"""
+                     THWTensorPtr ${arg_op_other}_guard(nullptr);\n"""
         else:
             cpu_t = "TH" + type + "Tensor"
             gpu_t = "THCuda" + type + "Tensor"

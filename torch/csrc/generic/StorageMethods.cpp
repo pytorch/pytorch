@@ -5,7 +5,7 @@
 static PyObject * THPStorage_(size)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromLong(THStorage_(size)(LIBRARY_STATE self->cdata));
+  return PyLong_FromLong(THWStorage_(size)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
 
@@ -13,7 +13,7 @@ static PyObject * THPStorage_(size)(THPStorage *self)
 static PyObject * THPStorage_(dataPtr)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromVoidPtr(THStorage_(data)(LIBRARY_STATE self->cdata));
+  return PyLong_FromVoidPtr(THWStorage_(data)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
 #endif
@@ -21,7 +21,7 @@ static PyObject * THPStorage_(dataPtr)(THPStorage *self)
 static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  return THPStorageCopyMethod(THStorage_(copy_functions), self, args, kwargs);
+  return THPStorageCopyMethod(THWStorage_(copy_functions), self, args, kwargs);
   END_HANDLE_TH_ERRORS
 }
 
@@ -31,7 +31,7 @@ static PyObject * THPStorage_(isPinned)(THPStorage *self)
   HANDLE_TH_ERRORS
 #if defined(WITH_CUDA)
   cudaPointerAttributes attr;
-  cudaError_t err = cudaPointerGetAttributes(&attr, THStorage_(data)(LIBRARY_STATE self->cdata));
+  cudaError_t err = cudaPointerGetAttributes(&attr, THWStorage_(data)(LIBRARY_STATE self->cdata));
   if (err != cudaSuccess) {
     cudaGetLastError();
     Py_RETURN_FALSE;
@@ -47,14 +47,14 @@ static PyObject * THPStorage_(isPinned)(THPStorage *self)
 static PyObject * THPStorage_(elementSize)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromLong(THStorage_(elementSize)(LIBRARY_STATE_NOARGS));
+  return PyLong_FromLong(THWStorage_(elementSize)(LIBRARY_STATE_NOARGS));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPStorage_(new)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  THStoragePtr new_storage(THStorage_(new)(LIBRARY_STATE_NOARGS));
+  THWStoragePtr new_storage(THWStorage_(new)(LIBRARY_STATE_NOARGS));
   PyObject *_ret = THPStorage_(New)(new_storage);
   new_storage.release();
   return _ret;
@@ -67,7 +67,7 @@ static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
   THPUtils_assert(THPUtils_checkLong(number_arg), "resize_ expects an int, "
       "but got %s", THPUtils_typename(number_arg));
   int64_t newsize = THPUtils_unpackLong(number_arg);
-  THStorage_(resize)(LIBRARY_STATE self->cdata, newsize);
+  THWStorage_(resize)(LIBRARY_STATE self->cdata, newsize);
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -79,7 +79,7 @@ static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
   THPUtils_assert(THPUtils_(checkReal)(number_arg), "fill_ expects %s, "
       "but got %s", THPUtils_typeTraits<real>::python_type_str,
       THPUtils_typename(number_arg));
-  THStorage_(fill)(LIBRARY_STATE self->cdata, THPUtils_(unpackReal)(number_arg));
+  THWStorage_(fill)(LIBRARY_STATE self->cdata, THPUtils_(unpackReal)(number_arg));
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -152,23 +152,23 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
   uint8_t* src = (uint8_t*) buffer.buf;
-  THStorage* storage = THStorage_(newWithSize)(count);
+  THWStorage* storage = THWStorage_(newWithSize)(count);
 
 #if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
-  memcpy(THStorage_(data)(storage), src + offset, count);
+  memcpy(THWStorage_(data)(storage), src + offset, count);
 #elif defined(TH_REAL_IS_SHORT)
-  THP_decodeInt16Buffer(THStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeInt16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_INT)
-  THP_decodeInt32Buffer(THStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeInt32Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_LONG)
   // TODO: remove the cast
-  THP_decodeInt64Buffer((int64_t*) THStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeInt64Buffer((int64_t*) THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_HALF)
-  THP_decodeHalfBuffer(THStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeHalfBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_FLOAT)
-  THP_decodeFloatBuffer(THStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeFloatBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_DOUBLE)
-  THP_decodeDoubleBuffer(THStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeDoubleBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #else
 #error "Unknown type"
 #endif
@@ -192,7 +192,7 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   }
   if (shared)
     shared = TH_ALLOCATOR_MAPPED_SHARED;
-  THStorage *storage = THStorage_(newWithMapping)(LIBRARY_STATE filename, size, shared);
+  THWStorage *storage = THWStorage_(newWithMapping)(LIBRARY_STATE filename, size, shared);
   return (PyObject*)THPStorage_(New)(storage);
   END_HANDLE_TH_ERRORS
 }
@@ -223,7 +223,7 @@ PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *file)
   int fd = PyObject_AsFileDescriptor(file);
   THPUtils_assert(fd != -1, "_new_with_file couldn't retrieve a file "
       "descriptor from given object");
-  THStorage *storage = THPStorage_(readFileRaw<int>)(fd, nullptr);
+  THWStorage *storage = THPStorage_(readFileRaw<int>)(fd, nullptr);
   if (storage == nullptr)
     return nullptr;
   PyObject *result = THPStorage_(New)(storage);
@@ -243,7 +243,7 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
     // but it is currently unnecessary to support this.
     THPUtils_assert(offset == Py_None,
                     "_set_from_file: offset is NYI for filelike objects");
-    THStorage *storage = THPStorage_(readFileRaw<PyObject*>)(file, self->cdata);
+    THWStorage *storage = THPStorage_(readFileRaw<PyObject*>)(file, self->cdata);
     if (storage == nullptr) {
       return nullptr;
     }
@@ -258,7 +258,7 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   }
   THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
-  THStorage *storage = THPStorage_(readFileRaw<int>)(fd, self->cdata);
+  THWStorage *storage = THPStorage_(readFileRaw<int>)(fd, self->cdata);
   if (storage == nullptr)
     return nullptr;
   Py_INCREF(self);
@@ -283,9 +283,9 @@ PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
   THPUtils_assert(THPUtils_checkLong(new_cdata), "given an invalid argument to "
       "_set_cdata - expected an int or long, but got %s",
       THPUtils_typename(new_cdata));
-  THStorage *ptr = (THStorage*)PyLong_AsVoidPtr(new_cdata);
-  THStorage_(retain)(LIBRARY_STATE ptr);
-  THStorage_(free)(LIBRARY_STATE self->cdata);
+  THWStorage *ptr = (THWStorage*)PyLong_AsVoidPtr(new_cdata);
+  THWStorage_(retain)(LIBRARY_STATE ptr);
+  THWStorage_(free)(LIBRARY_STATE self->cdata);
   self->cdata = ptr;
   Py_INCREF(self);
   return (PyObject*)self;
@@ -299,11 +299,11 @@ PyObject * THPStorage_(_rootStorage)(THPStorage *self)
   if (!(self->cdata->flag & TH_STORAGE_VIEW)) {
     return Py_BuildValue("(ON)", self, PyLong_FromLong(0));
   }
-  THStorage *root = self->cdata;
+  THWStorage *root = self->cdata;
   while (root->flag & TH_STORAGE_VIEW)
     root = root->view;
-  size_t offset = THStorage_(data)(LIBRARY_STATE self->cdata) - THStorage_(data)(LIBRARY_STATE root);
-  THStorage_(retain)(LIBRARY_STATE root);
+  size_t offset = THWStorage_(data)(LIBRARY_STATE self->cdata) - THWStorage_(data)(LIBRARY_STATE root);
+  THWStorage_(retain)(LIBRARY_STATE root);
   THPObjectPtr storage(THPStorage_(New)(root));
   PyObject *result = Py_BuildValue("(NN)", storage.get(), PyLong_FromLong(offset));
   storage.release();
