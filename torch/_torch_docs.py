@@ -4078,13 +4078,9 @@ Example::
 
     >>> torch.sparse_coo_tensor([], [], torch.Size([])) # Create an empty tensor (of size (0,))
     torch.sparse.FloatTensor of size () with indices:
-    torch.sparse.LongTensor of size (0,) with indices:
-    tensor([], dtype=torch.int64)
-    and values:
     tensor([], dtype=torch.int64)
     and values:
     tensor([])
-
 """)
 
 add_docstr(torch.sqrt,
