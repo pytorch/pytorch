@@ -21,10 +21,14 @@ rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 
-# Build and test PyTorch
+# Build PyTorch
 export MACOSX_DEPLOYMENT_TARGET=10.9
 export CXX=clang++
 export CC=clang
+if which sccache > /dev/null; then
+  export CXX="sccache clang++"
+  export CC="sccache clang"
+fi
 # If we run too many parallel jobs, we will OOM
 export MAX_JOBS=2
 
