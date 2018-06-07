@@ -8,6 +8,18 @@
 
 namespace at {
 
+// NB: I'd really like to deduplicate these, having AT_FORALL_SCALAR_TYPES
+// call AT_FORALL_SCALAR_TYPES_EXCEPT_HALF, but the order of these definitions
+// MATTERS for the following tests in test_torch:
+//
+//  - test_sum_all
+//  - test_tensor_factory
+//  - test_tensor_factory_type_inference
+//
+// So, it seems there is no way to conveniently insert Half where it needs
+// to be.  (Probably, the order /shouldn't/ matter, but I couldn't pin down
+// where someone had hardcoded a number.)
+
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_) \
 _(uint8_t,Byte,i) \
 _(int8_t,Char,i) \
@@ -18,8 +30,14 @@ _(float,Float,d) \
 _(double,Double,d)
 
 #define AT_FORALL_SCALAR_TYPES(_) \
+_(uint8_t,Byte,i) \
+_(int8_t,Char,i) \
+_(int16_t,Short,i) \
+_(int,Int,i) \
+_(int64_t,Long,i) \
 _(at::Half,Half,d) \
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_)
+_(float,Float,d) \
+_(double,Double,d)
 
 enum class ScalarType {
 #define DEFINE_ENUM(_1,n,_2) \
