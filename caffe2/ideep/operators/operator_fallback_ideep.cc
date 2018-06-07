@@ -8,6 +8,7 @@
 #include <caffe2/operators/filler_op.h>
 #include <caffe2/operators/flatten_op.h>
 #include <caffe2/operators/given_tensor_fill_op.h>
+#include <caffe2/operators/load_save_op.h>
 #include <caffe2/operators/loss_op.h>
 #include <caffe2/operators/reshape_op.h>
 #include <caffe2/operators/softmax_op.h>
@@ -53,5 +54,7 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     GivenTensorFill,
     IDEEPFallbackOp<GivenTensorFillOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(Load, IDEEPFallbackOp<LoadOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(Save, IDEEPFallbackOp<SaveOp<CPUContext>>);
 
 } // namespace caffe2
