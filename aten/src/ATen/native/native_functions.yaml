@@ -1218,3 +1218,9 @@
 
 - func: pow(Tensor self, Scalar exponent) -> Tensor
   variants: method, function
+
+- func: native_zero_(Tensor self) -> Tensor
+  variants: function
+  dispatch: zero_sparse_
+
+- func: zero_(Tensor self) -> Tensor

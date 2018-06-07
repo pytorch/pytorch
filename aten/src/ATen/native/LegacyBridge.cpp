@@ -51,4 +51,12 @@ Tensor pow(const Tensor& self, Scalar exponent) {
   return r;
 }
 
+Tensor& zero_(Tensor& self) {
+  if (_has_native(self)) {
+    return native_zero_(self);
+  } else {
+    return th_zero_(self);
+  }
+}
+
 }} // namespace at::native

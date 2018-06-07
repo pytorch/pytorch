@@ -2062,9 +2062,11 @@
       default: 0
 ]]
 [[
-  name: zero_
+  name: th_zero_
   cname: zero
   return: self
+  variants:
+    - function
   aten_sparse: True
   arguments:
     - THTensor* self
