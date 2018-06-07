@@ -5,32 +5,11 @@ using namespace c10::guts;
 
 namespace {
 
-namespace test_eq {
-    static_assert(eq(std::array < int, 3 > {{2, 3, 4}}, std::array < int, 3 > {{2, 3, 4}}), "");
-    static_assert(!eq(std::array < int, 3 > {{2, 3, 4}}, std::array < int, 3 > {{2, 5, 4}}), "");
-}
-
-namespace test_tail {
-    static_assert(eq(std::array < int, 2 > {{3, 4}}, tail(std::array < int, 3 > {{2, 3, 4}})), "");
-    static_assert(eq(std::array < int, 0 > {{}}, tail(std::array < int, 1 > {{3}})), "");
-}
-
-namespace test_prepend {
-    static_assert(eq(std::array < int, 3 > {{2, 3, 4}}, prepend(2, std::array < int, 2 > {{3, 4}})), "");
-    static_assert(eq(std::array < int, 1 > {{3}}, prepend(3, std::array < int, 0 > {{}})), "");
-}
-
 namespace test_function_traits {
     static_assert(std::is_same<void, typename function_traits<void(int, float)>::return_type>::value, "");
     static_assert(std::is_same<int, typename function_traits<int(int, float)>::return_type>::value, "");
     static_assert(std::is_same<typelist::typelist<int, float>, typename function_traits<void(int, float)>::parameter_types>::value, "");
     static_assert(std::is_same<typelist::typelist<int, float>, typename function_traits<int(int, float)>::parameter_types>::value, "");
-}
-
-namespace test_to_std_array {
-    constexpr int obj2[3] = {3, 5, 6};
-    static_assert(eq(std::array < int, 3 > {{3, 5, 6}}, to_std_array(obj2)), "");
-    static_assert(eq(std::array < int, 3 > {{3, 5, 6}}, to_std_array<int, 3>({3, 5, 6})), "");
 }
 
 struct MovableOnly {

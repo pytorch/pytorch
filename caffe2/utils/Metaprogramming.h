@@ -9,62 +9,6 @@ namespace c10 { namespace guts {
 
 
 /**
- * Compile-time operations on std::array.
- * Only call these at compile time, they're slow if called at runtime.
- * Examples:
- *  equals({2, 3, 4}, {2, 3, 4}) == true  // needed because operator==(std::array, std::array) isn't constexpr
- *  tail({2, 3, 4}) == {3, 4}
- *  prepend(2, {3, 4}) == {2, 3, 4}
- */
-namespace detail {
-template<class T, size_t N, size_t... I> struct eq__ {};
-template<class T, size_t N, size_t IHead, size_t... ITail> struct eq__<T, N, IHead, ITail...> {
- static constexpr bool call(const std::array<T, N>& lhs, const std::array<T, N>& rhs) {
-   return std::get<IHead>(lhs) == std::get<IHead>(rhs) && eq__<T, N, ITail...>::call(lhs, rhs);
- }
-};
-template<class T, size_t N> struct eq__<T, N> {
- static constexpr bool call(const std::array<T, N>& /*lhs*/, const std::array<T, N>& /*rhs*/) {
-   return true;
- }
-};
-template<class T, size_t N, size_t... I>
-constexpr inline bool eq_(const std::array<T, N>& lhs, const std::array<T, N>& rhs, guts::index_sequence<I...>) {
- return eq__<T, N, I...>::call(lhs, rhs);
-}
-}
-template<class T, size_t N>
-constexpr inline bool eq(const std::array<T, N>& lhs, const std::array<T, N>& rhs) {
- return detail::eq_(lhs, rhs, guts::make_index_sequence<N>());
-}
-
-namespace detail {
-template<class T, size_t N, size_t... I>
-constexpr inline std::array<T, N-1> tail_(const std::array<T, N>& arg, guts::index_sequence<I...>) {
-  static_assert(sizeof...(I) == N-1, "invariant");
-  return {{std::get<I+1>(arg)...}};
-}
-}
-template<class T, size_t N>
-constexpr inline std::array<T, N-1> tail(const std::array<T, N>& arg) {
-  static_assert(N > 0, "Can only call tail() on an std::array with at least one element");
-  return detail::tail_(arg, guts::make_index_sequence<N-1>());
-}
-
-namespace detail {
-template<class T, size_t N, size_t... I>
-constexpr inline std::array<T, N+1> prepend_(T head, const std::array<T, N>& tail, guts::index_sequence<I...>) {
-  return {{std::move(head), std::get<I>(tail)...}};
-}
-}
-template<class T, size_t N>
-constexpr inline std::array<T, N+1> prepend(T head, const std::array<T, N>& tail) {
-  return detail::prepend_(std::move(head), tail, guts::make_index_sequence<N>());
-}
-
-
-
-/**
  * Access information about result type or arguments from a function type.
  * Example:
  * using A = function_traits<int (float, double)>::return_type // A == int
@@ -79,27 +23,6 @@ struct function_traits<Result (Args...)> {
   using return_type = Result;
   using parameter_types = typelist::typelist<Args...>;
 };
-
-
-
-/**
- * Convert a C array into a std::array.
- * Example:
- *   int source[3] = {2, 3, 4};
- *   std::array<int, 3> target = to_std_array(source);
- */
-
-namespace detail {
-template<class T, size_t N, size_t... I>
-constexpr std::array<T, N> to_std_array_(const T (&arr)[N], guts::index_sequence<I...>) {
-  return {{arr[I]...}};
-}
-}
-
-template<class T, size_t N>
-constexpr std::array<T, N> to_std_array(const T (&arr)[N]) {
-  return detail::to_std_array_(arr, guts::make_index_sequence<N>());
-}
 
 
 

@@ -3,6 +3,8 @@
 #include <type_traits>
 #include <utility>
 #include <memory>
+#include <sstream>
+#include <string>
 
 /*
  * This header adds some utils with C++14 and C++17 functionality
@@ -168,5 +170,49 @@ constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
 }
 
 #endif
+
+
+
+
+#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+#  define C10_CPP14_CONSTEXPR constexpr
+#else
+#  define C10_CPP14_CONSTEXPR
+#endif
+
+
+
+
+// GCC 4.8 doesn't define std::to_string, even though that's in C++11. Let's define it.
+namespace detail {
+class DummyClassForToString final {};
+}}}
+namespace std {
+// We use SFINAE to detect if std::to_string exists for a type, but that only works
+// if the function name is defined. So let's define a std::to_string for a dummy type.
+inline std::string to_string(c10::guts::detail::DummyClassForToString) { return ""; }
+}
+namespace c10 { namespace guts { namespace detail {
+
+template<class T, class Enable = void>
+struct to_string_ final {
+    static std::string call(T value) {
+        std::ostringstream str;
+        str << value;
+        return str.str();
+    }
+};
+// If a std::to_string exists, use that instead
+template<class T>
+struct to_string_<T, void_t<decltype(std::to_string(std::declval<T>()))>> final {
+    static std::string call(T value) {
+        return std::to_string(value);
+    }
+};
+}
+template<class T> inline std::string to_string(T value) {
+    return detail::to_string_<T>::call(value);
+}
+
 
 }}
