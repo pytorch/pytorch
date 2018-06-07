@@ -1224,3 +1224,31 @@
   dispatch: zero_sparse_
 
 - func: zero_(Tensor self) -> Tensor
+
+- func: native_add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch: add_out_sparse_cpu
+
+- func: native_add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch: add_sparse_cpu
+
+- func: add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+
+- func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: method, function
+
+- func: native_add_out(Tensor result, Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch: add_out_dense_sparse_cpu
+
+- func: native_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
+  variants: method, function
+  dispatch: add_dense_sparse_cpu
+
+- func: add_out(Tensor result, Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
+  variants: function
+
+- func: add(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
+  variants: method, function

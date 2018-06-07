@@ -116,7 +116,7 @@ bool is_same_density(const SparseTensor& self, const SparseTensor& src) {
   return self._dimI() == src._dimI() && self._dimV() == src._dimV();
 }
 
-SparseTensor& cadd_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, Scalar value, const SparseTensor& src) {
+SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
   AT_CHECK(t.sizes().equals(src.sizes()), "cadd operands have incompatible sizes");
   if (src._nnz() == 0) {
     return r.copy_(t);
@@ -205,6 +205,12 @@ SparseTensor& cadd_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, Scalar
   return r;
 }
 
+SparseTensor add_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
+  SparseTensor r = t.type().tensor();
+  add_out_sparse_cpu(r, t, src, alpha);
+  return r;
+}
+
 SparseTensor& csub_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, Scalar value, const SparseTensor& src) {
   // UGH... We're doing two dispatches on scalar type here for no good reason.
   // NB: I tried adding an operator- to Scalar, but there isn't any good way
@@ -212,7 +218,7 @@ SparseTensor& csub_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, Scalar
   AT_DISPATCH_ALL_TYPES(
       t.type(), "csub_sparse", [&] {
         scalar_t cast_value = value.to<scalar_t>();
-        cadd_out_sparse_cpu(r, t, -cast_value, src);
+        add_out_sparse_cpu(r, t, src, -cast_value);
       }
   );
   return r;
@@ -250,7 +256,7 @@ static void _mul_slice_sparse(
 // NB: divslice was removed as dead code
 
 SparseTensor& cmul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const SparseTensor& src_) {
-  AT_CHECK(t_.sizes().equals(src_.sizes()), "cadd operands have incompatible sizes");
+  AT_CHECK(t_.sizes().equals(src_.sizes()), "cmul operands have incompatible sizes");
   if (src_._nnz() == 0 || t_._nnz() == 0) {
     return r.zero_();
   }
@@ -589,7 +595,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, Scalar alpha, const SparseTe
 
 
 template <typename scalar_t>
-void spcadd_out_worker(Tensor& r, Scalar value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
+void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
   int64_t k;
 
   auto indices_accessor = indices.accessor<int64_t, 2>();
@@ -608,7 +614,8 @@ void spcadd_out_worker(Tensor& r, Scalar value, const SparseTensor& sparse, cons
   }
 }
 
-Tensor& spcadd_out_sparse_cpu(Tensor& r, const Tensor& dense, Scalar value, const SparseTensor& sparse_) {
+Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef sparse__, Scalar value) {
+  const SparseTensor& sparse_ = sparse__.tref;
   r.resize_as_(dense);
   SparseTensor sparse = sparse_.coalesce();
 
@@ -631,10 +638,16 @@ Tensor& spcadd_out_sparse_cpu(Tensor& r, const Tensor& dense, Scalar value, cons
     }
   } else {
     AT_DISPATCH_ALL_TYPES(
-        values.type(), "spcadd", [&] {
-          spcadd_out_worker<scalar_t>(r, value, sparse, indices, values);
+        values.type(), "add_dense_sparse", [&] {
+          add_dense_sparse_worker_cpu<scalar_t>(r, value, sparse, indices, values);
         });
   }
+  return r;
+}
+
+SparseTensor add_dense_sparse_cpu(const SparseTensor& t, SparseTensorRef src, Scalar alpha) {
+  SparseTensor r = t.type().tensor();
+  add_out_dense_sparse_cpu(r, t, src, alpha);
   return r;
 }
 

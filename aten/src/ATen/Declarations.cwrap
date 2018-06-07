@@ -2186,21 +2186,11 @@
     - THTensor* self
 ]]
 [[
-  name: add
+  name: th_add
   variants:
-    - method
     - function
   return: argument 0
   options:
-    - cname: add_scaled
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
     - cname: cadd
       aten_sparse: True
       arguments:
@@ -2223,6 +2213,23 @@
           default: AS_REAL(1)
           kwarg_only: True
         - THSTensor* other
+]]
+[[
+  name: add
+  variants:
+    - method
+    - function
+  return: argument 0
+  options:
+    - cname: add_scaled
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real other
+        - arg: real alpha
+          default: AS_REAL(1)
+          kwarg_only: True
 ]]
 [[
   name: add_
