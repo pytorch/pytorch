@@ -36,6 +36,27 @@ static TypePtr interpreterType(const TypePtr& type) {
   }
 }
 
+static inline bool isTensorSubtype(const TypePtr& type) {
+  return type->isSubtypeOf(*DynamicType::get());
+}
+
+static inline bool isTensorSubtype(const Value* v) {
+  return v->type()->isSubtypeOf(*DynamicType::get());
+}
+
+static inline bool isPythonScalarType(const TypePtr& type) {
+  return type->kind() == TypeKind::FloatType ||
+         type->kind() == TypeKind::IntType;
+}
+
+static inline bool isPythonScalarType(const Value* v) {
+  return isPythonScalarType(v->type());
+}
+
+static inline bool isCastableToTensor(const Value* v) {
+  return isTensorSubtype(v) || isPythonScalarType(v->type());
+}
+
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
 // nested control structures in the frontend (which themselves don't introduce
@@ -299,10 +320,6 @@ Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs
                       ->setSourceLocation(std::make_shared<SourceRange>(loc)))->output();
 }
 
-static bool isTensorSubtype(Value* v) {
-  return v->type()->isSubtypeOf(*DynamicType::get());
-}
-
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<at::IntList>(input);
   if(list)
@@ -392,6 +409,73 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+// Given a schema and inputs, returns a NamedValue that all
+// python scalar inputs should be casted to.
+at::optional<NamedValue> determinePythonMathType(
+    const FunctionSchema& schema,
+    at::ArrayRef<NamedValue> inputs) {
+  if (schema.name != "add" &&
+      schema.name != "sub" &&
+      schema.name != "mul" &&
+      schema.name != "neg" &&
+      schema.name != "div") {
+    return at::nullopt;
+  }
+
+  bool has_python_float = false;
+  bool has_python_int = false;
+  at::optional<NamedValue> result;
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    NamedValue v = inputs[i];
+    const auto& arg = schema.arguments[i];
+    if (!isTensorSubtype(arg.type)) {
+      continue;
+    }
+    // If one of the inputs is a Tensor, cast all python literals to its type
+    if (isTensorSubtype(v.value)) {
+      return v;
+    } else if (v.value->type() == FloatType::get()) {
+      has_python_float = true;
+      result = v;
+    } else if (v.value->type() == IntType::get()) {
+      has_python_int = true;
+    }
+  }
+  // All "Tensor" inputs were python floats
+  if (has_python_float && !has_python_int) {
+    return at::nullopt;
+  }
+  // All "Tensor" inputs were python ints
+  else if (!has_python_float && has_python_int) {
+    return at::nullopt;
+  }
+  // "Tensor" inputs are either python float or python int.
+  else {
+    return result;
+  }
+}
+
+static Value* createImplicitCast(
+    const SourceRange& loc,
+    Graph& graph,
+    Value* value,
+    const TypePtr type) {
+  auto* result = graph.insertNode(graph.create(prim::Cast, {value})
+      ->setSourceLocation(std::make_shared<SourceRange>(loc)))
+      ->output();
+  result->setType(type);
+  return result;
+}
+
+static inline bool isLiteralPassedAsIntList(
+    const Value* value,
+    const Argument& arg) {
+  // NB: This assumes attribute_info->data is used ONLY in the case of
+  // IntList[k] arguments. It is okay to pass in a literal instead of list here.
+  return arg.attribute_info && arg.attribute_info->data &&
+      value->node()->kind() == prim::Constant;
+}
+
 at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
@@ -447,17 +531,49 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       NamedValue v = *positional_inputs[i];
       const auto& arg = schema.arguments[i];
 
-      // implicit conversion from List[Tensor] -> Tensor for when the argument
+      // implicit conversion from List[int] -> Tensor for when the argument
       // is an IntList in aten, for things like x.expand(sizes=[3,4,5])
       if(arg.attribute_info &&
          arg.attribute_info->kind == AttributeKind::is &&
-         v.value->type()->isSubtypeOf(*ListType::ofTensors())) {
+         v.value->type()->isSubtypeOf(*ListType::ofInts())) {
         auto unpacked = createTupleUnpack(v.value);
         v.value = createStack(graph, loc, unpacked);
       }
 
+      // We may have parsed a python literal that should be an IntList.
+      // i.e. in tensor.sum(dim=1), 1 is parsed as a int, but tensor.sum
+      // requires an IntList[1], which in jit-land is backed by a Tensor.
+      // Make a new Tensor (torch.tensor(1)) if this happened.
+      if (isLiteralPassedAsIntList(v.value, arg)) {
+        auto* node = v.value->node();
+        auto* output = createConstant(graph, loc, node->t(attr::value));
+        v.value = output;
+      }
+
+      // implicit conversion from Tensor to Python scalar
+      if (isTensorSubtype(v.value) && isPythonScalarType(arg.type)) {
+        v.value = createImplicitCast(loc, graph, v.value, arg.type);
+      }
+      
+      // implicit conversion from Python scalar to Tensor
+      if (isTensorSubtype(arg.type) && isPythonScalarType(v.value->type())) {
+        v.value = createImplicitCast(loc, graph, v.value, DynamicType::get());
+
+        // For math operations, like x + 1, the type of the inputs must match.
+        // Try to cast to one of the input's type (ScalarType and backend)
+        auto representative_val = determinePythonMathType(schema, inputs);
+        if (representative_val) {
+          std::vector<Value*> type_as_args({v.value, representative_val.value().value});
+          auto* castNode = graph.insertNode(
+            graph.create(aten::type_as, type_as_args)
+            ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+          v.value = castNode->output();
+        }
+      }
+
       if(!v.value->type()->isSubtypeOf(*arg.type)) {
-        err() << "expected a value of type " << arg.type->name() << " for argument '" << arg.name << "' but found "
+        err() << "expected a value of type " << arg.type->name()
+              << " for argument '" << arg.name << "' but found "
               << v.value->type()->name() << "\n"
               << v.loc;
         return at::nullopt;
@@ -574,8 +690,9 @@ struct NoneValue : SugaredValue {
 };
 
 static Value* ensureTensor(const SourceRange& range, Value* v) {
-  if(!isTensorSubtype(v)) {
-    throw ErrorReport(range) << "expected a tensor value but found a tuple";
+  if(!isCastableToTensor(v)) {
+    throw ErrorReport(range) << "expected a tensor value but found a "
+        << *v->type();
   }
   return v;
 }
@@ -1214,9 +1331,60 @@ private:
         }
         return emitApplyExpr(apply.callee(), inputs, attributes, n_binders);
       } break;
+      case TK_UNARY_MINUS:
+      case '*':
+      case '/':
+      case '+':
+      case '-': {
+        const auto& inputs = tree.tree()->trees();
+        auto kind = getNodeKind(tree.tree()->kind(), inputs.size());
+        auto input_vals = getValues(inputs);
+        std::vector<NamedValue> named_input_vals;
+        for (Value* inp : input_vals) {
+          named_input_vals.push_back(NamedValue(tree.range(), "", inp));
+        }
+
+        auto sugared_val = emitBuiltinCall(
+            tree.range(),
+            method,
+            kind.toUnqualString(),
+            named_input_vals,
+            /*attributes=*/{},
+            /*required=*/true);
+
+        // Infer the type of the output if inputs were python scalars
+        auto* output_val = sugared_val->asValue(tree.range(), method);
+        if (std::all_of(input_vals.begin(), input_vals.end(), [](Value* v) {
+              return isPythonScalarType(v); })) {
+          output_val->setType(inferPythonMathType(input_vals));
+        }
+
+        if (kind == aten::add || kind == aten::sub) {
+          // We require alpha=1 to be a lifted constant.
+          // However, liftConstantAttributes will only lift constants for
+          // add(tensor, other, alpha) if BOTH other and alpha are "constants",
+          // so we're going to manually lift it here.
+          auto* node = output_val->node();
+          if (node->inputs().size() == 3) {
+            node->removeInput(2);
+            node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+          }
+        }
+
+        return sugared_val;
+      }
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree));
     }
+  }
+
+  // ins should only have FloatType or IntType
+  TypePtr inferPythonMathType(std::vector<Value*> ins) {
+    if (std::any_of(ins.begin(), ins.end(), [](Value* v) {
+          return v->type()->kind() == TypeKind::FloatType; })) {
+      return FloatType::get();
+    }
+    return IntType::get();
   }
 
   Value* emitSimpleExpr(
@@ -1228,26 +1396,16 @@ private:
       case '>':
       case TK_LE:
       case TK_GE:
-      case '*':
-      case '/':
       case '@':
       case TK_POW:
       case TK_AND:
       case TK_OR:
-      case TK_NOT:
-      case TK_UNARY_MINUS: {
+      case TK_NOT: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        return emitNode(kind, tree->range(), getValues(inputs), 1)->output();
+        auto input_vals = getValues(inputs);
+        return emitNode(kind, tree->range(), input_vals, 1)->output();
       } break;
-      case '+':
-      case '-': {
-        const auto& inputs =tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto* node = emitNode(kind, tree->range(), getValues(inputs), 1);
-        node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
-        return node->output();
-      }
       case TK_STARRED: {
         throw ErrorReport(tree) << "Unexpected starred expansion. File a bug report.";
       }
