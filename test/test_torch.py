@@ -17,6 +17,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from itertools import product, combinations
 from functools import reduce
+from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
 
@@ -2367,6 +2368,32 @@ class TestTorch(TestCase):
 
     def test_multinomial(self):
         self._test_multinomial(self, torch.FloatTensor)
+
+    def _spawn_method(self, method, arg):
+        try:
+            mp.set_start_method('spawn')
+        except RuntimeError:
+            pass
+        with mp.Pool(1) as pool:
+            self.assertTrue(pool.map(method, [arg]))
+
+    @staticmethod
+    def _test_multinomial_invalid_probs(probs):
+        try:
+            torch.multinomial(probs.to('cpu'), 1)
+            return False  # Should not be reached
+        except RuntimeError as e:
+            return 'invalid multinomial distribution' in str(e)
+
+    @unittest.skipIf(not PY3,
+                     "spawn start method is not supported in Python 2, \
+                     but we need it for for testing failure case for CPU RNG on Windows")
+    def test_multinomial_invalid_probs(self):
+        test_method = TestTorch._test_multinomial_invalid_probs
+        self._spawn_method(test_method, torch.Tensor([0, -1]))
+        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
+        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
+        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
 
     @suppress_warnings
     def test_range(self):

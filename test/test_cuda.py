@@ -3,11 +3,13 @@ import math
 import tempfile
 import re
 import unittest
+import sys
 from itertools import repeat
 
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
+from torch import multiprocessing as mp
 
 from test_torch import TestTorch
 from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, PY3
@@ -1398,6 +1400,34 @@ class TestCuda(TestCase):
         torch.cuda.manual_seed(11042)
         sample = torch.multinomial(freqs, 1000, True)
         self.assertNotEqual(freqs[sample].min(), 0)
+
+    def _spawn_method(self, method, arg):
+        try:
+            mp.set_start_method('spawn')
+        except RuntimeError:
+            pass
+        with mp.Pool(1) as pool:
+            self.assertTrue(pool.map(method, [arg]))
+
+    @staticmethod
+    def _test_multinomial_invalid_probs_cuda(probs):
+        try:
+            with torch.random.fork_rng(devices=[0]):
+                torch.multinomial(probs.to('cuda'), 1)
+                torch.cuda.synchronize()
+            return False  # Should not be reached
+        except RuntimeError as e:
+            return 'device-side assert triggered' in str(e)
+
+    @unittest.skipIf(not PY3,
+                     "spawn start method is not supported in Python 2, \
+                     but we need it for creating another process with CUDA")
+    def test_multinomial_invalid_probs_cuda(self):
+        test_method = TestCuda._test_multinomial_invalid_probs_cuda
+        self._spawn_method(test_method, torch.Tensor([0, -1]))
+        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
+        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
+        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
 
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
