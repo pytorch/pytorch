@@ -360,6 +360,10 @@ def emit_schema(jit_decls, out):
         n = get_name(arg['name'])
         if arg.get('type') == 'TensorList':
             typ = 'ListType::ofTensors()'
+        elif arg.get('type') == 'int64_t':
+            typ = 'IntType::get()'
+        elif arg.get('type') == 'bool':
+            typ = 'IntType::get()'
         else:
             typ = 'DynamicType::get()'
         tensor = 'at::nullopt'

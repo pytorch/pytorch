@@ -522,7 +522,11 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         err() << "argument '" << schema.arguments[i].name << "' not provided.\n" << loc;
         return at::nullopt;
       }
-      positional_inputs[i] = NamedValue(loc, i, createConstant(graph, loc, *default_value));
+      if (isPythonScalarType(schema.arguments[i].type)) {
+        positional_inputs[i] = NamedValue(loc, i, createPythonScalar(graph, loc, *default_value));
+      } else {
+        positional_inputs[i] = NamedValue(loc, i, createConstant(graph, loc, *default_value));
+      }
     }
 
     // check input types
