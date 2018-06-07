@@ -110,7 +110,7 @@ IF(HIP_FOUND)
   find_package(hiprand REQUIRED)
   find_package(rocblas REQUIRED)
   find_package(miopen REQUIRED)
-  # find_package(hipblas REQUIRED) Bug with the CMake file in Hipblas.
+  #find_package(hipblas REQUIRED) There's a bug with the CMake file in the Hipblas package.
   #find_package(hipsparse REQUIRED)
 
   # TODO: hip_hcc has an interface include flag "-hc" which is only

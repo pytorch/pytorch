@@ -252,9 +252,11 @@ endif()
 if(USE_ROCM)
   HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
 
-  # Set necessary HIPCC Flags
-  SET(HIP_HCC_FLAGS "-fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
-  SET(Caffe2_HIP_CXX_FLAGS "-fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${Caffe2_HIP_CXX_FLAGS}")
+  IF(BUILD_ATEN)
+    # Set necessary HIPCC Flags
+    SET(HIP_HCC_FLAGS "-fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
+    SET(Caffe2_HIP_CXX_FLAGS "-fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${Caffe2_HIP_CXX_FLAGS}")
+  ENDIF()
 
   # Since the HIP_ADD_LIBRARY is a MACRO, we need to set HIP_HCC_FLAGS prior to calling it.
   # Also, Since HIP_INCLUDE_DIRECTORIES is a MACRO, we must call it before HIP_ADD_LIBRARY.
@@ -267,7 +269,10 @@ if(USE_ROCM)
   target_include_directories(
     caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
-  aten_set_target_props(caffe2_hip)
+  IF(BUILD_ATEN)
+    aten_set_target_props(caffe2_hip)
+  ENDIF()
+
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
@@ -329,6 +334,7 @@ if(BUILD_CAFFE2)
   # Aten tests should only run when Caffe2 is not built
   set(__aten_test_dir "test/aten")
 endif()
+# Todo - Set up ATen tests for ROCm in an upcoming PR
 if(BUILD_ATEN AND NOT USE_ROCM)
   foreach(test_src ${ATen_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)

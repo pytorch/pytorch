@@ -485,7 +485,7 @@ if(USE_ROCM AND NOT BUILD_CAFFE2)
  EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig --cpp_config OUTPUT_VARIABLE HIP_CXX_FLAGS)
 
  # Link with HIPCC https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_porting_guide.md#linking-with-hipcc
- SET(CMAKE_CXX_LINK_EXECUTABLE ${HIP_HIPCC_EXECUTABLE})
+ # SET(CMAKE_CXX_LINK_EXECUTABLE ${HIP_HIPCC_EXECUTABLE})
 
  # Show message that we're using ROCm.
  MESSAGE(STATUS "ROCM TRUE:")
@@ -1139,7 +1139,7 @@ if (BUILD_ATEN)
     set(AT_CUDNN_ENABLED 1)
   ENDIF()
 
-  IF (NOT USE_ROCM) # OR NOT MIOPEN_FOUND)
+  IF (NOT USE_ROCM)
     MESSAGE(STATUS "MIOpen not found. Compiling without MIOpen support")
     set(AT_MIOPEN_ENABLED 0)
   ELSE()
