@@ -1906,9 +1906,9 @@
     - THTensor* other
 ]]
 [[
-  name: pow
+  name: th_pow
+  cname: pow
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -1919,6 +1919,14 @@
           output: True
         - THTensor* self
         - real exponent
+]]
+[[
+  name: pow
+  variants:
+    - method
+    - function
+  return: argument 0
+  options:
     - cname: cpow
       arguments:
         - arg: THTensor* result

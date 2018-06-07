@@ -86,6 +86,12 @@ SparseTensor& pow_out_sparse(SparseTensor& r, const SparseTensor& t, Scalar valu
   return r;
 }
 
+SparseTensor pow_sparse(const SparseTensor& t, Scalar value) {
+  SparseTensor r = t.type().tensor();
+  pow_out_sparse(r, t, value);
+  return r;
+}
+
 SparseTensor& div_out_sparse(SparseTensor& r, const SparseTensor& t, Scalar value) {
   if (isSameTensor(r, t)) {
     r._values().div_(value);

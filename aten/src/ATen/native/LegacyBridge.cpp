@@ -37,4 +37,18 @@ Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
   }
 }
 
+Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
+  if (_has_native(self)) {
+    return native_pow_out(result, self, exponent);
+  } else {
+    return th_pow_out(result, self, exponent);
+  }
+}
+
+Tensor pow(const Tensor& self, Scalar exponent) {
+  Tensor r = self.type().tensor();
+  native::pow_out(r, self, exponent);
+  return r;
+}
+
 }} // namespace at::native

@@ -216,10 +216,11 @@ namespace {
   }
 }
 
-void resize_as_sparse_(const SparseTensor& self, const SparseTensor& src) {
+SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     _raw_resize_sparse(self, src._dimI(), src._dimV(), src.sizes());
   }
+  return self;
 }
 
 // NB: Dropped the resizeNd variants

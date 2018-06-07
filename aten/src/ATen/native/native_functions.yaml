@@ -1204,3 +1204,17 @@
   dispatch: resize_as_sparse_
 
 - func: resize_as_(Tensor self, Tensor the_template) -> Tensor
+
+- func: native_pow_out(Tensor result, Tensor self, Scalar exponent) -> Tensor
+  variants: function
+  dispatch: pow_out_sparse
+
+- func: native_pow(Tensor self, Scalar exponent) -> Tensor
+  variants: function
+  dispatch: pow_sparse
+
+- func: pow_out(Tensor result, Tensor self, Scalar exponent) -> Tensor
+  variants: function
+
+- func: pow(Tensor self, Scalar exponent) -> Tensor
+  variants: method, function
