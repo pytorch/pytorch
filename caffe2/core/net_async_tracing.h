@@ -104,6 +104,7 @@ class TracerGuard {
   Tracer* tracer_;
 };
 
+int getUniqueShardId(const OperatorDef &op_def);
 bool isTraceableNet(const std::string& net_name);
 
 std::shared_ptr<Tracer> create(const NetBase* net, const std::string& net_name);
