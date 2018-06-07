@@ -78,6 +78,10 @@ Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
   return r;
 }
 
+Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
+  return native::add_out(self, self, other, alpha);
+}
+
 Tensor& add_out(Tensor& result, const Tensor& self, SparseTensorRef other, Scalar alpha) {
   if (_has_native(self)) {
     return native_add_out(result, self, other, alpha);

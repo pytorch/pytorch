@@ -1232,7 +1232,8 @@
   dispatch: add_out_sparse_cpu
 
 # NB: I need foo for a foo_out variant, because otherwise the autogen code gets
-# mad at me.  In principle, this isn't actually needed
+# mad at me.  In principle, this isn't actually needed, and it's not used at all
+# from LegacyBridge
 - func: native_add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch: add_sparse_cpu
