@@ -1,11 +1,43 @@
 #include "ATen/native/TensorTransformations.h"
 
+#include "ATen/cuda/detail/IndexUtils.cuh"
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
 namespace at {
 namespace native {
+
+#define AT_APPLY_THREADS_PER_BLOCK 32 * 16
+#define AT_APPLY_BLOCKS_PER_SM 4
+
+template <typename scalar_t, typename IndexType>
+#if __CUDA_ARCH__ >= 350
+__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+#endif
+__global__ void
+kernelPointwiseFlipApply2(const cuda::detail::TensorInfo<scalar_t, IndexType> in_tensor_info,
+                          cuda::detail::TensorInfo<scalar_t, IndexType> out_tensor_info,
+                          IndexType N,
+                          int flip_dim,
+                          int64_t total_dims) {
+  for (IndexType linear_index = blockIdx.x * blockDim.x + threadIdx.x; linear_index < N; linear_index += gridDim.x * blockDim.x) {
+    // printf("size0 = %ld, size1 = %ld, stride0 = %ld, stride1 = %ld\n", b.sizes[0], b.sizes[1], b.strides[0], b.strides[1]);
+
+    int64_t cur_indices = linear_index, rem = 0, dst_offset = 0;
+    for (int64_t i = 0; i < total_dims; i++) {
+      int64_t temp = cur_indices;
+      cur_indices = cur_indices / in_tensor_info.strides[i];
+      rem = temp - cur_indices * in_tensor_info.strides[i];
+      if (i == flip_dim) {
+        cur_indices = in_tensor_info.sizes[i] - 1 - cur_indices;
+      }
+      dst_offset += cur_indices * in_tensor_info.strides[i];
+      cur_indices = rem;
+    }
+    out_tensor_info.data[dst_offset] = in_tensor_info.data[linear_index];
+  }
+}
 
 template <typename scalar_t>
 __global__
@@ -39,6 +71,28 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   const int64_t flip_dims_size = dims.size(), total_dims = in_tensor.dim(), N = in_tensor.numel();
   check_errors(total_dims, flip_dims_size, dims);
 
+  int64_t block_size = 512;
+  dim3 dim_block(block_size);
+  dim3 dim_grid((N + block_size - 1) / block_size);
+
+  if (flip_dims_size == 1 && in_tensor.is_contiguous() && (dims[0] == 0 || dims[0] == total_dims - 1)) {
+    // printf("single dim flip, flip_dims_size = %ld, dims0 = %ld, total_dims = %ld\n", flip_dims_size, dims[0], total_dims);
+    auto out_tensor = at::empty_like(self);
+    AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
+      using cuda_scalar_t = cuda::type<scalar_t>;
+      auto in_tensor_info = cuda::detail::getTensorInfo<cuda_scalar_t, int64_t>(in_tensor);
+      auto out_tensor_info = cuda::detail::getTensorInfo<cuda_scalar_t, int64_t>(out_tensor);
+      int flip_dim = in_tensor_info.collapseDims(dims[0]);
+      // printf("flip dim = %d\n", flip_dim);
+      out_tensor_info.collapseDims(dims[0]);
+      // in_tensor_info.strides[0] = -1;
+      kernelPointwiseFlipApply2<cuda_scalar_t, int64_t>
+        <<<dim_grid, dim_block, 0, globalContext().getCurrentCUDAStream()>>>(
+          in_tensor_info, out_tensor_info, N, flip_dim, total_dims);
+    });
+    return out_tensor;
+  }
+
   auto flip_dims = std::vector<int64_t>(dims);
   auto flip_dims_t = at::CPU(kLong).tensorFromBlob(flip_dims.data(), {static_cast<int64_t>(flip_dims.size())});
 
@@ -48,7 +102,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   auto strides = std::vector<int64_t>(in_tensor.strides());
   auto strides_t = at::CPU(kLong).tensorFromBlob(strides.data(), {static_cast<int64_t>(strides.size())});
 
-  auto out_tensor = at::zeros_like(in_tensor);
+  auto out_tensor = at::empty_like(in_tensor);
 
   // stride_contiguous is the stride of non-contiguous tensor after called contiguous()
   // it is used to compute indices for each element in non-contiguous tensor
@@ -59,10 +113,6 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
     tmp = tmp / shape[i];
     stride_contiguous_d[i] = tmp;
   }
-
-  int64_t block_size = 512;
-  dim3 dim_block(block_size);
-  dim3 dim_grid((N + block_size - 1) / block_size);
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
     using cuda_scalar_t = cuda::type<scalar_t>;
