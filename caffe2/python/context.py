@@ -65,12 +65,12 @@ def _context_registry():
 def __enter__(self):
     if self._prev_enter is not None:
         self._prev_enter()
-    context_registry().get(self._ctx_class).enter(self)
+    _context_registry().get(self._ctx_class).enter(self)
     return self
 
 
 def __exit__(self, *args):
-    context_registry().get(self._ctx_class).exit(self)
+    _context_registry().get(self._ctx_class).exit(self)
     if self._prev_exit is not None:
         self._prev_exit(*args)
 
