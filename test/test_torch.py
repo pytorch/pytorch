@@ -5560,7 +5560,7 @@ class TestTorch(TestCase):
             self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), data.hardshrink(0.5))
 
             # TODO: test default lambda (0.5)
-            # self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), data.hardshrink())
+            self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), data.hardshrink())
 
             # test non-contiguous case
             self.assertEqual(torch.tensor([1, 0.3, 0.5, 0.6]).view(2, 2), data.t().hardshrink(0.1))
