@@ -4,64 +4,6 @@
 
 namespace caffe2 {
 
-std::vector<int> ComputeBinaryBroadcastForwardDims(
-    const std::vector<int>& A_dims,
-    const std::vector<int>& B_dims) {
-  const int ndim = std::max(A_dims.size(), B_dims.size());
-  std::vector<int> C_dims(ndim);
-  int i = A_dims.size() - 1;
-  int j = B_dims.size() - 1;
-  int k = ndim - 1;
-  for (; i >= 0 && j >= 0; --k) {
-    CAFFE_ENFORCE(A_dims[i] == B_dims[j] || A_dims[i] == 1 || B_dims[j] == 1);
-    C_dims[k] = std::max(A_dims[i--], B_dims[j--]);
-  }
-  for (; i >= 0; --i) {
-    C_dims[k--] = A_dims[i];
-  }
-  for (; j >= 0; --j) {
-    C_dims[k--] = B_dims[j];
-  }
-  return C_dims;
-}
-
-void ComputeBinaryBroadcastBackwardAxes(
-    const std::vector<int>& A_dims,
-    const std::vector<int>& B_dims,
-    std::vector<int>* A_axes,
-    std::vector<int>* B_axes) {
-  A_axes->clear();
-  B_axes->clear();
-  const int ndim = std::max(A_dims.size(), B_dims.size());
-  int i = A_dims.size() - 1;
-  int j = B_dims.size() - 1;
-  int k = ndim - 1;
-  for (; i >= 0 && j >= 0; --k) {
-    CAFFE_ENFORCE(A_dims[i] == B_dims[j] || A_dims[i] == 1 || B_dims[j] == 1);
-    if (A_dims[i] != B_dims[j]) {
-      if (A_dims[i] == 1) {
-        A_axes->push_back(k);
-      }
-      if (B_dims[j] == 1) {
-        B_axes->push_back(k);
-      }
-    }
-    --i;
-    --j;
-  }
-  if (i < 0) {
-    for (; k >= 0; --k) {
-      A_axes->push_back(k);
-    }
-  } else {
-    for (; k >= 0; --k) {
-      B_axes->push_back(k);
-    }
-  }
-  std::reverse(A_axes->begin(), A_axes->end());
-  std::reverse(B_axes->begin(), B_axes->end());
-}
-
 REGISTER_CPU_OPERATOR(
     Not,
     UnaryElementwiseOp<BoolTypes, CPUContext, NotFunctor<CPUContext>>);
@@ -166,7 +108,8 @@ bool SumReduceLikeOp<CPUContext>::DoRunWithType() {
     SRLHelper::sum2one<T>(Adata, Cdata, count);
   } else {
     size_t pre, n, post;
-    std::tie(pre, n, post) = ComputeLegacyBroadcastSizes(A, B, axis_);
+    std::tie(pre, n, post) =
+        elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
     if (post == 1) {
       SRLHelper::RunWithBroadcastFront<T>(Adata, Cdata, pre, n, &context_);
     } else if (pre == 1) {
