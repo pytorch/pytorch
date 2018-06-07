@@ -1,4 +1,4 @@
-project(c10 CXX C)
+project(c10_dispatch CXX C)
 
 set(LIB_SOURCES
         dummy.cpp
