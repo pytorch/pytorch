@@ -7,8 +7,13 @@
 // has necessary diagnostic guards.
 #include <caffe2/core/common_gpu.h>
 #endif
+#if __HIP_DEVICE_COMPILE__
+#include <caffe2/core/hip/common_hip.h>
+#endif
 
 #ifdef __CUDA_ARCH__
+#define CONVERSIONS_DECL __host__ __device__ inline
+#elif __HIP_DEVICE_COMPILE__
 #define CONVERSIONS_DECL __host__ __device__ inline
 #else
 #define CONVERSIONS_DECL inline
@@ -175,13 +180,17 @@ CONVERSIONS_DECL float16 To(const float in) {
 #if __CUDA_ARCH__
   // hacky interface between C2 fp16 and CUDA
 #if CUDA_VERSION >= 9000
-  half rh = __float2half(in); 
+  half rh = __float2half(in);
   return halfToFloat16(rh);
 #else
   float16 ret;
   ret.x = __float2half(in).x;
   return ret;
 #endif // CUDA_VERSION >= 9000
+#elif __HIP_DEVICE_COMPILE__
+  float16 ret;
+  ret.x = __float2half(in);
+  return ret;
 #else
   return cpu_float2half_rn(in);
 #endif
@@ -196,6 +205,10 @@ CONVERSIONS_DECL float To(const float16 in) {
   __half tmp;
 #endif
   tmp.x = in.x;
+  return __half2float(tmp);
+#elif __HIP_DEVICE_COMPILE__
+  __half tmp;
+  tmp = in.x;
   return __half2float(tmp);
 #else
   return cpu_half2float(in);
