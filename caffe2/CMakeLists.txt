@@ -46,7 +46,7 @@ if(BUILD_ATEN)
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
   IF(USE_ROCM)
     # Set the HIP Variables
-    set(Caffe2_HIP_SRCS ${Caffe2_GPU_SRCS})
+    set(Caffe2_HIP_SRCS ${ATen_CUDA_SRCS})
     set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${Caffe2_GPU_INCLUDE})
   ENDIF()
 endif()
