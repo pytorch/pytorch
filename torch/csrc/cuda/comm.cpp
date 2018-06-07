@@ -48,9 +48,15 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
   {
 #endif
     auto & gpu_type = type.toBackend(type.is_sparse() ? at::kSparseCUDA : at::kCUDA);
-    for (auto device : devices) {
+    if (type.is_cuda()) {
+      tensors.push_back(tensor);
+    } else {
+      AutoGPU _gpu_guard(devices[0]);
+      tensors.push_back(gpu_type.copy(tensor, true));
+    }
+    for (auto device : devices.slice(1)) {
       AutoGPU _gpu_guard(device);
-      tensors.push_back(tensor.toType(gpu_type, true));
+      tensors.push_back(gpu_type.copy(tensor, true));
     }
   }
   return tensors;

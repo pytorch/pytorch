@@ -9,22 +9,10 @@
 namespace torch { namespace utils {
 
 inline at::Tensor flatten_dense_tensors(at::TensorList tensors) {
-  if (tensors.size() == 1) {
-    return tensors[0].reshape({-1});
-  } else {
-    int64_t total_numel = 0;
-    for (const auto & tensor : tensors) {
-      total_numel += tensor.numel();
-    }
-    auto flat = tensors[0].type().tensor({total_numel});
-    int64_t offset = 0;
-    for (const auto & tensor : tensors) {
-      auto numel = tensor.numel();
-      flat.narrow(0, offset, numel).view_as(tensor).copy_(tensor);
-      offset += numel;
-    }
-    return flat;
-  }
+  static auto flatten = [](const at::Tensor &t) { return t.contiguous().view({-1}); };
+  if (tensors.size() == 1)
+    return flatten(tensors[0]);
+  return at::cat(fmap(tensors, flatten));
 }
 
 inline std::vector<at::Tensor> unflatten_dense_tensors(const at::Tensor& flat, at::TensorList tensors) {
