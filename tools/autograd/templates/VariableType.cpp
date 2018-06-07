@@ -36,7 +36,7 @@ namespace torch { namespace autograd {
 // don't want to make the codegen do the dispatch manually)
 static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, v.toTensor()); }
-static void setattr(jit::Node* n, jit::Symbol name, SparseTensor s)        { n->t_(name, s.tref); }
+static void setattr(jit::Node* n, jit::Symbol name, SparseTensorRef s)     { n->t_(name, s.tref); }
 static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
@@ -60,7 +60,7 @@ void failPositionalAttr() {
 
 static void setposattr(jit::Node* n, size_t idx, const char *name, int64_t v)             { genericInsertInput(n, idx, v); }
 static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Scalar& v)   { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensor s)        { failPositionalAttr(); }
+static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensorRef s)     { failPositionalAttr(); }
 static void setposattr(jit::Node* n, size_t idx, const char *name, const at::IntList& v)  {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasIntList(name)) {
@@ -236,8 +236,8 @@ Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
   return checked_cast_variable(t, name, pos).data();
 }
 
-SparseTensor VariableType::unpack(SparseTensor t, const char * name, int pos) {
-  return SparseTensor(checked_cast_variable(t.tref, name, pos).data());
+SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
+  return SparseTensorRef(checked_cast_variable(t.tref, name, pos).data());
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {

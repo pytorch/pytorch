@@ -19,7 +19,7 @@ using at::Scalar;
 using at::TensorList;
 using at::IntList;
 using at::Generator;
-using at::SparseTensor;
+using at::SparseTensorRef;
 using at::Storage;
 
 static at::Type& default_type() {
