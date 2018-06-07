@@ -40,6 +40,11 @@ export CC=clang
 if which sccache > /dev/null; then
   export CXX="sccache clang++"
   export CC="sccache clang"
+  if [[ "${JOB_BASE_NAME}" == *cuda* ]]; then
+    printf "#!/bin/sh\nexec sccache $(which nvcc) \$*" > "${PYTORCH_ENV_DIR}/nvcc"
+    chmod a+x "${PYTORCH_ENV_DIR}/nvcc"
+    export CUDA_NVCC_EXECUTABLE="${PYTORCH_ENV_DIR}/nvcc"
+  fi
 fi
 # If we run too many parallel jobs, we will OOM
 export MAX_JOBS=2
