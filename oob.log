@@ -3,11 +3,6 @@ iter number: 200
 forward time without backward: 2.5799636840820312
 forward time with backward: 3.2017459869384766
 backward time without backward: 9.481528282165527
---------test gpu----------
-iter number: 200
-forward time without backward: 0.12842845916748047
-forward time with backward: 0.1221017837524414
-backward time without backward: 0.2354722023010254
 --------test cpu and gpu mix----------
 iter number: 200
 forward time without backward: 5.331166505813599
