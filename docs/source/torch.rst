@@ -238,9 +238,10 @@ Spectral Ops
 .. autofunction:: rfft
 .. autofunction:: irfft
 .. autofunction:: stft
-.. autofunction:: hann_window
-.. autofunction:: hamming_window
 .. autofunction:: bartlett_window
+.. autofunction:: blackman_window
+.. autofunction:: hamming_window
+.. autofunction:: hann_window
 
 
 Other Operations

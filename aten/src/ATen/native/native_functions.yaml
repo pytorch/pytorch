@@ -149,6 +149,9 @@
     CPU: _atan_out_cpu
     CUDA: _atan_out_cuda
 
+- func: bartlett_window(Type dtype, int64_t window_length, bool periodic=True) -> Tensor
+  variants: function
+
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
 
@@ -165,6 +168,9 @@
 - func: bernoulli_(Tensor self) -> Tensor
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
+  variants: function
+
+- func: blackman_window(Type dtype, int64_t window_length, bool periodic=True) -> Tensor
   variants: function
 
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
@@ -530,6 +536,12 @@
   variants: function
   python_default_init:
     dtype: self.type()
+
+- func: hann_window(Type dtype, int64_t window_length, bool periodic=True) -> Tensor
+  variants: function
+
+- func: hamming_window(Type dtype, int64_t window_length, bool periodic=True, double alpha=0.54, double beta=0.46) -> Tensor
+  variants: function
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function

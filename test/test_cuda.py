@@ -1372,15 +1372,14 @@ class TestCuda(TestCase):
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
 
+    def test_signal_window_functions(self):
+        TestTorch._test_signal_window_functions(self, device=torch.device('cuda'))
+
     def test_fft_ifft_rfft_irfft(self):
-        def cuda_randn_double(*sizes):
-            return torch.cuda.DoubleTensor(*sizes).normal_()
-        TestTorch._test_fft_ifft_rfft_irfft(self, build_fn=cuda_randn_double)
+        TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
     def test_stft(self):
-        def cuda_randn_double(*sizes):
-            return torch.cuda.DoubleTensor(*sizes).normal_()
-        TestTorch._test_stft(self, build_fn=cuda_randn_double)
+        TestTorch._test_stft(self, device=torch.device('cuda'))
 
     def test_multinomial(self):
         TestTorch._test_multinomial(self, torch.cuda.FloatTensor)

@@ -418,40 +418,18 @@ if(USE_CUDA)
     endif()
     if(CAFFE2_USE_CUDNN)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
-    else()
-      if(BUILD_CAFFE2)
-        # TODO: Get rid of special case for Caffe2 where we require
-        # CUDA *and* cuDNN to be installed.
-        message(WARNING
-          "Not compiling with CUDA since cuDNN is missing. Suppress "
-          "this warning with -DUSE_CUDA=OFF.")
-        caffe2_update_option(USE_CUDA OFF)
-        caffe2_update_option(USE_CUDNN OFF)
-        caffe2_update_option(USE_TENSORRT OFF)
-        set(CAFFE2_USE_CUDA OFF)
-        set(CAFFE2_USE_CUDNN OFF)
-        set(CAFFE2_USE_TENSORRT OFF)
-      else()
-        message(WARNING
-          "Not compiling with cuDNN. Suppress this warning with "
-          "-DUSE_CUDNN=OFF.")
-        caffe2_update_option(USE_CUDNN OFF)
-        set(CAFFE2_USE_CUDNN OFF)
-      endif()
     endif()
-    if(CAFFE2_USE_CUDA)
-      if(CAFFE2_STATIC_LINK_CUDA)
-        # When statically linking, this must be the order of the libraries
-        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-            "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
-      else()
-        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
-      endif()
-      if(CAFFE2_USE_TENSORRT)
-        list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
-      else()
-        caffe2_update_option(USE_TENSORRT OFF)
-      endif()
+    if(CAFFE2_STATIC_LINK_CUDA)
+      # When statically linking, this must be the order of the libraries
+      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
+    else()
+      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
+    endif()
+    if(CAFFE2_USE_TENSORRT)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
+    else()
+      caffe2_update_option(USE_TENSORRT OFF)
     endif()
   else()
     message(WARNING
