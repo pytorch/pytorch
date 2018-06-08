@@ -17,6 +17,10 @@
 #include <stddef.h>
 #include <inttypes.h>
 
+#ifdef TH_BLAS_MKL
+#include <mkl_vsl.h>
+#endif
+
 #cmakedefine USE_BLAS
 #cmakedefine USE_LAPACK
 #cmakedefine BLAS_F2C
@@ -29,7 +33,7 @@
 #endif
 
 #ifdef _WIN32
-# ifdef TH_EXPORTS
+# if defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
 #  define TH_API TH_EXTERNC __declspec(dllexport)
 # else
 #  define TH_API TH_EXTERNC __declspec(dllimport)

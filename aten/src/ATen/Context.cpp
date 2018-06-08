@@ -8,11 +8,6 @@
 #include <string>
 #include <stdexcept>
 
-#if AT_CUDA_ENABLED()
-#include <cuda.h>
-#include "THC/THC.h"
-#include "ATen/CUDAGenerator.h"
-#endif
 #include "ATen/CPUGenerator.h"
 
 #ifdef USE_SSE3
@@ -31,30 +26,14 @@ static inline void argErrorHandler(int arg, const char * msg, void * data) {
 }
 
 Context::Context()
-: thc_state(nullptr) {
+: thc_state(nullptr, [](THCState* p){ /* no-op */ } ) {
 
   THSetDefaultErrorHandler(errorHandler,nullptr);
   THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
 
   generator_registry[static_cast<int>(Backend::CPU)]
     .reset(new CPUGenerator(this));
-  Type::registerAll(this);
-}
-void Context::doInitCUDA() {
-#if AT_CUDA_ENABLED()
-  thc_state = THCState_alloc();
-  THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
-  thc_state->cudaHostAllocator = &THCCachingHostAllocator;
-  THCudaInit(thc_state);
-  generator_registry[static_cast<int>(Backend::CUDA)]
-    .reset(new CUDAGenerator(this));
-#endif
-}
-Context::~Context() {
-#if AT_CUDA_ENABLED()
-  if(thc_state)
-    THCState_free(thc_state);
-#endif
+  Type::registerCPU(this);
 }
 
 Context & globalContext() {
@@ -95,52 +74,6 @@ bool Context::hasMKL() const {
 #else
   return false;
 #endif
-}
-
-bool Context::hasCUDA() const {
-#if AT_CUDA_ENABLED()
-  int count;
-  cudaError_t err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorInsufficientDriver) {
-    return false;
-  }
-  return true;
-#else
-  return false;
-#endif
-}
-
-#if AT_CUDA_ENABLED()
-cudaStream_t Context::getCurrentCUDAStream() const {
-  return THCState_getCurrentStream(thc_state);
-}
-struct cudaDeviceProp* Context::getCurrentDeviceProperties() const {
-  return THCState_getCurrentDeviceProperties(thc_state);
-}
-struct cudaDeviceProp* Context::getDeviceProperties(int device) const {
-  return THCState_getDeviceProperties(thc_state, device);
-}
-#else
-cudaStream_t Context::getCurrentCUDAStream() const {
-  throw std::runtime_error("ATen not compiled with CUDA");
-}
-struct cudaDeviceProp* Context::getCurrentDeviceProperties() const {
-  throw std::runtime_error("ATen not compiled with CUDA");
-}
-struct cudaDeviceProp* Context::getDeviceProperties(int device) const {
-  throw std::runtime_error("ATen not compiled with CUDA");
-}
-#endif
-
-int64_t Context::current_device() const {
-#if AT_CUDA_ENABLED()
-  int device;
-  cudaError_t err = cudaGetDevice(&device);
-  if (err == cudaSuccess) {
-    return device;
-  }
-#endif
-  return -1;
 }
 
 bool Context::setFlushDenormal(bool on) {

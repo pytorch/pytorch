@@ -42,6 +42,7 @@ if not dist.is_available():
 SKIP_IF_NO_CUDA_EXIT_CODE = 75
 SKIP_IF_NO_GPU_EXIT_CODE = 76
 SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE = 77
+SKIP_IF_BACKEND_UNAVAILABLE = 78
 
 
 def skip_if_no_cuda_distributed(func):
@@ -899,7 +900,6 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     WORLD_SIZE = os.environ['WORLD_SIZE']
 
     class TestDistBackend(TestCase, _DistTestBase):
-
         MANAGER_PROCESS_RANK = -1
 
         @staticmethod
@@ -949,7 +949,8 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
                                         world_size=int(WORLD_SIZE))
             except RuntimeError as e:
                 if 'recompile' in e.args[0]:
-                    sys.exit(0)
+                    sys.exit(SKIP_IF_BACKEND_UNAVAILABLE)
+                    # sys.exit(0)
                 raise
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
@@ -963,11 +964,15 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
             self.JOIN_TIMEOUT = get_timeout(self.id())
             for p in self.processes:
                 p.join(self.JOIN_TIMEOUT)
-                if not skip_ok:
-                    self.assertEqual(p.exitcode, 0)
+
+            first_process = self.processes[0]
+            for p in self.processes:
+                self.assertEqual(p.exitcode, first_process.exitcode)
+
+            if first_process.exitcode == SKIP_IF_BACKEND_UNAVAILABLE:
+                raise unittest.SkipTest("Compiled without the " + BACKEND + " backend")
 
             if skip_ok:
-                first_process = self.processes[0]
                 # do this first so we don't give an error message about
                 # mismatched exit codes if the first isn't valid
                 assert first_process.exitcode == 0 \
@@ -975,14 +980,14 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
                     or first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE \
                     or first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE
 
-                for p in self.processes:
-                    self.assertEqual(p.exitcode, first_process.exitcode)
                 if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
                     raise unittest.SkipTest("cuda is not available")
                 if first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE:
                     raise unittest.SkipTest("One unique gpu per process is not available")
                 if first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE:
                     raise unittest.SkipTest("worldsize is too small to run group tests")
+
+            self.assertEqual(first_process.exitcode, 0)
 
 elif BACKEND == 'mpi':
     WORLD_SIZE = os.environ['WORLD_SIZE']
@@ -992,4 +997,6 @@ elif BACKEND == 'mpi':
         pass
 
 if __name__ == '__main__':
+    assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
+
     unittest.main()

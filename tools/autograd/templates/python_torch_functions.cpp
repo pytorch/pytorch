@@ -12,6 +12,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/utils/python_variables.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_new.h"
@@ -26,14 +27,11 @@ using at::Tensor;
 using at::Scalar;
 using at::ScalarType;
 using at::Backend;
+using torch::autograd::utils::set_requires_grad;
+
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
-
-static Tensor set_requires_grad(Tensor self, bool requires_grad) {
-  as_variable_ref(self).set_requires_grad(requires_grad);
-  return self;
-}
 
 static void check_out_type_matches(Tensor result,
                                    ScalarType scalarType, bool scalarType_is_none,
@@ -133,6 +131,55 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
+inline Tensor & dispatch_range(Scalar start, Scalar end, Scalar step, Tensor result) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(result);
+  return at::range_out(result, start, end, step);
+}
+
+inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const Type & dtype, int64_t device) {
+  maybe_initialize_cuda(dtype);
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(device);
+  return at::range(dtype, start, end, step);
+}
+
+static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "range(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+  });
+
+  ParsedArgs<8> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
+        "and will be removed in 0.5. Note that arange generates values in [start; end), "
+        "not [start; end].", 1);
+    if (r.isNone(3)) {
+      auto device = r.device(6);
+      return wrap(set_requires_grad(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2),
+                                                   torch::getType(r.scalartype(4), r.layout(5), device.type),
+                                                   device.deviceInt64()), r.toBool(7)));
+    } else {
+      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
+                             r.layout(5), r.isNone(5),
+                             r.device(6), r.isNone(6));
+      return wrap(set_requires_grad(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)), r.toBool(7)));
+    }
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  return THPVariable_Wrap(torch::utils::as_tensor(default_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 // The Python clamp() syntax has to be mapped to one of three C++ functions
 static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* kwargs)
 {
@@ -212,11 +259,13 @@ ${py_methods}
 
 static PyMethodDef torch_functions[] = {
   {"arange", (PyCFunction)THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"as_tensor", (PyCFunction)THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"dsmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"hsmm", (PyCFunction)THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"_promote_types", (PyCFunction)THPVariable__promote_types, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"range", (PyCFunction)THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"sparse_coo_tensor", (PyCFunction)THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"spmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

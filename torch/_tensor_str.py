@@ -168,7 +168,7 @@ def _vector_str(self, indent, fmt, scale, sz, summarize):
                 [' ...'] +
                 [fmt(val / scale) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
-        data = [fmt(val) for val in self.tolist()]
+        data = [fmt(val / scale) for val in self.tolist()]
 
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
     lines = [', '.join(line) for line in data_lines]
@@ -194,6 +194,14 @@ def _tensor_str(self, indent, fmt, scale, sz, summarize):
 
     tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
     return '[' + tensor_str + ']'
+
+
+def _maybe_wrap_suffix(suffix, indent, tensor_str):
+    suffix_len = len(suffix)
+    last_line_len = len(tensor_str) - tensor_str.rfind('\n') + 1
+    if suffix_len > 2 and last_line_len + suffix_len > PRINT_OPTS.linewidth:
+        return ',\n' + ' ' * indent + suffix[2:]
+    return suffix
 
 
 def get_summarized_data(self):
@@ -224,27 +232,36 @@ def _str(self):
     indent = len(prefix)
     summarize = self.numel() > PRINT_OPTS.threshold
 
-    suffix = ')'
+    suffix = ''
     if not torch._C._is_default_type_cuda():
         if self.device.type == 'cuda':
-            suffix = ', device=\'' + str(self.device) + '\'' + suffix
+            suffix += ', device=\'' + str(self.device) + '\''
     else:
         if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
-            suffix = ', device=\'' + str(self.device) + '\'' + suffix
+            suffix += ', device=\'' + str(self.device) + '\''
 
     if self.numel() == 0:
         # In an empty tensor, there are no elements to infer if the dtype should be int64,
         # so it must be shown explicitly.
         if self.dtype != torch.get_default_dtype():
-            suffix = ', dtype=' + str(self.dtype) + suffix
+            suffix += ', dtype=' + str(self.dtype)
         tensor_str = '[]'
     else:
         if self.dtype != torch.get_default_dtype() and self.dtype != torch.int64:
-            suffix = ', dtype=' + str(self.dtype) + suffix
+            suffix += ', dtype=' + str(self.dtype)
 
         fmt, scale, sz = _number_format(get_summarized_data(self) if summarize else self)
         if scale != 1:
             prefix = prefix + SCALE_FORMAT.format(scale) + ' ' * indent
         tensor_str = _tensor_str(self, indent, fmt, scale, sz, summarize)
+
+    if self.grad_fn is not None:
+        suffix += ', grad_fn=<{}>'.format(type(self.grad_fn).__name__)
+    elif self.requires_grad:
+        suffix += ', requires_grad=True'
+
+    suffix += ')'
+
+    suffix = _maybe_wrap_suffix(suffix, indent, tensor_str)
 
     return prefix + tensor_str + suffix

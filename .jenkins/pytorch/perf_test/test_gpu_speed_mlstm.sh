@@ -10,7 +10,11 @@ test_gpu_speed_mlstm () {
 
   git clone https://github.com/pytorch/benchmark.git
 
-  cd benchmark/scripts/
+  cd benchmark/
+
+  git checkout 43dfb2c0370e70ef37f249dc09aff9f0ccd2ddb0
+
+  cd scripts/
 
   SAMPLE_ARRAY=()
   NUM_RUNS=$1

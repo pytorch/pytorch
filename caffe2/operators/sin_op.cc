@@ -1,35 +1,36 @@
-#include "caffe2/operators/elementwise_op.h"
-#include "caffe2/utils/math.h"
+#include "caffe2/operators/sin_op.h"
+
+#include <algorithm>
+#include <functional>
 
 namespace caffe2 {
 
-struct SinCPUFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CPUContext* device_context) {
-    math::Sin<T, CPUContext>(n, x, y, device_context);
-  }
-};
-
-struct SinGradientCPUFunctor {
-  template <typename T>
-  inline void
-  Run(const int n, const T* x, const T* dy, T* dx, CPUContext* /* unused */) {
-    ConstEigenVectorArrayMap<T> dyM(dy, n);
-    ConstEigenVectorArrayMap<T> xM(x, n);
-    EigenVectorMap<T>(dx, n) = dyM * cos(xM);
-  }
-};
+template <>
+template <typename T>
+bool SinGradientFunctor<CPUContext>::Forward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& /* X_dims */,
+    const T* dY,
+    const T* X,
+    T* dX,
+    CPUContext* /* context */) const {
+  const int size = std::accumulate(
+      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+  ConstEigenVectorArrayMap<T> dY_arr(dY, size);
+  ConstEigenVectorArrayMap<T> X_arr(X, size);
+  EigenVectorMap<T>(dX, size) = dY_arr * X_arr.cos();
+  return true;
+}
 
 REGISTER_CPU_OPERATOR(
     Sin,
-    UnaryElementwiseOp<TensorTypes<float>, CPUContext, SinCPUFunctor>);
+    UnaryElementwiseOp<TensorTypes<float>, CPUContext, SinFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(
     SinGradient,
     BinaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
-        WithoutBroadcast<SinGradientCPUFunctor>>);
+        SinGradientFunctor<CPUContext>>);
 
 OPERATOR_SCHEMA(Sin)
     .NumInputs(1)
@@ -43,15 +44,21 @@ Calculates the sine of the given input tensor, element-wise.
 
 OPERATOR_SCHEMA(SinGradient).NumInputs(2).NumOutputs(1).IdenticalTypeAndShape();
 
+namespace {
+
 class GetSinGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+  std::vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "SinGradient",
         "",
-        std::vector<string>{I(0), GO(0)},
-        std::vector<string>{GI(0)});
+        std::vector<std::string>{GO(0), I(0)},
+        std::vector<std::string>{GI(0)});
   }
 };
+
+} // namespace
+
 REGISTER_GRADIENT(Sin, GetSinGradient);
+
 } // namespace caffe2

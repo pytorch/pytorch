@@ -6,6 +6,8 @@
 
 using namespace nom;
 
+namespace {
+
 std::map<std::string, caffe2::Argument>
 getArgumentsFromOperator(caffe2::OperatorDef op) {
   std::map<std::string, caffe2::Argument> argMap;
@@ -83,6 +85,8 @@ std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
   return dilations;
 }
 
+} // namespace
+
 namespace caffe2 {
 
 std::unique_ptr<repr::NeuralNetOperator>
@@ -118,6 +122,10 @@ convertToOperatorDef(caffe2::OperatorDef op) {
 
   if (op.type() == "Sum") {
     nnOp = util::make_unique<repr::Sum>();
+  }
+
+  if (op.type() == "SpatialBN") {
+    nnOp = util::make_unique<repr::BatchNormalization>();
   }
 
   if (!nnOp) {
@@ -201,11 +209,11 @@ void handleWhileOp(
   auto bodyEdges = bodyGraph.getMutableEdges();
 
   for (auto node : bodyNodes) {
-    bodyGraph.swapNode(node, dfg);
+    bodyGraph.importNode(node, dfg);
   }
 
   for (auto edge : bodyEdges) {
-    bodyGraph.swapEdge(edge, dfg);
+    bodyGraph.importEdge(edge, dfg);
   }
 
   // Merge all dependencies
@@ -248,7 +256,7 @@ void handleWhileOp(
   // The true path executes the body of the loop, so we
   // take that BB and point to it.
   for (auto cfNode : bodyCFNodes) {
-    bodyCFGraph.swapNode(cfNode, cfg);
+    bodyCFGraph.importNode(cfNode, cfg);
     // If the CFG node has no children, we loop back to the top of the
     // while loop.
     if (cfNode->getOutEdges().size() == 0) {
@@ -260,7 +268,7 @@ void handleWhileOp(
     }
   }
   for (auto cfEdge : bodyCFEdges) {
-    bodyCFGraph.swapEdge(cfEdge, cfg);
+    bodyCFGraph.importEdge(cfEdge, cfg);
   }
 
   // Now create the false case.
@@ -413,6 +421,14 @@ caffe2::OperatorDef convertToOperatorDef(repr::NNGraph::NodeRef instrNode) {
 
 caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m) {
   auto predictNet = caffe2::NetDef();
+  return convertToCaffe2Proto(m, predictNet);
+}
+
+caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& oldNet) {
+  auto predictNet = caffe2::NetDef();
+  // We copy the old net rather than mutate it.
+  predictNet.CopyFrom(oldNet);
+  predictNet.mutable_op()->Clear();
 
   repr::nn::coalesceInsertedDataDependencies(&m);
 
@@ -471,4 +487,4 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m) {
   return predictNet;
 }
 
-} // namespace caffe2 
+} // namespace caffe2

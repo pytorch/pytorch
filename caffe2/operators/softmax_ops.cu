@@ -366,12 +366,12 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     // Sum weights
     math::Sum<float, CUDAContext>(
         N, weights, total_weight_ptr_.mutable_data<float>(), &context_, &scratch_);
-    cudaMemcpyAsync(
+    CUDA_CHECK(cudaMemcpyAsync(
         &total_weight,
         total_weight_ptr_.data<float>(),
         sizeof(float),
         cudaMemcpyDeviceToHost,
-        context_.cuda_stream());
+        context_.cuda_stream()));
   }
 
   // Sum of all losses
@@ -454,12 +454,12 @@ bool SpatialSoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
       total_weight_ptr_.mutable_data<float>(),
       &context_,
       &scratch_);
-  cudaMemcpyAsync(
+  CUDA_CHECK(cudaMemcpyAsync(
       &h_total_weight,
       total_weight_ptr_.data<float>(),
       sizeof(float),
       cudaMemcpyDeviceToHost,
-      context_.cuda_stream());
+      context_.cuda_stream()));
 
   math::Sum<float, CUDAContext>(
       losses_.size(), losses_.data<float>(), avg_loss_data, &context_, &scratch_);
@@ -557,12 +557,12 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
     // Sum weights
     math::Sum<float, CUDAContext>(
         N, weights, total_weight_ptr_.mutable_data<float>(), &context_, &scratch_);
-    cudaMemcpyAsync(
+    CUDA_CHECK(cudaMemcpyAsync(
         &total_weight,
         total_weight_ptr_.data<float>(),
         sizeof(float),
         cudaMemcpyDeviceToHost,
-        context_.cuda_stream());
+        context_.cuda_stream()));
   }
 
   // Scale by d_avg_loss / N
@@ -648,12 +648,12 @@ bool SpatialSoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
 
   // Somewhat awkward scalar passing from device to host
   float h_total_weight;
-  cudaMemcpyAsync(
+  CUDA_CHECK(cudaMemcpyAsync(
       &h_total_weight,
       total_weight_ptr_.data<float>(),
       sizeof(float),
       cudaMemcpyDeviceToHost,
-      context_.cuda_stream());
+      context_.cuda_stream()));
 
   // Final scaling
   if (h_total_weight > 0) {

@@ -8,7 +8,6 @@
 #include "cub/util_allocator.cuh"
 
 #include "caffe2/core/asan.h"
-#include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"

@@ -20,11 +20,7 @@ class OneHotCategorical(Distribution):
 
         >>> m = OneHotCategorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
-         0
-         0
-         1
-         0
-        [torch.FloatTensor of size 4]
+        tensor([ 0.,  0.,  0.,  1.])
 
     Args:
         probs (Tensor): event probabilities
@@ -84,6 +80,6 @@ class OneHotCategorical(Distribution):
     def enumerate_support(self):
         n = self.event_shape[0]
         values = self._new((n, n))
-        torch.eye(n, out=values.data)
+        torch.eye(n, out=values)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
         return values.expand((n,) + self.batch_shape + (n,))

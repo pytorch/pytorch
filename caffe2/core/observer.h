@@ -30,8 +30,6 @@ class ObserverBase {
 
   virtual std::unique_ptr<ObserverBase<T>> rnnCopy(T* subject, int rnn_order)
       const {
-    LOG(WARNING)
-        << "rnnCopy() is not implemented and nullptr will be returned.";
     return nullptr;
   };
 
@@ -61,6 +59,7 @@ class Observable {
       return observer_ptr;
     }
     observers_list_.push_back(std::move(observer));
+    UpdateCache();
 
     return observer_ptr;
   }
@@ -74,6 +73,7 @@ class Observable {
       if (it->get() == observer_ptr) {
         auto res = std::move(*it);
         observers_list_.erase(it);
+        UpdateCache();
         return res;
       }
     }
@@ -81,20 +81,72 @@ class Observable {
   }
 
   virtual size_t NumObservers() {
-    return observers_list_.size();
+    return num_observers_;
   }
 
-  void StartAllObservers() {
-    for (auto& observer : observers_list_) {
+ private:
+  inline static void StartObserver(Observer* observer) {
+    try {
       observer->Start();
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Exception from observer: " << e.what();
+    } catch (...) {
+      LOG(ERROR) << "Exception from observer: unknown";
+    }
+  }
+
+  inline static void StopObserver(Observer* observer) {
+    try {
+      observer->Stop();
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Exception from observer: " << e.what();
+    } catch (...) {
+      LOG(ERROR) << "Exception from observer: unknown";
+    }
+  }
+
+  void UpdateCache() {
+    num_observers_ = observers_list_.size();
+    if (num_observers_ != 1) {
+      // we cannot take advantage of the cache
+      return;
+    }
+    observer_cache_ = observers_list_[0].get();
+  }
+
+ public:
+  void StartAllObservers() {
+    // do not access observers_list_ unless necessary
+    if (num_observers_ == 0) {
+      return;
+    } else if (num_observers_ == 1) {
+      StartObserver(observer_cache_);
+    } else {
+      for (auto& observer : observers_list_) {
+        StartObserver(observer.get());
+      }
     }
   }
 
   void StopAllObservers() {
-    for (auto& observer : observers_list_) {
-      observer->Stop();
+    // do not access observers_list_ unless necessary
+    if (num_observers_ == 0) {
+      return;
+    } else if (num_observers_ == 1) {
+      StopObserver(observer_cache_);
+    } else {
+      for (auto& observer : observers_list_) {
+        StopObserver(observer.get());
+      }
     }
   }
+
+ private:
+  // an on-stack cache for fast iteration;
+  // ideally, inside StartAllObservers and StopAllObservers,
+  // we should never access observers_list_
+  Observer* observer_cache_;
+  size_t num_observers_ = 0;
 
  protected:
   std::vector<std::unique_ptr<Observer>> observers_list_;

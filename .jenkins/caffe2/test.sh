@@ -8,12 +8,8 @@ TEST_DIR=$ROOT_DIR/caffe2_tests
 
 # Figure out which Python to use
 PYTHON="python"
-if [ -n "$BUILD_ENVIRONMENT" ]; then
-  if [[ "$BUILD_ENVIRONMENT" == py2* ]]; then
-    PYTHON="python2"
-  elif [[ "$BUILD_ENVIRONMENT" == py3* ]]; then
-    PYTHON="python3"
-  fi
+if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  PYTHON="python${BASH_REMATCH[1]}"
 fi
 
 # The prefix must mirror the setting from build.sh
@@ -44,8 +40,6 @@ if [[ "$BUILD_ENVIRONMENT" != conda* ]]; then
   export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/lib"
 fi
 
-exit_code=0
-
 cd "$ROOT_DIR"
 
 if [ -d $TEST_DIR ]; then
@@ -57,28 +51,25 @@ mkdir -p $TEST_DIR/{cpp,python}
 
 cd ${INSTALL_PREFIX}
 
-# Commands below may exit with non-zero status
-set +e
-
 # C++ tests
 echo "Running C++ tests.."
-for test in $INSTALL_PREFIX/test/*; do
-  # Skip tests we know are hanging or bad
-  case "$(basename "$test")" in
-    mkl_utils_test)
+gtest_reports_dir="${TEST_DIR}/cpp"
+junit_reports_dir="${TEST_DIR}/junit_reports"
+mkdir -p "$gtest_reports_dir" "$junit_reports_dir"
+for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
+  case "$test" in
+    # skip tests we know are hanging or bad
+    */mkl_utils_test|*/aten/integer_divider_test)
       continue
       ;;
-    # TODO investigate conv_op_test failures when using MKL
-    conv_op_test)
-      continue
+    */aten/*)
+      # ATen uses test framework Catch2
+      "$test" -r=xml -o "${junit_reports_dir}/$(basename $test).xml"
+      ;;
+    *)
+      "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
       ;;
   esac
-
-  "$test" --gtest_output=xml:"$TEST_DIR"/cpp/$(basename "$test").xml
-  tmp_exit_code="$?"
-  if [ "$exit_code" -eq 0 ]; then
-    exit_code="$tmp_exit_code"
-  fi
 done
 
 # Get the relative path to where the caffe2 python module was installed
@@ -92,9 +83,11 @@ if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
   EXTRA_TESTS+=("$CAFFE2_PYPATH/contrib/nccl")
 fi
 
-# TODO find out why this breaks for conda builds
+conda_ignore_test=()
 if [[ $BUILD_ENVIRONMENT == conda* ]]; then
-  conda_ignore_test="--ignore $CAFFE2_PYPATH/python/tt_core_test.py"
+  # These tests both assume Caffe2 was built with leveldb, which is not the case
+  conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/dataio_test.py")
+  conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/checkpoint_test.py")
 fi
 
 # Python tests
@@ -108,14 +101,11 @@ echo "Running Python tests.."
   --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
   --ignore "$CAFFE2_PYPATH/python/operator_test/pack_ops_test.py" \
   --ignore "$CAFFE2_PYPATH/python/mkl/mkl_sbn_speed_test.py" \
-  $conda_ignore_test \
+  ${conda_ignore_test[@]} \
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
 
-tmp_exit_code="$?"
-if [ "$exit_code" -eq 0 ]; then
-  exit_code="$tmp_exit_code"
+if [[ -n "$INTEGRATED" ]]; then
+  pip install --user pytest-xdist torchvision
+  "$ROOT_DIR/scripts/onnx/test.sh" -p
 fi
-
-# Exit with the first non-zero status we got
-exit "$exit_code"

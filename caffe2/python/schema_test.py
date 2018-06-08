@@ -23,6 +23,28 @@ class TestDB(unittest.TestCase):
             self.assertTrue(isinstance(r.field2, schema.List))
             self.assertTrue(getattr(r, 'non_existent', None) is None)
 
+    def testListSubclassClone(self):
+        class Subclass(schema.List):
+            pass
+
+        s = Subclass(schema.Scalar())
+        clone = s.clone()
+        self.assertIsInstance(clone, Subclass)
+        self.assertEqual(s, clone)
+        self.assertIsNot(clone, s)
+
+    def testStructSubclassClone(self):
+        class Subclass(schema.Struct):
+            pass
+
+        s = Subclass(
+            ('a', schema.Scalar()),
+        )
+        clone = s.clone()
+        self.assertIsInstance(clone, Subclass)
+        self.assertEqual(s, clone)
+        self.assertIsNot(clone, s)
+
     def testNormalizeField(self):
         s = schema.Struct(('field1', np.int32), ('field2', str))
         self.assertEquals(
@@ -366,3 +388,19 @@ class TestDB(unittest.TestCase):
         assert t.get('field_0', None) == s1
         assert t.get('field_1', None) == s2
         assert t.get('field_2', None) is None
+
+    def testScalarShape(self):
+        s0 = schema.Scalar(np.int32)
+        self.assertEqual(s0.field_type().shape, ())
+
+        s1_good = schema.Scalar((np.int32, 5))
+        self.assertEqual(s1_good.field_type().shape, (5, ))
+
+        with self.assertRaises(ValueError):
+            s1_bad = schema.Scalar((np.int32, -1))
+
+        s1_hard = schema.Scalar((np.int32, 1))
+        self.assertEqual(s1_hard.field_type().shape, (1, ))
+
+        s2 = schema.Scalar((np.int32, (2, 3)))
+        self.assertEqual(s2.field_type().shape, (2, 3))

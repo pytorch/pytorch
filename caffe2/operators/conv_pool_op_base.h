@@ -145,11 +145,6 @@ class ConvPoolOpBase : public Operator<Context> {
       }
     }
 
-    AllocateAndCopy(kernel_, kernel_device_);
-    AllocateAndCopy(stride_, stride_device_);
-    AllocateAndCopy(dilation_, dilation_device_);
-    AllocateAndCopy(pads_, pads_device_);
-
     // Check kernel only if we are doing conv or pooling. The reason is that a
     // few other ops, like PadImage, are also using this base class. We really
     // need to clean this up.
@@ -169,15 +164,6 @@ class ConvPoolOpBase : public Operator<Context> {
       CAFFE_ENFORCE_GE(kernel_[dim], 0);
       CAFFE_ENFORCE_GE(dilation_[dim], 0);
       CAFFE_ENFORCE_GE(stride_[dim], 0);
-    }
-
-    if (group_ != 1) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
-        CAFFE_ENFORCE_EQ(
-            dilation_[dim],
-            1,
-            "When group is used, dilation should not be set at the same time.");
-      }
     }
   }
 
@@ -399,6 +385,7 @@ class ConvPoolOpBase : public Operator<Context> {
   static struct OpSchema::Cost CostInferenceForConv(
       const OperatorDef& def,
       const vector<TensorShape>& inputs) {
+    CAFFE_ENFORCE_GE(inputs.size(), 2, "Conv requires at least 2 inputs");
     struct OpSchema::Cost c;
     const TensorShape X = inputs[0];
     const TensorShape W = inputs[1];
@@ -406,7 +393,6 @@ class ConvPoolOpBase : public Operator<Context> {
     ArgumentHelper helper(def);
     const auto order =
         StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
-
     unsigned long long N;
     unsigned long long Y_t = 1;
     unsigned long long Y_h;
@@ -417,6 +403,9 @@ class ConvPoolOpBase : public Operator<Context> {
     unsigned long long in_channels;
     unsigned long long out_channels;
 
+    if (X.dims_size() == 0 || W.dims_size() == 0) {
+      return c;
+    }
     N = X.dims(0);
     if (X.dims_size() == 5) {
       // 3D convolution
@@ -432,6 +421,7 @@ class ConvPoolOpBase : public Operator<Context> {
     } else {
       // 2D convolution
       CAFFE_ENFORCE_EQ(X.dims_size(), 4, "Conv2D should have 4D input tensor");
+      CAFFE_ENFORCE_EQ(W.dims_size(), 4, "Conv2D should have 4D filter tensor");
       if (order == StorageOrder::NHWC) {
         Y_h = Y.dims(1);
         Y_w = Y.dims(2);
@@ -448,12 +438,19 @@ class ConvPoolOpBase : public Operator<Context> {
         out_channels = W.dims(0);
       }
     }
+
+    uint64_t nElemX = nElemFromDim(X);
+    uint64_t nElemW = nElemFromDim(W);
+    uint64_t nElemBias = inputs.size() > 2 ? nElemFromDim(inputs[2]) : 0;
+
     // grouping is NOT properly handled yet
     c.flops = N * Y_t * Y_h * Y_w * kernel_t * kernel_w * kernel_h *
         in_channels * out_channels * 2;
-    c.bytes_moved = N * out_channels * Y_t * Y_h * Y_w * sizeof(float);
+    c.bytes_read = (nElemX + nElemW + nElemBias) * sizeof(X.data_type());
+    c.bytes_written =
+        N * out_channels * Y_t * Y_h * Y_w * sizeof(Y.data_type());
     c.params_bytes = out_channels * in_channels * kernel_t * kernel_h *
-        kernel_w * sizeof(float);
+        kernel_w * sizeof(W.data_type());
     return c;
   }
 
@@ -544,22 +541,22 @@ class ConvPoolOpBase : public Operator<Context> {
     return out;
   }
 
-  static vector<TensorShape> TensorInferenceForConv(
+  static std::vector<TensorShape> TensorInferenceForConv(
       const OperatorDef& def,
-      const vector<TensorShape>& in) {
+      const std::vector<TensorShape>& in) {
     if (in[0].unknown_shape()) {
-      vector<TensorShape> out(1);
+      std::vector<TensorShape> out(1);
       out[0].set_unknown_shape(true);
       return out;
     }
     return TensorInferenceForSchema(def, in, in[1].dims(0));
   }
 
-  static vector<TensorShape> TensorInferenceForPool(
+  static std::vector<TensorShape> TensorInferenceForPool(
       const OperatorDef& def,
-      const vector<TensorShape>& in) {
+      const std::vector<TensorShape>& in) {
     if (in[0].unknown_shape()) {
-      vector<TensorShape> out(1);
+      std::vector<TensorShape> out(1);
       out[0].set_unknown_shape(true);
       return out;
     }
@@ -569,6 +566,18 @@ class ConvPoolOpBase : public Operator<Context> {
     int num_channels =
         (order == StorageOrder::NCHW ? in[0].dims(1) : in[0].dims(3));
     return TensorInferenceForSchema(def, in, num_channels);
+  }
+
+  static std::vector<TensorShape> TensorInferenceForLC(
+      const OperatorDef& def,
+      const std::vector<TensorShape>& in) {
+    if (in[0].unknown_shape()) {
+      std::vector<TensorShape> out(1);
+      out[0].set_unknown_shape(true);
+      return out;
+    }
+    const int img_ndim = in[0].dims_size() - 2;
+    return TensorInferenceForSchema(def, in, in[1].dims(img_ndim));
   }
 
   virtual ~ConvPoolOpBase() {}
@@ -582,12 +591,6 @@ class ConvPoolOpBase : public Operator<Context> {
   vector<int> pads_;
 
   bool float16_compute_;
-
-  // We need the above parameters to be available for the devices.
-  Tensor<Context> kernel_device_;
-  Tensor<Context> dilation_device_;
-  Tensor<Context> stride_device_;
-  Tensor<Context> pads_device_;
 
   int group_;
   StorageOrder order_;
@@ -725,7 +728,6 @@ class ConvPoolOpBase : public Operator<Context> {
 #define USE_CONV_POOL_BASE_FUNCTIONS(Context)      \
   USE_OPERATOR_FUNCTIONS(Context);                 \
   using ConvPoolOpBase<Context>::pads_;            \
-  using ConvPoolOpBase<Context>::pads_device_;     \
   using ConvPoolOpBase<Context>::pad_t;            \
   using ConvPoolOpBase<Context>::pad_l;            \
   using ConvPoolOpBase<Context>::pad_b;            \
@@ -733,15 +735,12 @@ class ConvPoolOpBase : public Operator<Context> {
   using ConvPoolOpBase<Context>::legacy_pad_;      \
   using ConvPoolOpBase<Context>::global_pooling_;  \
   using ConvPoolOpBase<Context>::kernel_;          \
-  using ConvPoolOpBase<Context>::kernel_device_;   \
   using ConvPoolOpBase<Context>::kernel_h;         \
   using ConvPoolOpBase<Context>::kernel_w;         \
   using ConvPoolOpBase<Context>::dilation_;        \
-  using ConvPoolOpBase<Context>::dilation_device_; \
   using ConvPoolOpBase<Context>::dilation_h;       \
   using ConvPoolOpBase<Context>::dilation_w;       \
   using ConvPoolOpBase<Context>::stride_;          \
-  using ConvPoolOpBase<Context>::stride_device_;   \
   using ConvPoolOpBase<Context>::stride_h;         \
   using ConvPoolOpBase<Context>::stride_w;         \
   using ConvPoolOpBase<Context>::group_;           \

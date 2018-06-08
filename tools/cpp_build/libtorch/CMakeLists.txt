@@ -1,20 +1,53 @@
-cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
-cmake_policy(VERSION 3.0)
+if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  if (NOT BUILD_TORCH)
+    return()
+  endif()
+else()
+  cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+  include(CMakeDependentOption)
+  option(USE_CUDA "Use CUDA" ON)
+  option(TORCH_BUILD_TEST "Build torch test binaries" ON)
 
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  # Legacy options, which we will eventually remove
+  cmake_dependent_option(
+      NO_CUDA "Legacy no CUDA" OFF
+      "USE_CUDA" ON)
 
-if (VERBOSE)
-  message(STATUS "ATEN_PATH is ${ATEN_PATH}")
-  message(STATUS "ATEN_BUILD_PATH is ${ATEN_BUILD_PATH}")
+  # Flag for shared dependencies
+  set(BUILD_TORCH ON)
+endif()
+if (NOT USE_CUDA)
+  set(NO_CUDA ON)
 endif()
 
-find_path(ATEN_INCLUDE_DIR ATen/ATen.h PATHS "${ATEN_PATH}/src/" NO_DEFAULT_PATH)
-find_path(ATEN_BUILD_INCLUDE_DIR ATen/Type.h PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
-find_library(ATEN_LIBRARY ATen PATHS "${ATEN_BUILD_PATH}/src/ATen" NO_DEFAULT_PATH)
+cmake_policy(VERSION 3.0)
 
-find_path(TORCH_SRC_DIR torch.h PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch" NO_DEFAULT_PATH)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if (VERBOSE)
+  message(STATUS "CAFFE2_PATH is ${CAFFE2_PATH}")
+  message(STATUS "CAFFE2_BUILD_PATH is ${CAFFE2_BUILD_PATH}")
+  message(STATUS "INSTALL_PREFIX is ${INSTALL_PREFIX}")
+endif()
+
+set(CAFFE2_INCLUDE_DIR "${CAFFE2_PATH}")
+set(CAFFE2_BUILD_INCLUDE_DIR "${CAFFE2_BUILD_PATH}")
+set(CAFFE2_INSTALL_INCLUDE_DIR "${INSTALL_PREFIX}/include")
+set(CAFFE2_INSTALL_SHARE_DIR "${INSTALL_PREFIX}/share")
+set(CAFFE2_INSTALL_LIB_DIR "${INSTALL_PREFIX}/lib")
+set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch")
+
+find_library(CAFFE2_LIBRARY caffe2
+  NAMES libcaffe2.so libcaffe2.dylib caffe2.lib
+  PATHS ${CAFFE2_INSTALL_LIB_DIR} NO_DEFAULT_PATH)
+find_library(CAFFE2_GPU_LIBRARY caffe2_gpu
+  NAMES libcaffe2_gpu.so libcaffe2_gpu.dylib caffe2_gpu.lib
+  PATHS ${CAFFE2_INSTALL_LIB_DIR} NO_DEFAULT_PATH)
+find_library(NANOPB_LIBRARY protobuf-nanopb
+  PATHS ${NANOPB_BUILD_PATH} NO_DEFAULT_PATH)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -22,15 +55,20 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 if(NOT NO_CUDA)
   set(CMAKE_MODULE_PATH
-    ${TORCH_SRC_DIR}/../aten/cmake
-    ${TORCH_SRC_DIR}/../aten/cmake/FindCUDA
+    ${INSTALL_PREFIX}/share/cmake
+    ${TORCH_SRC_DIR}/../cmake/Modules
+    ${TORCH_SRC_DIR}/../cmake/public
+    ${TORCH_SRC_DIR}/../cmake/Modules_CUDA_fix
     /usr/lib/x86_64-linux-gnu/
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
     ${CMAKE_MODULE_PATH})
   set(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 
+  # Polyfill for upstream FindCUDA
+  include(CMakeInitializeConfigs)
+
   if(NOT CUDA_FOUND)
-    find_package(CUDA 5.5)
+    find_package(CUDA 7.0)
   endif()
 
   find_package(MAGMA)
@@ -59,9 +97,7 @@ if(NOT NO_CUDA)
   endif()
 endif()
 
-add_definitions(-DNO_PYTHON)
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORCE_INLINES")
+add_definitions(-DUSE_CATCH -D_FORCE_INLINES)
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -76,19 +112,16 @@ if(NOT TORCH_INSTALL_LIB_DIR)
 endif()
 
 if(NOT NO_CUDA)
-  add_definitions( -DWITH_CUDA )
+  add_definitions(-DWITH_CUDA)
 
   set(TORCH_CUDA_LIBRARIES
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libcuda.so
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvrtc.so
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
-    ${CUDA_LIBRARIES}
-  )
+    ${CUDA_LIBRARIES})
 
-  set(CUDA_INCLUDE_DIRS
-      ${CUDA_INCLUDE_DIRS}
-      "${ATEN_BUILD_PATH}/src/THC"
-      "${ATEN_PATH}/src/THC")
+  list(APPEND CUDA_INCLUDE_DIRS
+    ${CAFFE2_INSTALL_INCLUDE_DIR}/THC)
 endif()
 
 # RPATH stuff
@@ -106,13 +139,63 @@ if("${isSystemDir}" STREQUAL "-1")
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-missing-field-initializers -Wno-type-limits -Wno-unused-parameter -Wno-vla ${CMAKE_CXX_FLAGS}")
-set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
-if ($ENV{WERROR})
-  set(CMAKE_CXX_FLAGS "-Werror ${CMAKE_CXX_FLAGS}")
-endif()
+
+# Generate files
+set(TOOLS_PATH "${TORCH_SRC_DIR}/../tools")
+
+configure_file("${CAFFE2_PATH}/aten/src/ATen/common_with_cwrap.py"
+               "${TOOLS_PATH}/shared/cwrap_common.py"
+               COPYONLY)
+
+add_custom_command(
+  OUTPUT
+  "${TORCH_SRC_DIR}/csrc/nn/THNN.cpp"
+  "${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods_dispatch.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_dispatch.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_dispatch.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_schema.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
+  COMMAND
+  python tools/setup_helpers/generate_code.py
+    --declarations-path "${CAFFE2_INSTALL_SHARE_DIR}/ATen/Declarations.yaml"
+    --nn-path "aten/src/"
+  DEPENDS
+  "${CAFFE2_INSTALL_SHARE_DIR}/ATen/Declarations.yaml"
+  "${CAFFE2_INSTALL_INCLUDE_DIR}/THNN/generic/THNN.h"
+  "${TOOLS_PATH}/autograd/templates/VariableType.h"
+  "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
+  "${TOOLS_PATH}/autograd/templates/Functions.h"
+  "${TOOLS_PATH}/autograd/templates/Functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_functions.h"
+  "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_variable_methods_dispatch.h"
+  "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_torch_functions_dispatch.h"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
+  "${TOOLS_PATH}/autograd/gen_autograd.py"
+  "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
+  "${TOOLS_PATH}/autograd/gen_variable_type.py"
+  "${TOOLS_PATH}/jit/templates/aten_dispatch.cpp"
+  "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
+  WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
 
 set(TORCH_SRCS
+  ${TORCH_SRC_DIR}/csrc/autograd/aten_variable_hooks.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
@@ -130,6 +213,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/assertions.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/aten_dispatch.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/generated/aten_schema.cpp
   ${TORCH_SRC_DIR}/csrc/jit/variable_flags.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
@@ -145,6 +229,9 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_addmm.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interned_strings.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
@@ -153,30 +240,90 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/tracer_state.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/interpreter_autograd_function.cpp
-  ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
-  )
+  ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/import.cpp
+  ${TORCH_SRC_DIR}/csrc/onnx/onnx.cpp
+  ${TORCH_SRC_DIR}/csrc/onnx/onnx.pb.cpp
+  ${TORCH_SRC_DIR}/csrc/torch.cpp)
+
+if (NOT NO_API)
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/embedding.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp)
+endif()
 
 add_library(torch SHARED ${TORCH_SRCS})
 
+# https://gcc.gnu.org/onlinedocs/gcc-4.0.3/gcc/Warning-Options.html
+target_compile_options(torch
+  PRIVATE
+  -Wall
+  -Wextra
+  -pedantic
+  -Wcast-align
+  -Wcast-qual
+  -Wctor-dtor-privacy
+  -Wdisabled-optimization
+  -Winit-self
+  -Wmissing-include-dirs
+  -Woverloaded-virtual
+  -Wsign-promo
+  -Wstrict-overflow=5
+  -Wundef
+  -fdiagnostics-show-option
+  -Wno-unused-parameter
+  -Wno-missing-braces # This warning is buggy
+  -Wno-unknown-pragmas)
+
+if ($ENV{WERROR})
+  target_compile_options(torch PRIVATE -Werror)
+endif()
+
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
-  ${ATEN_LIBRARY}
+  ${CAFFE2_LIBRARY}
+  ${NANOPB_LIBRARY}
 )
-
-set(COMMON_INCLUDES
-  "${ATEN_INCLUDE_DIR}"
-  "${ATEN_INCLUDE_DIR}/TH"
-  "${ATEN_BUILD_INCLUDE_DIR}"
-  "${ATEN_BUILD_PATH}/src/TH"
-  "${CMAKE_CURRENT_SOURCE_DIR}"
-  "${CUDA_INCLUDE_DIRS}")
+if(NOT NO_CUDA)
+  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
+    target_link_libraries(torch -Wl,--no-as-needed ${CAFFE2_GPU_LIBRARY} -Wl,--as-needed)
+  else()
+    target_link_libraries(torch ${CAFFE2_GPU_LIBRARY})
+  endif()
+endif()
 
 target_include_directories(torch
   PUBLIC
-  "${COMMON_INCLUDES}"
-  "${TORCH_SRC_DIR}/../"
+  "${CAFFE2_INCLUDE_DIR}"
+  "${CAFFE2_BUILD_INCLUDE_DIR}"
+  "${CAFFE2_INSTALL_INCLUDE_DIR}"
+  "${CAFFE2_INSTALL_INCLUDE_DIR}/TH"
+  "${TORCH_SRC_DIR}/.."
+  "${CMAKE_CURRENT_SOURCE_DIR}")
+
+if (NOT NO_API)
+  target_include_directories(torch PUBLIC
+    "${TORCH_SRC_DIR}/csrc/api/"
+    "${TORCH_SRC_DIR}/csrc/api/include")
+endif()
+
+# SYSTEM headers are included with -isystem and thus do not trigger warnings.
+target_include_directories(torch SYSTEM PUBLIC
+  "${TORCH_SRC_DIR}/../third_party/cereal/include" # For cereal/
   "${TORCH_SRC_DIR}/../third_party/nanopb")
+
+if(NOT NO_CUDA)
+  target_include_directories(torch SYSTEM PUBLIC "${CUDA_INCLUDE_DIRS}")
+endif()
 
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
@@ -193,18 +340,38 @@ install(TARGETS torch
   LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
-set(TORCH_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
+if (TORCH_BUILD_TEST)
+  # JIT Tests. TODO: Put into test/cpp/jit folder
 
-add_executable(test_jit ${TORCH_TEST_SRCS})
+  add_executable(test_jit ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
 
-target_link_libraries(test_jit torch)
+  target_link_libraries(test_jit torch)
 
-target_include_directories(test_jit PUBLIC
-  "${TORCH_SRC_DIR}/../"
-  "${TORCH_SRC_DIR}/../third_party/catch/single_include"
-  "${COMMON_INCLUDES}")
+  target_include_directories(test_jit PUBLIC
+    "${TORCH_SRC_DIR}/../third_party/catch/single_include")
 
-install(TARGETS test_jit
-  RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
-  LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
-  ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  # API Tests
+
+  if (NOT NO_API)
+    set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
+
+    add_executable(test_api
+      ${TORCH_API_TEST_DIR}/any.cpp
+      ${TORCH_API_TEST_DIR}/container.cpp
+      ${TORCH_API_TEST_DIR}/integration.cpp
+      ${TORCH_API_TEST_DIR}/main.cpp
+      ${TORCH_API_TEST_DIR}/misc.cpp
+      ${TORCH_API_TEST_DIR}/module.cpp
+      ${TORCH_API_TEST_DIR}/optim.cpp
+      ${TORCH_API_TEST_DIR}/sequential.cpp
+      ${TORCH_API_TEST_DIR}/rnn.cpp
+      ${TORCH_API_TEST_DIR}/serialization.cpp
+      ${TORCH_API_TEST_DIR}/static.cpp)
+
+      target_include_directories(test_api
+        PUBLIC
+        "${TORCH_SRC_DIR}/../third_party/catch/single_include")
+
+    target_link_libraries(test_api torch)
+  endif()
+endif()

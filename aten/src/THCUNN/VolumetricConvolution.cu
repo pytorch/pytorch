@@ -1,4 +1,5 @@
 #include "THCUNN.h"
+#include "THCTensor.hpp"
 #include "common.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"

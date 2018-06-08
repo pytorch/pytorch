@@ -1,11 +1,12 @@
 #include "ATen/${Storage}.h"
+
+// ${generated_comment}
+
 #include "ATen/Half.h"
 #include "ATen/Allocator.h"
 
 #include "ATen/Config.h"
-#if AT_CUDA_ENABLED()
 $extra_cuda_headers
-#endif
 
 namespace at {
 
@@ -15,7 +16,7 @@ ${Storage}::${Storage}(Context* context):
 ${Storage}::${Storage}(Context* context, ${THStorage}* storage):
     storage(storage), context(context) {}
 
-${Storage}::${Storage}(Context* context, std::size_t storage_size)
+${Storage}::${Storage}(Context* context, size_t storage_size)
   : storage(${THStorage}_newWithSize(${state,} storage_size)), context(context) {}
 
 #if ${isCUDA}
@@ -79,7 +80,7 @@ static THAllocator wrapped_allocator = {
 };
 #endif
 
-${Storage}::${Storage}(Context* context, std::size_t size, std::unique_ptr<Allocator> allocator)
+${Storage}::${Storage}(Context* context, size_t size, std::unique_ptr<Allocator> allocator)
   : storage(nullptr),
     context(context) {
   auto ctx = new detail::AllocatorRetainable(std::move(allocator));
@@ -89,7 +90,7 @@ ${Storage}::${Storage}(Context* context, std::size_t size, std::unique_ptr<Alloc
 }
 
 ${Storage}::${Storage}(Context* context,
-  void * data, std::size_t size, const std::function<void(void*)> & deleter)
+  void * data, size_t size, const std::function<void(void*)> & deleter)
   : storage(${THStorage}_newWithDataAndAllocator(${state,}
      static_cast<${THScalarType}*>(data), size,
      &storage_deleter,
@@ -103,20 +104,20 @@ ${Storage}::~${Storage}() {
   ${THStorage}_free(${state,} storage);
 }
 
-std::size_t ${Storage}::elementSize() const {
+size_t ${Storage}::elementSize() const {
   return sizeof(${ScalarType});
 }
 
-std::size_t ${Storage}::size() const {
+size_t ${Storage}::size() const {
   return storage->size;
 }
 
 void* ${Storage}::data() {
-  return storage->data;
+  return storage->data_ptr;
 }
 
 const void* ${Storage}::data() const {
-  return storage->data;
+  return storage->data_ptr;
 }
 
 auto ${Storage}::retain() -> ${Storage}& {
@@ -146,24 +147,24 @@ auto ${Storage}::fill(Scalar value) -> ${Storage}& {
   return *this;
 }
 
-auto ${Storage}::set(std::size_t ind, Scalar value) -> ${Storage}& {
+auto ${Storage}::set(size_t ind, Scalar value) -> ${Storage}& {
   ${THStorage}_set(${state,} storage, ind, ${to_th_type}(value.to${ScalarName}()));
   return *this;
 }
 
-auto ${Storage}::fast_set(std::size_t ind, Scalar value) -> ${Storage}& {
+auto ${Storage}::fast_set(size_t ind, Scalar value) -> ${Storage}& {
   throw std::runtime_error("unsupported operation 'fast_set'");
 }
 
-auto ${Storage}::get(std::size_t ind) -> Scalar {
+auto ${Storage}::get(size_t ind) -> Scalar {
   // static cast to fix  long -> int64_t issues
   return static_cast<${ScalarType}>(${to_at_type}(${THStorage}_get(${state,} storage, ind)));
 }
 
-auto ${Storage}::fast_get(std::size_t ind) -> Scalar {
+auto ${Storage}::fast_get(size_t ind) -> Scalar {
   if(${isCUDA})
     throw std::runtime_error("unsupported operation 'fast_get'");
-  return static_cast<${ScalarType}>(${to_at_type}(storage->data[ind]));
+  return static_cast<${ScalarType}>(${to_at_type}(storage->unsafe_data<${THScalarType}>()[ind]));
 }
 
 void ${Storage}::set_flag(char flag) {

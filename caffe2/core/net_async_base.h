@@ -13,6 +13,16 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/thread_pool.h"
 
+CAFFE2_DECLARE_int(caffe2_streams_per_gpu);
+CAFFE2_DECLARE_bool(caffe2_net_async_finish_chain);
+CAFFE2_DECLARE_bool(caffe2_net_async_always_schedule_child);
+CAFFE2_DECLARE_int(caffe2_net_async_max_gpus);
+CAFFE2_DECLARE_int(caffe2_net_async_max_numa_nodes);
+CAFFE2_DECLARE_int(caffe2_net_async_cpu_pool_size);
+CAFFE2_DECLARE_bool(caffe2_net_async_check_stream_status);
+CAFFE2_DECLARE_bool(caffe2_net_async_use_single_pool);
+CAFFE2_DECLARE_bool(caffe2_net_async_use_per_net_pools);
+
 namespace caffe2 {
 
 class AsyncNetExecutorHelper;
@@ -34,31 +44,41 @@ class AsyncNetBase : public NetBase {
     return operators_;
   }
 
+  void handleRunError() override;
+
   bool RunAsync() override;
 
  protected:
   bool canSchedule(
       int chain_id,
-      const std::vector<EventStatus>* status = nullptr);
+      const std::vector<EventStatus>* status = nullptr,
+      bool* parent_failed = nullptr);
+  bool canSchedule(int parent_id, int child_id);
 
   int tasksNum() const;
   Event& event(int task_id) const;
   EventStatus query(int task_id) const;
   const std::vector<int>& children(int task_id) const;
   const std::vector<int>& parents(int task_id) const;
+  int updateParentCount(int child_id);
+  int getParentCount(int child_id);
+  bool testAndSetScheduled(int task_id);
   int num_ops(int task_id) const;
+
   void asyncWait(
       int task_id,
       int stream_id,
       const std::vector<int>& wait_task_ids) const;
   void run(int task_id, int stream_id);
   int stream(int task_id);
-  std::shared_ptr<TaskThreadPool> pool(const DeviceOption& device_option);
+  TaskThreadPool* pool(const DeviceOption& device_option);
 
   void finishTasks(const std::unordered_set<int>& task_ids);
   void finalizeEvents();
 
   bool isStreamFree(int task_id, int stream_id) const;
+
+  virtual void reset();
 
   // Operator/task graph
   std::vector<OperatorBase*> operators_;
@@ -78,13 +98,29 @@ class AsyncNetBase : public NetBase {
   static thread_local std::vector<int> stream_counters_;
   int num_workers_;
 
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  // Mutex that protects caught_exception_
+  std::mutex exception_mutex_;
+  std::exception_ptr caught_exception_;
+#endif // CAFFE2_USE_EXCEPTION_PTR
   // Tracing
   std::shared_ptr<tracing::Tracer> tracer_;
+
+  // execution mode flags
+  void computeExecutionModeFlags();
+  int streams_per_gpu_;
+  bool finish_chain_;
+  bool always_schedule_child_;
+  bool check_stream_status_;
+  bool use_single_pool_;
+  bool use_per_net_pools_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
-  std::shared_ptr<TaskThreadPool>
+  void storeExceptionPtr();
+
+  TaskThreadPool*
   pool_getter(PoolsMap& pools, int device_type, int device_id, int pool_size);
 
   std::unique_ptr<AsyncNetExecutorHelper> helper_;
@@ -93,13 +129,17 @@ class AsyncNetBase : public NetBase {
   friend class tracing::Tracer;
 };
 
-CAFFE_DECLARE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int);
+CAFFE_DECLARE_SHARED_REGISTRY(
+    ThreadPoolRegistry,
+    TaskThreadPool,
+    int,
+    int,
+    bool);
 
 class AsyncNetExecutorHelper : public ExecutorHelper {
  public:
   explicit AsyncNetExecutorHelper(AsyncNetBase* net) : net_(net) {}
-  std::shared_ptr<TaskThreadPool> GetPool(
-      const DeviceOption& option) const override {
+  TaskThreadPool* GetPool(const DeviceOption& option) const override {
     return net_->pool(option);
   }
 
@@ -107,10 +147,9 @@ class AsyncNetExecutorHelper : public ExecutorHelper {
   AsyncNetBase* net_;
 };
 
-std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool(
-    int numa_node_id,
-    int pool_size);
+std::shared_ptr<TaskThreadPool>
+GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new);
 
 } // namespace caffe2
 
-#endif // CAFFE2_CORE_NET_ASYNC_POLLING_H_
+#endif // CAFFE2_CORE_NET_ASYNC_BASE_H_

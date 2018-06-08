@@ -9,6 +9,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/utils/python_variables.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
@@ -23,6 +24,7 @@
 static const int MAX_DIMS = 128;
 
 using namespace at;
+using torch::autograd::utils::set_requires_grad;
 
 namespace torch { namespace utils {
 
@@ -96,6 +98,9 @@ static std::vector<int64_t> compute_sizes(PyObject* seq) {
     }
     if (length == 0) break;
     handle = THPObjectPtr(PySequence_GetItem(seq, 0));
+    if (!handle) {
+      throw ValueError("could not determine the shape of object type '%s'", Py_TYPE(seq)->tp_name);
+    }
     seq = handle.get();
   }
 
@@ -144,7 +149,7 @@ static ScalarType infer_scalar_type(PyObject *obj) {
     }
     return *scalarType;
   }
-  AT_ERROR("Could not infer dtype of %s", Py_TYPE(obj)->tp_name);
+  AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }
 
 static void recursive_store(char* data, IntList sizes, IntList strides, int64_t dim,
@@ -386,11 +391,6 @@ static const Type& typeWithDefault(PythonArgs& r, int64_t dtype_idx, int64_t dev
   return torch::getType(scalartype, *torch::getLayout(type.backend()), device_type);
 }
 
-static Tensor set_requires_grad(Tensor self, bool requires_grad) {
-  static_cast<torch::autograd::Variable&>(self).set_requires_grad(requires_grad);
-  return self;
-}
-
 Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   Backend sparse_backend = type.is_cuda() ? kSparseCUDA : kSparseCPU;
   const auto& default_sparse_type = type.toBackend(sparse_backend);
@@ -442,6 +442,21 @@ Tensor tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   throw std::runtime_error("tensor(): invalid arguments");
 }
 
+Tensor as_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
+  // TODO: add requires_grad once we decide on semantics for sharing data.
+  static PythonArgParser parser({
+    "as_tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None)",
+  });
+
+  ParsedArgs<3> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    bool type_inference = r.isNone(1);
+    return internal_new_from_data(
+        typeWithDefault(r, 1, 2, type), r.deviceOptional(2), r.pyobject(0), false, false, type_inference);
+  }
+  throw std::runtime_error("tensor(): invalid arguments");
+}
 
 Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({

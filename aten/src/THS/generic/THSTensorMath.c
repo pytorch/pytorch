@@ -121,9 +121,27 @@ void THSTensor_(div)(THSTensor *r_, THSTensor *t, real value) {
   }
 }
 
+int THSTensor_(isSameSizeIgnoringDensity)(const THSTensor *self, const THSTensor* src) {
+  int d;
+  if (self->nDimensionI + self->nDimensionV != src->nDimensionI + src->nDimensionV) {
+    return 0;
+  }
+  for(d = 0; d < self->nDimensionI + self->nDimensionV; ++d) {
+    if(self->size[d] != src->size[d]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+int THSTensor_(isSameDensity)(const THSTensor *self, const THSTensor* src) {
+  return self->nDimensionI == src->nDimensionI &&
+      self->nDimensionV == src->nDimensionV;
+}
+
 void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
-  if(!THSTensor_(isSameSizeAs)(t, src)) {
-    THError("cadd operands have incompatible sizes or dimension types");
+  if (!THSTensor_(isSameSizeIgnoringDensity)(t, src)) {
+    THError("cadd operands have incompatible sizes");
   }
 
   if (src->nnz == 0) {
@@ -133,6 +151,10 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   if (t->nnz == 0) {
     THSTensor_(mul)(r_, src, value);
     return;
+  }
+
+  if(!THSTensor_(isSameDensity)(t, src)) {
+    THError("cadd operands have incompatible densities");
   }
 
   // saving those because they can be overwritten when doing in-place operations
@@ -160,11 +182,11 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
     } else {
       cmp = 0;
       for (d = 0; d < nDimI; d++) {
-        if (THTensor_fastGet2d(t_indices_, d, t_i) < THTensor_fastGet2d(src_indices_, d, s_i)) {
+        if (THLongTensor_fastGet2d(t_indices_, d, t_i) < THLongTensor_fastGet2d(src_indices_, d, s_i)) {
           cmp = 1;
           break;
         }
-        if (THTensor_fastGet2d(t_indices_, d, t_i) > THTensor_fastGet2d(src_indices_, d, s_i)) {
+        if (THLongTensor_fastGet2d(t_indices_, d, t_i) > THLongTensor_fastGet2d(src_indices_, d, s_i)) {
           cmp = -1;
           break;
         }
@@ -172,7 +194,7 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
     }
     if (cmp >= 0) {
       for (d = 0; d < nDimI; d++) {
-        THTensor_fastSet2d(r_indices_, d, r_i, THTensor_fastGet2d(t_indices_, d, t_i));
+        THLongTensor_fastSet2d(r_indices_, d, r_i, THLongTensor_fastGet2d(t_indices_, d, t_i));
       }
       THBlas_(axpy)(blockSize, 1,
         THTensor_(data)(t_values_) + t_i * blockSize, 1,
@@ -181,7 +203,7 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
     }
     if (cmp <= 0) {
       for (d = 0; d < nDimI; d++) {
-        THTensor_fastSet2d(r_indices_, d, r_i, THTensor_fastGet2d(src_indices_, d, s_i));
+        THLongTensor_fastSet2d(r_indices_, d, r_i, THLongTensor_fastGet2d(src_indices_, d, s_i));
       }
       THBlas_(axpy)(blockSize, value,
         THTensor_(data)(s_values_) + s_i * blockSize, 1,
@@ -243,12 +265,12 @@ void THSTensor_(cmul)(THSTensor *r_, THSTensor *t_, THSTensor *src_) {
   while (t_i < t_nnz && s_i < s_nnz) {
     match = 1;
     for (d = 0; d < nDimI; d++) {
-      if (THTensor_fastGet2d(t_indices_, d, t_i) < THTensor_fastGet2d(src_indices_, d, s_i)) {
+      if (THLongTensor_fastGet2d(t_indices_, d, t_i) < THLongTensor_fastGet2d(src_indices_, d, s_i)) {
         t_i++;
         match = 0;
         break;
       }
-      if (THTensor_fastGet2d(t_indices_, d, t_i) > THTensor_fastGet2d(src_indices_, d, s_i)) {
+      if (THLongTensor_fastGet2d(t_indices_, d, t_i) > THLongTensor_fastGet2d(src_indices_, d, s_i)) {
         s_i++;
         match = 0;
         break;
@@ -256,7 +278,7 @@ void THSTensor_(cmul)(THSTensor *r_, THSTensor *t_, THSTensor *src_) {
     }
     if (!match) continue;
     for (d = 0; d < nDimI; d++) {
-      THTensor_fastSet2d(r_indices_, d, r_i, THTensor_fastGet2d(t_indices_, d, t_i));
+      THLongTensor_fastSet2d(r_indices_, d, r_i, THLongTensor_fastGet2d(t_indices_, d, t_i));
     }
     THSTensor_(mulSlice)(dstBuffer, src1Buffer, src2Buffer, r_values_, t_values_, s_values_, 0, r_i, t_i, s_i);
     r_i++;
@@ -296,7 +318,7 @@ THLongTensor *THSTensor_(toCSR)(int64_t const *indices, int64_t dim, int64_t nnz
     hp0 = indices[i];
     hp1 = (i+1 == nnz) ?  dim : indices[i+1];
     if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
-      THTensor_fastSet1d(csr, h+1, i+1);
+      THLongTensor_fastSet1d(csr, h+1, i+1);
     }
   }
   return csr;
@@ -351,11 +373,11 @@ void THSTensor_(spaddmm)(THTensor *r_,
   }
 #pragma omp parallel for private(h, i) schedule(static) if (nnz > 10000)
   for (h = 0; h < dim_i; h++) {
-    int64_t i_start = THTensor_fastGet1d(csr, h);
-    int64_t i_end = THTensor_fastGet1d(csr, h+1);
+    int64_t i_start = THLongTensor_fastGet1d(csr, h);
+    int64_t i_end = THLongTensor_fastGet1d(csr, h+1);
     for (i = i_start; i < i_end; i++) {
-      real val = THTensor_fastGet1d(values, i);
-      int64_t col = THTensor_fastGet2d(indices, 1, i);
+      real val = THTensor_(fastGet1d)(values, i);
+      int64_t col = THLongTensor_fastGet2d(indices, 1, i);
       if (col >= 0 && col < dim_j) {
         THBlas_(axpy)(dim_k,
             alpha * val,
@@ -434,11 +456,11 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
   p = t_nnz;
 
   for (h = 0; h < dim_i; h++) {
-    int64_t i_start = THTensor_fastGet1d(csr, h);
-    int64_t i_end = THTensor_fastGet1d(csr, h+1);
+    int64_t i_start = THLongTensor_fastGet1d(csr, h);
+    int64_t i_end = THLongTensor_fastGet1d(csr, h+1);
     for (i = i_start; i < i_end; i++) {
-      real val = THTensor_fastGet1d(values, i);
-      int64_t col = THTensor_fastGet2d(indices, 1, i);
+      real val = THTensor_(fastGet1d)(values, i);
+      int64_t col = THLongTensor_fastGet2d(indices, 1, i);
       if (col >= 0 && col < dim_j) {
         THBlas_(axpy)(dim_k,
             alpha * val,
@@ -452,8 +474,8 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
     // Fill up the indices with the right values
     if (i_start != i_end) {
       for (i = 0; i < dim_k; i++) {
-        THTensor_fastSet2d(newi, 0, p + i, h);
-        THTensor_fastSet2d(newi, 1, p + i, i);
+        THLongTensor_fastSet2d(newi, 0, p + i, h);
+        THLongTensor_fastSet2d(newi, 1, p + i, i);
       }
       p += dim_k;
     }
@@ -503,12 +525,12 @@ void THSTensor_(hspmm)(THSTensor *r_, real alpha, THSTensor *sparse_, THTensor *
   // Compute output indices
   int64_t i = -1, prevIdx = -1;
   for (int64_t j = 0; j < nnz; j++) {
-    int64_t currIdx = THTensor_fastGet1d(valueIndices, j);
+    int64_t currIdx = THLongTensor_fastGet1d(valueIndices, j);
     if (currIdx != prevIdx) {
-      THTensor_fastSet2d(indices, 0, ++i, currIdx);
+      THLongTensor_fastSet2d(indices, 0, ++i, currIdx);
       prevIdx = currIdx;
     }
-    THTensor_fastSet1d(valueIndices, j, i);
+    THLongTensor_fastSet1d(valueIndices, j, i);
   }
   int64_t outNnz = i + 1;
   THLongTensor_resize2d(indices, 1, outNnz);
@@ -544,7 +566,7 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
     for (k = 0; k < sparse->nnz; k++) {
       THTensor_(set)(dstBuffer, r_);
       for (int64_t d = 0; d < sparse->nDimensionI; d++) {
-        THTensor_(select)(dstBuffer, dstBuffer, 0, THTensor_fastGet2d(indices, d, k));
+        THTensor_(select)(dstBuffer, dstBuffer, 0, THLongTensor_fastGet2d(indices, d, k));
       }
       THTensor_(select)(srcBuffer, values, 0, k);
       THTensor_(cadd)(dstBuffer, dstBuffer, value, srcBuffer);
@@ -556,9 +578,9 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
     for (k = 0; k < sparse->nnz; k++) {
       int64_t index = r_->storageOffset;
       for (int64_t d = 0; d < sparse->nDimensionI; d++) {
-        index += r_->stride[d] * THTensor_fastGet2d(indices, d, k);
+        index += r_->stride[d] * THLongTensor_fastGet2d(indices, d, k);
       }
-      r_->storage->data[index]  += value * THTensor_fastGet1d(values, k);
+      r_->storage->unsafe_data<real>()[index]  += value * THTensor_(fastGet1d)(values, k);
     }
   }
 

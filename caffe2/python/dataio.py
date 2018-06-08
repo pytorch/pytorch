@@ -243,7 +243,7 @@ class PipedReaderBuilder(ReaderBuilder):
         return self._builder.schema()
 
     def setup(self, **kwargs):
-        self._builder.setup(**kwargs)
+        return self._builder.setup(**kwargs)
 
     def new_reader(self, **kwargs):
         # Passing everything down since you could wrap a PipedReaderBuilder in

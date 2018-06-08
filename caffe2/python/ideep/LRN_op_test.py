@@ -38,6 +38,8 @@ class LRNTest(hu.HypothesisTestCase):
 
         self.assertDeviceChecks(dc, op, [X], [0])
 
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
 
 if __name__ == "__main__":
     unittest.main()

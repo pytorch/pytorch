@@ -64,10 +64,11 @@ FeatureSpec = namedtuple(
         'feature_ids',
         'feature_is_request_only',
         'desired_hash_size',
+        'feature_to_index',
     ]
 )
 
-FeatureSpec.__new__.__defaults__ = (None, None, None, None, None)
+FeatureSpec.__new__.__defaults__ = (None, None, None, None, None, None)
 
 
 class Metadata(
@@ -236,7 +237,7 @@ class List(Field):
         return self.lengths.has_blobs() and self._items.has_blobs()
 
     def clone(self, keep_blobs=True):
-        return List(
+        return type(self)(
             _normalize_field(self._items, keep_blobs=keep_blobs),
             _normalize_field(self.lengths, keep_blobs=keep_blobs)
         )
@@ -382,7 +383,7 @@ class Struct(Field):
             (k, _normalize_field(v, keep_blobs=keep_blobs))
             for k, v in viewitems(self.fields)
         ]
-        return Struct(*normalized_fields)
+        return type(self)(*normalized_fields)
 
     def _get_field_by_nested_name(self, nested_name):
         names = nested_name.split(FIELD_SEPARATOR, 1)
@@ -720,6 +721,15 @@ class Scalar(Field):
             )
 
         self._original_dtype = dtype
+        # Numpy will collapse a shape of 1 into an unindexed data array (shape = ()),
+        # which betrays the docstring of this class (which expects shape = (1,)).
+        # >>> import numpy as np
+        # >> np.dtype((np.int32, 1))
+        # dtype('int32')
+        # >>> np.dtype((np.int32, 5))
+        # dtype(('<i4', (5,)))
+        if dtype is not None and isinstance(dtype, tuple) and dtype[1] == 1:
+            dtype = (dtype[0], (1,))
         if dtype is not None:
             dtype = np.dtype(dtype)
         # If blob is not None and it is not a BlobReference, we assume that

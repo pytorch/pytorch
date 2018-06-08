@@ -19,16 +19,50 @@ mkdir torch/lib/tmp_install
 
 IF "%~1"=="--with-cuda" (
   set /a NO_CUDA=0
+  set /a USE_CUDA=1
   shift
 ) ELSE (
   set /a NO_CUDA=1
+  set /a USE_CUDA=0
+)
+
+IF "%~1"=="--with-rocm" (
+  set /a WITH_ROCM=1
+  shift
+) ELSE (
+  set /a WITH_ROCM=0
 )
 
 IF "%~1"=="--with-nnpack" (
   set /a NO_NNPACK=0
+  set /a USE_NNPACK=1
   shift
 ) ELSE (
   set /a NO_NNPACK=1
+  set /a USE_NNPACK=0
+)
+
+IF "%~1"=="--with-mkldnn" (
+  set /a NO_MKLDNN=0
+  shift
+) ELSE (
+  set /a NO_MKLDNN=1
+)
+
+IF "%~1"=="--with-gloo-ibverbs" (
+  set /a WITH_GLOO_IBVERBS=1
+  echo Warning: gloo iverbs is enabled but build is not yet implemented 1>&2
+  shift
+) ELSE (
+  set /a WITH_GLOO_IBVERBS=0
+)
+
+IF "%~1"=="--with-distributed-mw" (
+  set /a WITH_DISTRIBUTED_MW=1
+  echo Warning: distributed mw is enabled but build is not yet implemented 1>&2
+  shift
+) ELSE (
+  set /a WITH_DISTRIBUTED_MW=0
 )
 
 set BUILD_TYPE=Release
@@ -60,10 +94,8 @@ IF "%CMAKE_GENERATOR%"=="" (
 
 :read_loop
 if "%1"=="" goto after_loop
-if "%1"=="ATen" (
-  cd aten
-  call:build_aten %~1
-  cd ..
+if "%1"=="caffe2" (
+  call:build_caffe2 %~1
 ) ELSE (
   set "IS_OURS="
   IF "%1"=="THD" set IS_OURS=1
@@ -113,13 +145,13 @@ goto:eof
                   -Dcwrap_files="%CWRAP_FILES%" ^
                   -DTH_INCLUDE_PATH="%INSTALL_DIR%/include" ^
                   -DTH_LIB_PATH="%INSTALL_DIR%/lib" ^
-                  -DTH_LIBRARIES="%INSTALL_DIR%/lib/ATen.lib" ^
-                  -DTHS_LIBRARIES="%INSTALL_DIR%/lib/ATen.lib" ^
-                  -DTHC_LIBRARIES="%INSTALL_DIR%/lib/ATen.lib" ^
-                  -DTHCS_LIBRARIES="%INSTALL_DIR%/lib/ATen.lib" ^
-                  -DATEN_LIBRARIES="%INSTALL_DIR%/lib/ATen.lib" ^
-                  -DTHNN_LIBRARIES="%INSTALL_DIR%/lib/ATen.lib" ^
-                  -DTHCUNN_LIBRARIES="%INSTALL_DIR%/lib/ATen.lib" ^
+                  -DTH_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
+                  -DTHS_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
+                  -DTHC_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
+                  -DTHCS_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
+                  -DCAFFE2_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
+                  -DTHNN_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
+                  -DTHCUNN_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
                   -DTH_SO_VERSION=1 ^
                   -DTHC_SO_VERSION=1 ^
                   -DTHNN_SO_VERSION=1 ^
@@ -136,19 +168,34 @@ goto:eof
 
 goto:eof
 
-:build_aten
+:build_caffe2
   @setlocal
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   mkdir build
   cd build
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
-                  -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
-                  -DNO_CUDA=%NO_CUDA% ^
-                  -DNO_NNPACK=%NO_NNPACK% ^
+                  -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
+                  -DBUILD_CAFFE2=OFF ^
+                  -DBUILD_ATEN=ON ^
+                  -DBUILD_PYTHON=OFF ^
+                  -DBUILD_BINARY=OFF ^
+                  -DUSE_CUDA=%USE_CUDA% ^
+                  -DUSE_NNPACK=%USE_NNPACK% ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
-                  -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
+                  -DNO_MKLDNN=%NO_MKLDNN% ^
+                  -DMKLDNN_INCLUDE_DIR="%MKLDNN_INCLUDE_DIR%" ^
+                  -DMKLDNN_LIB_DIR="%MKLDNN_LIB_DIR%" ^
+                  -DMKLDNN_LIBRARY="%MKLDNN_LIBRARY%" ^
+                  -DATEN_NO_CONTRIB=1 ^
+                  -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
+                  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
+                  -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
+                  -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
+                  -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
+                  -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
+                  -DWITH_ROCM=%WITH_ROCM%
 
   %MAKE_COMMAND%
   IF NOT %ERRORLEVEL%==0 exit 1

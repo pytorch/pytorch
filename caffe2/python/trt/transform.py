@@ -89,11 +89,11 @@ def transform_caffe2_net(
     shape_hints = {}
     if populate_shapes:
         input_data = {}
-        for k,v in input_shapes.iteritems():
+        for k,v in input_shapes.items():
             input_data[k] = np.random.randn(*v).astype(np.float32)
         shape_hints = _infer_shapes(init_net, pred_net, input_data)
 
-    for k,v in input_shapes.iteritems():
+    for k,v in input_shapes.items():
         shape_hints[k] = v
     pred_net_str = C.transform_trt(pred_net.SerializeToString(),
                                    shape_hints,

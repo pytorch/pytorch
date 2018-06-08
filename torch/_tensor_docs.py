@@ -139,9 +139,9 @@ Args:
 Example::
 
     >>> tensor = torch.tensor((), dtype=torch.float64)
-    >>> tensor.new_ones((2, 3))
-    tensor([[ 1.,  1.,  1.],
-            [ 1.,  1.,  1.]], dtype=torch.float64)
+    >>> tensor.new_zeros((2, 3))
+    tensor([[ 0.,  0.,  0.],
+            [ 0.,  0.,  0.]], dtype=torch.float64)
 
 """.format(**new_common_args))
 
@@ -599,14 +599,14 @@ Args:
 
 add_docstr_all('cumprod',
                r"""
-cumprod(dim) -> Tensor
+cumprod(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumprod`
 """)
 
 add_docstr_all('cumsum',
                r"""
-cumsum(dim) -> Tensor
+cumsum(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumsum`
 """)
@@ -887,17 +887,6 @@ histc(bins=100, min=0, max=0) -> Tensor
 See :func:`torch.histc`
 """)
 
-add_docstr_all('index',
-               r"""
-index(m) -> Tensor
-
-Selects elements from :attr:`self` tensor using a binary mask or along a given
-dimension. The expression ``tensor.index(m)`` is equivalent to ``tensor[m]``.
-
-Args:
-    m (int or ByteTensor or slice): the dimension or mask used to select elements
-""")
-
 add_docstr_all('index_add_',
                r"""
 index_add_(dim, index, tensor) -> Tensor
@@ -1028,7 +1017,7 @@ add_docstr_all('item', r"""
 item() -> number
 
 Returns the value of this tensor as a standard Python number. This only works
-for tensors with one element.
+for tensors with one element. For other cases, see :meth:`~Tensor.tolist`.
 
 This operation is not differentiable.
 
@@ -1141,6 +1130,13 @@ the underlying normal distribution, and not of the returned distribution:
 .. math::
 
     f(x) = \\dfrac{1}{x \\sigma \\sqrt{2\\pi}}\ e^{-\\dfrac{(\\ln x - \\mu)^2}{2\\sigma^2}}
+""")
+
+add_docstr_all('logsumexp',
+               r"""
+logsumexp(dim, keepdim=False) -> Tensor
+
+See :func:`torch.logsumexp`
 """)
 
 add_docstr_all('lt',
@@ -1400,6 +1396,24 @@ ormqr(input2, input3, left=True, transpose=False) -> Tensor
 See :func:`torch.ormqr`
 """)
 
+
+add_docstr_all('permute',
+               r"""
+permute(*dims) -> Tensor
+
+Permute the dimensions of this tensor.
+
+Args:
+    *dims (int...): The desired ordering of dimensions
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> x.permute(2, 0, 1).size()
+    torch.Size([5, 2, 3])
+""")
+
 add_docstr_all('potrf',
                r"""
 potrf(upper=True) -> Tensor
@@ -1437,7 +1451,7 @@ In-place version of :meth:`~Tensor.pow`
 
 add_docstr_all('prod',
                r"""
-prod(dim=None, keepdim=False) -> Tensor
+prod(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.prod`
 """)
@@ -1543,6 +1557,13 @@ repeat(*sizes) -> Tensor
 Repeats this tensor along the specified dimensions.
 
 Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
+
+.. warning::
+
+    :func:`torch.repeat` behaves differently from
+    `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
+    but is more similar to
+    `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
 
 Args:
     sizes (torch.Size or int...): The number of times to repeat this tensor along each
@@ -1684,8 +1705,8 @@ For a 3-D tensor, :attr:`self` is updated as::
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
 :attr:`self`, :attr:`index` and :attr:`src` should have same number of
-dimensions. It is also required that `index->size[d] <= src->size[d]` for all
-dimension `d`, and that `index->size[d] <= real->size[d]` for all dimensions
+dimensions. It is also required that `index.size(d) <= src.size(d)` for all
+dimensions `d`, and that `index.size(d) <= self.size(d)` for all dimensions
 `d != dim`.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
@@ -1693,7 +1714,6 @@ between `0` and `(self.size(dim) -1)` inclusive, and all values in a row along
 the specified dimension :attr:`dim` must be unique.
 
 Args:
-    input (Tensor): the source tensor
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter
     src (Tensor or float): the source element(s) to scatter
@@ -1937,7 +1957,7 @@ In-place version of :meth:`~Tensor.sub`
 
 add_docstr_all('sum',
                r"""
-sum(dim=None, keepdim=False) -> Tensor
+sum(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.sum`
 """)
@@ -1990,15 +2010,20 @@ Here are the ways to call ``to``:
 
     Returns a Tensor with the specified :attr:`dtype`
 
-.. function:: to(device, dtype=None) -> Tensor
+.. function:: to(device=None, dtype=None, non_blocking=False) -> Tensor
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
+    When :attr:`non_blocking`, tries to convert asynchronously with respect to
+    the host if possible, e.g., converting a CPU Tensor with pinned memory to a
+    CUDA Tensor.
 
-.. function:: to(other) -> Tensor
+.. function:: to(other, non_blocking=False) -> Tensor
 
-    Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as the Tensor
-    :attr:`other`.
+    Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
+    the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
+    asynchronously with respect to the host if possible, e.g., converting a CPU
+    Tensor with pinned memory to a CUDA Tensor.
 
 Example::
 
@@ -2017,7 +2042,7 @@ Example::
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
 
     >>> other = torch.randn((), dtype=torch.float64, device=cuda0)
-    >>> tensor.to(other)
+    >>> tensor.to(other, non_blocking=True)
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
 
@@ -2105,6 +2130,26 @@ add_docstr_all('tanh_',
 tanh_() -> Tensor
 
 In-place version of :meth:`~Tensor.tanh`
+""")
+
+add_docstr_all('tolist',
+               r""""
+tolist() -> list or number
+
+Returns the tensor as a (nested) list. For scalars, a standard
+Python number is returned, just like with :meth:`~Tensor.item`.
+Tensors are automatically moved to the CPU first if necessary.
+
+This operation is not differentiable.
+
+Examples::
+
+    >>> a = torch.randn(2, 2)
+    >>> a.tolist()
+    [[0.012766935862600803, 0.5415473580360413],
+     [-0.08909505605697632, 0.7729271650314331]]
+    >>> a[0,0].tolist()
+    0.012766935862600803
 """)
 
 add_docstr_all('topk',

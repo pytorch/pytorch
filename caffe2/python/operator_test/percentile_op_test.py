@@ -7,6 +7,7 @@ from caffe2.python import core, workspace, dyndep
 import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 
+
 class TestPercentileOp(hu.HypothesisTestCase):
     def _test_percentile_op(
         self,
@@ -20,16 +21,48 @@ class TestPercentileOp(hu.HypothesisTestCase):
             ['original_values', 'value_to_pct_map', 'dist_lengths'],
             ['percentile_values']
         )
-        workspace.FeedBlob('original_values', np.array(original_inp, dtype=np.float32))
+        workspace.FeedBlob('original_values', np.array(
+            original_inp, dtype=np.float32))
         workspace.FeedBlob(
             'value_to_pct_map', np.array(value_to_pct_map, dtype=np.float32))
-        workspace.FeedBlob('dist_lengths', np.array(dist_lengths, dtype=np.int32))
+        workspace.FeedBlob('dist_lengths', np.array(
+            dist_lengths, dtype=np.int32))
         workspace.RunOperatorOnce(op)
         np.testing.assert_array_almost_equal(
             workspace.FetchBlob('percentile_values'),
             np.array(expected_values),
             decimal=5
         )
+        self._test_shape_inference(
+            original_inp,
+            value_to_pct_map,
+            dist_lengths,
+            expected_values
+        )
+
+    def _test_shape_inference(
+        self,
+        original_inp,
+        value_to_pct_map,
+        dist_lengths,
+        expected_values
+    ):
+        net = core.Net('test_shape_inference')
+        result = net.Percentile(
+            ['original_values', 'value_to_pct_map', 'dist_lengths'],
+            ['percentile_values']
+        )
+        workspace.FeedBlob('original_values', np.array(
+            original_inp, dtype=np.float32))
+        workspace.FeedBlob(
+            'value_to_pct_map', np.array(value_to_pct_map, dtype=np.float32))
+        workspace.FeedBlob('dist_lengths', np.array(
+            dist_lengths, dtype=np.int32))
+        (shapes, types) = workspace.InferShapesAndTypes([net])
+        workspace.RunNetOnce(net)
+        self.assertEqual(shapes[result], list(workspace.blobs[result].shape))
+        self.assertEqual(shapes[result], list(workspace.blobs['original_values'].shape))
+        self.assertEqual(types[result], core.DataType.FLOAT)
 
     def test_percentile_op_with_only_one_dist(self):
         self._test_percentile_op(
@@ -42,7 +75,8 @@ class TestPercentileOp(hu.HypothesisTestCase):
     def test_percentile_op_with_all_elements_in_map(self):
         self._test_percentile_op(
             original_inp=[[3, 4], [10, 4]],
-            value_to_pct_map=[[3, 0.3], [4, 0.6], [10, 0.8], [4, 0.5], [5, 0.6]],
+            value_to_pct_map=[[3, 0.3], [4, 0.6],
+                              [10, 0.8], [4, 0.5], [5, 0.6]],
             dist_lengths=[3, 2],
             expected_values=[[0.3, 0.5], [0.8, 0.5]],
         )

@@ -36,6 +36,7 @@ static_assert(
 #cmakedefine CAFFE2_UNIQUE_LONG_TYPEMETA
 #cmakedefine CAFFE2_USE_EXCEPTION_PTR
 #cmakedefine CAFFE2_USE_ACCELERATE
+#cmakedefine CAFFE2_USE_CUDNN
 #cmakedefine CAFFE2_USE_EIGEN_FOR_BLAS
 #cmakedefine CAFFE2_USE_FBCODE
 #cmakedefine CAFFE2_USE_GFLAGS
@@ -57,7 +58,6 @@ static_assert(
   {"CXX_FLAGS", "${CMAKE_CXX_FLAGS}"}, \
   {"BUILD_TYPE", "${CMAKE_BUILD_TYPE}"}, \
   {"BLAS", "${BLAS}"}, \
-  {"USE_ATEN", "${USE_ATEN}"}, \
   {"USE_CUDA", "${USE_CUDA}"}, \
   {"USE_NCCL", "${USE_NCCL}"}, \
   {"USE_MPI", "${USE_MPI}"}, \

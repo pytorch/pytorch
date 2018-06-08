@@ -158,12 +158,12 @@ class GradientChecker:
         self,
         stepsize,
         threshold,
-        device_option=caffe2_pb2.DeviceOption(),
+        device_option=None,
         workspace_name="gradient_check"
     ):
         self._stepsize = stepsize
         self._threshold = threshold
-        self._device_option = device_option
+        self._device_option = device_option or caffe2_pb2.DeviceOption()
         self._workspace_name = workspace_name
 
     def GetLossAndGrad(
@@ -239,8 +239,6 @@ class GradientChecker:
         Outputs:
           boolean: True if it passes, False if it does not pass.
         """
-        if input_device_options is None:
-            input_device_options = {}
         # Entering the checker workspace
         old_ws_name = workspace.CurrentWorkspace()
         if self._workspace_name != old_ws_name:
@@ -254,11 +252,13 @@ class GradientChecker:
                 op, [s + '_grad' for s in op.output])
 
         dims_to_check = inputs[input_to_check].size
+        _input_device_options = input_device_options or \
+            core.InferOpBlobDevicesAsDict(op)[0]
         # First, feed in the input.
         for i, arr in enumerate(inputs):
             workspace.FeedBlob(
                 op.input[i], arr,
-                input_device_options.get(
+                _input_device_options.get(
                     op.input[i], self._device_option))
 
         # Get the loss and gradient for the original.

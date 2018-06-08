@@ -9,7 +9,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include <caffe2/contrib/ideep/ideep_utils.h>
+#include <caffe2/ideep/ideep_utils.h>
 
 namespace caffe2 {
 namespace python {

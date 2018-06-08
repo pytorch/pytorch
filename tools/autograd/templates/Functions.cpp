@@ -1,5 +1,6 @@
 #include "Functions.h"
 #include <ATen/WrapDimUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
 
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
@@ -36,14 +37,14 @@ struct IndexRangeGenerator {
 };
 
 void copy_range(variable_list& out, IndexRange range, const Tensor & t) {
-  AT_ASSERT(range.second <= out.size(), "range out of bounds");
-  AT_ASSERT(range.second - range.first == 1, "inconsistent range for Tensor output");
+  AT_ASSERT(range.second <= out.size());
+  AT_ASSERTM(range.second - range.first == 1, "inconsistent range for Tensor output");
   out[range.first] = t;
 }
 
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
-  AT_ASSERT(range.second <= out.size(), "range out of bounds");
-  AT_ASSERT(range.second - range.first == t.size(), "inconsistent range for TensorList output");
+  AT_ASSERT(range.second <= out.size());
+  AT_ASSERTM(range.second - range.first == t.size(), "inconsistent range for TensorList output");
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
@@ -132,9 +133,19 @@ Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
   return grad.permute(dims);
 }
 
-Tensor sum_backward(const Tensor & grad, IntList sizes, int64_t dim, bool keepdim) {
+Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
-    return grad.unsqueeze(dim).expand(sizes);
+    if (dims.size()==1) {
+      return grad.unsqueeze(dims[0]).expand(sizes);
+    } else {
+      auto dims_to_unsqueeze = dim_list_to_bitset(dims, sizes.size());
+      Tensor res = grad;
+      for (size_t i = 0; i < sizes.size(); i++){
+	if (dims_to_unsqueeze[i])
+	  res = res.unsqueeze(i);
+      }
+      return res.expand(sizes);
+    }
   } else {
     return grad.expand(sizes);
   }
@@ -335,6 +346,18 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   return grad_input;
 }
 
+Tensor gesv_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
+  return std::get<0>(at::gesv(grad, A.transpose(-2, -1)));
+}
+
+Tensor gesv_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
+  Tensor grad_self = gesv_backward_self(grad, self, A);
+  if (self.ndimension() == 2 && A.ndimension() == 2) {
+    return -at::mm(grad_self, solution.transpose(-2, -1));
+  }
+  return -at::matmul(grad_self, solution.transpose(-2, -1));
+}
+
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   if (x.dim() == 0) {
     return x;
@@ -344,6 +367,14 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
+}
+
+Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim, bool keepdim) {
+  if (! keepdim) {
+    grad = grad.unsqueeze(dim);
+    result = result.unsqueeze(dim);
+  }
+  return grad * (self - result).exp();
 }
 
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
@@ -634,6 +665,18 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
   return result;
 }
 
+// Compute derivatives for targets.
+// Assume targets are given as probabilities (i.e. without taking the logarithm).
+Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce) {
+  if (!reduce) {
+    return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+  }
+  if (size_average) {
+    return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
+  }
+  return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+}
+
 Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
   auto z = input.sigmoid();
   return grad * (z - 1) * z;
@@ -821,7 +864,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       return std::tuple<Tensor, Tensor, Tensor>(
                 ggO,
                 ggW_maybe_squeeze.expand_as(gO) * gO * nonpositive_mask,
-                (ggI * gO * nonpositive_mask).sum()
+                (ggI * gO * nonpositive_mask).sum().expand_as(weight)
           );
   } else {
       // Expand ggW to match size of ggI; a simple expand doesn't work because
@@ -972,7 +1015,7 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
 Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
-  AT_ASSERT(!grads[0].defined(), "slogdet's sign output should never have gradient");
+  AT_ASSERTM(!grads[0].defined(), "slogdet's sign output should never have gradient");
   auto signdet_val = signdet.toCDouble();
   if (signdet_val != 0 /* det != 0, invertible */) {
     return grads[1] * self.inverse().t();
@@ -1156,10 +1199,6 @@ Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
   return src_expanded.expand_as(target);
 }
 
-// NB: This currently is PURPOSELY outside of the anonymous namespace, because
-// we are manually calling it from some legacy batchnorm invocation code.  Once
-// that code moves into derivatives.yaml, this can be moved into the anonymous
-// namespace, BUT NOT BEFORE THEN.
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & input,
     const Tensor & gamma,
@@ -1275,7 +1314,7 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
   if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO);
   if (output_mask[1] && !gG.defined()) {
-    AT_ASSERT(affine, "gamma should always be defined when it requires grad");
+    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
     gG = at::zeros_like(gamma);
   }
   if (output_mask[2] && !gI.defined()) gI = at::zeros_like(input);

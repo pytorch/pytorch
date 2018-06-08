@@ -46,7 +46,7 @@ def map_rois_to_fpn_levels(
 
 
 def collect(inputs, **args):
-    post_nms_topN = args['post_nms_topN']
+    post_nms_topN = args['rpn_post_nms_topN']
     num_lvls = args['rpn_num_levels']
     roi_inputs = inputs[:num_lvls]
     score_inputs = inputs[num_lvls:]
@@ -134,7 +134,7 @@ class TestCollectAndDistributeFpnRpnProposals(hu.HypothesisTestCase):
            rpn_num_levels=st.integers(min_value=1, max_value=6),
            roi_min_level=st.integers(min_value=1, max_value=4),
            roi_num_levels=st.integers(min_value=1, max_value=6),
-           post_nms_topN=st.integers(min_value=1000, max_value=4000),
+           rpn_post_nms_topN=st.integers(min_value=1000, max_value=4000),
            roi_canonical_scale=st.integers(min_value=100, max_value=300),
            roi_canonical_level=st.integers(min_value=1, max_value=8),
            **hu.gcs_cpu_only)
@@ -143,7 +143,7 @@ class TestCollectAndDistributeFpnRpnProposals(hu.HypothesisTestCase):
         proposal_count,
         rpn_min_level, rpn_num_levels,
         roi_min_level, roi_num_levels,
-        post_nms_topN,
+        rpn_post_nms_topN,
         roi_canonical_scale, roi_canonical_level,
         gc, dc):
 
@@ -187,7 +187,7 @@ class TestCollectAndDistributeFpnRpnProposals(hu.HypothesisTestCase):
                 utils.MakeArgument("roi_min_level", roi_min_level),
                 utils.MakeArgument("rpn_max_level", rpn_min_level + rpn_num_levels - 1),
                 utils.MakeArgument("rpn_min_level", rpn_min_level),
-                utils.MakeArgument("post_nms_topN", post_nms_topN),
+                utils.MakeArgument("rpn_post_nms_topN", rpn_post_nms_topN),
             ],
             device_option=gc)
         args = {
@@ -196,7 +196,7 @@ class TestCollectAndDistributeFpnRpnProposals(hu.HypothesisTestCase):
             'rpn_num_levels' : rpn_num_levels,
             'roi_min_level' : roi_min_level,
             'roi_num_levels' : roi_num_levels,
-            'post_nms_topN' : post_nms_topN,
+            'rpn_post_nms_topN' : rpn_post_nms_topN,
             'roi_canonical_scale' : roi_canonical_scale,
             'roi_canonical_level' : roi_canonical_level}
 

@@ -240,7 +240,7 @@ class RNNCell(object):
 
     def get_state_names_override(self):
         '''
-        Override this funtion in your custom cell.
+        Override this function in your custom cell.
         It should return the names of the recurrent states.
 
         It's required by apply_over_sequence method in order to allocate

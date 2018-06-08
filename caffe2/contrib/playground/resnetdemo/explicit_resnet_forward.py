@@ -41,6 +41,7 @@ def gen_forward_pass_builder_fun(self, model, dataset, is_train):
 def resnet_imagenet_create_model(model, data, labels, split, opts, dataset):
     model_helper = ResNetModelHelper(model, split, opts)
     opts_depth = opts['model_param']['num_layer']
+    engine = opts['model_param']['engine']
     log.info(' | ResNet-{} Imagenet'.format(opts_depth))
     assert opts_depth in BLOCK_CONFIG.keys(), \
         'Block config is not defined for specified model depth. Please check.'
@@ -55,7 +56,7 @@ def resnet_imagenet_create_model(model, data, labels, split, opts, dataset):
     num_classes = 1000
     conv_blob = model.Conv(
         data, 'conv1', 3, 64, 7, stride=2, pad=3, weight_init=('MSRAFill', {}),
-        bias_init=('ConstantFill', {'value': 0.}), no_bias=0
+        bias_init=('ConstantFill', {'value': 0.}), no_bias=0, engine=engine
     )
     test_mode = False
     if split in ['test', 'val']:
@@ -137,6 +138,8 @@ class ResNetModelHelper():
         self.model = model
         self.split = split
         self.opts = opts
+        self.engine = opts['model_param']['engine']
+
 
     # shortcut type B
     def add_shortcut(self, blob_in, dim_in, dim_out, stride, prefix):
@@ -146,7 +149,7 @@ class ResNetModelHelper():
             blob_in, prefix, dim_in, dim_out, kernel=1,
             stride=stride,
             weight_init=("MSRAFill", {}),
-            bias_init=('ConstantFill', {'value': 0.}), no_bias=1
+            bias_init=('ConstantFill', {'value': 0.}), no_bias=1, engine=self.engine
         )
         test_mode = False
         if self.split in ['test', 'val']:
@@ -168,7 +171,7 @@ class ResNetModelHelper():
             blob_in, prefix, dim_in, dim_out, kernel, stride=stride,
             pad=pad, group=group,
             weight_init=("MSRAFill", {}),
-            bias_init=('ConstantFill', {'value': 0.}), no_bias=1
+            bias_init=('ConstantFill', {'value': 0.}), no_bias=1, engine=self.engine
         )
         test_mode = False
         if self.split in ['test', 'val']:
@@ -201,7 +204,7 @@ class ResNetModelHelper():
         conv_blob = self.model.GroupConv_Deprecated(
             blob_out, prefix + "_branch2b", dim_inner, dim_inner, kernel=3,
             stride=stride, pad=1, group=group, weight_init=("MSRAFill", {}),
-            bias_init=('ConstantFill', {'value': 0.}), no_bias=1
+            bias_init=('ConstantFill', {'value': 0.}), no_bias=1, engine=self.engine
         )
         test_mode = False
         if self.split in ['test', 'val']:
