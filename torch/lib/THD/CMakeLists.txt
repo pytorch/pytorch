@@ -1,5 +1,7 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
-SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+# TODO(jiayq): once we have unified CMake entry, remove this module path.
+SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules ${CMAKE_MODULE_PATH})
+SET(Gloo_USE_CUDA TRUE)
 
 ################################################################################
 # Helper functions
@@ -168,7 +170,8 @@ ENDIF()
 
 IF(GLOO_FOUND)
   INCLUDE_DIRECTORIES(${GLOO_INCLUDE_DIR})
-  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${GLOO_LIBRARIES};")
+  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${Gloo_LIBRARY};")
+  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${Gloo_NATIVE_LIBRARY};")
 ENDIF()
 
 # Test executables
