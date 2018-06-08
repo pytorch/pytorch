@@ -6,7 +6,7 @@
 #include "THCNumerics.cuh"
 #include "THCReduce.cuh"
 #include "THCReduceAll.cuh"
-#include "THCTensorCopy.h"
+#include "THCTensorCopy.hpp"
 #include "THCThrustAllocator.cuh"
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
@@ -647,8 +647,6 @@ THC_reduceDimIndex(THCState *state,
                    const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                    BinaryFunction binary_op)
 {
-  static_assert(std::is_same<ScalarTypeK, typename TensorUtils<TensorTypeK>::DataType>::value, "ScalarTypeK must match");
-  static_assert(std::is_same<ScalarTypeIndex, typename TensorUtils<TensorTypeIndex>::DataType>::value, "ScalarTypeIndex must match");
   THArgCheck(dimension >= 0 &&
              dimension < THCTensor_nDimension(state, src),
              3, "dimension out of range");
@@ -668,9 +666,9 @@ THC_reduceDimIndex(THCState *state,
   THCTensor_resize(state, tgt2_, dim, NULL);
   THLongStorage_free(dim);
 
-  TensorTypeK *tgt1 = TensorUtils<TensorTypeK>::newContiguous(state, tgt1_);
-  TensorTypeIndex *tgt2 = TensorUtils<TensorTypeIndex>::newContiguous(state, tgt2_);
-  src = TensorUtils<TensorTypeK>::newContiguous(state, src);
+  TensorTypeK *tgt1 = (TensorTypeK*)THCTensor_newContiguous<ScalarTypeK>(state, tgt1_);
+  TensorTypeIndex *tgt2 = (TensorTypeIndex*)THCTensor_newContiguous<ScalarTypeIndex>(state, tgt2_);
+  src = (TensorTypeK*)THCTensor_newContiguous<ScalarTypeK>(state, src);
 
   if (dimension == THCTensor_nDimension(state, src) - 1) {
     THC_transformReduceInnermostDimIndex(state, tgt1, tgt2, src, init, binary_op);
@@ -679,8 +677,8 @@ THC_reduceDimIndex(THCState *state,
   }
 
   THCTensor_free(state, src);
-  TensorUtils<TensorTypeK>::freeCopyTo(state, tgt1, tgt1_);
-  TensorUtils<TensorTypeIndex>::freeCopyTo(state, tgt2, tgt2_);
+  THCTensor_freeCopyTo<ScalarTypeK>(state, tgt1, tgt1_);
+  THCTensor_freeCopyTo<ScalarTypeIndex>(state, tgt2, tgt2_);
   if (!keepdim) {
     THCTensor_squeeze1d(state, tgt1_, tgt1_, dimension);
     THCTensor_squeeze1d(state, tgt2_, tgt2_, dimension);
