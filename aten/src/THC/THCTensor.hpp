@@ -40,6 +40,8 @@ THC_API int64_t THCTensor_size(THCState *state, const _THCTensor *self, int dim)
 THC_API int64_t THCTensor_stride(THCState *state, const _THCTensor *self, int dim);
 THC_API THLongStorage *THCTensor_newSizeOf(THCState *state, _THCTensor *self);
 
+THC_API _THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type);
+
 THC_API void THCTensor_resize(THCState *state, _THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
 THC_API void THCTensor_resizeAs(THCState *state, _THCTensor *tensor, _THCTensor *src);
 THC_API void THCTensor_resizeNd(THCState *state, _THCTensor *tensor, int nDimension, int64_t *size, int64_t *stride);

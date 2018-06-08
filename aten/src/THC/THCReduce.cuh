@@ -282,7 +282,6 @@ bool THC_reduceDim(THCState* state,
                    AccT init,
                    int dim,
                    int keepdim) {
-  static_assert(std::is_same<ScalarType, typename TensorUtils<TensorType>::DataType>::value, "ScalarType must match");
   ptrdiff_t inElements = THCTensor_nElement(state, in);
 
   int64_t reductionSize = THCTensor_size(state, in, dim);

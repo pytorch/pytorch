@@ -88,7 +88,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   }
 
   if (oldTensor) {
-    TensorUtils<THCTensor>::copyIgnoringOverlaps(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
@@ -179,7 +179,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
   }
 
   if (oldTensor) {
-    TensorUtils<THCTensor>::copyIgnoringOverlaps(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
@@ -268,7 +268,7 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
   }
 
   if (oldTensor) {
-    TensorUtils<THCTensor>::copyIgnoringOverlaps(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
@@ -350,7 +350,7 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   }
 
   if (oldTensor) {
-    TensorUtils<THCTensor>::copyIgnoringOverlaps(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
