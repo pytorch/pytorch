@@ -396,6 +396,7 @@ if(USE_CUDA)
   # public/*.cmake uses CAFFE2_USE_*
   set(CAFFE2_USE_CUDA ${USE_CUDA})
   set(CAFFE2_USE_CUDNN ${USE_CUDNN})
+  set(CAFFE2_USE_NVRTC ${USE_NVRTC})
   set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
   if(CAFFE2_USE_CUDA)
@@ -403,18 +404,10 @@ if(USE_CUDA)
     # caffe2::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::curand)
-    if(BUILD_CAFFE2)
-      # Don't be deceived!  caffe2::cuda is the low-level DRIVER API,
-      # not the actual CUDA library.  Caffe2 depends directly on nvrtc
-      # and needs it, but ATen doesn't use it at all, and so the
-      # dependency is unnecessary.
-      #
-      # BTW, if you change this so that PyTorch has this dependency
-      # again, make sure Mac OS X GPU builds still work; there's
-      # a decent chance the library finding algorithm picked up
-      # on cuda.framework, which is totally not going to work when
-      # linking.
+    if(CAFFE2_USE_NVRTC)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
+    else()
+      caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
@@ -437,9 +430,11 @@ if(USE_CUDA)
       "-DUSE_CUDA=OFF.")
     caffe2_update_option(USE_CUDA OFF)
     caffe2_update_option(USE_CUDNN OFF)
+    caffe2_update_option(USE_NVRTC OFF)
     caffe2_update_option(USE_TENSORRT OFF)
     set(CAFFE2_USE_CUDA OFF)
     set(CAFFE2_USE_CUDNN OFF)
+    set(CAFFE2_USE_NVRTC OFF)
     set(CAFFE2_USE_TENSORRT OFF)
   endif()
 endif()
