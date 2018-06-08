@@ -47,6 +47,9 @@ class FileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         self.file = tempfile.NamedTemporaryFile()
 
+    def tearDown(self):
+        self.file.close()
+
     def _create_store(self):
         return c10d.FileStore(self.file.name)
 
@@ -89,6 +92,7 @@ class ProcessGroupGlooTest(TestCase):
     def tearDown(self):
         for p in self.processes:
             p.terminate()
+        self.file.close()
 
     def _spawn_process(self, rank):
         name = 'process ' + str(rank)
