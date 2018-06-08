@@ -59,6 +59,77 @@ class TCPStoreTest(TestCase, StoreTestBase):
         return c10d.TCPStore(TCP_ADDR, TCP_PORT, True)
 
 
+class RendezvousTest(TestCase):
+    def test_unknown_handler(self):
+        with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
+            c10d.rendezvous('invalid://')
+
+
+class RendezvousFileTest(TestCase):
+    def test_common_errors(self):
+        with self.assertRaisesRegex(ValueError, 'path missing'):
+            gen = c10d.rendezvous('file://?rank=0&size=1')
+            next(gen)
+        with self.assertRaisesRegex(ValueError, 'rank parameter missing'):
+            gen = c10d.rendezvous('file:///tmp/foo?size=1')
+            next(gen)
+        with self.assertRaisesRegex(ValueError, 'size parameter missing'):
+            gen = c10d.rendezvous('file:///tmp/foo?rank=0')
+            next(gen)
+
+    def test_nominal(self):
+        with tempfile.NamedTemporaryFile() as file:
+            url = 'file://%s?size=%d' % (file.name, 2)
+            gen0 = c10d.rendezvous(url + "&rank=0")
+            store0, rank0, size0 = next(gen0)
+            self.assertEqual(0, rank0)
+            self.assertEqual(2, size0)
+            gen1 = c10d.rendezvous(url + "&rank=1")
+            store1, rank1, size1 = next(gen1)
+            self.assertEqual(1, rank1)
+            self.assertEqual(2, size1)
+
+            # Set value on both stores
+            store0.set("key0", "value0")
+            store1.set("key1", "value1")
+
+            # Cross check with get
+            self.assertEqual(b"value0", store1.get("key0"))
+            self.assertEqual(b"value1", store0.get("key1"))
+
+
+class RendezvousTCPTest(TestCase):
+    def test_common_errors(self):
+        with self.assertRaisesRegex(ValueError, 'port number missing'):
+            gen = c10d.rendezvous('tcp://127.0.0.1?rank=0&size=1')
+            next(gen)
+        with self.assertRaisesRegex(ValueError, 'rank parameter missing'):
+            gen = c10d.rendezvous('tcp://127.0.0.1:23456?size=1')
+            next(gen)
+        with self.assertRaisesRegex(ValueError, 'size parameter missing'):
+            gen = c10d.rendezvous('tcp://127.0.0.1:23456?rank=0')
+            next(gen)
+
+    def test_nominal(self):
+        url = 'tcp://127.0.0.1:23456?size=%d' % 2
+        gen0 = c10d.rendezvous(url + "&rank=0")
+        store0, rank0, size0 = next(gen0)
+        self.assertEqual(0, rank0)
+        self.assertEqual(2, size0)
+        gen1 = c10d.rendezvous(url + "&rank=1")
+        store1, rank1, size1 = next(gen1)
+        self.assertEqual(1, rank1)
+        self.assertEqual(2, size1)
+
+        # Set value on both stores
+        store0.set("key0", "value0")
+        store1.set("key1", "value1")
+
+        # Cross check with get
+        self.assertEqual(b"value0", store1.get("key0"))
+        self.assertEqual(b"value1", store0.get("key1"))
+
+
 class ProcessGroupGlooTest(TestCase):
     MAIN_PROCESS_RANK = -1
 

@@ -1,5 +1,7 @@
 import torch
 
+from .rendezvous import rendezvous
+
 
 def is_available():
     return hasattr(torch._C, '_c10d_init')
