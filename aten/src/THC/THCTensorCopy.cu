@@ -24,7 +24,7 @@ struct CopyOp {
 
 // Copy for the same type to the same type
 template <typename ScalarTypeDst, typename ScalarTypeSrc>
-void THC_copyTensor(THCState* state, _THCTensor* dst, _THCTensor* src) {
+void THC_copyTensor(THCState* state, THCTensor* dst, THCTensor* src) {
 
   ptrdiff_t totalElements = THCTensor_nElement(state, dst);
 
@@ -128,7 +128,7 @@ void THC_copyTensor(THCState* state, _THCTensor* dst, _THCTensor* src) {
 
       // Make sure the src is contiguous and in the same type as dst
       THCudaCheck(cudaSetDevice(srcDev));
-      _THCTensor* srcContig = NULL;
+      THCTensor* srcContig = NULL;
 
       if (sameType) {
         srcContig = THCTensor_newContiguous<ScalarTypeSrc>(state, src);
@@ -152,7 +152,7 @@ void THC_copyTensor(THCState* state, _THCTensor* dst, _THCTensor* src) {
 
       // Make sure the dst is contiguous
       THCudaCheck(cudaSetDevice(dstDev));
-      _THCTensor* dstContig = THCTensor_newContiguous<ScalarTypeDst>(state, dst);
+      THCTensor* dstContig = THCTensor_newContiguous<ScalarTypeDst>(state, dst);
 
       // Now, we are ready for a cross-device memcpy of contiguous
       // data, of the same layout and type

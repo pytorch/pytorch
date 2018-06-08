@@ -704,21 +704,7 @@ void THTensor_(retain)(THTensor *self)
 
 void THTensor_(free)(THTensor *self)
 {
-  if(!self)
-    return;
-
-  if(self->flag & TH_TENSOR_REFCOUNTED)
-  {
-    if(--self->refcount == 0)
-    {
-      THFree(self->size);
-      THFree(self->stride);
-      if(self->storage)
-        THStorage_(free)(self->storage);
-      self->refcount.~atomic<int>();
-      THFree(self);
-    }
-  }
+  THTensor_free(self);
 }
 
 void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)

@@ -4,6 +4,7 @@
 #include "torch/csrc/python_headers.h"
 #include <stdbool.h>
 #include <TH/TH.h>
+#include <TH/THTensor.hpp>
 #include <THS/THS.h>
 
 #include "THP_export.h"
