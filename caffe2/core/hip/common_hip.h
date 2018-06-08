@@ -172,14 +172,19 @@ const char* rocblasGetErrorString(rocblas_status error);
                          ": ",                                     \
                          ::caffe2::hiprandGetErrorString(status)); \
     } while(0)
+#define HIPRAND_CHECK(condition)                    \
+  do {                                             \
+        hiprandStatus_t status = condition;             \
+        CHECK(status == HIPRAND_STATUS_SUCCESS)         \
+            << ::caffe2::hiprandGetErrorString(status); \
+     } while (0)
 
 #define HIP_1D_KERNEL_LOOP(i, n)                                            \
     for(size_t i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x; i < (n); \
         i += hipBlockDim_x * hipGridDim_x)
 
-// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
-// kernels. This is not supported by Apple platforms so we special case it.
-// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
+// HIP_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
+// kernels.
 #define HIP_KERNEL_ASSERT(...)
 
 // The following helper functions are here so that you can write a kernel call
@@ -190,10 +195,8 @@ const char* rocblasGetErrorString(rocblas_status error);
 // A legacy note: this is derived from the old good Caffe days, when I simply
 // hard-coded the number of threads and wanted to keep backward compatibility
 // for different computation capabilities.
-// For more info on CUDA compute capabilities, visit the NVidia website at:
-//    http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#compute-capabilities
 
-// The number of cuda threads to use. 512 is used for backward compatibility,
+// The number of HIP threads to use. 512 is used for backward compatibility,
 // and it is observed that setting it to 1024 usually does not bring much
 // performance gain (which makes sense, because warp size being 32 means that
 // blindly setting a huge block for a random kernel isn't optimal).
@@ -231,5 +234,133 @@ class DeviceGuard
     int previous_;
 };
 
+template <typename T, int N>
+struct SimpleArray {
+  T data[N];
+};
+
+constexpr int kHIPTensorMaxDims = 8;
+
+#define DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(val, Func, T, ...) \
+  do {                                                            \
+    CAFFE_ENFORCE_LE(val, kHIPTensorMaxDims);                    \
+    switch (val) {                                                \
+      case 1: {                                                   \
+        Func<T, 1>(__VA_ARGS__);                                  \
+        break;                                                    \
+      }                                                           \
+      case 2: {                                                   \
+        Func<T, 2>(__VA_ARGS__);                                  \
+        break;                                                    \
+      }                                                           \
+      case 3: {                                                   \
+        Func<T, 3>(__VA_ARGS__);                                  \
+        break;                                                    \
+      }                                                           \
+      case 4: {                                                   \
+        Func<T, 4>(__VA_ARGS__);                                  \
+        break;                                                    \
+      }                                                           \
+      case 5: {                                                   \
+        Func<T, 5>(__VA_ARGS__);                                  \
+        break;                                                    \
+      }                                                           \
+      case 6: {                                                   \
+        Func<T, 6>(__VA_ARGS__);                                  \
+        break;                                                    \
+      }                                                           \
+      case 7: {                                                   \
+        Func<T, 7>(__VA_ARGS__);                                  \
+        break;                                                    \
+      }                                                           \
+      case 8: {                                                   \
+        Func<T, 8>(__VA_ARGS__);                                  \
+        break;                                                    \
+      }                                                           \
+      default: { break; }                                         \
+    }                                                             \
+  } while (false)
+
+#define DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(val, Func, T1, T2, ...) \
+  do {                                                                 \
+    CAFFE_ENFORCE_LE(val, kHIPTensorMaxDims);                         \
+    switch (val) {                                                     \
+      case 1: {                                                        \
+        Func<T1, T2, 1>(__VA_ARGS__);                                  \
+        break;                                                         \
+      }                                                                \
+      case 2: {                                                        \
+        Func<T1, T2, 2>(__VA_ARGS__);                                  \
+        break;                                                         \
+      }                                                                \
+      case 3: {                                                        \
+        Func<T1, T2, 3>(__VA_ARGS__);                                  \
+        break;                                                         \
+      }                                                                \
+      case 4: {                                                        \
+        Func<T1, T2, 4>(__VA_ARGS__);                                  \
+        break;                                                         \
+      }                                                                \
+      case 5: {                                                        \
+        Func<T1, T2, 5>(__VA_ARGS__);                                  \
+        break;                                                         \
+      }                                                                \
+      case 6: {                                                        \
+        Func<T1, T2, 6>(__VA_ARGS__);                                  \
+        break;                                                         \
+      }                                                                \
+      case 7: {                                                        \
+        Func<T1, T2, 7>(__VA_ARGS__);                                  \
+        break;                                                         \
+      }                                                                \
+      case 8: {                                                        \
+        Func<T1, T2, 8>(__VA_ARGS__);                                  \
+        break;                                                         \
+      }                                                                \
+      default: { break; }                                              \
+    }                                                                  \
+  } while (false)
+
+#define DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_3(val, Func, T1, T2, T3, ...) \
+  do {                                                                     \
+    CAFFE_ENFORCE_LE(val, kHIPTensorMaxDims);                             \
+    switch (val) {                                                         \
+      case 1: {                                                            \
+        Func<T1, T2, T3, 1>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 2: {                                                            \
+        Func<T1, T2, T3, 2>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 3: {                                                            \
+        Func<T1, T2, T3, 3>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 4: {                                                            \
+        Func<T1, T2, T3, 4>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 5: {                                                            \
+        Func<T1, T2, T3, 5>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 6: {                                                            \
+        Func<T1, T2, T3, 6>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 7: {                                                            \
+        Func<T1, T2, T3, 7>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 8: {                                                            \
+        Func<T1, T2, T3, 8>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      default: { break; }                                                  \
+    }                                                                      \
+  } while (false)
+
 } // namespace caffe2
+
 #endif // CAFFE2_CORE_COMMON_HIP_H_
