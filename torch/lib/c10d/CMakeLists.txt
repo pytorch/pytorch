@@ -59,16 +59,22 @@ if(NOT CUDA_FOUND)
   message(FATAL_ERROR "CUDA not found")
 endif()
 
+function(copy_header file)
+  configure_file(${file} ${CMAKE_BINARY_DIR}/include/c10d/${file} COPYONLY)
+endfunction()
+
 set(C10D_SRCS
-  Utils.cpp
-  Store.cpp
-  FileStore.cpp
-  TCPStore.cpp
-  ProcessGroup.cpp
   CUDAUtils.cpp
+  FileStore.cpp
+  ProcessGroup.cpp
+  Store.cpp
+  TCPStore.cpp
+  Utils.cpp
   )
 
 add_library(c10d ${C10D_SRCS})
+set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET c10d PROPERTY CXX_STANDARD 11)
 target_compile_options(c10d PUBLIC
   -Wall
   -Wextra
@@ -78,6 +84,15 @@ target_compile_options(c10d PUBLIC
   -Wno-unknown-pragmas
   )
 target_link_libraries(c10d PUBLIC caffe2_gpu)
+copy_header(CUDAUtils.hpp)
+copy_header(FileStore.hpp)
+copy_header(ProcessGroup.hpp)
+copy_header(Store.hpp)
+copy_header(TCPStore.hpp)
+copy_header(Types.hpp)
+copy_header(Utils.hpp)
+target_include_directories(c10d PRIVATE ${CMAKE_BINARY_DIR}/include)
+install(TARGETS c10d ARCHIVE DESTINATION lib)
 
 # c10d links to Caffe2/ATen, but the targets don't add TH/THC to the include path
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/TH)
@@ -91,16 +106,26 @@ set(C10D_GLOO_SRCS
   )
 
 add_library(c10d_gloo ${C10D_GLOO_SRCS})
+set_property(TARGET c10d_gloo PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET c10d_gloo PROPERTY CXX_STANDARD 11)
 target_include_directories(c10d_gloo PUBLIC ${GLOO_INCLUDE_DIR})
 target_link_libraries(c10d_gloo PUBLIC c10d ${Gloo_NATIVE_LIBRARY} ${Gloo_LIBRARY})
+copy_header(ProcessGroupGloo.hpp)
+target_include_directories(c10d PRIVATE ${CMAKE_BINARY_DIR}/include)
+install(TARGETS c10d_gloo ARCHIVE DESTINATION lib)
 
 if(MPI_FOUND)
   set(C10D_MPI_SRCS
     ProcessGroupMPI.cpp
   )
   add_library(c10d_mpi ${C10D_MPI_SRCS})
+  set_property(TARGET c10d_mpi PROPERTY POSITION_INDEPENDENT_CODE ON)
+  set_property(TARGET c10d_mpi PROPERTY CXX_STANDARD 11)
   target_include_directories(c10d_mpi PUBLIC ${MPI_INCLUDE_PATH})
   target_link_libraries(c10d_mpi PUBLIC c10d ${MPI_LIBRARIES})
+  copy_header(ProcessGroupMPI.hpp)
+  target_include_directories(c10d_mpi PRIVATE ${CMAKE_BINARY_DIR}/include)
+  install(TARGETS c10d_mpi ARCHIVE DESTINATION lib)
 endif()
 
 if(DISTRIBUTED_NCCL_FOUND)
@@ -112,7 +137,16 @@ if(DISTRIBUTED_NCCL_FOUND)
   target_link_libraries(c10d_nccl PUBLIC c10d ${NCCL_LIBRARIES})
 endif()
 
-add_subdirectory(example)
+option(BUILD_EXAMPLES "Build examples" OFF)
+if(BUILD_EXAMPLES)
+  add_subdirectory(example)
+endif()
 
-enable_testing()
-add_subdirectory(test)
+option(BUILD_TEST "Build tests" OFF)
+if(BUILD_TEST)
+  enable_testing()
+  add_subdirectory(test)
+endif()
+
+# Install all header files that were prepared in the build directory
+install(DIRECTORY ${CMAKE_BINARY_DIR}/include/ DESTINATION include)

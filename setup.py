@@ -115,7 +115,7 @@ from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
-    WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS
+    WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS, WITH_C10D
 
 
 ################################################################################
@@ -250,7 +250,7 @@ class create_version_file(PytorchCommand):
 # All libraries that torch could depend on
 dep_libs = [
     'nccl', 'caffe2',
-    'libshm', 'libshm_windows', 'gloo', 'THD', 'nanopb',
+    'libshm', 'libshm_windows', 'gloo', 'THD', 'nanopb', 'c10d',
 ]
 
 missing_pydep = '''
@@ -346,6 +346,8 @@ class build_deps(PytorchCommand):
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
             libs += ['THD']
+        if WITH_C10D:
+            libs += ['c10d']
         build_libs(libs)
 
         # Use copies instead of symbolic files.
@@ -633,6 +635,8 @@ if WITH_CUDA or WITH_ROCM:
     CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
+C10D_LIB = os.path.join(lib_path, 'libc10d.a')
+C10D_GLOO_LIB = os.path.join(lib_path, 'libc10d_gloo.a')
 
 # static library only
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
@@ -786,6 +790,11 @@ if WITH_DISTRIBUTED:
         extra_compile_args += ['-DWITH_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
+
+if WITH_C10D:
+    extra_compile_args += ['-DWITH_C10D']
+    main_sources += ['torch/csrc/distributed/c10d/init.cpp']
+    main_link_args += [C10D_GLOO_LIB, C10D_LIB]
 
 if WITH_CUDA:
     nvtoolext_lib_name = None
