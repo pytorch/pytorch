@@ -589,7 +589,9 @@ SparseTensor& sspaddmm_out_sparse_cpu(
   return r;
 }
 
-SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, Scalar alpha, const SparseTensor& sparse_, const Tensor& dense) {
+SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
+  // TODO: Make this a real argument
+  Scalar alpha = 1;
   AT_CHECK(sparse_._dimI() == 2,
       "Argument #2: matrices expected, got ", sparse_._dimI(), "D tensor");
   AT_CHECK(sparse_._dimV() == 0,
@@ -638,6 +640,12 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, Scalar alpha, const SparseTe
   addmm_out_sparse_dense_cpu(values, values, SparseTensorRef(newSparse), dense, 0, alpha);
   _get_sparse_impl(r)->set_indices_and_values(indices, values);  // TODO: sigh
 
+  return r;
+}
+
+SparseTensor hspmm_sparse_cpu(const SparseTensor& sparse, const Tensor& dense) {
+  SparseTensor r = sparse.type().tensor();
+  hspmm_out_sparse_cpu(r, sparse, dense);
   return r;
 }
 

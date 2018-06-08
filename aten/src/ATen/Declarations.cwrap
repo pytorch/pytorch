@@ -3883,10 +3883,10 @@
 ]]
 
 [[
-  name: to_dense
+  name: th_to_dense
   cname: toDense
   variants:
-    - method
+    - function
   backends:
     - SparseCPU
     - SparseCUDA
@@ -3896,10 +3896,10 @@
 ]]
 
 [[
-  name: _dimI
+  name: _th_dimI
   cname: nDimensionI
   variants:
-    - method
+    - function
   backends:
     - SparseCPU
     - SparseCUDA
@@ -3909,10 +3909,10 @@
 ]]
 
 [[
-  name: _dimV
+  name: _th_dimV
   cname: nDimensionV
   variants:
-    - method
+    - function
   backends:
     - SparseCPU
     - SparseCUDA
@@ -3922,10 +3922,10 @@
 ]]
 
 [[
-  name: _nnz
+  name: _th_nnz
   cname: nnz
   variants:
-    - method
+    - function
   backends:
     - SparseCPU
     - SparseCUDA
@@ -3935,10 +3935,10 @@
 ]]
 
 [[
-  name: coalesce
+  name: th_coalesce
   cname: newCoalesce
   variants:
-    - method
+    - function
   backends:
     - SparseCPU
     - SparseCUDA
@@ -3948,10 +3948,10 @@
 ]]
 
 [[
-  name: is_coalesced
+  name: th_is_coalesced
   cname: isCoalesced
   variants:
-    - method
+    - function
   backends:
     - SparseCPU
     - SparseCUDA
@@ -3961,9 +3961,9 @@
 ]]
 
 [[
-  name: _indices
+  name: _th_indices
   variants:
-    - method
+    - function
   backends:
     - SparseCPU
     - SparseCUDA
@@ -3979,9 +3979,9 @@
 ]]
 
 [[
-  name: _values
+  name: _th_values
   variants:
-    - method
+    - function
   backends:
     - SparseCPU
     - SparseCUDA
@@ -3991,7 +3991,7 @@
      - THTensor* self
 ]]
 [[
-  name: hspmm
+  name: th_hspmm
   variants:
     - function
   cname: hspmm

@@ -257,4 +257,87 @@ Tensor _sparse_mask(const Tensor& self, SparseTensorRef mask) {
   }
 }
 
+Tensor to_dense(const Tensor& self) {
+  if (_has_native(self)) {
+    return native_to_dense(self);
+  } else {
+    return th_to_dense(self);
+  }
+}
+
+int64_t _dimI(const Tensor& self) {
+  if (_has_native(self)) {
+    return _native_dimI(self);
+  } else {
+    return _th_dimI(self);
+  }
+}
+
+int64_t _dimV(const Tensor& self) {
+  if (_has_native(self)) {
+    return _native_dimV(self);
+  } else {
+    return _th_dimV(self);
+  }
+}
+
+int64_t _nnz(const Tensor& self) {
+  if (_has_native(self)) {
+    return _native_nnz(self);
+  } else {
+    return _th_nnz(self);
+  }
+}
+
+Tensor coalesce(const Tensor& self) {
+  if (_has_native(self)) {
+    return native_coalesce(self);
+  } else {
+    return th_coalesce(self);
+  }
+}
+
+bool is_coalesced(const Tensor& self) {
+  if (_has_native(self)) {
+    return native_is_coalesced(self);
+  } else {
+    return th_is_coalesced(self);
+  }
+}
+
+Tensor _indices(const Tensor& self) {
+  if (_has_native(self)) {
+    return _native_indices(self);
+  } else {
+    return _th_indices(self);
+  }
+}
+
+Tensor _values(const Tensor& self) {
+  if (_has_native(self)) {
+    return _native_values(self);
+  } else {
+    return _th_values(self);
+  }
+}
+
+
+Tensor& hspmm_out(Tensor& result, const Tensor& mat1, const Tensor& mat2) {
+  if (_has_native(mat1)) {
+    return native_hspmm_out(result, mat1, mat2);
+  } else {
+    return th_hspmm_out(result, mat1, mat2);
+  }
+}
+
+Tensor hspmm(const Tensor& mat1, const Tensor& mat2) {
+  if (_has_native(mat1)) {
+    return native_hspmm(mat1, mat2);
+  } else {
+    return th_hspmm(mat1, mat2);
+  }
+}
+
+
+
 }} // namespace at::native

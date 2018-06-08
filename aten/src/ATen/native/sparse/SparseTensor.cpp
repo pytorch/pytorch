@@ -29,23 +29,23 @@ namespace {
  * access methods
  ******************************************************************************/
 
-int64_t _dimI(const SparseTensor& self) {
+int64_t _dimI_sparse(const SparseTensor& self) {
   return _get_sparse_impl(self)->dimI();
 }
 
-int64_t _dimV(const SparseTensor& self) {
+int64_t _dimV_sparse(const SparseTensor& self) {
   return _get_sparse_impl(self)->dimV();
 }
 
-bool is_coalesced(const SparseTensor& self) {
+bool is_coalesced_sparse(const SparseTensor& self) {
   return _get_sparse_impl(self)->coalesced();
 }
 
-int64_t _nnz(const SparseTensor& self) {
+int64_t _nnz_sparse(const SparseTensor& self) {
   return _get_sparse_impl(self)->nnz();
 }
 
-Tensor _indices(const SparseTensor& self) {
+Tensor _indices_sparse(const SparseTensor& self) {
   auto nnz = self._nnz();
   if (nnz == 0) {
     // Narrows don't work on 0-length tensors
@@ -56,7 +56,7 @@ Tensor _indices(const SparseTensor& self) {
   return _get_sparse_impl(self)->indices().narrow(1, 0, nnz);
 }
 
-Tensor values(const SparseTensor& self) {
+Tensor _values_sparse(const SparseTensor& self) {
   // See indices for some relevant notes
   auto nnz = self._nnz();
   if (nnz == 0) {
