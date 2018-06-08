@@ -286,8 +286,9 @@ Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs
                       ->setSourceLocation(std::make_shared<SourceRange>(loc)))->output();
 }
 
-static bool isTensorSubtype(Value* v) {
-  return v->type()->isSubtypeOf(*DynamicType::get());
+static bool canBeUsedAsTensor(Value* v) {
+  return v->type()->isSubtypeOf(*DynamicType::get()) ||
+      v->type() == FloatType::get() || v->type() == IntType::get();
 }
 
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
@@ -379,6 +380,48 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+static bool isPythonScalar(const TypePtr type) {
+  return type == FloatType::get() || type == IntType::get();
+}
+
+// Given a schema and inputs, returns a NamedValue that all
+// python scalar inputs should be casted to.
+at::optional<NamedValue> determinePythonMathType(
+    const FunctionSchema& schema,
+    at::ArrayRef<NamedValue> inputs) {
+  bool has_python_float = false;
+  bool has_python_int = false;
+  at::optional<NamedValue> result;
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    NamedValue v = inputs[i];
+    const auto& arg = schema.arguments[i];
+    if (!arg.type->isSubtypeOf(*DynamicType::get())) {
+      continue;
+    }
+    // If one of the inputs is a Tensor, cast all python literals to its type
+    if (v.value->type()->isSubtypeOf(*DynamicType::get())) {
+      return v;
+    } else if (v.value->type() == FloatType::get()) {
+      has_python_float = true;
+      result = v;
+    } else if (v.value->type() == IntType::get()) {
+      has_python_int = true;
+    }
+  }
+  // All "Tensor" inputs were python floats
+  if (has_python_float && !has_python_int) {
+    return at::nullopt;
+  }
+  // All "Tensor" inputs were python ints
+  else if (!has_python_float && has_python_int) {
+    return at::nullopt;
+  }
+  // "Tensor" inputs are either python float or python int.
+  else {
+    return result;
+  }
+}
+
 at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
@@ -443,7 +486,29 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         v.value = createStack(graph, loc, unpacked);
       }
 
-      if(!v.value->type()->isSubtypeOf(*arg.type)) {
+      bool skip_subtype_check = false;
+
+      // implicit conversion from Python scalar to Tensor if applicable.
+      // Occurs when we math tensors & scalars (ie, `x + 3.1` or `3.1 * 2.7`)
+      if (arg.type->isSubtypeOf(*DynamicType::get()) && isPythonScalar(v.value->type())) {
+        // Does not looked at named arguments or default args.
+        // This is only used in math functions (+-*/) so this is okay.
+        auto repr_val = determinePythonMathType(schema, inputs);
+        if (repr_val) {
+          // cast to tensor's type (ScalarType and backend)
+          std::vector<Value*> type_as_args({ v.value, repr_val.value().value });
+          auto* castNode = graph.insertNode(
+            graph.create(aten::type_as, type_as_args)
+            ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+          v.value = castNode->output();
+        } else {
+          // No casting needs to be done, however, FloatType / IntType are NOT
+          // tensor types so we should skip the below subtype check.
+          skip_subtype_check = true;
+        }
+      }
+
+      if(!skip_subtype_check && !v.value->type()->isSubtypeOf(*arg.type)) {
         err() << "expected a value of type " << arg.type->name() << " for argument '" << arg.name << "' but found "
               << v.value->type()->name() << "\n"
               << v.loc;
@@ -561,7 +626,7 @@ struct NoneValue : SugaredValue {
 };
 
 static Value* ensureTensor(const SourceRange& range, Value* v) {
-  if(!isTensorSubtype(v)) {
+  if(!canBeUsedAsTensor(v)) {
     throw ErrorReport(range) << "expected a tensor value but found a tuple";
   }
   return v;
@@ -1206,6 +1271,18 @@ private:
     }
   }
 
+  static bool isPythonScalar(const Value* value) {
+    return value->type() == FloatType::get() || value->type() == IntType::get();
+  }
+
+  // ins should only have FloatType or IntType
+  TypePtr inferPythonMathType(std::vector<Value*> ins) {
+    if (std::any_of(ins.begin(), ins.end(), [](Value* v) { return v->type() == FloatType::get(); })) {
+      return FloatType::get();
+    }
+    return IntType::get();
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree) {
     switch (tree->kind()) {
@@ -1215,25 +1292,47 @@ private:
       case '>':
       case TK_LE:
       case TK_GE:
-      case '*':
-      case '/':
       case '@':
       case TK_POW:
       case TK_AND:
       case TK_OR:
-      case TK_NOT:
-      case TK_UNARY_MINUS: {
+      case TK_NOT: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         return emitNode(kind, tree->range(), getValues(inputs), 1)->output();
       } break;
+      case '*':
+      case '/':
+      case TK_UNARY_MINUS: {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto input_vals = getValues(inputs);
+        auto* node = emitNodeFromSchema(kind, tree->range(), input_vals, 1);
+
+        // Infer the type of the output if inputs were python scalars
+        auto* output = node->output();
+        if (std::all_of(input_vals.begin(), input_vals.end(), isPythonScalar)) {
+          output->setType(inferPythonMathType(input_vals));
+        }
+        return output;
+      } break;
       case '+':
       case '-': {
-        const auto& inputs =tree->trees();
+        const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto* node = emitNode(kind, tree->range(), getValues(inputs), 1);
+        auto input_vals = getValues(inputs);
+        auto* node = emitNodeFromSchema(kind, tree->range(), input_vals, 1);
+
+        // emitNodeFromSchema inserts default args. Lift the alpha attr.
+        node->removeInput(2);
         node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
-        return node->output();
+
+        // Infer the type of the output if inputs were python scalars
+        auto* output = node->output();
+        if (std::all_of(input_vals.begin(), input_vals.end(), isPythonScalar)) {
+          output->setType(inferPythonMathType(input_vals));
+        }
+        return output;
       }
       case TK_STARRED: {
         throw ErrorReport(tree) << "Unexpected starred expansion. File a bug report.";
@@ -1308,9 +1407,13 @@ private:
 
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint()) {
-      return createConstant(*graph, c.range(), at::CPU(at::kFloat).scalarTensor(c.asFloatingPoint()));
+      auto* value = createConstant(*graph, c.range(), at::CPU(at::kFloat).scalarTensor(c.asFloatingPoint()));
+      value->setType(FloatType::get());
+      return value;
     } else {
-      return createConstant(*graph, c.range(), at::CPU(at::kLong).scalarTensor(c.asIntegral()));
+      auto* value = createConstant(*graph, c.range(), at::CPU(at::kLong).scalarTensor(c.asIntegral()));
+      value->setType(IntType::get());
+      return value;
     }
   }
 
@@ -1324,6 +1427,39 @@ private:
       n->addInput(input_value);
     }
     return n;
+  }
+
+  Node* emitNodeFromSchema(
+      NodeKind kind,
+      const SourceRange& loc,
+      std::vector<Value*> input_vals,
+      size_t n_outputs) {
+    auto sanitized_inputs = matchSchema(kind.toUnqualString(), loc, input_vals);
+    auto* node = emitNode(kind, loc, sanitized_inputs, n_outputs);
+    return node;
+  }
+
+  std::vector<Value*> matchSchema(
+      const std::string& name,
+      const SourceRange& loc,
+      at::ArrayRef<Value*> input_vals) {
+    std::vector<NamedValue> named_input_vals;
+    for (Value* inp : input_vals) {
+      named_input_vals.push_back(NamedValue(loc, "", inp));
+    }
+
+    auto variants = getOperatorSchema(name);
+    std::stringstream failure_messages;
+    for (const FunctionSchema& schema : variants) {
+      if (auto sanitized_inputs = tryMatchSchema(
+          schema, loc, *graph, named_input_vals, {}, failure_messages)) {
+        return sanitized_inputs.value();
+      }
+    }
+    // none of the options worked
+    throw ErrorReport(loc)
+        << "arguments for call are not valid:\n"
+        << prefixLine(failure_messages.str(), "  ") << "for call at";
   }
 
   void matchSchemaAndLiftConstantAttributes(

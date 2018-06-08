@@ -29,6 +29,10 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "Dynamic";
   } else if(t.kind() == TypeKind::TupleType) {
     out << "Tuple";
+  } else if(t.kind() == TypeKind::FloatType) {
+    out << "float";
+  } else if(t.kind() == TypeKind::IntType) {
+    out << "int";
   } else {
     barf("unknown type kind");
   }
@@ -47,6 +51,15 @@ TypePtr DynamicType::get() {
 
 TypePtr ListType::ofTensors() {
   static auto value = std::make_shared<ListType>(DynamicType::get());
+  return value;
+}
+
+TypePtr FloatType::get() {
+  static auto value = std::make_shared<FloatType>();
+  return value;
+}
+TypePtr IntType::get() {
+  static auto value = std::make_shared<IntType>();
   return value;
 }
 
