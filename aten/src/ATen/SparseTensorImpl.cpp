@@ -5,8 +5,8 @@ namespace at {
 
 SparseTensorImpl::SparseTensorImpl(Type * type)
     : TensorImpl(type)
-    , indices_(type->toScalarType(ScalarType::Long).tensor())
-    , values_(type->tensor()) {
+    , indices_(type->toDense().toScalarType(ScalarType::Long).tensor())
+    , values_(type->toDense().tensor()) {
       AT_ASSERT(type->is_sparse());
     }
 

@@ -1725,7 +1725,7 @@
         // norm(value) for a sparse tensor returns a DENSE 0-dim tensor
         if (self.is_sparse()) {
           auto result = ${THTensor}_normall(${state,} self_->tensor, convert<${THScalarType}>(p_));
-          return toBackend(toDense(backend())).tensor({}).fill_(result);
+          return toDense().tensor({}).fill_(result);
         }
         // aten_custom_call is followed by the generated call to normall
 ]]
@@ -3974,7 +3974,7 @@
   aten_custom_call: |
     if (self_->isScalar()) {
       // Empty tensor
-      return toBackend(toDense(backend())).toScalarType(kLong).tensor({0});
+      return toDense().toScalarType(kLong).tensor({0});
     }
 ]]
 

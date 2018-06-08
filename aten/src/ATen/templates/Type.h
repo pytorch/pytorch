@@ -80,6 +80,9 @@ struct AT_API Type {
   Type & toSparse() const {
     return this->toBackend(at::toSparse(this->backend()));
   }
+  Type & toDense() const {
+    return this->toBackend(at::toDense(this->backend()));
+  }
   Context& get_context() const { return *context; }
 
   // contingious IDs for all types in the system
