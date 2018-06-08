@@ -11,21 +11,32 @@ const std::string NetObserverReporterPrint::IDENTIFIER = "Caffe2Observer ";
 void NetObserverReporterPrint::report(
     NetBase* net,
     std::map<std::string, PerformanceInformation>& info) {
-  std::map<std::string, std::map<std::string, std::string>> caffe2_perf;
-  std::map<std::string, std::string> op_perf;
-  std::map<std::string, std::string> net_perf;
+  // Not allowed to use json library
+  std::map<
+      std::string,
+      std::map<std::string, std::map<std::string, std::string>>>
+      caffe2_perf;
 
   for (auto& p : info) {
     if ((p.first == "NET_DELAY") && (info.size() == 1)) {
       // for Net_delay perf
-      net_perf["latency"] = caffe2::to_string(p.second.latency);
-      net_perf["flops"] = caffe2::to_string(-1);
-      caffe2_perf["NET"] = net_perf;
+      caffe2_perf["NET"] = {
+          {"latency",
+           {{"value", caffe2::to_string(p.second.latency * 1000)},
+            {"unit", "us"}}},
+          {"flops", {{"value", "-1"}, {"unit", "flops"}}}};
     } else if (p.first != "NET_DELAY") {
       // for operator perf
-      op_perf["latency"] = caffe2::to_string(p.second.latency);
-      op_perf["flops"] = caffe2::to_string(p.second.flops);
-      caffe2_perf[p.first] = op_perf;
+      caffe2_perf[p.first] = {
+          {"latency",
+           {{"value", caffe2::to_string(p.second.latency * 1000)},
+            {"unit", "us"}}},
+          {"flops",
+           {{
+                "value",
+                caffe2::to_string(p.second.flops),
+            },
+            {"unit", "flops"}}}};
     }
   }
 
@@ -36,9 +47,19 @@ void NetObserverReporterPrint::report(
            << ": {";
     for (auto jt = it->second.begin(); jt != it->second.end(); jt++) {
       buffer << "\"" << jt->first << "\""
-             << ": " << jt->second;
-      auto kt = jt;
-      if ((++kt) != it->second.end()) {
+             << ": {";
+      for (auto kt = jt->second.begin(); kt != jt->second.end(); kt++) {
+        buffer << "\"" << kt->first << "\""
+               << ": "
+               << "\"" << kt->second << "\"";
+        auto lt = kt;
+        if ((++lt) != jt->second.end()) {
+          buffer << ", ";
+        }
+      }
+      buffer << "}";
+      auto lt = jt;
+      if ((++lt) != it->second.end()) {
         buffer << ", ";
       }
     }
