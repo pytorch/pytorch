@@ -210,6 +210,17 @@ void resize_sparse(const SparseTensor& self, ArrayRef<int64_t> size) {
   _raw_resize_sparse(self, size.size(), 0, size);
 }
 
+SparseTensor& raw_resize_sparse_(SparseTensor& self, ArrayRef<int64_t> size, int64_t dimI, int64_t dimV) {
+  if (dimI == -1) {
+    dimI = self._indices().size(0);
+  }
+  if (dimV == -1) {
+    dimV = self._values().dim() - 1;
+  }
+  _raw_resize_sparse(self, dimI, dimV, size);
+  return self;
+}
+
 namespace {
   bool _is_same_size_as_sparse(const SparseTensor& self, const SparseTensor& src) {
     return self._dimI() == src._dimI() && self._dimV() == src._dimV() && self.sizes().equals(src.sizes());

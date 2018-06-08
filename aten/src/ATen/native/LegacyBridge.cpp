@@ -240,4 +240,12 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values, Ar
 }
 
 
+Tensor& sparse_raw_resize_(Tensor& self, ArrayRef<int64_t> size, int64_t dimI, int64_t dimV) {
+  if (_has_native(self)) {
+    return native_sparse_raw_resize_(self, size, dimI, dimV);
+  } else {
+    return th_sparse_raw_resize_(self, size, dimI, dimV);
+  }
+}
+
 }} // namespace at::native
