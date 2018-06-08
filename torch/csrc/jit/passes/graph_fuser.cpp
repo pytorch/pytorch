@@ -81,9 +81,8 @@ bool isSimpleMap(Node *node) {
   // Make sure that the node doesn't broadcast.
   JIT_ASSERT(node->inputs().size() > 0);
   TensorType* expected_type = node->inputs()[0]->type()->cast<TensorType>();
-  if (!expected_type)
-    return false;
-    static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual) {
+  if (!expected_type) return false;
+  static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual) {
      TensorType* actual = _actual->cast<TensorType>();
      return actual &&
            expected->device() == actual->device() &&
