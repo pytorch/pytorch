@@ -32,11 +32,11 @@ reduceops_common_args = parse_kwargs("""
 factory_common_args = parse_kwargs("""
     out (Tensor, optional): the output tensor
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
+        Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
     layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
         Default: ``torch.strided``.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
+        Default: if ``None``, uses the current device for the default tensor type
         (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
@@ -46,11 +46,11 @@ factory_common_args = parse_kwargs("""
 factory_like_common_args = parse_kwargs("""
     input (Tensor): the size of :attr:`input` will determine size of the output tensor
     layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
-        Default: if None, defaults to the layout of :attr:`input`.
+        Default: if ``None``, defaults to the layout of :attr:`input`.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
-        Default: if None, defaults to the dtype of :attr:`input`.
+        Default: if ``None``, defaults to the dtype of :attr:`input`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, defaults to the device of :attr:`input`.
+        Default: if ``None``, defaults to the device of :attr:`input`.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
 """)
@@ -59,9 +59,9 @@ factory_data_common_args = parse_kwargs("""
     data (array_like): Initial data for the tensor. Can be a list, tuple,
         NumPy ``ndarray``, scalar, and other types.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if None, infers data type from :attr:`data`.
+        Default: if ``None``, infers data type from :attr:`data`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
+        Default: if ``None``, uses the current device for the default tensor type
         (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
@@ -5425,3 +5425,170 @@ Example::
             [-0.1884,  0.2858, -1.5831,  0.9917, -0.8356]])
 
 """)
+
+
+add_docstr(torch.hann_window,
+           """
+hann_window(window_length, periodic=True, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Hann window function.
+
+.. math::
+    w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] =
+            \sin^2 \left( \frac{\pi n}{N - 1} \right),
+
+where :math:`N` is the full window size.
+
+The input :attr:`window_length` is a positive integer controlling the
+returned window size. :attr:`periodic` flag determines whether the returned
+window trims off the last duplicate value from the symmetric window and is
+ready to be used as a periodic window with functions like
+:meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
+above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+``torch.hann_window(L, periodic=True)`` equal to
+``torch.hann_window(L + 1, periodic=False)[:-1])``.
+
+.. note::
+    If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+""" + r"""
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool, optional): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+
+""".format(**factory_common_args))
+
+
+add_docstr(torch.hamming_window,
+           """
+hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Hamming window function.
+
+.. math::
+    w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right),
+
+where :math:`N` is the full window size.
+
+The input :attr:`window_length` is a positive integer controlling the
+returned window size. :attr:`periodic` flag determines whether the returned
+window trims off the last duplicate value from the symmetric window and is
+ready to be used as a periodic window with functions like
+:meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
+above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+``torch.hamming_window(L, periodic=True)`` equal to
+``torch.hamming_window(L + 1, periodic=False)[:-1])``.
+
+.. note::
+    If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+
+.. note::
+    This is a generalized version of :meth:`torch.hann_window`.
+""" + r"""
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool, optional): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+
+""".format(**factory_common_args))
+
+
+add_docstr(torch.bartlett_window,
+           """
+bartlett_window(window_length, periodic=True, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Bartlett window function.
+
+.. math::
+    w[n] = 1 - \left| \frac{2n}{N-1} - 1 \right| = \begin{cases}
+        \frac{2n}{N - 1} & \text{if } 0 \leq n \leq \frac{N - 1}{2} \\
+        2 - \frac{2n}{N - 1} & \text{if } \frac{N - 1}{2} < n < N \\
+    \end{cases},
+
+where :math:`N` is the full window size.
+
+The input :attr:`window_length` is a positive integer controlling the
+returned window size. :attr:`periodic` flag determines whether the returned
+window trims off the last duplicate value from the symmetric window and is
+ready to be used as a periodic window with functions like
+:meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
+above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+``torch.bartlett_window(L, periodic=True)`` equal to
+``torch.bartlett_window(L + 1, periodic=False)[:-1])``.
+
+.. note::
+    If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+""" + r"""
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool, optional): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+
+""".format(**factory_common_args))
+
+
+add_docstr(torch.blackman_window,
+           """
+blackman_window(window_length, periodic=True, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Blackman window function.
+
+.. math::
+    w[n] = 0.42 - 0.5 \cos \left( \frac{2 \pi n}{N - 1} \right) + 0.08 \cos \left( \frac{4 \pi n}{N - 1} \right)
+
+where :math:`N` is the full window size.
+
+The input :attr:`window_length` is a positive integer controlling the
+returned window size. :attr:`periodic` flag determines whether the returned
+window trims off the last duplicate value from the symmetric window and is
+ready to be used as a periodic window with functions like
+:meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
+above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+``torch.blackman_window(L, periodic=True)`` equal to
+``torch.blackman_window(L + 1, periodic=False)[:-1])``.
+
+.. note::
+    If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+""" + r"""
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool, optional): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+
+""".format(**factory_common_args))
