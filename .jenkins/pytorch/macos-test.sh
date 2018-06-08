@@ -1,6 +1,6 @@
 #!/bin/bash
 
-COMPACT_JOB_NAME=pytorch-macos-10.13-py3-build-test
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export PATH="/usr/local/bin:$PATH"
