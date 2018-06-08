@@ -1,5 +1,13 @@
 # ---[ cuda
 
+# Check if we need to use the new FindCUDA functionalities, which are included
+# since 3.7.0. Also, we know that VS2017 needs the new FindCUDA functionality,
+# so we will simply enable it for the whole Windows build.
+if (MSVC OR ${CMAKE_VERSION} VERSION_LESS 3.7.0)
+  list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
+  include(CMakeInitializeConfigs)
+endif()
+
 # Find CUDA.
 find_package(CUDA 7.0)
 if(NOT CUDA_FOUND)
