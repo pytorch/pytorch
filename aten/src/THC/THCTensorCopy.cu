@@ -95,8 +95,8 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
   if (memcpyEligible) {
     // Perform the copy
     THCudaCheck(cudaMemcpyAsync(
-                  TensorUtils<TensorTypeDst>::getData(state, dst),
-                  TensorUtils<TensorTypeSrc>::getData(state, src),
+                  dst->template data<ScalarTypeDst>(),
+                  src->template data<ScalarTypeSrc>(),
                   totalElements *
                   sizeof(ScalarTypeDst),
                   cudaMemcpyDeviceToDevice,
@@ -162,8 +162,8 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
       THCudaCheck(cudaSetDevice(srcDev));
 
       THCudaCheck(cudaMemcpyAsync(
-                    TensorUtils<TensorTypeDst>::getData(state, dstContig),
-                    TensorUtils<TensorTypeDst>::getData(state, srcContig),
+                    dstContig->template data<ScalarTypeDst>(),
+                    srcContig->template data<ScalarTypeDst>(),
                     totalElements *
                     sizeof(ScalarTypeDst),
                     cudaMemcpyDeviceToDevice,
