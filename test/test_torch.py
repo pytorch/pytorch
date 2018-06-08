@@ -6498,16 +6498,15 @@ class TestTorch(TestCase):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
                             "Please pre-load the data into a buffer like io.BytesIO and " +
                             "try to load from it instead.")
-        import sys
-        if sys.version_info < (3,):
-            import urllib
-            resource = urllib.urlopen('https://download.pytorch.org/test_data/linear.pt')
-            self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
-        else:
+        if PY3:
             import urllib.request
             import io
             resource = urllib.request.urlopen('https://download.pytorch.org/test_data/linear.pt')
             self.assertRaisesRegex(io.UnsupportedOperation, expected_err_msg, lambda: torch.load(resource))
+        else:
+            import urllib
+            resource = urllib.urlopen('https://download.pytorch.org/test_data/linear.pt')
+            self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])

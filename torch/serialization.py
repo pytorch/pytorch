@@ -463,18 +463,21 @@ def _load(f, map_location, pickle_module):
             raise e
 
     try:
-        if f_is_real_file and f.tell() == 0:
-            # legacy_load requires that f has fileno()
-            # only if offset is zero we can attempt the legacy tar file loader
-            try:
-                return legacy_load(f)
-            except tarfile.TarError:
-                # if not a tarfile, reset file offset and proceed
-                f.seek(0)
-    except io.UnsupportedOperation as e:
-        raise_load_err_msg("seek", e)
+        f_tell_is_0 = True if f.tell() == 0 else False
     except AttributeError as e:
         raise_load_err_msg("instance has no attribute 'tell'", e)
+
+    if f_is_real_file and f_tell_is_0:
+        # legacy_load requires that f has fileno()
+        # only if offset is zero we can attempt the legacy tar file loader
+        try:
+            return legacy_load(f)
+        except tarfile.TarError:
+            # if not a tarfile, reset file offset and proceed
+            try:
+                f.seek(0)
+            except io.UnsupportedOperation as e:
+                raise_load_err_msg("seek", e)
 
     magic_number = pickle_module.load(f)
     if magic_number != MAGIC_NUMBER:
