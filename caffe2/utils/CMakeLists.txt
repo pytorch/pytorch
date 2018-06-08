@@ -1,4 +1,4 @@
-set(OLD_LIB_SOURCES_CPU
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
         utils/proto_utils.cc
         utils/murmur_hash3.cc
         utils/smart_tensor_printer.cc
@@ -15,17 +15,17 @@ set(OLD_LIB_SOURCES_CPU
 # pthreadpool with a very similar interface. Neither NNPACK, nor this
 # thread pool supports Windows.
 if (NOT MSVC)
-  list(APPEND OLD_LIB_SOURCES_CPU
+  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
           utils/threadpool/pthreadpool.cc
           utils/threadpool/pthreadpool_impl.cc
           )
 endif()
 
-set(OLD_LIB_SOURCES_GPU
+set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}
         utils/math_gpu.cu
         )
 
-set(OLD_TEST_SOURCES_CPU
+set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS}
         utils/fixed_divisor_test.cc
         utils/math_test.cc
         utils/fatal_signal_asan_no_sig_test.cc
@@ -36,11 +36,11 @@ set(OLD_TEST_SOURCES_CPU
         utils/cast_test.cc
         )
 
-set(OLD_TEST_SOURCES_GPU
+set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS}
         utils/math_gpu_test.cc
         )
 
-# TODO Remove the OLD_xxx variables above and add them to the variables for the local library target below instead
+# TODO Remove the CMake_xxx variables above and add them to the variables for the local library target below instead
 
 set(LIB_SOURCES_CPU
         dummy.cpp
@@ -87,7 +87,7 @@ endif()
 # TODO Once all source files are defined inside the local c10_utils_xxx targets,
 # it should be the job of the parent CMakeLists.txt to decide what to do with the target (i.e. link it to caffe2)
 # instead of us locally adding it to Caffe2_xxx variables.
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${OLD_LIB_SOURCES_CPU} $<TARGET_OBJECTS:c10_utils_cpu> PARENT_SCOPE)
-set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${OLD_LIB_SOURCES_GPU} $<TARGET_OBJECTS:c10_utils_gpu> PARENT_SCOPE)
-set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} ${OLD_TEST_SOURCES_CPU} PARENT_SCOPE)
-set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${OLD_TEST_SOURCES_GPU} PARENT_SCOPE)
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:c10_utils_cpu> PARENT_SCOPE)
+set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} $<TARGET_OBJECTS:c10_utils_gpu> PARENT_SCOPE)
+set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} PARENT_SCOPE)
+set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} PARENT_SCOPE)
