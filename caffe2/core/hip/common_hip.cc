@@ -299,7 +299,7 @@ namespace {
 class HipRuntimeFlagFlipper
 {
     public:
-    HipRuntimeFlagFlipper() { g_caffe2_has_hip_linked = true; }
+    HipRuntimeFlagFlipper() { internal::SetHipRuntimeFlag(); }
 };
 static HipRuntimeFlagFlipper g_flipper;
 } // namespace
