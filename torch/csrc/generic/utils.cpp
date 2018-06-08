@@ -16,4 +16,6 @@ void THPPointer<THPStorage>::free() {
 
 template class THPPointer<THPStorage>;
 
+#undef GENERATE_SPARSE
+
 #endif
