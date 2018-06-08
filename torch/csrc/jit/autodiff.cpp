@@ -32,12 +32,25 @@ bool isDifferentiable(Graph & g) {
                      static_cast<bool(*)(Node*)>(isDifferentiable));
 }
 
-bool outputNotRequiresGrad(Node * n) {
-  static std::unordered_set<Symbol> output_nograd = {
-    aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le
-  };
-  return output_nograd.count(n->kind()) > 0;
+
+bool outputRequiresGrad(Node* node, std::function<bool(Value*)> requires_grad) {
+  switch (node->kind()) {
+    case aten::le:
+    case aten::ge:
+    case aten::lt:
+    case aten::gt:
+    case aten::ne:
+    case aten::eq:
+      return false;
+    case aten::type_as:
+//type_as has two inputs, the second of which (setting type) might require grad, but it still won't affect the output of type_as requiring grad.
+      return requires_grad(node->inputs()[0]);
+    default:
+      return std::any_of(node->inputs().begin(), node->inputs().end(), requires_grad);
+  }
 }
+
+
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
@@ -194,9 +207,7 @@ static value_set findAllRequiresGradNodes(
   }
 
   for (Node * node : graph.nodes()) {
-    if (std::none_of(node->inputs().begin(), node->inputs().end(), requires_grad)) continue;
-    if (node->kind() == aten::type_as && !requires_grad(node->inputs()[0])) continue;
-    if (outputNotRequiresGrad(node)) continue;
+    if (!outputRequiresGrad(node, requires_grad)) continue;
     for (Value * output : node->outputs())
       requires_grad_set.emplace(output);
   }
@@ -291,10 +302,8 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   for (auto it = graph.nodes().rbegin(), end = graph.nodes().rend(); it != end; ++it) {
     Node *node = *it;
     auto inputs = node->inputs();
-    if (std::none_of(inputs.begin(), inputs.end(), requires_grad))
-      continue;
-    if (outputNotRequiresGrad(node)) continue;
-    if (node->kind() == aten::type_as && !requires_grad(inputs[0])) continue;
+    if (!outputRequiresGrad(node, requires_grad)) continue;
+
     value_list grad_inputs = gradientForNode(node, fmap(node->outputs(), get_grad));
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (std::size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {

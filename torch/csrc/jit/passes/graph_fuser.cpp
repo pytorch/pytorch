@@ -7,12 +7,6 @@ namespace torch { namespace jit {
 
 namespace {
 
-bool ignoreOutputType(Node * n) {
-  static std::unordered_set<Symbol>  op_list = {
-    aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le
-  };
-  return op_list.count(n->kind()) > 0;
-}
 
 
 
@@ -89,21 +83,18 @@ bool isSimpleMap(Node *node) {
   TensorType* expected_type = node->inputs()[0]->type()->cast<TensorType>();
   if (!expected_type)
     return false;
-  static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual, bool checkScalarType) {
-    TensorType* actual = _actual->cast<TensorType>();
-    return actual &&
-           (!checkScalarType || expected->scalarType() == actual->scalarType()) &&
+    static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual) {
+     TensorType* actual = _actual->cast<TensorType>();
+     return actual &&
            expected->device() == actual->device() &&
            expected->sizes() == actual->sizes();
   };
-//Don't check scalar types for type_as and comparison, allFloatIO is doing some checks.
-  bool checkScalarType = ((node->kind() != aten::type_as) && !(ignoreOutputType(node)));
   for (Value * val : node->inputs()) {
-    if (!equal_modulo_strides(expected_type, val->type(), checkScalarType))
+    if (!equal_modulo_strides(expected_type, val->type()))
       return false;
   }
   for (Value * val : node->outputs()) {
-    if (!equal_modulo_strides(expected_type, val->type(), checkScalarType))
+    if (!equal_modulo_strides(expected_type, val->type()))
       return false;
   }
   return true;
@@ -150,16 +141,25 @@ struct GraphFuser {
     return true;
   }
   bool allFloatIO(Node * node) {
-    if (!allFloatList(node->outputs())) return false;
-    if (!allFloatList(node->inputs())) return false;
-    return true;
+    return (allFloatList(node->inputs()) && allFloatList(node->outputs()));
   }
   bool isFusable(Node * node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup) return true;
-    if (ignoreOutputType(node)) return isSimpleMap(node) && allFloatList(node->inputs());
-    if (node->kind() == aten::type_as) return isSimpleMap(node) && allFloatList(node->outputs());
-    return isSimpleMap(node) && allFloatIO(node);
+    if (!isSimpleMap(node)) return false;
+    switch (node->kind()){
+      case aten::le:
+      case aten::ge:
+      case aten::lt:
+      case aten::gt:
+      case aten::ne:
+      case aten::eq:
+         return allFloatList(node->inputs());
+      case aten::type_as:
+         return allFloatList(node->outputs());
+      default:
+         return allFloatIO(node);
+    }
   }
 
   bool allOutputsHaveSameSize(Node * node) {

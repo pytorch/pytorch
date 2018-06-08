@@ -137,7 +137,7 @@ struct SymbolicVariable {
     return r;
   }
   SymbolicVariable type_as(const SymbolicVariable rhs) const {
-    return create(aten::type_as, {*this, rhs})[0].typeLike(rhs);
+    return create(aten::type_as, {*this, rhs})[0].typeLikeWithRhsScalarType(*this, rhs);
   }
   SymbolicVariable narrow(int dim, int64_t start, int64_t length) const {
     Node * n;
@@ -206,7 +206,16 @@ private:
   }
   SymbolicVariable typeLikeWithScalarType(SymbolicVariable other, at::ScalarType type) {
     if (auto other_type = other.v->type()->cast<TensorType>()){
-      auto new_type = other_type->toScalarType(type)->cast<TensorType>()->contiguous();
+      auto new_type = other_type->toScalarType(type)->contiguous();
+      v->setType(new_type);
+    }
+    return *this;
+  }
+  SymbolicVariable typeLikeWithRhsScalarType(SymbolicVariable other, SymbolicVariable rhs) {
+    auto other_type = other.v->type()->cast<TensorType>();
+    auto rhs_type = rhs.v->type()->cast<TensorType>();
+    if (other_type && rhs_type){
+      auto new_type = other_type->toScalarType(rhs_type->scalarType())->contiguous();
       v->setType(new_type);
     }
     return *this;
