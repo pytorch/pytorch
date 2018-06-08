@@ -34,7 +34,7 @@ cat >ci_scripts/build_pytorch.bat <<EOL
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install MKL
-if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl )
+if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/mkl_2018.2.185_no_tbb.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl )
 set CMAKE_INCLUDE_PATH=%cd%\\mkl\\include
 set LIB=%cd%\\mkl\\lib;%LIB
 

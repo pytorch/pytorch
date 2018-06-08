@@ -40,6 +40,13 @@ if(BUILD_CAFFE2)
   endif()
 endif()
 
+
+set(TBB_BUILD_TESTS OFF CACHE BOOL "")
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../third_party/tbb" ${CMAKE_BINARY_DIR}/tbb)
+include_directories("${CMAKE_CURRENT_LIST_DIR}/../third_party/tbb/include")
+list(APPEND Caffe2_DEPENDENCY_LIBS tbb_static)
+set_property(TARGET tbb_static PROPERTY POSITION_INDEPENDENT_CODE ON)
+
 # ---[ BLAS
 if(BUILD_ATEN)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
