@@ -3926,23 +3926,29 @@ class TestTorch(TestCase):
         self.assertEqual(X, Xhat, 1e-8, 'USV\' wrong')
 
     @staticmethod
-    def _test_window_function(self, torch_method, scipy_name):
-        for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
-            for periodic in [True, False]:
-                ref = torch.from_numpy(signal.get_window(scipy_name, size, fftbins=periodic))
-                self.assertEqual(torch_method(size, periodic=periodic), ref)
+    def _test_signal_window_functions(self, device='cpu'):
+        if not TEST_SCIPY:
+            raise unittest.SkipTest('Scipy not found')
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_hann_window(self):
-        self._test_window_function(self, torch.hann_window, 'hann')
+        def test(name):
+            torch_method = getattr(torch, name + '_window')
+            for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
+                for periodic in [True, False]:
+                    res = torch_method(size, periodic=periodic, device=device)
+                    ref = torch.from_numpy(signal.get_window(name, size, fftbins=periodic))
+                    self.assertEqual(res, ref)
+            with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
+                torch_method(3, layout=torch.sparse_coo)
+            with self.assertRaisesRegex(RuntimeError, r'floating point'):
+                torch_method(3, dtype=torch.long)
+            self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
+            self.assertFalse(torch_method(3).requires_grad)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_hamming_window(self):
-        self._test_window_function(self, torch.hamming_window, 'hamming')
+        for window in ['hann', 'hamming', 'bartlett', 'blackman']:
+            test(window)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_bartlett_window(self):
-        self._test_window_function(self, torch.bartlett_window, 'bartlett')
+    def test_signal_window_functions(self):
+        self._test_signal_window_functions(self)
 
     @skipIfNoLapack
     def test_inverse(self):
@@ -4106,11 +4112,9 @@ class TestTorch(TestCase):
         self._test_det_logdet_slogdet(self, lambda x: x)
 
     @staticmethod
-    def _test_fft_ifft_rfft_irfft(self, build_fn):
-        # the conv_fn to convert tensors can be slow in cuda tests, so we use
-        # a build_fn: sizes => tensor
+    def _test_fft_ifft_rfft_irfft(self, device='cpu'):
         def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
-            x = prepro_fn(build_fn(*sizes))
+            x = prepro_fn(torch.randn(*sizes, device=device))
             for normalized in (True, False):
                 res = x.fft(signal_ndim, normalized=normalized)
                 rec = res.ifft(signal_ndim, normalized=normalized)
@@ -4120,7 +4124,7 @@ class TestTorch(TestCase):
                 self.assertEqual(x, rec, 1e-8, 'ifft and fft')
 
         def _test_real(sizes, signal_ndim, prepro_fn=lambda x: x):
-            x = prepro_fn(build_fn(*sizes))
+            x = prepro_fn(torch.randn(*sizes, device=device))
             signal_numel = 1
             signal_sizes = x.size()[-signal_ndim:]
             for normalized, onesided in product((True, False), repeat=2):
@@ -4196,22 +4200,17 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):
-        def randn_double(*sizes):
-            return torch.DoubleTensor(*sizes).normal_()
-        self._test_fft_ifft_rfft_irfft(self, build_fn=randn_double)
+        self._test_fft_ifft_rfft_irfft(self)
 
     @staticmethod
-    def _test_stft(self, build_fn):
-        # the conv_fn to convert tensors can be slow in cuda tests, so we use
-        # a build_fn: sizes => tensor
-
+    def _test_stft(self, device='cpu'):
         def naive_stft(x, frame_length, hop, fft_size=None, normalized=False,
                        onesided=True, window=None, pad_end=0):
             if fft_size is None:
                 fft_size = frame_length
             x = x.clone()
             if window is None:
-                window = x.new(frame_length).fill_(1)
+                window = x.new_ones(frame_length)
             else:
                 window = window.clone()
             input_1d = x.dim() == 1
@@ -4260,9 +4259,9 @@ class TestTorch(TestCase):
 
         def _test(sizes, frame_length, hop, fft_size=None, normalized=False,
                   onesided=True, window_sizes=None, pad_end=0, expected_error=None):
-            x = build_fn(*sizes)
+            x = torch.randn(*sizes, device=device)
             if window_sizes is not None:
-                window = build_fn(*window_sizes)
+                window = torch.randn(*window_sizes, device=device)
             else:
                 window = None
             if expected_error is None:
@@ -4307,9 +4306,7 @@ class TestTorch(TestCase):
         _test((10,), 5, 4, window_sizes=(1, 1), expected_error=RuntimeError)
 
     def test_stft(self):
-        def randn_double(*sizes):
-            return torch.DoubleTensor(*sizes).normal_()
-        self._test_stft(self, build_fn=randn_double)
+        self._test_stft(self)
 
     @unittest.skip("Not implemented yet")
     def test_conv2(self):
