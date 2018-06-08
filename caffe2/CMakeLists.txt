@@ -6,6 +6,7 @@ include(../cmake/Codegen.cmake)
 # ---[ Shared build
 add_subdirectory(proto)
 add_subdirectory(core)
+add_subdirectory(core/dispatch)
 add_subdirectory(utils)
 
 # ---[ ATen build
@@ -61,7 +62,6 @@ if(BUILD_CAFFE2)
   # addressed yet.
   add_subdirectory(contrib)
   add_subdirectory(core/nomnigraph)
-  add_subdirectory(core/dispatch)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)
   endif()
