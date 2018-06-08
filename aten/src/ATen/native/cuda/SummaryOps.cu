@@ -2,8 +2,7 @@
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 
 namespace at {
-
-namespace cuda { namespace detail {
+namespace cuda {
 #define MIN_NUMBER_BINS_FOR_GLOBAL_MEM 5000
 #define FOR_KERNEL_LOOP(i, lim)                                      \
   for (IndexType i = blockIdx.x * blockDim.x + threadIdx.x; i < lim; \
@@ -118,18 +117,18 @@ __global__ void kernelHistogram1D(
          (MEMORY_TYPE == CUDAHistogramMemoryType::SHARED) ? sharedMem : 0, \
          at::globalContext().getCurrentCUDAStream()>>>(                    \
           aInfo, pInfo, bInfo, binsize, totalElements, WEIGHTS_OP);        \
-  AT_ASSERT(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
+  AT_ASSERTM(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
 
-#define HANDLE_SWITCH_CASE(mType, getOp)                                      \
-  switch (mType) {                                                            \
-    case CUDAHistogramMemoryType::SHARED:                                     \
-      HANDLE_CASE(CUDAHistogramMemoryType::SHARED, getOp);                    \
-      break;                                                                  \
-    case CUDAHistogramMemoryType::MULTI_BLOCK:                                \
-      HANDLE_CASE(CUDAHistogramMemoryType::MULTI_BLOCK, getOp);               \
-      break;                                                                  \
-    default:                                                                  \
-      HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, getOp);                    \
+#define HANDLE_SWITCH_CASE(mType, getOp)                        \
+  switch (mType) {                                              \
+    case CUDAHistogramMemoryType::SHARED:                       \
+      HANDLE_CASE(CUDAHistogramMemoryType::SHARED, getOp);      \
+      break;                                                    \
+    case CUDAHistogramMemoryType::MULTI_BLOCK:                  \
+      HANDLE_CASE(CUDAHistogramMemoryType::MULTI_BLOCK, getOp); \
+      break;                                                    \
+    default:                                                    \
+      HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, getOp);      \
   }
 
 /*
@@ -168,7 +167,10 @@ bool CUDA_tensor_histogram(
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  if (!getApplyGrid(totalElements, grid)) {
+  int64_t curDevice = current_device();
+  if (curDevice == -1)
+    return false;
+  if (!getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
 #if CUDA_VERSION < 9000
@@ -192,10 +194,7 @@ bool CUDA_tensor_histogram(
   } else {
     memType = CUDAHistogramMemoryType::GLOBAL;
   }
-#ifdef CUDA_HIST_MEM_TYPE_OVERRIDE // TODO: remove
-  // added for benchmark purpose
-  memType = static_cast<CUDAHistogramMemoryType>(CUDA_HIST_MEM_TYPE_OVERRIDE);
-#endif
+
   // alloc memory for MULTI_BLOCK
   using IndexType = int64_t;
   auto aInfo = detail::getTensorInfo<output_t, IndexType>(a);
@@ -226,7 +225,7 @@ bool CUDA_tensor_histogram(
 #undef HANDLE_SWITCH_CASE
 #undef FOR_KERNEL_LOOP
 #undef MIN_NUMBER_BINS_FOR_GLOBAL_MEM
-}} // namespace cuda::detail
+} // namespace cuda
 
 namespace {
 ///////////////// bincount /////////////////
@@ -256,11 +255,11 @@ Tensor _bincount_cuda_template(
   Tensor output;
   if (has_weights) {
     output = zeros(weights.type(), {nbins});
-    auto ret = cuda::detail::CUDA_tensor_histogram<weights_t, input_t, true>(
+    auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
         output, self, weights, nbins, 1);
   } else {
     output = zeros(CUDA(kLong), {nbins});
-    auto ret = cuda::detail::CUDA_tensor_histogram<int64_t, input_t, false>(
+    auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, 1);
   }
   return output;
@@ -268,8 +267,10 @@ Tensor _bincount_cuda_template(
 } // namespace
 
 namespace native {
-Tensor
-_bincount_cuda(const Tensor& self, const Tensor& weights, int64_t minlength) {
+Tensor _bincount_cuda(
+    const Tensor& self,
+    const Tensor& weights,
+    int64_t minlength) {
   return AT_DISPATCH_INTEGRAL_TYPES(self.type(), "bincount", [&] {
     const auto scalar = weights.type().scalarType();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
