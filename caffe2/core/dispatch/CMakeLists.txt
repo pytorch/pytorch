@@ -1,5 +1,3 @@
-project(c10_dispatch CXX C)
-
 set(LIB_SOURCES
         dummy.cpp
 )
@@ -8,15 +6,15 @@ set(TEST_SOURCES
         dummy_test.cpp
 )
 
-add_library(${PROJECT_NAME} OBJECT ${LIB_SOURCES})
-target_enable_style_warnings(${PROJECT_NAME})
+add_library(c10_dispatch OBJECT ${LIB_SOURCES})
+target_enable_style_warnings(c10_dispatch)
 
 if(BUILD_TEST)
-    add_executable(${PROJECT_NAME}_test ${TEST_SOURCES} $<TARGET_OBJECTS:${PROJECT_NAME}>)
-    add_test(NAME ${PROJECT_NAME}_test COMMAND $<TARGET_FILE:${PROJECT_NAME}_test>)
-    target_enable_style_warnings(${PROJECT_NAME}_test)
-    target_link_libraries(${PROJECT_NAME}_test gtest_main)
+    add_executable(c10_dispatch_test ${TEST_SOURCES} $<TARGET_OBJECTS:c10_dispatch>)
+    add_test(NAME c10_dispatch_test COMMAND $<TARGET_FILE:c10_dispatch_test>)
+    target_enable_style_warnings(c10_dispatch_test)
+    target_link_libraries(c10_dispatch_test gtest_main)
     if(INSTALL_TEST)
-        install(TARGETS ${PROJECT_NAME}_test DESTINATION test)
+        install(TARGETS c10_dispatch_test DESTINATION test)
     endif()
 endif()

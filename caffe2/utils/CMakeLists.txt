@@ -1,5 +1,3 @@
-project(c10_utils CXX C)
-
 set(OLD_LIB_SOURCES_CPU
         utils/proto_utils.cc
         utils/murmur_hash3.cc
@@ -61,27 +59,27 @@ set(LIB_SOURCES_GPU
         )
 
 
-add_library(${PROJECT_NAME}_cpu OBJECT ${LIB_SOURCES_CPU})
-target_enable_style_warnings("${PROJECT_NAME}_cpu")
+add_library(c10_utils_cpu OBJECT ${LIB_SOURCES_CPU})
+target_enable_style_warnings("c10_utils_cpu")
 
-add_library(${PROJECT_NAME}_gpu OBJECT ${LIB_SOURCES_GPU})
-target_enable_style_warnings("${PROJECT_NAME}_gpu")
+add_library(c10_utils_gpu OBJECT ${LIB_SOURCES_GPU})
+target_enable_style_warnings("c10_utils_gpu")
 
 if(BUILD_TEST)
-  add_executable(${PROJECT_NAME}_cpu_test ${TEST_SOURCES_CPU} $<TARGET_OBJECTS:${PROJECT_NAME}>)
-  add_test(NAME ${PROJECT_NAME}_cpu_test COMMAND $<TARGET_FILE:${PROJECT_NAME}_cpu_test>)
-  #target_enable_style_warnings(${PROJECT_NAME}_cpu_test)
-  target_link_libraries(${PROJECT_NAME}_cpu_test gtest_main)
+  add_executable(c10_utils_cpu_test ${TEST_SOURCES_CPU} $<TARGET_OBJECTS:c10_utils_cpu>)
+  add_test(NAME c10_utils_cpu_test COMMAND $<TARGET_FILE:c10_utils_cpu_test>)
+  target_enable_style_warnings(c10_utils_cpu_test)
+  target_link_libraries(c10_utils_cpu_test gtest_main)
   if(INSTALL_TEST)
-    install(TARGETS ${PROJECT_NAME}_cpu_test DESTINATION test)
+    install(TARGETS c10_utils_cpu_test DESTINATION test)
   endif()
 
-  add_executable(${PROJECT_NAME}_gpu_test ${TEST_SOURCES_GPU} $<TARGET_OBJECTS:${PROJECT_NAME}>)
-  add_test(NAME ${PROJECT_NAME}_gpu_test COMMAND $<TARGET_FILE:${PROJECT_NAME}_gpu_test>)
-  #target_enable_style_warnings(${PROJECT_NAME}_gpu_test)
-  target_link_libraries(${PROJECT_NAME}_gpu_test gtest_main)
+  add_executable(c10_utils_gpu_test ${TEST_SOURCES_GPU} $<TARGET_OBJECTS:c10_utils_gpu>)
+  add_test(NAME c10_utils_gpu_test COMMAND $<TARGET_FILE:c10_utils_gpu_test>)
+  target_enable_style_warnings(c10_utils_gpu_test)
+  target_link_libraries(c10_utils_gpu_test gtest_main)
   if(INSTALL_TEST)
-    install(TARGETS ${PROJECT_NAME}_gpu_test DESTINATION test)
+    install(TARGETS c10_utils_gpu_test DESTINATION test)
   endif()
 endif()
 

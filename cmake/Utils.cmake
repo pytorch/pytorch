@@ -282,9 +282,10 @@ function(target_enable_style_warnings TARGET)
             -Wpedantic
             -Wno-gnu-zero-variadic-macro-arguments
             -Wundef
-            # TODO Add -Werror on CI
-            #-Werror
             )
+    if ($ENV{WERROR})
+      set(WARNING_OPTIONS "${WARNING_OPTIONS} -Werror")
+    endif()
   endif()
   target_compile_options(${TARGET} PRIVATE ${WARNING_OPTIONS})
-endfunction(target_enable_style_warnings)
+endfunction()
