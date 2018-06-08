@@ -43,7 +43,7 @@
 #endif
 
 #ifdef WITH_C10D
-#include "torch/csrc/c10d/c10d.h"
+#include "torch/csrc/distributed/c10d/c10d.h"
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -492,7 +492,7 @@ static PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, THDPModule_methods());
 #endif
 #ifdef WITH_C10D
-  THPUtils_addPyMethodDefs(methods, torch::c10d::python_functions());
+  THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #endif
 
 #if PY_MAJOR_VERSION == 2

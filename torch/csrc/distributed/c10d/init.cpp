@@ -10,6 +10,7 @@
 #include "torch/csrc/utils/pybind.h"
 
 namespace torch {
+namespace distributed {
 namespace c10d {
 
 namespace {
@@ -18,7 +19,7 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
-  auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.c10d"));
+  auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed.c10d"));
   if (!c10d_module) {
     throw python_error();
   }
@@ -120,4 +121,5 @@ PyMethodDef* python_functions() {
 }
 
 } // namespace c10d
+} // namespace distributed
 } // namespace torch

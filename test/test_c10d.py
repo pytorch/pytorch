@@ -6,7 +6,7 @@ import unittest
 from functools import wraps
 
 import torch
-import torch.c10d as c10d
+import torch.distributed.c10d as c10d
 
 from common import TestCase
 
