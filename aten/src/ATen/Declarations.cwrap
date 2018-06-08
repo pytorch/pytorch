@@ -2714,18 +2714,6 @@
   name: addmm_
   return: self
   options:
-    - cname: addmm
-      arguments:
-      - THTensor* self
-      - arg: real beta
-        default: AS_REAL(1)
-        kwarg_only: True
-      - THTensor* self
-      - arg: real alpha
-        default: AS_REAL(1)
-        kwarg_only: True
-      - THTensor* mat1
-      - THTensor* mat2
     - sparse: True
       cname: spaddmm
       aten_dense_sparse: True
@@ -2740,6 +2728,23 @@
           kwarg_only: True
         - THSTensor* mat1
         - THTensor* mat2
+]]
+[[
+  name: addmm_
+  return: self
+  options:
+    - cname: addmm
+      arguments:
+      - THTensor* self
+      - arg: real beta
+        default: AS_REAL(1)
+        kwarg_only: True
+      - THTensor* self
+      - arg: real alpha
+        default: AS_REAL(1)
+        kwarg_only: True
+      - THTensor* mat1
+      - THTensor* mat2
 ]]
 [[
   name: _addmv

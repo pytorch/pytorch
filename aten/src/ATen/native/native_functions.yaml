@@ -1346,6 +1346,10 @@
   variants: function
   dispatch: addmm_sparse_dense_cpu
 
+- func: native_addmm_(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch: addmm_sparse_dense_cpu_
+
 - func: addmm_out(Tensor result, Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
 - func: addmm(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor

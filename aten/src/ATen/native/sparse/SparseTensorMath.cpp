@@ -475,6 +475,16 @@ Tensor addmm_sparse_dense_cpu(
   return r;
 }
 
+Tensor& addmm_sparse_dense_cpu_(
+    Tensor& t,
+    SparseTensorRef sparse,
+    const Tensor& dense,
+    Scalar beta,
+    Scalar alpha
+) {
+  return addmm_out_sparse_dense_cpu(t, t, sparse, dense, beta, alpha);
+}
+
 SparseTensor& sspaddmm_out_sparse_cpu(
     SparseTensor& r,
     Scalar beta,

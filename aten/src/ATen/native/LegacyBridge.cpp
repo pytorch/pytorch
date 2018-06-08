@@ -188,7 +188,10 @@ Tensor& addmm_out(Tensor& result, const Tensor& self, SparseTensorRef mat1, cons
 Tensor addmm(const Tensor& self, SparseTensorRef mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
   Tensor r = self.type().tensor();
   return native::addmm_out(r, self, mat1, mat2, beta, alpha);
-  return r;
+}
+
+Tensor& addmm_(Tensor& self, SparseTensorRef mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  return native::addmm_out(self, self, mat1, mat2, beta, alpha);
 }
 
 }} // namespace at::native
