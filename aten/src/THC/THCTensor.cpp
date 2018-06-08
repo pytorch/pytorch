@@ -28,6 +28,31 @@ THLongStorage *THCTensor_newSizeOf(THCState *state, _THCTensor *self) {
   return size;
 }
 
+_THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
+  switch(scalar_type) {
+    case at::ScalarType::Byte:
+      return THCudaByteTensor_new(state);
+    case at::ScalarType::Char:
+      return THCudaCharTensor_new(state);
+    case at::ScalarType::Short:
+      return THCudaShortTensor_new(state);
+    case at::ScalarType::Int:
+      return THCudaIntTensor_new(state);
+    case at::ScalarType::Long:
+      return THCudaLongTensor_new(state);
+#ifdef CUDA_HALF_TENSOR
+    case at::ScalarType::Half:
+      return THCudaHalfTensor_new(state);
+#endif
+    case at::ScalarType::Float:
+      return THCudaTensor_new(state);
+    case at::ScalarType::Double:
+      return THCudaDoubleTensor_new(state);
+    default:
+      AT_ERROR("unexpected ScalarType: ", at::toString(scalar_type));
+  }
+}
+
 void THCTensor_resize(THCState *state, _THCTensor *self, THLongStorage *size, THLongStorage *stride) {
   THArgCheck(size != NULL, 2, "invalid size");
   if(stride)
