@@ -290,6 +290,10 @@ for arg in "$@"; do
         pushd "$TORCH_LIB_DIR"
         build $arg
         popd
+    elif [[ "$arg" == "c10d" ]]; then
+        pushd "$TORCH_LIB_DIR"
+        build c10d
+        popd
     else
         pushd "$THIRD_PARTY_DIR"
         build $arg
