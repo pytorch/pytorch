@@ -19,7 +19,8 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
     const std::vector<at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export = false,
-    bool export_raw_ir = false);
+    bool export_raw_ir = false,
+    bool aten_fallback = false);
 
 // For testing purposes
 std::string PrettyPrintExportedGraph(
@@ -27,6 +28,7 @@ std::string PrettyPrintExportedGraph(
     const std::vector<at::Tensor> & initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
-    bool export_raw_ir);
+    bool export_raw_ir,
+    bool aten_fallback = false);
 
 }}

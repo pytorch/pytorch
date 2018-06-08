@@ -94,7 +94,7 @@ def get_fn(file_name, script_path):
 
 class JitTestCase(TestCase):
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
-        torch.onnx._optimize_trace(trace, aten=False)
+        torch.onnx._optimize_trace(trace, aten=False, aten_fallback=False)
         self.assertExpectedGraph(trace, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
@@ -3027,7 +3027,7 @@ class TestScript(JitTestCase):
 
 
 # Smoke tests for export methods
-class TestPytorchExportModes(unittest.TestCase):
+class TestPytorchExportModes(JitTestCase):
     class MyModel(nn.Module):
         def __init__(self):
             super(TestPytorchExportModes.MyModel, self).__init__()
@@ -3063,6 +3063,20 @@ class TestPytorchExportModes(unittest.TestCase):
         torch.onnx._export(torch_model, (fake_input), d, verbose=False,
                            export_type=torch.onnx.ExportTypes.DIRECTORY)
         shutil.rmtree(d)
+
+    def test_aten_fallback(self):
+        class ModelWithAtenNotONNXOp(nn.Module):
+            def forward(self, x, y):
+                abcd = x + y
+                defg = torch.qr(abcd)
+                return defg
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+        f = io.BytesIO()
+        exported = torch.onnx._export_to_pretty_string(
+            ModelWithAtenNotONNXOp(), (x, y), f, aten_fallback=True)
+        self.assertExpected(exported)
 
 
 if __name__ == '__main__':
