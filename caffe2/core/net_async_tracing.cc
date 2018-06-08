@@ -48,30 +48,10 @@ void Tracer::recordEvent(const TracerEvent& event) {
 
 // Special handling of shard blob annotations
 std::string Tracer::opTraceName(const OperatorBase* op) {
-  if (!op->has_debug_def()) {
-    return op->type();
-  }
-
-  const auto& op_def = op->debug_def();
-  std::unordered_set<int> shards;
-  const std::string kShard = "shard:";
-  int shard = 0;
-  for (const auto& input : op_def.input()) {
-    auto pos = input.find(kShard);
-    if (pos != std::string::npos) {
-      shard = input[pos + kShard.length()] - '0';
-      shards.insert(shard);
-    }
-  }
-  for (const auto& output : op_def.output()) {
-    auto pos = output.find(kShard);
-    if (pos != std::string::npos) {
-      shard = output[pos + kShard.length()] - '0';
-      shards.insert(shard);
-    }
-  }
-  if (shards.size() == 1) {
-    return op->type() + ":" + caffe2::to_string(shard);
+  int uniqueShardId =
+      op->has_debug_def() ? getUniqueShardId(op->debug_def()) : -1;
+  if (uniqueShardId != -1) {
+    return op->type() + ":" + caffe2::to_string(uniqueShardId);
   } else {
     return op->type();
   }
@@ -325,6 +305,42 @@ TracerGuard::~TracerGuard() {
     event_.timestamp_ = (long)caffe2::round(tracer_->timer_.MicroSeconds());
     tracer_->recordEvent(event_);
   }
+}
+
+// Extract the shard id from name of the form "...shard:123..."
+// Return -1 if there is no shard found
+int extractShardId(const std::string& name) {
+  const std::string kShard = "shard:";
+  auto pos = name.find(kShard);
+  if (pos != std::string::npos) {
+    pos += kShard.length();
+    int shardId = 0;
+    while (pos < name.length() && isdigit(name[pos])) {
+      shardId = shardId * 10 + (name[pos] - '0');
+      pos++;
+    }
+    return shardId;
+  } else {
+    return -1;
+  }
+}
+
+// Return unique shard id, or -1 if it is not unique.
+int getUniqueShardId(const OperatorDef &op_def) {
+  int uniqueShardId = -1;
+  auto names = {op_def.input(), op_def.output()};
+  for (const auto& name : names) {
+    for (const auto& input : name) {
+      int shardId = extractShardId(input);
+      if (shardId != -1) {
+        if (uniqueShardId != -1) {
+          return -1;
+        }
+        uniqueShardId = shardId;
+      }
+    }
+  }
+  return uniqueShardId;
 }
 
 bool isTraceableNet(const std::string& net_name) {
