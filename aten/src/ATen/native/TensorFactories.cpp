@@ -29,7 +29,7 @@ Tensor& arange_out(Tensor& result, Scalar end) {
   return at::_arange_out(result, end);
 }
 
-Tensor dim_arange(const Tensor& like, int64_t dim) {
+Tensor _dim_arange(const Tensor& like, int64_t dim) {
   return like.type().toScalarType(at::kLong)._arange(like.size(dim));
 }
 

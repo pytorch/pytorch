@@ -110,7 +110,7 @@
 - func: arange_out(Tensor result, Scalar end) -> Tensor
   variants: function
 
-- func: dim_arange(Tensor like, int64_t dim) -> Tensor
+- func: _dim_arange(Tensor like, int64_t dim) -> Tensor
   variants: function
 
 # `argmin` and `argmax` are exposed in C++ but not in Python, where we only
