@@ -718,6 +718,7 @@
 
 - name: kl_div_forward(Tensor self, Tensor target, bool size_average, bool reduce)
   self: kl_div_backward(grad, self, target, size_average, reduce)
+  target: kl_div_target_backward(grad, self, target, size_average, reduce)
 
 - name: l1_loss_forward(Tensor self, Tensor target, bool size_average, bool reduce)
   self: l1_loss_backward(grad, self, target, size_average, reduce)
@@ -963,6 +964,7 @@
 - name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce)
   grad_output: kl_div_double_backward_grad_output(grad, self, target, size_average, reduce)
   self: zeros_like(grad)
+  target: zeros_like(grad)
 
 - name: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce)
   grad_output: l1_loss_double_backward_grad_output(grad, self, target, size_average, reduce)
