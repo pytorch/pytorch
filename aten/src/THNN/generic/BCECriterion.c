@@ -4,6 +4,13 @@
 
 #define EPS 1e-12
 
+static inline real safe_log(real a) {
+  if (a == 0.) {
+    return log(EPS);
+  }
+  return log(a);
+}
+
 void THNN_(BCECriterion_updateOutput)(
     THNNState *state,
     THTensor *input,
@@ -24,7 +31,7 @@ void THNN_(BCECriterion_updateOutput)(
         THAssertMsg(x >= 0. && x <= 1.,
           "input value should be between 0~1, but got %f",
 		      (double) x);
-		    *output_data = -(log(x + EPS) * y + log(1. - x + EPS) * (1. - y));
+		    *output_data = -(safe_log(x) * y + safe_log(1. - x) * (1. - y));
     );
 		if (weights) {
       THTensor_(cmul)(output, output, weights);
@@ -43,7 +50,7 @@ void THNN_(BCECriterion_updateOutput)(
       THAssertMsg(x >= 0. && x <= 1.,
         "input value should be between 0~1, but got %f",
 		  (double) x);
-      sum -= (log(x + EPS) * y + log(1. - x + EPS) * (1. - y)) * w;
+      sum -= (safe_log(x) * y + safe_log(1. - x) * (1. - y)) * w;
     );
   } else {
     TH_TENSOR_APPLY2(real, input, real, target,
@@ -52,7 +59,7 @@ void THNN_(BCECriterion_updateOutput)(
       THAssertMsg(x >= 0. && x <= 1.,
         "input value should be between 0~1, but got %f",
 		  (double) x);
-      sum -= log(x + EPS) * y + log(1. - x + EPS) * (1. - y);
+      sum -= safe_log(x) * y + safe_log(1. - x) * (1. - y);
     );
   }
 

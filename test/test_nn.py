@@ -4116,6 +4116,15 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
+    def test_bce_loss_always_nonnegative(self):
+        target = torch.ones(5)
+        input = torch.ones(5)
+        self.assertEqual((nn.BCELoss()(input, target) < 0).sum(), 0)
+
+        target = torch.zeros(5)
+        input = torch.zeros(5)
+        self.assertEqual((nn.BCELoss()(input, target) < 0).sum(), 0)
+
     def test_bce_with_logits_raises_if_target_and_input_are_different_size(self):
         target = torch.rand(5)
         input = torch.rand(5, 1)
