@@ -7,7 +7,7 @@
 #include <string>
 
 /*
- * This header adds some utils with C++14 and C++17 functionality
+ * This header adds some polyfills with C++14 and C++17 functionality
  */
 
 namespace c10 { namespace guts {

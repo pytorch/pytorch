@@ -8,6 +8,10 @@
 *  - remove std::swappable special case because that doesn't work with MSVC
 *  - constexpr more things
 *  - add some features like prepend/tail
+*
+* If using std::array at runtime, feel free to either keep using std::array or use this one - it doesn't really matter.
+* For compile time computations, this one here is preferred because std::array in C++11
+* misses some constexpr specifiers, forcing these methods to be called at runtime instead of compile time.
 */
 
 // Copyright (C) 2007-2017 Free Software Foundation, Inc.

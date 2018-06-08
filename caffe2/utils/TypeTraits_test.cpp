@@ -1,4 +1,4 @@
-#include "TypeTraits.h"
+#include <caffe2/utils/TypeTraits.h>
 #include <gtest/gtest.h>
 
 using namespace c10::guts;

@@ -3,7 +3,7 @@
 #include <type_traits>
 #include <array>
 #include <functional>
-#include "TypeList.h"
+#include <caffe2/utils/TypeList.h>
 
 namespace c10 { namespace guts {
 
