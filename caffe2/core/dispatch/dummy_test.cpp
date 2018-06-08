@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <c10/dummy.h>
+#include <caffe2/core/dispatch/dummy.h>
 
 TEST(DummyTest, dummy) {
     EXPECT_TRUE(true);
