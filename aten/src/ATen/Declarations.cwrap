@@ -2373,7 +2373,7 @@
         - THTensor* other
 ]]
 [[
-  name: div
+  name: th_div
   variants:
     - method
     - function
@@ -2386,6 +2386,14 @@
           output: True
         - THTensor* self
         - real other
+]]
+[[
+  name: div
+  variants:
+    - method
+    - function
+  return: argument 0
+  options:
     - cname: cdiv
       arguments:
         - arg: THTensor* result
@@ -2395,7 +2403,7 @@
         - THTensor* other
 ]]
 [[
-  name: div_
+  name: th_div_
   return: argument 0
   options:
     - cname: div
@@ -2404,6 +2412,11 @@
         - THTensor* self
         - THTensor* self
         - real other
+]]
+[[
+  name: div_
+  return: argument 0
+  options:
     - cname: cdiv
       arguments:
         - THTensor* self

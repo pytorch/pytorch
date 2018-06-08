@@ -98,7 +98,7 @@ SparseTensor pow_sparse(const SparseTensor& t, Scalar value) {
   return r;
 }
 
-SparseTensor& div_out_sparse(SparseTensor& r, const SparseTensor& t, Scalar value) {
+SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
   if (isSameTensor(r, t)) {
     r._values().div_(value);
   } else {
@@ -109,6 +109,12 @@ SparseTensor& div_out_sparse(SparseTensor& r, const SparseTensor& t, Scalar valu
     _get_sparse_impl(r)->set_nnz(t._nnz());
     _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
   }
+  return r;
+}
+
+SparseTensor div_sparse_scalar(const SparseTensor& t, Scalar src) {
+  SparseTensor r = t.type().tensor();
+  div_out_sparse_scalar(r, t, src);
   return r;
 }
 

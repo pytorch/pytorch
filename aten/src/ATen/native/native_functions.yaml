@@ -1317,3 +1317,22 @@
 - func: mul_(Tensor self, Tensor other) -> Tensor
 
 - func: mul_(Tensor self, Scalar other) -> Tensor
+
+
+
+- func: native_div_out(Tensor result, Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch: div_out_sparse_scalar
+
+# See Note [foo/foo_out workaround]
+- func: native_div(Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch: div_sparse_scalar
+
+- func: div_out(Tensor result, Tensor self, Scalar other) -> Tensor
+  variants: function
+
+- func: div(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: div_(Tensor self, Scalar other) -> Tensor

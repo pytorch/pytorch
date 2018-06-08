@@ -158,4 +158,23 @@ Tensor& mul_(Tensor& self, Scalar other) {
   return native::mul_out(self, self, other);
 }
 
+
+Tensor& div_out(Tensor& result, const Tensor& self, Scalar other) {
+  if (_has_native(self)) {
+    return native_div_out(result, self, other);
+  } else {
+    return th_div_out(result, self, other);
+  }
+}
+
+Tensor div(const Tensor& self, Scalar other) {
+  Tensor r = self.type().tensor();
+  return native::div_out(r, self, other);
+  return r;
+}
+
+Tensor& div_(Tensor& self, Scalar other) {
+  return native::div_out(self, self, other);
+}
+
 }} // namespace at::native
