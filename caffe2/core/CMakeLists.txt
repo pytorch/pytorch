@@ -26,6 +26,10 @@ exclude(Caffe2_HIP_SRCS "${Caffe2_HIP_SRCS}" ${tmp})
 
 # ---[ CPU files.
 file(GLOB tmp *.cc)
+# Manually remove the cudnn files since we might be using USE_CUDNN=OFF
+# TODO: when we move to explicit file list, this would not be needed.
+file(GLOB tmp_cudnn *_cudnn.cc)
+exclude(tmp "${tmp}" ${tmp_cudnn})
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
 # exclude test files and gpu files
 file(GLOB tmp *_test.cc)
