@@ -15,9 +15,9 @@ include(CMakeInitializeConfigs)
 # Relies on CMAKE_INSTALL_PREFIX to be set to ../tmp_install.
 # It then finds $PREFIX/share/cmake/ATen/ATenConfig.cmake,
 # which defines ATEN_INCLUDE_DIR and ATEN_LIBRARIES.
-find_package(ATen REQUIRED)
-if(NOT ATen_FOUND)
-  message(FATAL_ERROR "ATen not found")
+find_package(Caffe2 REQUIRED)
+if(NOT Caffe2_FOUND)
+  message(FATAL_ERROR "Caffe2 not found")
 endif()
 
 find_package(Gloo REQUIRED)
@@ -39,12 +39,6 @@ if(NOT CUDA_FOUND)
   message(FATAL_ERROR "CUDA not found")
 endif()
 
-set(CUDA_PROPAGATE_HOST_FLAGS OFF)
-if (NOT MSVC)
-  list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
-endif()
-
 set(C10D_SRCS
   Utils.cpp
   Store.cpp
@@ -55,13 +49,17 @@ set(C10D_SRCS
   )
 
 add_library(c10d ${C10D_SRCS})
-target_compile_options(c10d PUBLIC "-std=c++11")
-target_include_directories(c10d PUBLIC ${ATEN_INCLUDE_DIR})
-target_link_libraries(c10d PUBLIC ${ATEN_LIBRARIES})
-target_include_directories(c10d PUBLIC ${CUDA_INCLUDE_DIRS})
-target_link_libraries(c10d PUBLIC ${CUDA_LIBRARIES})
+target_compile_options(c10d PUBLIC
+  -Wall
+  -Wextra
+  -Wno-unused-parameter
+  -Wno-missing-field-initializers
+  -Wno-write-strings
+  -Wno-unknown-pragmas
+  )
+target_link_libraries(c10d PUBLIC caffe2_gpu)
 
-# c10d links to ATen, but the ATen targets don't add TH/THC to the include path
+# c10d links to Caffe2/ATen, but the targets don't add TH/THC to the include path
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/TH)
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/THC)
 

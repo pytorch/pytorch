@@ -255,7 +255,7 @@ Tracer::~Tracer() {
   renameThreads();
   std::stringstream serialized;
   serialized << "[\n";
-  for (auto idx = 0; idx < events_.size(); ++idx) {
+  for (size_t idx = 0; idx < events_.size(); ++idx) {
     serialized << serializeEvent(events_[idx]);
     if (idx != events_.size() - 1) {
       serialized << ",\n";

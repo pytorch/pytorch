@@ -1601,7 +1601,7 @@ void RandUniform<float, CPUContext>(
     float* r,
     CPUContext* context) {
   std::uniform_real_distribution<float> distribution(a, b);
-  for (auto i = 0; i < n; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }
 }
@@ -1614,7 +1614,7 @@ void RandUniform<int, CPUContext>(
     int* r,
     CPUContext* context) {
   std::uniform_int_distribution<int> distribution(a, b);
-  for (auto i = 0; i < n; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }
 }
@@ -1659,7 +1659,7 @@ void RandGaussian<float, CPUContext>(
     float* r,
     CPUContext* context) {
   std::normal_distribution<float> distribution(mean, std);
-  for (auto i = 0; i < n; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }
 }

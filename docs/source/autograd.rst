@@ -73,6 +73,15 @@ Tensor autograd functions
 .. autoclass:: Function
     :members:
 
+.. _grad-check:
+
+Numerical gradient checking
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autofunction:: gradcheck
+
+.. autofunction:: gradgradcheck
+
 Profiler
 ^^^^^^^^
 

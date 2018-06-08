@@ -18,7 +18,7 @@ FUNCTION_DECLARATION = CodeTemplate("""\
 struct ${op} : public ${superclass} {
   using ${superclass}::${superclass};
   variable_list apply(const variable_list& grads) override;
-  std::string name() override { return "${op}"; }
+  std::string name() const override { return "${op}"; }
   void release_variables() override {
     ${release_variables}
   }
@@ -61,6 +61,12 @@ if (should_compute_output({ ${name}_ix })) {
   auto grad_result = ${derivative};
   copy_range(grad_inputs, ${name}_ix, grad_result);
 }
+""")
+
+DERIVATIVE_MULTI_COPY_RANGE = CodeTemplate("""\
+  if (should_compute_output({ ${name}_ix })) {
+    copy_range(grad_inputs, ${name}_ix, std::get<${i}>(grad_result));
+  }
 """)
 
 DERIVATIVE_MULTI = CodeTemplate("""\
@@ -173,7 +179,7 @@ def process_function(func):
             idx_ranges = ', '.join("{}_ix".format(n) for n in var_names)
             copy_ranges = []
             for i, n in enumerate(var_names):
-                copy_ranges.append("copy_range(grad_inputs, {}_ix, std::get<{}>(grad_result));".format(n, i))
+                copy_ranges.append(DERIVATIVE_MULTI_COPY_RANGE.substitute(name=n, i=i))
             return DERIVATIVE_MULTI.substitute(
                 idx_ranges=idx_ranges, copy_ranges=copy_ranges,
                 derivative=formula,

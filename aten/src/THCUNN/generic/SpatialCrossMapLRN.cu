@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/SpatialCrossMapLRN.cu"
 #else
 
-void LRNforward(THCState* state, THCTensor* input, THCTensor* output,
+void THNN_(LRNforward)(THCState* state, THCTensor* input, THCTensor* output,
     THCTensor* scale, int local_size, accreal alpha_, accreal beta_, accreal k_)
 {
   real alpha = ScalarConvert<accreal, real>::to(alpha_);
@@ -47,7 +47,7 @@ void LRNforward(THCState* state, THCTensor* input, THCTensor* output,
 }
 
 
-void LRNbackward(THCState* state, THCTensor* input, THCTensor* output,
+void THNN_(LRNbackward)(THCState* state, THCTensor* input, THCTensor* output,
     THCTensor* gradOutput, THCTensor* gradInput, THCTensor* scale,
     int local_size, accreal alpha_, accreal beta_, accreal k_)
 {
@@ -101,7 +101,7 @@ void THNN_(SpatialCrossMapLRN_updateOutput)(
     accreal beta,
     accreal k)
 {
-  LRNforward(state, input, output, scale, size, alpha, beta, k);
+  THNN_(LRNforward)(state, input, output, scale, size, alpha, beta, k);
 }
 
 void THNN_(SpatialCrossMapLRN_updateGradInput)(
@@ -116,7 +116,7 @@ void THNN_(SpatialCrossMapLRN_updateGradInput)(
     accreal beta,
     accreal k)
 {
-  LRNbackward(state, input, output, gradOutput, gradInput, scale, size, alpha, beta, k);
+  THNN_(LRNbackward)(state, input, output, gradOutput, gradInput, scale, size, alpha, beta, k);
 }
 
 #endif

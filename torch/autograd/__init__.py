@@ -9,7 +9,7 @@ import warnings
 
 from .variable import Variable
 from .function import Function, NestedIOFunction
-from .gradcheck import gradcheck
+from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from . import profiler
 

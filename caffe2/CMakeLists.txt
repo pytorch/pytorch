@@ -8,8 +8,6 @@ if(BUILD_ATEN)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)
-  # Disable contrib for root-level build
-  set(ATEN_NO_CONTRIB ON)
   add_subdirectory(../aten aten)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
@@ -177,6 +175,7 @@ if(BUILD_CAFFE2)
 endif()
 
 # Compile exposed libraries.
+list(APPEND Caffe2_CPU_SRCs $<TARGET_OBJECTS:c10>)
 add_library(caffe2 ${Caffe2_CPU_SRCS})
 if (BUILD_CAFFE2)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
@@ -291,7 +290,9 @@ if(BUILD_CAFFE2)
         target_compile_features(${test_name} PRIVATE cxx_range_for)
       endif()
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
-      install(TARGETS ${test_name} DESTINATION test)
+      if (INSTALL_TEST)
+        install(TARGETS ${test_name} DESTINATION test)
+      endif()
     endforeach()
 
     if(USE_ROCM)

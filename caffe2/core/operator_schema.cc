@@ -286,7 +286,7 @@ DEFINE_STANDARG_ARG(IsTest, is_test)
 #undef DEFINE_STANDARG_ARG
 
 OpSchema& OpSchema::Input(const int n, const char* name, const char* description) {
-  if (input_desc_.size() <= n) {
+  if (input_desc_.size() <= (unsigned)n) {
     input_desc_.resize(n + 1);
   }
   input_desc_[n] = std::make_pair(name, description);
@@ -294,7 +294,7 @@ OpSchema& OpSchema::Input(const int n, const char* name, const char* description
 }
 
 OpSchema& OpSchema::Output(const int n, const char* name, const char* description) {
-  if (output_desc_.size() <= n) {
+  if (output_desc_.size() <= (unsigned)n) {
     output_desc_.resize(n + 1);
   }
   output_desc_[n] = std::make_pair(name, description);
@@ -328,7 +328,7 @@ std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
   if (schema.max_input_ > 0) {
     out << "Inputs:" << std::endl;
     if (!schema.input_desc_.empty()) {
-      for (int i = 0; i < schema.input_desc_.size(); ++i) {
+      for (size_t i = 0; i < schema.input_desc_.size(); ++i) {
         const auto& p = schema.input_desc_[i];
         out << "  " << i << ", " << (p.first ? p.first : "(unnamed)") << " : "
             << (p.second ? p.second : "(no doc)") << std::endl;
@@ -340,7 +340,7 @@ std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
   if (schema.max_output_ > 0) {
     out << "Outputs:" << std::endl;
     if (!schema.output_desc_.empty()) {
-      for (int i = 0; i < schema.output_desc_.size(); ++i) {
+      for (size_t i = 0; i < schema.output_desc_.size(); ++i) {
         const auto& p = schema.output_desc_[i];
         out << "  " << i << ", " << (p.first ? p.first : "(unnamed)") << " : "
             << (p.second ? p.second : "(no doc)") << std::endl;

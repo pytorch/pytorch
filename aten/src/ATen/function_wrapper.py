@@ -169,7 +169,7 @@ class NYIError(Exception):
 
 TYPE_FORMAL_GENERIC = {
     'THTensor*': 'Tensor &',
-    'THSTensor*': 'SparseTensor',
+    'THSTensor*': 'SparseTensorRef',
     'THBoolTensor*': 'Tensor &',
     'THIndexTensor*': 'Tensor &',
     'THIntegerTensor*': 'Tensor &',
@@ -186,7 +186,7 @@ TYPE_FORMAL_GENERIC = {
 
 DYNAMIC_TYPE = {
     'THTensor*': 'Tensor',
-    'THSTensor*': 'SparseTensor',
+    'THSTensor*': 'SparseTensorRef',
     'THBoolTensor*': 'BoolTensor',
     'THIndexTensor*': 'IndexTensor',
     'THIntegerTensor*': 'IntegerTensor',
@@ -1133,7 +1133,7 @@ def create_derived(backend_type_env, declarations):
             return []
         check_name = option['when_sparse_dispatch']
         sparse_actuals = [arg['name']
-                          if arg['name'] != check_name else "SparseTensor({})".format(arg['name'])
+                          if arg['name'] != check_name else "SparseTensorRef({})".format(arg['name'])
                           for arg in option['formals_list']]
         return [SPARSE_CHECK.substitute(env, check_name=check_name, sparse_actuals=sparse_actuals)]
 

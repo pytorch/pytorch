@@ -13,12 +13,13 @@ using at::Tensor;
 
 namespace torch { namespace autograd {
 
-// AccumulateGrad sets sequence_nr to the max value so it's always called 
+// AccumulateGrad sets sequence_nr to the max value so it's always called
 // ASAP during backwards.
 AccumulateGrad::AccumulateGrad(Variable variable_)
-    : Function(/*num_inputs=*/1
-              , /*sequence_nr=*/UINT64_MAX)
-              , variable(std::move(variable_)) {}
+    : Function(/*sequence_nr=*/UINT64_MAX)
+    , variable(std::move(variable_)) {
+  add_input_metadata(variable.type(), variable.sizes());
+}
 
 auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   // XXX: this method is not thread-safe!

@@ -39,6 +39,7 @@ function (caffe2_print_configuration_summary)
   message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
 
   message(STATUS "  USE_ASAN              : ${USE_ASAN}")
+  message(STATUS "  USE_ATEN              : ${USE_ATEN}")
   message(STATUS "  USE_CUDA              : ${USE_CUDA}")
   if(${USE_CUDA})
     message(STATUS "    CUDA static link    : ${CAFFE2_STATIC_LINK_CUDA}")

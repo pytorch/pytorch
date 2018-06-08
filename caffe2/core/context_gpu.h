@@ -51,7 +51,7 @@ class ThreadLocalCUDAObjects {
 
   cudaStream_t GetStream(int gpu, int stream_id) {
     vector<cudaStream_t>& gpu_streams = cuda_streams_[gpu];
-    if (gpu_streams.size() <= stream_id) {
+    if (gpu_streams.size() <= (unsigned)stream_id) {
       gpu_streams.resize(stream_id + 1, nullptr);
     }
     if (!gpu_streams[stream_id]) {
@@ -65,7 +65,7 @@ class ThreadLocalCUDAObjects {
   cublasHandle_t GetHandle(int gpu, int stream_id) {
     DeviceGuard guard(gpu);
     vector<cublasHandle_t>& gpu_handles = cublas_handles_[gpu];
-    if (gpu_handles.size() <= stream_id) {
+    if (gpu_handles.size() <= (unsigned)stream_id) {
       gpu_handles.resize(stream_id + 1, nullptr);
     }
     if (!gpu_handles[stream_id]) {
@@ -84,7 +84,7 @@ class ThreadLocalCUDAObjects {
   cudnnHandle_t GetCudnnHandle(int gpu, int stream_id) {
     DeviceGuard guard(gpu);
     vector<cudnnHandle_t>& gpu_handles = cudnn_handles_[gpu];
-    if (gpu_handles.size() <= stream_id) {
+    if (gpu_handles.size() <= (unsigned)stream_id) {
       gpu_handles.resize(stream_id + 1, nullptr);
     }
     if (!gpu_handles[stream_id]) {

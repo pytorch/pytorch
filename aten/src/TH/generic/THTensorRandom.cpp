@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.cpp"
 #else
 
+#include <cmath>
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -61,7 +63,7 @@ void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p)
 #define BERNOULLI_OMP 800
 #define TH_OMP_OVERHEAD_THRESHOLD_COPY 20000
 
-void iBernoulli_generate_copy(THTensor *self, THGenerator *_generator, const double p)
+void THTensor_(iBernoulli_generate_copy)(THTensor *self, THGenerator *_generator, const double p)
 {
   int64_t seed = THRandom_random(_generator);
   int64_t n = THTensor_(nElement)(self);
@@ -135,7 +137,7 @@ void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p)
 #ifdef TH_BLAS_MKL
   if(cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
     std::lock_guard<std::mutex> lock(_generator->mutex);
-    iBernoulli_generate_copy(self, _generator, p);
+    THTensor_(iBernoulli_generate_copy)(self, _generator, p);
   } else {
     std::lock_guard<std::mutex> lock(_generator->mutex);
     TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_bernoulli(_generator, p););
@@ -403,6 +405,10 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
                             THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
                             2,
                             "invalid multinomial distribution (encountering probability entry < 0)");
+      THArgCheckWithCleanup((std::isfinite(val)),
+                            THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
+                            2,
+                            "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
       sum += val;
       THDoubleStorage_set(
         cum_dist->storage, \
