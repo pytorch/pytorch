@@ -25,9 +25,9 @@ void CUDADevice::setDevice(int device) {
   }
 }
 
-CUDAEvent CUDAEvent::create() {
+CUDAEvent CUDAEvent::create(unsigned int flags) {
   CUDAEvent event;
-  C10D_CUDA_CHECK(cudaEventCreate(&event.event_));
+  C10D_CUDA_CHECK(cudaEventCreateWithFlags(&event.event_, flags));
   return event;
 }
 
