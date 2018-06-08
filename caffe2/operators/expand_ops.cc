@@ -38,7 +38,7 @@ namespace {
 
 class GetExpandGradient final : public GradientMakerBase {
 	using GradientMakerBase::GradientMakerBase;
-	std::vector<OperatorDef> GetGradientDefs() override {
+	std::vector<operatorDef> GetGradientDefs() override {
 		return SingleGradientDef(
 				def_.type() + "Gradient",
 				"",
