@@ -2,6 +2,7 @@
 
 #include "ATen/Tensor.h"
 #include "ATen/TensorImpl.h"
+#include "ATen/Error.h"
 
 namespace at {
 struct SparseTensorImpl : public TensorImpl {
@@ -56,8 +57,15 @@ public:
   }
 
   // TODO: I hate these two setters, please get rid of them!!!
-  void set_indices(const Tensor& indices) { indices_ = indices; }
-  void set_values(const Tensor& values) { values_ = values; }
+  void set_indices(const Tensor& indices) {
+    AT_ASSERT(indices.type().backend() == type().backend());
+    AT_ASSERT(indices.type().scalarType() == kLong);
+    indices_ = indices;
+  }
+  void set_values(const Tensor& values) {
+    AT_ASSERT(values.type().toSparse() == type());
+    values_ = values;
+  }
 
   void set_coalesced(bool coalesced) { coalesced_ = coalesced; }
   void set_nnz(int64_t nnz) { nnz_ = nnz; }
