@@ -2334,7 +2334,7 @@
           kwarg_only: True
 ]]
 [[
-  name: mul
+  name: th_mul
   variants:
     - method
     - function
@@ -2356,7 +2356,7 @@
         - arg: THTensor* other
 ]]
 [[
-  name: mul_
+  name: th_mul_
   return: argument 0
   aten_sparse: True
   options:

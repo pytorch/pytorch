@@ -1231,7 +1231,8 @@
   variants: function
   dispatch: add_out_sparse_cpu
 
-# NB: I need foo for a foo_out variant, because otherwise the autogen code gets
+# Note [foo/foo_out workaround]
+# I need foo for a foo_out variant, because otherwise the autogen code gets
 # mad at me.  In principle, this isn't actually needed, and it's not used at all
 # from LegacyBridge
 - func: native_add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
@@ -1250,6 +1251,7 @@
   variants: function
   dispatch: add_out_dense_sparse_cpu
 
+# See Note [foo/foo_out workaround]
 - func: native_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
   variants: method, function
   dispatch: add_dense_sparse_cpu
@@ -1268,6 +1270,7 @@
   variants: function
   dispatch: sub_out_sparse_cpu
 
+# See Note [foo/foo_out workaround]
 - func: native_sub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch: sub_sparse_cpu
@@ -1279,3 +1282,38 @@
   variants: method, function
 
 - func: sub_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+
+
+
+- func: native_mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch: mul_out_sparse_cpu
+
+# See Note [foo/foo_out workaround]
+- func: native_mul(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch: mul_sparse_cpu
+
+- func: native_mul_out(Tensor result, Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch: mul_out_sparse_scalar
+
+- func: native_mul(Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch: mul_sparse_scalar
+
+- func: mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+
+- func: mul_out(Tensor result, Tensor self, Scalar other) -> Tensor
+  variants: function
+
+- func: mul(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: mul(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: mul_(Tensor self, Tensor other) -> Tensor
+
+- func: mul_(Tensor self, Scalar other) -> Tensor

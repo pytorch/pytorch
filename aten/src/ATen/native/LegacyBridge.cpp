@@ -18,6 +18,8 @@ namespace {
 // TH functions.  This file should be temporary; when all of TH gets ported, we
 // can just use the native mechanism straight.
 
+// TODO: Maybe the foo_ variants should call th_foo_
+
 Tensor norm(const Tensor & self, Scalar p) {
   if (_has_native(self)) {
     return native_norm(self, p);
@@ -117,6 +119,43 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
   return native::sub_out(self, self, other, alpha);
+}
+
+
+Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  if (_has_native(self)) {
+    return native_mul_out(result, self, other);
+  } else {
+    return th_mul_out(result, self, other);
+  }
+}
+
+Tensor mul(const Tensor& self, const Tensor& other) {
+  Tensor r = self.type().tensor();
+  return native::mul_out(r, self, other);
+  return r;
+}
+
+Tensor& mul_(Tensor& self, const Tensor& other) {
+  return native::mul_out(self, self, other);
+}
+
+Tensor& mul_out(Tensor& result, const Tensor& self, Scalar other) {
+  if (_has_native(self)) {
+    return native_mul_out(result, self, other);
+  } else {
+    return th_mul_out(result, self, other);
+  }
+}
+
+Tensor mul(const Tensor& self, Scalar other) {
+  Tensor r = self.type().tensor();
+  return native::mul_out(r, self, other);
+  return r;
+}
+
+Tensor& mul_(Tensor& self, Scalar other) {
+  return native::mul_out(self, self, other);
 }
 
 }} // namespace at::native

@@ -56,7 +56,7 @@ bool isSameTensor(const Tensor& lhs, const Tensor& rhs) {
   return lhs.unsafeGetTensorImpl() == rhs.unsafeGetTensorImpl();
 }
 
-SparseTensor& mul_out_sparse(SparseTensor& r, const SparseTensor& t, Scalar value) {
+SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
   if (isSameTensor(r, t)) {
     r._values().mul_(value);
   } else {
@@ -67,6 +67,12 @@ SparseTensor& mul_out_sparse(SparseTensor& r, const SparseTensor& t, Scalar valu
     _get_sparse_impl(r)->set_nnz(t._nnz());
     _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
   }
+  return r;
+}
+
+SparseTensor mul_sparse_scalar(const SparseTensor& t, Scalar value) {
+  SparseTensor r = t.type().tensor();
+  mul_out_sparse_scalar(r, t, value);
   return r;
 }
 
@@ -122,7 +128,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
     return r.copy_(t);
   }
   if (t._nnz() == 0) {
-    return mul_out_sparse(r, src, value);
+    return mul_out_sparse_scalar(r, src, value);
   }
 
   AT_CHECK(is_same_density(t, src), "cadd operands have incompatible desnitities");
@@ -261,7 +267,7 @@ static void _mul_slice_sparse(
 
 // NB: divslice was removed as dead code
 
-SparseTensor& cmul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const SparseTensor& src_) {
+SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const SparseTensor& src_) {
   AT_CHECK(t_.sizes().equals(src_.sizes()), "cmul operands have incompatible sizes");
   if (src_._nnz() == 0 || t_._nnz() == 0) {
     return r.zero_();
@@ -290,7 +296,7 @@ SparseTensor& cmul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const
   auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
   AT_DISPATCH_ALL_TYPES(
-      r_values.type(), "cmul_out_sparse", [&] {
+      r_values.type(), "mul_out_sparse", [&] {
         auto r_accessor = r_values.accessor<scalar_t, 1>();
         auto t_accessor = t_values.accessor<scalar_t, 1>();
         auto s_accessor = s_values.accessor<scalar_t, 1>();
@@ -324,6 +330,12 @@ SparseTensor& cmul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const
   _get_sparse_impl(r)->set_nnz(r_i);
   _get_sparse_impl(r)->set_coalesced(true);
 
+  return r;
+}
+
+SparseTensor mul_sparse_cpu(const SparseTensor& t, const SparseTensor& src) {
+  SparseTensor r = t.type().tensor();
+  mul_out_sparse_cpu(r, t, src);
   return r;
 }
 
