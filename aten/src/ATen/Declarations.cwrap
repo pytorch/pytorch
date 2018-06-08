@@ -2667,6 +2667,29 @@
     result_->maybeScalar(self_->isScalar());
 ]]
 [[
+  name: th_addmm
+  variants:
+    - method
+    - function
+  return: argument 0
+  options:
+    - sparse: True
+      cname: spaddmm
+      aten_dense_sparse: True
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - arg: real beta
+          default: AS_REAL(1)
+          kwarg_only: True
+        - THTensor* self
+        - arg: real alpha
+          default: AS_REAL(1)
+          kwarg_only: True
+        - THSTensor* mat1
+        - THTensor* mat2
+]]
+[[
   name: addmm
   variants:
     - method
@@ -2686,21 +2709,6 @@
         kwarg_only: True
       - THTensor* mat1
       - THTensor* mat2
-    - sparse: True
-      cname: spaddmm
-      aten_dense_sparse: True
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: real beta
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THTensor* self
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THSTensor* mat1
-        - THTensor* mat2
 ]]
 [[
   name: addmm_

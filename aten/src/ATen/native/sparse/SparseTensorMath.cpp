@@ -371,7 +371,7 @@ LongTensor _to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
 
 // NB: OMP pragmas have to get their own functions; can't put them in lambdas
 template <typename scalar_t>
-void spaddmm_out_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, Scalar beta, const Tensor& t, Scalar alpha, const Tensor& csr, const Tensor& indices, const Tensor& values, const Tensor& dense) {
+void addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, Scalar beta, const Tensor& t, Scalar alpha, const Tensor& csr, const Tensor& indices, const Tensor& values, const Tensor& dense) {
   int64_t h, i;
 
   // r_ = alpha * sparse * dense
@@ -417,14 +417,16 @@ void spaddmm_out_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k
   }
 };
 
-Tensor& spaddmm_out_sparse_cpu(
+Tensor& addmm_out_sparse_dense_cpu(
     Tensor& r,
-    Scalar beta,
     const Tensor& t,
-    Scalar alpha,
-    const SparseTensor& sparse_,
-    const Tensor& dense
+    SparseTensorRef sparse__,
+    const Tensor& dense,
+    Scalar beta,
+    Scalar alpha
 ) {
+  const SparseTensor& sparse_ = sparse__.tref;
+
   // TODO: This error message seems awfully opaque
   AT_CHECK(sparse_._dimI() == 2, "matrices expected, got ", sparse_._dimI(), "D tensor");
   AT_CHECK(sparse_._dimV() == 0, "scalar values expected, got ", sparse_._dimV(), "D values");
@@ -452,13 +454,25 @@ Tensor& spaddmm_out_sparse_cpu(
   LongTensor csr = _to_csr(indices.data<int64_t>(), dim_i, nnz);
 
   AT_DISPATCH_ALL_TYPES(
-      values.type(), "spmm", [&] {
-        spaddmm_out_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, csr, indices, values, dense);
+      values.type(), "addmm_sparse_dense", [&] {
+        addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, csr, indices, values, dense);
       }
   );
 
   return r;
 
+}
+
+Tensor addmm_sparse_dense_cpu(
+    const Tensor& t,
+    SparseTensorRef sparse,
+    const Tensor& dense,
+    Scalar beta,
+    Scalar alpha
+) {
+  Tensor r = t.type().tensor();
+  addmm_out_sparse_dense_cpu(r, t, sparse, dense, beta, alpha);
+  return r;
 }
 
 SparseTensor& sspaddmm_out_sparse_cpu(
@@ -611,7 +625,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, Scalar alpha, const SparseTe
   _get_sparse_impl(newSparse)->_sizes_mut()[0] = outNnz; // TODO: use something safer
 
   // Compute output values tensor with sparse * dense multiplication
-  spaddmm_out_sparse_cpu(values, 0, values, alpha, newSparse, dense);
+  addmm_out_sparse_dense_cpu(values, values, SparseTensorRef(newSparse), dense, 0, alpha);
   _get_sparse_impl(r)->set_indices_and_values(indices, values);  // TODO: sigh
 
   return r;

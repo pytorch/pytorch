@@ -177,4 +177,18 @@ Tensor& div_(Tensor& self, Scalar other) {
   return native::div_out(self, self, other);
 }
 
+Tensor& addmm_out(Tensor& result, const Tensor& self, SparseTensorRef mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  if (_has_native(self)) {
+    return native_addmm_out(result, self, mat1, mat2, beta, alpha);
+  } else {
+    return th_addmm_out(result, self, mat1, mat2, beta, alpha);
+  }
+}
+
+Tensor addmm(const Tensor& self, SparseTensorRef mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  Tensor r = self.type().tensor();
+  return native::addmm_out(r, self, mat1, mat2, beta, alpha);
+  return r;
+}
+
 }} // namespace at::native
