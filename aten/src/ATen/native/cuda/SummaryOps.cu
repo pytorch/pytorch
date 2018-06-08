@@ -13,14 +13,14 @@ namespace cuda { namespace detail {
   Memory types used for the 3 histogram implementations.
   See `CUDA_tensor_histogram` below.
  */
-enum class CUDAHistogramMemoryType { MULTI_BLOCK, SHARED, GLOBAL };
+enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
 
 /*
   Kernel for computing the histogram of the input.
  */
 template <
-    typename scalar1,
-    typename scalar2,
+    typename output_t,
+    typename input_t,
     typename IndexType,
     int ADims,
     int PDims,
@@ -28,20 +28,20 @@ template <
     CUDAHistogramMemoryType MemoryType = CUDAHistogramMemoryType::MULTI_BLOCK,
     typename Op>
 __global__ void kernelHistogram1D(
-    detail::TensorInfo<scalar1, IndexType> a, /* output */
-    detail::TensorInfo<scalar1, IndexType> p, /* partial output */
-    detail::TensorInfo<scalar2, IndexType> b, /* input */
+    detail::TensorInfo<output_t, IndexType> a, /* output */
+    detail::TensorInfo<output_t, IndexType> p, /* partial output */
+    detail::TensorInfo<input_t, IndexType> b, /* input */
     int binsize,
     IndexType totalElements,
     Op getOp) {
   extern __shared__ unsigned char my_smem[];
-  scalar1* smem = nullptr;
+  output_t* smem = nullptr;
 
   if (MemoryType == CUDAHistogramMemoryType::SHARED) {
     ////////////////////////// Shared memory //////////////////////////
     // atomically add to block specific shared memory
     // then atomically add to the global output tensor
-    smem = reinterpret_cast<scalar1*>(my_smem);
+    smem = reinterpret_cast<output_t*>(my_smem);
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       smem[i] = 0;
     }
@@ -49,7 +49,7 @@ __global__ void kernelHistogram1D(
     FOR_KERNEL_LOOP(linearIndex, totalElements) {
       // Convert `linearIndex` into an offset of `b`
       const IndexType bOffset =
-          detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b);
+          detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
       // Use value at `b` as an offset of `smem`
       const IndexType pOffset = b.data[bOffset] / binsize;
       atomicAdd(&smem[pOffset], getOp(linearIndex));
@@ -60,7 +60,7 @@ __global__ void kernelHistogram1D(
     //   in a given block, not across blocks.
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       const IndexType aOffset =
-          detail::IndexToOffset<scalar1, IndexType, ADims>::get(i, a);
+          detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
       atomicAdd(&a.data[aOffset], smem[i]);
     }
 
@@ -72,12 +72,12 @@ __global__ void kernelHistogram1D(
     FOR_KERNEL_LOOP(linearIndex, totalElements) {
       // Convert `linearIndex` into an offset of `b`
       const IndexType bOffset =
-          detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b);
+          detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
       const auto bVal = b.data[bOffset];
       // Use value at `b` as an offset of `p`
       const IndexType pIdx = p.strides[0] * blockIdx.x + bVal / binsize;
       const IndexType pOffset =
-          detail::IndexToOffset<scalar1, IndexType, PDims>::get(pIdx, p);
+          detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
       atomicAdd(&p.data[pOffset], getOp(linearIndex));
     }
     __syncthreads();
@@ -86,10 +86,10 @@ __global__ void kernelHistogram1D(
     //   in a given block, not across blocks.
     const IndexType pIdx = p.strides[0] * blockIdx.x;
     const IndexType pOffset =
-        detail::IndexToOffset<scalar1, IndexType, PDims>::get(pIdx, p);
+        detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       const IndexType aOffset =
-          detail::IndexToOffset<scalar1, IndexType, ADims>::get(i, a);
+          detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
       atomicAdd(&a.data[aOffset], p.data[pOffset + i]);
     }
 
@@ -100,19 +100,19 @@ __global__ void kernelHistogram1D(
     FOR_KERNEL_LOOP(linearIndex, totalElements) {
       // Convert `linearIndex` into an offset of `b`
       const IndexType bOffset =
-          detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b);
+          detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
       const auto bVal = b.data[bOffset];
       // Use value at `b` as an offset of `a`
       const IndexType aIdx = bVal / binsize;
       const IndexType aOffset =
-          detail::IndexToOffset<scalar1, IndexType, ADims>::get(aIdx, a);
+          detail::IndexToOffset<output_t, IndexType, ADims>::get(aIdx, a);
       atomicAdd(&a.data[aOffset], getOp(linearIndex));
     }
   }
 }
 
 #define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP)                               \
-  kernelHistogram1D<scalar1, scalar2, IndexType, 1, 2, 1, MEMORY_TYPE>     \
+  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, 1, MEMORY_TYPE>    \
       <<<grid,                                                             \
          block,                                                            \
          (MEMORY_TYPE == CUDAHistogramMemoryType::SHARED) ? sharedMem : 0, \
@@ -129,9 +129,6 @@ __global__ void kernelHistogram1D(
       HANDLE_CASE(CUDAHistogramMemoryType::MULTI_BLOCK, getOp);               \
       break;                                                                  \
     default:                                                                  \
-      std::cerr << "WARNING: Potentially slow. "                              \
-                   "CUDA_tensor_histogram with nbins = "                      \
-                << nbins << " uses global memory with atomics." << std::endl; \
       HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, getOp);                    \
   }
 
@@ -153,7 +150,7 @@ __global__ void kernelHistogram1D(
     case: MIN_NUMBER_BINS_FOR_GLOBAL_MEM <= #bins
         GLOBAL: all threads atomically update to a single **global** hist copy.
  */
-template <typename scalar1, typename scalar2, bool HasWeights>
+template <typename output_t, typename input_t, bool HasWeights>
 bool CUDA_tensor_histogram(
     at::Tensor a, /* output */
     at::Tensor b, /* input */
@@ -186,7 +183,7 @@ bool CUDA_tensor_histogram(
   CUDAHistogramMemoryType memType = CUDAHistogramMemoryType::SHARED;
   auto maxSharedMem =
       at::globalContext().getCurrentDeviceProperties()->sharedMemPerBlock;
-  auto sharedMem = nbins * sizeof(scalar1) + 8; // 8 guard bytes
+  auto sharedMem = nbins * sizeof(output_t) + 8; // 8 guard bytes
   // determine memory type to use in the kernel
   if (nbins < block.x && sharedMem < maxSharedMem) {
     memType = CUDAHistogramMemoryType::SHARED;
@@ -195,22 +192,26 @@ bool CUDA_tensor_histogram(
   } else {
     memType = CUDAHistogramMemoryType::GLOBAL;
   }
+#ifdef CUDA_HIST_MEM_TYPE_OVERRIDE // TODO: remove
+  // added for benchmark purpose
+  memType = static_cast<CUDAHistogramMemoryType>(CUDA_HIST_MEM_TYPE_OVERRIDE);
+#endif
   // alloc memory for MULTI_BLOCK
   using IndexType = int64_t;
-  auto aInfo = detail::getTensorInfo<scalar1, IndexType>(a);
-  auto bInfo = detail::getTensorInfo<scalar2, IndexType>(b);
-  detail::TensorInfo<scalar1, IndexType> pInfo = aInfo;
+  auto aInfo = detail::getTensorInfo<output_t, IndexType>(a);
+  auto bInfo = detail::getTensorInfo<input_t, IndexType>(b);
+  detail::TensorInfo<output_t, IndexType> pInfo = aInfo;
   Tensor partial_output;
   if (memType == CUDAHistogramMemoryType::MULTI_BLOCK) {
     partial_output = a.type().zeros({grid.x, nbins});
-    pInfo = detail::getTensorInfo<scalar1, IndexType>(partial_output);
+    pInfo = detail::getTensorInfo<output_t, IndexType>(partial_output);
   }
 
   if (HasWeights) {
-    auto cInfo = detail::getTensorInfo<scalar1, IndexType>(c);
+    auto cInfo = detail::getTensorInfo<output_t, IndexType>(c);
     const auto getWeightsOp = [cInfo] __device__(IndexType cIndex) {
       const IndexType cOffset =
-          detail::IndexToOffset<scalar1, IndexType, 1>::get(cIndex, cInfo);
+          detail::IndexToOffset<output_t, IndexType, 1>::get(cIndex, cInfo);
       return cInfo.data[cOffset];
     };
     HANDLE_SWITCH_CASE(memType, getWeightsOp)

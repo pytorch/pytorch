@@ -34,14 +34,14 @@ Tensor _bincount_cpu_template(
   const input_t* self_p = self.contiguous().data<input_t>();
   if (has_weights) {
     output = zeros(weights.type(), {nbins});
-    weights_t* output_p = output.contiguous().data<weights_t>();
+    weights_t* output_p = output.data<weights_t>();
     const weights_t* weights_p = weights.contiguous().data<weights_t>();
     for (int64_t i = 0; i < self.size(0); i++) {
       output_p[self_p[i]] += weights_p[i];
     }
   } else {
     output = zeros(CPU(kLong), {nbins});
-    int64_t* output_p = output.contiguous().data<int64_t>();
+    int64_t* output_p = output.data<int64_t>();
     for (int64_t i = 0; i < self.size(0); i++) {
       output_p[self_p[i]] += 1L;
     }
