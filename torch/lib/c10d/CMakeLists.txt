@@ -1,12 +1,10 @@
 cmake_minimum_required(VERSION 3.2 FATAL_ERROR)
 
 # Find modules.
-# Note: this does NOT include <root>/cmake/Modules, because that woud
-# make find_package resolve to <root>cmake/Modules/FindGloo.cmake
-# instead of resolving to ../tmp_install/share/cmake/Gloo.
 list(APPEND CMAKE_MODULE_PATH
   /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/public
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules_CUDA_fix)
 
 # Polyfill for upstream FindCUDA
@@ -21,17 +19,39 @@ if(NOT Caffe2_FOUND)
 endif()
 
 find_package(Gloo REQUIRED)
-if(NOT Gloo_FOUND)
+if(Gloo_FOUND)
+  message(STATUS "Gloo_LIBRARY: ${Gloo_LIBRARY}")
+  message(STATUS "Gloo_NATIVE_LIBRARY: ${Gloo_NATIVE_LIBRARY}")
+  message(STATUS "Gloo_INCLUDE_DIR: ${Gloo_INCLUDE_DIR}")
+else()
   message(FATAL_ERROR "Gloo not found")
 endif()
 
 find_package(MPI)
 if(MPI_FOUND)
-  MESSAGE(STATUS "MPI_INCLUDE_PATH: ${MPI_INCLUDE_PATH}")
-  MESSAGE(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
-  MESSAGE(STATUS "MPIEXEC: ${MPIEXEC}")
+  message(STATUS "MPI_INCLUDE_PATH: ${MPI_INCLUDE_PATH}")
+  message(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
+  message(STATUS "MPIEXEC: ${MPIEXEC}")
 else()
-  MESSAGE(STATUS "Not able to find MPI, will compile c10d without MPI support")
+  message(STATUS "Not able to find MPI, will compile c10d without MPI support")
+endif()
+
+find_package(NCCL)
+IF(NCCL_FOUND)
+  message(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
+  message(STATUS "NCCL_INCLUDE_DIRS: ${NCCL_INCLUDE_DIRS}")
+  IF(NCCL_MAJOR_VERSION AND NOT (NCCL_MAJOR_VERSION LESS 2))
+    message(STATUS "NCCL Version 2 or higher found, will "
+                   "compile with NCCL distributed backend")
+    SET(DISTRIBUTED_NCCL_FOUND TRUE)
+  else()
+    message(STATUS "Found NCCL, but the NCCL version is either not 2+ or not "
+                   "determinable, will not compile with NCCL distributed "
+                   "backend")
+  endif()
+else()
+  message(STATUS "Not able to find NCCL, will not "
+                 "compile with NCCL distributed backend")
 endif()
 
 find_package(CUDA REQUIRED)
@@ -72,7 +92,7 @@ set(C10D_GLOO_SRCS
 
 add_library(c10d_gloo ${C10D_GLOO_SRCS})
 target_include_directories(c10d_gloo PUBLIC ${GLOO_INCLUDE_DIR})
-target_link_libraries(c10d_gloo PUBLIC c10d gloo gloo_cuda)
+target_link_libraries(c10d_gloo PUBLIC c10d ${Gloo_NATIVE_LIBRARY} ${Gloo_LIBRARY})
 
 if(MPI_FOUND)
   set(C10D_MPI_SRCS
@@ -81,6 +101,15 @@ if(MPI_FOUND)
   add_library(c10d_mpi ${C10D_MPI_SRCS})
   target_include_directories(c10d_mpi PUBLIC ${MPI_INCLUDE_PATH})
   target_link_libraries(c10d_mpi PUBLIC c10d ${MPI_LIBRARIES})
+endif()
+
+if(DISTRIBUTED_NCCL_FOUND)
+  set(C10D_NCCL_SRCS
+    ProcessGroupNCCL.cpp
+  )
+  add_library(c10d_nccl ${C10D_NCCL_SRCS})
+  target_include_directories(c10d_nccl PUBLIC ${NCCL_INCLUDE_DIRS})
+  target_link_libraries(c10d_nccl PUBLIC c10d ${NCCL_LIBRARIES})
 endif()
 
 add_subdirectory(example)
