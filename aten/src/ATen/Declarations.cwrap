@@ -3729,7 +3729,7 @@
           default: NULL
 ]]
 [[
-  name: sparse_coo_tensor
+  name: th_sparse_coo_tensor
   return: THTensor*
   backends:
     - SparseCPU
@@ -3761,7 +3761,7 @@
         - THTensor* self
 ]]
 [[
-  name: _sparse_coo_tensor_unsafe
+  name: _th_sparse_coo_tensor_unsafe
   return: THTensor*
   backends:
     - SparseCPU

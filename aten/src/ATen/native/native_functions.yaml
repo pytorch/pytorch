@@ -1369,3 +1369,26 @@
 
 - func: tensor(Type dtype, IntList size) -> Tensor
   variants: function
+
+
+- func: native_sparse_coo_tensor(Tensor indices, Tensor values) -> Tensor
+  variants: function
+  dispatch: new_with_tensor_sparse
+
+- func: native_sparse_coo_tensor(Tensor indices, Tensor values, IntList size) -> Tensor
+  variants: function
+  dispatch: new_with_tensor_and_size_sparse
+
+- func: sparse_coo_tensor(Tensor indices, Tensor values) -> Tensor
+  variants: function
+
+- func: sparse_coo_tensor(Tensor indices, Tensor values, IntList size) -> Tensor
+  variants: function
+
+
+- func: _native_sparse_coo_tensor_unsafe(Tensor indices, Tensor values, IntList size) -> Tensor
+  variants: function
+  dispatch: new_with_tensor_and_size_unsafe_sparse
+
+- func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, IntList size) -> Tensor
+  variants: function
