@@ -1400,3 +1400,10 @@
 
 - func: sparse_raw_resize_(Tensor self, IntList size, int64_t dimI, int64_t dimV) -> Tensor
   variants: method
+
+
+- func: _native_sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
+  variants: function
+  dispatch: sparse_mask_cpu
+
+- func: _sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor

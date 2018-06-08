@@ -379,4 +379,10 @@ void sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const SparseTensor& m
   }
 }
 
+SparseTensor sparse_mask_cpu(const Tensor& t, SparseTensorRef mask) {
+  SparseTensor r = t.type().toSparse().tensor();
+  sparse_mask_out_cpu(r, t, mask.tref);
+  return r;
+}
+
 }} // namespace at::native

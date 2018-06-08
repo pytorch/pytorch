@@ -248,4 +248,13 @@ Tensor& sparse_raw_resize_(Tensor& self, ArrayRef<int64_t> size, int64_t dimI, i
   }
 }
 
+
+Tensor _sparse_mask(const Tensor& self, SparseTensorRef mask) {
+  if (!self.is_cuda()) {
+    return _native_sparse_mask(self, mask);
+  } else {
+    return self._th_sparse_mask(mask);
+  }
+}
+
 }} // namespace at::native
