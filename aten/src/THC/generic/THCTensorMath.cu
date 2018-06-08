@@ -193,9 +193,9 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       !hasEmptyInput &&
       THCTensor_(nDimension)(state, result) <= CAT_ARRAY_MAX_INPUT_DIMS &&
       THCTensor_canUse32BitIndexMath(state, result) &&
-      THCTensor_allContiguous(state, (const _THCTensor **)inputs, numInputs) &&
-      THCTensor_all32BitIndexable(state, (const _THCTensor **)inputs, numInputs) &&
-      THCTensor_allSameDevice(state, (const _THCTensor **)inputs, numInputs)) {
+      THCTensor_allContiguous(state, inputs, numInputs) &&
+      THCTensor_all32BitIndexable(state, inputs, numInputs) &&
+      THCTensor_allSameDevice(state, inputs, numInputs)) {
 
     // First, let's set up our kernel parameters. We start with a raw pointer to the storage
     // for the output Tensor.
