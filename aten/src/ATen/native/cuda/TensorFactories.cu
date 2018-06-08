@@ -43,10 +43,8 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     throw std::runtime_error(oss.str());
   }
 
-  if (n > 0) {
-    AT_CHECK(result.type().scalarTensor(n).defined(),
-      "n is too large for result tensor type: '", result.type().toString(), "'");
-  }
+  AT_CHECK(result.type().scalarTensor(n).defined(),
+    "n is too large for result tensor type: '", result.type().toString(), "'");
 
   result.resize_({n});
 
