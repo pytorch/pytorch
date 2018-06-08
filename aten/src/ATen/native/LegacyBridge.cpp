@@ -11,6 +11,10 @@ namespace {
   static bool _has_native(const Tensor& self) {
     return self.is_sparse() && !self.is_cuda();
   }
+
+  static bool _type_has_native(const Type& dtype) {
+    return dtype.is_sparse() && !dtype.is_cuda();
+  }
 }
 
 // These native operations are not "really" native; they're actually just bridge
@@ -193,5 +197,23 @@ Tensor addmm(const Tensor& self, SparseTensorRef mat1, const Tensor& mat2, Scala
 Tensor& addmm_(Tensor& self, SparseTensorRef mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
   return native::addmm_out(self, self, mat1, mat2, beta, alpha);
 }
+
+
+Tensor tensor(const Type& dtype) {
+  if (_type_has_native(dtype)) {
+    return dtype.native_tensor();
+  } else {
+    return dtype.th_tensor();
+  }
+}
+
+Tensor tensor(const Type& dtype, ArrayRef<int64_t> size) {
+  if (_type_has_native(dtype)) {
+    return dtype.native_tensor(size);
+  } else {
+    return dtype.th_tensor(size);
+  }
+}
+
 
 }} // namespace at::native

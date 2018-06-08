@@ -3696,7 +3696,7 @@
         - THTensor* total
 ]]
 [[
-  name: tensor
+  name: th_tensor
   return: THTensor*
   cpu_half: True
   variants: [function]
@@ -3709,6 +3709,13 @@
       arguments:
         - THSize* size
         - CONSTANT NULL
+]]
+[[
+  name: tensor
+  return: THTensor*
+  cpu_half: True
+  variants: [function]
+  options:
     - cname: newWithSize
       arguments:
         - THSize* size

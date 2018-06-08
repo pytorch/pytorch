@@ -1354,3 +1354,18 @@
 
 - func: addmm(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method, function
+
+
+- func: native_tensor(Type dtype) -> Tensor
+  variants: function
+  dispatch: new_sparse
+
+- func: native_tensor(Type dtype, IntList size) -> Tensor
+  variants: function
+  dispatch: new_with_size_sparse
+
+- func: tensor(Type dtype) -> Tensor
+  variants: function
+
+- func: tensor(Type dtype, IntList size) -> Tensor
+  variants: function
