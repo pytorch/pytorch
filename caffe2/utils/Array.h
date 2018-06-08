@@ -39,7 +39,7 @@
 #include <utility>
 #include <stdexcept>
 #include <string>
-#include "TypeTraits.h"
+#include "caffe2/utils/C++17.h"
 
 namespace c10 { namespace guts {
 
