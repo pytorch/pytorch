@@ -1,7 +1,9 @@
 # ---[ GPU files
 # ------[ cuDNN
-file(GLOB tmp *_cudnn.cc)
-set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
+if (USE_CUDNN)
+  file(GLOB tmp *_cudnn.cc)
+  set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
+endif()
 # ------[ general GPU
 file(GLOB tmp *_gpu.cc)
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
@@ -22,8 +24,10 @@ exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
 
 # ---[ GPU test files
 # ------[ cuDNN
-file(GLOB tmp *_cudnn_test.cc)
-set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${tmp})
+if (USE_CUDNN)
+  file(GLOB tmp *_cudnn_test.cc)
+  set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${tmp})
+endif()
 # ------[ general GPU
 file(GLOB tmp *_gpu_test.cc)
 set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${tmp})
