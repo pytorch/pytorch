@@ -1,0 +1,10 @@
+--------test cpu----------
+iter number: 200
+forward time without backward: 2.65867638588
+forward time with backward: 2.49114847183
+backward time without backward: 8.12748217583
+--------test cpu and gpu mix----------
+iter number: 200
+forward time without backward: 5.44148540497
+forward time with backward: 5.52268505096
+backward time without backward: 16.8414642811
