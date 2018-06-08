@@ -1,9 +1,8 @@
 #!/bin/bash
 
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
 export PATH="/usr/local/bin:$PATH"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Set up conda environment
 export PYTORCH_ENV_DIR="${HOME}/pytorch-ci-env"
@@ -38,13 +37,19 @@ export MACOSX_DEPLOYMENT_TARGET=10.9
 export CXX=clang++
 export CC=clang
 if which sccache > /dev/null; then
-  export CXX="sccache clang++"
-  export CC="sccache clang"
+  printf "#!/bin/sh\nexec sccache $(which clang++) \$*" > "${PYTORCH_ENV_DIR}/clang++"
+  chmod a+x "${PYTORCH_ENV_DIR}/clang++"
+
+  printf "#!/bin/sh\nexec sccache $(which clang) \$*" > "${PYTORCH_ENV_DIR}/clang"
+  chmod a+x "${PYTORCH_ENV_DIR}/clang"
+
   if [[ "${JOB_BASE_NAME}" == *cuda* ]]; then
     printf "#!/bin/sh\nexec sccache $(which nvcc) \$*" > "${PYTORCH_ENV_DIR}/nvcc"
     chmod a+x "${PYTORCH_ENV_DIR}/nvcc"
     export CUDA_NVCC_EXECUTABLE="${PYTORCH_ENV_DIR}/nvcc"
   fi
+
+  export PATH="${PYTORCH_ENV_DIR}:$PATH"
 fi
 # If we run too many parallel jobs, we will OOM
 export MAX_JOBS=2
