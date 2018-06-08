@@ -24,13 +24,6 @@ TensorUtils<TENSOR_TYPE>::freeCopyTo(THCState* state,                   \
   TENSOR_TYPE##_freeCopyTo(state, src, dst);                            \
 }                                                                       \
                                                                         \
-DATA_TYPE*                                                              \
-TensorUtils<TENSOR_TYPE>::getData(THCState* state,                      \
-                                  TENSOR_TYPE* t) {                     \
-  /* FIXME: no cast is required except for THCudaHalfTensor */          \
-  return (DATA_TYPE*) TENSOR_TYPE##_data(state, t);                     \
-}                                                                       \
-                                                                        \
 void                                                                    \
 TensorUtils<TENSOR_TYPE>::copyIgnoringOverlaps(THCState* state,         \
                                                TENSOR_TYPE* dst,        \

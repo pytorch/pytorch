@@ -21,6 +21,15 @@ typedef struct _THCTensor
 
     char flag;
 
+    template <typename T>
+    inline T * data() const {
+      return storage->data<T>() + storageOffset;
+    }
+
+    template <typename T>
+    inline T * unsafe_data() const {
+      return storage->unsafe_data<T>() + storageOffset;
+    }
 } _THCTensor;
 
 #include "generic/THCTensor.hpp"

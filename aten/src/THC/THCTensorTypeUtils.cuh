@@ -42,7 +42,6 @@ struct TensorUtils {
     static TENSOR_TYPE* newContiguous(THCState* state, TENSOR_TYPE* t); \
     static void freeCopyTo(THCState* state, TENSOR_TYPE* src,           \
                            TENSOR_TYPE* dst);                           \
-    static DATA_TYPE* getData(THCState* state, TENSOR_TYPE* t);         \
     static void copyIgnoringOverlaps(THCState* state,                   \
                                      TENSOR_TYPE* dst, TENSOR_TYPE* src); \
   }
@@ -101,7 +100,7 @@ getTensorInfo(THCState* state, TensorType* t) {
   }
 
   return TensorInfo<ScalarType, IndexType>(
-    TensorUtils<TensorType>::getData(state, t), dims, sz, st);
+    t->template data<ScalarType>(), dims, sz, st);
 }
 
 template <typename T>
