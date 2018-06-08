@@ -261,21 +261,6 @@ endif()
 # ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.
 set(CAFFE2_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 
-# ---[ Check if we will need to include the local Modules_CUDA_fix folder.
-# Add your conditions here if needed.
-if (MSVC)
-  # We know that VS2017 needs the new FindCUDA functionality, so we will
-  # simply enable it for the whole Windows build.
-  set(CAFFE2_CMAKE_USE_LOCAL_FINDCUDA ON)
-else (${CMAKE_VERSION} VERSION_LESS 3.12 AND ${USE_CUDA})
-  set(CAFFE2_CMAKE_USE_LOCAL_FINDCUDA ON)
-endif()
-
-if (${CAFFE2_CMAKE_USE_LOCAL_FINDCUDA})
-  list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix)
-  include(CMakeInitializeConfigs)
-endif()
-
 if (USE_NATIVE_ARCH)
   check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
   if (COMPILER_SUPPORTS_MARCH_NATIVE)
