@@ -1,24 +1,29 @@
 #include <ATen/CPUGeneral.h>
 #include <ATen/Parallel.h>
+#include <cassert>
+#include <thread>
+
+#if defined(CPU_THREADPOOL_TBB)
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_reduce.h>
 #include <tbb/partitioner.h>
 #include <tbb/tbb.h>
-#include <cassert>
-#include <thread>
-
+#endif
 
 namespace at { namespace internal {
 
 // thread_local variable with internal linkage
 // requires no guarding as it's storage duration is defined to be per thread
+#if defined(CPU_THREADPOOL_TBB)
 static thread_local tbb::task_scheduler_init tbbinit(
     tbb::task_scheduler_init::deferred);
+#endif
 // Tracks number of threads uses which TBB doesn't track.
 static thread_local int num_threads_ = -1;
 
 // Negative number of threads means default value
 void init_tbb_num_threads() {
+#if defined(CPU_THREADPOOL_TBB)
   static thread_local bool first_call = true;
   int num_threads = at::get_num_threads();
   // In order to have control over the number of threads this function
@@ -51,6 +56,7 @@ void init_tbb_num_threads() {
     tbbinit.initialize(num_threads);
     num_threads_ = num_threads;
   }
+#endif
 }
 } // namespace internal
 } // namespace at
