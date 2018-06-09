@@ -89,7 +89,7 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& add_out(Tensor& result, const Tensor& self, SparseTensorRef other, Scalar alpha) {
-  if (_has_native(self)) {
+  if (!self.is_cuda()) {
     return native_add_out(result, self, other, alpha);
   } else {
     return th_add_out(result, self, other, alpha);
@@ -182,7 +182,7 @@ Tensor& div_(Tensor& self, Scalar other) {
 }
 
 Tensor& addmm_out(Tensor& result, const Tensor& self, SparseTensorRef mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  if (_has_native(self)) {
+  if (!self.is_cuda()) {
     return native_addmm_out(result, self, mat1, mat2, beta, alpha);
   } else {
     return th_addmm_out(result, self, mat1, mat2, beta, alpha);

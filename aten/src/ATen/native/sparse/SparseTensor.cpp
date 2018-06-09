@@ -241,7 +241,7 @@ SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
 // NB: Dropped the resizeNd variants
 
 Tensor sparse_to_dense(const SparseTensor& self) {
-  Tensor dst = self.type().toBackend(toDense(self.type().backend())).zeros(self.sizes());
+  Tensor dst = self.type().toDense().zeros(self.sizes());
   return dst.add_(self);
 }
 
