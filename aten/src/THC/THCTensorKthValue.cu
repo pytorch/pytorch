@@ -8,11 +8,7 @@
 #include "THCTensorMathReduce.cuh"
 #include <algorithm> // for std::min
 
-#if CUDA_VERSION >= 7000
-#include <thrust/system/cuda/execution_policy.h>
-#endif
+#include "THCTensorKthValue.cuh"
 
-#include "THCTensorTopK.cuh"
-
-#include "generic/THCTensorTopK.cu"
+#include "generic/THCTensorKthValue.cu"
 #include "THCGenerateAllTypes.h"

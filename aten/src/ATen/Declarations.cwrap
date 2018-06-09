@@ -880,6 +880,7 @@
   name: kthvalue
   backends:
     - CPU
+    - CUDA
   variants:
     - method
     - function

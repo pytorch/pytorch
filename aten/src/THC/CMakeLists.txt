@@ -50,6 +50,7 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorTopK.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorKthValue.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCSortUtils.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMode.cu
@@ -109,6 +110,7 @@ INSTALL(FILES
           THCThrustAllocator.cuh
           THCTensorMode.cuh
           THCTensorTopK.cuh
+          THCTensorKthValue.cuh
           THCCachingAllocator.h
           # See Note [TH abstraction violation]
           THCGenerator.hpp
@@ -162,4 +164,6 @@ INSTALL(FILES
           generic/THCTensorMode.cu
           generic/THCTensorTopK.h
           generic/THCTensorTopK.cu
+          generic/THCTensorKthValue.h
+          generic/THCTensorKthValue.cu
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")
