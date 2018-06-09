@@ -150,6 +150,10 @@ SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, c
 
 // NB: Got rid of the sizes == NULL case
 SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Tensor& values, ArrayRef<int64_t> sizes) {
+  std::cerr << "new_with_tensor_and_size_sparse\n";
+  std::cerr << "indices " << indices << "\n";
+  std::cerr << "values " << values << "\n";
+  std::cerr << "sizes " << sizes << "\n";
   const SparseType& dtype = values.type().toSparse();
   if (indices.dim() == 0 && values.dim() == 0) {
     return new_with_size_sparse(dtype, sizes);

@@ -1165,53 +1165,40 @@
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
 
-# - func: _nnz(Tensor self) -> int64_t
-#   variants: method
-
-# - func: _resize_nnz_(Tensor self, int64_t nnz) -> int64_t
-#   variants: method
-
-# - func: _indices(Tensor self) -> Tensor
-#   variants: method
-
-# - func: _values(Tensor self) -> Tensor
-#   variants: method
-
-# - func: _dimI(Tensor self) -> int64_t
-#   variants: method
-
-# - func: _dimV(Tensor self) -> int64_t
-#   variants: method
-
 # When more variants get ported to native, this dispatch will get more
 # complicated
 
 - func: native_norm(Tensor self, Scalar p=2) -> Tensor
   variants: function
-  dispatch: norm_sparse
+  dispatch:
+    SparseCPU: norm_sparse
 
 - func: norm(Tensor self, Scalar p=2) -> Tensor
   variants: method, function
 
 - func: native_clone(Tensor self) -> Tensor
   variants: function
-  dispatch: clone_sparse
+  dispatch:
+    SparseCPU: clone_sparse
 
 - func: clone(Tensor self) -> Tensor
 
 - func: native_resize_as_(Tensor self, Tensor the_template) -> Tensor
   variants: function
-  dispatch: resize_as_sparse_
+  dispatch:
+    SparseCPU: resize_as_sparse_
 
 - func: resize_as_(Tensor self, Tensor the_template) -> Tensor
 
 - func: native_pow_out(Tensor result, Tensor self, Scalar exponent) -> Tensor
   variants: function
-  dispatch: pow_out_sparse
+  dispatch:
+    SparseCPU: pow_out_sparse
 
 - func: native_pow(Tensor self, Scalar exponent) -> Tensor
   variants: function
-  dispatch: pow_sparse
+  dispatch:
+    SparseCPU: pow_sparse
 
 - func: pow_out(Tensor result, Tensor self, Scalar exponent) -> Tensor
   variants: function
@@ -1221,7 +1208,8 @@
 
 - func: native_zero_(Tensor self) -> Tensor
   variants: function
-  dispatch: zero_sparse_
+  dispatch:
+    SparseCPU: zero_sparse_
 
 - func: zero_(Tensor self) -> Tensor
 
@@ -1229,7 +1217,8 @@
 
 - func: native_add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
-  dispatch: add_out_sparse_cpu
+  dispatch:
+    SparseCPU: add_out_sparse_cpu
 
 # Note [foo/foo_out workaround]
 # I need foo for a foo_out variant, because otherwise the autogen code gets
@@ -1237,7 +1226,8 @@
 # from LegacyBridge
 - func: native_add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
-  dispatch: add_sparse_cpu
+  dispatch:
+    SparseCPU: add_sparse_cpu
 
 - func: add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
@@ -1249,12 +1239,14 @@
 
 - func: native_add_out(Tensor result, Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
   variants: function
-  dispatch: add_out_dense_sparse_cpu
+  dispatch:
+    CPU: add_out_dense_sparse_cpu
 
 # See Note [foo/foo_out workaround]
 - func: native_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
   variants: method, function
-  dispatch: add_dense_sparse_cpu
+  dispatch:
+    CPU: add_dense_sparse_cpu
 
 - func: add_out(Tensor result, Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
   variants: function
@@ -1268,12 +1260,14 @@
 
 - func: native_sub_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
-  dispatch: sub_out_sparse_cpu
+  dispatch:
+    SparseCPU: sub_out_sparse_cpu
 
 # See Note [foo/foo_out workaround]
 - func: native_sub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
-  dispatch: sub_sparse_cpu
+  dispatch:
+    SparseCPU: sub_sparse_cpu
 
 - func: sub_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
@@ -1287,20 +1281,24 @@
 
 - func: native_mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
   variants: function
-  dispatch: mul_out_sparse_cpu
+  dispatch:
+    SparseCPU: mul_out_sparse_cpu
 
 # See Note [foo/foo_out workaround]
 - func: native_mul(Tensor self, Tensor other) -> Tensor
   variants: function
-  dispatch: mul_sparse_cpu
+  dispatch:
+    SparseCPU: mul_sparse_cpu
 
 - func: native_mul_out(Tensor result, Tensor self, Scalar other) -> Tensor
   variants: function
-  dispatch: mul_out_sparse_scalar
+  dispatch:
+    SparseCPU: mul_out_sparse_scalar
 
 - func: native_mul(Tensor self, Scalar other) -> Tensor
   variants: function
-  dispatch: mul_sparse_scalar
+  dispatch:
+    SparseCPU: mul_sparse_scalar
 
 - func: mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
   variants: function
@@ -1322,12 +1320,14 @@
 
 - func: native_div_out(Tensor result, Tensor self, Scalar other) -> Tensor
   variants: function
-  dispatch: div_out_sparse_scalar
+  dispatch:
+    SparseCPU: div_out_sparse_scalar
 
 # See Note [foo/foo_out workaround]
 - func: native_div(Tensor self, Scalar other) -> Tensor
   variants: function
-  dispatch: div_sparse_scalar
+  dispatch:
+    SparseCPU: div_sparse_scalar
 
 - func: div_out(Tensor result, Tensor self, Scalar other) -> Tensor
   variants: function
@@ -1340,15 +1340,18 @@
 
 - func: native_addmm_out(Tensor result, Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
-  dispatch: addmm_out_sparse_dense_cpu
+  dispatch:
+    CPU: addmm_out_sparse_dense_cpu
 
 - func: native_addmm(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
-  dispatch: addmm_sparse_dense_cpu
+  dispatch:
+    CPU: addmm_sparse_dense_cpu
 
 - func: native_addmm_(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
-  dispatch: addmm_sparse_dense_cpu_
+  dispatch:
+    CPU: addmm_sparse_dense_cpu_
 
 - func: addmm_out(Tensor result, Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
@@ -1356,13 +1359,15 @@
   variants: method, function
 
 
-- func: native_tensor(Type dtype) -> Tensor
+- func: native_tensor(Type self_ty) -> Tensor
   variants: function
-  dispatch: new_sparse
+  dispatch:
+    SparseCPU: new_sparse
 
-- func: native_tensor(Type dtype, IntList size) -> Tensor
+- func: native_tensor(Type self_ty, IntList size) -> Tensor
   variants: function
-  dispatch: new_with_size_sparse
+  dispatch:
+    SparseCPU: new_with_size_sparse
 
 - func: tensor(Type dtype) -> Tensor
   variants: function
@@ -1371,32 +1376,36 @@
   variants: function
 
 
-- func: native_sparse_coo_tensor(Tensor indices, Tensor values) -> Tensor
+- func: native_sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
   variants: function
-  dispatch: new_with_tensor_sparse
+  dispatch:
+    CPU: new_with_tensor_sparse
 
-- func: native_sparse_coo_tensor(Tensor indices, Tensor values, IntList size) -> Tensor
+- func: native_sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
   variants: function
-  dispatch: new_with_tensor_and_size_sparse
+  dispatch:
+    CPU: new_with_tensor_and_size_sparse
 
-- func: sparse_coo_tensor(Tensor indices, Tensor values) -> Tensor
+- func: sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
   variants: function
 
-- func: sparse_coo_tensor(Tensor indices, Tensor values, IntList size) -> Tensor
+- func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
   variants: function
 
 
-- func: _native_sparse_coo_tensor_unsafe(Tensor indices, Tensor values, IntList size) -> Tensor
+- func: _native_sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
   variants: function
-  dispatch: new_with_tensor_and_size_unsafe_sparse
+  dispatch:
+    CPU: new_with_tensor_and_size_unsafe_sparse
 
-- func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, IntList size) -> Tensor
+- func: _sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
   variants: function
 
 
 - func: native_sparse_raw_resize_(Tensor self, IntList size, int64_t dimI, int64_t dimV) -> Tensor
   variants: function
-  dispatch: raw_resize_sparse_
+  dispatch:
+    SparseCPU: raw_resize_sparse_
 
 - func: sparse_raw_resize_(Tensor self, IntList size, int64_t dimI, int64_t dimV) -> Tensor
   variants: method
@@ -1404,14 +1413,16 @@
 
 - func: _native_sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
   variants: function
-  dispatch: sparse_mask_cpu
+  dispatch:
+    CPU: sparse_mask_cpu
 
 - func: _sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
 
 
 - func: native_to_dense(Tensor self) -> Tensor
   variants: function
-  dispatch: sparse_to_dense
+  dispatch:
+    SparseCPU: sparse_to_dense
 
 - func: to_dense(Tensor self) -> Tensor
   variants: method
@@ -1419,7 +1430,8 @@
 
 - func: _native_dimI(Tensor self) -> int64_t
   variants: function
-  dispatch: _dimI_sparse
+  dispatch:
+    SparseCPU: _dimI_sparse
 
 - func: _dimI(Tensor self) -> int64_t
   variants: method
@@ -1427,7 +1439,8 @@
 
 - func: _native_dimV(Tensor self) -> int64_t
   variants: function
-  dispatch: _dimV_sparse
+  dispatch:
+    SparseCPU: _dimV_sparse
 
 - func: _dimV(Tensor self) -> int64_t
   variants: method
@@ -1435,7 +1448,8 @@
 
 - func: _native_nnz(Tensor self) -> int64_t
   variants: function
-  dispatch: _nnz_sparse
+  dispatch:
+    SparseCPU: _nnz_sparse
 
 - func: _nnz(Tensor self) -> int64_t
   variants: method
@@ -1443,7 +1457,8 @@
 
 - func: native_coalesce(Tensor self) -> Tensor
   variants: function
-  dispatch: coalesce_sparse_cpu
+  dispatch:
+    SparseCPU: coalesce_sparse_cpu
 
 - func: coalesce(Tensor self) -> Tensor
   variants: method
@@ -1451,7 +1466,8 @@
 
 - func: native_is_coalesced(Tensor self) -> bool
   variants: function
-  dispatch: is_coalesced_sparse
+  dispatch:
+    SparseCPU: is_coalesced_sparse
 
 - func: is_coalesced(Tensor self) -> bool
   variants: method
@@ -1459,7 +1475,8 @@
 
 - func: _native_indices(Tensor self) -> Tensor
   variants: function
-  dispatch: _indices_sparse
+  dispatch:
+    SparseCPU: _indices_sparse
 
 - func: _indices(Tensor self) -> Tensor
   variants: method
@@ -1467,7 +1484,8 @@
 
 - func: _native_values(Tensor self) -> Tensor
   variants: function
-  dispatch: _values_sparse
+  dispatch:
+    SparseCPU: _values_sparse
 
 - func: _values(Tensor self) -> Tensor
   variants: method
@@ -1475,11 +1493,13 @@
 
 - func: native_hspmm_out(Tensor result, Tensor mat1, Tensor mat2) -> Tensor
   variants: function
-  dispatch: hspmm_out_sparse_cpu
+  dispatch:
+    SparseCPU: hspmm_out_sparse_cpu
 
 - func: native_hspmm(Tensor mat1, Tensor mat2) -> Tensor
   variants: function
-  dispatch: hspmm_sparse_cpu
+  dispatch:
+    SparseCPU: hspmm_sparse_cpu
 
 - func: hspmm_out(Tensor result, Tensor mat1, Tensor mat2) -> Tensor
   variants: function
