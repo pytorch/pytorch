@@ -38,16 +38,16 @@ namespace {
 
 class GetExpandGradient final : public GradientMakerBase {
 	using GradientMakerBase::GradientMakerBase;
-	std::vector<operatorDef> GetGradientDefs() override {
-		return SingleGradientDef(
-				def_.type() + "Gradient",
-				"",
-				std::vector<string>{GO(0), I(0), O(0)},
-				std::vector<string>{GI(0)});
-	}
+        std::vector<OperatorDef> GetGradientDefs() override {
+          return SingleGradientDef(
+              def_.type() + "Gradient",
+              "",
+              std::vector<string>{GO(0), I(0), O(0)},
+              std::vector<string>{GI(0)});
+        }
 };
 
 } // namespace
 
-REGISTER_GRADIENT(ExpandSum, GetExpandGradient);
+REGISTER_GRADIENT(ExpandNormal, GetExpandGradient);
 } // namespace caffe2

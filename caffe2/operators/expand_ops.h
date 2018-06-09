@@ -15,35 +15,40 @@ namespace caffe2{
 template <typename InputTypes, class Context, class Expander>
 class ExpandOp final : public Operator<Context> {
 	public:
-		USE_OPERATOR_CONTEXT_FUNCTION;
+         USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-	ExpandOp(const OperatorDef& operator_def, Workspace* ws)
-		: Operator<Context>(operator_def, ws){}
+         ExpandOp(const OperatorDef& operator_def, Workspace* ws)
+             : Operator<Context>(operator_def, ws) {}
 
-	bool RunOnDevice() override {
-		return DispatchHelper<InputTypes>::call(this, Input(0));
+         bool RunOnDevice() override {
+           return DispatchHelper<InputTypes>::call(this, Input(0));
 	}
 
 	template <typename T>
 	bool DoRunWithType() {
 		const auto& X = Input(0);
-		const auto& Y_shape = Input(1);
-		auto* Y = Output(0);
-		const int ndim = Y_shape.ndim();
-		const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
-		const std::vector<int> shape_dims(Y_shape);
-		Y_dims.reserve(math::Max(ndim,X.ndim()));
+                const auto& Y_shape_tensor = Input(1);
+                const auto Y_shape = Y_shape_tensor.template data<T>();
+                auto* Y = Output(0);
+                const int ndim = Y_shape_tensor.ndim();
+                const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+                std::vector<int> Y_dims;
+                const std::vector<int> shape_dims(Y_shape, Y_shape + ndim);
+                Y_dims.reserve(std::max(ndim, X.ndim()));
 
-		//ndim, X.ndim() might equal to 0
-		for (int i = ndim, j = X.ndim(); i >= 0 || j >= 0; i--, j--) {
-			const shape_x = (j >= 0 ? X_dims[j] : 1);
-			const shape_y = (i >= 0 ? shape_dims[i] : 1);
-			CAFFE_FORCE(shape_x == 1 || shape_y == 1 || shape_x == shape_y, "Dimensions format invalid.");
-			Y_dims.push_back(math::Max(shape_x, shape_y));
-		}
-		std::reverse(Y_dims.begin(), Y_dims.end());
-		Y.Resize(Y_dims);
-		return expander_.template Forward<T>(
+                //ndim, X.ndim() might equal to 0
+                for (int i = ndim - 1, j = X.ndim() - 1; i >= 0 || j >= 0;
+                     i--, j--) {
+                  const int shape_x = (j >= 0 ? X_dims[j] : 1);
+                  const int shape_y = (i >= 0 ? shape_dims[i] : 1);
+                  CAFFE_ENFORCE(
+                      shape_x == 1 || shape_y == 1 || shape_x == shape_y,
+                      "Dimensions format invalid.");
+                  Y_dims.push_back(std::max(shape_x, shape_y));
+                }
+                std::reverse(Y_dims.begin(), Y_dims.end());
+                Y->Resize(Y_dims);
+                return expander_.template Forward<T>(
 				X.ndim(),
 				X_dims,
 				ndim,
@@ -75,8 +80,9 @@ class ExpandGradientOp final : public Operator<Context> {
 			const auto& Y = Input(2);
 			auto* dX = Output(0);
 			const int ndim = Y.ndim();
-			const std::vector<int> dX_dims(X.dims().cbegin(). X.dims().cend());
-			dX->ResizeLike(X);
+                        const std::vector<int> dX_dims(
+                            X.dims().cbegin(), X.dims().cend());
+                        dX->ResizeLike(X);
 			std::vector<int> axes;
 			const int offset = ndim - X.ndim();
 			for (int i = 0; i < ndim; i++){
@@ -96,45 +102,44 @@ class ExpandGradientOp final : public Operator<Context> {
 };
 
 template <class Context>
-struct ExpandNormal {
-	template <typename T>
-	bool Forward(
-			const int& X_ndims,
-			const std::vector<int>& X_dims,
-			const int& Y_ndims,
-			const std::vector<int>& Y_dims,
-			const T* X_data,
-			T* Y_data,
-			Context* context) const{
-		math::Broadcast(
-				X_ndims,
-				X_dims.data(),
-				Y_ndims,
-				Y_dims.data(),
-				X_data,
-				Y_data,
-				context);
-		return true;
+struct NormalExpander {
+  template <typename T>
+  bool Forward(
+      const int& X_ndims,
+      const std::vector<int>& X_dims,
+      const int& Y_ndims,
+      const std::vector<int>& Y_dims,
+      const T* X_data,
+      T* Y_data,
+      Context* context) const {
+    math::Broadcast(
+        X_ndims,
+        X_dims.data(),
+        Y_ndims,
+        Y_dims.data(),
+        X_data,
+        Y_data,
+        context);
+    return true;
+  }
 
-	}
-
-	template <typename T>
-	bool Backward(
-			const std::vector<int>& dims,
-			const std::vector<int>& axes,
-			const T* dY_data,
-			T* dX_data,
-			Context* context) const {
-		math::ReduceSum<T, Context>(
-			dims.size(),
-			dims.data(),
-			axes.size(),
-			axes.size(),
-			dY_data,
-			dX_data,
-			context);
-		return true;
-	}
+  template <typename T>
+  bool Backward(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* dY_data,
+      T* dX_data,
+      Context* context) const {
+    math::ReduceSum<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        dY_data,
+        dX_data,
+        context);
+    return true;
+  }
 };
 
 } // namespace caffe2

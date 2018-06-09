@@ -8,11 +8,11 @@
 #include "caffe2/core/context_gpu.h"
 
 namespace caffe2 {
-	REGISTER_CUDA_OPERATOR(
-		ExpandNormal,
-		ExpandOp<
-			TensorType<std::int32_t, std::int64_t, float, double>,
-			CUDAContext,
-			NormalExpander<CUDAContext>>);
+REGISTER_CUDA_OPERATOR(
+    ExpandNormal,
+    ExpandOp<
+        TensorType<std::int32_t, std::int64_t, float, double>,
+        CUDAContext,
+        NormalExpander<CUDAContext>>);
 
 } // namespace caffe2
