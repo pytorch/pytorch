@@ -1285,6 +1285,60 @@
     - THTensor* self
 ]]
 [[
+  name: i0
+  types:
+    - floating_point
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+[[
+  name: i0_
+  types:
+    - floating_point
+  backends:
+    - CPU
+  cname: i0
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+[[
+  name: i1
+  types:
+    - floating_point
+  backends:
+    - CPU
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+[[
+  name: i1_
+  types:
+    - floating_point
+  backends:
+    - CPU
+  cname: i1
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+[[
   name: _exp
   cname: exp
   types:

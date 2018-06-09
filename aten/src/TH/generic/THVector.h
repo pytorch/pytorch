@@ -30,6 +30,9 @@ TH_API void THVector_(abs)(real *y, const real *x, const ptrdiff_t n);
 /* floating point only now */
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
+TH_API void THVector_(i0)(real *y, const real *x, const ptrdiff_t n);
+TH_API void THVector_(i1)(real *y, const real *x, const ptrdiff_t n);
+//TH_API void THVector_(iv)(real *y, const real v, const real *x, const ptrdiff_t n);
 TH_API void THVector_(log)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(lgamma)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(digamma)(real *y, const real *x, const ptrdiff_t n);

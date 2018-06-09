@@ -218,6 +218,12 @@ struct Tensor : public detail::TensorBase {
   Tensor & abs_();
   Tensor & sigmoid_();
   Tensor sigmoid() const;
+  Tensor & i0_();
+  Tensor i0() const;
+  Tensor & i1_();
+  Tensor i1() const;
+  //Tensor & iv_(Scalar v);
+  //Tensor iv(Scalar v) const;
   Tensor & log_();
   Tensor log() const;
   Tensor & log1p_();

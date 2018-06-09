@@ -323,6 +323,16 @@
 - name: histc(Tensor self, int64_t bins, Scalar min, Scalar max)
   self: not_implemented("histc")
 
+- name: i0(Tensor self)
+  self: grad * i1(self)
+
+- name: i1(Tensor self)
+  self: grad * (i0(self) - i1(self) / self)
+
+#- name: iv(Scalar v, Tensor self)
+#  self: grad * (iv(v,self) * v / self + iv(v+1, self))
+#  v: not_implemented("iv")
+
 - name: index_add_(Tensor self, int64_t dim, Tensor index, Tensor source)
   self: grad
   source: grad.index_select(dim, index)

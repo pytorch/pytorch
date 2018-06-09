@@ -223,6 +223,8 @@ std::string encodeRHS(Node * n) {
     {aten::log1p, "log1pf(${0})"},
     {aten::log2,  "log2f(${0})"},
     {aten::lgamma, "lgammaf(${0})"},
+    {aten::i0, "i0f(${0})"},
+    {aten::i1, "i1f(${0})"},
     {aten::exp, "expf(${0})"},
     {aten::expm1, "expm1f(${0})"},
     {aten::cos, "cosf(${0})"},
@@ -244,6 +246,7 @@ std::string encodeRHS(Node * n) {
     {aten::reciprocal, "reciprocalf(${0})"},
     {aten::neg, "-${0}"},
     //simple binary
+    //{aten::iv, "ivf(${0},${1})"},
     {aten::atan2, "atan2(${0}, ${1})"},
     {aten::min, "fminf(${0}, ${1})"},
     {aten::max, "fmaxf(${0}, ${1})"},

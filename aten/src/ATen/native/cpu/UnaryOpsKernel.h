@@ -38,6 +38,9 @@ extern DispatchStub<unary_fn> truncImpl;
 // Missing unary functions
 // digamma
 // lgamma
+// i0
+// i1
+// iv
 
 // TODO: See below
 // erfinv
