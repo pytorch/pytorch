@@ -587,25 +587,29 @@ class clean(distutils.command.clean.clean):
 
 include_dirs = []
 library_dirs = []
-extra_link_args = []
 
 if IS_WINDOWS:
-    extra_compile_args = ['/MD', '/Z7', '/EHa', '/DNOMINMAX', '/wd4267', '/wd4251',
-                          '/wd4522', '/wd4522', '/wd4838', '/wd4305', '/wd4244',
-                          '/wd4190', '/wd4101', '/wd4996', '/wd4275'
-                          # /MD links against DLL-specific runtime library and
-                          # matches the flag set for ONNX
-                          # /Z7 turns on symbolic debugging information in .obj files
-                          # /EHa is about native C++ catch support for asynchronous
-                          # structured exception handling (SEH)
-                          # /DNOMINMAX removes builtin min/max functions
-                          # /wdXXXX disables warning no. XXXX
-                          ]
+    # /NODEFAULTLIB makes sure we only link to DLL runtime
+    # and matches the flags set for protobuf and ONNX
+    extra_link_args = ['/NODEFAULTLIB:LIBCMT.LIB']
+    # /MD links against DLL runtime
+    # and matches the flags set for protobuf and ONNX
+    # /Z7 turns on symbolic debugging information in .obj files
+    # /EHa is about native C++ catch support for asynchronous
+    # structured exception handling (SEH)
+    # /DNOMINMAX removes builtin min/max functions
+    # /wdXXXX disables warning no. XXXX
+    extra_compile_args = ['/MD', '/Z7',
+                          '/EHa', '/DNOMINMAX',
+                          '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
+                          '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
+                          '/wd4275']
     if sys.version_info[0] == 2:
         # /bigobj increases number of sections in .obj file, which is needed to link
         # against libaries in Python 2.7 under Windows
         extra_compile_args.append('/bigobj')
 else:
+    extra_link_args = []
     extra_compile_args = [
         '-std=c++11',
         '-Wall',
