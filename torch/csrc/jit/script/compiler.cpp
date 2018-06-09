@@ -161,7 +161,7 @@ struct Environment {
     if (as_simple_value &&
         !findInThisFrame(name) &&
         findInParentFrame(name) &&
-        getBlockOwningKind() == prim::Loop) {
+        (getBlockOwningKind() == prim::Loop || getBlockOwningKind() == prim::If)) {
       createCapturedInput(as_simple_value, name);
     }
     value_table[name] = std::move(value);
@@ -223,6 +223,28 @@ struct Environment {
       }
     }
   }
+
+  // for each captured input, create/refer new one in enclosing
+  // scope, and replace references in the block, delete branch block
+  // inputs, and the corresponding field in value_map
+  void deleteIfStmtCapturedInputs(const SourceRange& loc) {
+    // block inputs should be 1:1 to the captured_inputs
+    JIT_ASSERT(b->inputs().size() == captured_inputs.size());
+    for(int i = captured_inputs.size() - 1; i >= 0; -- i) {
+      std::string name = captured_inputs[i];
+      Ident ident = Ident::create(loc, name);
+      Value* parent_frame_var = next->getVar(ident);
+      Value* captured_val = b->inputs()[i];
+      captured_val->replaceAllUsesWith(parent_frame_var);
+      // If unmutated, we can delete it from value_map. Safe to call asValue
+      // here since captured values are all guaranteed to be Simple
+      if (value_table[name]->asValue(loc, method) == captured_val) {
+        value_table.erase(name);
+      }
+      b->eraseInput(i);
+    }
+  }
+
   std::vector<std::string> definedVariables() {
     std::vector<std::string> result;
     for(auto & kv : value_table) {
@@ -759,7 +781,10 @@ private:
 
     // Emit both blocks once to get the union of all mutated values
     auto save_true = emitSingleIfBranch(true_block, stmt.trueBranch());
+    save_true->deleteIfStmtCapturedInputs(stmt.range());
+
     auto save_false = emitSingleIfBranch(false_block, stmt.falseBranch());
+    save_false->deleteIfStmtCapturedInputs(stmt.range());
 
     // In python, every variable assigned in an if statement escapes
     // the scope of the if statement (all variables are scoped to the function).

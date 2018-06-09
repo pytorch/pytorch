@@ -1422,6 +1422,20 @@ class TestScript(TestCase):
 
         self.assertEqual(test_script_for_in_range_ast(*inputs), 161700)
 
+    def test_script_for_in_range_if_ast(self):
+        @torch.jit.script
+        def test_script_for_in_range_if_ast(x):
+            output = 0
+            for i in range(20):
+                if i == 0:
+                    output = x.unsqueeze(0)
+                else:
+                    output = torch.cat((output, x.unsqueeze(0)), dim=0)
+            return output
+        inputs = self._make_scalar_vars([0], torch.int64)
+
+        self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
+
     def test_script_bool_constant(self):
         script = '''
         def test_script_bool_constant():
