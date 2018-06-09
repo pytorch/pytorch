@@ -14,6 +14,5 @@
 #include "THCTensorCopy.h"
 #include "THCTensorRandom.h"
 #include "THCTensorMath.h"
-#include "THCTensorConv.h"
 
 #endif
