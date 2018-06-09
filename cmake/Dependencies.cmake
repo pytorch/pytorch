@@ -4,40 +4,34 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # ---[ Threads
-if(BUILD_CAFFE2)
-  include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-  if (TARGET Threads::Threads)
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
-  else()
-    message(FATAL_ERROR
-        "Cannot find threading library. Caffe2 requires Threads to compile.")
-  endif()
+include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
+if (TARGET Threads::Threads)
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
+else()
+  message(FATAL_ERROR
+      "Cannot find threading library. Caffe2 requires Threads to compile.")
 endif()
 
 # ---[ protobuf
-if(BUILD_CAFFE2)
-  if(USE_LITE_PROTO)
-    set(CAFFE2_USE_LITE_PROTO 1)
-  endif()
+if(USE_LITE_PROTO)
+  set(CAFFE2_USE_LITE_PROTO 1)
 endif()
 
 # ---[ git: used to generate git build string.
-if(BUILD_CAFFE2)
-  find_package(Git)
-  if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-                    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-                    OUTPUT_VARIABLE CAFFE2_GIT_VERSION
-                    RESULT_VARIABLE __git_result)
-    if(NOT ${__git_result} EQUAL 0)
-      set(CAFFE2_GIT_VERSION "unknown")
-    endif()
-  else()
-    message(
-        WARNING
-        "Cannot find git, so Caffe2 won't have any git build info available")
+find_package(Git)
+if(GIT_FOUND)
+  execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+                  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
+                  WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
+                  OUTPUT_VARIABLE CAFFE2_GIT_VERSION
+                  RESULT_VARIABLE __git_result)
+  if(NOT ${__git_result} EQUAL 0)
+    set(CAFFE2_GIT_VERSION "unknown")
   endif()
+else()
+  message(
+      WARNING
+      "Cannot find git, so Caffe2 won't have any git build info available")
 endif()
 
 # ---[ BLAS
@@ -303,18 +297,16 @@ if(USE_FFMPEG)
 endif()
 
 # ---[ EIGEN
-if(BUILD_CAFFE2)
-  # Due to license considerations, we will only use the MPL2 parts of Eigen.
-  set(EIGEN_MPL2_ONLY 1)
-  find_package(Eigen3)
-  if(EIGEN3_FOUND)
-    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
-  else()
-    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
-    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
-  endif()
-  include_directories(${EIGEN3_INCLUDE_DIR})
+# Due to license considerations, we will only use the MPL2 parts of Eigen.
+set(EIGEN_MPL2_ONLY 1)
+find_package(Eigen3)
+if(EIGEN3_FOUND)
+  message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+else()
+  message(STATUS "Did not find system Eigen. Using third party subdirectory.")
+  set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
 endif()
+include_directories(${EIGEN3_INCLUDE_DIR})
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
@@ -440,28 +432,26 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(BUILD_CAFFE2)
-  include(cmake/public/LoadHIP.cmake)
-  if(PYTORCH_FOUND_HIP)
-    message(INFO "Compiling with HIP for AMD.")
-    caffe2_update_option(USE_ROCM ON)
+include(cmake/public/LoadHIP.cmake)
+if(PYTORCH_FOUND_HIP)
+  message(INFO "Compiling with HIP for AMD.")
+  caffe2_update_option(USE_ROCM ON)
 
-    set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
-    set(Caffe2_HIP_INCLUDES
-      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${Caffe2_HIP_INCLUDES} ${thrust_INCLUDE_DIRS})
-    set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
+  set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
+  set(Caffe2_HIP_INCLUDES
+    ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${Caffe2_HIP_INCLUDES} ${thrust_INCLUDE_DIRS})
+  set(Caffe2_HIP_DEPENDENCY_LIBS
+    ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
 
-    # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
-    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas)
-  else()
-    caffe2_update_option(USE_ROCM OFF)
-  endif()
+  # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
+  list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
+    roc::rocblas)
+else()
+  caffe2_update_option(USE_ROCM OFF)
 endif()
 
 # ---[ ROCm
-if(USE_ROCM AND NOT BUILD_CAFFE2)
+if(USE_ROCM)
  include_directories(${HIP_PATH}/include)
  include_directories(${HIPBLAS_PATH}/include)
  include_directories(${HIPSPARSE_PATH}/include)
@@ -497,14 +487,12 @@ if(USE_NCCL)
 endif()
 
 # ---[ CUB
-if(BUILD_CAFFE2)
-  if(USE_CUDA)
-    find_package(CUB)
-    if(CUB_FOUND)
-      include_directories(${CUB_INCLUDE_DIRS})
-    else()
-      include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
-    endif()
+if(USE_CUDA)
+  find_package(CUB)
+  if(CUB_FOUND)
+    include_directories(${CUB_INCLUDE_DIRS})
+  else()
+    include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
   endif()
 endif()
 
@@ -657,13 +645,11 @@ if (USE_NNAPI AND NOT ANDROID)
 endif()
 
 if (BUILD_ATEN)
-  if (BUILD_CAFFE2)
-    list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
-    if (USE_CUDA)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
-    endif()
-    include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
+  list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
+  if (USE_CUDA)
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
   endif()
+  include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
 endif()
 
 if (USE_ZSTD)
@@ -685,9 +671,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # We will build onnx as static libs and embed it directly into the binary.
   set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  # Do not do post-processing if caffe2 is not included in the build,
-  # otherwise the caffe2 protobuf symbols will not be found
-  if (BUILD_CAFFE2 AND CAFFE2_LINK_LOCAL_PROTOBUF)
+  if (CAFFE2_LINK_LOCAL_PROTOBUF)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
