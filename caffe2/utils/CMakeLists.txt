@@ -43,7 +43,11 @@ set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS}
 # TODO Remove the CMake_xxx variables above and add them to the variables for the local library target below instead
 
 set(LIB_SOURCES_CPU
-        dummy.cpp
+        Array.cpp
+        C++17.cpp
+        Metaprogramming.cpp
+        TypeList.cpp
+        TypeTraits.cpp
         )
 
 set(LIB_SOURCES_GPU
@@ -51,7 +55,10 @@ set(LIB_SOURCES_GPU
         )
 
 set(TEST_SOURCES_CPU
-        dummy.cpp
+        Array_test.cpp
+        Metaprogramming_test.cpp
+        TypeList_test.cpp
+        TypeTraits_test.cpp
         )
 
 set(LIB_SOURCES_GPU
