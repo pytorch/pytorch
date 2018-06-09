@@ -15,6 +15,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/loop_unrolling.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
@@ -349,6 +350,7 @@ private:
       // do not work on variables
 
       // They also may assume that concrete sizes/strides are availiable
+      UnrollLoops(graph);
 
       //TODO: create peephole optimizations that are safe to run
       // when we are using variables, and when we do not know sizes.

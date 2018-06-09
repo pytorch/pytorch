@@ -15,3 +15,4 @@
 #include "ATen/TensorOperators.h"
 #include "ATen/TensorMethods.h"
 #include "ATen/Dispatch.h"
+#include "ATen/DimVector.h"

@@ -30,7 +30,7 @@ NetDef optimize_inference_net(
   // Step 1: count first and last operator for each blob
   std::unordered_set<std::string> all_blobs;
   std::unordered_map<std::string, std::pair<int, int>> ranges;
-  for (int i = 0; i < ops.size(); i++) {
+  for (size_t i = 0; i < ops.size(); i++) {
     for (auto& inp : ops[i].input()) {
       if (ranges.find(inp) != ranges.end()) {
         ranges[inp].second = i;
@@ -53,7 +53,7 @@ NetDef optimize_inference_net(
   std::unordered_map<std::string, std::string> renaming;
   std::unordered_map<std::string, std::string> mapping;
 
-  for (int i = 0; i < ops.size(); i++) {
+  for (int i = 0; i < (int)ops.size(); i++) {
     auto& op = ops[i];
     std::unordered_set<std::string> new_free_blobs;
 
@@ -366,7 +366,7 @@ class ComputeBlobRecyclingForDag {
     for (const auto& input : current_op.input()) {
       if (has_key(shareable_blob_names, input)) {
         blob_input_count_[input]++;
-        if (blob_input_count_[input] == blob_to_ops_[input].size()) {
+        if (blob_input_count_[input] == (int)blob_to_ops_[input].size()) {
           const string& actual_blob = get_blob_or_mapped_blob(input);
           if (!has_key(dont_share_blob_names, actual_blob)) {
             new_free_blobs.emplace_back(
@@ -456,7 +456,7 @@ class ComputeBlobRecyclingForDag {
       return 0;
     }
     int size = 1;
-    for (int i = 0; i < blob_shapes_iter->second.size(); ++i) {
+    for (size_t i = 0; i < blob_shapes_iter->second.size(); ++i) {
       size *= blob_shapes_iter->second[i];
     }
     return size;
@@ -526,7 +526,7 @@ class ComputeBlobRecyclingForDag {
       const int blob_size = infer_blob_size(blob_name, blob_shapes);
       int best_size = -1;
       int free_blob_index = -1;
-      for (int i = 0; i < free_blobs->size(); ++i) {
+      for (size_t i = 0; i < free_blobs->size(); ++i) {
         const string& cb_name = (*free_blobs)[i].second;
         if (can_use_blob(cb_name, tokens, device)) {
           const int cand_bz = blob_sizes_[cb_name];

@@ -3569,6 +3569,19 @@
     - double p
 ]]
 [[
+  name: _cpu_bernoulli_
+  backends:
+    - CPU
+  cname: bernoulli
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
+    - double p
+]]
+[[
   name: _th_bernoulli
   types:
     - Float
@@ -3872,7 +3885,7 @@
   aten_custom_call: |
     if (self_->isScalar()) {
       // Empty tensor
-      return self_->type().toScalarType(kLong).tensor({0});
+      return toBackend(toDense(backend())).toScalarType(kLong).tensor({0});
     }
 ]]
 

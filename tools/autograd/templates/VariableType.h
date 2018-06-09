@@ -17,7 +17,7 @@ using at::Context;
 using at::Generator;
 using at::IntList;
 using at::Scalar;
-using at::SparseTensor;
+using at::SparseTensorRef;
 using at::Storage;
 using at::Tensor;
 using at::TensorList;
@@ -62,7 +62,7 @@ private:
   // checks that t is actually a Variable
   static Variable & checked_cast_variable(const Tensor & t, const char * name, int pos);
   static at::Tensor & unpack(const Tensor & t, const char * name, int pos);
-  static at::SparseTensor unpack(SparseTensor t, const char * name, int pos);
+  static at::SparseTensorRef unpack(SparseTensorRef t, const char * name, int pos);
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
 

@@ -12,6 +12,7 @@ TH_API void THDoubleVector_cmul_AVX(double *z, const double *x, const double *y,
 TH_API void THDoubleVector_muls_AVX(double *y, const double *x, const double c, const ptrdiff_t n);
 TH_API void THDoubleVector_cadd_AVX(double *z, const double *x, const double *y, const double c, const ptrdiff_t n);
 TH_API void THDoubleVector_adds_AVX(double *y, const double *x, const double c, const ptrdiff_t n);
+TH_API void THDoubleVector_cvtFromInt_AVX(double *y, const int *x, const ptrdiff_t n);
 TH_API void THFloatVector_copy_AVX(float *y, const float *x, const ptrdiff_t n);
 TH_API void THFloatVector_fill_AVX(float *x, const float c, const ptrdiff_t n);
 TH_API void THFloatVector_cdiv_AVX(float *z, const float *x, const float *y, const ptrdiff_t n);
@@ -20,4 +21,5 @@ TH_API void THFloatVector_cmul_AVX(float *z, const float *x, const float *y, con
 TH_API void THFloatVector_muls_AVX(float *y, const float *x, const float c, const ptrdiff_t n);
 TH_API void THFloatVector_cadd_AVX(float *z, const float *x, const float *y, const float c, const ptrdiff_t n);
 TH_API void THFloatVector_adds_AVX(float *y, const float *x, const float c, const ptrdiff_t n);
+TH_API void THFloatVector_cvtFromInt_AVX(float *y, const int *x, const ptrdiff_t n);
 #endif

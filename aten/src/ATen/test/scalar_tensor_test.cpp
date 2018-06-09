@@ -49,8 +49,8 @@ void test(Type &T) {
   for (auto s = sizes.begin(); s != sizes.end(); ++s) {
     // verify that the dim, sizes, strides, etc match what was requested.
     auto t = ones(T, *s);
-    REQUIRE((std::size_t)t.dim() == s->size());
-    REQUIRE((std::size_t)t.ndimension() == s->size());
+    REQUIRE((size_t)t.dim() == s->size());
+    REQUIRE((size_t)t.ndimension() == s->size());
     REQUIRE(t.sizes().equals(*s));
     REQUIRE(t.strides().size() == s->size());
     auto numel = std::accumulate(s->begin(), s->end(), 1, std::multiplies<int64_t>());

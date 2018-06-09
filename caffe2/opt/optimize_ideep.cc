@@ -1,6 +1,7 @@
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
+#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 namespace opt {
@@ -18,6 +19,13 @@ void OptimizeForIdeep(repr::NNModule* nn) {
 
     // We only want to fuse for IDEEP convs
     if (op->device_option().device_type() != DeviceType::IDEEP) {
+      return false;
+    }
+
+    // IDEEP doesn't support fusion group conv
+    int group =
+        ArgumentHelper::GetSingleArgument<OperatorDef, int>(*op, "group", 1);
+    if (group != 1) {
       return false;
     }
 

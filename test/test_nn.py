@@ -500,14 +500,10 @@ class TestNN(NNTestCase):
             return input.grad.data
 
     def _zero_grad_parameters(self, module):
-        if hasattr(module, 'weight') and module.weight is not None:
-            if module.weight.grad is not None:
-                module.weight.grad.data.zero_()
-                module.weight.grad.detach_()
-        if hasattr(module, 'bias') and module.bias is not None:
-            if module.bias.grad is not None:
-                module.bias.grad.data.zero_()
-                module.bias.grad.detach_()
+        for p in module.parameters():
+            if p.grad is not None:
+                p.grad.data.zero_()
+                p.grad.detach_()
 
     def _get_parameters(self, module):
         params = []
@@ -1179,6 +1175,28 @@ class TestNN(NNTestCase):
         self.assertEqual(net.l, l3)
         self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
 
+    def test_module_to_argparse(self):
+        net = nn.Sequential(nn.Linear(3, 3))
+        cpu = torch.device('cpu')
+        with self.assertRaises(TypeError):
+            net.to(cpu, True)
+        with self.assertRaises(TypeError):
+            net.to(torch.long)
+        with self.assertRaises(TypeError):
+            net.to(None, True)
+        with self.assertRaises(TypeError):
+            net.to(cpu, torch.long, True)
+        with self.assertRaises(TypeError):
+            net.to(cpu, dtype=torch.long, non_blocking=True)
+        with self.assertRaises(TypeError):
+            net.to([])
+        with self.assertRaises(TypeError):
+            net.to({}, non_blocking=True)
+        with self.assertRaises(TypeError):
+            net.to(torch.tensor(3, dtype=torch.long), non_blocking=True)
+        with self.assertRaises(TypeError):
+            net.to(cpu, torch.tensor(3, dtype=torch.long), non_blocking=True)
+
     def test_type(self):
         l = nn.Linear(10, 20)
         net = nn.Module()
@@ -1207,22 +1225,22 @@ class TestNN(NNTestCase):
             self.assertIsInstance(l.weight.data, torch.FloatTensor)
             self.assertIsInstance(l.bias.data, torch.FloatTensor)
             self.assertIsInstance(net.indices, torch.LongTensor)
-            net.to("cuda", torch.double)
+            net.to("cuda", torch.double, True)
             self.assertIsInstance(l.weight.data, torch.cuda.DoubleTensor)
             self.assertIsInstance(l.bias.data, torch.cuda.DoubleTensor)
             self.assertIsInstance(net.indices, torch.cuda.LongTensor)
-            net.to(device="cuda:0", dtype=torch.half)
+            net.to(torch.empty(1, device="cuda:0", dtype=torch.half))
             self.assertIsInstance(l.weight.data, torch.cuda.HalfTensor)
             self.assertIsInstance(l.bias.data, torch.cuda.HalfTensor)
             self.assertIsInstance(net.indices, torch.cuda.LongTensor)
-        net.to(torch.device("cpu"))
+        net.to(torch.device("cpu"), non_blocking=True)
         self.assertIsInstance(l.weight.data, torch.HalfTensor)
         self.assertIsInstance(l.bias.data, torch.HalfTensor)
         self.assertIsInstance(net.indices, torch.LongTensor)
         net.type(torch.FloatTensor)
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)
-        net.type(torch.DoubleTensor)
+        net.to(torch.DoubleTensor(1))
         self.assertIsInstance(l.weight.data, torch.DoubleTensor)
         self.assertIsInstance(l.bias.data, torch.DoubleTensor)
         if TEST_CUDA:
@@ -2412,16 +2430,15 @@ class TestNN(NNTestCase):
         i2 = torch.randn(2, 10, device="cuda:1", dtype=torch.float)
         expected1 = l1(i1).data
         expected2 = l2(i2).data
-        inputs = ((i1,), (i2,))
         modules = (l1, l2)
         expected_outputs = (expected1, expected2)
 
-        outputs = dp.parallel_apply(modules, inputs, None)
-        for out, expected in zip(outputs, expected_outputs):
-            self.assertEqual(out.data, expected)
-
-        inputs = (i1, i2.new_empty(0))
-        expected_outputs = (expected1, expected2.new_empty(0))
+        # each input can be either a collection of positional arguments
+        #                       or an object representing the single argument
+        for inputs in [((i1,), (i2,)), (i1, i2)]:
+            outputs = dp.parallel_apply(modules, inputs, None)
+            for out, expected in zip(outputs, expected_outputs):
+                self.assertEqual(out.data, expected)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
@@ -4099,6 +4116,15 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
+    def test_bce_loss_always_nonnegative(self):
+        target = torch.ones(5)
+        input = torch.ones(5)
+        self.assertEqual((nn.BCELoss()(input, target) < 0).sum(), 0)
+
+        target = torch.zeros(5)
+        input = torch.zeros(5)
+        self.assertEqual((nn.BCELoss()(input, target) < 0).sum(), 0)
+
     def test_bce_with_logits_raises_if_target_and_input_are_different_size(self):
         target = torch.rand(5)
         input = torch.rand(5, 1)
@@ -5063,6 +5089,93 @@ class TestNN(NNTestCase):
     def test_grad_conv3d_weight(self):
         self.run_grad_conv_test(F.conv3d, F.grad.conv3d_weight, 3, 'weight')
 
+    def test_adaptive_log_softmax(self):
+        # args validation
+        with self.assertRaises(ValueError):
+            _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 15, 15], div_value=2.)
+
+        with self.assertRaises(ValueError):
+            _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 15, 10], div_value=2.)
+
+        with self.assertRaises(ValueError):
+            _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 25], div_value=2.)
+
+        # input shapes
+        with self.assertRaisesRegex(RuntimeError, "Input and target should have the same size"):
+            asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
+            x = torch.randn(2, 16)
+            y = torch.tensor([0, 5, 10])
+            asfm(x, y)
+
+        # out-of-bound targets
+        with self.assertRaisesRegex(RuntimeError, "Target values should be in"):
+            asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
+            x = torch.randn(2, 16)
+            y = torch.tensor([0, 20])
+            asfm(x, y)
+
+        # cluster sizes
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
+        x = torch.randn(2, 16)
+        y = torch.tensor([0, 17])
+
+        self.assertEqual(asfm.head.weight.size(), (5 + 3, 16))   # 5 targets in head, 3 clusters, dimensionality 16
+        self.assertEqual(asfm.tail[0][1].weight.size(), (5, 8))  # 5 targets in this cluster, dimensionality 8
+        self.assertEqual(asfm.tail[1][1].weight.size(), (5, 4))
+        self.assertEqual(asfm.tail[2][1].weight.size(), (5, 2))
+
+        self.assertEqual(asfm(x, y).output.size(), (2, ))
+
+        # log_probs actually returns log_proba
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 4, [2], div_value=2.)
+        x = torch.randn(4, 8)
+        logprob_out = asfm.log_prob(x)
+
+        self.assertEqual(torch.exp(logprob_out).data.sum(1), torch.ones(4))
+
+        # forward returns the same thing as log_probs
+        for v in [0, 1, 2, 3]:
+            y = torch.full((4,), v, dtype=torch.long)
+            out, loss = asfm(x, y)
+
+            self.assertEqual(out, logprob_out.gather(1, y.unsqueeze(1)).squeeze())
+            self.assertEqual(loss, F.nll_loss(logprob_out, y))
+
+        # predict
+        x = torch.randn(64, 8).abs_()
+
+        # argmax in shortlist
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2., head_bias=True)
+        asfm.head.weight.data.abs_()
+        asfm.head.bias.data.abs_()
+        asfm.head.weight.data[asfm.shortlist_size:, :].zero_()
+
+        out = asfm.predict(x)
+        self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
+
+        # argmax outside of shortlist
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2., head_bias=True)
+        asfm.head.weight.data.abs_()
+        asfm.head.bias.data.abs_()
+        asfm.head.weight.data[:asfm.shortlist_size, :].zero_()
+
+        out = asfm.predict(x)
+        self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
+
+        # half of the argmax in shortlist, half in clusters
+        asfm = nn.AdaptiveLogSoftmaxWithLoss(8, 10, [4, 8], div_value=2., head_bias=True)
+        asfm.head.weight.data.abs_()
+        asfm.head.bias.data.abs_()
+
+        x[:32, :asfm.shortlist_size].zero_()
+        x[32:, asfm.shortlist_size:].zero_()
+
+        asfm.head.weight.data[:asfm.shortlist_size, asfm.shortlist_size:].zero_()
+        asfm.head.weight.data[asfm.shortlist_size:, :asfm.shortlist_size].zero_()
+
+        out = asfm.predict(x)
+        self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
+
 
 class TestNNInit(TestCase):
     def setUp(self):
@@ -5693,6 +5806,18 @@ def bce_with_logistic_no_reduce_scalar_test():
         pickle=False)
 
 
+def kldivloss_with_target_no_reduce_test():
+    i = torch.rand(10, 10).log()
+    return dict(
+        fullname='KLDivLoss_with_target_no_reduce',
+        constructor=wrap_functional(
+            lambda t: F.kl_div(i.type_as(t), t, reduce=False)),
+        input_fn=lambda: torch.rand(10, 10),
+        reference_fn=lambda t, _:
+            loss_reference_fns['KLDivLoss'](i.type_as(t), t, reduce=False),
+        pickle=False)
+
+
 def kldivloss_no_reduce_test():
     t = torch.randn(10, 10)
     return dict(
@@ -6145,6 +6270,7 @@ new_module_tests = [
     bceloss_no_reduce_scalar_test(),
     bceloss_weights_no_reduce_scalar_test(),
     bce_with_logistic_no_reduce_scalar_test(),
+    kldivloss_with_target_no_reduce_test(),
     kldivloss_no_reduce_test(),
     kldivloss_no_reduce_scalar_test(),
     l1loss_no_reduce_test(),
@@ -6184,7 +6310,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6193,7 +6318,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6202,7 +6326,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine_simple_average',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6211,7 +6334,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6220,7 +6342,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -6229,7 +6350,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input_not_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6237,7 +6357,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6246,7 +6365,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_simple_average',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6255,7 +6373,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6264,7 +6381,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -6273,7 +6389,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6281,7 +6396,6 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6290,7 +6404,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_simple_average',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6299,7 +6412,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6308,7 +6420,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -6317,7 +6428,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -6325,7 +6435,6 @@ new_module_tests = [
         input_size=(4, 3, 15),
         cudnn=True,
         check_eval=True,
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -6334,7 +6443,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -6342,7 +6450,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -6351,7 +6458,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -6359,7 +6465,6 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='InstanceNorm3d',
@@ -6368,7 +6473,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6377,7 +6481,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_elementwise_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6386,7 +6489,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_elementwise_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6395,7 +6497,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_elementwise_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='LayerNorm',
@@ -6404,7 +6505,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6413,7 +6513,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6422,7 +6521,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNorm
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6431,7 +6529,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6440,7 +6537,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_affine',
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6449,7 +6545,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='GroupNorm',
@@ -6458,7 +6553,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
-        decorator=skipCUDAMemoryLeakCheckIf(IS_WINDOWS),
     ),
     dict(
         module_name='Conv1d',
@@ -7487,6 +7581,19 @@ add_test(NewModuleTest(
     input_size=(1, 1, 2, 4, 6),
     fullname='MaxUnpool3d_net',
     check_gradgrad=False,))
+
+
+class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
+    def __call__(self, input):
+        t = torch.tensor([0, 1, 4, 8]).to(input.device)
+        return nn.AdaptiveLogSoftmaxWithLoss.__call__(self, input, t).output
+
+
+add_test(NewModuleTest(
+    constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
+    input_size=(4, 16),
+    fullname='AdaptiveLogSoftmax'))
+
 
 if __name__ == '__main__':
     run_tests()

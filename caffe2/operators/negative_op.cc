@@ -1,21 +1,13 @@
-#include "caffe2/operators/elementwise_op.h"
+#include "caffe2/operators/negative_op.h"
+
+#include <string>
+#include <vector>
 
 namespace caffe2 {
 
-struct NegativeCPUFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CPUContext* /*device_context*/) {
-    EigenVectorMap<T>(y, n) = -ConstEigenVectorMap<T>(x, n);
-    // for (int i = 0; i < n; ++i) {
-    //  y[i] = -x[i];
-    //}
-  }
-};
-
 REGISTER_CPU_OPERATOR(
-    Negative, UnaryElementwiseOp<
-        TensorTypes<float, double, int, long>, CPUContext, NegativeCPUFunctor>);
+    Negative,
+    UnaryElementwiseOp<NumericTypes, CPUContext, NegativeFunctor<CPUContext>>);
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(Negative)
@@ -69,14 +61,21 @@ Y: [[-0.83296907 -0.61407167 -0.32562155]
     .Output(0, "Y", "*(type: Tensor`<float>`)* 1D output tensor.")
     .InheritOnnxSchema("Neg");
 
+namespace {
+
 class GetNegativeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+  std::vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "Negative", "",
-        vector<string>{GO(0)},
-        vector<string>{GI(0)});
+        "Negative",
+        "",
+        std::vector<std::string>{GO(0)},
+        std::vector<std::string>{GI(0)});
   }
 };
+
+} // namespace
+
 REGISTER_GRADIENT(Negative, GetNegativeGradient);
-}  // namespace caffe2
+
+} // namespace caffe2

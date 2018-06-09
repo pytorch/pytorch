@@ -36,10 +36,10 @@ fi
 
 export ATEN_DISABLE_AVX=
 export ATEN_DISABLE_AVX2=
-if [[ "${JOB_BASE_NAME}" == *NO_AVX* ]]; then
+if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
   export ATEN_DISABLE_AVX=1
 fi
-if [[ "${JOB_BASE_NAME}" == *NO_AVX2* ]]; then
+if [[ "${JOB_BASE_NAME}" == *-NO_AVX2-* ]]; then
   export ATEN_DISABLE_AVX2=1
 fi
 
@@ -85,7 +85,7 @@ test_torchvision() {
 
 test_libtorch() {
   if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-     echo "Testing libtorch with NO_PYTHON"
+     echo "Testing libtorch"
      CPP_BUILD="$PWD/../cpp-build"
      if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
        "$CPP_BUILD"/libtorch/bin/test_jit

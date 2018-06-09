@@ -274,7 +274,7 @@ DEFINE_BUILTINS(prim, FORALL_PRIM_SYMBOLS)
 namespace std {
   template<>
   struct hash<torch::jit::Symbol> {
-    std::size_t operator()(torch::jit::Symbol s) const {
+    size_t operator()(torch::jit::Symbol s) const {
       return std::hash<uint32_t>()(static_cast<uint32_t>(s));
     }
   };

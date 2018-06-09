@@ -226,7 +226,7 @@ class DBReader {
     *value = cursor_->value();
 
     // In sharded mode, each read skips num_shards_ records
-    for (int s = 0; s < num_shards_; s++) {
+    for (uint32_t s = 0; s < num_shards_; s++) {
       cursor_->Next();
       if (!cursor_->Valid()) {
         MoveToBeginning();
@@ -270,7 +270,7 @@ class DBReader {
 
   void MoveToBeginning() const {
     cursor_->SeekToFirst();
-    for (auto s = 0; s < shard_id_; s++) {
+    for (uint32_t s = 0; s < shard_id_; s++) {
       cursor_->Next();
       CAFFE_ENFORCE(
           cursor_->Valid(), "Db has less rows than shard id: ", s, shard_id_);

@@ -130,7 +130,7 @@ THC_API void
 THCTensor_(rshift)(THCState* state, THCTensor *self_, THCTensor *src_, real value)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-  THCTensor_(mul)(state, self_, src_, pow(2, value));
+  THCTensor_(mul)(state, self_, src_, pow(2, -value));
 #elif defined(THC_REAL_IS_HALF)
   return THError("rshift not supported for torch.CudaHalfTensor");
 #else

@@ -1,19 +1,13 @@
-#include "caffe2/operators/elementwise_op.h"
-#include "caffe2/utils/math.h"
+#include "caffe2/operators/exp_op.h"
+
+#include <string>
+#include <vector>
 
 namespace caffe2 {
 
-struct ExpCPUFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CPUContext* device_context) {
-    math::Exp<T, CPUContext>(n, x, y, device_context);
-  }
-};
-
 REGISTER_CPU_OPERATOR(
     Exp,
-    UnaryElementwiseOp<TensorTypes<float>, CPUContext, ExpCPUFunctor>);
+    UnaryElementwiseOp<TensorTypes<float>, CPUContext, ExpFunctor<CPUContext>>);
 
 OPERATOR_SCHEMA(Exp)
     .NumInputs(1)
@@ -77,15 +71,21 @@ X after running op:
         "element-wise.")
     .InheritOnnxSchema("Exp");
 
+namespace {
+
 class GetExpGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+  std::vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "Mul",
         "",
-        std::vector<string>{O(0), GO(0)},
-        std::vector<string>{GI(0)});
+        std::vector<std::string>{O(0), GO(0)},
+        std::vector<std::string>{GI(0)});
   }
 };
+
+} // namespace
+
 REGISTER_GRADIENT(Exp, GetExpGradient);
+
 } // namespace caffe2

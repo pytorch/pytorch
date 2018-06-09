@@ -97,7 +97,7 @@ if(NOT NO_CUDA)
   endif()
 endif()
 
-add_definitions(-DNO_PYTHON -D_FORCE_INLINES)
+add_definitions(-DUSE_CATCH -D_FORCE_INLINES)
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -231,6 +231,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_addmm.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interned_strings.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp

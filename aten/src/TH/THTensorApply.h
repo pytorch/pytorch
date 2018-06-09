@@ -369,7 +369,7 @@
     TYPE1 *rp = TENSOR1->storage->data<TYPE1>()+TENSOR1->storageOffset;                        \
     TYPE2 *tp = TENSOR2->storage->data<TYPE2>()+TENSOR2->storageOffset;                        \
     ptrdiff_t iter = 0;                                                                        \
-    if(tp != rp) {                                                                             \
+    if(tp != (TYPE2*)rp) {                                                                             \
       PRAGMA(ivdep) \
       PRAGMA( omp parallel for if (SIZE > OMP_THRESHOLD * 10) firstprivate(rp, tp)) \
       for (iter = 0; iter < SIZE; iter++) {                             \
@@ -449,7 +449,7 @@
     TYPE2 *tp = TENSOR2->storage->data<TYPE2>()+TENSOR2->storageOffset;                                 \
     TYPE3 *srcp = TENSOR3->storage->data<TYPE3>()+TENSOR3->storageOffset;                               \
     ptrdiff_t iter = 0;\
-    if (rp != tp) { \
+    if(tp != (TYPE2*)rp) {                                                                             \
       PRAGMA(ivdep) \
       PRAGMA( omp parallel for if (SIZE > OMP_THRESHOLD * 10) )  \
       for (iter = 0; iter < SIZE; iter++) {\

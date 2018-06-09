@@ -162,7 +162,7 @@ struct FunctionParameter {
 template<int N>
 inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
   if (N < max_args) {
-    throw ValueError("dst does not have enough capacity, expected %d (got %d)",
+    throw ValueError("PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
         (int)max_args, N);
   }
   return raw_parse(args, kwargs, dst.args);

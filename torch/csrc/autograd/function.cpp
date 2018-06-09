@@ -19,8 +19,8 @@ namespace torch { namespace autograd {
 
 thread_local uint64_t Function::next_sequence_nr_ = 0;
 
-auto Function::name() -> std::string {
-  return std::string(typeid(*this).name());
+auto Function::name() const -> std::string {
+  return at::demangle(typeid(*this).name());
 }
 
 // This function is analogous to make_trace which operates on PythonOp, but this
@@ -38,11 +38,7 @@ variable_list Function::traced_apply(variable_list inputs) {
   // Insert a CppOp in the trace.
   auto& graph = state->graph;
   auto* this_node = graph->createCppOp(get_shared_ptr());
-#ifndef NO_PYTHON
-  this_node->setSourceLocation(std::make_shared<StringSourceLocation>(
-        jit::tracer::getPythonInterpreterStackTrace()
-  ));
-#endif
+  jit::tracer::recordSourceLocation(this_node);
   for (auto& input: inputs) {
     this_node->addInput(tracer::getValueTrace(state, input));
   }

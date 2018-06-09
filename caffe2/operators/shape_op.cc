@@ -22,7 +22,7 @@ OPERATOR_SCHEMA(Shape)
       } else {
         out[0].add_dims(axes.size());
       }
-      out[0].set_data_type(TensorProto::INT32);
+      out[0].set_data_type(TensorProto::INT64);
       return out;
     })
     .SetDoc(R"DOC(

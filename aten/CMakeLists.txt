@@ -13,7 +13,6 @@ else()
       USE_CUDNN "Use cuDNN" ON
       "USE_CUDA" OFF)
   option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-  option(ATEN_NO_CONTRIB "Do not build ATen contrib" OFF)
 
   # Legacy options, which we will eventually remove
   cmake_dependent_option(
@@ -119,6 +118,10 @@ add_subdirectory(src/THS)
 # Find the HIP package, set the HIP paths, load the HIP CMake.
 IF(USE_ROCM)
   include(LoadHIP)
+  if (NOT PYTORCH_FOUND_HIP)
+    MESSAGE(FATAL_ERROR
+      "Could not find HIP installation")
+  endif()
 ENDIF()
 
 IF(MSVC)
@@ -152,13 +155,6 @@ list(APPEND ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include
   ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 add_subdirectory(src/ATen)
-
-if(ATEN_NO_CONTRIB)
-  message("disable contrib because ATEN_NO_CONTRIB is set")
-else()
-  add_subdirectory(contrib/data)
-  add_subdirectory(contrib/meter)
-endif()
 
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # Pass source, includes, and libs to parent

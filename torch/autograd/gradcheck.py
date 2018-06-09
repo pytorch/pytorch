@@ -21,7 +21,7 @@ def make_jacobian(input, num_out):
             return None
         if not input.requires_grad:
             return None
-        return torch.zeros(input.nelement(), num_out)
+        return torch.zeros(input.nelement(), num_out, dtype=input.dtype)
     elif isinstance(input, Iterable):
         jacobians = list(filter(
             lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
@@ -125,25 +125,36 @@ def _differentiable_outputs(x):
 
 
 def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True):
-    """Check gradients computed via small finite differences
-       against analytical gradients
+    r"""Check gradients computed via small finite differences against analytical
+    gradients
 
-    The check between numerical and analytical has the same behaviour as
-    numpy.allclose https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html
-    meaning it check that
-        absolute(a - n) <= (atol + rtol * absolute(n))
-    is true for all elements of analytical jacobian a and numerical jacobian n.
+    The check between numerical and analytical gradients has the same behaviour as
+    `numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_,
+    i.e., it checks that
+
+    .. math::
+
+        \lvert a - n \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert n \rvert
+
+    holds for all elements of analytical gradient :math:`a` and numerical
+    gradient :math:`n`.
+
+    .. note::
+        The default values are designed for :attr:`input` of double precision.
+        This check will likely fail if :attr:`input` is of single precision,
+        i.e., ``FloatTensor``.
 
     Args:
-        func: Python function that takes Tensor inputs and returns
+        func (function): a Python function that takes Tensor inputs and returns
             a Tensor or a tuple of Tensors
-        inputs: tuple of Tensors
-        eps: perturbation for finite differences
-        atol: absolute tolerance
-        rtol: relative tolerance
-        raise_exception: bool indicating whether to raise an exception if
-            gradcheck fails. The exception gives more information about the
+        inputs (tuple of Tensor): inputs to the function
+        eps (float, optional): perturbation for finite differences
+        atol (float, optional): absolute tolerance
+        rtol (float, optional): relative tolerance
+        raise_exception (bool, optional): indicating whether to raise an exception if
+            the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
+
     Returns:
         True if all differences satisfy allclose condition
     """
@@ -208,19 +219,30 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
 
 def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3,
                   gen_non_contig_grad_outputs=False, raise_exception=True):
-    """Check gradients of gradients computed via small finite differences
-       against analytical gradients
-    This function checks that backpropagating through the gradients computed
-    to the given grad_outputs are correct.
+    r"""Check gradients of gradients computed via small finite differences
+    against analytical gradients
 
-    The check between numerical and analytical has the same behaviour as
-    numpy.allclose https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html
-    meaning it check that
-        absolute(a - n) <= (atol + rtol * absolute(n))
-    is true for all elements of analytical gradient a and numerical gradient n.
+    This function checks that backpropagating through the gradients computed
+    to the given :attr:`grad_outputs` are correct.
+
+    The check between numerical and analytical gradients has the same behaviour as
+    `numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_,
+    i.e., it checks that
+
+    .. math::
+
+        \lvert a - n \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert n \rvert
+
+    holds for all elements of analytical gradient :math:`a` and numerical
+    gradient :math:`n`.
+
+    .. note::
+        The default values are designed for :attr:`input` of double precision.
+        This check will likely fail if :attr:`input` is of single precision,
+        i.e., ``FloatTensor``.
 
     Args:
-        func (function): Python function that takes Tensor inputs and returns
+        func (function): a Python function that takes Tensor inputs and returns
             a Tensor or a tuple of Tensors
         inputs (tuple of Tensor): inputs to the function
         grad_outputs (tuple of Tensor, optional): The gradients with respect to
@@ -231,13 +253,12 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         gen_non_contig_grad_outputs (bool, optional): if :attr:`grad_outputs` is
             ``None`` and :attr:`gen_non_contig_grad_outputs` is ``True``, the
             randomly generated gradient outputs are made to be noncontiguous
-        raise_exception: bool indicating whether to raise an exception if
-            gradcheck fails. The exception gives more information about the
+        raise_exception (bool, optional): indicating whether to raise an exception if
+            the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
 
     Returns:
-        True if all differences satisfy allclose condition. Raises an exception
-        otherwise.
+        True if all differences satisfy allclose condition
     """
     if grad_outputs is None:
         # If grad_outputs is not specified, create random Tensors of the same

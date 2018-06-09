@@ -36,6 +36,8 @@ def _find_cuda_home():
                 cuda_home = os.path.dirname(os.path.dirname(nvcc))
             except Exception:
                 cuda_home = None
+    if cuda_home and not torch.cuda.is_available():
+        print("No CUDA runtime is found, using CUDA_HOME='{}'".format(cuda_home))
     return cuda_home
 
 
@@ -56,7 +58,7 @@ for instructions on how to install GCC 4.9 or higher.
 
                               !! WARNING !!
 '''
-CUDA_HOME = _find_cuda_home() if torch.cuda.is_available() else None
+CUDA_HOME = _find_cuda_home()
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
 # it the below pattern.

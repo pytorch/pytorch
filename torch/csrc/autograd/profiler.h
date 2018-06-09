@@ -26,7 +26,7 @@ struct Function;
 
 namespace profiler {
 
-constexpr inline std::size_t ceilToMultiple(std::size_t a, std::size_t b) {
+constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
@@ -120,9 +120,9 @@ private:
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
-  constexpr static std::size_t MB = 1024 * 1024;
-  constexpr static std::size_t event_block_size = 16 * MB;
-  constexpr static std::size_t num_block_elements =
+  constexpr static size_t MB = 1024 * 1024;
+  constexpr static size_t event_block_size = 16 * MB;
+  constexpr static size_t num_block_elements =
     event_block_size / ceilToMultiple(sizeof(Event), alignof(Event));
   static_assert(sizeof(Event[num_block_elements]) <= event_block_size,
                 "num_block_elements is calculated incorrectly");
