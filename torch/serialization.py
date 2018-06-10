@@ -161,6 +161,24 @@ def _should_read_directly(f):
         return False
 
 
+def _can_tell_and_seek(f):
+    def raise_load_err_msg(pattern, e):
+        if pattern in str(e):
+            msg = (str(e) + ". You can only torch.load from a file that is seekable." +
+                            " Please pre-load the data into a buffer like io.BytesIO and try to load from it instead.")
+            raise type(e)(msg)
+        else:
+            raise e
+
+    try:
+        f.seek(f.tell())
+        return True
+    except io.UnsupportedOperation:
+        raise_load_err_msg("seek", e)
+    except AttributeError as e:
+        raise_load_err_msg("instance has no attribute 'tell'", e)
+
+
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     """Saves an object to a disk file.
 
@@ -479,31 +497,17 @@ def _load(f, map_location, pickle_module):
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
-    def raise_load_err_msg(pattern, e):
-        if pattern in str(e):
-            msg = (str(e) + ". You can only torch.load from a file that is seekable." +
-                            " Please pre-load the data into a buffer like io.BytesIO and try to load from it instead.")
-            raise type(e)(msg)
-        else:
-            raise e
-
-    try:
-        f_tell_is_0 = True if f.tell() == 0 else False
-    except AttributeError as e:
-        raise_load_err_msg("instance has no attribute 'tell'", e)
-
+    f_can_tell_and_seek = _can_tell_and_seek(f)
     f_should_read_directly = _should_read_directly(f)
-    if f_should_read_directly and f_tell_is_0:
+
+    if f_should_read_directly and f_can_tell_and_seek and f.tell() == 0:
         # legacy_load requires that f has fileno()
         # only if offset is zero we can attempt the legacy tar file loader
         try:
             return legacy_load(f)
         except tarfile.TarError:
             # if not a tarfile, reset file offset and proceed
-            try:
-                f.seek(0)
-            except io.UnsupportedOperation as e:
-                raise_load_err_msg("seek", e)
+            f.seek(0)
 
     magic_number = pickle_module.load(f)
     if magic_number != MAGIC_NUMBER:
