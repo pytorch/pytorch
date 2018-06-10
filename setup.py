@@ -637,6 +637,7 @@ THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
 C10D_GLOO_LIB = os.path.join(lib_path, 'libc10d_gloo.a')
+C10D_NCCL_LIB = os.path.join(lib_path, 'libc10d_nccl.a')
 
 # static library only
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
@@ -794,7 +795,7 @@ if WITH_DISTRIBUTED:
 if WITH_C10D:
     extra_compile_args += ['-DWITH_C10D']
     main_sources += ['torch/csrc/distributed/c10d/init.cpp']
-    main_link_args += [C10D_GLOO_LIB, C10D_LIB]
+    main_link_args += [C10D_GLOO_LIB, C10D_NCCL_LIB, C10D_LIB]
 
 if WITH_CUDA:
     nvtoolext_lib_name = None

@@ -3,6 +3,7 @@
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
+#include <c10d/ProcessGroupNCCL.hpp>
 #include <c10d/TCPStore.hpp>
 
 #include "torch/csrc/Exceptions.h"
@@ -78,6 +79,10 @@ PyObject* c10d_init(PyObject* _unused) {
 
   shared_ptr_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup)
+      .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
+
+  shared_ptr_class_<::c10d::ProcessGroupNCCL>(
+      module, "ProcessGroupNCCL", processGroup)
       .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")

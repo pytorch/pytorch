@@ -126,7 +126,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait() {
 
 // Waiting on the work's corresponding CUDA events
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
-  auto thcState = ::at::globalContext().lazyInitCUDA();
+  auto thcState = ::at::globalContext().getTHCState();
   CUDADevice gpuGuard;
   for (size_t i = 0; i < devices_.size(); ++i) {
     gpuGuard.setDevice(devices_[i]);
@@ -148,29 +148,47 @@ const std::exception& ProcessGroupNCCL::WorkNCCL::exception() const {
       "isCompleted() and wait() will either succeed or throw");
 }
 
+std::unordered_set<ssize_t> ProcessGroupNCCL::processGroups_;
+ssize_t ProcessGroupNCCL::processGroupCounter_ = -1;
+
 ProcessGroupNCCL::ProcessGroupNCCL(
     const std::shared_ptr<Store>& store,
     int rank,
     int size)
     : ProcessGroup(rank, size), store_(store) {
-  C10D_CUDA_CHECK(cudaGetDeviceCount(&numGPUs_));
-  thcState_ = ::at::globalContext().lazyInitCUDA();
+  // C10D_CUDA_CHECK(cudaGetDeviceCount(&numGPUs_));
+  thcState_ = ::at::globalContext().getTHCState();
+  if (!thcState_) {
+    thcState_ = ::at::globalContext().lazyInitCUDA();
+  }
+  // Generate the Process Group ID for current PG, this needs to be identical
+  // for all processes
+  std::unique_lock<std::mutex>(pgTrackingLock_);
+  while (true) {
+    ++processGroupCounter_;
+    if (processGroups_.count(processGroupCounter_) == 0) {
+      processGroups_.insert(processGroupCounter_);
+      processGroupId_ = std::to_string(processGroupCounter_);
+      return;
+    }
+  }
 }
 
-ProcessGroupNCCL::~ProcessGroupNCCL() {}
+ProcessGroupNCCL::~ProcessGroupNCCL() {
+  std::unique_lock<std::mutex>(pgTrackingLock_);
+  processGroups_.erase(std::stoull(processGroupId_));
+}
 
-void ProcessGroupNCCL::broadcastUniqueNCCLId(
-    const std::string& devicesKey,
-    ncclUniqueId* ncclId) {
+void ProcessGroupNCCL::broadcastUniqueNCCLId(ncclUniqueId* ncclId) {
   // Rank 0 writes to the store as bcast
   if (rank_ == 0) {
     auto ncclIdVal = std::vector<uint8_t>(
         reinterpret_cast<uint8_t*>(ncclId),
         reinterpret_cast<uint8_t*>(ncclId) + NCCL_UNIQUE_ID_BYTES);
-    store_->set(devicesKey, ncclIdVal);
+    store_->set(processGroupId_, ncclIdVal);
     // Other ranks get to the store
   } else {
-    auto ncclIdVal = store_->get(devicesKey);
+    auto ncclIdVal = store_->get(processGroupId_);
     // Just a sanity check
     if (ncclIdVal.size() != NCCL_UNIQUE_ID_BYTES) {
       throw std::runtime_error(
@@ -207,7 +225,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   }
 
   // Broadcast so that each process can have a unique NCCL ID
-  broadcastUniqueNCCLId(devicesKey, &ncclId);
+  broadcastUniqueNCCLId(&ncclId);
 
   CUDADevice gpuGuard;
 
@@ -262,7 +280,7 @@ void ProcessGroupNCCL::tensorCheckHelper(
     throw std::runtime_error("The number of input tensors should not be zero");
   }
 
-  if (input.size() > static_cast<size_t>(numGPUs_)) {
+  if (input.size() > static_cast<size_t>(thcState_->numDevices)) {
     throw std::runtime_error(
         "The number of input tensors is larger than "
         "the number of available GPUs");
