@@ -67,6 +67,8 @@ cmake .. ^
 :: Actually run the build
 cmake --build . --config %CMAKE_BUILD_TYPE% -- /maxcpucount:%NUMBER_OF_PROCESSORS% || goto :label_error
 
+if NOT %ERRORLEVEL%==0 goto :label_error
+
 echo "Caffe2 built successfully"
 cd %ORIGINAL_DIR%
 endlocal
