@@ -11,13 +11,9 @@
 struct THPStorage;
 struct THSPTensor;
 
-typedef class THPPointer<THStorage>      THStoragePtr;
-typedef class THPPointer<THTensor>       THTensorPtr;
+typedef class THPPointer<THWStorage>      THWStoragePtr;
+typedef class THPPointer<THWTensor>       THWTensorPtr;
 typedef class THPPointer<THPStorage>     THPStoragePtr;
-
-#if GENERATE_SPARSE
-typedef class THPPointer<THSTensor>      THSTensorPtr;
-#endif
 
 #if (!defined(THC_GENERIC_FILE) || defined(THC_REAL_IS_HALF)) && \
     (!defined(THD_GENERIC_FILE))

@@ -4,10 +4,10 @@
 
 struct THPStorage {
   PyObject_HEAD
-  THStorage *cdata;
+  THWStorage *cdata;
 };
 
-THP_API PyObject * THPStorage_(New)(THStorage *ptr);
+THP_API PyObject * THPStorage_(New)(THWStorage *ptr);
 extern PyObject *THPStorageClass;
 
 #ifdef _THP_CORE

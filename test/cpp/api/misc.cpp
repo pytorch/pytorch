@@ -71,7 +71,7 @@ TEST_CASE("autograd") {
   }
   SECTION("custom gradient inputs") {
     z.sum().backward(
-        autograd::make_variable(at::ones(at::CPU(at::kFloat), {1}) * 2));
+        autograd::make_variable(at::ones(at::CPU(at::kFloat), {}) * 2));
     REQUIRE(x.grad().allclose(y * 2));
   }
   // Assume everything else is safe from PyTorch tests.

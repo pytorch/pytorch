@@ -148,7 +148,7 @@ unique_ptr<OperatorBase> _CreateOperator(
             << engine;
     auto op = TryCreateOperator(key, operator_def, ws);
     if (op) {
-      if (engine.size() <= FLAGS_caffe2_operator_max_engine_name_length) {
+      if (engine.size() <= (unsigned)FLAGS_caffe2_operator_max_engine_name_length) {
         op->annotate_engine(engine);
       } else {
         op->annotate_engine(
@@ -450,7 +450,7 @@ TensorShapes InferBlobShapesAndTypes(
           CaffeMap<string, string> grads_to_params =
               GradientMakerBase::MatchGradsToParams(op);
 
-          for (int i = 0; i < out.size(); i++) {
+          for (size_t i = 0; i < out.size(); i++) {
             if (out[i].unknown_shape()) {
               std::string gradout = op.output(i);
 
@@ -479,7 +479,7 @@ TensorShapes InferBlobShapesAndTypes(
         return tps;
       }
 
-      if (out.size() != op.output_size()) {
+      if (out.size() != (unsigned)op.output_size()) {
         if (op.type() == "Slice") {
           CAFFE_ENFORCE(
               out.size() == 0,
@@ -495,7 +495,7 @@ TensorShapes InferBlobShapesAndTypes(
               out.size());
         }
       } else {
-        for (int i = 0; i < out.size(); i++) {
+        for (size_t i = 0; i < out.size(); i++) {
           blob_desc[op.output(i)] = out[i];
         }
       }

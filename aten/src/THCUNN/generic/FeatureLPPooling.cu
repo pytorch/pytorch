@@ -159,7 +159,7 @@ void THNN_(FeatureLPPooling_updateOutput)(THCState* state,
                "input must be 1-3 dimensions for non-batch mode");
   }
 
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, inputTH), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, inputTH), 2,
              "input tensor must fit into 32-bit index math");
 
   THCDeviceTensor<real, 4> input;
@@ -201,9 +201,9 @@ void THNN_(FeatureLPPooling_updateGradInput)(THCState* state,
                                              int width,
                                              int stride,
                                              bool batchMode) {
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, gradOutputTH), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, gradOutputTH), 2,
                 "output gradient tensor must fit into 32-bit index math");
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, inputTH), 3,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, inputTH), 3,
                 "input tensor must fit into 32-bit index math");
   THCUNN_assertSameGPU(state, 4, gradOutputTH, inputTH, outputTH, gradInputTH);
 

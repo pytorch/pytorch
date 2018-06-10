@@ -921,6 +921,12 @@ public:
       SmallVectorImpl<T>::operator=(::std::move(RHS));
   }
 
+  template<typename Container>
+  const SmallVector &operator=(const Container &RHS) {
+    this->assign(RHS.begin(), RHS.end());
+    return *this;
+  }
+
   SmallVector(SmallVectorImpl<T> &&RHS) : SmallVectorImpl<T>(N) {
     if (!RHS.empty())
       SmallVectorImpl<T>::operator=(::std::move(RHS));

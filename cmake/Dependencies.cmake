@@ -180,7 +180,7 @@ if(BUILD_TEST)
     set(gtest_force_shared_crt ON)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
-  include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
+  include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
 
   # We will not need to test benchmark lib itself.
   set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Disable benchmark testing as we don't need it.")
@@ -393,61 +393,49 @@ endif()
 
 # ---[ CUDA
 if(USE_CUDA)
+  # public/*.cmake uses CAFFE2_USE_*
+  set(CAFFE2_USE_CUDA ${USE_CUDA})
+  set(CAFFE2_USE_CUDNN ${USE_CUDNN})
+  set(CAFFE2_USE_NVRTC ${USE_NVRTC})
+  set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
-  if(CAFFE2_FOUND_CUDA)
+  if(CAFFE2_USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
     # caffe2::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-        caffe2::cufft caffe2::curand)
-    if(BUILD_CAFFE2)
-      # Don't be deceived!  caffe2::cuda is the low-level DRIVER API,
-      # not the actual CUDA library.  Caffe2 depends directly on nvrtc
-      # and needs it, but ATen doesn't use it at all, and so the
-      # dependency is unnecessary.
-      #
-      # BTW, if you change this so that PyTorch has this dependency
-      # again, make sure Mac OS X GPU builds still work; there's
-      # a decent chance the library finding algorithm picked up
-      # on cuda.framework, which is totally not going to work when
-      # linking.
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::curand)
+    if(CAFFE2_USE_NVRTC)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
-    endif()
-    if(CAFFE2_FOUND_CUDNN)
-      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
     else()
-      if(BUILD_CAFFE2)
-        # TODO: Get rid of special case for Caffe2 where we require
-        # CUDA *and* cuDNN to be installed.
-        message(WARNING
-            "Not compiling with CUDA since cuDNN is missing. Suppress "
-            "this warning with -DUSE_CUDA=OFF.")
-        caffe2_update_option(USE_CUDA OFF)
-        caffe2_update_option(USE_CUDNN OFF)
-      else()
-        message(WARNING
-            "Not compiling with cuDNN. Suppress this warning with "
-            "-DUSE_CUDNN=OFF.")
-        caffe2_update_option(USE_CUDNN OFF)
-      endif()
+      caffe2_update_option(USE_NVRTC OFF)
     endif()
-    if(USE_CUDA)
-      if(CAFFE2_STATIC_LINK_CUDA)
-        # When statically linking, this must be the order of the libraries
-        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-            "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
-      else()
-        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
-      endif()
-      if(USE_TENSORRT)
-        list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
-      endif()
+    if(CAFFE2_USE_CUDNN)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+    endif()
+    if(CAFFE2_STATIC_LINK_CUDA)
+      # When statically linking, this must be the order of the libraries
+      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
+    else()
+      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
+    endif()
+    if(CAFFE2_USE_TENSORRT)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
+    else()
+      caffe2_update_option(USE_TENSORRT OFF)
     endif()
   else()
     message(WARNING
-        "Not compiling with CUDA. Suppress this warning with "
-        "-DUSE_CUDA=OFF.")
+      "Not compiling with CUDA. Suppress this warning with "
+      "-DUSE_CUDA=OFF.")
     caffe2_update_option(USE_CUDA OFF)
+    caffe2_update_option(USE_CUDNN OFF)
+    caffe2_update_option(USE_NVRTC OFF)
+    caffe2_update_option(USE_TENSORRT OFF)
+    set(CAFFE2_USE_CUDA OFF)
+    set(CAFFE2_USE_CUDNN OFF)
+    set(CAFFE2_USE_NVRTC OFF)
+    set(CAFFE2_USE_TENSORRT OFF)
   endif()
 endif()
 
@@ -674,7 +662,6 @@ if (BUILD_ATEN)
     if (USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
     endif()
-    include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten/aten/src/ATen)
     include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
   endif()
 endif()

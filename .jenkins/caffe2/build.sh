@@ -67,7 +67,6 @@ report_compile_cache_stats() {
   fi
 }
 
-
 ###############################################################################
 # Explicitly set Python executable.
 ###############################################################################
@@ -85,6 +84,7 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
   CMAKE_ARGS+=("-DBUILD_BINARY=ON")
+  CMAKE_ARGS+=("-DBUILD_TEST=ON")
   CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
   CMAKE_ARGS+=("-DUSE_ZSTD=ON")
   "${ROOT_DIR}/scripts/build_android.sh" ${CMAKE_ARGS[*]} "$@"
@@ -118,6 +118,8 @@ fi
 # Set cmake args
 ###############################################################################
 CMAKE_ARGS+=("-DBUILD_BINARY=ON")
+CMAKE_ARGS+=("-DBUILD_TEST=ON")
+CMAKE_ARGS+=("-DINSTALL_TEST=ON")
 CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
 CMAKE_ARGS+=("-DUSE_ZSTD=ON")
 CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")

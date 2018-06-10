@@ -57,8 +57,11 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 cmake_dependent_option(
-    BUILD_TEST "Build Caffe2 C++ test binaries (need gtest and gbenchmark)" ON
+    BUILD_TEST "Build Caffe2 C++ test binaries (need gtest and gbenchmark)" OFF
     "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    INSTALL_TEST "Install test binaries if BUILD_TEST is on" OFF
+    "BUILD_TEST" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_ATEN "Use ATen" OFF)
@@ -104,6 +107,9 @@ option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(
     USE_NUMA "Use NUMA (only available on Linux)" ON
     "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
+    "USE_CUDA" OFF)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 cmake_dependent_option(
@@ -219,12 +225,16 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-field-initializers")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-type-limits")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-warning-option")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result")
+  if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
+  endif()
   if ($ENV{WERROR})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
   endif($ENV{WERROR})
@@ -378,6 +388,10 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
       DESTINATION share/cmake/Caffe2/public
+      COMPONENT dev)
+  install(DIRECTORY
+      ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
+      DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake

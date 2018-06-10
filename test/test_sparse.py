@@ -910,6 +910,12 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "values and sizes are inconsistent"):
             self.SparseTensor(indices, values, sizes)
 
+    def test_factory_empty_indices(self):
+        device = 'cuda' if self.is_cuda else 'cpu'
+        tensor = torch.sparse_coo_tensor([], [], torch.Size([]), device=device)
+        expected_indices = torch.tensor([], dtype=torch.long, device=device)
+        self.assertEqual(tensor._indices(), expected_indices)
+
     @cpu_only
     def test_factory_type_inference(self):
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=torch.float32))
