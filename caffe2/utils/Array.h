@@ -36,6 +36,8 @@
 // see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 // <http://www.gnu.org/licenses/>.
 
+#pragma once
+
 #include <utility>
 #include <stdexcept>
 #include <string>
