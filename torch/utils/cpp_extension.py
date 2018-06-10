@@ -36,6 +36,8 @@ def _find_cuda_home():
                 cuda_home = os.path.dirname(os.path.dirname(nvcc))
             except Exception:
                 cuda_home = None
+    if cuda_home and not torch.cuda.is_available():
+        print("No CUDA runtime is found, using CUDA_HOME='{}'".format(cuda_home))
     return cuda_home
 
 
@@ -56,7 +58,11 @@ for instructions on how to install GCC 4.9 or higher.
 
                               !! WARNING !!
 '''
-CUDA_HOME = _find_cuda_home() if torch.cuda.is_available() else None
+CUDA_HOME = _find_cuda_home()
+# PyTorch releases have the version pattern major.minor.patch, whereas when
+# PyTorch is built from source, we append the git commit hash, which gives
+# it the below pattern.
+BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -71,6 +77,8 @@ def check_compiler_abi_compatibility(compiler):
         False if the compiler is (likely) ABI-incompatible with PyTorch,
         else True.
     '''
+    if BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__):
+        return True
     try:
         check_cmd = '{}' if sys.platform == 'win32' else '{} --version'
         info = subprocess.check_output(
@@ -294,7 +302,7 @@ def CppExtension(name, sources, *args, **kwargs):
         kwargs['library_dirs'] = library_dirs
 
         libraries = kwargs.get('libraries', [])
-        libraries.append('ATen_cpu')
+        libraries.append('caffe2')
         libraries.append('_C')
         kwargs['libraries'] = libraries
 
@@ -337,8 +345,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries = kwargs.get('libraries', [])
     libraries.append('cudart')
     if sys.platform == 'win32':
-        libraries.append('ATen_cpu')
-        libraries.append('ATen_cuda')
+        libraries.append('caffe2')
+        libraries.append('caffe2_gpu')
         libraries.append('_C')
     kwargs['libraries'] = libraries
 
@@ -669,9 +677,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         torch_path = os.path.dirname(os.path.dirname(here))
         lib_path = os.path.join(torch_path, 'lib')
 
-        extra_ldflags.append('ATen_cpu.lib')
+        extra_ldflags.append('caffe2.lib')
         if with_cuda:
-            extra_ldflags.append('ATen_cuda.lib')
+            extra_ldflags.append('caffe2_gpu.lib')
         extra_ldflags.append('_C.lib')
         extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
         extra_ldflags.append('/LIBPATH:{}'.format(lib_path))

@@ -139,7 +139,7 @@ at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
     /**
      * Check conditions
      */
-    
+
     if(n_iter == max_iter_) {
       break;
     } else if (current_evals >= max_eval_) {
@@ -152,7 +152,7 @@ at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
       break;
     } else if (std::abs(loss.toFloat() - prev_loss.toFloat()) < tolerance_change_) {
       break;
-    } 
+    }
   }
   return orig_loss;
 }

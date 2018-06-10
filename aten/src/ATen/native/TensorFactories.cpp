@@ -1,3 +1,9 @@
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif
+
 #include "ATen/ATen.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
@@ -9,8 +15,9 @@
 
 #include <algorithm>
 #include <sstream>
+#include <cmath>
 
-    namespace at {
+namespace at {
 namespace native {
 
 Tensor arange(const Type& dtype, Scalar start, Scalar end, Scalar step) {
@@ -48,7 +55,7 @@ Tensor& empty_out(Tensor& result, IntList size) {
 // TODO: remove when we have Type support in the IR
 
 #define DEFINE_CAST_OP(_1, n, _2)                                \
-  Tensor _cast_##_1(const Tensor& self, bool non_blocking) {     \
+  Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
     auto& target_type = self.type().toScalarType(ScalarType::n); \
     if (self.type() == target_type)                              \
       return self;                                               \
@@ -263,17 +270,14 @@ THGenerator* get_generator(at::Generator* gen) {
 
 Tensor randperm(const Type& dtype, int64_t n, Generator* generator) {
   Tensor result = dtype.tensor(n);
-  return at::native::randperm_out(result, n, generator);
+  return at::randperm_out(result, n, generator);
 }
 
-Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
+Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   if (n < 0) {
     std::ostringstream oss;
     oss << "n must be non-negative, got " << n;
     throw std::runtime_error(oss.str());
-  }
-  if (result.type().backend() != at::kCPU) {
-    throw std::runtime_error("randperm is only implemented for CPU");
   }
 
   result.resize_({n});
@@ -319,6 +323,86 @@ Tensor zeros_like(const Tensor& self, const Type& dtype) {
     return res;
   }
   return at::native::zeros(dtype, self.sizes());
+}
+
+// Signal Processing Window Functions
+
+Tensor bartlett_window(const Type& dtype, int64_t window_length, bool periodic) {
+  if (dtype.is_sparse()) {
+    AT_ERROR("bartlett_window(...) is not implemented for sparse types, got: ", dtype.toString());
+  }
+  if (!at::isFloatingType(dtype.scalarType())) {
+    AT_ERROR("bartlett_window(...) expects floating point dtypes, got: ", dtype.toString());
+  }
+  if (window_length <= 0) {
+    AT_ERROR("bartlett_window(...) requires positive window_length, got window_length=%lld", window_length);
+  }
+  if (window_length == 1) {
+    return at::ones(dtype, {1});
+  }
+  if (periodic) {
+    window_length += 1;
+  }
+  auto window = at::arange(dtype, window_length).mul_(2. / static_cast<double>(window_length - 1));
+  int64_t first_half_size = ((window_length - 1) >> 1) + 1;
+  window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2);
+  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+}
+
+Tensor blackman_window(const Type& dtype, int64_t window_length, bool periodic) {
+  if (dtype.is_sparse()) {
+    AT_ERROR("blackman_window(...) is not implemented for sparse types, got: ", dtype.toString());
+  }
+  if (!at::isFloatingType(dtype.scalarType())) {
+    AT_ERROR("blackman_window(...) expects floating point dtypes, got: ", dtype.toString());
+  }
+  if (window_length <= 0) {
+    AT_ERROR("blackman_window(...) requires positive window_length, got window_length=%lld", window_length);
+  }
+  if (window_length == 1) {
+    return at::ones(dtype, {1});
+  }
+  if (periodic) {
+    window_length += 1;
+  }
+  // from https://en.wikipedia.org/wiki/Window_function#Blackman_window
+  auto window = at::arange(dtype, window_length).mul_(M_PI / static_cast<double>(window_length - 1));
+  window = window.mul(4).cos_().mul_(0.08) - window.mul(2).cos_().mul_(0.5) + 0.42;
+  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+}
+
+Tensor hamming_window(const Type& dtype, int64_t window_length, bool periodic, double alpha, double beta) {
+  if (dtype.is_sparse()) {
+    AT_ERROR("hamming_window(...) is not implemented for sparse types, got: ", dtype.toString());
+  }
+  if (!at::isFloatingType(dtype.scalarType())) {
+    AT_ERROR("hamming_window(...) expects floating point dtypes, got: ", dtype.toString());
+  }
+  if (window_length <= 0) {
+    AT_ERROR("hamming_window(...) requires positive window_length, got window_length=%lld", window_length);
+  }
+  if (window_length == 1) {
+    return at::ones(dtype, {1});
+  }
+  if (periodic) {
+    window_length += 1;
+  }
+  auto window = at::arange(dtype, window_length);
+  window.mul_(M_PI * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
+  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+}
+
+Tensor hann_window(const Type& dtype, int64_t window_length, bool periodic) {
+  if (dtype.is_sparse()) {
+    AT_ERROR("hann_window(...) is not implemented for sparse types, got: ", dtype.toString());
+  }
+  if (!at::isFloatingType(dtype.scalarType())) {
+    AT_ERROR("hann_window(...) expects floating point dtypes, got: ", dtype.toString());
+  }
+  if (window_length <= 0) {
+    AT_ERROR("hann_window(...) requires positive window_length, got window_length=%lld", window_length);
+  }
+  return at::native::hamming_window(dtype, window_length, periodic, 0.5, 0.5);
 }
 
 }

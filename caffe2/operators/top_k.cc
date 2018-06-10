@@ -235,36 +235,108 @@ OPERATOR_SCHEMA(TopK)
       return out;
     })
     .SetDoc(R"DOC(
-Retrieve the top-K elements for the last dimension. Given an input tensor of
-shape [a_1, a_2, ..., a_n, r] and integer argument k, return two outputs:
--Value tensor of shape [a_1, a_2, ..., a_n, k] which contains the values of
- the top k elements along the last dimension. When k > r, the value tensor is
- padded with 0 values.
--Index tensor of shape [a_1, a_2, ..., a_n, k] which contains the indices
- of the top k elements (original indices from the input tensor). When k > r,
- the Index tensor is padded with -1 values.
+Retrieve the top-K elements of the last dimension. Given an input tensor of shape $(a_1, a_2, ..., a_n, r)$ and integer argument `k`, return up to three outputs:
 
-Given two equivalent values, this operator uses the indices along the last dim-
-ension as a tiebreaker. That is, the element with the lower index will appear
-first.
-    )DOC")
-    .Input(0, "X", "Tensor of shape [a_1, a_2, ..., a_n, r]")
+1. Value tensor of shape $(a_1, a_2, ..., a_n, k)$ which contains the values of the top k elements along the last dimension
+2. Index tensor of shape $(a_1, a_2, ..., a_n, k)$ which contains the indices of the top k elements (original indices from the input tensor).
+3. [OPTIONAL] Flattened index tensor of shape $(a_1 * a_2 * ... * a_n * k,)$.
+
+Given two equivalent values, this operator uses the indices along the last dimension as a tiebreaker. That is, the element with the lower index will appear first.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/top_k.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "TopK",
+    ["X"],
+    ["Values", "Indices", "Flattened_indices"],
+    k=2
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(3,3,3)).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Values:", workspace.FetchBlob("Values"))
+print("Indices:", workspace.FetchBlob("Indices"))
+print("Flattened_indices:", workspace.FetchBlob("Flattened_indices"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[[6. 7. 0.]
+  [8. 7. 7.]
+  [1. 5. 6.]]
+
+ [[0. 6. 1.]
+  [2. 8. 4.]
+  [1. 2. 9.]]
+
+ [[4. 3. 7.]
+  [0. 1. 7.]
+  [0. 1. 8.]]]
+Values:
+[[[7. 6.]
+  [8. 7.]
+  [6. 5.]]
+
+ [[6. 1.]
+  [8. 4.]
+  [9. 2.]]
+
+ [[7. 4.]
+  [7. 1.]
+  [8. 1.]]]
+Indices:
+[[[1 0]
+  [0 1]
+  [2 1]]
+
+ [[1 2]
+  [1 2]
+  [2 1]]
+
+ [[2 0]
+  [2 1]
+  [2 1]]]
+Flattened_indices: [ 1  0  3  4  8  7 10 11 13 14 17 16 20 18 23 22 26 25]
+
+```
+
+</details>
+
+  )DOC")
+    .Input(
+      0,
+      "X",
+      "(*Tensor`<float>`*): input tensor of shape $(a_1, a_2, ..., a_n, r)$")
     .Output(
         0,
         "Values",
-        "Tensor of shape [a_1, a_2, ..., a_n, k] containing"
-        " top K values from the input tensor")
+        "(*Tensor`<float>`*): output tensor of shape $(a_1, a_2, ..., a_n, k)$")
     .Output(
         1,
         "Indices",
-        "Tensor of shape [a_1, a_2, ..., a_n, k] containing"
-        " the corresponding input tensor indices for the top K values.")
+        "(*Tensor`<int>`*): tensor of indices of shape $(a_1, a_2, ..., a_n, k)$; indices values refer to each element's index in the last dimension of the `X` input tensor")
     .Output(
         2,
-        "Flatten indices",
-        "Tensor of shape [a_1 * a_2 * ... * a_n * k] containing the indices "
-        "into the flatten input")
-    .Arg("k", "Number of top elements to retrieve");
+        "Flattened_indices",
+        "(*Tensor`<int>`*): tensor of indices of shape $(a_1 * a_2 * ... * a_n * k,)$; indices values refer to each element's index in the flattened input tensor `X`")
+    .Arg("k", "(*int*): number of top elements to retrieve");
 
 OPERATOR_SCHEMA(TopKGradient).NumInputs(3).NumOutputs(1);
 

@@ -1,4 +1,7 @@
 #include "ATen/Type.h"
+
+// ${generated_comment}
+
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
 #include "ATen/Scalar.h"

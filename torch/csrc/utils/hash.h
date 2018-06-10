@@ -31,7 +31,7 @@ namespace torch {
 // ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-inline std::size_t hash_combine(std::size_t seed, std::size_t value) {
+inline size_t hash_combine(size_t seed, size_t value) {
   return seed ^ (value + 0x9e3779b9 + (seed << 6) + (seed >> 2));
 }
 
@@ -43,7 +43,7 @@ namespace _hash_detail {
 
 // Use template argument deduction to shorten calls to torch::hash
 template<typename T>
-std::size_t simple_get_hash(const T& o);
+size_t simple_get_hash(const T& o);
 
 template<typename T, typename V>
 using type_if_not_enum = typename std::enable_if<!std::is_enum<T>::value, V>::type;
@@ -54,18 +54,18 @@ using type_if_not_enum = typename std::enable_if<!std::is_enum<T>::value, V>::ty
 // implement it even when C++14 flags aren't specified. This is why we have to disable
 // this overload if T is an enum type (and use the one below in this case).
 template<typename T>
-auto dispatch_hash(const T& o) -> decltype(std::hash<T>()(o), type_if_not_enum<T, std::size_t>()) {
+auto dispatch_hash(const T& o) -> decltype(std::hash<T>()(o), type_if_not_enum<T, size_t>()) {
   return std::hash<T>()(o);
 }
 
 template<typename T>
-typename std::enable_if<std::is_enum<T>::value, std::size_t>::type dispatch_hash(const T& o) {
+typename std::enable_if<std::is_enum<T>::value, size_t>::type dispatch_hash(const T& o) {
   using R = typename std::underlying_type<T>::type;
   return std::hash<R>()(static_cast<R>(o));
 }
 
 template<typename T>
-auto dispatch_hash(const T& o) -> decltype(T::hash(o), std::size_t()) {
+auto dispatch_hash(const T& o) -> decltype(T::hash(o), size_t()) {
   return T::hash(o);
 }
 
@@ -74,7 +74,7 @@ auto dispatch_hash(const T& o) -> decltype(T::hash(o), std::size_t()) {
 // Hasher struct
 template<typename T>
 struct hash {
-  std::size_t operator()(const T& o) const {
+  size_t operator()(const T& o) const {
     return _hash_detail::dispatch_hash(o);
   };
 };
@@ -82,9 +82,9 @@ struct hash {
 // Specialization for std::tuple
 template<typename... Types>
 struct hash<std::tuple<Types...>> {
-  template<std::size_t idx, typename... Ts>
+  template<size_t idx, typename... Ts>
   struct tuple_hash {
-    std::size_t operator()(const std::tuple<Ts...>& t) const {
+    size_t operator()(const std::tuple<Ts...>& t) const {
       return hash_combine(_hash_detail::simple_get_hash(std::get<idx>(t)),
                           tuple_hash<idx-1, Ts...>()(t));
     }
@@ -92,12 +92,12 @@ struct hash<std::tuple<Types...>> {
 
   template<typename... Ts>
   struct tuple_hash<0, Ts...> {
-    std::size_t operator()(const std::tuple<Ts...>& t) const {
+    size_t operator()(const std::tuple<Ts...>& t) const {
       return _hash_detail::simple_get_hash(std::get<0>(t));
     }
   };
 
-  std::size_t operator()(const std::tuple<Types...>& t) const {
+  size_t operator()(const std::tuple<Types...>& t) const {
     return tuple_hash<sizeof...(Types)-1, Types...>()(t);
   }
 };
@@ -105,8 +105,8 @@ struct hash<std::tuple<Types...>> {
 // Specialization for std::vector
 template<typename T>
 struct hash<std::vector<T>> {
-  std::size_t operator()(const std::vector<T>& v) const {
-    std::size_t seed = 0;
+  size_t operator()(const std::vector<T>& v) const {
+    size_t seed = 0;
     for (const auto & elem : v) {
       seed = hash_combine(seed, _hash_detail::simple_get_hash(elem));
     }
@@ -117,7 +117,7 @@ struct hash<std::vector<T>> {
 namespace _hash_detail {
 
 template<typename T>
-std::size_t simple_get_hash(const T& o) {
+size_t simple_get_hash(const T& o) {
   return torch::hash<T>()(o);
 }
 
@@ -127,11 +127,11 @@ std::size_t simple_get_hash(const T& o) {
 // Dispatches to torch::hash, so it can hash containers.
 // Example:
 //
-// static std::size_t hash(const MyStruct& s) {
+// static size_t hash(const MyStruct& s) {
 //   return get_hash(s.member1, s.member2, s.member3);
 // }
 template<typename... Types>
-std::size_t get_hash(const Types&... args) {
+size_t get_hash(const Types&... args) {
   return torch::hash<decltype(std::tie(args...))>()(std::tie(args...));
 }
 

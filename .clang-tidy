@@ -32,6 +32,7 @@ Checks: '
   ,-cert-err58-cpp
   ,-modernize-make-unique
   ,-cppcoreguidelines-owning-memory
+  ,-readability-named-parameter
   '
 WarningsAsErrors: ''
 HeaderFilterRegex: 'torch/csrc/'

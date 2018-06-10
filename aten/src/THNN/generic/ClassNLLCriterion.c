@@ -38,15 +38,15 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     int i;
     #pragma omp parallel for private(i)
     for (i = 0; i < batch_size; i++) {
-      int cur_target = THTensor_fastGet1d(target, i) - TH_INDEX_BASE;
+      int cur_target = THLongTensor_fastGet1d(target, i) - TH_INDEX_BASE;
 
       if (cur_target >= 0 && cur_target < n_classes) {
           if (cur_target == ignore_index) {
-            THTensor_fastSet1d(output, i, 0.0f);
+            THTensor_(fastSet1d)(output, i, 0.0f);
             continue;
           }
-          real cur_weight = weights ? THTensor_fastGet1d(weights, cur_target) : 1.0f;
-          THTensor_fastSet1d(output, i, -THTensor_fastGet2d(input, i, cur_target) * cur_weight);
+          real cur_weight = weights ? THTensor_(fastGet1d)(weights, cur_target) : 1.0f;
+          THTensor_(fastSet1d)(output, i, -THTensor_(fastGet2d)(input, i, cur_target) * cur_weight);
       } else {
         int tmp = -1;
         invalid_target.compare_exchange_strong(tmp, cur_target);
@@ -157,12 +157,12 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     int i;
     #pragma omp parallel for private(i)
     for (i = 0; i < batch_size; i++) {
-      int cur_target = THTensor_fastGet1d(target, i) - TH_INDEX_BASE;
+      int cur_target = THLongTensor_fastGet1d(target, i) - TH_INDEX_BASE;
       if (cur_target == ignore_index) {
         continue;
       }
-      real weight = weights ? THTensor_fastGet1d(weights, cur_target) : 1.0f;
-      THTensor_fastSet2d(gradInput, i, cur_target, -weight * THTensor_fastGet1d(gradOutput, i));
+      real weight = weights ? THTensor_(fastGet1d)(weights, cur_target) : 1.0f;
+      THTensor_(fastSet2d)(gradInput, i, cur_target, -weight * THTensor_(fastGet1d)(gradOutput, i));
     }
     return;
   }

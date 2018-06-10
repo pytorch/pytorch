@@ -64,11 +64,11 @@ THC_API void THCTensor_(topk)(THCState* state,
 
 #define RUN_T(INDEX_T)                                                  \
   TensorInfo<real, INDEX_T> inputInfo =                                 \
-    getTensorInfo<THCTensor, INDEX_T>(state, input);                    \
+    getTensorInfo<real, THCTensor, INDEX_T>(state, input);              \
   TensorInfo<real, INDEX_T> topKInfo =                                  \
-    getTensorInfo<THCTensor, INDEX_T>(state, topK);                     \
+    getTensorInfo<real, THCTensor, INDEX_T>(state, topK);               \
   TensorInfo<int64_t, INDEX_T> indicesInfo =                            \
-    getTensorInfo<THCudaLongTensor, INDEX_T>(state, indices);           \
+    getTensorInfo<int64_t, THCudaLongTensor, INDEX_T>(state, indices);  \
                                                                         \
   /* We use these structures solely to find the offset to */            \
   /* each slice we are operating on */                                  \
@@ -110,9 +110,9 @@ THC_API void THCTensor_(topk)(THCState* state,
 
   // Based on required index size, run the algorithm with the
   // appropriate index type
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, input) &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, topK) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, indices)) {
+  if (THCTensor_canUse32BitIndexMath(state, input) &&
+      THCTensor_canUse32BitIndexMath(state, topK) &&
+      THCTensor_canUse32BitIndexMath(state, indices)) {
     RUN_T(uint32_t);
   } else {
     RUN_T(uint64_t);

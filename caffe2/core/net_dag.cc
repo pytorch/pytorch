@@ -51,7 +51,7 @@ DAGNetBase::DAGNetBase(
 
   // Figure out the initial frontier - this is the one we will feed into the job
   // queue to start a run.
-  for (int idx = 0; idx < operator_nodes_.size(); ++idx) {
+  for (size_t idx = 0; idx < operator_nodes_.size(); ++idx) {
     if (operator_nodes_[idx].parents_.size() == 0) {
       initial_frontier_.push_back(idx);
     }
@@ -66,7 +66,7 @@ DAGNetBase::DAGNetBase(
   }
   num_workers_ = num_workers;
 
-  for (int idx = 0; idx < operator_nodes_.size(); ++idx) {
+  for (size_t idx = 0; idx < operator_nodes_.size(); ++idx) {
     if (operator_nodes_[idx].is_chain_start_) {
       task_timers_[idx] = caffe2::make_unique<Timer>();
     }
@@ -112,11 +112,11 @@ bool DAGNetBase::DoRunAsync() {
     job_queue_ = caffe2::make_unique<SimpleQueue<int>>();
   }
   // Figure out number of workers to start.
-  auto num_workers_to_start = num_workers_ - workers_.size();
+  size_t num_workers_to_start = num_workers_ - workers_.size();
 
   // Ensure the number of workers matches the defined in case
   // any of the previously started threads terminated.
-  for (auto i = 0; i < num_workers_to_start; i++) {
+  for (size_t i = 0; i < num_workers_to_start; i++) {
     VLOG(1) << "Start worker #" << workers_.size();
     workers_.push_back(std::thread(&DAGNetBase::WorkerFunction, this));
   }
@@ -301,43 +301,6 @@ void DAGNetBase::WorkerFunction() {
 
     VLOG(2) << "Finished executing operator #" << idx;
   }
-}
-
-vector<float> DAGNetBase::TEST_Benchmark(
-    const int warmup_runs,
-    const int main_runs,
-    const bool run_individual) {
-  std::cout << "Starting benchmark." << std::endl;
-  std::cout << "Running warmup runs." << std::endl;
-  CAFFE_ENFORCE(
-      warmup_runs >= 0,
-      "Number of warm up runs should be non negative, provided ",
-      warmup_runs,
-      ".");
-  for (int i = 0; i < warmup_runs; ++i) {
-    CAFFE_ENFORCE(Run(), "Warmup run ", i, " has failed.");
-  }
-
-  std::cout << "Main runs." << std::endl;
-  CAFFE_ENFORCE(
-      main_runs >= 0,
-      "Number of main runs should be non negative, provided ",
-      main_runs,
-      ".");
-  Timer timer;
-  for (int i = 0; i < main_runs; ++i) {
-    CAFFE_ENFORCE(Run(), "Main run ", i, " has failed.");
-  }
-  auto millis = timer.MilliSeconds();
-  std::cout << "Main run finished. Milliseconds per iter: "
-            << millis / main_runs
-            << ". Iters per second: " << 1000.0 * main_runs / millis << std::endl;
-
-  if (run_individual) {
-    std::cout << "DAGNet does not do per-op benchmark. To do so, "
-                 "switch to a simple net type." << std::endl;
-  }
-  return vector<float>{millis / main_runs};
 }
 
 bool DAGNet::RunAt(int chain_id, const std::vector<int>& chain) {

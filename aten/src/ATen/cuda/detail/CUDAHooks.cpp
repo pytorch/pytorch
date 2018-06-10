@@ -48,6 +48,9 @@ bool CUDAHooks::hasCuDNN() const {
 cudaStream_t CUDAHooks::getCurrentCUDAStream(THCState* thc_state) const {
   return THCState_getCurrentStream(thc_state);
 }
+cudaStream_t CUDAHooks::getCurrentCUDAStreamOnDevice(THCState* thc_state, int64_t device) const {
+  return THCState_getCurrentStreamOnDevice(thc_state, device);
+}
 struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(THCState* thc_state) const {
   return THCState_getCurrentDeviceProperties(thc_state);
 }
@@ -113,5 +116,11 @@ int CUDAHooks::getNumGPUs() const {
   }
   return count;
 }
+
+// Sigh, the registry doesn't support namespaces :(
+using at::RegistererCUDAHooksRegistry;
+using at::CUDAHooksRegistry;
+
+REGISTER_CUDA_HOOKS(CUDAHooks);
 
 }}} // namespace at::cuda::detail

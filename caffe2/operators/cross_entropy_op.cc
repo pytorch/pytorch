@@ -372,27 +372,84 @@ OPERATOR_SCHEMA(LabelCrossEntropy)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-Operator computes the cross entropy between the input and the label set. In
- practice, it is most commonly used at the end of models, after the SoftMax
- operator and before the AveragedLoss operator. Note that LabelCrossEntropy
- assumes that the label provided is either a 1D array of size N (batch size), or
- a 2D array of size N x 1 (batch size). Each entry in the label vector indicates
- which is the correct class; as such, each entry must be between 0 and D - 1,
- inclusive, where D is the total number of classes. The formula used is:
+This operator computes the cross entropy between a $NxD$ dimensional input data tensor $X$  and a one dimensional input label tensor $label$. The op produces a single length $N$ output tensor $Y$. Here, $N$ is considered the batch size and $D$ is the size of each element in the batch. In practice, it is most commonly used at the end of models as a part of the loss computation, after the SoftMax operator and before the AveragedLoss operator. The cross entropy operation is defined as follows
 
-                            Y[i] = -log(X[i][j])
+$$Y_i = -log(X_{ij})$$
 
- where (i, j) is the classifier's prediction of the jth class (the correct one),
- and i is the batch size. Each log has a lower limit for numerical stability.
+where ($i$, $j$) is the classifier's prediction of the $j$th class (the correct one), and $i$ is the batch size. Each log has a lower limit for numerical stability.
+
+The difference between *LabelCrossEntropy* and *CrossEntropy* is how the labels are specified. Here, the labels are a length $N$ list of integers, whereas in CrossEntropy the labels are a $NxD$ dimensional matrix of one hot label vectors. However, the results of computation should be the same, as shown in the two examples where ($i$, $j$) is the classifier's prediction of the $j$th class (the correct one), and $i$ is the batch size. Each log has a lower limit for numerical stability.
+
+Github Links:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/cross_entropy_op.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/cross_entropy_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LabelCrossEntropy",
+    ["X", "label"],
+    ["Y"]
+)
+
+# Create X: Sample softmax output for 5-class model
+X = np.array([[.01, .05, .02, .02, .9],[.03, .1, .42, .05, .4]])
+print("X:\n",X)
+
+# Create label: Sample 1-hot ground truth label vectors
+label = np.array([4,2])
+print("label:\n",label)
+
+# Feed X & label into workspace
+workspace.FeedBlob("X", X.astype(np.float32))
+workspace.FeedBlob("label", label.astype(np.int32))
+
+# Run op
+workspace.RunOperatorOnce(op)
+
+# Collect Output
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[0.01 0.05 0.02 0.02 0.9 ]
+ [0.03 0.1  0.42 0.05 0.4 ]]
+label:
+ [4 2]
+Y:
+ [0.10536055 0.8675006 ]
+
+```
+
+</details>
+
+
 )DOC")
-    .Input(
-        0,
-        "X",
-        "Input blob from the previous layer, which is almost always "
-        "the result of a softmax operation; X is a 2D array of size N x D, where N "
-        "is the batch size and D is the number of classes")
-    .Input(1, "label", "Blob containing the labels used to compare the input")
-    .Output(0, "Y", "Output blob after the cross entropy computation");
+  .Input(
+      0,
+      "X",
+      "Input tensor which is almost always the result of a softmax operation. $X$ is a 2D array of size $NxD$, where $N$ is the batch size and $D$ is the number of classes.")
+  .Input(
+      1,
+      "label",
+      "Blob containing the labels used to compare the input. $label$ is a length $N$ list of integers, where each element is the integer label for the $n$th element of the batch.")
+  .Output(
+      0,
+      "Y",
+      "Output blob from the cross entropy computation. $Y$ is 1D length $N$ tensor.");
 OPERATOR_SCHEMA(LabelCrossEntropyGradient)
   .NumInputs(3)
   .NumOutputs(1);
@@ -551,28 +608,83 @@ OPERATOR_SCHEMA(CrossEntropy)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-Operator computes the cross entropy between the input and the label set. In
- practice, it is most commonly used at the end of models, after the SoftMax
- operator and before the AveragedLoss operator. Note that CrossEntropy
- assumes that the soft labels provided is a 2D array of size N x D
- (batch size x number of classes). Each entry in the 2D label corresponds to
- the soft label for the input, where each element represents the correct
- probability of the class being selected. As such, each element must be between
- 0 and 1, and all elements in an entry must sum to 1. The formula used is:
+This operator computes the cross entropy between a $NxD$ dimensional input data tensor $X$  and a $NxD$ dimensional input label tensor $label$. The op produces a single length $N$ output tensor $Y$. Here, $N$ is considered the batch size and $D$ is the size of each element in the batch. In practice, it is most commonly used at the end of models as a part of the loss computation, after the SoftMax operator and before the AveragedLoss operator. The cross entropy operation is defined as follows
 
-                Y[i] = sum_j (label[i][j] * log(X[i][j]))
+$$Y_i = \sum_j (label_{ij} * log(X_{ij}))$$
 
- where (i, j) is the classifier's prediction of the jth class (the correct one),
- and i is the batch size. Each log has a lower limit for numerical stability.
+where ($i$, $j$) is the classifier's prediction of the $j$th class (the correct one), and $i$ is the batch size. Each log has a lower limit for numerical stability.
+
+Github Links:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/cross_entropy_op.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/cross_entropy_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "CrossEntropy",
+    ["X", "label"],
+    ["Y"]
+)
+
+# Create X: Sample softmax output for 5-class model
+X = np.array([[.01, .05, .02, .02, .9],[.03, .1, .42, .05, .4]])
+print("X:\n",X)
+
+# Create label: Sample 1-hot ground truth label vectors
+label = np.array([[0.,0.,0.,0.,1.],[0.,0.,1.,0.,0.]])
+print("label:\n",label)
+
+# Feed X & label into workspace
+workspace.FeedBlob("X", X.astype(np.float32))
+workspace.FeedBlob("label", label.astype(np.float32))
+
+# Run op
+workspace.RunOperatorOnce(op)
+
+# Collect Output
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[0.01 0.05 0.02 0.02 0.9 ]
+ [0.03 0.1  0.42 0.05 0.4 ]]
+label:
+ [[0. 0. 0. 0. 1.]
+ [0. 0. 1. 0. 0.]]
+Y:
+ [0.10536055 0.8675006 ]
+
+```
+
+</details>
+
+
 )DOC")
     .Input(
         0,
         "X",
-        "Input blob from the previous layer, which is almost always "
-        "the result of a softmax operation; X is a 2D array of size N x D, where N "
-        "is the batch size and D is the number of classes")
-    .Input(1, "label", "Blob containing the labels used to compare the input")
-    .Output(0, "Y", "Output blob after the cross entropy computation");
+        "Input tensor which is almost always the result of a softmax operation. $X$ is a 2D array of size $NxD$, where $N$ is the batch size and $D$ is the number of classes.")
+    .Input(
+        1,
+        "label",
+        "Blob containing the labels used to compare the input. $label$ is the same shape as $X$.")
+    .Output(
+        0,
+        "Y",
+        "Output blob from the cross entropy computation. $Y$ is 1D length $N$ tensor.");
 OPERATOR_SCHEMA(CrossEntropyGradient)
   .NumInputs(3)
   .NumOutputs(1);

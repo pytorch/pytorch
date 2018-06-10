@@ -1,17 +1,20 @@
 #pragma once
 
-#include <torch/csrc/autograd/variable.h>
+#include <torch/tensor.h>
+#include <torch/detail/ordered_dict.h>
 
-#include "torch/detail.h"
+#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/optional.h>
 
 #include <map>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 class Module {
  public:
@@ -28,8 +31,15 @@ class Module {
   /// Returns the name of the `Module`.
   const std::string& name() const noexcept;
 
-  virtual variable_list forward(variable_list) = 0;
   virtual std::shared_ptr<Module> clone() const;
+
+  // Only construct parameters in initialize_parameters, and
+  // containers in initialize_containers. Most of the time, the containers are
+  // the only thing you need to add.
+  // You are guaranteed that containers are added before parameters.
+  virtual void initialize_containers() {}
+  virtual void initialize_parameters() {}
+  virtual void reset_parameters() {}
 
   std::map<std::string, Variable> parameters() const;
   Variable& param(std::string const&);
@@ -61,13 +71,10 @@ class Module {
   /// Recursively zeros out the `grad` values of all parameters.
   virtual void zero_grad();
 
-  std::unordered_map<std::string, std::shared_ptr<nn::Module>> children_;
-  std::unordered_map<std::string, Variable> parameters_;
-
   template <class Archive>
   void save(Archive& ar) const {
     auto params = parameters();
-    std::size_t size = params.size();
+    size_t size = params.size();
     ar(size);
     for (auto& p : params) {
       ar(p.first, p.second);
@@ -77,23 +84,40 @@ class Module {
   template <class Archive>
   void load(Archive& ar) {
     auto params = parameters();
-    std::size_t size;
+    size_t size;
     ar(size);
     std::string name;
-    for (std::size_t i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++) {
       ar(name);
       ar(params[name]);
     }
   }
 
  protected:
-  std::shared_ptr<nn::Module> add(
-      std::shared_ptr<nn::Module>,
-      std::string const&);
-  // Be careful when registering Tensors that are not variables
-  Variable& add(Variable, std::string const&);
+  autograd::Variable& register_parameter(std::string name, at::Tensor tensor);
+  autograd::Variable& register_buffer(std::string name, at::Tensor tensor);
+
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> register_module(
+      std::string name,
+      std::shared_ptr<ModuleType> module) {
+    auto& base_module = children_.insert(std::move(name), std::move(module));
+    return std::static_pointer_cast<ModuleType>(base_module);
+  }
 
  private:
+  template <typename T>
+  using OrderedDict = torch::detail::OrderedDict<std::string, T>;
+
+  template <typename Derived>
+  friend class CloneableModule;
+
+  virtual void clone_(Module& other);
+
+  OrderedDict<autograd::Variable> parameters_;
+  OrderedDict<autograd::Variable> buffers_;
+  OrderedDict<std::shared_ptr<Module>> children_;
+
   /// The module's name (e.g. "LSTM").
   mutable at::optional<std::string> name_;
 
@@ -126,20 +150,35 @@ class CloneableModule : public Module {
   /// and submodules in the cloned module are different from those in the
   /// original module.
   std::shared_ptr<Module> clone() const override {
-    auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
-    ptr->parameters_.clear();
-    ptr->reset();
-    for (auto& parameter : ptr->parameters_) {
-      parameter.second.data().copy_(
-          this->parameters_.at(parameter.first).data());
+    const auto& self = static_cast<const Derived&>(*this);
+    auto copy = std::make_shared<Derived>(self);
+    copy->parameters_.clear();
+    copy->children_.clear();
+    copy->reset();
+    for (const auto& parameter : parameters_) {
+      copy->parameters_[parameter.key].data().copy_(parameter->data());
     }
-    for (auto& child : ptr->children_) {
-      child.second = this->children_.at(child.first)->clone();
+    for (const auto& child : children_) {
+      copy->children_[child.key]->clone_(*child.value);
     }
-    return ptr;
+    return copy;
+  }
+
+ private:
+  void clone_(Module& other) final override {
+    // Here we are *pretty* certain that `other's` type is `Derived` (because it
+    // was registered under the same name as `this`), but you never know what
+    // crazy things `reset()` does, so `dynamic_cast` just to be safe.
+    auto clone = std::dynamic_pointer_cast<Derived>(other.clone());
+    AT_CHECK(
+        clone != nullptr,
+        "Attempted to clone submodule, but it is of a "
+        "different type than the submodule it was to be cloned into");
+    static_cast<Derived&>(*this) = std::move(*clone);
   }
 };
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch
 
 #define TORCH_ATTR(T, name)                         \
   auto name(const T& new_##name)->decltype(*this) { \

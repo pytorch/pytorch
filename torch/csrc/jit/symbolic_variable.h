@@ -79,6 +79,24 @@ struct SymbolicVariable {
   SymbolicVariable operator-() const {
     return create(aten::neg, {*this})[0].typeLike(*this);
   }
+  SymbolicVariable operator-(const SymbolicVariable rhs) const {
+    Node *n;
+    auto r = create(aten::sub, {*this, rhs}, 1, &n)[0].typeLike(*this);
+    n->t_(attr::alpha, at::Scalar(1).toTensor());
+    return r;
+  }
+  SymbolicVariable operator/(at::Scalar rhs) const {
+    Node *n;
+    auto r = create(aten::div, {*this}, 1, &n)[0].typeLike(*this);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator%(at::Scalar rhs) const {
+    Node *n;
+    auto r = create(aten::remainder, {*this}, 1, &n)[0].typeLike(*this);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
   SymbolicVariable mm(const SymbolicVariable rhs) const {
     auto r = create(t("mm"), {*this, rhs})[0];
     return r;
@@ -147,6 +165,13 @@ struct SymbolicVariable {
     Node *n;
     auto r =  create(aten::view, {*this}, 1, &n)[0];
     n->is_(a("size"), std::move(sizes));
+    return r;
+  }
+  SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
+    Node *n;
+    auto r = create(aten::addmm, {*this, mat1, mat2}, 1, &n)[0];
+    n->t_(a("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+    n->t_(a("beta"), at::CPU(at::kFloat).scalarTensor(1.0));
     return r;
   }
   Value * value() const {

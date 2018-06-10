@@ -40,7 +40,12 @@ class NeuralNetData;
 /// to use them.
 class Annotation {
  public:
-  enum class AnnotationKind { Generic, Caffe2 };
+  enum class AnnotationKind {
+    Generic,
+    Caffe2,
+    ProfilingOperator,
+    ProfilingData
+  };
 
   Annotation(AnnotationKind K) : Kind(K) {}
   Annotation() : Kind(AnnotationKind::Generic) {}
@@ -52,16 +57,8 @@ class Annotation {
   Annotation(const Annotation&) = delete;
   Annotation& operator=(Annotation&) = delete;
 
-  void* getSaved() const {
-    return Saved;
-  }
-  void setSaved(void* saved) {
-    Saved = saved;
-  }
-
  private:
   const AnnotationKind Kind;
-  void* Saved = nullptr;
 };
 
 class NeuralNetOperator : public Instruction {
@@ -241,8 +238,8 @@ class GenericOperator : public NeuralNetOperator {
   std::string name_;
 };
 
-using NNGraph = nom::Graph<std::unique_ptr<nom::repr::Value>, int>;
-using NNSubgraph = nom::Subgraph<std::unique_ptr<nom::repr::Value>, int>;
+using NNGraph = nom::Graph<std::unique_ptr<nom::repr::Value>>;
+using NNSubgraph = nom::Subgraph<std::unique_ptr<nom::repr::Value>>;
 using NNCFGraph = nom::repr::ControlFlowGraph<NNGraph>;
 
 struct NNModule {
@@ -263,7 +260,8 @@ using enable_if_t = typename std::enable_if<B, T>::type;
 
 template <typename T, typename U>
 struct inheritedFrom {
-    static constexpr bool value = std::is_base_of<U, T>::value && !std::is_same<U, T>::value;
+  static constexpr bool value =
+      std::is_base_of<U, T>::value && !std::is_same<U, T>::value;
 };
 
 // This is just a way to fix issues when the isa<> implementation

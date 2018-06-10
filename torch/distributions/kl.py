@@ -26,7 +26,6 @@ from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost
-from torch.autograd import Variable
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
@@ -238,7 +237,7 @@ def _kl_expfamily_expfamily(p, q):
     if not type(p) == type(q):
         raise NotImplementedError("The cross KL-divergence between different exponential families cannot \
                             be computed using Bregman divergences")
-    p_nparams = [Variable(np.data, requires_grad=True) for np in p._natural_params]
+    p_nparams = [np.detach().requires_grad_() for np in p._natural_params]
     q_nparams = q._natural_params
     lg_normal = p._log_normalizer(*p_nparams)
     gradients = torch.autograd.grad(lg_normal.sum(), p_nparams, create_graph=True)

@@ -1,28 +1,30 @@
 #include <torch/nn/modules/batchnorm.h>
 
+#include <torch/cuda.h>
+
 #include <cstdint>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 BatchNorm::BatchNorm(int64_t features) : features_(features) {}
 
 void BatchNorm::reset() {
   if (affine_) {
-    weight_ =
-        add(Var(at::CPU(at::kFloat).empty({features_}).uniform_()), "weight");
-    bias_ = add(Var(at::CPU(at::kFloat).zeros({features_})), "bias");
+    weight_ = register_parameter(
+        "weight", at::CPU(at::kFloat).empty({features_}).uniform_());
+    bias_ = register_parameter("bias", at::CPU(at::kFloat).zeros({features_}));
   }
 
   if (stateful_) {
-    // TODO: Make into buffers instead of parameters
-    running_mean_ = add(
-        Var(at::CPU(at::kFloat).zeros({features_}), false), "running_mean");
-    running_variance_ = add(
-        Var(at::CPU(at::kFloat).ones({features_}), false), "running_variance");
+    running_mean_ =
+        register_buffer("running_mean", at::CPU(at::kFloat).zeros({features_}));
+    running_variance_ = register_buffer(
+        "running_variance", at::CPU(at::kFloat).ones({features_}));
   }
 }
 
-variable_list BatchNorm::forward(variable_list inputs) {
+std::vector<Variable> BatchNorm::forward(std::vector<Variable> inputs) {
   auto& input = inputs[0];
   auto& running_mean_ = (stateful_ ? this->running_mean_ : inputs[1]);
   auto& running_variance_ = (stateful_ ? this->running_variance_ : inputs[2]);
@@ -44,8 +46,9 @@ variable_list BatchNorm::forward(variable_list inputs) {
       is_training(),
       momentum_,
       eps_,
-      hasCudnn());
+      torch::cuda::cudnn_is_available());
 
-  return variable_list({output});
+  return std::vector<Variable>({output});
 }
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

@@ -6,8 +6,14 @@
 
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
-#include "ATen/optional.h"
 #include "ATen/cpu/vec256/vec256.h"
+#include "ATen/optional.h"
+
+#ifdef __PPC64__
+using default_partitioner_type = tbb::simple_partitioner;
+#else
+using default_partitioner_type = tbb::affinity_partitioner;
+#endif
 
 namespace at { namespace native { namespace {
 
@@ -28,7 +34,7 @@ static void parallel_for(int64_t end, int64_t step, bool parallelize, F func) {
   }
 }
 
-static tbb::affinity_partitioner ap;
+static default_partitioner_type ap;
 
 // Vectorized reduction defined by reduce operation `Op` with identity `ident`.
 // The reduction is built on top of reduce128, which reduces down a column
@@ -127,7 +133,9 @@ struct Reduction {
     });
 
     if (cols_rounded != cols) {
+#if !defined(__APPLE__)
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
       scalar_t buf[WIDTH];
 
       // Initializes the entire (tiny) array to avoid uninitialized warnings

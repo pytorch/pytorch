@@ -121,10 +121,10 @@ Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
   return native::bernoulli_(result, p, gen);
 }
 
-Tensor bernoulli(const Tensor& self, Generator* gen) {
+Tensor bernoulli(const Tensor& self) {
   Tensor result = self.type().tensor();
   result.resize_(self.sizes());
-  return native::bernoulli(result, self, gen);
+  return native::bernoulli(result, self, nullptr);
 }
 
 Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
@@ -146,21 +146,15 @@ Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
 
 Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
   if (!self.is_cuda()) {
-    AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_", [&] {
-      THGenerator* generator = get_generator(gen);
-      std::lock_guard<std::mutex> lock(generator->mutex);
-      CPU_tensor_apply1<scalar_t>(self, [generator, p](scalar_t& ret_val) {
-        ret_val = (scalar_t)THRandom_bernoulli(generator, p);
-      });
-    });
+    self._cpu_bernoulli_(p, gen);
     return self;
   }
   Tensor probs = self.type().toScalarType(kDouble).tensor({}).fill_(p);
   return native::bernoulli_(self, probs, gen);
 }
 
-Tensor& bernoulli_(Tensor& self, Generator* gen) {
-  return native::bernoulli_(self, 0.5, gen);
+Tensor& bernoulli_(Tensor& self) {
+  return native::bernoulli_(self, 0.5, nullptr);
 }
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {

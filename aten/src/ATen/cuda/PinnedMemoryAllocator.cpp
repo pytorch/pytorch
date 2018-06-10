@@ -8,7 +8,7 @@
 
 namespace at { namespace cuda {
 
-void* PinnedMemoryAllocator::allocate(std::size_t n) const {
+void* PinnedMemoryAllocator::allocate(size_t n) const {
   auto state = globalContext().lazyInitCUDA();
   return state->cudaHostAllocator->malloc(nullptr, n);
 }

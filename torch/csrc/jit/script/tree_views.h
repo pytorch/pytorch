@@ -105,7 +105,7 @@ struct TreeView {
   }
 
 protected:
-  const TreeRef& subtree(std::size_t i) const {
+  const TreeRef& subtree(size_t i) const {
     return tree_->trees().at(i);
   }
   TreeRef tree_;

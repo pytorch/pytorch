@@ -5,6 +5,7 @@
 #include <TH/TH.h>
 #include <THC/THC.h>
 #include <THC/THCHalf.h>
+#include <THC/THCTensor.hpp>
 
 #include <THS/THS.h>
 #include <THCS/THCS.h>

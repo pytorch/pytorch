@@ -6,12 +6,12 @@
 
 #include <algorithm>
 #include <map>
-#include <stdexcept>
 #include <string>
 #include <typeinfo>
 #include <unordered_map>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 Module::Module(std::string name) : name_(std::move(name)) {}
 
@@ -44,15 +44,13 @@ std::shared_ptr<Module> Module::clone() const {
 
 std::map<std::string, Variable> Module::parameters() const {
   std::map<std::string, Variable> ret;
-  for (auto pair : children_) {
-    auto& name = pair.first;
-    auto& child = pair.second;
-    for (auto& p : child->parameters()) {
-      ret[name + "." + p.first] = p.second;
+  for (const auto& child : children_) {
+    for (auto& p : child.value->parameters()) {
+      ret[child.key + "." + p.first] = p.second;
     }
   }
-  for (auto pair : parameters_) {
-    ret[pair.first] = pair.second;
+  for (const auto& parameter : parameters_) {
+    ret[parameter.key] = parameter.value;
   }
   return ret;
 }
@@ -66,34 +64,33 @@ Variable& Module::param(std::string const& name) {
       break;
     }
 
-    auto child_name = name.substr(begin, dot_pos - begin);
-    auto it = container->children_.find(child_name);
-    if (it == container->children_.end()) {
-      throw std::runtime_error("No such child: " + child_name);
+    const auto child_name = name.substr(begin, dot_pos - begin);
+    if (auto* child = container->children_.find(child_name)) {
+      container = child->get();
+    } else {
+      AT_ERROR("No such child: ", child_name);
     }
 
-    container = it->second.get();
     begin = dot_pos + 1; // Skip the dot
   }
 
-  auto param_name = name.substr(begin);
-  auto it = container->parameters_.find(param_name);
-  if (it == parameters_.end()) {
-    throw std::runtime_error("No such param: " + param_name);
+  const auto parameter_name = name.substr(begin);
+  if (auto* parameter = container->parameters_.find(parameter_name)) {
+    return *parameter;
   }
-  return it->second;
+  AT_ERROR("No such param: ", parameter_name);
 }
 
 void Module::train() {
-  for (auto& pair : children_) {
-    pair.second->train();
+  for (auto& child : children_) {
+    child.value->train();
   }
   is_training_ = true;
 }
 
 void Module::eval() {
-  for (auto& pair : children_) {
-    pair.second->eval();
+  for (auto& child : children_) {
+    child.value->eval();
   }
   is_training_ = false;
 }
@@ -108,39 +105,36 @@ void Module::cpu() {
 
 void Module::to(at::Type& type) {
   for (auto& child : children_) {
-    child.second->to(type);
+    child.value->to(type);
   }
-  for (auto& pair : parameters_) {
-    auto& parameter = pair.second;
-    at::detail::set_data(parameter, parameter.data().toType(type));
-    AT_ASSERT(parameter.data().type() == type);
-    AT_ASSERT(&parameter.type() == autograd::VariableType::getType(type));
+  for (auto& parameter : parameters_) {
+    at::detail::set_data(*parameter, parameter->data().toType(type));
+    AT_ASSERT(parameter->data().type() == type);
+    AT_ASSERT(&parameter->type() == autograd::VariableType::getType(type));
   }
 }
 
 void Module::to(at::ScalarType scalar_type) {
   for (auto& child : children_) {
-    child.second->to(scalar_type);
+    child.value->to(scalar_type);
   }
-  for (auto& pair : parameters_) {
-    auto& parameter = pair.second;
-    auto& new_type = parameter.data().type().toScalarType(scalar_type);
-    at::detail::set_data(parameter, parameter.data().toType(new_type));
-    AT_ASSERT(parameter.data().type().scalarType() == scalar_type);
-    AT_ASSERT(parameter.type().scalarType() == scalar_type);
+  for (auto& parameter : parameters_) {
+    auto& new_type = parameter->data().type().toScalarType(scalar_type);
+    at::detail::set_data(*parameter, parameter->data().toType(new_type));
+    AT_ASSERT(parameter->data().type().scalarType() == scalar_type);
+    AT_ASSERT(parameter->type().scalarType() == scalar_type);
   }
 }
 
 void Module::to(at::Backend backend) {
   for (auto& child : children_) {
-    child.second->to(backend);
+    child.value->to(backend);
   }
-  for (auto& pair : parameters_) {
-    auto& parameter = pair.second;
-    auto& new_type = parameter.data().type().toBackend(backend);
-    at::detail::set_data(parameter, parameter.data().toType(new_type));
-    AT_ASSERT(parameter.data().type().backend() == backend);
-    AT_ASSERT(parameter.type().backend() == backend);
+  for (auto& parameter : parameters_) {
+    auto& new_type = parameter->data().type().toBackend(backend);
+    at::detail::set_data(*parameter, parameter->data().toType(new_type));
+    AT_ASSERT(parameter->data().type().backend() == backend);
+    AT_ASSERT(parameter->type().backend() == backend);
   }
 }
 
@@ -150,38 +144,27 @@ bool Module::is_training() const noexcept {
 
 void Module::zero_grad() {
   for (auto& child : children_) {
-    child.second->zero_grad();
+    child.value->zero_grad();
   }
-  for (auto& pair : parameters_) {
-    pair.second.grad().zero_();
+  for (auto& parameter : parameters_) {
+    parameter->grad().zero_();
   }
 }
 
-std::shared_ptr<nn::Module> Module::add(
-    std::shared_ptr<nn::Module> m,
-    std::string const& name) {
-  if (this->children_.find(name) != this->children_.end()) {
-    throw std::runtime_error("Trying to add container that already exists");
-  }
-  if (std::find(name.begin(), name.end(), '.') != name.end()) {
-    // We can't allow containers with dots in their names, as that would make
-    // their parameters not findable with parameters().
-    throw std::runtime_error("Trying to add parameter with a '.' in its name");
-  }
-  this->children_[name] = std::move(m);
-  return this->children_[name];
+autograd::Variable& Module::register_parameter(
+    std::string name,
+    at::Tensor tensor) {
+  auto variable = autograd::make_variable(tensor, /*requires_grad=*/true);
+  return parameters_.insert(std::move(name), std::move(variable));
 }
 
-Variable& Module::add(Variable v, std::string const& name) {
-  if (this->parameters_.find(name) != this->parameters_.end()) {
-    throw std::runtime_error("Trying to add parameter that already exists");
-  }
-  if (std::find(name.begin(), name.end(), '.') != name.end()) {
-    // We can't allow parameters with dots in their names, as that would make
-    // them not findable with parameters().
-    throw std::runtime_error("Trying to add parameter with a '.' in its name");
-  }
-  this->parameters_[name] = v;
-  return this->parameters_[name];
+autograd::Variable& Module::register_buffer(
+    std::string name,
+    at::Tensor tensor) {
+  auto variable = autograd::make_variable(tensor, /*requires_grad=*/false);
+  return parameters_.insert(std::move(name), std::move(variable));
 }
-}} // namespace torch::nn
+
+void Module::clone_(Module& other) {}
+} // namespace nn
+} // namespace torch

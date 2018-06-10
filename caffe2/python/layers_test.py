@@ -613,6 +613,17 @@ class TestLayers(LayersTestCase):
             ]
         )
 
+    def testDistillBatchLRLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float64, (1,)))),
+            ('logit', schema.Scalar((np.float32, (2,)))),
+            ('teacher_label', schema.Scalar((np.float32(1,)))),
+            ('weight', schema.Scalar((np.float64, (1,))))
+        ))
+        loss = self.model.BatchDistillLRLoss(input_record)
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
+
     def testBatchLRLoss(self):
         input_record = self.new_record(schema.Struct(
             ('label', schema.Scalar((np.float64, (1,)))),

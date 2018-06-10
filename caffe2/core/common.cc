@@ -8,14 +8,23 @@ namespace caffe2 {
 // Do not directly use this variable, but instead use the HasCudaRuntime()
 // function below.
 std::atomic<bool> g_caffe2_has_cuda_linked{false};
+std::atomic<bool> g_caffe2_has_hip_linked{false};
 
 bool HasCudaRuntime() {
   return g_caffe2_has_cuda_linked.load();
 }
 
+bool HasHipRuntime() {
+  return g_caffe2_has_hip_linked.load();
+}
+
 namespace internal {
 void SetCudaRuntimeFlag() {
   g_caffe2_has_cuda_linked.store(true);
+}
+
+void SetHipRuntimeFlag() {
+  g_caffe2_has_hip_linked.store(true);
 }
 } // namespace internal
 

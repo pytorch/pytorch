@@ -4,7 +4,7 @@
 #include <ctime>
 #include <mutex>
 
-#include "caffe2/core/common_cudnn.h"
+#include "caffe2/core/common.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -12,6 +12,12 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
+
+// Since we are using the macro CAFFE2_USE_CUDNN, we will need to include this
+// file after common.h is included.
+#ifdef CAFFE2_USE_CUDNN
+#include "caffe2/core/common_cudnn.h"
+#endif // CAFFE2_USE_CUDNN
 
 namespace caffe2 {
 
@@ -45,13 +51,15 @@ class ThreadLocalCUDAObjects {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
       cuda_streams_[i] = vector<cudaStream_t>();
       cublas_handles_[i] = vector<cublasHandle_t>();
+#ifdef CAFFE2_USE_CUDNN
       cudnn_handles_[i] = vector<cudnnHandle_t>();
+#endif // CAFFE2_USE_CUDNN
     }
   }
 
   cudaStream_t GetStream(int gpu, int stream_id) {
     vector<cudaStream_t>& gpu_streams = cuda_streams_[gpu];
-    if (gpu_streams.size() <= stream_id) {
+    if (gpu_streams.size() <= (unsigned)stream_id) {
       gpu_streams.resize(stream_id + 1, nullptr);
     }
     if (!gpu_streams[stream_id]) {
@@ -65,7 +73,7 @@ class ThreadLocalCUDAObjects {
   cublasHandle_t GetHandle(int gpu, int stream_id) {
     DeviceGuard guard(gpu);
     vector<cublasHandle_t>& gpu_handles = cublas_handles_[gpu];
-    if (gpu_handles.size() <= stream_id) {
+    if (gpu_handles.size() <= (unsigned)stream_id) {
       gpu_handles.resize(stream_id + 1, nullptr);
     }
     if (!gpu_handles[stream_id]) {
@@ -81,10 +89,11 @@ class ThreadLocalCUDAObjects {
     return gpu_handles[stream_id];
   }
 
+#ifdef CAFFE2_USE_CUDNN
   cudnnHandle_t GetCudnnHandle(int gpu, int stream_id) {
     DeviceGuard guard(gpu);
     vector<cudnnHandle_t>& gpu_handles = cudnn_handles_[gpu];
-    if (gpu_handles.size() <= stream_id) {
+    if (gpu_handles.size() <= (unsigned)stream_id) {
       gpu_handles.resize(stream_id + 1, nullptr);
     }
     if (!gpu_handles[stream_id]) {
@@ -94,6 +103,7 @@ class ThreadLocalCUDAObjects {
     }
     return gpu_handles[stream_id];
   }
+#endif // CAFFE2_USE_CUDNN
 
   ~ThreadLocalCUDAObjects() noexcept {
     for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
@@ -107,16 +117,21 @@ class ThreadLocalCUDAObjects {
           CUDA_CHECK(cudaStreamDestroy(stream));
         }
       }
+
+#ifdef CAFFE2_USE_CUDNN
       for (auto& handle : cudnn_handles_[i]) {
         if (handle) {
           CUDNN_CHECK(cudnnDestroy(handle));
         }
       }
+#endif // CAFFE2_USE_CUDNN
     }
   }
   vector<cudaStream_t> cuda_streams_[CAFFE2_COMPILE_TIME_MAX_GPUS];
   vector<cublasHandle_t> cublas_handles_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+#ifdef CAFFE2_USE_CUDNN
   vector<cudnnHandle_t> cudnn_handles_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+#endif // CAFFE2_USE_CUDNN
 };
 
 class CUDAContext final {
@@ -177,9 +192,11 @@ class CUDAContext final {
     return cuda_objects_.GetHandle(gpu_id_, stream_id_);
   }
 
+#ifdef CAFFE2_USE_CUDNN
   cudnnHandle_t cudnn_handle() {
     return cuda_objects_.GetCudnnHandle(gpu_id_, stream_id_);
   }
+#endif // CAFFE2_USE_CUDNN
 
   curandGenerator_t& curand_generator() {
     if (!curand_generator_) {

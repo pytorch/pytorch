@@ -13,12 +13,17 @@ using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
 bool isDifferentiable(Node * n) {
-  // TODO: unsqueeze!
   static std::unordered_set<Symbol> differentiable_kinds = {
     aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
-    aten::unsqueeze, aten::expand,
+    aten::unsqueeze, aten::expand, aten::addmm
   };
+  // TODO: check this more generally via schema
+  // This check ensures that the `alpha` and `beta` attributes on this addmm
+  // node are constant and equivalent to 1.0
+  if (n->kind() == aten::addmm && n->inputs().size() > 3) {
+    return false;
+  }
   return differentiable_kinds.count(n->kind()) > 0;
 }
 
@@ -90,7 +95,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
             dmat2 = inputs.at(0).t().mm(grads.at(0));
           }
         } else {
-          dmat2 = grads.at(0).mm(inputs.at(1).t());
+          dmat2 = inputs.at(0).t().mm(grads.at(0));
         }
         return {dmat1, dmat2};
       }
@@ -176,7 +181,7 @@ static value_set findAllRequiresGradNodes(
   const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
 
   auto inputs = graph.inputs();
-  for (std::size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
+  for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
     if (!input_requires_grad[i]) continue;
     requires_grad_set.emplace(inputs[i]);
   }
@@ -265,7 +270,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   };
 
   auto outputs = graph.outputs();
-  for (std::size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
+  for (size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
     Value * output = outputs[i];
     if (!requires_grad(output))
       continue;
@@ -282,13 +287,13 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
       continue;
     value_list grad_inputs = gradientForNode(node, fmap(node->outputs(), get_grad));
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
-    for (std::size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
+    for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
 
   auto inputs = graph.inputs();
-  for (std::size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
+  for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
     Value * input = inputs[i];
     if (!requires_grad(input))
       continue;
@@ -395,12 +400,12 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   // -- Construct primal_outputs, df_input_captures, f_real_outputs ----
   grad_desc.f_real_outputs = graph.outputs().size();
 
-  std::unordered_map<Value*, std::size_t> orig_primal_outputs_idx;
-  std::unordered_map<Value*, std::size_t> orig_primal_inputs_idx;
+  std::unordered_map<Value*, size_t> orig_primal_outputs_idx;
+  std::unordered_map<Value*, size_t> orig_primal_inputs_idx;
   // NOTE: we use emplace to avoid replacing an existing index if an output is repeated
-  for (std::size_t i = 0, num_outputs = graph.outputs().size(); i < num_outputs; ++i)
+  for (size_t i = 0, num_outputs = graph.outputs().size(); i < num_outputs; ++i)
     orig_primal_outputs_idx.emplace(graph.outputs()[i], i);
-  for (std::size_t i = 0, num_inputs = graph.inputs().size(); i < num_inputs; ++i)
+  for (size_t i = 0, num_inputs = graph.inputs().size(); i < num_inputs; ++i)
     orig_primal_inputs_idx[graph.inputs()[i]] = i;
 
   // NB: reverse_captures are already deduplicated, and in topo order
@@ -425,7 +430,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   // NB [possible optimization]: use the newly added vjp input as soon as the first
   // vjp for that value is generated, to reduce the lifespan of this input
   // (currently we add it to the final vjp after all adds).
-  for (std::size_t i = grad_desc.f_real_outputs; i < graph.outputs().size(); ++i) {
+  for (size_t i = grad_desc.f_real_outputs; i < graph.outputs().size(); ++i) {
     Value * tmp = graph.outputs().at(i);
     // Add VJP inputs only for intermediates that actually required grad.
     if (rev_info.requires_grad_set.count(tmp) == 0) continue;
