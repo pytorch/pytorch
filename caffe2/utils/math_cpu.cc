@@ -257,6 +257,8 @@ CAFFE2_SPECIALIZED_SCALE(float)
 CAFFE2_SPECIALIZED_DOT(float)
 #undef CAFFE2_SPECIALIZED_DOT
 
+#if !CAFFE2_MOBILE
+
 #define CAFFE2_SPECIALIZED_AXPY(T)                                          \
   template <>                                                               \
   void Axpy<T, CPUContext>(                                                 \
@@ -285,6 +287,8 @@ CAFFE2_SPECIALIZED_AXPY(float)
   }
 CAFFE2_SPECIALIZED_AXPBY(float)
 #undef CAFFE2_SPECIALIZED_AXPBY
+
+#endif // !CAFFE2_MOBILE
 
 #else // CAFFE2_USE_EIGEN_FOR_BLAS
 
@@ -396,6 +400,8 @@ CAFFE2_SPECIALIZED_SCALE(float, s)
 CAFFE2_SPECIALIZED_DOT(float, s)
 #undef CAFFE2_SPECIALIZED_DOT
 
+#if !CAFFE2_MOBILE
+
 #define CAFFE2_SPECIALIZED_AXPY(T, prefix)                          \
   template <>                                                       \
   void Axpy<T, CPUContext>(                                         \
@@ -440,6 +446,8 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
 #endif // CAFFE2_USE_MKL
 CAFFE2_SPECIALIZED_AXPBY(float, s)
 #undef CAFFE2_SPECIALIZED_AXPBY
+
+#endif // !CAFFE2_MOBILE
 
 #endif // CAFFE2_USE_EIGEN_FOR_BLAS
 
@@ -782,6 +790,8 @@ void ReduceMeanImpl(
 
 } // namespace
 
+#if !CAFFE2_MOBILE
+
 #define CAFFE2_SPECIALIZED_REDUCE_MIN(T)                       \
   template <>                                                  \
   void ReduceMin<T, CPUContext>(                               \
@@ -836,6 +846,8 @@ CAFFE2_SPECIALIZED_REDUCE_MAX(float)
 CAFFE2_SPECIALIZED_REDUCE_MAX(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MAX
 
+#endif // !CAFFE2_MOBILE
+
 #define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                                      \
   template <>                                                                 \
   void ReduceSum<T, CPUContext>(                                              \
@@ -854,6 +866,8 @@ CAFFE2_SPECIALIZED_REDUCE_SUM(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_SUM(float)
 CAFFE2_SPECIALIZED_REDUCE_SUM(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_SUM
+
+#if !CAFFE2_MOBILE
 
 #define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                             \
   template <>                                                         \
@@ -975,6 +989,8 @@ void MomentsImpl(
   }
 CAFFE2_SPECIALIZED_MOMENTS(float)
 #undef CAFFE2_SPECIALIZED_MOMENTS
+
+#endif // !CAFFE2_MOBILE
 
 #define CAFFE2_SPECIALIZED_ROWWISEMAX(T)                         \
   template <>                                                    \
@@ -1327,6 +1343,8 @@ void BroadcastBinaryOpImpl(
     std::transform(A, A + N, B, C, Op<TIn>());                         \
   }
 
+#if !CAFFE2_MOBILE
+
 #define DEFINE_1D_COMPARE_FUNCTION(Func, Op)                \
   DELEGATE_1D_BINARY_FUNCTION(float, bool, Func, Op)        \
   DELEGATE_1D_BINARY_FUNCTION(double, bool, Func, Op)       \
@@ -1357,6 +1375,8 @@ DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseOr, std::bit_or)
 DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DEFINE_1D_BITWISE_BINARY_FUNCTION
+
+#endif // !CAFFE2_MOBILE
 
 #undef DELEGATE_1D_BINARY_FUNCTION
 
@@ -1404,6 +1424,8 @@ DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
         rows, cols, Op<TIn>(), A, B, C);                                       \
   }
 
+#if !CAFFE2_MOBILE
+
 #define DEFINE_2D_COMPARE_FUNCTION(Func, Op)                          \
   DELEGATE_2D_BROADCAST_BINARY_FUNCTION(float, bool, Func, Op)        \
   DELEGATE_2D_BROADCAST_BINARY_FUNCTION(double, bool, Func, Op)       \
@@ -1434,6 +1456,8 @@ DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseOr, std::bit_or)
 DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION
+
+#endif // !CAFFE2_MOBILE
 
 #undef DELEGATE_2D_BROADCAST_BINARY_FUNCTION
 
@@ -1547,6 +1571,8 @@ DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int64_t)
         C);                                                     \
   }
 
+#if !CAFFE2_MOBILE
+
 #define DEFINE_BROADCAST_COMPARE_FUNCTION(Func, Op)                \
   DELEGATE_BROADCAST_BINARY_FUNCTION(float, bool, Func, Op)        \
   DELEGATE_BROADCAST_BINARY_FUNCTION(double, bool, Func, Op)       \
@@ -1563,6 +1589,8 @@ DEFINE_BROADCAST_COMPARE_FUNCTION(GE, std::greater_equal)
 
 #undef DEFINE_BROADCAST_COMPARE_FUNCTION
 
+#endif // !CAFFE2_MOBILE
+
 #define DEFINE_BROADCAST_BINARY_FUNCTION(Func, Op)                         \
   DELEGATE_BROADCAST_BINARY_FUNCTION(float, float, Func, Op)               \
   DELEGATE_BROADCAST_BINARY_FUNCTION(double, double, Func, Op)             \
@@ -1575,6 +1603,8 @@ DEFINE_BROADCAST_BINARY_FUNCTION(Mul, std::multiplies)
 DEFINE_BROADCAST_BINARY_FUNCTION(Div, std::divides)
 
 #undef DEFINE_BROADCAST_BINARY_FUNCTION
+
+#if !CAFFE2_MOBILE
 
 DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, And, std::logical_and)
 DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Or, std::logical_or)
@@ -1590,6 +1620,8 @@ DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseOr, std::bit_or)
 DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DEFINE_BITWISE_BROADCAST_BINARY_FUNCTION
+
+#endif // !CAFFE2_MOBILE
 
 #undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
