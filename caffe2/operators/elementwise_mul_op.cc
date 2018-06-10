@@ -5,6 +5,8 @@
 
 namespace caffe2 {
 
+#if !CAFFE2_MOBILE
+
 namespace {
 
 template <typename TGrad, typename TIn>
@@ -86,9 +88,14 @@ bool MulFunctor<CPUContext>::Backward(
   return true;
 }
 
+#endif // !CAFFE2_MOBILE
+
 REGISTER_CPU_OPERATOR(
     Mul,
     BinaryElementwiseOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>);
+
+#if !CAFFE2_MOBILE
+
 REGISTER_CPU_OPERATOR(
     MulGradient,
     BinaryElementwiseGradientOp<
@@ -113,5 +120,7 @@ class GetMulGradient final : public GradientMakerBase {
 } // namespace
 
 REGISTER_GRADIENT(Mul, GetMulGradient);
+
+#endif // !CAFFE2_MOBILE
 
 } // namespace caffe2
