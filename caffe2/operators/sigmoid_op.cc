@@ -16,6 +16,8 @@ operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
   return true;
 }
 
+#if !CAFFE2_MOBILE
+
 template <>
 template <typename T>
 bool SigmoidGradientFunctor<CPUContext>::Forward(
@@ -33,12 +35,17 @@ bool SigmoidGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
+#endif // !CAFFE2_MOBILE
+
 REGISTER_CPU_OPERATOR(
     Sigmoid,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         SigmoidFunctor<CPUContext>>);
+
+#if !CAFFE2_MOBILE
+
 REGISTER_CPU_OPERATOR(
     SigmoidGradient,
     BinaryElementwiseOp<
@@ -86,5 +93,7 @@ class GetSigmoidGradient : public GradientMakerBase {
 } // namespace
 
 REGISTER_GRADIENT(Sigmoid, GetSigmoidGradient);
+
+#endif // !CAFFE2_MOBILE
 
 } // namespace caffe2
