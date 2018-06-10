@@ -101,7 +101,7 @@ struct DescriptorDeleter {
 // initialized the first time you call set() or any other initializing
 // function.
 template <typename T, cudnnStatus_t (*ctor)(T**), cudnnStatus_t (*dtor)(T*)>
-class Descriptor
+class AT_CUDA_API Descriptor
 {
 public:
   // TODO: Figure out why const-correctness doesn't work here
@@ -182,7 +182,7 @@ private:
   }
 };
 
-struct ConvolutionDescriptor
+struct AT_CUDA_API ConvolutionDescriptor
   : public Descriptor<cudnnConvolutionStruct,
                       &cudnnCreateConvolutionDescriptor,
                       &cudnnDestroyConvolutionDescriptor>
@@ -201,7 +201,7 @@ struct ConvolutionDescriptor
   }
 };
 
-struct SpatialTransformerDescriptor
+struct AT_CUDA_API SpatialTransformerDescriptor
   : public Descriptor<cudnnSpatialTransformerStruct,
                       &cudnnCreateSpatialTransformerDescriptor,
                       &cudnnDestroySpatialTransformerDescriptor>
@@ -240,7 +240,7 @@ inline cudnnStatus_t cudnnRestoreDropoutDescriptor(
 
 #endif // CUDNN_VERSION
 
-struct DropoutDescriptor
+struct AT_CUDA_API DropoutDescriptor
   : public Descriptor<cudnnDropoutStruct,
                       &cudnnCreateDropoutDescriptor,
                       &cudnnDestroyDropoutDescriptor>
@@ -282,7 +282,7 @@ struct DropoutDescriptor
   }
 };
 
-struct RNNDescriptor
+struct AT_CUDA_API RNNDescriptor
   : public Descriptor<cudnnRNNStruct,
                       &cudnnCreateRNNDescriptor,
                       &cudnnDestroyRNNDescriptor>
