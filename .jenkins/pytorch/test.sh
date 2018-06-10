@@ -89,18 +89,19 @@ test_libtorch() {
 }
 
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+  test_torchvision
   test_python_nn
   test_python_all_except_nn
   test_aten
-  test_torchvision
   test_libtorch
 else
   if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+    test_torchvision
     test_python_nn
   elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+    test_torchvision
     test_python_all_except_nn
     test_aten
-    test_torchvision
     test_libtorch
   fi
 fi
