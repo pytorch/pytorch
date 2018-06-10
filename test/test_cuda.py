@@ -1823,10 +1823,6 @@ def generate_tests():
 
 
 if __name__ == '__main__':
-    if TEST_CUDA:
-        load_ignore_file()
-        generate_tests()
-
     # skip TestTorch tests
     # hide in __name__ == '__main__' because we don't want this to be run when
     # someone imports test_cuda
@@ -1839,4 +1835,7 @@ if __name__ == '__main__':
                 test_suite.addTest(test)
         return test_suite
 
-    run_tests()
+    if TEST_CUDA:
+        load_ignore_file()
+        generate_tests()
+        run_tests()
