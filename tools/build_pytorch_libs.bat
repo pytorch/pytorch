@@ -85,7 +85,7 @@ IF "%CMAKE_GENERATOR%"=="" (
   IF "%CMAKE_GENERATOR%"=="Ninja" (
     IF "%CC%"== "" set CC=cl.exe
     IF "%CXX%"== "" set CXX=cl.exe
-    set MAKE_COMMAND=cmake --build . --target install --config %BUILD_TYPE% -- -j%MAX_JOBS%
+    set MAKE_COMMAND=cmake --build . --target install --config %BUILD_TYPE% -- -j%MAX_JOBS% -v
   ) ELSE (
     set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=%BUILD_TYPE%
   )
