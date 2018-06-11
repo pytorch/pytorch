@@ -688,7 +688,7 @@ class Caffe2Backend(Backend):
                    'eliminate_nop_transpose',
                    'fuse_transpose_into_gemm',
                    'lift_lexical_references',
-                   'fuse_bin_into_conv']
+                   'fuse_bn_into_conv']
         if init:
             passes.append('split_init')
         if predict:
@@ -785,6 +785,7 @@ class Caffe2Backend(Backend):
             ws = Workspace()
             device_option = get_device_option(Device(device))
 
+            model = cls.optimize_onnx(model)
             init_net, predict_net = cls._onnx_model_to_caffe2_net(model, device, opset_version, False)
 
             if raw_values_dict:
