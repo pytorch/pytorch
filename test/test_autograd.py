@@ -2511,6 +2511,8 @@ method_tests = [
     ('reshape', (), (1,), 'scalar_to_1d'),
     ('flip', (S, S, S), ([0],), 'd0'),
     ('flip', (S, S, S), ([0, 1, 2],), 'd012'),
+    ('flip', (S, S, S), ([0, 2],), 'd02'),
+    ('flip', (S, S, S), ([2, 0],), 'd20'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
     ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
     ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
