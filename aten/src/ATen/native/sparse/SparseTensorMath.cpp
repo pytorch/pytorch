@@ -167,6 +167,7 @@ SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._values().div_(value);
   } else {
     r.resize_as_(t);
+    r._indices().resize_as_(t._indices());
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because div_out takes Tensor&
     div_out(r_values, t._values(), value);
