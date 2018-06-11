@@ -48,7 +48,7 @@ Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
   }
 }
 
-Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
+Tensor pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
   if (_has_native(self)) {
     return native_pow_out(result, self, exponent);
   } else {
@@ -57,9 +57,11 @@ Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
 }
 
 Tensor pow(const Tensor& self, Scalar exponent) {
-  Tensor r = self.type().tensor();
-  native::pow_out(r, self, exponent);
-  return r;
+  if (_has_native(self)) {
+    return native_pow(self, exponent);
+  } else {
+    return th_pow(self, exponent);
+  }
 }
 
 Tensor& zero_(Tensor& self) {
@@ -70,40 +72,90 @@ Tensor& zero_(Tensor& self) {
   }
 }
 
+// Note [CPU sparse is globally native]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// The current state of affairs is as follows:
+//
+//  - CPU sparse functionality is implemented natively
+//  - CUDA sparse functionality, and all other functionality, are implemented
+//    in TH.
+//
+// Thus, we need these trampoline functions, to help us decide whether or
+// not we can go to native implementations or not.  We expect the trampolines
+// to go away when things get ported to native for real.
+
+// Note [Multiple dispatch to sparse]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// In principle, there are some degrees of freedom in how we could gotten to our
+// native CPU sparse implementations.  In particular, the handling of how we are
+// simulating multiple dispatch is asymmetric with how th_add_out handles the
+// multiple dispatch.  We justify this in two ways: (1) knowing when to
+// correctly dispatch to sparse requires us to know how what overloads; so we're
+// less likely to get it "wrong" if we put it all together, and (2) all of this
+// is temporary, because we're aiming to natively support multiple dispatch in
+// our system.
+
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
-  if (_has_native(self)) {
-    return native_add_out(result, self, other, alpha);
+  if (!self.is_cuda()) {
+    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+    auto self_sparse = self.is_sparse();
+    auto other_sparse = other.is_sparse();
+    if (self_sparse && other_sparse) {
+      return native_add_out(result, self, other, alpha);
+    } else if (!self_sparse && other_sparse) {
+      // TODO: Perhaps doing overload selection with SparseTensorRef is
+      // confusing, and we should have given these overloads different names.
+      // For now, we do it this way for consistency with the TH bindings
+      // (not that it is terribly consistent anyway).
+      return native_add_out(result, self, SparseTensorRef(other), alpha);
+    } else {
+      return th_add_out(result, self, other, alpha);
+    }
   } else {
     return th_add_out(result, self, other, alpha);
   }
 }
 
+// NB: You may be tempted to implement add and add_ just as calls to add_out, but
+// calling the actual implementing function matters, because broadcast
+// will be handled differently depending on if you call add_ or (a seemingly
+// equivalent) add_out.  Arguably this mismatch in treatment is a bug,
+// c.f., https://github.com/pytorch/pytorch/issues/8308 but fixing this
+// bug would involve changing a lot of other places, so we leave it
+// alone for now.
+
 Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
-  Tensor r = self.type().tensor();
-  native::add_out(r, self, other, alpha);
-  return r;
+  if (!self.is_cuda()) {
+    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+    auto self_sparse = self.is_sparse();
+    auto other_sparse = other.is_sparse();
+    if (self_sparse && other_sparse) {
+      return native_add(self, other, alpha);
+    } else if (!self_sparse && other_sparse) {
+      return native_add(self, SparseTensorRef(other), alpha);
+    } else {
+      return th_add(self, other, alpha);
+    }
+  } else {
+    return th_add(self, other, alpha);
+  }
 }
 
 Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
-  return native::add_out(self, self, other, alpha);
-}
-
-Tensor& add_out(Tensor& result, const Tensor& self, SparseTensorRef other, Scalar alpha) {
   if (!self.is_cuda()) {
-    return native_add_out(result, self, other, alpha);
+    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+    auto self_sparse = self.is_sparse();
+    auto other_sparse = other.is_sparse();
+    if (self_sparse && other_sparse) {
+      return native_add_(self, other, alpha);
+    } else if (!self_sparse && other_sparse) {
+      return native_add_(self, SparseTensorRef(other), alpha);
+    } else {
+      return th_add_(self, other, alpha);
+    }
   } else {
-    return th_add_out(result, self, other, alpha);
+    return th_add_(self, other, alpha);
   }
-}
-
-Tensor add(const Tensor& self, SparseTensorRef other, Scalar alpha) {
-  Tensor r = self.type().tensor();
-  native::add_out(r, self, other, alpha);
-  return r;
-}
-
-Tensor& add_(Tensor& self, SparseTensorRef other, Scalar alpha) {
-  return native::add_out(self, self, other, alpha);
 }
 
 
