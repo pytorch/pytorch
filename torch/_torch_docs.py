@@ -4021,6 +4021,68 @@ Example::
             [ 1,  2,  2,  0]])
 """)
 
+add_docstr(torch.sparse_coo_tensor,
+           r"""
+sparse_coo_tensor(indices, values, size=None, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a sparse_coo_tensor with non-zero elements at the given :attr:`indices` with the given
+:attr:`values`.
+
+Args:
+    indices (array_like): Initial data for the tensor. Can be a list, tuple,
+        NumPy ``ndarray``, scalar, and other types. Will be cast to a :class:`torch.LongTensor`
+        internally. The indices are the coordinates of the non-zero values in the matrix, and thus
+        should be two-dimensional where the first dimension is the number of tensor dimensions and
+        the second dimension is the number of non-zero values.
+    values (array_like): Initial values for the tensor. Can be a list, tuple,
+        NumPy ``ndarray``, scalar, and other types.
+    size (list, tuple, or :class:`torch.Size`, optional): Size of the sparse tensor. If not
+        provided the size will be inferred as the minimum size big enough to hold all non-zero
+        elements.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if None, infers data type from :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+
+
+Example::
+
+    >>> i = torch.LongTensor([[0, 1, 1],
+                              [2, 0, 2]])
+    >>> v = torch.FloatTensor([3, 4, 5])
+    >>> torch.sparse_coo_tensor(i, v, torch.Size([2,4]))
+    torch.sparse.FloatTensor of size (2,4) with indices:
+    tensor([[ 0,  1,  1],
+            [ 2,  0,  2]])
+    and values:
+    tensor([ 3.,  4.,  5.])
+
+    >>> torch.sparse_coo_tensor(i, v)  # Shape inference
+    torch.sparse.FloatTensor of size (2,3) with indices:
+    tensor([[ 0,  1,  1],
+            [ 2,  0,  2]])
+    and values:
+    tensor([ 3.,  4.,  5.])
+
+    >>> torch.sparse_coo_tensor(i, v, torch.Size([2,4]), dtype=torch.float64,
+                                device=torch.device('cuda:0'))
+    torch.cuda.sparse.DoubleTensor of size (2,4) with indices:
+    tensor([[ 0,  1,  1],
+            [ 2,  0,  2]], device='cuda:0')
+    and values:
+    tensor([ 3.,  4.,  5.], dtype=torch.float64, device='cuda:0')
+
+    >>> torch.sparse_coo_tensor([], [], torch.Size([])) # Create an empty tensor (of size (0,))
+    torch.sparse.FloatTensor of size () with indices:
+    tensor([], dtype=torch.int64)
+    and values:
+    tensor([])
+""")
+
 add_docstr(torch.sqrt,
            r"""
 sqrt(input, out=None) -> Tensor
