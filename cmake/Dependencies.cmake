@@ -411,6 +411,8 @@ if(USE_CUDA)
     endif()
     if(CAFFE2_USE_CUDNN)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+    else()
+      caffe2_update_option(USE_CUDNN OFF)
     endif()
     if(CAFFE2_STATIC_LINK_CUDA)
       # When statically linking, this must be the order of the libraries
