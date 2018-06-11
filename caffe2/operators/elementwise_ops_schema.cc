@@ -5,6 +5,8 @@
 
 namespace caffe2 {
 
+namespace {
+
 const char* kBroadcastDoc = R"DOC(
 If necessary the right-hand-side argument will be broadcasted to match the
 shape of left-hand-side argument. When broadcasting is specified, the second
@@ -49,12 +51,36 @@ Performs element-wise binary {name} (with limited broadcast support).
   };
 }
 
+std::vector<TensorShape> ElementwiseOpShapeInference(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in) {
+  std::vector<TensorShape> out(1);
+  out[0].set_data_type(in[0].data_type());
+  ArgumentHelper helper(def);
+  const bool broadcast = helper.GetSingleArgument<bool>("broadcast", false);
+  if (broadcast) {
+    out[0].mutable_dims()->CopyFrom(in[0].dims());
+  } else {
+    const std::vector<int> A_dims(in[0].dims().begin(), in[0].dims().end());
+    const std::vector<int> B_dims(in[1].dims().begin(), in[1].dims().end());
+    const std::vector<int> C_dims =
+        elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
+            A_dims, B_dims);
+    for (const int dim : C_dims) {
+      out[0].add_dims(dim);
+    }
+  }
+  return out;
+}
+
+} // namespace
+
 OPERATOR_SCHEMA(Add)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}, {1, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
-    .IdenticalTypeAndShapeOfInput(0)
+    .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("addition"))
     .InheritOnnxSchema("Add");
 OPERATOR_SCHEMA(AddGradient)
@@ -67,7 +93,7 @@ OPERATOR_SCHEMA(Sub)
     .NumOutputs(1)
     .AllowInplace({{0, 0}, {1, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
-    .IdenticalTypeAndShapeOfInput(0)
+    .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("subtraction"))
     .InheritOnnxSchema("Sub");
 OPERATOR_SCHEMA(SubGradient)
@@ -80,7 +106,7 @@ OPERATOR_SCHEMA(Mul)
     .NumOutputs(1)
     .AllowInplace({{0, 0}, {1, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
-    .IdenticalTypeAndShapeOfInput(0)
+    .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("multiplication"))
     .InheritOnnxSchema("Mul");
 OPERATOR_SCHEMA(MulGradient)
@@ -93,7 +119,7 @@ OPERATOR_SCHEMA(Div)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
-    .IdenticalTypeAndShapeOfInput(0)
+    .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("division"))
     .InheritOnnxSchema("Div");
 OPERATOR_SCHEMA(DivGradient).NumInputs(4).NumOutputs(2).AllowInplace({{0, 0}});
