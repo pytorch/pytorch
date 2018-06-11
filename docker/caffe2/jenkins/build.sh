@@ -37,7 +37,7 @@ fi
 # TODO: the version number here actually doesn't do anything at the
 # moment
 if [[ "$image" == *rocm* ]]; then
-  ROCM_VERSION="$(echo "${image}" | perl -n -e'/rocm(\d+\.\d+|nightly)/ && print $1')"
+  ROCM_VERSION="$(echo "${image}" | perl -n -e'/rocm(\d+\.\d+\.\d+|nightly)/ && print $1')"
   DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
