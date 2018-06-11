@@ -13,20 +13,9 @@ from torch import multiprocessing as mp
 
 from test_torch import TestTorch
 from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, PY3, IS_WINDOWS
+from common_cuda_utils import skipIfNoMultiGpu, skipIfNoMagma
 if __name__ == '__main__':
     from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_MAGMA
-
-def skipIfNoMagma(function):
-    def wrapper(*args, **kwargs):
-        if TEST_MAGMA:
-            return function(*args, **kwargs)
-    return wrapper
-
-def skipIfNoMultiGpu(function):
-    def wrapper(*args, **kwargs):
-        if TEST_MULTIGPU:
-            return function(*args, **kwargs)
-    return wrapper
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
                 torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
@@ -416,16 +405,16 @@ tests = [
         lambda t: [2], None, signed_types),
     # lapack tests
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types, False,
-        skipIfNoMagma), #, unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+        skipIfNoMagma),
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types, False,
-        skipIfNoMagma), #, unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+        skipIfNoMagma),
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types, False,
-        skipIfNoMagma), #, unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+        skipIfNoMagma),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types, False,
-        skipIfNoMagma), #, unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+        skipIfNoMagma),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types, False),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
-        skipIfNoMagma), #, unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+        skipIfNoMagma),
 ]
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,
