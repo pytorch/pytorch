@@ -12,15 +12,14 @@ BatchNorm::BatchNorm(int64_t features) : features_(features) {}
 void BatchNorm::reset() {
   if (affine_) {
     weight_ = register_parameter(
-        "weight", at::CPU(at::kFloat).empty({features_}).uniform_());
-    bias_ = register_parameter("bias", at::CPU(at::kFloat).zeros({features_}));
+        "weight", at::empty({features_}).uniform_());
+    bias_ = register_parameter("bias", at::zeros({features_}));
   }
 
   if (stateful_) {
-    running_mean_ =
-        register_buffer("running_mean", at::CPU(at::kFloat).zeros({features_}));
-    running_variance_ = register_buffer(
-        "running_variance", at::CPU(at::kFloat).ones({features_}));
+    running_mean_ = register_buffer("running_mean", at::zeros({features_}));
+    running_variance_ =
+        register_buffer("running_variance", at::ones({features_}));
   }
 }
 

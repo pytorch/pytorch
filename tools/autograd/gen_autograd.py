@@ -154,7 +154,7 @@ def gen_autograd(aten_path, out, autograd_dir):
     deprecated = load_deprecated_signatures(
         aten_decls, os.path.join(autograd_dir, 'deprecated.yaml'))
 
-    # Genereate Python bindings
+    # Generate Python bindings
     from . import gen_python_functions
     gen_python_functions.gen_py_variable_methods(
         out, aten_decls + deprecated, os.path.join(autograd_dir, 'templates'))

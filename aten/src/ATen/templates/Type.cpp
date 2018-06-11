@@ -2,13 +2,16 @@
 
 // ${generated_comment}
 
-#include "ATen/Tensor.h"
-#include "ATen/Storage.h"
-#include "ATen/Scalar.h"
-#include "ATen/SparseTensorRef.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/Scalar.h"
+#include "ATen/SparseTensorRef.h"
+#include "ATen/Storage.h"
+#include "ATen/Tensor.h"
+#include "ATen/TensorOptions.h"
 #include "ATen/UndefinedType.h"
+#include "ATen/AutoGPU.h"
+
 #include <ATen/detail/VariableHooksInterface.h>
 
 #include <iostream>

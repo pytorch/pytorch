@@ -26,12 +26,18 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 
+#include <ATen/ATen.h>
+#include <ATen/optional.h>
+
 #include "python_variable_methods_dispatch.h"
 
-using at::Tensor;
+#include <stdexcept>
+
+using at::AutoGPU;
+using at::Backend;
 using at::Scalar;
 using at::ScalarType;
-using at::Backend;
+using at::Tensor;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
@@ -326,11 +332,14 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
   auto& type = self_.type().toBackend(backend);
   auto device_obj = r.device(0);
-  if (!r.isNone(0) && device_obj.type != DeviceType::CUDA) {
+  if (!r.isNone(0) && device_obj.is_cpu()) {
     throw std::runtime_error("Invalid device, must be cuda device");
   }
-  auto device = (device_obj.is_default || device_obj.type == DeviceType::CPU) ? -1 : device_obj.index;
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device, r.toBool(1)));
+  int32_t device_index = -1;
+  if (device_obj.has_index() && device_obj.is_cuda()) {
+    device_index = device_obj.index().value();
+  }
+  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 
@@ -571,9 +580,12 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   } else {
     // device and maybe dtype are given
     auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-    auto deviceAutoGPU = device->deviceInt64();
     auto& layout = *torch::getLayout(self_.type().backend());
-    auto& type = torch::getType(scalarType.value_or(self_.type().scalarType()), layout, device->type);
+    auto& type = torch::getType(scalarType.value_or(self_.type().scalarType()), layout, device->type());
+    at::optional<int32_t> deviceAutoGPU;
+    if (type.is_cuda()) {
+      deviceAutoGPU = device->index();
+    }
     return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, deviceAutoGPU, non_blocking));
   }
   Py_RETURN_NONE;

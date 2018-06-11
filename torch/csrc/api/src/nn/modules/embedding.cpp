@@ -10,7 +10,7 @@ Embedding::Embedding(int64_t count, int64_t dimension)
 
 void Embedding::reset() {
   table_ = register_parameter(
-      "table", at::CPU(at::kFloat).empty({count_, dimension_}));
+      "table", at::empty({count_, dimension_}));
   table_.data().normal_(0, 1);
 }
 

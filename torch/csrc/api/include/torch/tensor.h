@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 
+#include <torch/csrc/TensorOptions.h>
 #include <torch/csrc/autograd/variable.h>
 
 // This is all temporary until I create a nice torch::Tensor API.

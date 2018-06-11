@@ -1037,6 +1037,7 @@
 [[
   name: getDevice
   python_name: get_device
+  auto_gpu: False
   backends:
     - CUDA
   aten_sparse: True
@@ -1713,7 +1714,7 @@
         // norm(value) for a sparse tensor returns a DENSE 0-dim tensor
         if (self.is_sparse()) {
           auto result = ${THTensor}_normall(${state,} self_->tensor, convert<${THScalarType}>(p_));
-          return toDense().tensor({}).fill_(result);
+          return at::native::full({}, result, toBackend(toDense(backend())));
         }
         // aten_custom_call is followed by the generated call to normall
 ]]
@@ -3952,7 +3953,7 @@
   aten_custom_call: |
     if (self_->isScalar()) {
       // Empty tensor
-      return toDense().toScalarType(kLong).tensor({0});
+      return at::native::empty({0}, getType(toDense(self_->type().backend()), kLong));
     }
 ]]
 

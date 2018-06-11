@@ -37,7 +37,7 @@ Variable Dropout::noise_mask(Variable input) const {
 }
 
 Variable Dropout2d::noise_mask(Variable input) const {
-  return input.type().empty({input.size(0), input.size(1), 1, 1});
+  return at::empty({input.size(0), input.size(1), 1, 1}, input.type());
 }
 } // namespace nn
 } // namespace torch

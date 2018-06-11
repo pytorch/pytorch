@@ -8,25 +8,34 @@
 
 #include <Python.h>
 
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
+#include "python_torch_functions_dispatch.h"
+
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/python_variables.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/TensorOptions.h"
 #include "torch/csrc/utils/python_arg_parser.h"
+#include "torch/csrc/utils/tensor_layouts.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
-#include "torch/csrc/utils/tensor_devices.h"
-#include "torch/csrc/utils/tensor_layouts.h"
 
-#include "python_torch_functions_dispatch.h"
+#include <ATen/ATen.h>
+#include <ATen/AutoGPU.h>
+
 #include <functional>
+#include <initializer_list>
+#include <stdexcept>
+#include <utility>
 
 using at::Tensor;
+using at::Device;
 using at::Scalar;
 using at::ScalarType;
 using at::Backend;
+using at::AutoGPU;
 using torch::autograd::utils::set_requires_grad;
 
 using namespace torch::autograd::utils;
@@ -42,7 +51,7 @@ static void check_out_type_matches(Tensor result,
   }
   auto scalarType_arg = scalarType_is_none ? result.type().scalarType() : scalarType;
   auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
-  auto device_type_arg = device_is_none ? torch::getDeviceType(result.type()) : device.type;
+  auto device_type_arg = device_is_none ? torch::getDeviceType(result.type()) : device.type();
   const auto& type = torch::getType(scalarType_arg, layout_arg, device_type_arg);
   if (result.type() != type) {
     AT_ERROR(
@@ -58,11 +67,11 @@ inline Tensor & dispatch_arange(Scalar end, Tensor result) {
   return at::arange_out(result, end);
 }
 
-inline Tensor dispatch_arange(Scalar end, const Type & dtype, int64_t device) {
-  maybe_initialize_cuda(dtype);
+inline Tensor dispatch_arange(Scalar end, const TensorOptions& options) {
+  maybe_initialize_cuda(options.type());
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(device);
-  return at::arange(dtype, end);
+  AutoGPU auto_gpu(options.device_index());
+  return at::arange(end, options);
 }
 
 inline Tensor & dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor result) {
@@ -71,11 +80,11 @@ inline Tensor & dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor re
   return at::arange_out(result, start, end, step);
 }
 
-inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const Type & dtype, int64_t device) {
-  maybe_initialize_cuda(dtype);
+inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
+  maybe_initialize_cuda(options.type());
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(device);
-  return at::arange(dtype, start, end, step);
+  AutoGPU auto_gpu(options.device_index());
+  return at::arange(start, end, step, options);
 }
 
 static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
@@ -100,12 +109,15 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 
   if (r.idx == 0) {
     if (r.isNone(1)) {
-      auto device = r.device(4);
       auto end = r.scalar(0);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
       auto scalarType = r.isNone(2) && allIntegral({end}) ? at::ScalarType::Long : r.scalartype(2);
-      auto& type = torch::getType(scalarType, r.layout(3), device.type);
-      return wrap(set_requires_grad(dispatch_arange(end, type,  device.deviceInt64()), r.toBool(5)));
+      const auto options = torch::TensorOptions()
+          .dtype(scalarType)
+          .device(r.device(4))
+          .layout(r.layout(3).layout)
+          .requires_grad(r.toBool(5));
+      return wrap(dispatch_arange(end, options));
     } else {
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2), r.layout(3), r.isNone(3),
                              r.device(4), r.isNone(4));
@@ -113,14 +125,17 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
     }
   } else if (r.idx == 1) {
     if (r.isNone(3)) {
-      auto device = r.device(6);
       auto start = r.scalar(0);
       auto end = r.scalar(1);
       auto step = r.scalar(2);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
       auto scalarType = r.isNone(4) && allIntegral({start, end, step}) ? at::ScalarType::Long : r.scalartype(4);
-      auto& type = torch::getType(scalarType, r.layout(5), device.type);
-      return wrap(set_requires_grad(dispatch_arange(start, end, step, type, device.deviceInt64()), r.toBool(7)));
+      const auto options = torch::TensorOptions()
+          .dtype(scalarType)
+          .device(r.device(6))
+          .layout(r.layout(5).layout)
+          .requires_grad(r.toBool(7));
+      return wrap(dispatch_arange(start, end, step, options));
     } else {
       check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4), r.layout(5), r.isNone(5),
                                r.device(6), r.isNone(6));
@@ -137,11 +152,11 @@ inline Tensor & dispatch_range(Scalar start, Scalar end, Scalar step, Tensor res
   return at::range_out(result, start, end, step);
 }
 
-inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const Type & dtype, int64_t device) {
-  maybe_initialize_cuda(dtype);
+inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
+  maybe_initialize_cuda(options.type());
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(device);
-  return at::range(dtype, start, end, step);
+  AutoGPU auto_gpu(options.device_index());
+  return at::range(start, end, step, options);
 }
 
 static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -158,10 +173,12 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
         "and will be removed in 0.5. Note that arange generates values in [start; end), "
         "not [start; end].", 1);
     if (r.isNone(3)) {
-      auto device = r.device(6);
-      return wrap(set_requires_grad(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2),
-                                                   torch::getType(r.scalartype(4), r.layout(5), device.type),
-                                                   device.deviceInt64()), r.toBool(7)));
+      const auto options = torch::TensorOptions()
+          .dtype(r.scalartype(4))
+          .device(r.device(6))
+          .layout(r.layout(5).layout)
+          .requires_grad(r.toBool(7));
+      return wrap(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2), options));
     } else {
       check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
                              r.layout(5), r.isNone(5),

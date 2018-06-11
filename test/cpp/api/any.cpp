@@ -62,7 +62,7 @@ TEST_CASE("any-module") {
           std::string&& c) {
         const auto s = a + b + c;
         return autograd::make_variable(
-            at::ones(at::CPU(at::kFloat), {static_cast<int64_t>(s.size())}));
+            at::ones({static_cast<int64_t>(s.size())}));
       }
     };
     AnyModule any(M{});

@@ -68,18 +68,18 @@ void RNNBase<Derived>::reset() {
     const int64_t input_size = (layer == 0) ? input_size_ : hidden_size_;
     ihw_[layer] = this->register_parameter(
         "weight_ih_l" + std::to_string(layer),
-        at::CPU(at::kFloat).empty({gate_size, input_size}));
+        at::empty({gate_size, input_size}));
     hhw_[layer] = this->register_parameter(
         "weight_hh_l" + std::to_string(layer),
-        at::CPU(at::kFloat).empty({gate_size, hidden_size_}));
+        at::empty({gate_size, hidden_size_}));
 
     if (with_bias_) {
       ihb_[layer] = this->register_parameter(
           "bias_ih_l" + std::to_string(layer),
-          at::CPU(at::kFloat).empty({gate_size}));
+          at::empty({gate_size}));
       hhb_[layer] = this->register_parameter(
           "bias_hh_l" + std::to_string(layer),
-          at::CPU(at::kFloat).empty({gate_size}));
+          at::empty({gate_size}));
     }
   }
   flatten_parameters_for_cudnn();
@@ -130,7 +130,7 @@ std::vector<Variable> RNNBase<Derived>::autograd_forward(
   }
 
   auto output =
-      Variable(inp.type().zeros({inp.size(0), inp.size(1), hidden_size_}));
+      Variable(zeros({inp.size(0), inp.size(1), hidden_size_}, inp.type()));
   for (int64_t t = 0; t < inp.size(0); t++) {
     auto x = inp.select(0, t);
     for (int64_t i = 0; i < layers_; i++) {
@@ -210,12 +210,12 @@ std::vector<Variable> RNNBase<Derived>::CUDNN_forward(
       hx = inputs[1];
     }
   } else {
-    hx = x.type().zeros({layers_, x.size(1), hidden_size_});
+    hx = zeros({layers_, x.size(1), hidden_size_}, x.type());
     if (has_cell_state_) {
-      cx = x.type().zeros({layers_, x.size(1), hidden_size_});
+      cx = zeros({layers_, x.size(1), hidden_size_}, x.type());
     }
   }
-  auto dropout_state = x.type().tensor();
+  auto dropout_state = at::empty({}, x.type());
 
   std::vector<void*> weight_data_ptrs;
   auto params = this->parameters();
@@ -299,7 +299,7 @@ std::vector<Variable> LSTM::cell_forward(
     int64_t layer) {
   auto x = inputs[0];
   auto hid = inputs[1].defined() ? inputs[1]
-                                 : x.type().zeros({2, x.size(0), hidden_size_});
+                                 : zeros({2, x.size(0), hidden_size_}, x.type());
   auto hx = hid[0];
   auto cx = hid[1];
 
@@ -328,7 +328,7 @@ std::vector<Variable> GRU::cell_forward(
     int64_t layer) {
   auto x = inputs[0];
   auto hx = inputs[1].defined() ? inputs[1]
-                                : x.type().zeros({x.size(0), hidden_size_});
+                                : zeros({x.size(0), hidden_size_}, x.type());
 
   auto gi = linear(x, ihw_[layer], ihb_[layer]);
   auto gh = linear(x, hhw_[layer], hhb_[layer]);
@@ -368,7 +368,7 @@ std::vector<Variable> RNN::cell_forward(
     int64_t layer) {
   auto x = inputs[0];
   auto hx = inputs[1].defined() ? inputs[1]
-                                : x.type().zeros({x.size(0), hidden_size_});
+                                : zeros({x.size(0), hidden_size_}, x.type());
 
   auto h = linear(x, ihw_[layer], ihb_[layer]) +
       linear(hx, hhw_[layer], hhb_[layer]);

@@ -9,6 +9,7 @@
 #include "ATen/Context.h"
 #include "ATen/Storage.h"
 #include "ATen/Tensor.h"
+#include "ATen/Device.h"
 #include "ATen/TensorGeometry.h"
 #include "ATen/Functions.h"
 #include "ATen/Formatting.h"
@@ -16,3 +17,5 @@
 #include "ATen/TensorMethods.h"
 #include "ATen/Dispatch.h"
 #include "ATen/DimVector.h"
+#include "ATen/AutoGPU.h"
+#include "ATen/TensorOptions.h"

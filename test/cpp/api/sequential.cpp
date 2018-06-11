@@ -117,7 +117,7 @@ TEST_CASE("sequential") {
 
       Sequential sequential(M{});
       auto variable =
-          autograd::make_variable(at::CPU(at::kFloat).ones({3, 3}), true);
+          autograd::make_variable(at::ones({3, 3}), true);
       REQUIRE(sequential.forward(variable).equal(variable));
     }
   }
@@ -126,7 +126,7 @@ TEST_CASE("sequential") {
     Sequential sequential(
         Linear(10, 3).build(), Linear(3, 5).build(), Linear(5, 100).build());
 
-    auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
+    auto x = Var(at::randn({1000, 10}));
     auto y = sequential.forward<std::vector<Variable>>(std::vector<Variable>{x}).front();
     REQUIRE(y.ndimension() == 2);
     REQUIRE(y.size(0) == 1000);

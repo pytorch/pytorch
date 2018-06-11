@@ -18,10 +18,8 @@ using Catch::StartsWith;
 
 struct TestModule : public torch::nn::Module {
   TestModule(int64_t size) {
-    tensor1 =
-        register_parameter("tensor1", at::randn(at::CPU(at::kFloat), {size}));
-    tensor2 =
-        register_parameter("tensor2", at::randn(at::CPU(at::kFloat), {size}));
+    tensor1 = register_parameter("tensor1", at::randn({size}));
+    tensor2 = register_parameter("tensor2", at::randn({size}));
   }
 
   autograd::Variable tensor1;

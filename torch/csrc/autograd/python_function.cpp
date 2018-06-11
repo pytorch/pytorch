@@ -20,7 +20,6 @@
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/Exceptions.h"
 
 using namespace torch;
@@ -37,7 +36,6 @@ namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
   : type(&var.type())
-  , device(-1)
   , size(var.sizes())
   , requires_grad(var.requires_grad()) {
   if (var.type().is_cuda()) {
@@ -45,9 +43,9 @@ VariableInfo::VariableInfo(const Variable& var)
   }
 }
 
-Variable VariableInfo::zeros(AutoGPU& gpu_guard) const {
-  gpu_guard.setDevice(device);
-  return at::zeros(*type, size);
+Variable VariableInfo::zeros(at::AutoGPU& gpu_guard) const {
+  gpu_guard.set_index(device);
+  return at::zeros(size, *type);
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
@@ -99,7 +97,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 // C++'s Function::apply to a Python method "apply".
 auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
-  AutoGPU _gpu_guard(-1);
+  at::AutoGPU _gpu_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
   THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
@@ -751,7 +749,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
 static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_grad_output)
 {
-  AutoGPU gpu_guard(-1);
+  at::AutoGPU gpu_guard;
   int num_grads = PyTuple_GET_SIZE(raw_grads.get());
   // First, check if any of grads is None. If not, there's nothing to do
   bool has_none = false;

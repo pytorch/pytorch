@@ -107,7 +107,7 @@ template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
   const Tensor& weight, const Tensor &indices, const Tensor& offset2bag, const Tensor& output, const Tensor& bag_size, const Tensor& offsets) {
 
-    auto max_indices = at::zeros(indices.type(), {offsets.size(0), weight.size(1)});
+    auto max_indices = at::zeros({offsets.size(0), weight.size(1)}, indices.type());
 
     int64_t numel = indices.numel();
     int64_t dims = weight.size(1);
@@ -156,7 +156,7 @@ embedding_bag_cpu(const Tensor &weight, const Tensor &indices__,
   auto weight_arg = TensorArg(weight, "weight", 1);
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
 
-  auto bag_size = at::zeros(indices.type(), offsets.sizes());
+  auto bag_size = at::zeros(offsets.sizes(), indices.type());
   make_bag_size(offsets, indices, mode, bag_size);
 
   // If the last entries are empty, that the last offsets are irrelevant as they
@@ -164,13 +164,13 @@ embedding_bag_cpu(const Tensor &weight, const Tensor &indices__,
   // throw out of bounds error. So to keep it simple we just add one more
   // entry to the end then get rid of it after make_offset2bag.
   auto offset2bag = at::zeros(
-     indices__.type(), {indices.sizes()[0] + 1}); // offset2bag = [0 0 0 0 0]
+     {indices.sizes()[0] + 1}, indices__.type()); // offset2bag = [0 0 0 0 0]
 
   make_offset2bag(offsets, indices, offset2bag);
 
   offset2bag.resize_({indices.sizes()[0]});
 
-  auto output = at::zeros(weight.type(), {offsets.size(0), weight.size(1)});
+  auto output = at::zeros({offsets.size(0), weight.size(1)}, weight.type());
 
   if (mode == MODE_MEAN || mode == MODE_SUM) {
     if (weight.type().scalarType() == kFloat) {
@@ -258,7 +258,7 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
   }
 
   auto index_grad_weight =
-      at::zeros(grad.type(), {num_weights, grad.size(1)}).contiguous();
+      at::zeros({num_weights, grad.size(1)}, grad.type()).contiguous();
 
   std::vector<int64_t> counts_uniq;
   counts_uniq.reserve(num_weights);

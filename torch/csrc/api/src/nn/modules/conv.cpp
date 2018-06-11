@@ -41,11 +41,9 @@ void Conv<D, Derived>::reset() {
       weights_size.end(), kernel_size_->begin(), kernel_size_->end());
   AT_ASSERT(weights_size.size() == 2 + kernel_size_->size());
 
-  weight_ = this->register_parameter(
-      "weight", at::CPU(at::kFloat).empty(weights_size));
+  weight_ = this->register_parameter("weight", at::empty(weights_size));
   if (with_bias_) {
-    bias_ = this->register_parameter(
-        "bias", at::CPU(at::kFloat).empty(output_channels_));
+    bias_ = this->register_parameter("bias", at::empty(output_channels_));
   }
 
   const auto number_of_features = std::accumulate(

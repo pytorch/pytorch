@@ -35,7 +35,7 @@ class NestedModel : public Module {
     l1 = register_module("l1", Linear(5, 20).build());
     t = register_module("test", std::make_shared<TestModel>());
     param_ =
-        register_parameter("param", at::CPU(at::kFloat).tensor({3, 2, 21}));
+        register_parameter("param", at::empty({3, 2, 21}));
   }
 
   std::vector<Variable> forward(std::vector<Variable> input) {
@@ -51,7 +51,7 @@ TEST_CASE("containers") {
   SECTION("conv") {
     SECTION("1d") {
       auto model = Conv1d(3, 2, 3).stride(2).build();
-      auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5}), true);
+      auto x = Var(at::randn({2, 3, 5}), true);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
@@ -67,7 +67,7 @@ TEST_CASE("containers") {
     SECTION("2d") {
       SECTION("even") {
         auto model = Conv2d(3, 2, 3).stride(2).build();
-        auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5, 5}), true);
+        auto x = Var(at::randn({2, 3, 5, 5}), true);
         auto y = model->forward({x})[0];
         Variable s = y.sum();
 
@@ -84,7 +84,7 @@ TEST_CASE("containers") {
 
       SECTION("uneven") {
         auto model = Conv2d(3, 2, {3, 2}).stride({2, 2}).build();
-        auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5, 4}), true);
+        auto x = Var(at::randn({2, 3, 5, 4}), true);
         auto y = model->forward({x})[0];
         Variable s = y.sum();
 
@@ -101,7 +101,7 @@ TEST_CASE("containers") {
     }
     SECTION("3d") {
       auto model = Conv3d(3, 2, 3).stride(2).build();
-      auto x = Var(at::CPU(at::kFloat).randn({2, 3, 5, 5, 5}), true);
+      auto x = Var(at::randn({2, 3, 5, 5, 5}), true);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
@@ -120,7 +120,7 @@ TEST_CASE("containers") {
   SECTION("linear") {
     SECTION("basic1") {
       auto model = Linear(5, 2).build();
-      auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);
+      auto x = Var(at::randn({10, 5}), true);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
@@ -140,7 +140,7 @@ TEST_CASE("containers") {
     auto l2 = model->add(Linear(3, 5).build(), "l2");
     auto l3 = model->add(Linear(5, 100).build(), "l3");
 
-    auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
+    auto x = Var(at::randn({1000, 10}));
     x = l1->forward({x})[0].clamp_min(0);
     x = l2->forward({x})[0].clamp_min(0);
     x = l3->forward({x})[0].clamp_min(0);
@@ -158,7 +158,7 @@ TEST_CASE("containers") {
       auto model = Embedding(dict_size, 2).build();
       // Cannot get gradients to change indices (input) - only for embedding
       // params
-      auto x = Var(at::CPU(at::kLong).tensor({10}).fill_(dict_size - 1), false);
+      auto x = Var(at::empty({10}, at::kLong).fill_(dict_size - 1), false);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
@@ -174,7 +174,7 @@ TEST_CASE("containers") {
 
     SECTION("list") {
       auto model = Embedding(6, 4).build();
-      auto x = Var(at::CPU(at::kLong).tensor({2, 3}).fill_(5), false);
+      auto x = Var(empty({2, 3}, at::kLong).fill_(5), false);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
@@ -188,7 +188,7 @@ TEST_CASE("containers") {
 
   SECTION("dropout") {
     auto dropout = Dropout(0.5).build();
-    Variable x = Var(at::CPU(at::kFloat).ones(100));
+    Variable x = Var(at::ones(100));
     Variable y = dropout->forward({x})[0];
 
     y.backward();
@@ -232,10 +232,10 @@ TEST_CASE("containers") {
       return input;
     }).build();
     // clang-format on
-    auto output = functional->forward({Var(at::CPU(at::kFloat).ones(5))});
+    auto output = functional->forward({Var(at::ones(5))});
     REQUIRE(was_called);
     REQUIRE(output.size() == 1);
-    REQUIRE(output.front().equal(Var(at::CPU(at::kFloat).ones(5))));
+    REQUIRE(output.front().equal(Var(at::ones(5))));
   }
 }
 
@@ -243,7 +243,7 @@ TEST_CASE("containers_cuda", "[cuda]") {
   SECTION("1") {
     auto model = Linear(5, 2).build();
     model->cuda();
-    auto x = Var(at::CUDA(at::kFloat).randn({10, 5}), true);
+    auto x = Var(at::randn({10, 5}, at::device(at::kCUDA)), true);
     auto y = model->forward({x})[0];
     Variable s = y.sum();
 
@@ -260,7 +260,7 @@ TEST_CASE("containers_cuda", "[cuda]") {
     auto model = Linear(5, 2).build();
     model->cuda();
     model->cpu();
-    auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);
+    auto x = Var(at::randn({10, 5}), true);
     auto y = model->forward({x})[0];
     Variable s = y.sum();
 

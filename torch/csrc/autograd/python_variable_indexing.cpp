@@ -263,7 +263,7 @@ static PyObject* applyBoolGetitem(const Variable& self, bool index) {
   if (index) {
     return wrap(self.type().copy(self.unsqueeze(0)));
   } else {
-    return wrap(self.type().tensor({0}));
+    return wrap(at::empty({0}, self.type()));
   }
 }
 

@@ -5,7 +5,8 @@
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/auto_gpu.h"
+
+#include <ATen/AutoGPU.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -204,7 +205,7 @@ Engine::~Engine() = default;
 
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-  AutoGPU guard(device);
+  at::AutoGPU guard(device);
   worker_device = device;
   thread_main(nullptr);
 }

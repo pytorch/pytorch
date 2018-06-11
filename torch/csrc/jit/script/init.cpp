@@ -1,14 +1,21 @@
 #include "torch/csrc/jit/script/init.h"
-#include "torch/csrc/jit/script/compiler.h"
+
 #include "torch/csrc/Device.h"
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/Layout.h"
+#include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/python_tracer.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
-#include <functional>
+#include <ATen/ATen.h>
+
+#include <cstddef>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -174,14 +181,15 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
       return createConstant(loc, m, at::CPU(at::kByte).scalarTensor(py::cast<bool>(self)));
     } else if(THPDevice_Check(self.ptr())) {
       auto device = (THPDevice*) self.ptr();
-      auto t = as_tensor({static_cast<int64_t>(device->device.type), device->device.deviceInt64()});
+      auto t = as_tensor({static_cast<int64_t>(device->device.type()), device->device.index().value_or(-1)});
       return createConstant(loc, m, t);
     } else if(THPLayout_Check(self.ptr())) {
       auto layout = (THPLayout*) self.ptr();
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(layout->is_strided));
+      const auto v = static_cast<int64_t>(layout->layout);
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
     } else if(THPDtype_Check(self.ptr())) {
       auto dtype = (THPDtype*)(self.ptr());
-      int64_t v = static_cast<int64_t>(dtype->scalar_type);
+      const auto v = static_cast<int64_t>(dtype->scalar_type);
       return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
     }
     return std::make_shared<ConstantPythonValue>(self);

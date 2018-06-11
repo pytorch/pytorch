@@ -30,7 +30,7 @@ TEST_CASE("serialization") {
 
     REQUIRE(!x.defined());
 
-    auto y = at::CPU(at::kFloat).randn({5});
+    auto y = at::randn({5});
 
     std::stringstream ss;
     save(ss, &x);
@@ -51,8 +51,8 @@ TEST_CASE("serialization") {
         continue;
       }
 
-      auto x =
-          at::getType(at::kCPU, static_cast<at::ScalarType>(i)).ones({5, 5});
+      auto x = at::ones(
+          {5, 5}, at::getType(at::kCPU, static_cast<at::ScalarType>(i)));
       auto y = at::Tensor();
 
       std::stringstream ss;
@@ -70,7 +70,7 @@ TEST_CASE("serialization") {
   }
 
   SECTION("binary") {
-    auto x = at::CPU(at::kFloat).randn({5, 5});
+    auto x = at::randn({5, 5});
     auto y = at::Tensor();
 
     std::stringstream ss;
@@ -88,7 +88,7 @@ TEST_CASE("serialization") {
     REQUIRE(x.allclose(y));
   }
   SECTION("portable_binary") {
-    auto x = at::CPU(at::kFloat).randn({5, 5});
+    auto x = at::randn({5, 5});
     auto y = at::Tensor();
 
     std::stringstream ss;
@@ -107,7 +107,7 @@ TEST_CASE("serialization") {
   }
 
   SECTION("resized") {
-    auto x = at::CPU(at::kFloat).randn({11, 5});
+    auto x = at::randn({11, 5});
     x.resize_({5, 5});
     auto y = at::Tensor();
 
@@ -126,7 +126,7 @@ TEST_CASE("serialization") {
     REQUIRE(x.allclose(y));
   }
   SECTION("sliced") {
-    auto x = at::CPU(at::kFloat).randn({11, 5});
+    auto x = at::randn({11, 5});
     x = x.slice(0, 1, 3);
     auto y = at::Tensor();
 
@@ -146,7 +146,7 @@ TEST_CASE("serialization") {
   }
 
   SECTION("noncontig") {
-    auto x = at::CPU(at::kFloat).randn({11, 5});
+    auto x = at::randn({11, 5});
     x = x.slice(1, 1, 4);
     auto y = at::Tensor();
 
@@ -231,7 +231,7 @@ TEST_CASE("serialization") {
     auto optim3 = SGD(model3, 1e-1).momentum(0.9).make();
     auto optim3_2 = SGD(model3, 1e-1).momentum(0.9).make();
 
-    auto x = Var(at::CPU(at::kFloat).ones({10, 5}), true);
+    auto x = Var(at::ones({10, 5}, at::CPU(at::kFloat)), true);
 
     auto step = [&](Optimizer optim, std::shared_ptr<Linear> model) {
       optim->zero_grad();

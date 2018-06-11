@@ -1,26 +1,37 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
-namespace at {
+#include <mutex>
 
+namespace at {
 namespace detail {
-  const CUDAHooksInterface& getCUDAHooks() {
-    static std::unique_ptr<CUDAHooksInterface> cuda_hooks;
-    // NB: The once_flag here implies that if you try to call any CUDA
-    // functionality before libATen_cuda.so is loaded, CUDA is permanently
-    // disabled for that copy of ATen.  In principle, we can relax this
-    // restriction, but you might have to fix some code.  See getVariableHooks()
-    // for an example where we relax this restriction (but if you try to avoid
-    // needing a lock, be careful; it doesn't look like Registry.h is thread
-    // safe...)
-    static std::once_flag once;
-    std::call_once(once, []{
-      cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{});
-      if (!cuda_hooks) {
-        cuda_hooks = std::unique_ptr<CUDAHooksInterface>(new CUDAHooksInterface());
-      }
-    });
-    return *cuda_hooks;
-  }
+
+// Default the static members of DynamicCUDAInterface.
+std::function<int(int)> DynamicCUDAInterface::set_device = [](int) {
+  return 0;
+};
+std::function<int(int*)> DynamicCUDAInterface::get_device = [](int*) {
+  return 0;
+};
+std::function<void(int)> DynamicCUDAInterface::check_status = [](int) {};
+
+const CUDAHooksInterface& getCUDAHooks() {
+  static std::unique_ptr<CUDAHooksInterface> cuda_hooks;
+  // NB: The once_flag here implies that if you try to call any CUDA
+  // functionality before libATen_cuda.so is loaded, CUDA is permanently
+  // disabled for that copy of ATen.  In principle, we can relax this
+  // restriction, but you might have to fix some code.  See getVariableHooks()
+  // for an example where we relax this restriction (but if you try to avoid
+  // needing a lock, be careful; it doesn't look like Registry.h is thread
+  // safe...)
+  static std::once_flag once;
+  std::call_once(once, []{
+    cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{});
+    if (!cuda_hooks) {
+      cuda_hooks = std::unique_ptr<CUDAHooksInterface>(new CUDAHooksInterface());
+    }
+  });
+  return *cuda_hooks;
+}
 }
 
 AT_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)

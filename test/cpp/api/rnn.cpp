@@ -37,8 +37,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   while (running_loss > 1e-2) {
     auto bs = 16U;
     auto nlen = 5U;
-    auto inp =
-        at::CPU(at::kFloat).rand({nlen, bs, 1}).round().toType(at::kFloat);
+    auto inp = at::rand({nlen, bs, 1}).round().toType(at::kFloat);
     auto lab = inp.sum(0);
 
     if (cuda) {
@@ -90,7 +89,7 @@ TEST_CASE("rnn") {
   SECTION("lstm") {
     SECTION("sizes") {
       auto model = LSTM(128, 64).layers(3).dropout(0.2).build();
-      Variable x = Var(at::CPU(at::kFloat).randn({10, 16, 128}));
+      Variable x = Var(at::randn({10, 16, 128}));
       auto tup = model->forward({x});
       auto y = x.mean();
 
@@ -193,7 +192,7 @@ TEST_CASE("rnn_cuda", "[cuda]") {
   SECTION("sizes") {
     auto model = LSTM(128, 64).layers(3).dropout(0.2).build();
     model->cuda();
-    Variable x = Var(at::CUDA(at::kFloat).randn({10, 16, 128}));
+    Variable x = Var(at::randn({10, 16, 128}, at::device(at::kCUDA)));
     auto tup = model->forward({x});
     auto y = x.mean();
 
