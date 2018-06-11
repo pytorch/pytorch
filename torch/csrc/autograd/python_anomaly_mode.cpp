@@ -31,7 +31,6 @@ void PyAnomalyMetadata::print_stack() {
 
   THPObjectPtr stack(PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY));
   if (!stack) {
-    // TODO: raise no info warning
     std::cout << "No forward pass information available." << std::endl;
     std::cout << "Enable detect anomaly during forward pass for more informations." << std::endl;
     return;
@@ -40,7 +39,6 @@ void PyAnomalyMetadata::print_stack() {
   THPObjectPtr empty_string(PyUnicode_FromString(""));
   THPObjectPtr msg(PyUnicode_Join(empty_string, stack.get()));
 
-  // TODO: raise warning containing trace
   std::cout << "Traceback of forward call that caused the error:" << std::endl;
   std::cout << THPUtils_unpackString(msg.get()) << std::endl;
 }

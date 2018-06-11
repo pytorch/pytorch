@@ -1,7 +1,5 @@
 #pragma once
 
-#ifndef NO_PYTHON
-
 // RAII structs to acquire and release Python's global interpreter lock (GIL)
 
 #include "torch/csrc/python_headers.h"
@@ -34,5 +32,3 @@ inline void with_no_gil(F f) {
   AutoNoGIL no_gil;
   f();
 }
-
-#endif

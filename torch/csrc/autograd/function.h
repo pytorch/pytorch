@@ -25,6 +25,7 @@
 
 namespace torch { namespace autograd {
 
+struct Edge;
 struct FunctionPostHook;
 struct FunctionPreHook;
 
@@ -110,7 +111,6 @@ struct Function : std::enable_shared_from_this<Function> {
   Function(Function&& other) = delete;
   Function& operator=(const Function& other) = delete;
   Function& operator=(Function&& other) = delete;
-
   virtual ~Function() = default;
 
   /// Evaluates the function on the given inputs and returns the result of the
@@ -242,7 +242,7 @@ struct Function : std::enable_shared_from_this<Function> {
   }
 
   /// Returns the anomaly metadata stored for this `Function`.
-  /// If none exist, create a new empty one.
+  /// If none exist, creates a new empty one.
   AnomalyMetadata* metadata() noexcept;
 
   /// Create a context edge for the JIT.
