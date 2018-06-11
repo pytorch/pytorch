@@ -162,7 +162,8 @@ goto:eof
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
-  IF NOT %ERRORLEVEL%==0 exit 1
+  IF ERRORLEVEL 1 exit 1
+  IF NOT ERRORLEVEL 0 exit 1
   cd ../..
   @endlocal
 
@@ -198,7 +199,8 @@ goto:eof
                   -DWITH_ROCM=%WITH_ROCM%
 
   %MAKE_COMMAND%
-  IF NOT %ERRORLEVEL%==0 exit 1
+  IF ERRORLEVEL 1 exit 1
+  IF NOT ERRORLEVEL 0 exit 1
   cd ..
   @endlocal
 
