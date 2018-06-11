@@ -1432,7 +1432,7 @@
   dispatch:
     CPU: sparse_mask_cpu
 
-- func: _sparse_mask(Tensor self, Tensor mask) -> Tensor
+- func: _sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
 
 
 - func: native_to_dense(Tensor self) -> Tensor
