@@ -115,10 +115,10 @@ if (NOT BUILD_ATEN_MOBILE)
       LIST(APPEND CPU_CAPABILITY_FLAGS "-O3 -mavx2 -mfma")
     ENDIF(MSVC)
   ENDIF(CXX_AVX2_FOUND)
-
+  
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
-
+  
   FOREACH(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     FOREACH(IMPL ${cpu_kernel_cpp_in})
       string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/" "" NAME ${IMPL})
@@ -136,23 +136,23 @@ if (NOT BUILD_ATEN_MOBILE)
     ENDFOREACH()
   ENDFOREACH()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
-
+  
   set(cwrap_files
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/Declarations.cwrap
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/THNN/generic/THNN.h
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/THCUNN/generic/THCUNN.h
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/nn.yaml
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml)
-
+  
   FILE(GLOB all_python "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/*.py")
-
+  
   SET(GEN_COMMAND
       ${PYCMD} ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${cwrap_files}
   )
-
+  
   EXECUTE_PROCESS(
       COMMAND ${GEN_COMMAND}
         --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
@@ -165,16 +165,16 @@ if (NOT BUILD_ATEN_MOBILE)
   endif()
   file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt generated_cpp)
   file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-cuda cuda_generated_cpp)
-
+  
   file(GLOB_RECURSE all_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*")
-
+  
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
-
+  
   add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp}
     COMMAND ${GEN_COMMAND}
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
     DEPENDS ${all_python} ${all_templates} ${cwrap_files})
-
+  
   # Generated headers used from a CUDA (.cu) file are
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
   # on building the generated ATen files to workaround.

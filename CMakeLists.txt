@@ -54,7 +54,6 @@ endif()
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
 option(BUILD_TORCH "Build Torch" OFF)
-option(BUILD_CAFFE2 "Build Caffe2" ON)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
 option(BUILD_BINARY "Build C++ binaries" ON)
@@ -68,9 +67,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
-cmake_dependent_option(
-    BUILD_TEST "Build Caffe2 C++ test binaries (need gtest and gbenchmark)" OFF
-    "BUILD_CAFFE2" OFF)
+option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" OFF
     "BUILD_TEST" OFF)
@@ -83,32 +80,16 @@ cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
-cmake_dependent_option(
-    USE_GFLAGS "Use GFLAGS" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_GLOG "Use GLOG" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_GLOO "Use Gloo" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_GFLAGS "Use GFLAGS" ON)
+option(USE_GLOG "Use GLOG" ON)
+option(USE_GLOO "Use Gloo" ON)
 option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)
-cmake_dependent_option(
-    USE_LEVELDB "Use LEVELDB" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_LEVELDB "Use LEVELDB" ON)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
-cmake_dependent_option(
-    USE_LMDB "Use LMDB" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_METAL "Use Metal for iOS build" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_MPI "Use MPI" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_LMDB "Use LMDB" ON)
+option(USE_METAL "Use Metal for iOS build" ON)
+option(USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON)
+option(USE_MPI "Use MPI" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
 option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
@@ -121,9 +102,7 @@ cmake_dependent_option(
     "USE_CUDA" OFF)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
-cmake_dependent_option(
-    USE_OPENCV "Use OpenCV" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_OPENCV "Use OpenCV" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" OFF)
 option(USE_PROF "Use profiling" OFF)
 option(USE_REDIS "Use Redis" OFF)
@@ -133,12 +112,8 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_MKLDNN "Use MKLDNN" OFF)
-cmake_dependent_option(
-  USE_IDEEP "Use IDEEP interface in MKL BLAS" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-  USE_MKLML "Use MKLML interface in MKL BLAS" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
+option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
 option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
 
 # Used when building Caffe2 through setup.py
@@ -402,19 +377,15 @@ else()
 endif()
 
 # ---[ Modules
-if (BUILD_CAFFE2)
-  add_subdirectory(modules)
-endif()
+add_subdirectory(modules)
 
 # ---[ Binaries
 # Binaries will be built after the Caffe2 main libraries and the modules
 # are built. For the binaries, they will be linked to the Caffe2 main
 # libraries, as well as all the modules that are built with Caffe2 (the ones
 # built in the previous Modules section above).
-if (BUILD_CAFFE2)
-  if (BUILD_BINARY)
-    add_subdirectory(binaries)
-  endif()
+if (BUILD_BINARY)
+  add_subdirectory(binaries)
 endif()
 
 include(cmake/Summary.cmake)

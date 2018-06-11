@@ -1,4 +1,4 @@
-# UBSAN triggers when compiling protobuf, so we need to disable it.
+ # UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
 
 macro(disable_ubsan)
@@ -24,14 +24,12 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # ---[ Threads
-if(BUILD_CAFFE2)
-  include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-  if (TARGET Threads::Threads)
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
-  else()
-    message(FATAL_ERROR
-        "Cannot find threading library. Caffe2 requires Threads to compile.")
-  endif()
+include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
+if (TARGET Threads::Threads)
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
+else()
+  message(FATAL_ERROR
+      "Cannot find threading library. Caffe2 requires Threads to compile.")
 endif()
 
 # ---[ protobuf
@@ -42,22 +40,20 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # ---[ git: used to generate git build string.
-if(BUILD_CAFFE2)
-  find_package(Git)
-  if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-                    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-                    OUTPUT_VARIABLE CAFFE2_GIT_VERSION
-                    RESULT_VARIABLE __git_result)
-    if(NOT ${__git_result} EQUAL 0)
-      set(CAFFE2_GIT_VERSION "unknown")
-    endif()
-  else()
-    message(
-        WARNING
-        "Cannot find git, so Caffe2 won't have any git build info available")
+find_package(Git)
+if(GIT_FOUND)
+  execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+                  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
+                  WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
+                  OUTPUT_VARIABLE CAFFE2_GIT_VERSION
+                  RESULT_VARIABLE __git_result)
+  if(NOT ${__git_result} EQUAL 0)
+    set(CAFFE2_GIT_VERSION "unknown")
   endif()
+else()
+  message(
+      WARNING
+      "Cannot find git, so Caffe2 won't have any git build info available")
 endif()
 
 # ---[ BLAS
@@ -512,7 +508,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(BUILD_CAFFE2 OR NOT BUILD_ATEN_MOBILE)
+if(NOT BUILD_ATEN_MOBILE)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
@@ -754,13 +750,11 @@ if (USE_NNAPI AND NOT ANDROID)
 endif()
 
 if (NOT BUILD_ATEN_MOBILE)
-  if (BUILD_CAFFE2)
-    list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
-    if (USE_CUDA)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
-    endif()
-    include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
+  list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
+  if (USE_CUDA)
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
   endif()
+  include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
 endif()
 
 if (USE_ZSTD)
@@ -837,14 +831,14 @@ if (NOT BUILD_ATEN_MOBILE)
   if (NOT MSVC)
     set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
   endif()
-
+  
   INCLUDE(CheckCXXSourceCompiles)
-
+  
   # disable some verbose warnings
   IF (MSVC)
     set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 /wd4275 ${CMAKE_CXX_FLAGS}")
   ENDIF()
-
+  
   # windef.h will define max/min macros if NOMINMAX is not defined
   IF (MSVC)
     add_definitions(/DNOMINMAX)
@@ -878,7 +872,7 @@ if (NOT BUILD_ATEN_MOBILE)
   ############################################
   # Flags
   # When using MSVC
-
+  
   # Detect CUDA architecture and get best NVCC flags
   # finding cuda must be first because other things depend on the result
   #
@@ -887,13 +881,13 @@ if (NOT BUILD_ATEN_MOBILE)
   # compiler variables to run various probe tests.  We could try to fix
   # this, but since FindCUDA upstream is subsumed by first-class support
   # for CUDA language, it seemed not worth fixing.
-
+  
   IF (MSVC)
     # we want to respect the standard, and we are bored of those **** .
     ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
     LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
   ENDIF()
-
+  
   IF (NOT MSVC)
     IF (CMAKE_VERSION VERSION_LESS "3.1")
       SET(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
@@ -901,7 +895,7 @@ if (NOT BUILD_ATEN_MOBILE)
       SET(CMAKE_C_STANDARD 11)
     ENDIF ()
   ENDIF()
-
+  
   if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
       if (CUDA_VERSION VERSION_LESS "8.0")
@@ -910,20 +904,20 @@ if (NOT BUILD_ATEN_MOBILE)
       endif()
     endif()
   endif()
-
+  
   LIST(APPEND CUDA_NVCC_FLAGS -Wno-deprecated-gpu-targets)
   LIST(APPEND CUDA_NVCC_FLAGS --expt-extended-lambda)
-
+  
   if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     SET(CMAKE_CXX_STANDARD 11)
   endif()
-
+  
   LIST(APPEND CUDA_NVCC_FLAGS ${TORCH_NVCC_FLAGS})
   LIST(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
   IF (CMAKE_POSITION_INDEPENDENT_CODE AND NOT MSVC)
     LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
   ENDIF()
-
+  
   IF (CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
     MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
     LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__")
@@ -931,18 +925,18 @@ if (NOT BUILD_ATEN_MOBILE)
   ELSE()
     MESSAGE(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
   ENDIF()
-
+  
   OPTION(NDEBUG "disable asserts (WARNING: this may result in silent UB e.g. with out-of-bound indices)")
   IF (NOT NDEBUG)
     MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
+    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
   ENDIF()
-
+  
   # OpenMP support?
   SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
   IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
@@ -961,25 +955,25 @@ if (NOT BUILD_ATEN_MOBILE)
       SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
     ENDIF()
   ENDIF()
-
+  
   IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
     FIND_PACKAGE(OpenMP)
     SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-
+  
     # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
     # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
     SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
   ENDIF()
-
+  
   IF (OPENMP_FOUND)
     MESSAGE(STATUS "Compiling with OpenMP support")
     SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
   ENDIF()
-
-
+  
+  
   SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
-
+  
   FIND_PACKAGE(MAGMA)
   IF (USE_CUDA AND MAGMA_FOUND)
     INCLUDE_DIRECTORIES(SYSTEM ${MAGMA_INCLUDE_DIR})
@@ -993,7 +987,7 @@ if (NOT BUILD_ATEN_MOBILE)
     IF (MAGMA_V2)
       add_definitions(-DMAGMA_V2)
     ENDIF (MAGMA_V2)
-
+  
     SET(USE_MAGMA 1)
     MESSAGE(STATUS "Compiling with MAGMA support")
     MESSAGE(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
@@ -1002,7 +996,7 @@ if (NOT BUILD_ATEN_MOBILE)
   ELSE()
     MESSAGE(STATUS "MAGMA not found. Compiling without MAGMA support")
   ENDIF()
-
+  
   # ARM specific flags
   FIND_PACKAGE(ARM)
   IF (ASIMD_FOUND)
@@ -1020,7 +1014,7 @@ if (NOT BUILD_ATEN_MOBILE)
     MESSAGE(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
     add_compile_options(-mcpu=cortex-a9)
   ENDIF()
-
+  
   # Check that our programs run.  This is different from the native CMake compiler
   # check, which just tests if the program compiles and links.  This is important
   # because with ASAN you might need to help the compiled library find some
@@ -1038,7 +1032,7 @@ if (NOT BUILD_ATEN_MOBILE)
         "if the problem is this by attempting to build and run a "
         "small program.)")
   ENDIF()
-
+  
   CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)
   # Check for a cpuid intrinsic
   IF (HAVE_CPUID_H)
@@ -1052,7 +1046,7 @@ if (NOT BUILD_ATEN_MOBILE)
   IF (HAVE_GCC_GET_CPUID)
     add_compile_options(-DHAVE_GCC_GET_CPUID)
   ENDIF()
-
+  
   CHECK_C_SOURCE_COMPILES("#include <stdint.h>
       static inline void cpuid(uint32_t *eax, uint32_t *ebx,
       			 uint32_t *ecx, uint32_t *edx)
@@ -1066,11 +1060,11 @@ if (NOT BUILD_ATEN_MOBILE)
         cpuid(&a, &b, &c, &d);
         return 0;
       }" NO_GCC_EBX_FPIC_BUG)
-
+  
   IF (NOT NO_GCC_EBX_FPIC_BUG)
     add_compile_options(-DUSE_GCC_GET_CPUID)
   ENDIF()
-
+  
   FIND_PACKAGE(SSE) # checks SSE, AVX and AVX2
   IF (C_SSE2_FOUND)
     MESSAGE(STATUS "SSE2 Found")
@@ -1091,7 +1085,7 @@ if (NOT BUILD_ATEN_MOBILE)
     SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} ${CMAKE_CXX_FLAGS}")
     add_compile_options(-DUSE_SSE3)
   ENDIF()
-
+  
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
   # however, we want to enable the AVX codepaths, so we still need to
   # add USE_AVX and USE_AVX2 macro defines
@@ -1103,7 +1097,7 @@ if (NOT BUILD_ATEN_MOBILE)
     MESSAGE(STATUS "AVX2 Found")
     add_compile_options(-DUSE_AVX2)
   ENDIF()
-
+  
   CHECK_C_SOURCE_RUNS("
   #include <stdatomic.h>
   // ATOMIC_INT_LOCK_FREE is flaky on some older gcc versions
@@ -1124,7 +1118,7 @@ if (NOT BUILD_ATEN_MOBILE)
     return 0;
   }
   " HAS_C11_ATOMICS)
-
+  
   IF (NOT HAS_C11_ATOMICS)
     CHECK_C_SOURCE_RUNS("
   #include <intrin.h>
@@ -1138,7 +1132,7 @@ if (NOT BUILD_ATEN_MOBILE)
     return 0;
   }
   " HAS_MSC_ATOMICS)
-
+  
     CHECK_C_SOURCE_RUNS("
   int main()
   {
@@ -1151,7 +1145,7 @@ if (NOT BUILD_ATEN_MOBILE)
   }
   " HAS_GCC_ATOMICS)
   ENDIF()
-
+  
   IF (HAS_C11_ATOMICS)
     ADD_DEFINITIONS(-DUSE_C11_ATOMICS=1)
     MESSAGE(STATUS "Atomics: using C11 intrinsics")
@@ -1170,12 +1164,12 @@ if (NOT BUILD_ATEN_MOBILE)
       MESSAGE(STATUS "Atomics: using pthread")
     ENDIF()
   ENDIF()
-
+  
   IF (WIN32 AND NOT CYGWIN)
     SET(BLAS_INSTALL_LIBRARIES "OFF"
       CACHE BOOL "Copy the required BLAS DLLs into the TH install dirs")
   ENDIF()
-
+  
   FIND_PACKAGE(BLAS)
   SET(AT_MKL_ENABLED 0)
   SET(AT_MKL_MT 0)
@@ -1199,12 +1193,12 @@ if (NOT BUILD_ATEN_MOBILE)
       SET(AT_MKL_ENABLED 1)
     ENDIF()
   ENDIF()
-
+  
   FIND_PACKAGE(LAPACK)
   IF (LAPACK_FOUND)
     SET(USE_LAPACK 1)
   ENDIF()
-
+  
   if (NOT USE_CUDA)
     message("disabling CUDA because NOT USE_CUDA is set")
     SET(AT_CUDA_ENABLED 0)
@@ -1212,7 +1206,7 @@ if (NOT BUILD_ATEN_MOBILE)
     SET(AT_CUDA_ENABLED 1)
     find_package(CUDA 5.5 REQUIRED)
   endif()
-
+  
   IF (NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
     MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
     set(AT_CUDNN_ENABLED 0)
@@ -1243,7 +1237,7 @@ if (NOT BUILD_ATEN_MOBILE)
       set(AT_MKLDNN_ENABLED 1)
     endif()
   endif()
-
+  
   IF(UNIX AND NOT APPLE)
      INCLUDE(CheckLibraryExists)
      # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
@@ -1253,7 +1247,7 @@ if (NOT BUILD_ATEN_MOBILE)
        SET(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} rt)
      ENDIF(NEED_LIBRT)
   ENDIF(UNIX AND NOT APPLE)
-
+  
   IF(UNIX)
     SET(CMAKE_EXTRA_INCLUDE_FILES "sys/mman.h")
     CHECK_FUNCTION_EXISTS(mmap HAVE_MMAP)
@@ -1275,7 +1269,7 @@ if (NOT BUILD_ATEN_MOBILE)
       ADD_DEFINITIONS(-DHAVE_MALLOC_USABLE_SIZE=1)
     ENDIF(HAVE_MALLOC_USABLE_SIZE)
   ENDIF(UNIX)
-
+  
   # Is __thread supported?
   IF(NOT MSVC)
     CHECK_C_SOURCE_COMPILES("static __thread int x = 1; int main() { return x; }" C_HAS_THREAD)
