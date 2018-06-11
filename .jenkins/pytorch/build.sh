@@ -23,6 +23,14 @@ gcc --version
 # TODO: Don't run this...
 pip install -r requirements.txt || true
 
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
+  pushd "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/"
+  WERROR=1 HIPCC_VERBOSE=1 VERBOSE=1 WITH_ROCM=1 python setup.py install
+  exit
+fi
+
+# TODO: Don't install this here
 if ! which conda; then
   pip install mkl mkl-devel
 fi
@@ -31,13 +39,6 @@ fi
 # gcc 7.2 with sccache seems to have intermittent OOM issue if all cores are used
 if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7.2* ]]) && which sccache > /dev/null; then
   export MAX_JOBS=`expr $(nproc) - 1`
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
-  pushd "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/"
-  WERROR=1 HIPCC_VERBOSE=1 VERBOSE=1 WITH_ROCM=1 python setup.py install
-  exit
 fi
 
 # Target only our CI GPU machine's CUDA arch to speed up the build
