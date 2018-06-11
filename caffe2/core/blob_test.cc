@@ -30,10 +30,17 @@ class BlobTestFoo {
   int32_t val;
 };
 class BlobTestBar {};
+class BlobTestNonDefaultConstructible {
+ public:
+  BlobTestNonDefaultConstructible() = delete;
+  BlobTestNonDefaultConstructible(int x) : val(x) {}
+  int32_t val;
+};
 }
 
 CAFFE_KNOWN_TYPE(BlobTestFoo);
 CAFFE_KNOWN_TYPE(BlobTestBar);
+CAFFE_KNOWN_TYPE(BlobTestNonDefaultConstructible);
 
 class BlobTestFooSerializer : public BlobSerializerBase {
  public:
@@ -121,6 +128,22 @@ TEST(BlobTest, BlobMove) {
   EXPECT_EQ(&blob3.Get<BlobTestFoo>(), fooPtr);
 }
 
+TEST(BlobTest, BlobNonConstructible) {
+  Blob blob;
+  ASSERT_THROW(blob.Get<BlobTestNonDefaultConstructible>(), EnforceNotMet);
+  // won't work because it's not default constructible
+  // blob.GetMutable<BlobTestNonDefaultConstructible>();
+  EXPECT_FALSE(
+      blob.GetMutableOrNull<BlobTestNonDefaultConstructible>() != nullptr);
+  EXPECT_TRUE(blob.Reset(new BlobTestNonDefaultConstructible(42)) != nullptr);
+  ASSERT_NO_THROW(blob.Get<BlobTestNonDefaultConstructible>());
+  ASSERT_TRUE(
+      blob.GetMutableOrNull<BlobTestNonDefaultConstructible>() != nullptr);
+  EXPECT_EQ(blob.Get<BlobTestNonDefaultConstructible>().val, 42);
+  blob.GetMutableOrNull<BlobTestNonDefaultConstructible>()->val = 37;
+  EXPECT_EQ(blob.Get<BlobTestNonDefaultConstructible>().val, 37);
+}
+
 TEST(BlobTest, BlobShareExternalPointer) {
   Blob blob;
   std::unique_ptr<BlobTestFoo> foo(new BlobTestFoo());
@@ -185,6 +208,21 @@ TEST(TensorNonTypedTest, TensorChangeType) {
   EXPECT_TRUE(doubleptr != nullptr);
   EXPECT_TRUE(tensor.data<double>() != nullptr);
   EXPECT_TRUE(tensor.meta().Match<double>());
+}
+
+TEST(TensorNonTypedTest, NonDefaultConstructible) {
+  vector<int> dims(3);
+  dims[0] = 2;
+  dims[1] = 3;
+  dims[2] = 5;
+  TensorCPU tensor(dims);
+
+  // this doesn't compile - good!
+  // auto* ptr = tensor.mutable_data<BlobTestNonDefaultConstructible>();
+  EXPECT_THROW(
+      tensor.raw_mutable_data(
+          TypeMeta::Make<BlobTestNonDefaultConstructible>()),
+      EnforceNotMet);
 }
 
 template <typename T> class TensorCPUTest : public ::testing::Test {};
