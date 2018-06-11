@@ -109,6 +109,11 @@ namespace {
     _alias_into_sparse(self, indices, values);
     return self;
   }
+
+  // TODO: put this into the public API
+  bool isSameTensor(const Tensor& lhs, const Tensor& rhs) {
+    return lhs.unsafeGetTensorImpl() == rhs.unsafeGetTensorImpl();
+  }
 }
 
 /* Pointer-copy init */
@@ -161,7 +166,7 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
   int64_t dimV = values.dim() - 1;
   AT_CHECK(sizes.size() == dimI + dimV, "number of dimensions must be dimI + dimV");
 
-  LongTensor max_indices = std::get</* indices */ 1>(indices.max(/* dim */ 1, /* keepdim */ false));
+  LongTensor max_indices = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
   auto max_indices_accessor = max_indices.accessor<int64_t, 1>();
   for (int64_t d = 0; d < dimI; d++) {
     int64_t max_index_in_dim = max_indices_accessor[d];
@@ -172,7 +177,7 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
   for (int64_t d = 0; d < dimV; d++) {
     int64_t values_size = values.size(d+1);
     int64_t specified_size = sizes[static_cast<size_t>(dimI + d)];
-    AT_CHECK(values_size < specified_size,
+    AT_CHECK(values_size <= specified_size,
              "values and sizes are inconsistent: sizes[", d + dimI, "] is ", specified_size,
              " but values.size(", d + 1, ") is ", values_size);
   }
@@ -244,7 +249,7 @@ Tensor sparse_to_dense(const SparseTensor& self) {
 }
 
 SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src) {
-  if (self.equal(src)) return self;
+  if (isSameTensor(self, src)) return self;
   _raw_resize_sparse(self, src._dimI(), src._dimV(), src.sizes());
   _copy_into_sparse(self, src._indices(), src._values());
   _get_sparse_impl(self)->set_coalesced(src.is_coalesced());
