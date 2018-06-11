@@ -24,6 +24,7 @@ gcc --version
 pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
   pushd "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/"
   WERROR=1 HIPCC_VERBOSE=1 VERBOSE=1 WITH_ROCM=1 python setup.py install
