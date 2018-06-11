@@ -12,6 +12,12 @@ install_hip_nightly() {
     ./install.sh
     popd
     rm -rf HIP
+
+    git clone https://github.com/ROCmSoftwarePlatform/hipBLAS.git
+    pushd hipBLAS
+    ./install.sh
+    popd
+    rm -rf hipBLAS
 }
 
 install_ubuntu() {
