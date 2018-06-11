@@ -61,8 +61,8 @@ std::vector<TensorShape> ElementwiseOpShapeInference(
   if (broadcast) {
     out[0].mutable_dims()->CopyFrom(in[0].dims());
   } else {
-    const std::vector<int> A_dims(in[0].dims().cbegin(), in[0].dims().cend());
-    const std::vector<int> B_dims(in[1].dims().cbegin(), in[1].dims().cend());
+    const std::vector<int> A_dims(in[0].dims().begin(), in[0].dims().end());
+    const std::vector<int> B_dims(in[1].dims().begin(), in[1].dims().end());
     const std::vector<int> C_dims =
         elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
             A_dims, B_dims);
