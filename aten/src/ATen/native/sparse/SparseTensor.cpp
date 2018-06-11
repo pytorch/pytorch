@@ -243,12 +243,13 @@ Tensor sparse_to_dense(const SparseTensor& self) {
   return dst.add_(self);
 }
 
-void copy_sparse_(const SparseTensor& self, const SparseTensor& src) {
-  if (self.equal(src)) return;
+SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src) {
+  if (self.equal(src)) return self;
   _raw_resize_sparse(self, src._dimI(), src._dimV(), src.sizes());
   _copy_into_sparse(self, src._indices(), src._values());
   _get_sparse_impl(self)->set_coalesced(src.is_coalesced());
   _get_sparse_impl(self)->set_nnz(src._nnz());
+  return self;
 }
 
 void transpose_sparse_(const SparseTensor& self, int64_t d1, int64_t d2) {

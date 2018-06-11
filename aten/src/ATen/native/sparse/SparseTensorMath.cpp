@@ -100,6 +100,7 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._values().mul_(value);
   } else {
     r.resize_as_(t);
+    r._indices().resize_as_(t._indices());
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because mul_out takes Tensor&
     mul_out(r_values, t._values(), value);
@@ -133,6 +134,7 @@ SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._values().pow_(value);
   } else {
     r.resize_as_(t);
+    r._indices().resize_as_(t._indices());
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because pow_out takes Tensor&
     pow_out(r_values, t._values(), value);
@@ -225,7 +227,7 @@ SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const
   LongTensor src_indices = src._indices();
   Tensor s_values = src._values();
   LongTensor r_indices = t_indices.type().tensor({dimI, max_nnz});
-  Tensor r_values = _new_values_with_size_of(t_values, max_nnz).zero_();
+  Tensor r_values = _new_values_with_size_of(s_values, max_nnz).zero_();
   r.resize_as_(src);
   _get_sparse_impl(r)->set_indices_and_values(r_indices, r_values);  // TODO: sigh
 
@@ -361,7 +363,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
   int64_t nDim = dense.dim();
   int64_t nDimI = sparse._dimI();
 
-  if (!isSameTensor(r, dense)) r.copy_(dense);
+  if (!isSameTensor(r, dense)) raw_copy_sparse_(r, dense);
 
   if (nDim > nDimI) {
     auto indices_accessor = indices.accessor<int64_t, 2>();
@@ -382,13 +384,13 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
   return r;
 }
 
-SparseTensor add_dense_sparse_cpu(const SparseTensor& t, SparseTensorRef src, Scalar alpha) {
-  SparseTensor r = t.type().tensor();
+Tensor add_dense_sparse_cpu(const Tensor& t, SparseTensorRef src, Scalar alpha) {
+  Tensor r = t.type().tensor();
   add_out_dense_sparse_cpu(r, t, src, alpha);
   return r;
 }
 
-SparseTensor& add_dense_sparse_cpu_(SparseTensor& t, SparseTensorRef src, Scalar alpha) {
+Tensor& add_dense_sparse_cpu_(Tensor& t, SparseTensorRef src, Scalar alpha) {
   return add_out_dense_sparse_cpu(t, t, src, alpha);
 }
 
@@ -564,7 +566,7 @@ void addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, in
     r.zero_();
   } else if (cast_beta == 1) {
     if (!isSameTensor(r, t)) {
-      r.copy_(t); // TODO: not convinced this will work
+      raw_copy_sparse_(r, t);
     }
   } else {
     mul_out(r, t, beta);

@@ -1225,25 +1225,25 @@
   dispatch:
     CPU: add_out_dense_sparse_cpu
 
-- func: native_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    CPU: add_dense_sparse_cpu
-
 - func: native_add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
     SparseCPU: add_sparse_cpu
 
-- func: native_add_(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
+- func: native_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    CPU: add_dense_sparse_cpu_
+    CPU: add_dense_sparse_cpu
 
 - func: native_add_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
     SparseCPU: add_sparse_cpu_
+
+- func: native_add_(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: add_dense_sparse_cpu_
 
 - func: add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
