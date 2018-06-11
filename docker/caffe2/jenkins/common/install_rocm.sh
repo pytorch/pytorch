@@ -9,13 +9,13 @@ set -ex
 install_hip_nightly() {
     git clone https://github.com/ROCm-Developer-Tools/HIP.git
     pushd HIP
-    ./install.sh
+    yes | ./install.sh
     popd
     rm -rf HIP
 
     git clone https://github.com/ROCmSoftwarePlatform/hipBLAS.git
     pushd hipBLAS
-    ./install.sh
+    yes | ./install.sh
     popd
     rm -rf hipBLAS
 }
