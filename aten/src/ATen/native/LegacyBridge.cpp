@@ -168,13 +168,19 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
 }
 
 Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
-  Tensor r = self.type().tensor();
-  return native::sub_out(r, self, other, alpha);
-  return r;
+  if (_has_native(self)) {
+    return native_sub(self, other, alpha);
+  } else {
+    return th_sub(self, other, alpha);
+  }
 }
 
 Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
-  return native::sub_out(self, self, other, alpha);
+  if (_has_native(self)) {
+    return native_sub_(self, other, alpha);
+  } else {
+    return th_sub_(self, other, alpha);
+  }
 }
 
 
@@ -187,13 +193,19 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor mul(const Tensor& self, const Tensor& other) {
-  Tensor r = self.type().tensor();
-  return native::mul_out(r, self, other);
-  return r;
+  if (_has_native(self)) {
+    return native_mul(self, other);
+  } else {
+    return th_mul(self, other);
+  }
 }
 
 Tensor& mul_(Tensor& self, const Tensor& other) {
-  return native::mul_out(self, self, other);
+  if (_has_native(self)) {
+    return native_mul_(self, other);
+  } else {
+    return th_mul_(self, other);
+  }
 }
 
 Tensor& mul_out(Tensor& result, const Tensor& self, Scalar other) {
@@ -205,13 +217,19 @@ Tensor& mul_out(Tensor& result, const Tensor& self, Scalar other) {
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
-  Tensor r = self.type().tensor();
-  return native::mul_out(r, self, other);
-  return r;
+  if (_has_native(self)) {
+    return native_mul(self, other);
+  } else {
+    return th_mul(self, other);
+  }
 }
 
 Tensor& mul_(Tensor& self, Scalar other) {
-  return native::mul_out(self, self, other);
+  if (_has_native(self)) {
+    return native_mul_(self, other);
+  } else {
+    return th_mul_(self, other);
+  }
 }
 
 
@@ -224,30 +242,61 @@ Tensor& div_out(Tensor& result, const Tensor& self, Scalar other) {
 }
 
 Tensor div(const Tensor& self, Scalar other) {
-  Tensor r = self.type().tensor();
-  return native::div_out(r, self, other);
-  return r;
+  if (_has_native(self)) {
+    return native_div(self, other);
+  } else {
+    return th_div(self, other);
+  }
 }
 
 Tensor& div_(Tensor& self, Scalar other) {
-  return native::div_out(self, self, other);
+  if (_has_native(self)) {
+    return native_div_(self, other);
+  } else {
+    return th_div_(self, other);
+  }
 }
 
-Tensor& addmm_out(Tensor& result, const Tensor& self, SparseTensorRef mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+Tensor& addmm_out(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
   if (!self.is_cuda()) {
-    return native_addmm_out(result, self, mat1, mat2, beta, alpha);
+    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+    auto mat1_sparse = mat1.is_sparse();
+    if (mat1_sparse) {
+      return native_addmm_out(result, self, SparseTensorRef(mat1), mat2, beta, alpha);
+    } else {
+      return th_addmm_out(result, self, mat1, mat2, beta, alpha);
+    }
   } else {
     return th_addmm_out(result, self, mat1, mat2, beta, alpha);
   }
 }
 
-Tensor addmm(const Tensor& self, SparseTensorRef mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  Tensor r = self.type().tensor();
-  return native::addmm_out(r, self, mat1, mat2, beta, alpha);
+Tensor addmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  if (!self.is_cuda()) {
+    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+    auto mat1_sparse = mat1.is_sparse();
+    if (mat1_sparse) {
+      return native_addmm(self, SparseTensorRef(mat1), mat2, beta, alpha);
+    } else {
+      return th_addmm(self, mat1, mat2, beta, alpha);
+    }
+  } else {
+    return th_addmm(self, mat1, mat2, beta, alpha);
+  }
 }
 
-Tensor& addmm_(Tensor& self, SparseTensorRef mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  return native::addmm_out(self, self, mat1, mat2, beta, alpha);
+Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  if (!self.is_cuda()) {
+    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+    auto mat1_sparse = mat1.is_sparse();
+    if (mat1_sparse) {
+      return native_addmm_(self, SparseTensorRef(mat1), mat2, beta, alpha);
+    } else {
+      return th_addmm_(self, mat1, mat2, beta, alpha);
+    }
+  } else {
+    return th_addmm_(self, mat1, mat2, beta, alpha);
+  }
 }
 
 
@@ -301,11 +350,11 @@ Tensor& sparse_raw_resize_(Tensor& self, ArrayRef<int64_t> size, int64_t dimI, i
 }
 
 
-Tensor _sparse_mask(const Tensor& self, SparseTensorRef mask) {
+Tensor _sparse_mask(const Tensor& self, const Tensor& mask) {
   if (!self.is_cuda()) {
-    return _native_sparse_mask(self, mask);
+    return _native_sparse_mask(self, SparseTensorRef(mask));
   } else {
-    return self._th_sparse_mask(mask);
+    return self._th_sparse_mask(SparseTensorRef(mask));
   }
 }
 

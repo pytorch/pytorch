@@ -2234,7 +2234,7 @@
 [[
   name: th_add_
   return: argument 0
-  variants: function
+  variants: [function]
   options:
     - cname: cadd
       aten_sparse: True
@@ -2308,6 +2308,7 @@
 [[
   name: th_sub_
   return: argument 0
+  variants: [function]
   options:
     - cname: csub
       aten_sparse: True
@@ -2336,7 +2337,6 @@
 [[
   name: th_mul
   variants:
-    - method
     - function
   return: argument 0
   aten_sparse: True
@@ -2357,6 +2357,8 @@
 ]]
 [[
   name: th_mul_
+  variants:
+    - function
   return: argument 0
   aten_sparse: True
   options:
@@ -2375,7 +2377,6 @@
 [[
   name: th_div
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -2404,6 +2405,7 @@
 ]]
 [[
   name: th_div_
+  variants: [function]
   return: argument 0
   options:
     - cname: div
@@ -2668,8 +2670,8 @@
 ]]
 [[
   name: th_addmm
+  cname: addmm
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -2688,14 +2690,6 @@
           kwarg_only: True
         - THSTensor* mat1
         - THTensor* mat2
-]]
-[[
-  name: addmm
-  variants:
-    - method
-    - function
-  return: argument 0
-  options:
     - arguments:
       - arg: THTensor* result
         output: True
@@ -2711,7 +2705,8 @@
       - THTensor* mat2
 ]]
 [[
-  name: addmm_
+  name: th_addmm_
+  variants: [function]
   return: self
   options:
     - sparse: True
@@ -2728,11 +2723,6 @@
           kwarg_only: True
         - THSTensor* mat1
         - THTensor* mat2
-]]
-[[
-  name: addmm_
-  return: self
-  options:
     - cname: addmm
       arguments:
       - THTensor* self

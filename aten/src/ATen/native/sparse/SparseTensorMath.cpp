@@ -434,6 +434,10 @@ SparseTensor sub_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scal
   return r;
 }
 
+SparseTensor& sub_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar alpha) {
+  return sub_out_sparse_cpu(t, t, src, alpha);
+}
+
 // --------------------------------------------------------------------
 // mul(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
@@ -468,7 +472,7 @@ static void _mul_slice_sparse(
 
 // NB: divslice was removed as dead code
 
-SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const SparseTensor& src_) {
+SparseTensor& s_mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const SparseTensor& src_) {
   AT_CHECK(t_.sizes().equals(src_.sizes()), "cmul operands have incompatible sizes");
   if (src_._nnz() == 0 || t_._nnz() == 0) {
     return r.zero_();
@@ -534,10 +538,32 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const 
   return r;
 }
 
-SparseTensor mul_sparse_cpu(const SparseTensor& t, const SparseTensor& src) {
+SparseTensor s_mul_sparse_cpu(const SparseTensor& t, const SparseTensor& src) {
   SparseTensor r = t.type().tensor();
-  mul_out_sparse_cpu(r, t, src);
+  s_mul_out_sparse_cpu(r, t, src);
   return r;
+}
+
+SparseTensor& s_mul_sparse_cpu_(SparseTensor& t, const SparseTensor& src) {
+  return s_mul_out_sparse_cpu(t, t, src);
+}
+
+SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src) {
+  Tensor b_t, b_src;
+  std::tie(b_t, b_src) = expand_outplace(t, src, "mul_out_sparse_cpu");
+  return s_mul_out_sparse_cpu(r, b_t, b_src);
+}
+
+SparseTensor mul_sparse_cpu(const SparseTensor& t, const SparseTensor& src) {
+  Tensor b_t, b_src;
+  std::tie(b_t, b_src) = expand_outplace(t, src, "mul_sparse_cpu");
+  return s_mul_sparse_cpu(b_t, b_src);
+}
+
+SparseTensor& mul_sparse_cpu_(SparseTensor& t, const SparseTensor& src) {
+  Tensor b_src;
+  std::tie(b_src) = expand_inplace(t, src, "mul_sparse_cpu_");
+  return s_mul_sparse_cpu_(t, b_src);
 }
 
 // --------------------------------------------------------------------

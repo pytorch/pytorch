@@ -1225,16 +1225,11 @@
   dispatch:
     CPU: add_out_dense_sparse_cpu
 
-# See Note [foo/foo_out workaround]
 - func: native_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
     CPU: add_dense_sparse_cpu
 
-# Note [foo/foo_out workaround]
-# I need foo for a foo_out variant, because otherwise the autogen code gets
-# mad at me.  In principle, this isn't actually needed, and it's not used at all
-# from LegacyBridge
 - func: native_add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
@@ -1265,11 +1260,15 @@
   dispatch:
     SparseCPU: sub_out_sparse_cpu
 
-# See Note [foo/foo_out workaround]
 - func: native_sub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
     SparseCPU: sub_sparse_cpu
+
+- func: native_sub_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: sub_sparse_cpu_
 
 - func: sub_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
@@ -1286,11 +1285,15 @@
   dispatch:
     SparseCPU: mul_out_sparse_cpu
 
-# See Note [foo/foo_out workaround]
 - func: native_mul(Tensor self, Tensor other) -> Tensor
   variants: function
   dispatch:
     SparseCPU: mul_sparse_cpu
+
+- func: native_mul_(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: mul_sparse_cpu_
 
 - func: native_mul_out(Tensor result, Tensor self, Scalar other) -> Tensor
   variants: function
@@ -1301,6 +1304,11 @@
   variants: function
   dispatch:
     SparseCPU: mul_sparse_scalar
+
+- func: native_mul_(Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: mul_sparse_scalar_
 
 - func: mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
   variants: function
@@ -1325,11 +1333,15 @@
   dispatch:
     SparseCPU: div_out_sparse_scalar
 
-# See Note [foo/foo_out workaround]
 - func: native_div(Tensor self, Scalar other) -> Tensor
   variants: function
   dispatch:
     SparseCPU: div_sparse_scalar
+
+- func: native_div_(Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: div_sparse_scalar_
 
 - func: div_out(Tensor result, Tensor self, Scalar other) -> Tensor
   variants: function
@@ -1355,10 +1367,12 @@
   dispatch:
     CPU: addmm_sparse_dense_cpu_
 
-- func: addmm_out(Tensor result, Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
-- func: addmm(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method, function
+
+- func: addmm_(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
 
 - func: native_tensor(Type self_ty) -> Tensor
@@ -1418,7 +1432,7 @@
   dispatch:
     CPU: sparse_mask_cpu
 
-- func: _sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
+- func: _sparse_mask(Tensor self, Tensor mask) -> Tensor
 
 
 - func: native_to_dense(Tensor self) -> Tensor
