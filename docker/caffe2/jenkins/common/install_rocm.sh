@@ -2,7 +2,17 @@
 
 set -ex
 
+# TODO: This script should install a SPECIFIC ROCM_VERSION, but actually
+# it ignores all values of ROCM_VERSION which are not nightly.  Ugh!
 [ -n "$ROCM_VERSION" ]
+
+install_hip_nightly() {
+    git clone https://github.com/ROCm-Developer-Tools/HIP.git
+    pushd HIP
+    ./install.sh
+    popd
+    rm -rf HIP
+}
 
 install_ubuntu() {
     apt-get update
@@ -62,6 +72,12 @@ elif [ -f /etc/os-release ]; then
 else
   echo "Unable to determine OS..."
   exit 1
+fi
+
+# NB: We first install the "wrong" version, but then use those dev tools
+# to install the newer version of HIP.
+if [ "$ROCM_VERSION" = "nightly" ]; then
+  install_hip_nightly
 fi
 
 install_hip_thrust
