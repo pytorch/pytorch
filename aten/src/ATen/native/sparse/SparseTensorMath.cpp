@@ -125,23 +125,25 @@ SparseTensor& mul_sparse_scalar_(SparseTensor& t, Scalar v) {
 // pow(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
-  AT_ASSERT(!r.is_variable_or_undefined() && !t.is_variable_or_undefined());
+// TODO: add in-place variant
+
+SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, Scalar value) {
+  AT_ASSERT(!r.is_variable_or_undefined() && !t_.is_variable_or_undefined());
   AT_ASSERT(r.is_sparse());
-  AT_ASSERT(t.is_sparse());
+  AT_ASSERT(t_.is_sparse());
   AT_CHECK(value.toDouble() != 0, "cannot raise to zeroth power on sparse tensor; it would make the result tensor dense");
 
-  if (isSameTensor(r, t)) {
-    r._values().pow_(value);
-  } else {
-    r.resize_as_(t);
-    r._indices().resize_as_(t._indices());
-    r._indices().copy_(t._indices());
-    Tensor r_values = r._values(); // Sigh... needed because pow_out takes Tensor&
-    at::pow_out(r_values, t._values(), value);
-    _get_sparse_impl(r)->set_nnz(t._nnz());
-    _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
-  }
+  // This coalesce is why we can't easily provide an inplace variant
+  SparseTensor t = t_.coalesce();
+
+  r.resize_as_(t);
+  r._indices().resize_as_(t._indices());
+  r._indices().copy_(t._indices());
+  Tensor r_values = r._values(); // Sigh... needed because pow_out takes Tensor&
+  at::pow_out(r_values, t._values(), value);
+  _get_sparse_impl(r)->set_nnz(t._nnz());
+  _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
+
   return r;
 }
 
@@ -149,10 +151,6 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, Scalar value) {
   SparseTensor r = t.type().tensor();
   pow_out_sparse_scalar(r, t, value);
   return r;
-}
-
-SparseTensor& pow_sparse_scalar_(SparseTensor& t, Scalar value) {
-  return pow_out_sparse_scalar(t, t, value);
 }
 
 // --------------------------------------------------------------------
