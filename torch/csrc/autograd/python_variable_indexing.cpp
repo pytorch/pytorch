@@ -75,10 +75,6 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
     // TODO: implement negative step
     throw ValueError("negative step not yet supported");
   }
-  if (start >= stop) {
-    // TODO: currently we don't have support for 0-sized dims, return size 0 tensor for now
-    return self.type().tensor();
-  }
   if (!ensure_view && start == 0 && stop == length && step == 1) {
     return self;
   }
@@ -146,8 +142,9 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
     } else if (PySlice_Check(obj)) {
       result = applySlice(result, dim, obj);
       if (result.numel() == 0) {
-        // sliced a dim to size 0, which isn't fully supported yet
-        // just return size 0 tensor for now
+        // TODO: currently we don't have support for 0-sized dims, so slicing a dim
+        // to size 0 will return a size 0 tensor. for now, just shortcircuit slicing
+        // and return that size 0 tensor.
         return result;
       }
       dim++;
