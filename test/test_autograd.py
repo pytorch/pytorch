@@ -2307,6 +2307,7 @@ class TestAutograd(TestCase):
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
     def test_anomaly_detect_nan(self):
+        size = 10
 
         class MyFunc(Function):
             @staticmethod
@@ -2316,7 +2317,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, gO):
-                gI = gO.clone()
+                gI = gO.clone().expand(size)
                 gI[0] = 0
                 gI[0] /= 0  # Generate a nan
                 if ctx.fail_0th:
@@ -2324,17 +2325,17 @@ class TestAutograd(TestCase):
                 else:
                     return None, gI, None
 
-        inp = torch.rand(10, requires_grad=True)
+        inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, inp, True)
         out.backward()  # Should not fail
 
-        inp = torch.rand(10, requires_grad=True)
+        inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, inp, True)
         with self.assertRaisesRegexp(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
             with detect_anomaly():
                 out.backward()
 
-        inp = torch.rand(10, requires_grad=True)
+        inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, inp, False)
         with self.assertRaisesRegexp(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
             with detect_anomaly():

@@ -270,11 +270,9 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
 auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void {
   std::lock_guard<std::mutex> lock(task.base->mutex);
   if (!task.base->has_error.load()) {
-#ifndef NO_PYTHON
     if (AnomalyMode::is_enabled()) {
-      AnomalyMode::print_stack(task.fn->metadata());
+      task.fn->metadata()->print_stack();
     }
-#endif
     task.base->exception = std::current_exception();
     task.base->has_error = true;
   }
@@ -380,7 +378,6 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
   int num_outputs = outputs.size();
   if (num_outputs == 0) return; // Don't even acquire the mutex
 
-#ifndef NO_PYTHON
   if (AnomalyMode::is_enabled()) {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
@@ -393,7 +390,6 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       }
     }
   }
-#endif
 
   std::lock_guard<std::mutex> lock(task.base->mutex);
   for (int i = 0; i < num_outputs; ++i) {

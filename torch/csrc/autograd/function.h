@@ -12,7 +12,6 @@
 #include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/utils/auto_gil.h"
 
 #include <ATen/ATen.h>
 
@@ -26,7 +25,6 @@
 
 namespace torch { namespace autograd {
 
-struct Edge;
 struct FunctionPostHook;
 struct FunctionPreHook;
 
@@ -98,11 +96,9 @@ struct Function : std::enable_shared_from_this<Function> {
       edge_list&& next_edges = edge_list())
       : sequence_nr_(sequence_nr),
       next_edges_(std::move(next_edges)) {
-#ifndef NO_PYTHON
     if (AnomalyMode::is_enabled()) {
-      AnomalyMode::store_stack(metadata());
+      metadata()->store_stack();
     }
-#endif
   }
 
   explicit Function(
@@ -115,16 +111,7 @@ struct Function : std::enable_shared_from_this<Function> {
   Function& operator=(const Function& other) = delete;
   Function& operator=(Function&& other) = delete;
 
-#ifdef NO_PYTHON
   virtual ~Function() = default;
-#else
-  virtual ~Function() {
-    if (metadata_) {
-      AutoGIL gil;
-      Py_DECREF(metadata_);
-    }
-  }
-#endif
 
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
@@ -254,17 +241,9 @@ struct Function : std::enable_shared_from_this<Function> {
     pyobj_ = pyobj;
   }
 
-  /// Returns the metadata stored for this `Function`.
+  /// Returns the anomaly metadata stored for this `Function`.
   /// If none exist, create a new empty one.
-  PyObject* metadata() noexcept {
-#ifndef NO_PYTHON
-    if (!metadata_) {
-      AutoGIL gil;
-      metadata_ = PyDict_New();
-    }
-#endif
-    return metadata_;
-  }
+  AnomalyMetadata* metadata() noexcept;
 
   /// Create a context edge for the JIT.
   static void set_up_context_edge(
@@ -359,7 +338,7 @@ struct Function : std::enable_shared_from_this<Function> {
 
   edge_list next_edges_;
   PyObject* pyobj_ = nullptr; // weak reference
-  PyObject* metadata_ = nullptr; // strong reference
+  std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
   auto_unique_ptr<jit::tracer::FunctionTracingState> tracing_state_;
