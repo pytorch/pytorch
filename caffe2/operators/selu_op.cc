@@ -43,20 +43,66 @@ OPERATOR_SCHEMA(Selu)
     .AllowInplace({{0, 0}})
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-Selu takes one input data (Tensor<T>) and produces one output data
-(Tensor<T>) where the function, y = scale*(alpha_*e^x-alpha_ if x < 0 else x),
-is applied to the tensor elementwise.
+
+The *Selu* op takes one input tensor $X$, an argument $alpha$, an argument $scale$, and produces one output tensor $Y$ of the same shape as $X.$ The op performs the element wise *Selu* operation, defined as
+
+$$y=selu(x) =\begin{cases}scale (\alpha e^{x} - \alpha) & x < 0\\scale * x & otherwise\end{cases}$$
+
+The default value of *alpha* is 1.6732632423543772848170429916717 and the default value of *scale* is 1.0507009873554804934193349852946. See [Self-Normalizing Neural Networks](https://arxiv.org/abs/1706.02515) for more information.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/selu_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/selu_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Selu",
+    ["X"],
+    ["Y"],
+)
+
+workspace.FeedBlob("X", np.random.randn(3, 3).astype(np.float32))
+print("X:\n", workspace.FetchBlob("X"), "\n")
+
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[ 1.1613879  -0.27111396 -1.2076733 ]
+ [ 1.3442237  -1.0701777   1.2070968 ]
+ [ 0.23810555  0.9740916  -1.7872391 ]]
+
+Y:
+ [[ 1.2202715  -0.4174965  -1.2326177 ]
+ [ 1.4123772  -1.1551634   1.2682979 ]
+ [ 0.25017774  1.023479   -1.4637551 ]]
+
+```
+
+</details>
+
 )DOC")
-    .Arg(
-        "alpha",
-        "(float) default to 1.6732~; affects the activation function itself. "
-        "This should go with the weight initialization in the paper. "
-        " See https://arxiv.org/abs/1706.02515 ")
-    .Arg(
-        "scale",
-        "(float) default to 1.0507~; affects the activation function itself.")
-    .Input(0, "X", "input tensor")
-    .Output(0, "Y", "input tensor")
+    .Arg("alpha", "*(type: float; default: 1.673263~)* Alpha constant in equation.")
+    .Arg("scale", "*(type: float; default: 1.050700~; must be > 1.0)* Scale constant in equation.")
+    .Input(0, "X", "Input tensor of data to be operated on.")
+    .Output(0, "Y", "Output tensor with same shape as input.")
     .InheritOnnxSchema("Selu");
 
 // Input: Y, dY; output: dX

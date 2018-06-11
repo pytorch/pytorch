@@ -25,6 +25,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/bench_utils.h"
 #include "caffe2/utils/string_utils.h"
 #include "observers/net_observer_reporter_print.h"
 #include "observers/observer_config.h"
@@ -178,6 +179,7 @@ void loadInput(
 void runNetwork(
     shared_ptr<caffe2::Workspace> workspace,
     caffe2::NetDef& net_def,
+    const bool wipe_cache,
     const bool run_individual,
     const int warmup,
     const int iter) {
@@ -195,6 +197,9 @@ void runNetwork(
     CAFFE_ENFORCE(net->Run(), "Warmup run ", i, " has failed.");
   }
 
+  if (wipe_cache) {
+    caffe2::wipe_cache();
+  }
   LOG(INFO) << "Main runs.";
   CAFFE_ENFORCE(
       iter >= 0,
@@ -204,9 +209,15 @@ void runNetwork(
   for (int i = 0; i < iter; ++i) {
     caffe2::ObserverConfig::initSampleRate(1, 1, 1, 0, warmup);
     CAFFE_ENFORCE(net->Run(), "Main run ", i, " has failed.");
+    if (wipe_cache) {
+      caffe2::wipe_cache();
+    }
     if (run_individual) {
       caffe2::ObserverConfig::initSampleRate(1, 1, 1, 1, warmup);
       CAFFE_ENFORCE(net->Run(), "Main run ", i, " with operator has failed.");
+      if (wipe_cache) {
+        caffe2::wipe_cache();
+      }
     }
   }
 }

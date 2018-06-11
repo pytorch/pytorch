@@ -2,6 +2,7 @@
 
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
+#include <torch/tensor.h>
 
 #include <vector>
 
@@ -126,7 +127,7 @@ TEST_CASE("sequential") {
         Linear(10, 3).build(), Linear(3, 5).build(), Linear(5, 100).build());
 
     auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
-    auto y = sequential.forward<variable_list>(variable_list{x}).front();
+    auto y = sequential.forward<std::vector<Variable>>(std::vector<Variable>{x}).front();
     REQUIRE(y.ndimension() == 2);
     REQUIRE(y.size(0) == 1000);
     REQUIRE(y.size(1) == 100);

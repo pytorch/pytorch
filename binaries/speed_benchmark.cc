@@ -19,7 +19,9 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
+#endif
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
@@ -173,7 +175,11 @@ int main(int argc, char** argv) {
     }
   }
   if (caffe2::FLAGS_opt) {
+#ifdef CAFFE2_OPTIMIZER
     net_def = caffe2::opt::optimize(net_def, workspace.get(), caffe2::FLAGS_opt);
+#else
+    LOG(WARNING) << "Caffe2 not compiled with optimization passes.";
+#endif
   }
 
   caffe2::NetBase* net = workspace->CreateNet(net_def);

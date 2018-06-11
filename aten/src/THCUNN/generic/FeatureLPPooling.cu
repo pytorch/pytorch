@@ -159,11 +159,11 @@ void THNN_(FeatureLPPooling_updateOutput)(THCState* state,
                "input must be 1-3 dimensions for non-batch mode");
   }
 
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, inputTH), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, inputTH), 2,
              "input tensor must fit into 32-bit index math");
 
-  THCDeviceTensor<TensorUtils<THCTensor>::DataType, 4> input;
-  THCDeviceTensor<TensorUtils<THCTensor>::DataType, 4> output;
+  THCDeviceTensor<real, 4> input;
+  THCDeviceTensor<real, 4> output;
 
   input = THNN_(FeatureLPPooling_upcast)(state, inputTH, batchMode);
 
@@ -201,9 +201,9 @@ void THNN_(FeatureLPPooling_updateGradInput)(THCState* state,
                                              int width,
                                              int stride,
                                              bool batchMode) {
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, gradOutputTH), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, gradOutputTH), 2,
                 "output gradient tensor must fit into 32-bit index math");
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, inputTH), 3,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, inputTH), 3,
                 "input tensor must fit into 32-bit index math");
   THCUNN_assertSameGPU(state, 4, gradOutputTH, inputTH, outputTH, gradInputTH);
 
@@ -217,10 +217,10 @@ void THNN_(FeatureLPPooling_updateGradInput)(THCState* state,
                "input must be 1-3 dimensions for non-batch mode");
   }
 
-  THCDeviceTensor<TensorUtils<THCTensor>::DataType, 4> gradOutput;
-  THCDeviceTensor<TensorUtils<THCTensor>::DataType, 4> input;
-  THCDeviceTensor<TensorUtils<THCTensor>::DataType, 4> output;
-  THCDeviceTensor<TensorUtils<THCTensor>::DataType, 4> gradInput;
+  THCDeviceTensor<real, 4> gradOutput;
+  THCDeviceTensor<real, 4> input;
+  THCDeviceTensor<real, 4> output;
+  THCDeviceTensor<real, 4> gradInput;
 
   input = THNN_(FeatureLPPooling_upcast)(state, inputTH, batchMode);
 

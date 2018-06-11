@@ -23,7 +23,7 @@ namespace c10d {
 inline std::string toString(at::IntList l) {
   std::stringstream ss;
   ss << "(";
-  for (int i = 0; i < l.size(); i++) {
+  for (size_t i = 0; i < l.size(); i++) {
     if (i > 0) {
       ss << ", ";
     }
@@ -42,7 +42,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure all tensors have identical type and shape
   auto& type = tensors[0].type();
   auto sizes = tensors[0].sizes();
-  for (auto i = 1; i < tensors.size(); i++) {
+  for (size_t i = 1; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
       const std::string expected = type.toString();
       const std::string actual = tensors[i].type().toString();
@@ -63,18 +63,16 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
 inline std::vector<std::vector<int64_t>> getSizes(
     const std::vector<at::Tensor>& tensors) {
   std::vector<std::vector<int64_t>> sizes(tensors.size());
-  for (auto i = 0; i < tensors.size(); i++) {
+  for (size_t i = 0; i < tensors.size(); i++) {
     sizes[i] = tensors[i].sizes();
   }
   return sizes;
 }
 
 inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
-  std::vector<int> devices;
-  const auto& type = tensors[0].type();
-  if (type.is_cuda()) {
-    devices.resize(tensors.size());
-    for (auto i = 0; i < tensors.size(); i++) {
+  std::vector<int> devices(tensors.size(), -1);
+  if (tensors[0].type().is_cuda()) {
+    for (size_t i = 0; i < tensors.size(); i++) {
       devices[i] = tensors[i].storage()->getDevice();
     }
   }
@@ -84,7 +82,7 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
 template <typename T>
 std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
   std::vector<T*> ptrs(tensors.size());
-  for (auto i = 0; i < tensors.size(); i++) {
+  for (size_t i = 0; i < tensors.size(); i++) {
     ptrs[i] = static_cast<T*>(tensors[i].storage()->data());
   }
   return ptrs;

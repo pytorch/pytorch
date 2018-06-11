@@ -19,8 +19,7 @@ class Poisson(ExponentialFamily):
 
         >>> m = Poisson(torch.tensor([4]))
         >>> m.sample()
-         3
-        [torch.LongTensor of size 1]
+        tensor([ 3.])
 
     Args:
         rate (Number, Tensor): the rate parameter

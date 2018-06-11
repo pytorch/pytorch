@@ -109,14 +109,14 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
 
   // The constructed key/value tensor info is used to select the slice
   // we are sorting on a per-block basis
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, key)) {
+  if (THCTensor_canUse32BitIndexMath(state, key)) {
     TensorInfo<real, unsigned int> keyInfo =
-      getTensorInfo<THCTensor, unsigned int>(state, key);
+      getTensorInfo<real, THCTensor, unsigned int>(state, key);
     keyInfo.reduceDim(dim);
     int collapseKeyDim = keyInfo.collapseDims(dim);
 
     TensorInfo<int64_t, unsigned int> valueInfo =
-      getTensorInfo<THCudaLongTensor, unsigned int>(state, value);
+      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, value);
     valueInfo.reduceDim(dim);
     int collapseValueDim = valueInfo.collapseDims(dim);
 
@@ -134,12 +134,12 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
     }
   } else {
     TensorInfo<real, uint64_t> keyInfo =
-      getTensorInfo<THCTensor, uint64_t>(state, key);
+      getTensorInfo<real, THCTensor, uint64_t>(state, key);
     keyInfo.reduceDim(dim);
     int collapseKeyDim = keyInfo.collapseDims(dim);
 
     TensorInfo<int64_t, uint64_t> valueInfo =
-      getTensorInfo<THCudaLongTensor, uint64_t>(state, value);
+      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, value);
     valueInfo.reduceDim(dim);
     int collapseValueDim = valueInfo.collapseDims(dim);
 
@@ -153,11 +153,11 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
   THCudaCheck(cudaGetLastError());
 }
 
-void sortViaThrust(THCState* state,
-                   THCTensor* sorted,
-                   THCudaLongTensor* indices,
-                   THCTensor* input,
-                   int dim, bool dir) {
+void THCTensor_(sortViaThrust)(THCState* state,
+                               THCTensor* sorted,
+                               THCudaLongTensor* indices,
+                               THCTensor* input,
+                               int dim, bool dir) {
   int nDims = THCTensor_(nDimension)(state, input);
 
   ptrdiff_t totalElements = THCTensor_(nElement)(state, input);
@@ -327,7 +327,7 @@ THC_API void THCTensor_(sort)(THCState* state,
   } else {
     // Otherwise, fall back upon Thrust, which handles all other cases
     // (potentially slowly, with extra copies/memory allocations)
-    sortViaThrust(state, sorted, indices, input, dim, (bool) order);
+    THCTensor_(sortViaThrust)(state, sorted, indices, input, dim, (bool) order);
   }
 
   THCudaCheck(cudaGetLastError());

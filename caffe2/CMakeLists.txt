@@ -8,8 +8,6 @@ if(BUILD_ATEN)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)
-  # Disable contrib for root-level build
-  set(ATEN_NO_CONTRIB ON)
   add_subdirectory(../aten aten)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
@@ -43,6 +41,7 @@ if(BUILD_ATEN)
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
+  list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
 endif()
 
 # ---[ Caffe2 build
@@ -54,7 +53,10 @@ if(BUILD_CAFFE2)
   add_subdirectory(utils)
   add_subdirectory(contrib)
   add_subdirectory(core/nomnigraph)
-  add_subdirectory(cuda_rtc)
+  add_subdirectory(core/dispatch)
+  if (USE_NVRTC)
+    add_subdirectory(cuda_rtc)
+  endif()
   add_subdirectory(db)
   add_subdirectory(distributed)
   # add_subdirectory(experiments) # note, we may remove this folder at some point
@@ -83,6 +85,7 @@ endif()
 if (CAFFE2_WHITELISTED_FILES)
   caffe2_do_whitelist(Caffe2_CPU_SRCS CAFFE2_WHITELISTED_FILES)
   caffe2_do_whitelist(Caffe2_GPU_SRCS CAFFE2_WHITELISTED_FILES)
+  caffe2_do_whitelist(Caffe2_HIP_SRCS CAFFE2_WHITELISTED_FILES)
 endif()
 
 # Debug messages - if you want to get a list of source files, enable the
@@ -115,6 +118,16 @@ if (FALSE)
 
   message(STATUS "GPU test sources: ")
   foreach(tmp ${Caffe2_GPU_TEST_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
+  message(STATUS "HIP sources: ")
+  foreach(tmp ${Caffe2_HIP_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
+  message(STATUS "HIP test sources: ")
+  foreach(tmp ${Caffe2_HIP_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
 
@@ -180,19 +193,19 @@ target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
 target_include_directories(caffe2 INTERFACE $<INSTALL_INTERFACE:include>)
 target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
+target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
 aten_set_target_props(caffe2)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
-set_target_properties(caffe2 PROPERTIES VERSION 1 SOVERSION 1)
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
 caffe2_interface_library(caffe2 caffe2_library)
 list(APPEND Caffe2_MAIN_LIBS caffe2_library)
 
 # ---[ CUDA library.
-if(USE_CUDA OR USE_ROCM)
+if(USE_CUDA OR (USE_ROCM AND NOT BUILD_CAFFE2))
   # A hack to deal with cuda library dependencies and modern CMake: the
   # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
   # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
@@ -223,11 +236,32 @@ if(USE_CUDA OR USE_ROCM)
 
   # Set standard properties on the target
   aten_set_target_props(caffe2_gpu)
-  set_target_properties(caffe2_gpu PROPERTIES VERSION 1 SOVERSION 1)
 
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
+endif()
+
+# ---[ Caffe2 HIP sources.
+if(BUILD_CAFFE2)
+  if(USE_ROCM)
+    HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
+    set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
+
+    target_include_directories(
+      caffe2_hip PUBLIC ${Caffe2_HIP_INCLUDES})
+    target_include_directories(
+      caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
+
+    target_link_libraries(caffe2_hip PUBLIC caffe2)
+    target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
+
+    set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
+
+    caffe2_interface_library(caffe2_hip caffe2_hip_library)
+    list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
+    install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
+  endif()
 endif()
 
 # ---[ Check if warnings should be errors.
@@ -242,8 +276,11 @@ endif()
 if(BUILD_CAFFE2)
   if (BUILD_TEST)
     set(Caffe2_ALL_TEST_SRCS ${Caffe2_CPU_TEST_SRCS})
-    if (USE_CUDA OR USE_ROCM)
+    if (USE_CUDA)
       list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_GPU_TEST_SRCS})
+    endif()
+    if(USE_ROCM)
+      list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_HIP_TEST_SRCS})
     endif()
 
     foreach(test_src ${Caffe2_ALL_TEST_SRCS})
@@ -254,18 +291,39 @@ if(BUILD_CAFFE2)
         target_compile_features(${test_name} PRIVATE cxx_range_for)
       endif()
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
-      install(TARGETS ${test_name} DESTINATION test)
+      if (INSTALL_TEST)
+        install(TARGETS ${test_name} DESTINATION test)
+      endif()
     endforeach()
+
+    if(USE_ROCM)
+      foreach(test_src ${Caffe2_HIP_TEST_SRCS})
+        get_filename_component(test_name ${test_src} NAME_WE)
+        set_target_properties(${test_name} PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
+        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE HIP)
+        if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
+          target_compile_features(${test_name} PRIVATE cxx_range_for)
+        endif()
+      endforeach()
+    endif()
+
   endif()
+endif()
+
+set(__aten_test_dir "test")
+if(BUILD_CAFFE2)
+  # Aten tests should only run when Caffe2 is not built
+  set(__aten_test_dir "test/aten")
 endif()
 if(BUILD_ATEN)
   foreach(test_src ${ATen_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+    target_include_directories(${test_name} SYSTEM PRIVATE ${Caffe2_DEPENDENCY_INCLUDE})
     target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS})
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
-    install(TARGETS ${test_name} DESTINATION test)
+    install(TARGETS ${test_name} DESTINATION ${__aten_test_dir})
   endforeach()
 
   if(USE_CUDA OR USE_ROCM)
@@ -273,12 +331,12 @@ if(BUILD_ATEN)
       get_filename_component(test_name ${test_src} NAME_WE)
       torch_cuda_based_add_executable(${test_name} "${test_src}")
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+      target_include_directories(${test_name} SYSTEM PRIVATE ${Caffe2_DEPENDENCY_INCLUDE})
       target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
-      install(TARGETS ${test_name} DESTINATION test)
+      install(TARGETS ${test_name} DESTINATION ${__aten_test_dir})
     endforeach()
   endif()
-
 endif()
 
 if(BUILD_CAFFE2)
@@ -312,7 +370,7 @@ if(BUILD_CAFFE2)
     # ---[ Python.
     add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
-    set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "")
+    set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "" DEBUG_POSTFIX "")
     set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     if (APPLE)
       set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
@@ -327,10 +385,10 @@ if(BUILD_CAFFE2)
     endif(WIN32)
     install(TARGETS caffe2_pybind11_state DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
 
-    if(USE_CUDA OR USE_ROCM)
+    if(USE_CUDA)
       add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
-      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "")
+      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
       if (APPLE)
         set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
@@ -357,7 +415,7 @@ if(BUILD_CAFFE2)
           COMMAND ${CMAKE_COMMAND} -E copy
           $<TARGET_FILE:caffe2_pybind11_state>
           ${CMAKE_BINARY_DIR}/caffe2/python)
-      if (USE_CUDA OR USE_ROCM)
+      if (USE_CUDA)
         add_dependencies(windows_python_copy_lib caffe2_pybind11_state_gpu)
         add_custom_command(
             TARGET windows_python_copy_lib POST_BUILD

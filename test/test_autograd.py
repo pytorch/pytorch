@@ -75,7 +75,7 @@ class TestAutograd(TestCase):
         x = torch.randn(5, 5, requires_grad=True)
         y = torch.randn(5, 5, requires_grad=True)
         result = cls.apply(x, 2, y)
-        go = torch.ones(1, requires_grad=True)
+        go = torch.ones((), requires_grad=True)
         result.sum().backward(go, create_graph=True)
 
         self.assertEqual(x.grad.data, y.data + torch.ones(5, 5))
@@ -150,13 +150,14 @@ class TestAutograd(TestCase):
             def backward(ctx, grad):
                 return grad * 2
 
-        v = torch.ones(1, requires_grad=True)
-        MyFunction.apply(v).backward()
-        self.assertEqual(v.grad.data.tolist(), [2])
+        for shape in [(1,), ()]:
+            v = torch.ones(shape, requires_grad=True)
+            MyFunction.apply(v).backward()
+            self.assertEqual(v.grad, torch.full(shape, 2))
 
-        v.grad.data.zero_()
-        MyFunction.apply(v.clone()).backward()
-        self.assertEqual(v.grad.data.tolist(), [2])
+            v.grad.data.zero_()
+            MyFunction.apply(v.clone()).backward()
+            self.assertEqual(v.grad, torch.full(shape, 2))
 
     def test_legacy_function_none_grad(self):
         class MyFunction(Function):
@@ -171,6 +172,23 @@ class TestAutograd(TestCase):
         y = v[0, 0].expand(3, 5).t().sum()
         MyFunction()(y).sum().backward()
         self.assertEqual(v.grad.data, torch.zeros(shape))
+
+    def test_invalid_gradients(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return torch.randn(10, dtype=torch.float)
+
+        with self.assertRaisesRegex(RuntimeError, 'expected shape'):
+            input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
+            MyFunction.apply(input).sum().backward()
+        with self.assertRaisesRegex(RuntimeError, 'expected type'):
+            input = torch.randn(10, dtype=torch.double, requires_grad=True)
+            MyFunction.apply(input).sum().backward()
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -494,7 +512,6 @@ class TestAutograd(TestCase):
 
     def test_sparse_backward(self):
         class FixedGradientFunction(Function):
-
             def __init__(self, grad):
                 self.grad = grad
 
@@ -523,15 +540,15 @@ class TestAutograd(TestCase):
         dense_fn = FixedGradientFunction(dense_grad)
 
         # sparse first
-        x = torch.randn(5, 5, requires_grad=True)
+        x = torch.randn(size, requires_grad=True)
         (sparse_fn1(x) + dense_fn(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
         # dense first
-        x = torch.randn(5, 5, requires_grad=True)
+        x = torch.randn(size, requires_grad=True)
         (dense_fn(x) + sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
         # sparse only
-        x = torch.randn(5, 5, requires_grad=True)
+        x = torch.randn(size, requires_grad=True)
         (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
@@ -2276,6 +2293,19 @@ class TestAutograd(TestCase):
     def test_set_requires_grad_only_for_floats(self):
         self._test_set_requires_grad_only_for_floats(self, False)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_rnn_backward_to_input_but_not_parameters_cuda(self):
+        # this checks whether it is possible to not require
+        # weight parameters, but require inputs, see #7722
+        dev = torch.device('cuda')
+        l = torch.nn.LSTM(2, 3).to(dev)
+        for p in l.parameters():
+            p.requires_grad = False
+        s = torch.randn(1, 1, 2, requires_grad=True, device=dev)
+        out, _ = l(s)
+        out.sum().backward()
+        self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -2934,7 +2964,6 @@ method_tests = [
     ('select', (S, S, S), (1, 2), 'dim', [0]),
     ('select', (S,), (0, 2), '1d'),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
-    ('slice', (S, S, S), (-2, 1, -1, 2)),
     ('squeeze', (S, 1, S, 1), NO_ARGS),
     ('squeeze', (1, 1, 1, 1), NO_ARGS, 'input_sizes_are_ones'),
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),

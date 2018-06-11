@@ -6,6 +6,7 @@ else()
   cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
   include(CMakeDependentOption)
   option(USE_CUDA "Use CUDA" ON)
+  option(TORCH_BUILD_TEST "Build torch test binaries" ON)
 
   # Legacy options, which we will eventually remove
   cmake_dependent_option(
@@ -17,13 +18,6 @@ else()
 endif()
 if (NOT USE_CUDA)
   set(NO_CUDA ON)
-endif()
-
-# TODO: Enable tests on Mac as soon as possible
-if (APPLE)
-  set(TORCH_BUILD_TEST OFF)
-else()
-  set(TORCH_BUILD_TEST ON)
 endif()
 
 cmake_policy(VERSION 3.0)
@@ -70,6 +64,9 @@ if(NOT NO_CUDA)
     ${CMAKE_MODULE_PATH})
   set(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 
+  # Polyfill for upstream FindCUDA
+  include(CMakeInitializeConfigs)
+
   if(NOT CUDA_FOUND)
     find_package(CUDA 7.0)
   endif()
@@ -100,7 +97,7 @@ if(NOT NO_CUDA)
   endif()
 endif()
 
-add_definitions(-DNO_PYTHON -D_FORCE_INLINES)
+add_definitions(-DUSE_CATCH -D_FORCE_INLINES)
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -233,6 +230,8 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_addmm.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interned_strings.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
@@ -245,12 +244,13 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
   ${TORCH_SRC_DIR}/csrc/onnx/onnx.cpp
   ${TORCH_SRC_DIR}/csrc/onnx/onnx.pb.cpp
-  ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
   ${TORCH_SRC_DIR}/csrc/torch.cpp)
 
 if (NOT NO_API)
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/api/src/detail.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/cursor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
@@ -259,7 +259,8 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp)
+    ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
+  )
 endif()
 
 add_library(torch SHARED ${TORCH_SRCS})
@@ -359,6 +360,7 @@ if (TORCH_BUILD_TEST)
     add_executable(test_api
       ${TORCH_API_TEST_DIR}/any.cpp
       ${TORCH_API_TEST_DIR}/container.cpp
+      ${TORCH_API_TEST_DIR}/cursor.cpp
       ${TORCH_API_TEST_DIR}/integration.cpp
       ${TORCH_API_TEST_DIR}/main.cpp
       ${TORCH_API_TEST_DIR}/misc.cpp

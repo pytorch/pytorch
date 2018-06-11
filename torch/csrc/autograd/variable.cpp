@@ -122,15 +122,16 @@ void Variable::Impl::backward(
     gradient = make_variable(at::ones_like(data_), /*requires_grad=*/false);
   }
   inputs.push_back(std::move(as_variable_ref(*gradient)));
-
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
 }
 
 void Variable::Impl::set_data(Tensor new_data) {
-  data_ = std::move(new_data);
-  if (data_.type() != *type_) {
-    type_ = VariableType::getType(data_);
+  if (new_data.type() != data_.type()) {
+    type_ = VariableType::getType(new_data.type());
+    // Clear grad_accumulator if it exists, since it stores the old type info.
+    grad_accumulator_.reset();
   }
+  data_ = std::move(new_data);
 }
 
 Variable::ViewImpl::ViewImpl(Variable base, at::Tensor data, Edge gradient_edge)
@@ -159,7 +160,7 @@ std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
     fn->stride = strides();
     fn->storage_offset = data_.storage_offset();
     fn->set_next_edges(collect_next_edges(base_));
-    fn->set_num_inputs(1);
+    fn->add_input_metadata(base_.type(), sizes());
     grad_fn_ = std::move(fn);
     attr_version = current_version;
   }

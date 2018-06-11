@@ -6,8 +6,7 @@
 
 #include <cstdint>
 
-namespace torch { namespace nn {
-
+namespace torch {
 namespace detail {
 template <typename T>
 class DropoutBase : public torch::nn::CloneableModule<T> {
@@ -18,7 +17,7 @@ class DropoutBase : public torch::nn::CloneableModule<T> {
 
   void reset() override;
 
-  variable_list forward(variable_list input);
+  std::vector<Variable> forward(std::vector<Variable> input);
 
   TORCH_ATTR(double, rate) = 0.5;
 
@@ -27,6 +26,7 @@ class DropoutBase : public torch::nn::CloneableModule<T> {
 };
 } // namespace detail
 
+namespace nn {
 class Dropout : public detail::DropoutBase<Dropout> {
  public:
   using detail::DropoutBase<Dropout>::DropoutBase;
@@ -43,4 +43,5 @@ class Dropout2d : public detail::DropoutBase<Dropout2d> {
   Variable noise_mask(Variable input) const override;
 };
 
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

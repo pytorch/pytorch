@@ -32,6 +32,7 @@ CAFFE2_DECLARE_bool(caffe2_use_fatal_for_enforce);
 namespace caffe2 {
 // Functions that we use for initialization.
 bool InitCaffeLogging(int* argc, char** argv);
+void UpdateLoggingLevelsFromFlags();
 
 constexpr bool IsUsingGoogleLogging() {
 #ifdef CAFFE2_USE_GOOGLE_GLOG

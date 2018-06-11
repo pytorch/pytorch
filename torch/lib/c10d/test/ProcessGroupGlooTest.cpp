@@ -11,84 +11,14 @@
 
 #include <gloo/transport/tcp/device.h>
 
+#include "CUDAUtils.hpp"
 #include "FileStore.hpp"
 #include "ProcessGroupGloo.hpp"
+#include "test/TestUtils.hpp"
 
-class Semaphore {
- public:
-  void post(int n = 1) {
-    std::unique_lock<std::mutex> lock(m_);
-    n_ += n;
-    cv_.notify_all();
-  }
+using namespace c10d::test;
 
-  void wait(int n = 1) {
-    std::unique_lock<std::mutex> lock(m_);
-    while (n_ < n) {
-      cv_.wait(lock);
-    }
-    n_ -= n;
-  }
-
- protected:
-  int n_ = 0;
-  std::mutex m_;
-  std::condition_variable cv_;
-};
-
-std::string tmppath() {
-  const char* tmpdir = getenv("TMPDIR");
-  if (tmpdir == nullptr) {
-    tmpdir = "/tmp";
-  }
-
-  // Create template
-  std::vector<char> tmp(256);
-  auto len = snprintf(tmp.data(), tmp.size(), "%s/testXXXXXX", tmpdir);
-  tmp.resize(len);
-
-  // Create temporary file
-  auto fd = mkstemp(&tmp[0]);
-  if (fd == -1) {
-    throw std::system_error(errno, std::system_category());
-  }
-  close(fd);
-  return std::string(tmp.data(), tmp.size());
-}
-
-struct TemporaryFile {
-  std::string path;
-
-  TemporaryFile() {
-    path = tmppath();
-  }
-
-  ~TemporaryFile() {
-    unlink(path.c_str());
-  }
-};
-
-struct Fork {
-  pid_t pid;
-
-  Fork() {
-    pid = fork();
-    if (pid < 0) {
-      throw std::system_error(errno, std::system_category(), "fork");
-    }
-  }
-
-  ~Fork() {
-    if (pid > 0) {
-      kill(pid, SIGKILL);
-      waitpid(pid, nullptr, 0);
-    }
-  }
-
-  bool isChild() {
-    return pid == 0;
-  }
-};
+using c10d::CUDADevice;
 
 class SignalTest {
  public:
@@ -206,14 +136,28 @@ class CollectiveTest {
   std::unique_ptr<::c10d::ProcessGroupGloo> pg_;
 };
 
-void testAllreduce(const std::string& path) {
+std::vector<std::vector<at::Tensor>> copyTensors(
+    const std::vector<std::vector<at::Tensor>>& inputs) {
+  std::vector<std::vector<at::Tensor>> outputs(inputs.size());
+  for (size_t i = 0; i < inputs.size(); i++) {
+    const auto& input = inputs[i];
+    std::vector<at::Tensor> output(input.size());
+    for (size_t j = 0; j < input.size(); j++) {
+      output[j] = input[j].toBackend(at::kCPU);
+    }
+    outputs[i] = std::move(output);
+  }
+  return outputs;
+}
+
+void testAllreduce(const std::string& path, const at::Backend b) {
   const auto size = 4;
   auto tests = CollectiveTest::initialize(path, size);
 
   // Generate inputs
   std::vector<std::vector<at::Tensor>> inputs(size);
   for (auto i = 0; i < size; i++) {
-    auto tensor = at::ones(at::CPU(at::kFloat), {16, 16}) * i;
+    auto tensor = at::ones(at::getType(b, at::kFloat), {16, 16}) * i;
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
 
@@ -232,8 +176,9 @@ void testAllreduce(const std::string& path) {
 
   // Verify outputs
   const auto expected = (size * (size - 1)) / 2;
+  auto outputs = copyTensors(inputs);
   for (auto i = 0; i < size; i++) {
-    auto& tensor = inputs[i][0];
+    auto& tensor = outputs[i][0];
     auto data = tensor.data<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
       if (data[j] != expected) {
@@ -243,13 +188,13 @@ void testAllreduce(const std::string& path) {
   }
 }
 
-void testBroadcast(const std::string& path) {
+void testBroadcast(const std::string& path, const at::Backend b) {
   const auto size = 2;
   const auto stride = 2;
   auto tests = CollectiveTest::initialize(path, size);
 
   std::vector<std::vector<at::Tensor>> inputs(size);
-  const auto& type = at::CPU(at::kFloat);
+  const auto& type = at::getType(b, at::kFloat);
 
   // Try every permutation of root rank and root tensoro
   for (auto i = 0; i < size; i++) {
@@ -258,6 +203,7 @@ void testBroadcast(const std::string& path) {
       for (auto k = 0; k < size; k++) {
         inputs[k].resize(stride);
         for (auto l = 0; l < stride; l++) {
+          CUDADevice device(type.is_cuda() ? l : -1);
           inputs[k][l] = at::ones(type, {16, 16}) * (k * stride + l);
         }
       }
@@ -281,9 +227,10 @@ void testBroadcast(const std::string& path) {
 
       // Verify outputs
       const auto expected = (i * stride + j);
+      auto outputs = copyTensors(inputs);
       for (auto k = 0; k < size; k++) {
         for (auto l = 0; l < stride; l++) {
-          auto& tensor = inputs[k][l];
+          auto& tensor = outputs[k][l];
           auto data = tensor.data<float>();
           for (auto n = 0; n < tensor.numel(); n++) {
             if (data[n] != expected) {
@@ -313,12 +260,22 @@ int main(int argc, char** argv) {
 
   {
     TemporaryFile file;
-    testAllreduce(file.path);
+    testAllreduce(file.path, at::kCPU);
   }
 
   {
     TemporaryFile file;
-    testBroadcast(file.path);
+    testAllreduce(file.path, at::kCUDA);
+  }
+
+  {
+    TemporaryFile file;
+    testBroadcast(file.path, at::kCPU);
+  }
+
+  {
+    TemporaryFile file;
+    testBroadcast(file.path, at::kCUDA);
   }
 
   return 0;

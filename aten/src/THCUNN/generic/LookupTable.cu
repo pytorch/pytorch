@@ -184,7 +184,7 @@ void THNN_(LookupTable_renorm)(
 
   // At launch time figure out what the index type is and norm type
   int Norm = ScalarConvert<accreal, int>::to(normType);
-  if (TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, idx)) {
+  if (THCTensor_canUse32BitIndexMath(state, idx)) {
     if (Norm == 1) {
       RUN(1, unsigned int);
     } else if (Norm == 2) {

@@ -20,12 +20,25 @@ set(CAFFE2_VERSION
 #    endif()
 set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 
-if(DEFINED BLAS)
-  set(BLAS_SET_BY_USER TRUE)
-else()
-  message(STATUS "Not forcing any particular BLAS to be found")
-  set(BLAS_SET_BY_USER FALSE)
+if(NOT DEFINED BLAS_SET_BY_USER)
+  if(DEFINED BLAS)
+    set(BLAS_SET_BY_USER TRUE)
+  else()
+    message(STATUS "Not forcing any particular BLAS to be found")
+    set(BLAS_SET_BY_USER FALSE)
+  endif()
+  set(BLAS_SET_BY_USER ${BLAS_SET_BY_USER} CACHE STRING "Marks whether BLAS was manually set by user or auto-detected")
 endif()
+
+# These lines are an attempt to make find_package(cuda) pick up
+# libcuda.dylib, and not cuda.framework.  It doesn't work all
+# the time, but it seems to help for some users.
+# TODO: replace this with a more robust fix
+if(APPLE)
+  set(CMAKE_FIND_FRAMEWORK LAST)
+  set(CMAKE_FIND_APPBUNDLE LAST)
+endif()
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -44,8 +57,11 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 cmake_dependent_option(
-    BUILD_TEST "Build Caffe2 C++ test binaries (need gtest and gbenchmark)" ON
+    BUILD_TEST "Build Caffe2 C++ test binaries (need gtest and gbenchmark)" OFF
     "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    INSTALL_TEST "Install test binaries if BUILD_TEST is on" OFF
+    "BUILD_TEST" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_ATEN "Use ATen" OFF)
@@ -91,6 +107,9 @@ option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(
     USE_NUMA "Use NUMA (only available on Linux)" ON
     "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
+    "USE_CUDA" OFF)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 cmake_dependent_option(
@@ -118,9 +137,6 @@ option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
 cmake_dependent_option(
     WITH_CUDA "Legacy CUDA" ON
     "USE_CUDA" OFF)
-cmake_dependent_option(
-    WITH_ROCM "Legacy ROCm" ON
-    "USE_ROCM" OFF)
 cmake_dependent_option(
     NO_CUDA "Legacy no CUDA" OFF
     "USE_CUDA" ON)
@@ -205,6 +221,23 @@ if(NOT MSVC)
   # Eigen fails to build with some versions, so convert this to a warning
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-invalid-partial-specialization")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-field-initializers")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-type-limits")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-warning-option")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result")
+  if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
+  endif()
+  if ($ENV{WERROR})
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+  endif($ENV{WERROR})
 else()
   foreach(flag_var
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
@@ -355,6 +388,10 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
       DESTINATION share/cmake/Caffe2/public
+      COMPONENT dev)
+  install(DIRECTORY
+      ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
+      DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake

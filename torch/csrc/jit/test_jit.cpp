@@ -1,12 +1,11 @@
-#ifndef NO_PYTHON
-#include "torch/csrc/python_headers.h"
-
-#define REQUIRE JIT_ASSERT
-
-#else
+#ifdef USE_CATCH
 
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
+
+#else
+
+#define REQUIRE JIT_ASSERT
 
 #endif
 
@@ -38,12 +37,6 @@
 
 #include <vector>
 #include <iostream>
-
-#ifndef NO_PYTHON
-#include "torch/csrc/utils/auto_gil.h"
-#else
-struct AutoNoGIL {};
-#endif
 
 namespace torch { namespace jit {
 
@@ -537,7 +530,7 @@ variable_list grad(const variable_list& outputs, const variable_list& inputs, co
 
 void assertAllClose(const tensor_list& a, const tensor_list& b) {
   REQUIRE(a.size() == b.size());
-  for (std::size_t i = 0; i < a.size(); ++i) {
+  for (size_t i = 0; i < a.size(); ++i) {
     REQUIRE(a[i].is_same_size(b[i]));
     REQUIRE(a[i].allclose(b[i]));
   }
@@ -587,10 +580,6 @@ void testADFormulas() {
     {"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(3, 2)); }},
   };
 
-  // We have to release the GIL inside this method, because if we happen to
-  // initialize the autograd engine here, the newly spawned worker threads will
-  // try to initialize their PyThreadState*, and they need the GIL for this.
-  AutoNoGIL _no_gil;
   for (const auto & test : ad_tests) {
     // Get reference values form autograd
     auto vars_in        = test.make_vars();
@@ -635,10 +624,10 @@ void testDifferentiate(std::ostream & out) {
   graph->registerOutput(c.value());
 
   auto grad_spec = differentiate(graph, {true, true});
-  std::vector<std::size_t> expected_captured_inputs = {0, 1};
-  std::vector<std::size_t> expected_captured_outputs = {1};
-  std::vector<std::size_t> expected_input_vjps = {0, 1};
-  std::vector<std::size_t> expected_output_vjps = {0, 1};
+  std::vector<size_t> expected_captured_inputs = {0, 1};
+  std::vector<size_t> expected_captured_outputs = {1};
+  std::vector<size_t> expected_input_vjps = {0, 1};
+  std::vector<size_t> expected_output_vjps = {0, 1};
   REQUIRE(grad_spec.f_real_outputs == 1);
   REQUIRE(grad_spec.df_input_captured_inputs == expected_captured_inputs);
   REQUIRE(grad_spec.df_input_captured_outputs == expected_captured_outputs);
@@ -664,11 +653,11 @@ void testDifferentiateWithRequiresGrad(std::ostream & out) {
   graph->registerOutput(e.value());
 
   auto grad_spec = differentiate(graph, {true, false});
-  std::vector<std::size_t> expected_input_vjps = {1, 2};  // for e and %4 = (d + a)
-  std::vector<std::size_t> expected_output_vjps = {0};    // only a requires grad
+  std::vector<size_t> expected_input_vjps = {1, 2};  // for e and %4 = (d + a)
+  std::vector<size_t> expected_output_vjps = {0};    // only a requires grad
   REQUIRE(grad_spec.f_real_outputs == 2);              // we need one temporary %4 = (d + a)
-  REQUIRE(grad_spec.df_input_captured_inputs == std::vector<std::size_t>({0}));
-  REQUIRE(grad_spec.df_input_captured_outputs == std::vector<std::size_t>({2}));
+  REQUIRE(grad_spec.df_input_captured_inputs == std::vector<size_t>({0}));
+  REQUIRE(grad_spec.df_input_captured_outputs == std::vector<size_t>({2}));
   REQUIRE(grad_spec.df_input_vjps == expected_input_vjps);
   REQUIRE(grad_spec.df_output_vjps == expected_output_vjps);
   out << "testDifferentiateWithRequiresGrad\n";
@@ -886,7 +875,28 @@ void testControlFlow() {
   REQUIRE(256 == run_binary("while_test",2,0));
 }
 
-#ifdef NO_PYTHON
+std::string runJITCPPTests() {
+  std::stringstream out;
+  testControlFlow();
+  testGraphExecutor();
+  testBlocks(out);
+  testCreateAutodiffSubgraphs(out);
+  testDifferentiate(out);
+  testDifferentiateWithRequiresGrad(out);
+  testADFormulas();
+  interpTest();
+  interpStageTest();
+  codeTemplateTest();
+  fusionTests();
+  attributesTest();
+  internedStringsTests();
+  fromQualStringTests();
+  argumentSpecTest();
+  shapeAnalysisTest();
+  return out.str();
+}
+
+#ifdef USE_CATCH
 
 TEST_CASE( "jit test CPU", "[cpu]" ) {
 
@@ -928,26 +938,5 @@ TEST_CASE( "jit test CUDA", "[cuda]" ) {
 }
 
 #endif
-
-std::string runJITCPPTests() {
-  std::stringstream out;
-  testControlFlow();
-  testGraphExecutor();
-  testBlocks(out);
-  testCreateAutodiffSubgraphs(out);
-  testDifferentiate(out);
-  testDifferentiateWithRequiresGrad(out);
-  testADFormulas();
-  interpTest();
-  interpStageTest();
-  codeTemplateTest();
-  fusionTests();
-  attributesTest();
-  internedStringsTests();
-  fromQualStringTests();
-  argumentSpecTest();
-  shapeAnalysisTest();
-  return out.str();
-}
 
 }}

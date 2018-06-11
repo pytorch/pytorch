@@ -37,7 +37,7 @@ static inline void THNN_(VolumetricGridSamplerBilinear_shapeCheck)
 
 #define SAFE_GET(input, x, y, z, n, c, D, H, W) \
   x >= 0 && x < W && y >=0 && y < H && z >= 0 && z < D \
-    ? THTensor_fastGet5d(input, n, c, z, y, x) : 0
+    ? THTensor_(fastGet5d)(input, n, c, z, y, x) : 0
 
 #define CLIP_COORDINATES(in, out, clip_limit) out = MIN((clip_limit-1), MAX(in, 0))
 
@@ -69,9 +69,9 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
       for (h = 0; h < H; ++h) {
         for (w = 0; w < W; ++w) {
           // get the corresponding input x, y, z co-ordinates from grid
-          real ix = THTensor_fastGet5d(grid, n, d, h, w, 0);
-          real iy = THTensor_fastGet5d(grid, n, d, h, w, 1);
-          real iz = THTensor_fastGet5d(grid, n, d, h, w, 2);
+          real ix = THTensor_(fastGet5d)(grid, n, d, h, w, 0);
+          real iy = THTensor_(fastGet5d)(grid, n, d, h, w, 1);
+          real iz = THTensor_(fastGet5d)(grid, n, d, h, w, 2);
 
           // normalize ix, iy, iz from [-1, 1] to [0, IW-1] & [0, IH-1] & [0, ID-1]
           ix = ((ix + 1) / 2) * (IW-1);
@@ -165,7 +165,7 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
             real bse_val = SAFE_GET(input, ix_bse, iy_bse, iz_bse, n, c, ID, IH, IW);
             real out_val = tnw_val * tnw + tne_val * tne + tsw_val * tsw + tse_val * tse +
               bnw_val * bnw + bne_val * bne + bsw_val * bsw + bse_val * bse;
-            THTensor_fastSet5d(output, n, c, d, h, w, out_val);
+            THTensor_(fastSet5d)(output, n, c, d, h, w, out_val);
           }
         }
       }
@@ -176,8 +176,8 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
 #define SAFE_ADD(input, x, y, z, n, c, D, H, W, value)  \
   do {                                                                  \
     if (x >= 0 && x < W && y >=0 && y < H && z >=0 && z < D) {          \
-      real old_value = THTensor_fastGet5d(input, n, c, z, y, x);        \
-      THTensor_fastSet5d(input, n, c, z, y, x, value + old_value);      \
+      real old_value = THTensor_(fastGet5d)(input, n, c, z, y, x);        \
+      THTensor_(fastSet5d)(input, n, c, z, y, x, value + old_value);      \
     }                                                                   \
   } while(0)
 
@@ -211,9 +211,9 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
       for (h = 0; h < H; ++h) {
         for (w = 0; w < W; ++w) {
           // get the corresponding input x, y, z co-ordinates from grid
-          real ix = THTensor_fastGet5d(grid, n, d, h, w, 0);
-          real iy = THTensor_fastGet5d(grid, n, d, h, w, 1);
-          real iz = THTensor_fastGet5d(grid, n, d, h, w, 2);
+          real ix = THTensor_(fastGet5d)(grid, n, d, h, w, 0);
+          real iy = THTensor_(fastGet5d)(grid, n, d, h, w, 1);
+          real iz = THTensor_(fastGet5d)(grid, n, d, h, w, 2);
 
           real gix = 0;
           real giy = 0;
@@ -329,7 +329,7 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
           }
 
           for (int c = 0; c < C; ++c) {
-            real gradout = THTensor_fastGet5d(gradOutput, n, c, d, h, w);
+            real gradout = THTensor_(fastGet5d)(gradOutput, n, c, d, h, w);
 
             // calculate and set gradInput
             SAFE_ADD(gradInput, ix_tnw_cl, iy_tnw_cl, iz_tnw_cl, n, c, ID, IH, IW, tnw * gradout);
@@ -386,13 +386,13 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
           giy = giy * (IH - 1) / 2;
           giz = giz * (ID - 1) / 2;
 
-          real gix_old = THTensor_fastGet5d(gradGrid, n, d, h, w, 0);
-          real giy_old = THTensor_fastGet5d(gradGrid, n, d, h, w, 1);
-          real giz_old = THTensor_fastGet5d(gradGrid, n, d, h, w, 2);
+          real gix_old = THTensor_(fastGet5d)(gradGrid, n, d, h, w, 0);
+          real giy_old = THTensor_(fastGet5d)(gradGrid, n, d, h, w, 1);
+          real giz_old = THTensor_(fastGet5d)(gradGrid, n, d, h, w, 2);
 
-          THTensor_fastSet5d(gradGrid, n, d, h, w, 0, gix_old + gix);
-          THTensor_fastSet5d(gradGrid, n, d, h, w, 1, giy_old + giy);
-          THTensor_fastSet5d(gradGrid, n, d, h, w, 2, giz_old + giz);
+          THTensor_(fastSet5d)(gradGrid, n, d, h, w, 0, gix_old + gix);
+          THTensor_(fastSet5d)(gradGrid, n, d, h, w, 1, giy_old + giy);
+          THTensor_(fastSet5d)(gradGrid, n, d, h, w, 2, giz_old + giz);
         }
       }
     }

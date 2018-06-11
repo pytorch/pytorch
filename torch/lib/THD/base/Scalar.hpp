@@ -12,7 +12,7 @@ struct Scalar {
   Scalar(Scalar&& other) = delete;
   virtual ~Scalar() {}
 
-  virtual std::size_t elementSize() const = 0;
+  virtual size_t elementSize() const = 0;
   virtual void* data() = 0;
   virtual const void* data() const = 0;
   virtual RPCType type() const = 0;
@@ -25,7 +25,7 @@ struct ScalarWrapper : Scalar {
   ScalarWrapper(real value) : _value(value) {}
   virtual ~ScalarWrapper() {}
 
-  virtual std::size_t elementSize() const override {
+  virtual size_t elementSize() const override {
     return sizeof(real);
   }
 

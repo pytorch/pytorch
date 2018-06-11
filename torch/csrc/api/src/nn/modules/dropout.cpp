@@ -1,6 +1,6 @@
 #include <torch/nn/modules/dropout.h>
 
-namespace torch { namespace nn {
+namespace torch {
 namespace detail {
 
 template <typename T>
@@ -13,11 +13,11 @@ template <typename T>
 void DropoutBase<T>::reset() {}
 
 template <typename T>
-variable_list DropoutBase<T>::forward(variable_list input) {
+std::vector<Variable> DropoutBase<T>::forward(std::vector<Variable> input) {
   if (rate_ == 0 || !is_training()) {
     return input;
   }
-  variable_list output;
+  std::vector<Variable> output;
   for (const auto& value : input) {
     const auto noise = (noise_mask(value).uniform_(0, 1) > rate_)
                            .toType(value.type().scalarType())
@@ -27,10 +27,11 @@ variable_list DropoutBase<T>::forward(variable_list input) {
   return output;
 }
 
-template class DropoutBase<Dropout>;
-template class DropoutBase<Dropout2d>;
+template class detail::DropoutBase<nn::Dropout>;
+template class detail::DropoutBase<nn::Dropout2d>;
 } // namespace detail
 
+namespace nn {
 Variable Dropout::noise_mask(Variable input) const {
   return at::empty_like(input);
 }
@@ -38,5 +39,5 @@ Variable Dropout::noise_mask(Variable input) const {
 Variable Dropout2d::noise_mask(Variable input) const {
   return input.type().empty({input.size(0), input.size(1), 1, 1});
 }
-
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

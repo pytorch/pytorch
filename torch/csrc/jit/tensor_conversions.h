@@ -123,4 +123,22 @@ inline at::Tensor as_variable(const T& t) {
   return autograd::make_variable(as_tensor(t));
 }
 
+//////////////////////////////////////////////////////////////////////////////////
+// Helper for retrieving constants
+//////////////////////////////////////////////////////////////////////////////////
+
+// if a value is a constant then try to turn into type T using the
+// same rules as the interpreter
+template<typename T>
+at::optional<T> constant_as(Value* v) {
+  if(v->node()->kind() != prim::Constant)
+    return at::nullopt;
+  auto tensor = v->node()->t(attr::value);
+  try {
+    return tensor_as<T>(std::move(tensor));
+  } catch (tensor_conversion_error& err) {
+    return at::nullopt;
+  }
+}
+
 }} // namespace torch::jit

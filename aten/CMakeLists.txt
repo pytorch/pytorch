@@ -13,7 +13,6 @@ else()
       USE_CUDNN "Use cuDNN" ON
       "USE_CUDA" OFF)
   option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-  option(ATEN_NO_CONTRIB "Do not build ATen contrib" OFF)
 
   # Legacy options, which we will eventually remove
   cmake_dependent_option(
@@ -25,18 +24,12 @@ else()
   cmake_dependent_option(
       NO_MKLDNN "Legacy no MKLDNN" OFF
       "USE_MKLDNN" ON)
-  cmake_dependent_option(
-      WITH_ROCM "Legacy ROCm" ON
-      "USE_ROCM" OFF)
 
   # Flag for shared dependencies
   set(BUILD_ATEN ON)
 endif()
 if (NOT USE_CUDA)
   set(NO_CUDA ON)
-endif()
-if (WITH_ROCM)
-  set(USE_ROCM ON)
 endif()
 
 # Create the project in all cases
@@ -60,6 +53,7 @@ include(CMakeInitializeConfigs)
 set(ATen_CPU_SRCS)
 set(ATen_CPU_TEST_SRCS)
 set(ATen_CPU_INCLUDE)
+set(ATen_THIRD_PARTY_INCLUDE)
 set(ATen_CUDA_SRCS)
 set(ATen_CUDA_TEST_SRCS)
 set(ATen_CUDA_INCLUDE)
@@ -122,8 +116,12 @@ add_subdirectory(src/THNN)
 add_subdirectory(src/THS)
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.
-IF(WITH_ROCM)
+IF(USE_ROCM)
   include(LoadHIP)
+  if (NOT PYTORCH_FOUND_HIP)
+    MESSAGE(FATAL_ERROR
+      "Could not find HIP installation")
+  endif()
 ENDIF()
 
 IF(MSVC)
@@ -132,7 +130,7 @@ IF(MSVC)
   LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
 ENDIF(MSVC)
 
-if(WITH_ROCM)
+if(USE_ROCM)
   SET(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
@@ -158,13 +156,6 @@ list(APPEND ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 add_subdirectory(src/ATen)
 
-if(ATEN_NO_CONTRIB)
-  message("disable contrib because ATEN_NO_CONTRIB is set")
-else()
-  add_subdirectory(contrib/data)
-  add_subdirectory(contrib/meter)
-endif()
-
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # Pass source, includes, and libs to parent
   set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
@@ -173,6 +164,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
   set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
   set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)
+  set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)
   set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
   set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 endif()

@@ -19,7 +19,7 @@ pytest_plugins = 'onnx.backend.test.report',
 backend_test = onnx.backend.test.BackendTest(c2, __name__)
 
 backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
-                     '|test_mean|test_hardmax'  # Does not support Mean and Hardmax.
+                     '|test_hardmax'  # Does not support Hardmax.
                      '|test_cast.*FLOAT16.*'  # Does not support Cast on Float16.
                      '|test_depthtospace.*'  # Does not support DepthToSpace.
                      '|test_reduce_l1.*'  # Does not support ReduceL1.
@@ -34,10 +34,10 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_lstm.*'  # Seems LSTM case has some problem
                      '|test_simple_rnn.*'  # Seems simple RNN case has some problem
                      '|test_gru.*'  # Seems GRU case has some problem
-                     '|test_upsample.*'  # Upsample is redesigned in ONNX
                      '|test_prelu.*'  # PRelu is not compliant with ONNX yet
                      '|test_operator_repeat.*'  # Tile is not compliant with ONNX yet
                      '|test_.*pool_.*same.*'  # Does not support pool same.
+                     '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

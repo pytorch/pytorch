@@ -12,6 +12,8 @@
 
 namespace at {
 
+AT_API int _crash_if_asan(int);
+
 template <typename T, typename Base>
 static inline T* checked_cast_storage(Base* expr, const char * name, int pos) {
   if (typeid(*expr) != typeid(T))

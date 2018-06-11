@@ -33,6 +33,7 @@ Creation Ops
     range of distributions.
 
 .. autofunction:: tensor
+.. autofunction:: sparse_coo_tensor
 .. autofunction:: as_tensor
 .. autofunction:: from_numpy
 .. autofunction:: zeros
@@ -238,9 +239,10 @@ Spectral Ops
 .. autofunction:: rfft
 .. autofunction:: irfft
 .. autofunction:: stft
-.. autofunction:: hann_window
-.. autofunction:: hamming_window
 .. autofunction:: bartlett_window
+.. autofunction:: blackman_window
+.. autofunction:: hamming_window
+.. autofunction:: hann_window
 
 
 Other Operations

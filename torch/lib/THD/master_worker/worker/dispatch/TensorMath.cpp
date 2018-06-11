@@ -188,7 +188,7 @@ static void tensorCatArray(rpc::RPCMessage& raw_message) {
   at::Tensor result = unpackRetrieveTensor(raw_message);
   int numInputs = unpackInteger(raw_message);
   std::vector<at::Tensor> inputs(numInputs);
-  for (std::size_t i = 0; i < numInputs; i++)
+  for (size_t i = 0; i < numInputs; i++)
     inputs[i] = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);

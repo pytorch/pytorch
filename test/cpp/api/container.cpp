@@ -1,6 +1,13 @@
 #include <catch.hpp>
 
-#include <torch/torch.h>
+#include <torch/nn/module.h>
+#include <torch/nn/modules/batchnorm.h>
+#include <torch/nn/modules/conv.h>
+#include <torch/nn/modules/dropout.h>
+#include <torch/nn/modules/embedding.h>
+#include <torch/nn/modules/functional.h>
+#include <torch/nn/modules/linear.h>
+#include <torch/tensor.h>
 
 #include <test/cpp/api/util.h>
 
@@ -15,7 +22,7 @@ class TestModel : public Module {
     l3 = register_module("l3", Linear(5, 100).build());
   }
 
-  variable_list forward(variable_list input) {
+  std::vector<Variable> forward(std::vector<Variable> input) {
     return input;
   }
 
@@ -31,7 +38,7 @@ class NestedModel : public Module {
         register_parameter("param", at::CPU(at::kFloat).tensor({3, 2, 21}));
   }
 
-  variable_list forward(variable_list input) {
+  std::vector<Variable> forward(std::vector<Variable> input) {
     return input;
   };
 
@@ -55,7 +62,7 @@ TEST_CASE("containers") {
         REQUIRE(y.size(i) == 2);
       }
 
-      REQUIRE(model->parameters().at("weight").grad().numel() == 3 * 2 * 3);
+      REQUIRE(model->parameters()["weight"].grad().numel() == 3 * 2 * 3);
     }
     SECTION("2d") {
       SECTION("even") {
@@ -72,7 +79,7 @@ TEST_CASE("containers") {
         }
 
         REQUIRE(
-            model->parameters().at("weight").grad().numel() == 3 * 2 * 3 * 3);
+            model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 3);
       }
 
       SECTION("uneven") {
@@ -89,7 +96,7 @@ TEST_CASE("containers") {
         }
 
         REQUIRE(
-            model->parameters().at("weight").grad().numel() == 3 * 2 * 3 * 2);
+            model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 2);
       }
     }
     SECTION("3d") {
@@ -106,7 +113,8 @@ TEST_CASE("containers") {
       }
 
       REQUIRE(
-          model->parameters().at("weight").grad().numel() == 3 * 2 * 3 * 3 * 3);
+          model->parameters()["weight"].grad().numel() ==
+          3 * 2 * 3 * 3 * 3);
     }
   }
   SECTION("linear") {
@@ -122,7 +130,7 @@ TEST_CASE("containers") {
       REQUIRE(y.size(0) == 10);
       REQUIRE(y.size(1) == 2);
 
-      REQUIRE(model->parameters().at("weight").grad().numel() == 2 * 5);
+      REQUIRE(model->parameters()["weight"].grad().numel() == 2 * 5);
     }
   }
 
@@ -160,7 +168,8 @@ TEST_CASE("containers") {
       REQUIRE(y.size(0) == 10);
       REQUIRE(y.size(1) == 2);
 
-      REQUIRE(model->parameters().at("table").grad().numel() == 2 * dict_size);
+      REQUIRE(
+          model->parameters()["table"].grad().numel() == 2 * dict_size);
     }
 
     SECTION("list") {
@@ -197,27 +206,28 @@ TEST_CASE("containers") {
 
   SECTION("param") {
     auto model = std::make_shared<NestedModel>();
-    REQUIRE(model->param("param").size(0) == 3);
-    REQUIRE(model->param("param").size(1) == 2);
-    REQUIRE(model->param("param").size(2) == 21);
-    REQUIRE(model->param("l1.bias").size(0) == 20);
-    REQUIRE(model->param("l1.weight").size(0) == 20);
-    REQUIRE(model->param("l1.weight").size(1) == 5);
-    REQUIRE(model->param("test.l1.bias").size(0) == 3);
-    REQUIRE(model->param("test.l1.weight").size(0) == 3);
-    REQUIRE(model->param("test.l1.weight").size(1) == 10);
-    REQUIRE(model->param("test.l2.bias").size(0) == 5);
-    REQUIRE(model->param("test.l2.weight").size(0) == 5);
-    REQUIRE(model->param("test.l2.weight").size(1) == 3);
-    REQUIRE(model->param("test.l3.bias").size(0) == 100);
-    REQUIRE(model->param("test.l3.weight").size(0) == 100);
-    REQUIRE(model->param("test.l3.weight").size(1) == 5);
+    auto parameters = model->parameters();
+    REQUIRE(parameters["param"].size(0) == 3);
+    REQUIRE(parameters["param"].size(1) == 2);
+    REQUIRE(parameters["param"].size(2) == 21);
+    REQUIRE(parameters["l1.bias"].size(0) == 20);
+    REQUIRE(parameters["l1.weight"].size(0) == 20);
+    REQUIRE(parameters["l1.weight"].size(1) == 5);
+    REQUIRE(parameters["test.l1.bias"].size(0) == 3);
+    REQUIRE(parameters["test.l1.weight"].size(0) == 3);
+    REQUIRE(parameters["test.l1.weight"].size(1) == 10);
+    REQUIRE(parameters["test.l2.bias"].size(0) == 5);
+    REQUIRE(parameters["test.l2.weight"].size(0) == 5);
+    REQUIRE(parameters["test.l2.weight"].size(1) == 3);
+    REQUIRE(parameters["test.l3.bias"].size(0) == 100);
+    REQUIRE(parameters["test.l3.weight"].size(0) == 100);
+    REQUIRE(parameters["test.l3.weight"].size(1) == 5);
   }
 
   SECTION("functional") {
     bool was_called = false;
     // clang-format off
-    auto functional = Functional([&was_called](variable_list input) {
+    auto functional = Functional([&was_called](std::vector<Variable> input) {
       was_called = true;
       return input;
     }).build();
@@ -243,7 +253,7 @@ TEST_CASE("containers_cuda", "[cuda]") {
     REQUIRE(y.size(0) == 10);
     REQUIRE(y.size(1) == 2);
 
-    REQUIRE(model->parameters().at("weight").grad().numel() == 2 * 5);
+    REQUIRE(model->parameters()["weight"].grad().numel() == 2 * 5);
   }
 
   SECTION("2") {
@@ -260,6 +270,6 @@ TEST_CASE("containers_cuda", "[cuda]") {
     REQUIRE(y.size(0) == 10);
     REQUIRE(y.size(1) == 2);
 
-    REQUIRE(model->parameters().at("weight").grad().numel() == 2 * 5);
+    REQUIRE(model->parameters()["weight"].grad().numel() == 2 * 5);
   }
 }

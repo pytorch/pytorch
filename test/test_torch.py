@@ -5,16 +5,19 @@ import math
 import random
 import operator
 import copy
+import shutil
 import torch
 import torch.cuda
 import tempfile
 import unittest
 import warnings
 import pickle
+import gzip
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from itertools import product, combinations
 from functools import reduce
+from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
 
@@ -1508,6 +1511,7 @@ class TestTorch(TestCase):
             def do_einsum(*args):
                 return torch.einsum(test[0], args)
             self.assertTrue(torch.autograd.gradcheck(do_einsum, test[1:]))
+            self.assertTrue(A._version == 0)  # check that we do not use inplace ops
 
     def test_sum_all(self):
         def check_sum_all(tensor):
@@ -1855,26 +1859,28 @@ class TestTorch(TestCase):
         self.assertIs(torch.float32, a.to(dtype=torch.float32).dtype)
 
         if torch.cuda.is_available():
-            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
-                b = torch.tensor(5., device=cuda)
-                self.assertEqual(b.device, b.to(cuda).device)
-                self.assertEqual(a.device, b.to('cpu').device)
-                self.assertEqual(b.device, a.to(cuda).device)
-                self.assertIs(torch.int32, b.to('cpu', dtype=torch.int32).dtype)
-                self.assertEqual(a.device, b.to('cpu', dtype=torch.int32).device)
-                self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
-                self.assertEqual(b.device, b.to(dtype=torch.int32).device)
+            for non_blocking in [True, False]:
+                for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                    b = torch.tensor(5., device=cuda)
+                    self.assertEqual(b.device, b.to(cuda, non_blocking=non_blocking).device)
+                    self.assertEqual(a.device, b.to('cpu', non_blocking=non_blocking).device)
+                    self.assertEqual(b.device, a.to(cuda, non_blocking=non_blocking).device)
+                    self.assertIs(torch.int32, b.to('cpu', dtype=torch.int32, non_blocking=non_blocking).dtype)
+                    self.assertEqual(a.device, b.to('cpu', dtype=torch.int32, non_blocking=non_blocking).device)
+                    self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
+                    self.assertEqual(b.device, b.to(dtype=torch.int32).device)
 
     def test_to_with_tensor(self):
         a = torch.tensor(5)
         self.assertEqual(a.device, a.to(a).device)
 
         if torch.cuda.is_available():
-            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
-                b = torch.tensor(5., device=cuda)
-                self.assertEqual(b.device, b.to(b).device)
-                self.assertEqual(a.device, b.to(a).device)
-                self.assertEqual(b.device, a.to(b).device)
+            for non_blocking in [True, False]:
+                for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                    b = torch.tensor(5., device=cuda)
+                    self.assertEqual(b.device, b.to(b, non_blocking=non_blocking).device)
+                    self.assertEqual(a.device, b.to(a, non_blocking=non_blocking).device)
+                    self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
 
     @staticmethod
     def _test_empty_full(self, dtypes, layout, device):
@@ -2362,6 +2368,32 @@ class TestTorch(TestCase):
 
     def test_multinomial(self):
         self._test_multinomial(self, torch.FloatTensor)
+
+    def _spawn_method(self, method, arg):
+        try:
+            mp.set_start_method('spawn')
+        except RuntimeError:
+            pass
+        with mp.Pool(1) as pool:
+            self.assertTrue(pool.map(method, [arg]))
+
+    @staticmethod
+    def _test_multinomial_invalid_probs(probs):
+        try:
+            torch.multinomial(probs.to('cpu'), 1)
+            return False  # Should not be reached
+        except RuntimeError as e:
+            return 'invalid multinomial distribution' in str(e)
+
+    @unittest.skipIf(not PY3,
+                     "spawn start method is not supported in Python 2, \
+                     but we need it for for testing failure case for CPU RNG on Windows")
+    def test_multinomial_invalid_probs(self):
+        test_method = TestTorch._test_multinomial_invalid_probs
+        self._spawn_method(test_method, torch.Tensor([0, -1]))
+        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
+        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
+        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
 
     @suppress_warnings
     def test_range(self):
@@ -3317,20 +3349,20 @@ class TestTorch(TestCase):
     def test_slice(self):
         empty = torch.Tensor()
         x = torch.arange(0., 16).view(4, 4)
-        self.assertEqual(x.slice(), x)
-        self.assertEqual(x.slice(0, 0, 4), x)
+        self.assertEqual(x[:], x)
+        self.assertEqual(x[:4], x)
         # start and stop are clamped to the size of dim
-        self.assertEqual(x.slice(0, 0, 5), x)
+        self.assertEqual(x[:5], x)
         # if start >= stop then the result is empty
-        self.assertEqual(x.slice(0, 2, 1), empty)
-        self.assertEqual(x.slice(0, 2, 2), empty)
+        self.assertEqual(x[2:1], empty)
+        self.assertEqual(x[2:2], empty)
         # out of bounds is also empty
-        self.assertEqual(x.slice(0, 10, 12), empty)
+        self.assertEqual(x[10:12], empty)
         # additional correctness checks
-        self.assertEqual(x.slice(0, 0, 1).data.tolist(), [[0, 1, 2, 3]])
-        self.assertEqual(x.slice(0, 0, -3).data.tolist(), [[0, 1, 2, 3]])
-        self.assertEqual(x.slice(start=-2, end=3, dim=1).data.tolist(), [[2], [6], [10], [14]])
-        self.assertEqual(x.slice(0, 0, -1, 2).data.tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
+        self.assertEqual(x[:1].data.tolist(), [[0, 1, 2, 3]])
+        self.assertEqual(x[:-3].data.tolist(), [[0, 1, 2, 3]])
+        self.assertEqual(x[:, -2:3].data.tolist(), [[2], [6], [10], [14]])
+        self.assertEqual(x[0:-1:2].data.tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
 
     def test_is_signed(self):
         self.assertEqual(torch.IntTensor(5).is_signed(), True)
@@ -3894,23 +3926,29 @@ class TestTorch(TestCase):
         self.assertEqual(X, Xhat, 1e-8, 'USV\' wrong')
 
     @staticmethod
-    def _test_window_function(self, torch_method, scipy_name):
-        for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
-            for periodic in [True, False]:
-                ref = torch.from_numpy(signal.get_window(scipy_name, size, fftbins=periodic))
-                self.assertEqual(torch_method(size, periodic=periodic), ref)
+    def _test_signal_window_functions(self, device='cpu'):
+        if not TEST_SCIPY:
+            raise unittest.SkipTest('Scipy not found')
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_hann_window(self):
-        self._test_window_function(self, torch.hann_window, 'hann')
+        def test(name):
+            torch_method = getattr(torch, name + '_window')
+            for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
+                for periodic in [True, False]:
+                    res = torch_method(size, periodic=periodic, device=device)
+                    ref = torch.from_numpy(signal.get_window(name, size, fftbins=periodic))
+                    self.assertEqual(res, ref)
+            with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
+                torch_method(3, layout=torch.sparse_coo)
+            with self.assertRaisesRegex(RuntimeError, r'floating point'):
+                torch_method(3, dtype=torch.long)
+            self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
+            self.assertFalse(torch_method(3).requires_grad)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_hamming_window(self):
-        self._test_window_function(self, torch.hamming_window, 'hamming')
+        for window in ['hann', 'hamming', 'bartlett', 'blackman']:
+            test(window)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_bartlett_window(self):
-        self._test_window_function(self, torch.bartlett_window, 'bartlett')
+    def test_signal_window_functions(self):
+        self._test_signal_window_functions(self)
 
     @skipIfNoLapack
     def test_inverse(self):
@@ -4074,11 +4112,9 @@ class TestTorch(TestCase):
         self._test_det_logdet_slogdet(self, lambda x: x)
 
     @staticmethod
-    def _test_fft_ifft_rfft_irfft(self, build_fn):
-        # the conv_fn to convert tensors can be slow in cuda tests, so we use
-        # a build_fn: sizes => tensor
+    def _test_fft_ifft_rfft_irfft(self, device='cpu'):
         def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
-            x = prepro_fn(build_fn(*sizes))
+            x = prepro_fn(torch.randn(*sizes, device=device))
             for normalized in (True, False):
                 res = x.fft(signal_ndim, normalized=normalized)
                 rec = res.ifft(signal_ndim, normalized=normalized)
@@ -4088,7 +4124,7 @@ class TestTorch(TestCase):
                 self.assertEqual(x, rec, 1e-8, 'ifft and fft')
 
         def _test_real(sizes, signal_ndim, prepro_fn=lambda x: x):
-            x = prepro_fn(build_fn(*sizes))
+            x = prepro_fn(torch.randn(*sizes, device=device))
             signal_numel = 1
             signal_sizes = x.size()[-signal_ndim:]
             for normalized, onesided in product((True, False), repeat=2):
@@ -4164,22 +4200,17 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):
-        def randn_double(*sizes):
-            return torch.DoubleTensor(*sizes).normal_()
-        self._test_fft_ifft_rfft_irfft(self, build_fn=randn_double)
+        self._test_fft_ifft_rfft_irfft(self)
 
     @staticmethod
-    def _test_stft(self, build_fn):
-        # the conv_fn to convert tensors can be slow in cuda tests, so we use
-        # a build_fn: sizes => tensor
-
+    def _test_stft(self, device='cpu'):
         def naive_stft(x, frame_length, hop, fft_size=None, normalized=False,
                        onesided=True, window=None, pad_end=0):
             if fft_size is None:
                 fft_size = frame_length
             x = x.clone()
             if window is None:
-                window = x.new(frame_length).fill_(1)
+                window = x.new_ones(frame_length)
             else:
                 window = window.clone()
             input_1d = x.dim() == 1
@@ -4228,9 +4259,9 @@ class TestTorch(TestCase):
 
         def _test(sizes, frame_length, hop, fft_size=None, normalized=False,
                   onesided=True, window_sizes=None, pad_end=0, expected_error=None):
-            x = build_fn(*sizes)
+            x = torch.randn(*sizes, device=device)
             if window_sizes is not None:
-                window = build_fn(*window_sizes)
+                window = torch.randn(*window_sizes, device=device)
             else:
                 window = None
             if expected_error is None:
@@ -4275,9 +4306,7 @@ class TestTorch(TestCase):
         _test((10,), 5, 4, window_sizes=(1, 1), expected_error=RuntimeError)
 
     def test_stft(self):
-        def randn_double(*sizes):
-            return torch.DoubleTensor(*sizes).normal_()
-        self._test_stft(self, build_fn=randn_double)
+        self._test_stft(self)
 
     @unittest.skip("Not implemented yet")
     def test_conv2(self):
@@ -6213,7 +6242,7 @@ class TestTorch(TestCase):
             self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
             self.assertRaises(TypeError, lambda: torch.ones((np.array(3, 3))))
 
-    def _test_serialization(self, filecontext_lambda, test_use_filename=True):
+    def _test_serialization_data(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
@@ -6223,68 +6252,115 @@ class TestTorch(TestCase):
         t2 = torch.FloatTensor().set_(a[0].storage()[1:4], 0, (3,), (1,))
         b += [(t1.storage(), t1.storage(), t2.storage())]
         b += [a[0].storage()[0:2]]
-        if test_use_filename:
-            use_name_options = (False, True)
-        else:
-            use_name_options = (False,)
-        for use_name in use_name_options:
+        return b
+
+    def _test_serialization_assert(self, b, c):
+        self.assertEqual(b, c, 0)
+        self.assertTrue(isinstance(c[0], torch.FloatTensor))
+        self.assertTrue(isinstance(c[1], torch.FloatTensor))
+        self.assertTrue(isinstance(c[2], torch.FloatTensor))
+        self.assertTrue(isinstance(c[3], torch.FloatTensor))
+        self.assertTrue(isinstance(c[4], torch.FloatStorage))
+        c[0].fill_(10)
+        self.assertEqual(c[0], c[2], 0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
+        c[1].fill_(20)
+        self.assertEqual(c[1], c[3], 0)
+        self.assertEqual(c[4][1:4], c[5], 0)
+
+        # check that serializing the same storage view object unpickles
+        # it as one object not two (and vice versa)
+        views = c[7]
+        self.assertEqual(views[0]._cdata, views[1]._cdata)
+        self.assertEqual(views[0], views[2])
+        self.assertNotEqual(views[0]._cdata, views[2]._cdata)
+
+        rootview = c[8]
+        self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
+
+    def test_serialization(self):
+        # Test serialization with a real file
+        b = self._test_serialization_data()
+        for use_name in (False, True):
             # Passing filename to torch.save(...) will cause the file to be opened twice,
             # which is not supported on Windows
             if sys.platform == "win32" and use_name:
                 continue
-            with filecontext_lambda() as f:
+            with tempfile.NamedTemporaryFile() as f:
                 handle = f if not use_name else f.name
                 torch.save(b, handle)
                 f.seek(0)
                 c = torch.load(handle)
-            self.assertEqual(b, c, 0)
-            self.assertTrue(isinstance(c[0], torch.FloatTensor))
-            self.assertTrue(isinstance(c[1], torch.FloatTensor))
-            self.assertTrue(isinstance(c[2], torch.FloatTensor))
-            self.assertTrue(isinstance(c[3], torch.FloatTensor))
-            self.assertTrue(isinstance(c[4], torch.FloatStorage))
-            c[0].fill_(10)
-            self.assertEqual(c[0], c[2], 0)
-            self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
-            c[1].fill_(20)
-            self.assertEqual(c[1], c[3], 0)
-            self.assertEqual(c[4][1:4], c[5], 0)
-
-            # check that serializing the same storage view object unpickles
-            # it as one object not two (and vice versa)
-            views = c[7]
-            self.assertEqual(views[0]._cdata, views[1]._cdata)
-            self.assertEqual(views[0], views[2])
-            self.assertNotEqual(views[0]._cdata, views[2]._cdata)
-
-            rootview = c[8]
-            self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
-
-    def test_serialization(self):
-        # Test serialization with a real file
-        self._test_serialization(tempfile.NamedTemporaryFile)
+            self._test_serialization_assert(b, c)
 
     def test_serialization_filelike(self):
         # Test serialization (load and save) with a filelike object
-        self._test_serialization(BytesIOContext, test_use_filename=False)
+        b = self._test_serialization_data()
+        with BytesIOContext() as f:
+            torch.save(b, f)
+            f.seek(0)
+            c = torch.load(f)
+        self._test_serialization_assert(b, c)
 
-    def _test_serialization_offset(self, filecontext_lambda):
+    def test_serialization_gzip(self):
+        # Test serialization with gzip file
+        b = self._test_serialization_data()
+        f1 = tempfile.NamedTemporaryFile(delete=False)
+        f2 = tempfile.NamedTemporaryFile(delete=False)
+        torch.save(b, f1)
+        with open(f1.name, 'rb') as f_in, gzip.open(f2.name, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+
+        with gzip.open(f2.name, 'rb') as f:
+            c = torch.load(f)
+        self._test_serialization_assert(b, c)
+
+    def test_serialization_offset(self):
         a = torch.randn(5, 5)
         i = 41
-        with tempfile.TemporaryFile() as f:
+        for use_name in (False, True):
+            # Passing filename to torch.save(...) will cause the file to be opened twice,
+            # which is not supported on Windows
+            if sys.platform == "win32" and use_name:
+                continue
+            with tempfile.NamedTemporaryFile() as f:
+                handle = f if not use_name else f.name
+                pickle.dump(i, f)
+                torch.save(a, f)
+                f.seek(0)
+                j = pickle.load(f)
+                b = torch.load(f)
+            self.assertTrue(torch.equal(a, b))
+            self.assertEqual(i, j)
+
+    def test_serialization_offset_filelike(self):
+        a = torch.randn(5, 5)
+        i = 41
+        with BytesIOContext() as f:
             pickle.dump(i, f)
             torch.save(a, f)
             f.seek(0)
             j = pickle.load(f)
             b = torch.load(f)
-            self.assertTrue(torch.equal(a, b))
-            self.assertEqual(i, j)
+        self.assertTrue(torch.equal(a, b))
+        self.assertEqual(i, j)
 
-    def test_serialization_offset(self):
-        self._test_serialization_offset(tempfile.TemporaryFile)
+    def test_serialization_offset_gzip(self):
+        a = torch.randn(5, 5)
+        i = 41
+        f1 = tempfile.NamedTemporaryFile(delete=False)
+        f2 = tempfile.NamedTemporaryFile(delete=False)
+        with open(f1.name, 'wb') as f:
+            pickle.dump(i, f)
+            torch.save(a, f)
+        with open(f1.name, 'rb') as f_in, gzip.open(f2.name, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
 
-    def test_serialization_offset_filelike(self):
-        self._test_serialization_offset(BytesIOContext)
+        with gzip.open(f2.name, 'rb') as f:
+            j = pickle.load(f)
+            b = torch.load(f)
+        self.assertTrue(torch.equal(a, b))
+        self.assertEqual(i, j)
 
     def test_half_tensor(self):
         x = torch.randn(5, 5).float()
@@ -6489,6 +6565,30 @@ class TestTorch(TestCase):
                 torch.cuda.FloatTensor,
                 torch.device('cuda', torch.cuda.device_count() - 1)
             )
+
+    @unittest.skipIf(torch.cuda.is_available(), "Testing torch.load on CPU-only machine")
+    @unittest.skipIf(not PY3, "Test tensors were serialized using python 3")
+    def test_load_nonexistent_device(self):
+        # Setup: create a serialized file object with a 'cuda:0' restore location
+        # The following was generated by saving a torch.randn(2, device='cuda') tensor.
+        serialized = (b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9'
+                      b'\x03.\x80\x02}q\x00(X\x10\x00\x00\x00protocol_versionq'
+                      b'\x01M\xe9\x03X\r\x00\x00\x00little_endianq\x02\x88X\n'
+                      b'\x00\x00\x00type_sizesq\x03}q\x04(X\x05\x00\x00\x00shortq'
+                      b'\x05K\x02X\x03\x00\x00\x00intq\x06K\x04X\x04\x00\x00\x00'
+                      b'longq\x07K\x04uu.\x80\x02ctorch._utils\n_rebuild_tensor_v2'
+                      b'\nq\x00((X\x07\x00\x00\x00storageq\x01ctorch\nFloatStorage'
+                      b'\nq\x02X\x0e\x00\x00\x0094919395964320q\x03X\x06\x00\x00'
+                      b'\x00cuda:0q\x04K\x02Ntq\x05QK\x00K\x02\x85q\x06K\x01\x85q'
+                      b'\x07\x89Ntq\x08Rq\t.\x80\x02]q\x00X\x0e\x00\x00\x00'
+                      b'94919395964320q\x01a.\x02\x00\x00\x00\x00\x00\x00\x00\xbb'
+                      b'\x1f\x82\xbe\xea\x81\xd1>')
+
+        buf = io.BytesIO(serialized)
+
+        error_msg = r'Attempting to deserialize object on a CUDA device'
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            _ = torch.load(buf)
 
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)
@@ -7143,6 +7243,19 @@ class TestTorch(TestCase):
         self.assertIsInstance(x * 2, torch.Size)
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
+
+    def test_Size_scalar(self):
+        three = torch.tensor(3)
+        two = torch.tensor(2)
+        x = torch.Size([0, 1, two, three, 4])
+        for i in range(1, 5):
+            self.assertEqual(x[i], i)
+
+    def test_Size_iter(self):
+        for sizes in [iter([1, 2, 3, 4, 5]), range(1, 6)]:
+            x = torch.Size(sizes)
+            for i in range(0, 5):
+                self.assertEqual(x[i], i + 1)
 
     def test_t_not_2d_error(self):
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t())

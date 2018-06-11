@@ -17,24 +17,24 @@ void Linear::reset() {
   bias_ = register_parameter("bias", at::CPU(at::kFloat).empty(out_));
 
   const auto stdv = 1.0 / std::sqrt(weight_.size(1));
-  for (auto& p : parameters()) {
-    p.second.data().uniform_(-stdv, stdv);
+  for (auto& p : this->parameters()) {
+    p->data().uniform_(-stdv, stdv);
   }
 }
 
-variable_list Linear::forward(variable_list input) {
+std::vector<Variable> Linear::forward(std::vector<Variable> input) {
   auto x = input[0];
   if (x.ndimension() == 2 && with_bias_) {
     // Fused op is marginally faster
     AT_ASSERT(x.size(1) == weight_.size(1));
-    return variable_list({at::addmm(bias_, x, weight_.t())});
+    return std::vector<Variable>({at::addmm(bias_, x, weight_.t())});
   }
 
   auto output = x.matmul(weight_.t());
   if (with_bias_) {
     output += bias_;
   }
-  return variable_list({output});
+  return std::vector<Variable>({output});
 }
 } // namespace nn
 } // namespace torch

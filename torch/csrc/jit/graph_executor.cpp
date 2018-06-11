@@ -14,6 +14,8 @@
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
+#include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/loop_unrolling.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
@@ -89,6 +91,22 @@ struct ExecutionPlan {
   std::shared_ptr<Graph> get_graph() const {
     return graph;
   }
+
+  ExecutionPlanState getDebugState() {
+    ExecutionPlanState state;
+    state.f = &f;
+    state.graph = graph.get();
+    if (grad) {
+      state.grad = &grad;
+      state.grad_executor = std::unique_ptr<GraphExecutorState>(
+          new GraphExecutorState(grad_executor.getDebugState()));
+    } else {
+      state.grad = nullptr;
+      state.grad_executor.reset();
+    }
+    return state;
+  }
+
 private:
   // inplace to avoid allocations
   variable_tensor_list unwrapVariables(variable_tensor_list && list) const {
@@ -220,6 +238,22 @@ struct GraphExecutorImpl {
     return it->second.get_graph();
   }
 
+  GraphExecutorState getDebugState() {
+    GraphExecutorState state;
+    state.graph = graph.get();
+    if (autograd_fallback) {
+      state.autograd_fallback = &autograd_fallback;
+      state.autograd_fallback_graph = autograd_fallback_graph.get();
+    } else {
+      state.autograd_fallback = nullptr;
+      state.autograd_fallback_graph = nullptr;
+    }
+    for (auto & entry : plan_cache) {
+      state.execution_plans.emplace(entry.first, entry.second.getDebugState());
+    }
+    return state;
+  }
+
 private:
   friend struct GraphExecutor;
 
@@ -316,6 +350,7 @@ private:
       // do not work on variables
 
       // They also may assume that concrete sizes/strides are availiable
+      UnrollLoops(graph);
 
       //TODO: create peephole optimizations that are safe to run
       // when we are using variables, and when we do not know sizes.
@@ -348,6 +383,7 @@ private:
         CreateAutodiffSubgraphs(*graph_);
       runOptimization(graph_, /*graphMustSupportVariables=*/true);
     }
+    autograd_fallback_graph = graph_;
     autograd_fallback = Code(graph_);
     return autograd_fallback;
   }
@@ -418,6 +454,12 @@ private:
     // decisions to insert/remove undefs nodes and to work before
     // we propagate input shapes.
 
+    // Decompose addmm nodes to add + mm, so expands can be inserted and
+    // gradients accumulated on the backward pass
+    //
+    // In the future, if we need more passes like this, we should convert this
+    // into a generic canonicalization pass.
+    DecomposeAddmm(g);
     // clean up replaceIfUndef nodes
     specializeUndef(*g, spec);
     // clean up additions resulting from nodes that were in fact undefined
@@ -505,6 +547,10 @@ std::shared_ptr<Graph> GraphExecutor::graph() const {
 
 std::shared_ptr<Graph> GraphExecutor::graphFor(const variable_tensor_list& inputs) const {
   return pImpl->graphFor(inputs);
+}
+
+GraphExecutorState GraphExecutor::getDebugState() {
+  return pImpl->getDebugState();
 }
 
 }}

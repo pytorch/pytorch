@@ -17,8 +17,8 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
-#define I_INFO(tensor) getTensorInfo<THCIndexTensor, uint64_t>(state, tensor)
-#define V_INFO(tensor) getTensorInfo<THCTensor, uint64_t>(state, tensor)
+#define I_INFO(tensor) getTensorInfo<int64_t, THCIndexTensor, uint64_t>(state, tensor)
+#define V_INFO(tensor) getTensorInfo<real, THCTensor, uint64_t>(state, tensor)
 
 THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
   THLongStorage *size;

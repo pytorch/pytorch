@@ -209,14 +209,14 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
   THCudaLongTensor_free(state, ignore);
   for (int d = 0; d < nDimI; d++) {
     int64_t max_index_in_dim = THCudaLongTensor_get1d(state, max_indices, d);
-    int64_t dim_size = sizes->data[d];
+    int64_t dim_size = THLongStorage_data(sizes)[d];
     THArgCheck(max_index_in_dim < dim_size, 2,
         "sizes is inconsistent with indices: for dim %d, size is %lld but found index %lld",
         d, (long long)dim_size, (long long)max_index_in_dim);
   }
   for (int d = 0; d < nDimV; d++) {
     int64_t values_size = THCTensor_(size)(state, values, d + 1);
-    int64_t specified_size = sizes->data[nDimI + d];
+    int64_t specified_size = THLongStorage_data(sizes)[nDimI + d];
     THArgCheck(values_size <= specified_size, 2,
         "values and sizes are inconsistent: sizes[%d] is %lld but values.size(%d) is %lld",
         d + nDimI, (long long)specified_size, d + 1, (long long)values_size);
@@ -229,7 +229,7 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
 THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size, THLongStorage *_ignored)
 {
   THCSTensor *self = THCSTensor_(new)(state);
-  THCSTensor_(rawResize)(state, self, size->size, 0, size->data);
+  THCSTensor_(rawResize)(state, self, size->size, 0, THLongStorage_data(size));
   return self;
 }
 
@@ -288,7 +288,7 @@ THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, 
     new_values = THCTensor_(newWithSize1d)(state, nnz);
   } else {
     THLongStorage *size = THCTensor_(newSizeOf)(state, values);
-    size->data[0] = nnz;
+    THLongStorage_data(size)[0] = nnz;
     new_values = THCTensor_(newWithSize)(state, size, NULL);
     THLongStorage_free(size);
   }
@@ -325,7 +325,7 @@ int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, cons
 
 THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, THLongStorage *size)
 {
-  THCSTensor_(rawResize)(state, self, size->size, 0, size->data);
+  THCSTensor_(rawResize)(state, self, size->size, 0, THLongStorage_data(size));
   return self;
 }
 
@@ -484,9 +484,9 @@ void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCST
     THCudaLongTensor_cadd(state, indices, indices, 1, indicesBuffer);
   }
   THLongStorage *viewSize = THLongStorage_newWithSize(1 + mask->nDimensionV);
-  viewSize->data[0] = -1;
+  THLongStorage_data(viewSize)[0] = -1;
   for (int64_t d = 0; d < mask->nDimensionV; d++) {
-    viewSize->data[1 + d] = mask->size[mask->nDimensionI + d];
+    THLongStorage_data(viewSize)[1 + d] = mask->size[mask->nDimensionI + d];
   }
   THCTensor *t_view = THCTensor_(newView)(state, t, viewSize);
   THCTensor_(indexSelect)(state, rValues, t_view, 0, indices);

@@ -8,13 +8,13 @@ namespace torch { namespace nn {
 Functional::Functional(Function function) : function_(std::move(function)) {}
 
 Functional::Functional(std::function<Variable(Variable)> function)
-    : function_([function](variable_list input) {
-        return variable_list({function(input.front())});
+    : function_([function](std::vector<Variable> input) {
+        return std::vector<Variable>({function(input.front())});
       }) {}
 
 void Functional::reset() {}
 
-variable_list Functional::forward(variable_list input) {
+std::vector<Variable> Functional::forward(std::vector<Variable> input) {
   return function_(input);
 }
 }} // namespace torch::nn

@@ -239,7 +239,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
             out = (out, )
         if loss_fn == torch.sum and len(out) != 1:
             raise ValueError(("Model returns {} outputs, but default loss function "
-                             "(torch.sum) can only handle a single output").format(len(out)))
+                              "(torch.sum) can only handle a single output").format(len(out)))
         out_vars, _ = _flatten(out)
         saved_outs = [v.data.clone() for v in out_vars]
         loss = loss_fn(*out)
@@ -367,16 +367,16 @@ def _script_graph(fn, _frames_up=0):
     return _jit_script_compile(ast, rcb)
 
 
-def script(fn, _frames_up=0):
+def script(fn, optimize=True, _frames_up=0):
     graph = _script_graph(fn, _frames_up=_frames_up + 1)
-    return torch._C.GraphExecutor(graph, True)
+    return functools.wraps(fn)(torch._C.GraphExecutor(graph, optimize))
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))
 
 
 def script_method(fn):
-    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn))
+    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn), fn)
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -501,7 +501,7 @@ class OrderedBufferDict(OrderedDictWrapper):
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, types.FunctionType)
+_constant_types = (bool, float, int, types.FunctionType, torch.device, torch.layout, torch.dtype)
 
 
 def _get_valid_constant(v):
@@ -533,11 +533,13 @@ class ScriptMeta(type(torch._C.ScriptModule)):
     # a pybind11 type
     def __init__(cls, name, bases, attrs):
         # find all the script methods
+        cls._original_methods = {}
         methods = []
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
                 delattr(cls, k)
                 methods.append(v)
+                cls._original_methods[v.original_method.__name__] = v.original_method
         # after the user's __init__ register all the script methods
         # with the module
         original_init = getattr(cls, '__init__', lambda self: None)
@@ -570,7 +572,12 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
 
     def __getattr__(self, attr):
         if self._has_method(attr):
-            return self._get_method(attr)
+            if attr in self.__class__._original_methods:
+                original_method = self.__class__._original_methods[attr]
+                script_method = self._get_method(attr)
+                return functools.wraps(original_method)(script_method)
+            else:
+                return self._get_method(attr)
         return Module.__getattr__(self, attr)
 
     def __setattr__(self, attr, value):
@@ -717,12 +724,17 @@ class _ConstSequential(_ConstModuleList):
     def __init__(self, mods):
         super(_ConstSequential, self).__init__(mods._modules.values())
 
-    @script_method
-    def forward(self, input):
-        for m in self:
-            input = m(input)
-        return input
-
+        # we define the forward method via self.define rather than
+        # making it a direct class member (with a @script) annotation
+        # because, in optimized runtime environments where only .pyc files
+        # are shipped, we cant retrieve the source code.
+        # TODO: find a workaround for this and remove this hack
+        self.define("""
+        def forward(self, input):
+            for m in self:
+                input = m(input)
+            return input
+        """)
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

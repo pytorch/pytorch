@@ -64,7 +64,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   return true;
 };
 
-void check_lstm_sizes(variable_list tup) {
+void check_lstm_sizes(std::vector<Variable> tup) {
   // Expect the LSTM to have 64 outputs and 3 layers, with an input of batch
   // 10 and 16 time steps (10 x 16 x n)
 
@@ -111,8 +111,8 @@ TEST_CASE("rnn") {
       // Make sure the outputs match pytorch outputs
       auto model = LSTM(2, 2).build();
       for (auto& v : model->parameters()) {
-        float size = v.second.numel();
-        auto p = static_cast<float*>(v.second.data().storage()->data());
+        float size = v->numel();
+        auto p = static_cast<float*>(v->data().storage()->data());
         for (size_t i = 0; i < size; i++) {
           p[i] = i / size;
         }
