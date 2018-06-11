@@ -243,7 +243,7 @@ Tensor sparse_to_dense(const SparseTensor& self) {
   return dst.add_(self);
 }
 
-void copy_sparse(const SparseTensor& self, const SparseTensor& src) {
+void copy_sparse_(const SparseTensor& self, const SparseTensor& src) {
   if (self.equal(src)) return;
   _raw_resize_sparse(self, src._dimI(), src._dimV(), src.sizes());
   _copy_into_sparse(self, src._indices(), src._values());

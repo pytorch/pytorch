@@ -1522,3 +1522,9 @@
 
 - func: hspmm(Tensor mat1, Tensor mat2) -> Tensor
   variants: function
+
+# This "raw copy" doesn't handle conversions NOR does it handle non-blocking.
+- func: raw_copy_sparse_(Tensor self, Tensor src) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: copy_sparse_

@@ -208,7 +208,7 @@ SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const
   AT_CHECK(t.sizes().equals(src.sizes()), "cadd operands have incompatible sizes");
 
   if (src._nnz() == 0) {
-    return r.copy_(t);
+    return raw_copy_sparse_(r, t);
   }
   if (t._nnz() == 0) {
     return mul_out_sparse_scalar(r, src, value);
