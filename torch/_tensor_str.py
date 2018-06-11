@@ -248,8 +248,8 @@ def _str(self):
         if self.dtype != torch.get_default_dtype() and self.dtype != torch.int64:
             suffix += ', dtype=' + str(self.dtype)
 
-    if suffix == ')':
-        return prefix + tensor_str + suffix
+        formatter = _Formatter(get_summarized_data(self) if summarize else self)
+        tensor_str = _tensor_str(self, indent, formatter, summarize)
 
     if self.grad_fn is not None:
         suffix += ', grad_fn=<{}>'.format(type(self.grad_fn).__name__)
