@@ -178,7 +178,7 @@ struct Environment {
     auto retval = findInThisFrame(ident);
 
     if (!retval && (retval = findInParentFrame(ident)) &&
-        getBlockOwningKind() == prim::Loop) {
+        (getBlockOwningKind() == prim::Loop || getBlockOwningKind() == prim::If)) {
       if(Value* simple_val = asSimple(retval)) {
         retval = createCapturedInput(simple_val, ident);
       }
@@ -759,11 +759,14 @@ private:
       WithInsertPoint guard(b);
       Value* out_val = emitExpr(expr);
       b->registerOutput(out_val);
-      popFrame();
+      return popFrame();
     };
 
-    emit_if_expr(true_block, expr.true_expr());
-    emit_if_expr(false_block, expr.false_expr());
+    auto save_true = emit_if_expr(true_block, expr.true_expr());
+    auto save_false = emit_if_expr(false_block, expr.false_expr());
+
+    save_true->deleteIfStmtCapturedInputs(expr.range());
+    save_false->deleteIfStmtCapturedInputs(expr.range());
 
     // Add op outputs
     auto expr_value = n->addOutput(); // Resulting value
@@ -782,7 +785,6 @@ private:
     // Emit both blocks once to get the union of all mutated values
     auto save_true = emitSingleIfBranch(true_block, stmt.trueBranch());
     save_true->deleteIfStmtCapturedInputs(stmt.range());
-
     auto save_false = emitSingleIfBranch(false_block, stmt.falseBranch());
     save_false->deleteIfStmtCapturedInputs(stmt.range());
 
@@ -826,11 +828,13 @@ private:
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
-      auto tv = save_true->getVar(x, stmt.range());
-      true_block->registerOutput(tv);
-      auto fv = save_false->getVar(x, stmt.range());
-      false_block->registerOutput(fv);
-      environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(tv->type()));
+      // find value in frame without creating vars (avoid using getVar)
+      auto tv = save_true->findInAnyFrame(x);
+      auto tv_val = tv->asValue(stmt.range(),method);
+      true_block->registerOutput(tv_val);
+      auto fv = save_false->findInAnyFrame(x);
+      false_block->registerOutput(fv->asValue(stmt.range(),method));
+      environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(tv_val->type()));
     }
 
   }

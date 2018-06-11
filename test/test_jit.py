@@ -1317,6 +1317,23 @@ class TestScript(TestCase):
         inputs = self._make_scalar_vars([1, -1], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_if_for_in_range(self):
+        def func(a, b):
+            d = 3
+            for _ in range(20):
+                if a > 10:
+                    a = 3 + d
+                else:
+                    b = 3 + d
+                    d = 4
+                c = a + b
+            return d
+
+        self.assertExpected(str(torch.jit.script(func).graph))
+
+        inputs = self._make_scalar_vars([1, -1], torch.int64)
+        self.checkScript(func, inputs, optimize=True)
+
     def test_if_noelse(self):
         def func(a, b):
             if a > 10:
