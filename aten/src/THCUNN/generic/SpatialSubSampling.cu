@@ -10,7 +10,7 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
                          THCTensor *gradOutput,
                          THCTensor *weight,
                          int kW, int kH) {
-  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
+  THCUNN_argCheck(state, input->_dim() == 3 || input->_dim() == 4, 2, input,
                   "3D or 4D input tensor expected but got: %s");
 
   int nInputPlane = THCTensor_(size)(state, weight, 0);
@@ -19,7 +19,7 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
   int dimr = 1;
   int dimp = 0;
 
-  if (input->nDimension == 4) {
+  if (input->_dim() == 4) {
     dimc++;
     dimr++;
     dimp++;
@@ -50,7 +50,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
   THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
   THNN_(SpatialSubSampling_shapeCheck)(state, input, NULL, weight, kW, kH);
 
-  if (input->nDimension == 3) {
+  if (input->_dim() == 3) {
     int64_t nInputCols = input->size[2];
     int64_t nInputRows = input->size[1];
     int64_t nOutputCols = (nInputCols - kW) / dW + 1;
@@ -118,7 +118,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
 
   int nInputPlane = THCTensor_(size)(state, weight, 0);
 
-  if (input->nDimension == 3) {
+  if (input->_dim() == 3) {
     int64_t nInputCols = input->size[2];
     int64_t nInputRows = input->size[1];
 
@@ -198,7 +198,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
 
   int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
 
-  if (input->nDimension == 3) {
+  if (input->_dim() == 3) {
     int64_t nInputCols = input->size[2];
     int64_t nInputRows = input->size[1];
 
