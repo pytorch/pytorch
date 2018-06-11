@@ -16,6 +16,7 @@ def conv_test_cpu():
     # warm up
     for i in range(iters):
         layer(inputs)
+        out.backward(grad)
 
     # record forward time without backward
     time_forward = 0
