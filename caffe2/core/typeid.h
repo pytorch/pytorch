@@ -1,29 +1,64 @@
-#ifndef CAFFE2_CORE_TYPEID_H_
-#define CAFFE2_CORE_TYPEID_H_
+#pragma once
 
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
-#include <map>
+#include <unordered_map>
 #include <mutex>
 #include <type_traits>
+#include <unordered_set>
 #ifdef __GXX_RTTI
-#include <set>
 #include <typeinfo>
 #endif
 
 #include <exception>
 
 #include "caffe2/core/common.h"
+#include "caffe2/utils/IdWrapper.h"
 
-namespace caffe2 {
+namespace c10 {
 
-typedef intptr_t CaffeTypeId;
-std::map<CaffeTypeId, string>& gTypeNames();
-std::set<string>& gRegisteredTypeNames();
+/**
+ * Dynamic type ID of a Tensor argument.  It represents something like CPUFloatTensor, etc.
+ */
+class TypeId final : public guts::IdWrapper<TypeId, intptr_t> {
+public:
+  constexpr explicit TypeId(intptr_t id): IdWrapper(id) {}
+
+  friend std::ostream& operator<<(std::ostream& stream, TypeId typeId);
+  friend bool operator<(TypeId lhs, TypeId rhs);
+
+  // Don't use this default constructor!
+  // Unfortunately, a default constructor needs to be defined because of https://reviews.llvm.org/D41223
+  constexpr TypeId(): IdWrapper(0) {}
+
+  // TODO Can we get rid of uninitialized?
+  static constexpr TypeId uninitialized() {
+    return TypeId(0);
+  }
+};
+
+inline std::ostream& operator<<(std::ostream& stream, TypeId typeId) {
+  return stream << typeId.underlyingId();
+}
+
+// Allow usage in std::map / std::set
+// TODO Disallow this and rather use std::unordered_map/set everywhere
+inline bool operator<(TypeId lhs, TypeId rhs) {
+  return lhs.underlyingId() < rhs.underlyingId();
+}
+
+}
+
+C10_DEFINE_HASH_FOR_IDWRAPPER(c10::TypeId)
+
+namespace c10 {
+
+std::unordered_map<TypeId, std::string>& gTypeNames();
+std::unordered_set<std::string>& gRegisteredTypeNames();
 
 // A utility function to demangle a function name.
-string Demangle(const char* name);
+std::string Demangle(const char* name);
 
 /**
  * Returns the printable name of the type.
@@ -33,27 +68,27 @@ string Demangle(const char* name);
 template <typename T>
 static const char* DemangleType() {
 #ifdef __GXX_RTTI
-  static const string name = Demangle(typeid(T).name());
+  static const std::string name = Demangle(typeid(T).name());
   return name.c_str();
 #else // __GXX_RTTI
   return "(RTTI disabled, cannot show name)";
 #endif // __GXX_RTTI
 }
 
-// A utility function to return an exception string by prepending its exception
+// A utility function to return an exception std::string by prepending its exception
 // type before its what() content.
-string GetExceptionString(const std::exception& e);
+std::string GetExceptionString(const std::exception& e);
 
-std::mutex& gCaffe2TypeRegistrationMutex();
+std::mutex& gTypeRegistrationMutex();
 
 template <typename T>
 struct TypeNameRegisterer {
-  TypeNameRegisterer(CaffeTypeId id, const string& literal_name) {
-    std::lock_guard<std::mutex> guard(gCaffe2TypeRegistrationMutex());
+  TypeNameRegisterer(TypeId id, const std::string& literal_name) {
+    std::lock_guard<std::mutex> guard(gTypeRegistrationMutex());
 #ifdef __GXX_RTTI
     (void)literal_name;
 
-    string name = Demangle(typeid(T).name());
+    std::string name = Demangle(typeid(T).name());
     // If we are in RTTI mode, we will also use this opportunity to do sanity
     // check if there are duplicated ids registered for the same type. This
     // usually happens when one does not do RTLD_GLOBAL, which is often the
@@ -87,47 +122,36 @@ struct TypeNameRegisterer {
  */
 class TypeMeta {
  public:
-  typedef void (*PlacementNew)(void*, size_t);
-  typedef void (*TypedCopy)(const void*, void*, size_t);
-  typedef void (*TypedDestructor)(void*, size_t);
+  using PlacementNew = void (void*, size_t);
+  using TypedCopy = void (const void*, void*, size_t);
+  using TypedDestructor = void (void*, size_t);
   /** Create a dummy TypeMeta object. To create a TypeMeta object for a specific
    * type, use TypeMeta::Make<T>().
    */
-  TypeMeta()
+  TypeMeta() noexcept
       : id_(0), itemsize_(0), ctor_(nullptr), copy_(nullptr), dtor_(nullptr) {}
 
   /**
    * Copy constructor.
    */
-  TypeMeta(const TypeMeta& src)
-      : id_(src.id_),
-        itemsize_(src.itemsize_),
-        ctor_(src.ctor_),
-        copy_(src.copy_),
-        dtor_(src.dtor_) {}
+  TypeMeta(const TypeMeta& src) noexcept = default;
+
   /**
    * Assignment operator.
    */
-  TypeMeta& operator=(const TypeMeta& src) {
-    if (this == &src)
-      return *this;
-    id_ = src.id_;
-    itemsize_ = src.itemsize_;
-    ctor_ = src.ctor_;
-    copy_ = src.copy_;
-    dtor_ = src.dtor_;
-    return *this;
-  }
+  TypeMeta& operator=(const TypeMeta& src) noexcept = default;
+
+  TypeMeta(TypeMeta &&rhs) noexcept = default;
 
  private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
   TypeMeta(
-      CaffeTypeId i,
+      TypeId i,
       size_t s,
-      PlacementNew ctor,
-      TypedCopy copy,
-      TypedDestructor dtor)
+      PlacementNew* ctor,
+      TypedCopy* copy,
+      TypedDestructor* dtor) noexcept
       : id_(i), itemsize_(s), ctor_(ctor), copy_(copy), dtor_(dtor) {}
 
   // Mechanism for throwing errors which can't be prevented at compile time
@@ -140,50 +164,46 @@ class TypeMeta {
   /**
    * Returns the type id.
    */
-  inline const CaffeTypeId& id() const {
+  const TypeId& id() const noexcept {
     return id_;
   }
   /**
    * Returns the size of the item.
    */
-  inline const size_t& itemsize() const {
+  const size_t& itemsize() const noexcept {
     return itemsize_;
   }
   /**
    * Returns the placement new function pointer for individual items.
    */
-  inline PlacementNew ctor() const {
+  PlacementNew* ctor() const noexcept {
     return ctor_;
   }
   /**
    * Returns the typed copy function pointer for individual iterms.
    */
-  inline TypedCopy copy() const {
+  TypedCopy* copy() const noexcept {
     return copy_;
   }
   /**
    * Returns the destructor function pointer for individual items.
    */
-  inline TypedDestructor dtor() const {
+  TypedDestructor* dtor() const noexcept {
     return dtor_;
   }
   /**
    * Returns a printable name for the type.
    */
-  inline const char* name() const {
+  const char* name() const noexcept {
     auto it = gTypeNames().find(id_);
     assert(it != gTypeNames().end());
     return it->second.c_str();
   }
-  inline bool operator==(const TypeMeta& m) const {
-    return (id_ == m.id_);
-  }
-  inline bool operator!=(const TypeMeta& m) const {
-    return (id_ != m.id_);
-  }
+
+  friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
 
   template <typename T>
-  inline bool Match() const {
+  bool Match() const {
     return (id_ == Id<T>());
   }
 
@@ -197,7 +217,7 @@ class TypeMeta {
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  CAFFE2_API static CaffeTypeId Id();
+  CAFFE2_API static TypeId Id();
 
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
@@ -241,7 +261,7 @@ class TypeMeta {
       typename T,
       typename std::enable_if<std::is_default_constructible<T>::value>::type* =
           nullptr>
-  static inline PlacementNew _PickCtor() {
+  static inline PlacementNew* _PickCtor() {
     return _Ctor<T>;
   }
 
@@ -249,7 +269,7 @@ class TypeMeta {
       typename T,
       typename std::enable_if<!std::is_default_constructible<T>::value>::type* =
           nullptr>
-  static inline PlacementNew _PickCtor() {
+  static inline PlacementNew* _PickCtor() {
     return _CtorNotDefault<T>;
   }
 
@@ -280,7 +300,7 @@ class TypeMeta {
       typename T,
       typename std::enable_if<std::is_copy_assignable<T>::value>::type* =
           nullptr>
-  static inline TypedCopy _PickCopy() {
+  static inline TypedCopy* _PickCopy() {
     return _Copy<T>;
   }
 
@@ -288,7 +308,7 @@ class TypeMeta {
       typename T,
       typename std::enable_if<!std::is_copy_assignable<T>::value>::type* =
           nullptr>
-  static inline TypedCopy _PickCopy() {
+  static inline TypedCopy* _PickCopy() {
     return _CopyNotAllowed<T>;
   }
 
@@ -324,25 +344,32 @@ class TypeMeta {
   }
 
  private:
-  CaffeTypeId id_;
+  TypeId id_;
   size_t itemsize_;
-  PlacementNew ctor_;
-  TypedCopy copy_;
-  TypedDestructor dtor_;
+  PlacementNew* ctor_;
+  TypedCopy* copy_;
+  TypedDestructor* dtor_;
 };
+
+inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+  return (lhs.id_ == rhs.id_);
+}
+inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+  return !operator==(lhs, rhs);
+}
 
 /**
  * Register unique id for a type so it can be used in TypeMeta context, e.g. be
  * used as a type for Blob or for Tensor elements.
  *
- * CAFFE_KNOWN_TYPE does explicit instantiation of TypeMeta::Id<T> template
+ * C10_KNOWN_TYPE does explicit instantiation of TypeMeta::Id<T> template
  * function and thus needs to be put in a single translation unit (.cpp file)
  * for a given type T. Other translation units that use type T as a type of the
  * caffe2::Blob or element type of caffe2::Tensor need to depend on the
- * translation unit that contains CAFFE_KNOWN_TYPE declaration via regular
+ * translation unit that contains C10_KNOWN_TYPE declaration via regular
  * linkage dependencies.
  *
- * NOTE: the macro needs to be invoked in ::caffe2 namespace
+ * NOTE: the macro needs to be invoked in ::c10 namespace
  */
 // Implementation note: in MSVC, we will need to prepend the CAFFE2_EXPORT
 // keyword in order to get things compiled properly. in Linux, gcc seems to
@@ -352,25 +379,39 @@ class TypeMeta {
 // and as a result, we define these two macros slightly differently.
 
 #ifdef _MSC_VER
-#define CAFFE_KNOWN_TYPE(T)                              \
-  template <>                                            \
-  CAFFE2_EXPORT CaffeTypeId TypeMeta::Id<T>() {          \
-    static bool type_id_bit[1];                          \
-    static TypeNameRegisterer<T> registerer(             \
-        reinterpret_cast<CaffeTypeId>(type_id_bit), #T); \
-    return reinterpret_cast<CaffeTypeId>(type_id_bit);   \
+#define C10_KNOWN_TYPE(T)                                                     \
+  template <>                                                                 \
+  CAFFE2_EXPORT TypeId TypeMeta::Id<T>() {                                    \
+    static bool type_id_bit[1];                                               \
+    static const TypeId type_id(reinterpret_cast<intptr_t>(type_id_bit));     \
+    static TypeNameRegisterer<T> registerer(                                  \
+        type_id, #T);                                                         \
+    return type_id;                                                           \
   }
 #else // _MSC_VER
-#define CAFFE_KNOWN_TYPE(T)                              \
-  template <>                                            \
-  CaffeTypeId TypeMeta::Id<T>() {                        \
-    static bool type_id_bit[1];                          \
-    static TypeNameRegisterer<T> registerer(             \
-        reinterpret_cast<CaffeTypeId>(type_id_bit), #T); \
-    return reinterpret_cast<CaffeTypeId>(type_id_bit);   \
+#define C10_KNOWN_TYPE(T)                                                     \
+  template <>                                                                 \
+  TypeId TypeMeta::Id<T>() {                                                  \
+      static bool type_id_bit[1];                                             \
+    static const TypeId type_id(reinterpret_cast<intptr_t>(type_id_bit));     \
+    static TypeNameRegisterer<T> registerer(                                  \
+        type_id, #T);                                                         \
+    return type_id;                                                           \
   }
 #endif
 
-} // namespace caffe2
+}
 
-#endif // CAFFE2_CORE_TYPEID_H_
+// Define adapters for legacy code
+namespace caffe2 {
+using CaffeTypeId = c10::TypeId;
+using TypeMeta = c10::TypeMeta;
+
+// Needs to be called from ::caffe2 namespace
+#define CAFFE_KNOWN_TYPE(T)                              \
+  } namespace c10 {                                      \
+  using namespace ::caffe2;                              \
+  C10_KNOWN_TYPE(T)                                      \
+  } namespace caffe2 {
+
+}

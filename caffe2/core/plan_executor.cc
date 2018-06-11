@@ -100,7 +100,7 @@ std::function<bool(int64_t)> getContinuationTest(
 
 // if the blob doesn't exist or is not initiaized, return false
 inline bool getShouldStop(const Blob* b) {
-  if (!b || !b->meta().id()) { // not exist or uninitialized
+  if (!b || b->meta().id() == c10::TypeId::uninitialized()) { // not exist or uninitialized
     return false;
   }
 
@@ -418,7 +418,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           } catch (const std::exception& ex) {
             std::lock_guard<std::mutex> guard(exception_mutex);
             if (!first_exception.size()) {
-              first_exception = GetExceptionString(ex);
+              first_exception = c10::GetExceptionString(ex);
               LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
             }
             compiledStep->gotFailure = true;
