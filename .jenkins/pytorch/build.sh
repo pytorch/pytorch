@@ -28,7 +28,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   rm -rf pyHIPIFY || true
   git clone https://github.com/ROCm-Developer-Tools/pyHIPIFY.git
   chmod a+x pyHIPIFY/*.py
-  sudo cp pyHIPIFY/*.py /opt/rocm/bin
+  sudo cp -p pyHIPIFY/*.py /opt/rocm/bin
   # TODO: Eliminate use of python3 here
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python3 "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
