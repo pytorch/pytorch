@@ -96,7 +96,8 @@ PyObject* c10d_init(PyObject* _unused) {
                 return pg.broadcast(xs, opts);
               },
               py::arg("tensor"),
-              py::arg("root"))
+              py::arg("root"),
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allreduce",
               &::c10d::ProcessGroup::allreduce,
@@ -111,7 +112,8 @@ PyObject* c10d_init(PyObject* _unused) {
                 return pg.allreduce(xs, opts);
               },
               py::arg("tensor"),
-              py::arg("op") = ::c10d::ReduceOp::SUM);
+              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup)
