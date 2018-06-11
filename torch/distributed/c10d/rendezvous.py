@@ -1,4 +1,7 @@
-from urllib.parse import urlparse
+try:
+    from urllib.parse import urlparse
+except ImportError:
+    from urlparse import urlparse
 
 from torch.distributed import c10d
 
