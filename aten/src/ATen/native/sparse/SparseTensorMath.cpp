@@ -426,36 +426,6 @@ SparseTensor& sub_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar a
 // mul(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 
-// Internal slice operation
-
-// NB: This function used to take in buffers which can be reused across calls;
-// we dropped it because there is no select_out implementation at the moment
-// NB: This function is called in a tight loop!
-template <typename scalar_t>
-static void _mul_slice_sparse(
-    const Tensor& dst,
-    TensorAccessor<scalar_t, 1> dst_accessor,
-    const Tensor& src1,
-    TensorAccessor<scalar_t, 1> src1_accessor,
-    const Tensor& src2,
-    TensorAccessor<scalar_t, 1> src2_accessor,
-    int64_t dim,
-    int64_t dstIdx,
-    int64_t src1Idx,
-    int64_t src2Idx
-    ) {
-  if (src1.dim() > 1) {
-    Tensor src1Buffer = src1.select(dim, src1Idx);
-    Tensor src2Buffer = src2.select(dim, src2Idx);
-    Tensor dstBuffer = dst.select(dim, dstIdx);
-    dstBuffer.addcmul_(src1Buffer, src2Buffer);
-  } else {
-    dst_accessor[dstIdx] = src1_accessor[src1Idx] * src2_accessor[src2Idx];
-  }
-}
-
-// NB: divslice was removed as dead code
-
 SparseTensor& s_mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const SparseTensor& src_) {
   AT_CHECK(t_.sizes().equals(src_.sizes()), "cmul operands have incompatible sizes");
   if (src_._nnz() == 0 || t_._nnz() == 0) {
@@ -480,41 +450,60 @@ SparseTensor& s_mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, cons
 
   int64_t match, d;
   int64_t r_i = 0, t_i = 0, s_i = 0;
+
   auto t_indices_accessor = t_indices.accessor<int64_t, 2>();
   auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
   auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
-  AT_DISPATCH_ALL_TYPES(
-      r_values.type(), "mul_out_sparse", [&] {
-        auto r_accessor = r_values.accessor<scalar_t, 1>();
-        auto t_accessor = t_values.accessor<scalar_t, 1>();
-        auto s_accessor = s_values.accessor<scalar_t, 1>();
-
-        while (t_i < t_nnz && s_i < s_nnz) {
-          match = 1;
-          for (d = 0; d < dimI; d++) {
-            if (t_indices_accessor[d][t_i] < src_indices_accessor[d][s_i]) {
-              t_i++;
-              match = 0;
-              break;
-            }
-            if (t_indices_accessor[d][t_i] > src_indices_accessor[d][s_i]) {
-              s_i++;
-              match = 0;
-              break;
-            }
-          }
-          if (!match) continue;
-          for (d = 0; d < dimI; d++) {
-            r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
-          }
-          _mul_slice_sparse<scalar_t>(r_values, r_accessor, t_values, t_accessor, s_values, s_accessor, 0, r_i, t_i, s_i);
-          r_i++;
-          t_i++;
-          s_i++;
-        }
+  // Check if we can find matching indices, and if so, write an
+  // entry to the result indices vector.  Returns true if matching
+  // indices were found.
+  auto index_preamble = [&]() {
+    match = 1;
+    for (d = 0; d < dimI; d++) {
+      if (t_indices_accessor[d][t_i] < src_indices_accessor[d][s_i]) {
+        t_i++;
+        match = 0;
+        break;
       }
-  );
+      if (t_indices_accessor[d][t_i] > src_indices_accessor[d][s_i]) {
+        s_i++;
+        match = 0;
+        break;
+      }
+    }
+    if (!match) return false;
+    for (d = 0; d < dimI; d++) {
+      r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
+    }
+    return true;
+  };
+
+  if (t_values.dim() > 1) {
+    while (t_i < t_nnz && s_i < s_nnz) {
+      if (!index_preamble()) continue;
+      r_values.select(0, r_i).addcmul_(t_values.select(0, t_i), s_values.select(0, s_i));
+      r_i++;
+      t_i++;
+      s_i++;
+    }
+  } else {
+    AT_DISPATCH_ALL_TYPES(
+        r_values.type(), "mul_out_sparse", [&] {
+          auto r_accessor = r_values.accessor<scalar_t, 1>();
+          auto t_accessor = t_values.accessor<scalar_t, 1>();
+          auto s_accessor = s_values.accessor<scalar_t, 1>();
+
+          while (t_i < t_nnz && s_i < s_nnz) {
+            if (!index_preamble()) continue;
+            r_accessor[r_i] = t_accessor[t_i] * s_accessor[s_i];
+            r_i++;
+            t_i++;
+            s_i++;
+          }
+        }
+    );
+  }
 
   _get_sparse_impl(r)->set_nnz(r_i);
   _get_sparse_impl(r)->set_coalesced(true);
