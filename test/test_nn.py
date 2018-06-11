@@ -33,7 +33,6 @@ from common_cuda_utils import skipIfNoCuda, skipIfNoMultiGpu, skipIfNoCudnn, ski
 if __name__ == '__main__':
     from common_cuda import TEST_CUDA, TEST_CUDNN
 
-
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, loss_reference_fns, get_size_average, \
     get_weight, smoothl1loss_reference, kldivloss_reference
@@ -7510,53 +7509,6 @@ new_module_tests = [
 ]
 
 
-for test_params in module_tests + new_module_tests:
-    # TODO: CUDA is not implemented yet
-    if 'constructor' not in test_params:
-        name = test_params.pop('module_name')
-        test_params['constructor'] = getattr(nn, name)
-    decorator = test_params.pop('decorator', None)
-    test = NewModuleTest(**test_params)
-    add_test(test, decorator)
-    if 'check_eval' in test_params:
-        # create a new test that is identical but that sets module.training to False
-        desc = test_params.get('desc', None)
-        test_params['desc'] = 'eval' if desc is None else desc + '_eval'
-
-        def gen_eval_constructor(constructor):
-            def eval_constructor(*args, **kwargs):
-                cons = constructor(*args, **kwargs)
-                cons.training = False
-                return cons
-            eval_constructor.__name__ = constructor.__name__
-            return eval_constructor
-
-        test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
-        test = NewModuleTest(**test_params)
-        add_test(test, decorator)
-
-for test_params in criterion_tests + new_criterion_tests:
-    name = test_params.pop('module_name')
-    test_params['constructor'] = getattr(nn, name)
-    test = NewCriterionTest(**test_params)
-    decorator = test_params.pop('decorator', None)
-    add_test(test, decorator)
-    if 'check_no_size_average' in test_params:
-        desc = test_params.get('desc', None)
-        test_params['desc'] = 'no_size_average' if desc is None else desc + '_no_size_average'
-
-        def gen_no_size_average_constructor(constructor):
-            def no_size_average_constructor(*args, **kwargs):
-                cons = constructor(*args, size_average=False, **kwargs)
-                return cons
-            no_size_average_constructor.__name__ = constructor.__name__
-            return no_size_average_constructor
-
-        test_params['constructor'] = gen_no_size_average_constructor(test_params['constructor'])
-        test = NewCriterionTest(**test_params)
-        add_test(test, decorator)
-
-
 class UnpoolingNet(nn.Module):
     def __init__(self, pool, unpool):
         super(UnpoolingNet, self).__init__()
@@ -7567,38 +7519,82 @@ class UnpoolingNet(nn.Module):
         return self.unpool(*self.pool(input))
 
 
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool1d(2, return_indices=True),
-        nn.MaxUnpool1d(2)),
-    input_size=(1, 1, 4),
-    fullname='MaxUnpool1d_net',))
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool2d(2, return_indices=True),
-        nn.MaxUnpool2d(2)),
-    input_size=(1, 1, 2, 4),
-    fullname='MaxUnpool2d_net',))
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool3d(2, return_indices=True),
-        nn.MaxUnpool3d(2)),
-    input_size=(1, 1, 2, 4, 6),
-    fullname='MaxUnpool3d_net',
-    check_gradgrad=False,))
-
-
 class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
     def __call__(self, input):
         t = torch.tensor([0, 1, 4, 8]).to(input.device)
         return nn.AdaptiveLogSoftmaxWithLoss.__call__(self, input, t).output
 
 
-add_test(NewModuleTest(
-    constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
-    input_size=(4, 16),
-    fullname='AdaptiveLogSoftmax'))
-
-
 if __name__ == '__main__':
+    for test_params in module_tests + new_module_tests:
+        # TODO: CUDA is not implemented yet
+        if 'constructor' not in test_params:
+            name = test_params.pop('module_name')
+            test_params['constructor'] = getattr(nn, name)
+        decorator = test_params.pop('decorator', None)
+        test = NewModuleTest(**test_params)
+        add_test(test, decorator)
+        if 'check_eval' in test_params:
+            # create a new test that is identical but that sets module.training to False
+            desc = test_params.get('desc', None)
+            test_params['desc'] = 'eval' if desc is None else desc + '_eval'
+
+            def gen_eval_constructor(constructor):
+                def eval_constructor(*args, **kwargs):
+                    cons = constructor(*args, **kwargs)
+                    cons.training = False
+                    return cons
+                eval_constructor.__name__ = constructor.__name__
+                return eval_constructor
+
+            test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
+            test = NewModuleTest(**test_params)
+            add_test(test, decorator)
+
+    for test_params in criterion_tests + new_criterion_tests:
+        name = test_params.pop('module_name')
+        test_params['constructor'] = getattr(nn, name)
+        test = NewCriterionTest(**test_params)
+        decorator = test_params.pop('decorator', None)
+        add_test(test, decorator)
+        if 'check_no_size_average' in test_params:
+            desc = test_params.get('desc', None)
+            test_params['desc'] = 'no_size_average' if desc is None else desc + '_no_size_average'
+
+            def gen_no_size_average_constructor(constructor):
+                def no_size_average_constructor(*args, **kwargs):
+                    cons = constructor(*args, size_average=False, **kwargs)
+                    return cons
+                no_size_average_constructor.__name__ = constructor.__name__
+                return no_size_average_constructor
+
+            test_params['constructor'] = gen_no_size_average_constructor(test_params['constructor'])
+            test = NewCriterionTest(**test_params)
+            add_test(test, decorator)
+
+    add_test(NewModuleTest(
+        constructor=lambda: UnpoolingNet(
+            nn.MaxPool1d(2, return_indices=True),
+            nn.MaxUnpool1d(2)),
+        input_size=(1, 1, 4),
+        fullname='MaxUnpool1d_net',))
+    add_test(NewModuleTest(
+        constructor=lambda: UnpoolingNet(
+            nn.MaxPool2d(2, return_indices=True),
+            nn.MaxUnpool2d(2)),
+        input_size=(1, 1, 2, 4),
+        fullname='MaxUnpool2d_net',))
+    add_test(NewModuleTest(
+        constructor=lambda: UnpoolingNet(
+            nn.MaxPool3d(2, return_indices=True),
+            nn.MaxUnpool3d(2)),
+        input_size=(1, 1, 2, 4, 6),
+        fullname='MaxUnpool3d_net',
+        check_gradgrad=False,))
+
+    add_test(NewModuleTest(
+        constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
+        input_size=(4, 16),
+        fullname='AdaptiveLogSoftmax'))
+
     run_tests()
