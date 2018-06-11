@@ -115,6 +115,8 @@ public:
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool cachePlanCuFFT() const;
+  void setCachePlanCuFFT(bool);
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Backend::NumOptions)];
 private:
@@ -128,6 +130,7 @@ private:
       lazyInitCUDA();
   }
   std::once_flag thc_init;
+  bool caching_plan_cufft = false;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;

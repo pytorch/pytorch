@@ -5298,6 +5298,11 @@ The inverse of this function is :func:`~torch.ifft`.
     For CPU tensors, this method is currently only available with MKL. Check
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
+.. note::
+    For CUDA tensors, setting ``torch.backends.cuda.cufft_cache_plan = True``
+    turns on cuFFT plan caching, and thus speed up repeatedly running FFT
+    methods on tensors of same shape and strides with same figurations.
+
 Arguments:
     input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
         dimensions
@@ -5387,6 +5392,11 @@ The inverse of this function is :func:`~torch.fft`.
     For CPU tensors, this method is currently only available with MKL. Check
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
+.. note::
+    For CUDA tensors, setting ``torch.backends.cuda.cufft_cache_plan = True``
+    turns on cuFFT plan caching, and thus speed up repeatedly running FFT
+    methods on tensors of same shape and strides with same figurations.
+
 Arguments:
     input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
         dimensions
@@ -5465,6 +5475,11 @@ The inverse of this function is :func:`~torch.irfft`.
     For CPU tensors, this method is currently only available with MKL. Check
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
+.. note::
+    For CUDA tensors, setting ``torch.backends.cuda.cufft_cache_plan = True``
+    turns on cuFFT plan caching, and thus speed up repeatedly running FFT
+    methods on tensors of same shape and strides with same figurations.
+
 Arguments:
     input (Tensor): the input tensor of at least :attr:`signal_ndim` dimensions
     signal_ndim (int): the number of dimensions in each signal.
@@ -5534,6 +5549,11 @@ The inverse of this function is :func:`~torch.rfft`.
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Check
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
+
+.. note::
+    For CUDA tensors, setting ``torch.backends.cuda.cufft_cache_plan = True``
+    turns on cuFFT plan caching, and thus speed up repeatedly running FFT
+    methods on tensors of same shape and strides with same figurations.
 
 Arguments:
     input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``

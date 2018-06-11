@@ -6,6 +6,7 @@ import unittest
 import sys
 from itertools import repeat
 import os
+from contextlib import contextmanager
 
 import torch
 import torch.cuda
@@ -1387,6 +1388,18 @@ class TestCuda(TestCase):
 
     def test_fft_ifft_rfft_irfft(self):
         TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        @contextmanager
+        def enable_plan_cache():
+            original = torch.backends.cuda.cufft_cache_plan
+            torch.backends.cuda.cufft_cache_plan = True
+            yield
+            torch.backends.cuda.cufft_cache_plan = original
+
+        with enable_plan_cache():
+            # run test twice to make sure that we use cache
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
     def test_stft(self):
         TestTorch._test_stft(self, device=torch.device('cuda'))

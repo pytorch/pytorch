@@ -353,6 +353,20 @@ PyObject *THPModule_benchmarkCuDNN(PyObject *_unused)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setCachePlanCuFFT(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "_cufft_set_cache_plan expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setCachePlanCuFFT(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_cachePlanCuFFT(PyObject *_unused)
+{
+  if (at::globalContext().cachePlanCuFFT()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
 PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
   THPUtils_assert(PyBool_Check(arg), "flush_denormal expects a bool, "
           "but got %s", THPUtils_typename(arg));
@@ -414,6 +428,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  NULL},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     NULL},
   {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  NULL},
+  {"_get_cufft_cache_plan", (PyCFunction)THPModule_cachePlanCuFFT, METH_NOARGS,     NULL},
+  {"_set_cufft_cache_plan", (PyCFunction)THPModule_setCachePlanCuFFT, METH_O,  NULL},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},

@@ -36,7 +36,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
     throw std::runtime_error(ss.str());
   }
 
-  auto signal_tensor_ndim = signal_ndim + static_cast<int>(complex_input);  // add complex dim
+  auto signal_tensor_ndim = signal_ndim + static_cast<int64_t>(complex_input);  // add complex dim
   if (self.dim() < signal_tensor_ndim) {
     std::ostringstream ss;
     ss << "Given signal_ndim=" << signal_ndim << ", expected an input tensor "
@@ -83,7 +83,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
        << signal_ndim << "D, but got signal_sizes=" << signal_sizes;
     throw std::runtime_error(ss.str());
   }
-  std::vector<int64_t> output_sizes(signal_ndim + 1 + static_cast<int>(complex_output));
+  std::vector<int64_t> output_sizes(signal_ndim + 1 + static_cast<int64_t>(complex_output));
   output_sizes[0] = input.size(0);  // batch size
   std::vector<int64_t> checked_signal_sizes(signal_ndim);
   for (int64_t i = 0; i < signal_ndim; i++) {
@@ -133,7 +133,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
     // slightly faster path for non-batch mode
     output = output.squeeze(0);
   } else if (batch_ndim > 1) {
-    auto output_ndim = self.dim() + static_cast<int>(complex_output) - static_cast<int>(complex_input);
+    auto output_ndim = self.dim() + static_cast<int64_t>(complex_output) - static_cast<int64_t>(complex_input);
     std::vector<int64_t> unflatten_output_shape(output_ndim);
     std::copy(self_shape.begin(), self_shape.begin() + batch_ndim, unflatten_output_shape.begin());
     std::copy(output_sizes.begin() + 1, output_sizes.end(), unflatten_output_shape.begin() + batch_ndim);

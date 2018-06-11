@@ -76,6 +76,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 
 #include "THC/THC.h"
 
+#include <ATen/third_party/ParamsMap.h>
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
@@ -264,9 +265,6 @@ struct ConvolutionParams
   // NB: transposed purposely omitted: transposed just swaps
   // forward and backward, so you can reuse the benchmark entry,
 };
-// ConvolutionParams must be a POD because we read out its memory
-// contenst as char* when hashing
-static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
 
 // NB: This can't be a constructor, because then ConvolutionParams
 // would not be a POD anymore.
@@ -321,48 +319,8 @@ struct ConvolutionArgs {
 //
 // ---------------------------------------------------------------------
 
-// Hashing machinery for ConvolutionParams
-struct ParamsHash {
-  size_t operator()(const ConvolutionParams& params) const {
-    auto ptr = reinterpret_cast<const uint8_t*>(&params);
-    uint32_t value = 0x811C9DC5;
-    for (int i = 0; i < (int)sizeof(ConvolutionParams); ++i) {
-      value ^= ptr[i];
-      value *= 0x01000193;
-    }
-    return (size_t)value;
-  }
-};
-
-struct ParamsEqual {
-  bool operator()(const ConvolutionParams& a, const ConvolutionParams& b) const {
-    auto ptr1 = reinterpret_cast<const uint8_t*>(&a);
-    auto ptr2 = reinterpret_cast<const uint8_t*>(&b);
-    return memcmp(ptr1, ptr2, sizeof(ConvolutionParams)) == 0;
-  }
-};
-
-// TODO: Use something less heavy duty than a big honking mutex
 template <typename T>
-struct BenchmarkCache {
-  std::mutex mutex;
-  std::unordered_map<ConvolutionParams, T, ParamsHash, ParamsEqual> map;
-
-  bool find(const ConvolutionParams& params, T* results) {
-    std::lock_guard<std::mutex> guard(mutex);
-    auto it = map.find(params);
-    if (it == map.end()) {
-      return false;
-    }
-    *results = it->second;
-    return true;
-  }
-
-  void insert(const ConvolutionParams& params, const T& results) {
-    std::lock_guard<std::mutex> guard(mutex);
-    map[params] = results;
-  }
-};
+using BenchmarkCache = ParamsMap<ConvolutionParams, T>;
 
 BenchmarkCache<cudnnConvolutionFwdAlgo_t> fwd_algos;
 BenchmarkCache<cudnnConvolutionBwdDataAlgo_t> bwd_data_algos;
@@ -715,6 +673,9 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   }
   cache.insert(args.params, *algo);
 
+  // These two lines frees the cached blocks in our caching allocator. They are
+  // needed here because the above benchmarking uses a huge amount of memory,
+  // e.g. a few GBs.
   THCDeviceAllocator* allocator = THCCachingAllocator_get();
   CUDA_CHECK(allocator->emptyCache(allocator->state));
 }
