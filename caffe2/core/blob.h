@@ -101,12 +101,10 @@ class Blob {
    * Reset().
    */
   template <class T>
-  T* GetMutable(bool* is_new_object=nullptr) {
+  T* GetMutable() {
     if (IsType<T>()) {
-      if (is_new_object) *is_new_object = false;
       return static_cast<T*>(pointer_);
     } else {
-      if (is_new_object) *is_new_object = true;
       VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<T>();
       return Reset<T>(new T());
     }

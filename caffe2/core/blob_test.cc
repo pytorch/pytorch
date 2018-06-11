@@ -85,22 +85,6 @@ TEST(BlobTest, Blob) {
   EXPECT_FALSE(blob.IsType<int>());
 }
 
-TEST(BlobTest, BlobNewObjectFlag) {
-  Blob blob;
-
-  bool is_new_object = true;
-
-  blob.GetMutable<int>(&is_new_object);
-  EXPECT_TRUE(is_new_object);
-  blob.GetMutable<int>(&is_new_object);
-  EXPECT_FALSE(is_new_object);
-
-  blob.GetMutable<BlobTestFoo>(&is_new_object);
-  EXPECT_TRUE(is_new_object);
-  blob.GetMutable<BlobTestFoo>(&is_new_object);
-  EXPECT_FALSE(is_new_object);
-}
-
 TEST(BlobTest, BlobUninitialized) {
   Blob blob;
   ASSERT_THROW(blob.Get<int>(), EnforceNotMet);
