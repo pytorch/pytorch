@@ -5,6 +5,9 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(
     Sub,
     BinaryElementwiseOp<NumericTypes, CPUContext, SubFunctor<CPUContext>>);
+
+#if !CAFFE2_MOBILE
+
 REGISTER_CPU_OPERATOR(
     SubGradient,
     BinaryElementwiseGradientOp<
@@ -29,5 +32,7 @@ class GetSubGradient final : public GradientMakerBase {
 } // namespace
 
 REGISTER_GRADIENT(Sub, GetSubGradient);
+
+#endif // !CAFFE2_MOBILE
 
 } // namespace caffe2
