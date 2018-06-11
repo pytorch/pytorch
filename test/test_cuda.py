@@ -1344,17 +1344,14 @@ class TestCuda(TestCase):
     def _select_broadcastable_dims(dims_full=None):
         return TestTorch._select_broadcastable_dims(dims_full)
 
-    # @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     @skipIfNoMagma
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
-    # @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     @skipIfNoMagma
     def test_gesv_batched(self):
         TestTorch._test_gesv_batched(self, lambda t: t.cuda())
 
-    # @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     @skipIfNoMagma
     def test_gesv_batched_dims(self):
         TestTorch._test_gesv_batched_dims(self, lambda t: t.cuda())
@@ -1629,7 +1626,6 @@ class TestCuda(TestCase):
         test(True)
         test(False)
 
-    # @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     @skipIfNoMagma
     def test_symeig(self):
         # Small case
@@ -1658,7 +1654,6 @@ class TestCuda(TestCase):
     def test_diagflat(self):
         TestTorch._test_diagflat(self, dtype=torch.float32, device='cuda')
 
-    # @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     @skipIfNoMagma
     def test_trtrs(self):
         TestTorch._test_trtrs(self, lambda t: t.cuda())

@@ -335,7 +335,6 @@ class TestDataLoader(TestCase):
         self.assertEqual(len(dataloader_seq), 5)
         self.assertEqual(len(dataloader_shuffle), 5)
 
-    # @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @skipIfNoCuda
     def test_sequential_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
@@ -440,7 +439,6 @@ class TestDataLoader(TestCase):
         self._test_batch_sampler()
         self._test_batch_sampler(num_workers=4)
 
-    # @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @skipIfNoCuda
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
@@ -471,7 +469,6 @@ class TestDataLoader(TestCase):
         self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
 
     @unittest.skipIf(IS_WINDOWS, "FIXME: stuck test")
-    # @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @skipIfNoCuda
     def test_partial_workers(self):
         "check that workers exit even if the iterator is not exhausted"
@@ -523,7 +520,6 @@ class TestDataLoader(TestCase):
     @unittest.skipIf(sys.version_info[0] == 2,
                      "spawn start method is not supported in Python 2, \
                      but we need it for creating another process with CUDA")
-    # @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @skipIfNoCuda
     def test_manager_unclean_exit(self):
         '''there might be ConnectionResetError or leaked semaphore warning (due to dirty process exit), \
@@ -627,7 +623,6 @@ class TestStringDataLoader(TestCase):
     def setUp(self):
         self.dataset = StringDataset()
 
-    # @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @skipIfNoCuda
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
@@ -671,7 +666,6 @@ class TestDictDataLoader(TestCase):
             self.assertEqual(n[0], idx)
             self.assertEqual(n[1], idx + 1)
 
-    # @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @skipIfNoCuda
     def test_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
