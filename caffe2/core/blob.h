@@ -102,11 +102,24 @@ class Blob {
    */
   template <class T>
   T* GetMutable() {
+    static_assert(
+        std::is_default_constructible<T>::value,
+        "GetMutable can't be called with non-default-constructible types. "
+        "Try using specialized methods");
     if (IsType<T>()) {
       return static_cast<T*>(pointer_);
     } else {
       VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<T>();
       return Reset<T>(new T());
+    }
+  }
+
+  template <class T>
+  T* GetMutableOrNull() {
+    if (IsType<T>()) {
+      return static_cast<T*>(pointer_);
+    } else {
+      return nullptr;
     }
   }
 
