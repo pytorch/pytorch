@@ -5,6 +5,8 @@
 
 namespace caffe2 {
 
+#if !CAFFE2_MOBILE
+
 namespace {
 
 template <typename TGrad, typename TIn, typename TOut>
@@ -89,9 +91,14 @@ bool DivFunctor<CPUContext>::Backward(
   return true;
 }
 
+#endif // !CAFFE2_MOBILE
+
 REGISTER_CPU_OPERATOR(
     Div,
     BinaryElementwiseOp<NumericTypes, CPUContext, DivFunctor<CPUContext>>);
+
+#if !CAFFE2_MOBILE
+
 REGISTER_CPU_OPERATOR(
     DivGradient,
     BinaryElementwiseGradientOp<
@@ -116,5 +123,7 @@ class GetDivGradient final : public GradientMakerBase {
 } // namespace
 
 REGISTER_GRADIENT(Div, GetDivGradient);
+
+#endif // !CAFFE2_MOBILE
 
 } // namespace caffe2

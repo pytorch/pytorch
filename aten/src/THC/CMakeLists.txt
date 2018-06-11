@@ -47,7 +47,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathScan.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorIndex.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorConv.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorTopK.cu
@@ -71,7 +70,6 @@ INSTALL(FILES
           THCTensorCopy.hpp
           THCTensorRandom.h
           THCTensorMath.h
-          THCTensorConv.h
           THCApply.cuh
           THCReduce.cuh
           THCReduceAll.cuh

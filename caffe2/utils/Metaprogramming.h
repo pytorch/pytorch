@@ -4,6 +4,7 @@
 #include <array>
 #include <functional>
 #include "caffe2/utils/TypeList.h"
+#include "caffe2/utils/Array.h"
 
 namespace c10 { namespace guts {
 
@@ -100,14 +101,14 @@ namespace detail {
 
 template<class ResultType, size_t num_results> struct filter_map_ {
    template<template <class> class Condition, class Mapper, class... Args, size_t... I>
-   static std::array<ResultType, num_results> call(const Mapper& mapper, guts::index_sequence<I...>, Args&&... args) {
-     return std::array<ResultType, num_results> { mapper(extract_arg_by_filtered_index<Condition, I>(std::forward<Args>(args)...))... };
+   static guts::array<ResultType, num_results> call(const Mapper& mapper, guts::index_sequence<I...>, Args&&... args) {
+     return guts::array<ResultType, num_results> { mapper(extract_arg_by_filtered_index<Condition, I>(std::forward<Args>(args)...))... };
    }
 };
 template<class ResultType> struct filter_map_<ResultType, 0> {
   template<template <class> class Condition, class Mapper, class... Args, size_t... I>
-  static std::array<ResultType, 0> call(const Mapper& /*mapper*/, guts::index_sequence<I...>, Args&&... /*args*/) {
-    return std::array<ResultType, 0> { };
+  static guts::array<ResultType, 0> call(const Mapper& /*mapper*/, guts::index_sequence<I...>, Args&&... /*args*/) {
+    return guts::array<ResultType, 0> { };
   }
 };
 }

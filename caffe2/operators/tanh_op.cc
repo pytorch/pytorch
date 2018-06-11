@@ -22,6 +22,8 @@ bool TanhFunctor<CPUContext>::operator()<float>(
   return true;
 }
 
+#if !CAFFE2_MOBILE
+
 template <>
 template <typename T>
 bool TanhGradientFunctor<CPUContext>::Forward(
@@ -39,12 +41,17 @@ bool TanhGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
+#endif // !CAFFE2_MOBILE
+
 REGISTER_CPU_OPERATOR(
     Tanh,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         TanhFunctor<CPUContext>>);
+
+#if !CAFFE2_MOBILE
+
 REGISTER_CPU_OPERATOR(
     TanhGradient,
     BinaryElementwiseOp<
@@ -136,5 +143,7 @@ class GetTanhGradient : public GradientMakerBase {
 } // namespace
 
 REGISTER_GRADIENT(Tanh, GetTanhGradient);
+
+#endif // !CAFFE2_MOBILE
 
 } // namespace caffe2
