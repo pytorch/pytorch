@@ -110,6 +110,14 @@
 - func: arange_out(Tensor result, Scalar end) -> Tensor
   variants: function
 
+# This function is a temporary hack to allow tracing of arange like constructs with dynamic
+# bounds on arange.  Normal arange is not traceable because it does not take any tensor inputs;
+# if the range you need is based on another tensor, calling this function directly will
+# preserve tracing.  Get rid of this when arange can directly take tensors for bounds
+# (so that it can be traced directly).
+- func: _dim_arange(Tensor like, int64_t dim) -> Tensor
+  variants: function
+
 # `argmin` and `argmax` are exposed in C++ but not in Python, where we only
 # expose `_argmin` and `_argmax` (which call the first versions). In Python, we
 # then define our own `argmax` and `argmin` that handle passing `dim=None`,
