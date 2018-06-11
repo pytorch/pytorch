@@ -303,6 +303,104 @@ class TestCaffe2Basic(TestCase):
             onnx_outputs = c2.run_model(onnx_model, inputs=[X])
             self.assertSameOutputs(c2_outputs, onnx_outputs)
 
+    def test_fuse_bn_into_conv_optimization(self):
+        X = np.random.uniform(0, 1, (1, 1, 7, 7)).astype(np.float32)
+        W = np.random.uniform(0, 1, (1, 1, 3, 3)).astype(np.float32)
+        bc = np.random.uniform(0, 1, (1)).astype(np.float32)
+        bb = np.random.uniform(0, 1, (1)).astype(np.float32)
+        m = np.random.uniform(0, 1, (1)).astype(np.float32)
+        v = np.random.uniform(0, 1, (1)).astype(np.float32)
+        s = np.random.uniform(0, 1, (1)).astype(np.float32)
+
+        init_net = caffe2_pb2.NetDef()
+        init_net.name = 'init'
+        init_net.external_output[:] = ['W', 'bc', 's', 'bb', 'm', 'v']
+        init_net.op.extend([
+            core.CreateOperator(
+                'GivenTensorFill',
+                [],
+                ['W'],
+                values=W,
+                shape=W.shape,
+            ),
+            core.CreateOperator(
+                'GivenTensorFill',
+                [],
+                ['bc'],
+                values=bc,
+                shape=bc.shape,
+            ),
+            core.CreateOperator(
+                'GivenTensorFill',
+                [],
+                ['bb'],
+                values=bb,
+                shape=bb.shape,
+            ),
+            core.CreateOperator(
+                'GivenTensorFill',
+                [],
+                ['m'],
+                values=m,
+                shape=m.shape,
+            ),
+            core.CreateOperator(
+                'GivenTensorFill',
+                [],
+                ['v'],
+                values=v,
+                shape=v.shape,
+            ),
+            core.CreateOperator(
+                'GivenTensorFill',
+                [],
+                ['s'],
+                values=s,
+                shape=s.shape,
+            ),
+        ])
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-bn-into-conv'
+        predict_net.external_input[:] = ['X', 'W', 'bc', 's', 'bb', 'm', 'v']
+        predict_net.external_output[:] = ['Z']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'Conv',
+                inputs=['X', 'W', 'bc'],
+                outputs=['Y'],
+                strides=[1,1],
+                dilations=[1,1],
+                pads=[0,0,0,0],
+                kernels=[3,3],
+            ),
+            core.CreateOperator(
+                'SpatialBN',
+                inputs=['Y', 's', 'bb', 'm', 'v'],
+                outputs=['Z'],
+                is_test=1,
+                epsilon=1e-5,
+                order="NCHW",
+            )
+        ])
+
+        ws, c2_outputs = c2_native_run_net(
+            init_net=init_net,
+            predict_net=predict_net,
+            inputs={'X': X})
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            init_net=init_net,
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape),
+            })
+
+
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs, decimal=5)
+
+
 
 class TestCaffe2End2End(TestCase):
     def _model_dir(self, model):

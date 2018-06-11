@@ -687,7 +687,8 @@ class Caffe2Backend(Backend):
         passes =  ['fuse_consecutive_transposes',
                    'eliminate_nop_transpose',
                    'fuse_transpose_into_gemm',
-                   'lift_lexical_references']
+                   'lift_lexical_references',
+                   'fuse_bin_into_conv']
         if init:
             passes.append('split_init')
         if predict:
