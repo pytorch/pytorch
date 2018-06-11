@@ -51,8 +51,8 @@ void THNN_(LookupTable_accGradParameters)(
   }
 
   THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
-  THCIndexTensor_(resize)(state, sortedIndices, inputSize, NULL);
-  THCIndexTensor_(resize)(state, origIndices, inputSize, NULL);
+  THCIndexTensor_(resizeLegacy)(state, sortedIndices, inputSize, NULL);
+  THCIndexTensor_(resizeLegacy)(state, origIndices, inputSize, NULL);
   THLongStorage_free(inputSize);
 
   // Sort the inputs into sorted with the corresponding indices; we

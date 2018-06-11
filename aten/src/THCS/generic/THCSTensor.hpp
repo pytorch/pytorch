@@ -24,6 +24,11 @@ typedef struct THCSTensor
     inline int64_t _dim() const {
       return nDimensionI + nDimensionV;
     }
+
+    inline int64_t dim() const {
+      // FixME: nDimensionI and nDimensionV should be set correctly by THCS
+      return (nDimensionI + nDimensionV) == 0 ? 1 : (nDimensionI + nDimensionV);
+    }
 } THCSTensor;
 
 #endif

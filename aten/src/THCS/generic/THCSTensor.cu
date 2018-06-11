@@ -100,7 +100,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
 
   THCIndexTensor_(resize2d)(state, indices1D, 1, newNnz);
   THCTensor *newValues = THCTensor_(new)(state);
-  THCTensor_(resizeNd)(state, newValues, values->_dim(), values->size, NULL);
+  THCTensor_(resizeNdLegacy)(state, newValues, values->_dim(), values->size, NULL);
   newValues->size[0] = newNnz;
 
 

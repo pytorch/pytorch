@@ -32,20 +32,6 @@ struct Allocator;
 struct Generator;
 struct Storage;
 
-// Note [Empty versus 0-dim tensors]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Unlike Torch, ATen treats zero-dimension tensors as having ONE
-// element (that is to say, a zero-dimensional tensor is a scalar!)
-// This is in contrast to Torch, where a zero-dimension tensor has
-// zero elements.
-//
-// Because we are backed by Torch tensors, we need to be able to
-// represent this state (of numel==0).  These tensors are represented
-// by one-dimensional tensors with size[0] == 0 and stride[0] == 1
-// (the stride is arbitrary but matches the NumPy equivalent).
-constexpr std::array<int64_t, 1> kEmptySizes { {0} };
-constexpr std::array<int64_t, 1> kEmptyStrides { {1} };
-
 static inline void noop_deleter(void*) {}
 
 enum class TypeID {

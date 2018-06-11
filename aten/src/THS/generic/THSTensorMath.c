@@ -7,17 +7,17 @@
 
 void THSTensor_(zero)(THSTensor *self) {
   if (self->indices->_dim()) {
-    THLongTensor_resizeNd(self->indices, 0, NULL, NULL);
+    THLongTensor_resizeNdLegacy(self->indices, 0, NULL, NULL);
   }
   if (self->values->_dim()) {
-    THTensor_(resizeNd)(self->values, 0, NULL, NULL);
+    THTensor_(resizeNdLegacy)(self->values, 0, NULL, NULL);
   }
   self->nnz = 0;
 }
 
 void THSTensor_(zeros)(THSTensor *r_, THLongStorage *size)
 {
-  THSTensor_(resize)(r_, size);
+  THSTensor_(resizeLegacy)(r_, size);
   THSTensor_(zero)(r_);
 }
 

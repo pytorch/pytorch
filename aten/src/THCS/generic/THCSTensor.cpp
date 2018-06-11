@@ -323,7 +323,7 @@ int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, cons
   return 1;
 }
 
-THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, THLongStorage *size)
+THCSTensor *THCSTensor_(resizeLegacy)(THCState *state, THCSTensor *self, THLongStorage *size)
 {
   THCSTensor_(rawResize)(state, self, size->size, 0, THLongStorage_data(size));
   return self;

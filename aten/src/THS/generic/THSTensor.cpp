@@ -296,7 +296,7 @@ int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor* src)
   return 1;
 }
 
-THSTensor *THSTensor_(resize)(THSTensor *self, THLongStorage *size)
+THSTensor *THSTensor_(resizeLegacy)(THSTensor *self, THLongStorage *size)
 {
   THSTensor_(rawResize)(self, size->size, 0, THLongStorage_data(size));
   return self;
