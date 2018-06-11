@@ -15,7 +15,6 @@ if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
 
-
 # Used below in `initialize_cuda_context_rng` to ensure that CUDA context and
 # RNG have been initialized.
 __cuda_ctx_rng_initialized = False

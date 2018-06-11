@@ -16,6 +16,18 @@ from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, 
 if __name__ == '__main__':
     from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_MAGMA
 
+def skipIfNoCudnn(function):
+    def wrapper():
+        if TEST_MAGMA:
+            function()
+    return wrapper
+
+def skipIfNoMagma(function):
+    def wrapper():
+        if TEST_MAGMA:
+            function()
+    return wrapper
+
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
                 torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
 
@@ -404,16 +416,16 @@ tests = [
         lambda t: [2], None, signed_types),
     # lapack tests
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+        skipIfNoMagma), #, unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+        skipIfNoMagma), #, unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+        skipIfNoMagma), #, unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+        skipIfNoMagma), #, unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types, False),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+        skipIfNoMagma), #, unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
 ]
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,
@@ -1343,15 +1355,18 @@ class TestCuda(TestCase):
     def _select_broadcastable_dims(dims_full=None):
         return TestTorch._select_broadcastable_dims(dims_full)
 
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    # @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipIfNoMagma
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    # @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipIfNoMagma
     def test_gesv_batched(self):
         TestTorch._test_gesv_batched(self, lambda t: t.cuda())
 
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    # @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipIfNoMagma
     def test_gesv_batched_dims(self):
         TestTorch._test_gesv_batched_dims(self, lambda t: t.cuda())
 
@@ -1625,7 +1640,8 @@ class TestCuda(TestCase):
         test(True)
         test(False)
 
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    # @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipIfNoMagma
     def test_symeig(self):
         # Small case
         tensor = torch.randn(3, 3).cuda()
@@ -1653,7 +1669,8 @@ class TestCuda(TestCase):
     def test_diagflat(self):
         TestTorch._test_diagflat(self, dtype=torch.float32, device='cuda')
 
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    # @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipIfNoMagma
     def test_trtrs(self):
         TestTorch._test_trtrs(self, lambda t: t.cuda())
 
