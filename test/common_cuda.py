@@ -1,4 +1,7 @@
-r"""This file is allowed to initialize CUDA context when imported."""
+r"""Because this file is allowed to initialize CUDA context when imported,
+we must use __name__ == '__main__' to protect the import, otherwise repeated allocation of
+small tensors in multiple processes (such as the statements for TEST_CUDNN and TEST_MAGMA)
+can cause CUDA OOM error on Windows."""
 
 import torch
 import torch.cuda

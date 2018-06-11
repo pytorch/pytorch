@@ -15,8 +15,6 @@ from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MANAGER_STATUS_CHECK_INTERVAL
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_cuda_utils import skipIfNoCuda
-if __name__ == '__main__':
-    from common_cuda import TEST_CUDA
 
 
 # We need spawn start method for test_manager_unclean_exit, but

@@ -31,7 +31,7 @@ from random import shuffle
 
 import torch
 from common import TestCase, run_tests, set_rng_seed
-from common_cuda import TEST_CUDA
+from common_cuda_utils import skipIfNoCuda
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
@@ -1017,7 +1017,7 @@ class TestDistributions(TestCase):
                                          'Poisson(lambda={})'.format(rate),
                                          failure_rate=1e-3)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @skipIfNoCuda
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_gpu_sample(self):
         set_rng_seed(1)
@@ -1577,7 +1577,7 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @skipIfNoCuda
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma_gpu_shape(self):
         alpha = torch.tensor(torch.exp(torch.randn(2, 3).cuda()), requires_grad=True)
@@ -1607,7 +1607,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.gamma(alpha, scale=1.0 / beta),
                                         'Gamma(concentration={}, rate={})'.format(alpha, beta))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @skipIfNoCuda
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_gpu_sample(self):
         set_rng_seed(0)
@@ -3525,7 +3525,7 @@ class TestConstraintRegistry(TestCase):
             j = t.log_abs_det_jacobian(x, y)
             self.assertEqual(j.shape, x.shape[:x.dim() - t.event_dim])
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @skipIfNoCuda
     def test_biject_to_cuda(self):
         for constraint in self.get_constraints(is_cuda=True):
             try:
@@ -3557,7 +3557,7 @@ class TestConstraintRegistry(TestCase):
             y2 = t(x2)
             self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @skipIfNoCuda
     def test_transform_to_cuda(self):
         for constraint in self.get_constraints(is_cuda=True):
             t = transform_to(constraint)

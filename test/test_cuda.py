@@ -15,7 +15,7 @@ from test_torch import TestTorch
 from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, PY3, IS_WINDOWS
 from common_cuda_utils import skipIfNoMultiGpu, skipIfNoMagma
 if __name__ == '__main__':
-    from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_MAGMA
+    from common_cuda import TEST_CUDA, TEST_MULTIGPU
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
                 torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
