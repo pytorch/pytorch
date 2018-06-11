@@ -97,8 +97,6 @@ def get_cuda_memory_usage():
     torch.cuda.synchronize()
     gc.set_debug(gc.DEBUG_UNCOLLECTABLE)
     gc.collect()
-    gc.collect()
-    gc.collect()
     print(gc.garbage)
     return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
 
