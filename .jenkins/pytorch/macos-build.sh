@@ -29,8 +29,10 @@ if [[ "${JOB_BASE_NAME}" == *cuda9.2* ]]; then
   export CUDA_HOME=/Developer/NVIDIA/CUDA-${CUDA_VERSION}
   export NO_CUDA=0
 
-  # We need to do this for install_name_tool to be found
-  export PATH=/Applications/Xcode9.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:$PATH
+  # Use Xcode 8.2 toolchain to build CUDA
+  export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+else
+  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
 export MACOSX_DEPLOYMENT_TARGET=10.9
