@@ -454,6 +454,7 @@ if(BUILD_CAFFE2)
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
     # TODO: replace hardcoded path
     INCLUDE_DIRECTORIES(/opt/rocm/include /opt/rocm/hiprand/include /opt/rocm/rocrand/include /opt/rocm/miopen/include /data/Thrust/thrust/system/cuda/detail/cub-hip)
+    include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/src)
     LINK_DIRECTORIES(/opt/rocm/lib /opt/rocm/hiprand/lib /opt/rocm/rocrand/lib /opt/rocm/miopen/lib)
     set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
     set(Caffe2_HIP_INCLUDES
