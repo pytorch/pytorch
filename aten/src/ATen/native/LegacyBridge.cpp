@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorRef.h>
 
 namespace at { namespace native {
@@ -48,7 +49,7 @@ Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
   }
 }
 
-Tensor pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
+Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
   if (_has_native(self)) {
     return native_pow_out(result, self, exponent);
   } else {

@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/BlasUtils.h>
+#include <ATen/NativeFunctions.h>
 
 namespace at { namespace native {
 

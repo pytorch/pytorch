@@ -2,6 +2,7 @@
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/BlasUtils.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/NativeFunctions.h>
 
 namespace at { namespace native {
 
@@ -103,7 +104,7 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._indices().resize_as_(t._indices());
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because mul_out takes Tensor&
-    mul_out(r_values, t._values(), value);
+    at::mul_out(r_values, t._values(), value);
     _get_sparse_impl(r)->set_nnz(t._nnz());
     _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
   }
@@ -137,7 +138,7 @@ SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._indices().resize_as_(t._indices());
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because pow_out takes Tensor&
-    pow_out(r_values, t._values(), value);
+    at::pow_out(r_values, t._values(), value);
     _get_sparse_impl(r)->set_nnz(t._nnz());
     _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
   }
@@ -170,7 +171,7 @@ SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._indices().resize_as_(t._indices());
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because div_out takes Tensor&
-    div_out(r_values, t._values(), value);
+    at::div_out(r_values, t._values(), value);
     _get_sparse_impl(r)->set_nnz(t._nnz());
     _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
   }
@@ -570,7 +571,7 @@ void addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, in
       raw_copy_sparse_(r, t);
     }
   } else {
-    mul_out(r, t, beta);
+    at::mul_out(r, t, beta);
   }
 
   auto csr_accessor = csr.accessor<int64_t, 1>();
