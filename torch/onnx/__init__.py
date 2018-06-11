@@ -4,6 +4,7 @@ import types
 import torch._C as _C
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
+OperatorExportTypes = _C._onnx.OperatorExportTypes
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
@@ -30,9 +31,9 @@ def export(*args, **kwargs):
     return utils.export(*args, **kwargs)
 
 
-def _optimize_trace(trace, aten, aten_fallback):
+def _optimize_trace(trace, operator_export_type):
     from torch.onnx import utils
-    trace.set_graph(utils._optimize_graph(trace.graph(), aten, aten_fallback))
+    trace.set_graph(utils._optimize_graph(trace.graph(), operator_export_type))
 
 
 def set_training(*args, **kwargs):

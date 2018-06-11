@@ -8,6 +8,7 @@ import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
+from torch.onnx import OperatorExportTypes
 from common import TestCase, run_tests, IS_WINDOWS
 from textwrap import dedent
 import os
@@ -94,7 +95,7 @@ def get_fn(file_name, script_path):
 
 class JitTestCase(TestCase):
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
-        torch.onnx._optimize_trace(trace, aten=False, aten_fallback=False)
+        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
@@ -137,7 +138,8 @@ class TestJit(JitTestCase):
             return torch._C.GraphExecutor(graph, False)(*inputs)
 
         proto, _ = trace.graph().export(initializers, onnx_opset_version=0,
-                                        defer_weight_export=False, export_raw_ir=True)
+                                        defer_weight_export=False,
+                                        operator_export_type=OperatorExportTypes.RAW)
         self.assertFalse(initializers)
 
         imported_graph, initializers = torch._C._jit_import_graph(proto)
@@ -3075,7 +3077,8 @@ class TestPytorchExportModes(JitTestCase):
         y = torch.rand(3, 4)
         f = io.BytesIO()
         exported = torch.onnx._export_to_pretty_string(
-            ModelWithAtenNotONNXOp(), (x, y), f, aten_fallback=True)
+            ModelWithAtenNotONNXOp(), (x, y), f,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
         self.assertExpected(exported)
 
 
