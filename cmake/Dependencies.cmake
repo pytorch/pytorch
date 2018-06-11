@@ -468,7 +468,7 @@ endif()
 
 # ---[ HIP
 if(BUILD_CAFFE2 OR BUILD_ATEN)
-  include(cmake/public/LoadHIP.cmake)
+  include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
