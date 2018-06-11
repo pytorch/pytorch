@@ -111,8 +111,8 @@ TEST_CASE("rnn") {
       // Make sure the outputs match pytorch outputs
       auto model = LSTM(2, 2).build();
       for (auto& v : model->parameters()) {
-        float size = v.second.numel();
-        auto p = static_cast<float*>(v.second.data().storage()->data());
+        float size = v->numel();
+        auto p = static_cast<float*>(v->data().storage()->data());
         for (size_t i = 0; i < size; i++) {
           p[i] = i / size;
         }

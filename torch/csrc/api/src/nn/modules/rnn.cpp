@@ -86,7 +86,7 @@ void RNNBase<Derived>::reset() {
 
   auto stdv = 1.0 / std::sqrt(hidden_size_);
   for (auto& p : this->parameters()) {
-    p.second.data().uniform_(-stdv, stdv);
+    p->data().uniform_(-stdv, stdv);
   }
 }
 
@@ -166,7 +166,7 @@ void RNNBase<Derived>::flatten_parameters_for_cudnn() {
   std::unordered_set<void*> unique_data_ptrs;
   auto params = this->parameters();
   for (auto& p : params) {
-    unique_data_ptrs.insert(p.second.data().data_ptr());
+    unique_data_ptrs.insert(p->data().data_ptr());
   }
   // TODO PyTorch says:
   // If any parameters alias, we fall back to the slower, copying code path.
@@ -193,7 +193,7 @@ void RNNBase<Derived>::flatten_parameters_for_cudnn() {
         false); // batch_first and bidirectional, unsupported
   }
   for (auto& p : params) {
-    data_ptrs_.emplace_back(p.second.data().data_ptr());
+    data_ptrs_.emplace_back(p->data().data_ptr());
   }
 }
 
@@ -220,7 +220,7 @@ std::vector<Variable> RNNBase<Derived>::CUDNN_forward(
   std::vector<void*> weight_data_ptrs;
   auto params = this->parameters();
   for (auto& p : params) {
-    weight_data_ptrs.emplace_back(p.second.data().data_ptr());
+    weight_data_ptrs.emplace_back(p->data().data_ptr());
   }
   if (weight_data_ptrs != data_ptrs_) {
     std::cerr

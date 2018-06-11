@@ -998,3 +998,7 @@ def RNN_variant_symbolic_builder(
             return prev_output, h_outs, c_outs
 
     return symbolic
+
+
+def _dim_arange(g, like, dim):
+    return g.op('ATen', like, dim_i=dim, operator_s='_dim_arange')
