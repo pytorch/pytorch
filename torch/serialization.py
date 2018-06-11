@@ -162,21 +162,22 @@ def _should_read_directly(f):
 
 
 def _can_tell_and_seek(f):
-    def raise_load_err_msg(pattern, e):
-        if pattern in str(e):
-            msg = (str(e) + ". You can only torch.load from a file that is seekable." +
-                            " Please pre-load the data into a buffer like io.BytesIO and try to load from it instead.")
-            raise type(e)(msg)
-        else:
-            raise e
+
+    def raise_load_err_msg(patterns, e):
+        for p in patterns:
+            if p in str(e):
+                msg = (str(e) + ". You can only torch.load from a file that is seekable." +
+                                " Please pre-load the data into a buffer like io.BytesIO and" +
+                                " try to load from it instead.")
+                raise type(e)(msg)
+            else:
+                raise e
 
     try:
         f.seek(f.tell())
         return True
-    except io.UnsupportedOperation:
-        raise_load_err_msg("seek", e)
-    except AttributeError as e:
-        raise_load_err_msg("instance has no attribute 'tell'", e)
+    except (io.UnsupportedOperation, AttributeError) as e:
+        raise_load_err_msg(["seek", "tell"], e)
 
 
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
