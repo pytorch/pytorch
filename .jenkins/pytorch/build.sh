@@ -33,6 +33,13 @@ if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7.2* 
   export MAX_JOBS=`expr $(nproc) - 1`
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
+  pushd "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/"
+  WERROR=1 HIPCC_VERBOSE=1 VERBOSE=1 WITH_ROCM=1 python setup.py install
+  exit
+fi
+
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST=5.2
 
