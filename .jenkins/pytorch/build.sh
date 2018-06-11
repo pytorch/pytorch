@@ -25,7 +25,9 @@ pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Install pyHIPIFY in the docker image
+  rm -rf pyHIPIFY || true
   git clone https://github.com/ROCm-Developer-Tools/pyHIPIFY.git
+  chmod a+x pyHIPIFY/*.py
   sudo cp pyHIPIFY/*.py /opt/rocm/bin
   # TODO: Eliminate use of python3 here
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
