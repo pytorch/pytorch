@@ -71,6 +71,8 @@ Tensor _values_sparse(const SparseTensor& self) {
 
 /* Empty init */
 SparseTensor new_sparse(const SparseType& dtype) {
+  AT_ASSERT(!dtype.is_variable_or_undefined());
+  AT_ASSERT(dtype.is_sparse());
   // TODO: Hmm... this const_cast business seems a bit dodgy
   return SparseTensor(new SparseTensorImpl(const_cast<SparseType*>(&dtype)), /* retain */ false);
 }
@@ -150,10 +152,6 @@ SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, c
 
 // NB: Got rid of the sizes == NULL case
 SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Tensor& values, ArrayRef<int64_t> sizes) {
-  std::cerr << "new_with_tensor_and_size_sparse\n";
-  std::cerr << "indices " << indices << "\n";
-  std::cerr << "values " << values << "\n";
-  std::cerr << "sizes " << sizes << "\n";
   const SparseType& dtype = values.type().toSparse();
   if (indices.dim() == 0 && values.dim() == 0) {
     return new_with_size_sparse(dtype, sizes);
@@ -269,6 +267,9 @@ void transpose_sparse_(const SparseTensor& self, int64_t d1, int64_t d2) {
 }
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
+  AT_ASSERT(!self.is_variable_or_undefined());
+  AT_ASSERT(self.is_sparse());
+
   if (self._nnz() < 2) {
     _get_sparse_impl(self)->set_coalesced(true);
   }
@@ -291,7 +292,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
     factor *= self.size(d);
   }
 
-  SparseTensor dst = new_sparse(values.type());
+  SparseTensor dst = new_sparse(values.type().toSparse());
   _raw_resize_sparse(dst, dimI, dimV, self.sizes());
   // TODO: is there a more idiomatic way to do this?
   LongTensor newIndices = indices.type().tensor(indices.sizes());
@@ -300,7 +301,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
 
   LongTensor indicesBuffer;
   LongTensor indicesPermutation;
-  std::tie(indicesBuffer, indicesPermutation) = indicesBuffer.sort(0);
+  std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
   auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
   auto indicesAccessor = indices.accessor<int64_t, 2>();
   auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
@@ -312,7 +313,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
         int64_t prev = -1;
         int64_t blockSize = values.stride(0);
         scalar_t* values_ptr = values.data<scalar_t>();
-        scalar_t* newValues_ptr = values.data<scalar_t>();
+        scalar_t* newValues_ptr = newValues.data<scalar_t>();
         for (int64_t j = 0; j < nnz; j++) {
           int64_t pos = indicesPermutationAccessor[j];
           int64_t curr = indicesBufferAccessor[j];

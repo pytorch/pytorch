@@ -69,10 +69,14 @@ namespace {
 
 // hummu hummu
 SparseTensor& zero_sparse_(SparseTensor& self) {
+  AT_ASSERT(!self.is_variable_or_undefined());
+  AT_ASSERT(self.is_sparse());
+
   if (self._indices().dim()) {
     // TODO: To be fixed when we support zero-size dims
     self._indices().resize_({0});
   }
+
   if (self._values().dim()) {
     self._values().resize_({0});
   }
@@ -88,6 +92,10 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // --------------------------------------------------------------------
 
 SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
+  AT_ASSERT(!r.is_variable_or_undefined() && !t.is_variable_or_undefined());
+  AT_ASSERT(r.is_sparse());
+  AT_ASSERT(t.is_sparse());
+
   if (isSameTensor(r, t)) {
     r._values().mul_(value);
   } else {
@@ -116,6 +124,9 @@ SparseTensor& mul_sparse_scalar_(SparseTensor& t, Scalar v) {
 // --------------------------------------------------------------------
 
 SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
+  AT_ASSERT(!r.is_variable_or_undefined() && !t.is_variable_or_undefined());
+  AT_ASSERT(r.is_sparse());
+  AT_ASSERT(t.is_sparse());
   AT_CHECK(value.toDouble() != 0, "cannot raise to zeroth power on sparse tensor; it would make the result tensor dense");
 
   if (isSameTensor(r, t)) {
@@ -146,6 +157,10 @@ SparseTensor& pow_sparse_scalar_(SparseTensor& t, Scalar value) {
 // --------------------------------------------------------------------
 
 SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
+  AT_ASSERT(!r.is_variable_or_undefined() && !t.is_variable_or_undefined());
+  AT_ASSERT(r.is_sparse());
+  AT_ASSERT(t.is_sparse());
+
   if (isSameTensor(r, t)) {
     r._values().div_(value);
   } else {
@@ -175,6 +190,9 @@ SparseTensor& div_sparse_scalar_(SparseTensor& t, Scalar value) {
 
 // Only supports floating point, FYI
 Tensor norm_sparse(const SparseTensor& self, Scalar value) {
+  AT_ASSERT(!self.is_variable_or_undefined());
+  AT_ASSERT(self.is_sparse());
+
   return self.coalesce()._values().norm(value);
 }
 
@@ -183,7 +201,12 @@ Tensor norm_sparse(const SparseTensor& self, Scalar value) {
 // --------------------------------------------------------------------
 
 SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
+  AT_ASSERT(!r.is_variable_or_undefined() && !t.is_variable_or_undefined());
+  AT_ASSERT(r.is_sparse());
+  AT_ASSERT(t.is_sparse());
+
   AT_CHECK(t.sizes().equals(src.sizes()), "cadd operands have incompatible sizes");
+
   if (src._nnz() == 0) {
     return r.copy_(t);
   }
@@ -271,26 +294,26 @@ SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const
   return r;
 }
 
+SparseTensor s_add_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
+  SparseTensor r = t.type().tensor();
+  s_add_out_sparse_cpu(r, t, src, alpha);
+  return r;
+}
+
+SparseTensor& s_add_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar alpha) {
+  return s_add_out_sparse_cpu(t, t, src, alpha);
+}
+
 SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
   Tensor b_t, b_src;
   std::tie(b_t, b_src) = expand_outplace(t, src, "add_out_sparse_cpu");
   return s_add_out_sparse_cpu(r, b_t, b_src, value);
 }
 
-SparseTensor s_add_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
-  SparseTensor r = t.type().tensor();
-  add_out_sparse_cpu(r, t, src, alpha);
-  return r;
-}
-
 SparseTensor add_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
   Tensor b_t, b_src;
   std::tie(b_t, b_src) = expand_outplace(t, src, "add_sparse_cpu");
   return s_add_sparse_cpu(b_t, b_src, alpha);
-}
-
-SparseTensor& s_add_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar alpha) {
-  return add_out_sparse_cpu(t, t, src, alpha);
 }
 
 SparseTensor& add_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar alpha) {
@@ -304,11 +327,11 @@ SparseTensor& add_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar a
 // --------------------------------------------------------------------
 
 template <typename scalar_t>
-void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
+void s_add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
   int64_t k;
 
   auto indices_accessor = indices.accessor<int64_t, 2>();
-  auto values_accessor = values.accessor<int64_t, 1>();
+  auto values_accessor = values.accessor<scalar_t, 1>();
 
   scalar_t* r_ptr = r.data<scalar_t>();
   scalar_t cast_value = value.to<scalar_t>();
@@ -323,7 +346,12 @@ void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sp
   }
 }
 
-Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef sparse__, Scalar value) {
+Tensor& s_add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef sparse__, Scalar value) {
+  AT_ASSERT(!r.is_variable_or_undefined() && !dense.is_variable_or_undefined() && !sparse__.tref.is_variable_or_undefined());
+  AT_ASSERT(!r.is_sparse());
+  AT_ASSERT(!dense.is_sparse());
+  AT_ASSERT(sparse__.tref.is_sparse());
+
   const SparseTensor& sparse_ = sparse__.tref;
   r.resize_as_(dense);
   SparseTensor sparse = sparse_.coalesce();
@@ -348,20 +376,38 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
   } else {
     AT_DISPATCH_ALL_TYPES(
         values.type(), "add_dense_sparse", [&] {
-          add_dense_sparse_worker_cpu<scalar_t>(r, value, sparse, indices, values);
+          s_add_dense_sparse_worker_cpu<scalar_t>(r, value, sparse, indices, values);
         });
   }
   return r;
 }
 
-SparseTensor add_dense_sparse_cpu(const SparseTensor& t, SparseTensorRef src, Scalar alpha) {
+SparseTensor s_add_dense_sparse_cpu(const SparseTensor& t, SparseTensorRef src, Scalar alpha) {
   SparseTensor r = t.type().tensor();
-  add_out_dense_sparse_cpu(r, t, src, alpha);
+  s_add_out_dense_sparse_cpu(r, t, src, alpha);
   return r;
 }
 
+SparseTensor& s_add_dense_sparse_cpu_(SparseTensor& t, SparseTensorRef src, Scalar alpha) {
+  return s_add_out_dense_sparse_cpu(t, t, src, alpha);
+}
+
+SparseTensor& add_out_dense_sparse_cpu(SparseTensor& r, const SparseTensor& t, SparseTensorRef src, Scalar value) {
+  Tensor b_t, b_src;
+  std::tie(b_t, b_src) = expand_outplace(t, src.tref, "add_out_dense_sparse_cpu");
+  return s_add_out_dense_sparse_cpu(r, b_t, SparseTensorRef(b_src), value);
+}
+
+SparseTensor add_dense_sparse_cpu(const SparseTensor& t, SparseTensorRef src, Scalar alpha) {
+  Tensor b_t, b_src;
+  std::tie(b_t, b_src) = expand_outplace(t, src.tref, "add_dense_sparse_cpu");
+  return s_add_dense_sparse_cpu(b_t, SparseTensorRef(b_src), alpha);
+}
+
 SparseTensor& add_dense_sparse_cpu_(SparseTensor& t, SparseTensorRef src, Scalar alpha) {
-  return add_out_dense_sparse_cpu(t, t, src, alpha);
+  Tensor b_src;
+  std::tie(b_src) = expand_inplace(t, src.tref, "add_dense_sparse_cpu_");
+  return s_add_dense_sparse_cpu_(t, SparseTensorRef(b_src), alpha);
 }
 
 
