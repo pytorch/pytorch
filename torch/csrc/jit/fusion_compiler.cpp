@@ -60,6 +60,10 @@ std::ostream& operator<<(std::ostream & out, const TensorDesc & d) {
 
 namespace codegen {
 
+/*with type_as not checking type of its input, a fusion group can have non-fp32 tensor as input.
+Correct code for this case is generated, however, nvrtc does not know how to handle int*_t integer types,
+so typedefs help it handle those cases*/
+
 auto type_declarations_template = CodeTemplate(R"(
 #if defined(__CUDACC_RTC__)
 typedef unsigned char uint8_t; 
