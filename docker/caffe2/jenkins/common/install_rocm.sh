@@ -41,6 +41,16 @@ install_hip_thrust() {
     cd /data/Thrust/thrust/system/cuda/detail/cub-hip && git checkout hip_port_1.7.4_caffe2 && cd -
 }
 
+install_hcrng() {
+    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb 
+    dpkg -i /opt/rocm/debians/hcrng.deb
+}
+
+install_hcsparse() {
+    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb
+    dpkg -i /opt/rocm/debians/hcsparse.deb
+}
+
 
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
@@ -53,3 +63,5 @@ else
 fi
 
 install_hip_thrust
+install_hcrng
+install_hcsparse
