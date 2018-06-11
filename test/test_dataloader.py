@@ -18,9 +18,9 @@ if __name__ == '__main__':
     from common_cuda import TEST_CUDA
 
 def skipIfNoCuda(function):
-    def wrapper():
+    def wrapper(*args, **kwargs):
         if TEST_CUDA:
-            function()
+            return function(*args, **kwargs)
     return wrapper
 
 # We need spawn start method for test_manager_unclean_exit, but

@@ -16,16 +16,10 @@ from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, 
 if __name__ == '__main__':
     from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_MAGMA
 
-def skipIfNoCudnn(function):
-    def wrapper():
-        if TEST_MAGMA:
-            function()
-    return wrapper
-
 def skipIfNoMagma(function):
-    def wrapper():
+    def wrapper(*args, **kwargs):
         if TEST_MAGMA:
-            function()
+            return function(*args, **kwargs)
     return wrapper
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
