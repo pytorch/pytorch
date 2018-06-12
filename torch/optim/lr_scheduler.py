@@ -51,8 +51,10 @@ class _LRScheduler(object):
             epoch = self.last_epoch + 1
         self.last_epoch = epoch
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
-            if self.min_lr is None or lr > self.min_lr:
+            if self.min_lr is None:
                 param_group['lr'] = lr
+            else:
+                param_group['lr'] = max(lr, self.min_lr)
 
 
 class LambdaLR(_LRScheduler):
@@ -65,7 +67,7 @@ class LambdaLR(_LRScheduler):
             factor given an integer parameter epoch, or a list of such
             functions, one for each group in optimizer.param_groups.
         last_epoch (int): The index of last epoch. Default: -1.
-        min_lr (float): A lower bound on the learning rate of all 
+        min_lr (float): A lower bound on the learning rate of all
             param groups. Default: None.
 
     Example:
@@ -138,7 +140,7 @@ class StepLR(_LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
-        min_lr (float): A lower bound on the learning rate of all 
+        min_lr (float): A lower bound on the learning rate of all
             param groups. Default: None.
 
     Example:
@@ -175,7 +177,7 @@ class MultiStepLR(_LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
-        min_lr (float): A lower bound on the learning rate of all 
+        min_lr (float): A lower bound on the learning rate of all
             param groups. Default: None.
 
     Example:
@@ -211,7 +213,7 @@ class ExponentialLR(_LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         gamma (float): Multiplicative factor of learning rate decay.
         last_epoch (int): The index of last epoch. Default: -1.
-        min_lr (float): A lower bound on the learning rate of all 
+        min_lr (float): A lower bound on the learning rate of all
             param groups. Default: None.
     """
 
@@ -245,7 +247,7 @@ class CosineAnnealingLR(_LRScheduler):
         T_max (int): Maximum number of iterations.
         eta_min (float): Minimum learning rate. Default: 0.
         last_epoch (int): The index of last epoch. Default: -1.
-        min_lr (float): A lower bound on the learning rate of all 
+        min_lr (float): A lower bound on the learning rate of all
             param groups. Default: None.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
