@@ -1157,6 +1157,7 @@ if (BUILD_ATEN)
     MESSAGE(STATUS "MIOpen not found. Compiling without MIOpen support")
     set(AT_MIOPEN_ENABLED 0)
   ELSE()
+    INCLUDE_DIRECTORIES(BEFORE ${MIOPEN_INCLUDE_DIRS})
     set(AT_MIOPEN_ENABLED 1)
   ENDIF()
 

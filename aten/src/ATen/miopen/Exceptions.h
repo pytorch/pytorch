@@ -1,4 +1,4 @@
-gigit #pragma once
+#pragma once
 
 #include "miopen-wrapper.h"
 #include <string>
