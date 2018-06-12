@@ -8,7 +8,6 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/hip/context_hip.h"
 // This macro is here just to allow us to experiment with padding values that
 // determines, when we have an odd number of pads, which side gets the one
 // additional pad value, the head side, or the tail side. Setting it to false
@@ -47,8 +46,7 @@ class ConvPoolOpBase : public Operator<Context> {
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(
             OperatorBase::GetSingleArgument<int>("shared_buffer", 0)),
-        ws_(ws),
-        poolWs_(nullptr)
+        ws_(ws)
   {
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
@@ -583,10 +581,6 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   virtual ~ConvPoolOpBase() {
-    if(poolWs_ != nullptr) {
-      hipFree(poolWs_);
-      poolWs_ = nullptr;
-    }
   }
 
  protected:
@@ -603,7 +597,6 @@ class ConvPoolOpBase : public Operator<Context> {
   StorageOrder order_;
   bool shared_buffer_;
   Workspace* ws_;
-  char* poolWs_;
 
   static inline void ComputeSizeAndPad(
       const int in_size,
