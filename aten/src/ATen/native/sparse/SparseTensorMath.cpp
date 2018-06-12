@@ -545,7 +545,7 @@ SparseTensor& mul_sparse_cpu_(SparseTensor& t, const SparseTensor& src) {
 
 // NB: OMP pragmas have to get their own functions; can't put them in lambdas
 template <typename scalar_t>
-void addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, Scalar beta, const Tensor& t, Scalar alpha, const Tensor& csr, const Tensor& indices, const Tensor& values, const Tensor& dense) {
+void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, Scalar beta, const Tensor& t, Scalar alpha, const Tensor& csr, const Tensor& indices, const Tensor& values, const Tensor& dense) {
   int64_t h, i;
 
   // r_ = alpha * sparse * dense
@@ -591,7 +591,7 @@ void addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, in
   }
 };
 
-Tensor& addmm_out_sparse_dense_cpu(
+Tensor& s_addmm_out_sparse_dense_cpu(
     Tensor& r,
     const Tensor& t,
     SparseTensorRef sparse__,
@@ -629,7 +629,7 @@ Tensor& addmm_out_sparse_dense_cpu(
 
   AT_DISPATCH_ALL_TYPES(
       values.type(), "addmm_sparse_dense", [&] {
-        addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, csr, indices, values, dense);
+        s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, csr, indices, values, dense);
       }
   );
 
@@ -637,7 +637,7 @@ Tensor& addmm_out_sparse_dense_cpu(
 
 }
 
-Tensor addmm_sparse_dense_cpu(
+Tensor s_addmm_sparse_dense_cpu(
     const Tensor& t,
     SparseTensorRef sparse,
     const Tensor& dense,
@@ -649,6 +649,7 @@ Tensor addmm_sparse_dense_cpu(
   return r;
 }
 
+// inplace is not broadcasting
 Tensor& addmm_sparse_dense_cpu_(
     Tensor& t,
     SparseTensorRef sparse,
@@ -658,6 +659,32 @@ Tensor& addmm_sparse_dense_cpu_(
 ) {
   return addmm_out_sparse_dense_cpu(t, t, sparse, dense, beta, alpha);
 }
+
+Tensor& addmm_out_sparse_dense_cpu(
+    Tensor& result,
+    const Tensor& self,
+    SparseTensorRef mat1,
+    const Tensor& mat2,
+    Scalar beta,
+    Scalar alpha
+) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.tref.size(0), mat2.size(1)}, "addmm_out_dense_sparse_cpu");
+  return s_addmm_out_sparse_dense_cpu(result, b_self, mat1, mat2, beta, alpha);
+}
+
+Tensor addmm_sparse_dense_cpu(
+    const Tensor& self,
+    SparseTensorRef mat1,
+    const Tensor& mat2,
+    Scalar beta,
+    Scalar alpha
+) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.tref.size(0), mat2.size(1)}, "th_addmm_out");
+  return s_addmm_sparse_dense_cpu(b_self, mat1, mat2, beta, alpha);
+}
+
 
 // --------------------------------------------------------------------
 // hspmm(SparseTensor mat1, Tensor mat2)
