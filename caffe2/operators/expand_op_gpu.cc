@@ -1,4 +1,4 @@
-#include "caffe2/operator/reduce_ops.h"
+#include "caffe2/operator/expand_op.h"
 
 #include <algorithm>
 #include <functional>
@@ -9,10 +9,10 @@
 
 namespace caffe2 {
 REGISTER_CUDA_OPERATOR(
-    ExpandNormal,
+    Expand,
     ExpandOp<
         TensorType<std::int32_t, std::int64_t, float, double>,
         CUDAContext,
-        NormalExpander<CUDAContext>>);
+        Expander<CUDAContext>>);
 
 } // namespace caffe2
