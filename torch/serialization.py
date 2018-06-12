@@ -161,23 +161,22 @@ def _should_read_directly(f):
         return False
 
 
-def _can_tell_and_seek(f):
+def _check_seekable(f):
 
-    def raise_load_err_msg(patterns, e):
+    def raise_err_msg(patterns, e):
         for p in patterns:
             if p in str(e):
                 msg = (str(e) + ". You can only torch.load from a file that is seekable." +
                                 " Please pre-load the data into a buffer like io.BytesIO and" +
                                 " try to load from it instead.")
                 raise type(e)(msg)
-            else:
-                raise e
+        raise e
 
     try:
         f.seek(f.tell())
         return True
     except (io.UnsupportedOperation, AttributeError) as e:
-        raise_load_err_msg(["seek", "tell"], e)
+        raise_err_msg(["seek", "tell"], e)
 
 
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
@@ -498,10 +497,10 @@ def _load(f, map_location, pickle_module):
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
-    f_can_tell_and_seek = _can_tell_and_seek(f)
+    _check_seekable(f)
     f_should_read_directly = _should_read_directly(f)
 
-    if f_should_read_directly and f_can_tell_and_seek and f.tell() == 0:
+    if f_should_read_directly and f.tell() == 0:
         # legacy_load requires that f has fileno()
         # only if offset is zero we can attempt the legacy tar file loader
         try:
