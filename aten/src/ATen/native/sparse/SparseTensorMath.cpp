@@ -48,15 +48,17 @@ namespace {
     int64_t h, i, hp0, hp1;
     LongTensor csr = at::CPU(kLong).zeros({dim + 1});
 
-    auto csr_accessor = csr.accessor<int64_t, 1>();
-
-    // Convert the sparse matrix to CSR format
+    // TODO: eliminate this conditional when zero-size dims supported correctly
+    if (nnz > 0) {
+      auto csr_accessor = csr.accessor<int64_t, 1>();
+      // Convert the sparse matrix to CSR format
 #pragma omp parallel for private(i, h, hp0, hp1) schedule(static) if (nnz > 10000)
-    for (i=0; i<nnz; i++) {
-      hp0 = indices[i];
-      hp1 = (i+1 == nnz) ?  dim : indices[i+1];
-      if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
-        csr_accessor[h+1] = i+1;
+      for (i=0; i<nnz; i++) {
+        hp0 = indices[i];
+        hp1 = (i+1 == nnz) ?  dim : indices[i+1];
+        if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
+          csr_accessor[h+1] = i+1;
+        }
       }
     }
     return csr;
@@ -235,6 +237,7 @@ SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const
   int64_t cmp, d;
   int64_t r_i = 0, t_i = 0, s_i = 0;
 
+  // NB: relies on nnz tests above
   auto t_indices_accessor = t_indices.accessor<int64_t, 2>();
   auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
   auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
@@ -365,7 +368,9 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
   int64_t nDimI = sparse._dimI();
 
   if (!isSameTensor(r, dense)) r.copy_(dense);
+  if (sparse._nnz() == 0) return r;
 
+  // accessors rely on nnz test
   if (nDim > nDimI) {
     auto indices_accessor = indices.accessor<int64_t, 2>();
     for (int64_t k = 0; k < sparse._nnz(); k++) {
@@ -452,6 +457,7 @@ SparseTensor& s_mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, cons
   int64_t match, d;
   int64_t r_i = 0, t_i = 0, s_i = 0;
 
+  // NB: relies on nnz test above
   auto t_indices_accessor = t_indices.accessor<int64_t, 2>();
   auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
   auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
@@ -624,6 +630,12 @@ Tensor& s_addmm_out_sparse_dense_cpu(
       "Argument #1 (t): Expected dim 1 size ", dim_k, ", got ", t.size(1));
 
   int64_t nnz        = sparse._nnz();
+
+  if (nnz == 0) {
+    at::mul_out(r, t, beta);
+    return r;
+  }
+
   LongTensor indices = sparse._indices();
   Tensor values      = sparse._values();
   LongTensor csr = _to_csr(indices.data<int64_t>(), dim_i, nnz);
@@ -712,6 +724,12 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   SparseTensor sparse = sparse_.coalesce();
 
   int64_t nnz = sparse._nnz();
+
+  if (nnz == 0) {
+    r.zero_();
+    return r;
+  }
+
   LongTensor indices = at::CPU(kLong).tensor({1, nnz});
 
   // Initialize the sparse matrix that will be used with spaddmm to send rows

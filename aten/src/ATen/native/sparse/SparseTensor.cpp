@@ -127,6 +127,11 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
     values = values_;
   }
 
+  // TODO: This is a temporary test until we support zero-size dims.
+  // I'm NOT adding the "obvious" bypass code, because it wasn't supported
+  // previously
+  AT_CHECK(indices.numel() != 0, "cannot construct sparse tensor with empty indices; use the nullary constructor instead");
+
   const SparseType& dtype = values.type().toSparse();
 
   // If sizes are not given, it is inferred as max index of each dim.
@@ -290,12 +295,17 @@ void transpose_sparse_(const SparseTensor& self, int64_t d1, int64_t d2) {
   int64_t dimI = self._dimI();
   AT_CHECK(d1 < dimI && d2 < dimI, "Transposed dimensions should be sparse.  Got dimI: ", dimI, ", d1: ", d1, ", d2: ", d2);
   LongTensor indices = self._indices();
-  auto indices_accessor = indices.accessor<int64_t, 2>();
   auto nnz = self._nnz();
-  for (int64_t i = 0; i < nnz; i++) {
-    int64_t tmp = indices_accessor[d1][i];
-    indices_accessor[d1][i] = indices_accessor[d2][i];
-    indices_accessor[d2][i] = tmp;
+  if (nnz > 0) {
+    // NB: We must guard the indices_accessor, since it will immediately do
+    // a dimensionality check (and if nnz == 0, indices will always be 1D)
+    // TODO: Remove this if statement when we fix zero-size dims
+    auto indices_accessor = indices.accessor<int64_t, 2>();
+    for (int64_t i = 0; i < nnz; i++) {
+      int64_t tmp = indices_accessor[d1][i];
+      indices_accessor[d1][i] = indices_accessor[d2][i];
+      indices_accessor[d2][i] = tmp;
+    }
   }
   auto& sizes = _get_sparse_impl(self)->_sizes_mut(); // TODO: Do this more safely
   std::swap(sizes[d1], sizes[d2]);
@@ -337,6 +347,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   LongTensor indicesBuffer;
   LongTensor indicesPermutation;
   std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
+  // NB: The accessor accesses here rely on self._nnz() > 0 (tested earlier in this function)
   auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
   auto indicesAccessor = indices.accessor<int64_t, 2>();
   auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
@@ -387,6 +398,7 @@ void sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const SparseTensor& m
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();
   _get_sparse_impl(r)->set_nnz(r_nnz);
+  // NB: Relies on mask._nnz() == 0 test above
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
 
   if (dim > dimI) {
