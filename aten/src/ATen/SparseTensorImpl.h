@@ -62,7 +62,7 @@ public:
 
   // TODO: I hate these two setters, please get rid of them!!!
   void set_indices(const Tensor& indices) {
-    AT_ASSERT(indices.type().backend() == type().backend());
+    AT_ASSERT(indices.type().backend() == at::toDense(type().backend()));
     AT_ASSERT(indices.type().scalarType() == kLong);
     indices_ = indices;
   }

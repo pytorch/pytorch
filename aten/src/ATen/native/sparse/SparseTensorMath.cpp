@@ -770,16 +770,16 @@ SparseTensor hspmm_sparse_cpu(const SparseTensor& sparse, const Tensor& dense) {
 }
 
 // --------------------------------------------------------------------
-// sspaddmm (not actually exposed at the moment)
+// sspaddmm
 // --------------------------------------------------------------------
 
-SparseTensor& sspaddmm(
+SparseTensor& _sspaddmm_out_cpu(
     SparseTensor& r,
-    Scalar beta,
     const SparseTensor& t,
-    Scalar alpha,
     const SparseTensor& sparse_,
-    const Tensor& dense
+    const Tensor& dense,
+    Scalar beta,
+    Scalar alpha
 ) {
   AT_CHECK(sparse_._dimI() == 2,
       "Argument #2: matrices expected, got ", sparse_._dimI(), "D tensor");
@@ -795,7 +795,7 @@ SparseTensor& sspaddmm(
   int64_t dim_j = sparse.size(1);
   int64_t dim_k = dense.size(1);
 
-  r.resize_({dim_i, dim_k});
+  r.sparse_raw_resize_({dim_i, dim_k}, 2, 0);
 
   AT_CHECK(dense.size(0) == dim_j,
       "Argument #3: Expected dim 0 size ", dim_j, ", got ", dense.size(0));
@@ -875,6 +875,28 @@ SparseTensor& sspaddmm(
   _get_sparse_impl(r)->set_nnz(p);
 
   return r;
+}
+
+// sparse, sparse, sparse, dense, real, real -> sparse
+Tensor& _sspaddmm_out_only_sparse(Tensor& result, const Tensor& self,
+    const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  AT_ERROR("tensor.sspaddmm(...) can only be called on sparse tensors");
+  return result;
+}
+
+// sparse, dense -> sparse
+Tensor smm(const Tensor& self, const Tensor& mat2) {
+  auto result = self.type().tensor();
+  self.type().sspaddmm_out(result, result, self, mat2, 0.0, 1.0);
+  return result;
+}
+
+// sparse, sparse, dense, real, real -> sparse
+Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
+    Scalar beta, Scalar alpha) {
+  auto result = self.type().tensor();
+  self.type().sspaddmm_out(result, self, mat1, mat2, beta, alpha);
+  return result;
 }
 
 }} // namespace at::native
