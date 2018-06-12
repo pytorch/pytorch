@@ -15,6 +15,7 @@
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/autograd/python_anomaly_mode.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/DynamicTypes.h"
@@ -938,6 +939,13 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
   return result.release();
 }
 
+PyObject *THPFunction_metadata(THPFunction *self, void *_unused)
+{
+  auto metadata = static_cast<PyAnomalyMetadata*>(self->cdata.metadata())->dict();
+
+  Py_INCREF(metadata);
+  return metadata;
+}
 
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
@@ -995,6 +1003,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, nullptr, nullptr, nullptr},
   {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
   {"_is_tracing", &getMember<char, &THPFunction::is_traced, PyBool_FromLong>, nullptr, nullptr, nullptr},
+  {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
