@@ -22710,7 +22710,7 @@
   abstract: true
   auto_gpu: true
   with_gil: false
-- name: _cast_uint8_t
+- name: _cast_Byte
   method_prefix_derived: ''
   arguments:
   - dynamic_type: Tensor
@@ -22735,7 +22735,7 @@
   abstract: false
   auto_gpu: true
   with_gil: false
-- name: _cast_int8_t
+- name: _cast_Char
   method_prefix_derived: ''
   arguments:
   - dynamic_type: Tensor
@@ -22760,7 +22760,7 @@
   abstract: false
   auto_gpu: true
   with_gil: false
-- name: _cast_double
+- name: _cast_Double
   method_prefix_derived: ''
   arguments:
   - dynamic_type: Tensor
@@ -22785,7 +22785,7 @@
   abstract: false
   auto_gpu: true
   with_gil: false
-- name: _cast_float
+- name: _cast_Float
   method_prefix_derived: ''
   arguments:
   - dynamic_type: Tensor
@@ -22810,7 +22810,7 @@
   abstract: false
   auto_gpu: true
   with_gil: false
-- name: _cast_int
+- name: _cast_Int
   method_prefix_derived: ''
   arguments:
   - dynamic_type: Tensor
@@ -22835,7 +22835,7 @@
   abstract: false
   auto_gpu: true
   with_gil: false
-- name: _cast_int64_t
+- name: _cast_Long
   method_prefix_derived: ''
   arguments:
   - dynamic_type: Tensor
@@ -22860,7 +22860,7 @@
   abstract: false
   auto_gpu: true
   with_gil: false
-- name: _cast_int16_t
+- name: _cast_Short
   method_prefix_derived: ''
   arguments:
   - dynamic_type: Tensor
