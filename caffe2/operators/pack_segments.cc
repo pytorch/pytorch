@@ -132,7 +132,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   output->Resize(shape);
   // create output tensor
   auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
-  if (!(data.dim(0) * data.dim(1))) {
+  if (!(data.dim(0) && data.dim(1))) {
     return true;
   }
   auto block_size = data.size_from_dim(2);
