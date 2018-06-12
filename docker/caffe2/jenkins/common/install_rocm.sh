@@ -9,8 +9,7 @@ set -ex
 install_hip_nightly() {
     git clone https://github.com/ROCm-Developer-Tools/HIP.git
     pushd HIP
-    yes | ./install.sh --install
-    apt-get -f install
+    export HIP_PLATFORM=hcc
     yes | ./install.sh --install
     popd
     rm -rf HIP
