@@ -1407,6 +1407,31 @@ class RangeOp : public Operator<Context> {
   TensorCPU local_;
 };
 
+template <class Context>
+class IdentityOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(IdentityOp)
+
+  bool RunOnDevice() override {
+    auto& X = Input(0);
+    auto* Y = Output(0);
+    Y->CopyFrom(X, &context_);
+    return true;
+  }
+};
+
+struct GetIdentityGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  std::vector<OperatorDef> GetGradientDefs() override {
+    return {CreateOperatorDef(
+        "Identity",
+        "",
+        std::vector<string>{GO(0)},
+        std::vector<string>{GI(0)})};
+  }
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_UTILITY_OPS_H_
