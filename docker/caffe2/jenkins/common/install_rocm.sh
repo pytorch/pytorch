@@ -54,7 +54,7 @@ install_hip_thrust() {
     git clone --recursive https://github.com/ROCmSoftwarePlatform/Thrust.git /data/Thrust
     pushd /data/Thrust
     curl https://patch-diff.githubusercontent.com/raw/ROCmSoftwarePlatform/Thrust/pull/12.patch -o 12.patch
-    git am 12.patch
+    patch -p1 < 12.patch
     rm 12.patch
     popd
     rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
