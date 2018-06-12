@@ -678,6 +678,12 @@ if IS_WINDOWS:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
     if WITH_ROCM:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
+    # Windows needs direct access to ONNX libraries as well
+    # as through Caffe2 library
+    CAFFE2_LIBS += [
+        os.path.join(lib_path, 'onnx.lib'),
+        os.path.join(lib_path, 'onnx_proto.lib'),
+    ]
     if DEBUG:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
         PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.lib')
