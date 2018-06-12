@@ -7,6 +7,4 @@ REGISTER_CPU_OPERATOR(
     Div,
     BinaryElementwiseOp<NumericTypes, CPUContext, DivFunctor<CPUContext>>);
 
-#endif // !CAFFE2_MOBILE
-
 } // namespace caffe2
