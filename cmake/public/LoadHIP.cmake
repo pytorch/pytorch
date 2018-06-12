@@ -122,7 +122,7 @@ IF(HIP_FOUND)
   # however currently it's just the lib name
   FIND_LIBRARY(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
   FIND_LIBRARY(hiprand_LIBRARIES hiprand HINTS ${HIPRAND_PATH}/lib)
-  FIND_LIBRARY(hiprng_LIBRARIES hiprng HINTS ${HIPRNG_PATH}/lib)
+  FIND_LIBRARY(hiprng_LIBRARIES hcrng HINTS ${HIPRNG_PATH}/lib)
   FIND_LIBRARY(hipblas_LIBRARIES hipblas HINTS ${HIPBLAS_PATH}/lib)
   FIND_LIBRARY(hipsparse_LIBRARIES hipsparse HINTS ${HIPSPARSE_PATH}/lib)
 
