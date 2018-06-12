@@ -1,11 +1,10 @@
 #pragma once
 
-#include <atomic>
-#include <condition_variable>
-#include <thread>
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/utils/thread_name.h"
+#include <atomic>
+#include <thread>
+#include <condition_variable>
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -263,7 +262,6 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
 
   // Thread entry point.
   void ThreadFunc() {
-    setThreadName("CaffeWorkersPool");
     ChangeState(State::Ready);
 
     // Thread main loop
