@@ -6,12 +6,14 @@
 from collections import defaultdict
 import re
 from .nested_dict import nested_dict
-from tools.shared.module_loader import import_module
-from .gen_autograd import template_path
 from .gen_variable_type import should_trace
 from .utils import write
 
-CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+try:
+    from src.ATen.code_template import CodeTemplate
+except ImportError:
+    from tools.shared.module_loader import import_module
+    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
@@ -24,14 +26,6 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*',
     'arange.*', 'range.*', '_gesv.*', 'slice',
 ]
-
-PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
-PY_VARIABLE_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_variable_methods_dispatch.h')
-PY_TORCH_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_torch_functions.cpp')
-PY_TORCH_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_torch_functions_dispatch.h')
-PY_NN_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_nn_functions.cpp')
-PY_NN_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_nn_functions.h')
-PY_NN_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_nn_functions_dispatch.h')
 
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -140,7 +134,10 @@ def should_generate_python_binding(declaration):
     return True
 
 
-def gen_py_variable_methods(out, declarations):
+def gen_py_variable_methods(out, declarations, template_path):
+    PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
+    PY_VARIABLE_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_variable_methods_dispatch.h')
+
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
@@ -153,7 +150,11 @@ def gen_py_variable_methods(out, declarations):
     write(out, 'python_variable_methods_dispatch.h', PY_VARIABLE_DISPATCH_H, env)
 
 
-def gen_py_nn_functions(out, declarations):
+def gen_py_nn_functions(out, declarations, template_path):
+    PY_NN_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_nn_functions.cpp')
+    PY_NN_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_nn_functions.h')
+    PY_NN_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_nn_functions_dispatch.h')
+
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] == 'NN')
@@ -166,7 +167,10 @@ def gen_py_nn_functions(out, declarations):
     write(out, 'python_nn_functions_dispatch.h', PY_NN_DISPATCH_H, env)
 
 
-def gen_py_torch_functions(out, declarations):
+def gen_py_torch_functions(out, declarations, template_path):
+    PY_TORCH_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_torch_functions.cpp')
+    PY_TORCH_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_torch_functions_dispatch.h')
+
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and

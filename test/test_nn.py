@@ -1431,18 +1431,33 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.spectral_norm(m)
 
         self.assertEqual(m.weight_u.size(), torch.Size([m.weight.size(0)]))
-        self.assertTrue(hasattr(m, 'weight_org'))
+        # weight_orig should be trainable
+        self.assertTrue(hasattr(m, 'weight_orig'))
+        self.assertTrue('weight_orig' in m._parameters)
+        # weight_u should be just a reused buffer
+        self.assertTrue(hasattr(m, 'weight_u'))
+        self.assertTrue('weight_u' in m._buffers)
+        # weight should be a plain attribute, not counted as a buffer or a param
+        self.assertTrue(hasattr(m, 'weight'))
+        self.assertFalse('weight' in m._buffers or 'weight' in m._parameters)
+        # it should also be sharing storage as `weight_orig`
+        self.assertEqual(m.weight_orig.storage(), m.weight.storage())
+        self.assertEqual(m.weight_orig.size(), m.weight.size())
+        self.assertEqual(m.weight_orig.stride(), m.weight.stride())
 
         m = torch.nn.utils.remove_spectral_norm(m)
-        self.assertFalse(hasattr(m, 'weight_org'))
+        self.assertFalse(hasattr(m, 'weight_orig'))
         self.assertFalse(hasattr(m, 'weight_u'))
+        # weight should be converted back as a parameter
+        self.assertTrue(hasattr(m, 'weight'))
+        self.assertTrue('weight' in m._parameters)
 
     def test_spectral_norm_forward(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
         m = torch.nn.utils.spectral_norm(m)
         # naive forward
-        _weight, _bias, _u = m.weight_org, m.bias, m.weight_u
+        _weight, _bias, _u = m.weight_orig, m.bias, m.weight_u
         _weight_mat = _weight.view(_weight.size(0), -1)
         _v = torch.mv(_weight_mat.t(), _u)
         _v = F.normalize(_v, dim=0, eps=1e-12)
@@ -2944,7 +2959,7 @@ class TestNN(NNTestCase):
         self.assertNotIn('buf', l.__dict__)  # should be stored in l._buffers
         l.buf = buf
         self.assertIn('buf', l.state_dict())
-        self.assertIs(l.state_dict()['buf'], buf)
+        self.assertEqual(l.state_dict()['buf'], buf)
 
     def test_Conv2d_inconsistent_types(self):
         inputs = Variable(torch.randn(4, 1, 7, 7).float())
