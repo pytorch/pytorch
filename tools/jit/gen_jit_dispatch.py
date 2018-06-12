@@ -100,6 +100,8 @@ def is_jit_op(decl):
     # Only support a single TensorList arg
     if sum(arg['simple_type'] == 'TensorList' for arg in arguments) > 1:
         return False
+    if any(arg['simple_type'] == 'std::string' for arg in arguments):
+        return False
 
     return ((not decl['api_name'].endswith('_') or is_magic_method(decl['api_name'])) and
             not decl['name'].endswith('_out') and
