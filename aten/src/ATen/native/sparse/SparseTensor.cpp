@@ -118,7 +118,15 @@ namespace {
 }
 
 /* Pointer-copy init */
-SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& values) {
+SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& values_) {
+  Tensor values;
+  if (values_.dim() == 0) {
+    // Mimic Numpy behavior here and treat it as a 1D tensor
+    values = values_.expand({1});
+  } else {
+    values = values_;
+  }
+
   const SparseType& dtype = values.type().toSparse();
 
   // If sizes are not given, it is inferred as max index of each dim.
@@ -126,7 +134,8 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
   int64_t dimV = values.dim() - 1;
 
   std::vector<int64_t> computed_sizes(dimI + dimV);
-  LongTensor computed_indices_sizes = std::get</* indices */ 1>(indices.max(/* dim */ 1, /* keepdim */ true));
+  // NB: It used to keepdim. I think that was wrong.
+  LongTensor computed_indices_sizes = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
   computed_indices_sizes.add_(1); // len = max_index + 1
   auto computed_indices_sizes_accessor = computed_indices_sizes.accessor<int64_t, 1>();
   for (int64_t d = 0; d < dimI; d++) {
@@ -145,7 +154,15 @@ SparseTensor new_with_size_sparse(const SparseType& dtype, ArrayRef<int64_t> siz
 }
 
 // NB: Got rid of the sizes == NULL case
-SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, const Tensor& values, ArrayRef<int64_t> sizes) {
+SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, const Tensor& values_, ArrayRef<int64_t> sizes) {
+  Tensor values;
+  if (values_.dim() == 0) {
+    // Mimic Numpy behavior here and treat it as a 1D tensor
+    values = values_.expand({1});
+  } else {
+    values = values_;
+  }
+
   const SparseType& dtype = values.type().toSparse();
   if (indices.dim() == 0 && values.dim() == 0) {
     return new_with_size_sparse(dtype, sizes);
@@ -157,15 +174,25 @@ SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, c
 }
 
 // NB: Got rid of the sizes == NULL case
-SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Tensor& values, ArrayRef<int64_t> sizes) {
+SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Tensor& values_, ArrayRef<int64_t> sizes) {
+  Tensor values;
+  if (values_.dim() == 0) {
+    // Mimic Numpy behavior here and treat it as a 1D tensor
+    values = values_.expand({1});
+  } else {
+    values = values_;
+  }
+
   const SparseType& dtype = values.type().toSparse();
-  if (indices.dim() == 0 && values.dim() == 0) {
+  // NB: This used to be dims, but mumble TH handling zero-sized tensors
+  // incorrectly
+  if (indices.numel() == 0 && values.numel() == 0) {
     return new_with_size_sparse(dtype, sizes);
   }
 
   int64_t dimI = indices.size(0);
   int64_t dimV = values.dim() - 1;
-  AT_CHECK(sizes.size() == dimI + dimV, "number of dimensions must be dimI + dimV");
+  AT_CHECK(sizes.size() == dimI + dimV, "number of dimensions must be dimI (", dimI, ") + dimV (", dimV, "), but got ", sizes);
 
   LongTensor max_indices = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
   auto max_indices_accessor = max_indices.accessor<int64_t, 1>();
