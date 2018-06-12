@@ -6,29 +6,29 @@ namespace caffe2 {
 
 class CopyCPUToIDEEPOp final : public IDEEPOperator {
  public:
-   USE_SIMPLE_IDEEP_CTOR_DTOR(CopyCPUToIDEEPOp);
-   USE_IDEEP_DEF_ALIASES();
+  USE_SIMPLE_IDEEP_CTOR_DTOR(CopyCPUToIDEEPOp);
+  USE_IDEEP_DEF_ALIASES();
 
-   bool RunOnDevice() override {
-     const auto& X = OperatorBase::Input<TensorCPU>(0);
-     auto* Y = OperatorBase::OutputBlob(0);
-     itensor::dims src_dims(X.dims().begin(), X.dims().end());
-     if (!(Y->template IsType<itensor>() &&
-           Y->Get<itensor>().get_data_type() == itensor::data_type::f32) ||
-         Y->Get<itensor>().get_dims() != src_dims) {
-       Y->Reset(new itensor());
-       Y->GetMutable<itensor>()->resize(src_dims, itensor::data_type::f32);
-     }
-     Y->GetMutable<itensor>()->reorder_from(
-         src_dims, itensor::data_type::f32, X.raw_data());
-     return true;
+  bool RunOnDevice() override {
+    const auto& X = OperatorBase::Input<TensorCPU>(0);
+    auto* Y = OperatorBase::OutputBlob(0);
+    itensor::dims src_dims(X.dims().begin(), X.dims().end());
+    if (!(Y->template IsType<itensor>() &&
+          Y->Get<itensor>().get_data_type() == itensor::data_type::f32) ||
+        Y->Get<itensor>().get_dims() != src_dims) {
+      Y->Reset(new itensor());
+      Y->GetMutable<itensor>()->resize(src_dims, itensor::data_type::f32);
+    }
+    Y->GetMutable<itensor>()->reorder_from(
+        src_dims, itensor::data_type::f32, X.raw_data());
+    return true;
   }
 };
 
 class CopyIDEEPToCPUOp final : public IDEEPOperator {
  public:
-   USE_SIMPLE_IDEEP_CTOR_DTOR(CopyIDEEPToCPUOp);
-   USE_IDEEP_DEF_ALIASES();
+  USE_SIMPLE_IDEEP_CTOR_DTOR(CopyIDEEPToCPUOp);
+  USE_IDEEP_DEF_ALIASES();
   bool RunOnDevice() override {
     const auto& X = OperatorBase::Input<itensor>(0);
     auto* Y = OperatorBase::Output<TensorCPU>(0);
@@ -53,4 +53,3 @@ OPERATOR_SCHEMA(CopyIDEEPToCPU)
     .Output(0, "cpu_blob", "The output TensorCPU to copy to");
 
 } // namespace caffe2
-
