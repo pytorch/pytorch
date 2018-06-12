@@ -379,7 +379,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 // and as a result, we define these two macros slightly differently.
 
 #ifdef _MSC_VER
-#define C10_KNOWN_TYPE(T)                                                     \
+#define CAFFE_KNOWN_TYPE(T)                                                   \
   template <>                                                                 \
   CAFFE2_EXPORT TypeId TypeMeta::Id<T>() {                                    \
     static bool type_id_bit[1];                                               \
