@@ -778,6 +778,7 @@ class TestSparse(TestCase):
             ('sspaddmm_b', lambda sp, de: sp.sspaddmm(2, sp, de), False),
             ('sspaddmm_b_a', lambda sp, de: sp.sspaddmm(3, 2, sp, de), False),
             ('addmm', lambda sp, de: de.addmm(sp, de), True),
+            # TODO: This looks like a typo
             ('addmm_', lambda sp, de: de.addmm(sp, de), True),
             ('mm', lambda sp, de: torch.mm(sp, de), True),
             ('mm_out', lambda sp, de: torch.mm(sp, de, out=de), True),
