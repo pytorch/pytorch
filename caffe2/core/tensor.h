@@ -579,6 +579,11 @@ class Tensor {
       if ((size_ == 0 || data_.get()) && IsType<T>()) {
         return static_cast<T*>(data_.get());
       }
+      // Check it here statically - otherwise TypeMeta would throw the runtime
+      // error in attempt to invoke TypeMeta::ctor()
+      static_assert(
+          std::is_default_constructible<T>::value,
+          "Tensor can't hold non-default-constructible types");
       return static_cast<T*>(raw_mutable_data(TypeMeta::Make<T>()));
     }
 

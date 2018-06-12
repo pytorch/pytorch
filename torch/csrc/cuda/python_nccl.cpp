@@ -38,6 +38,16 @@ static ncclComm_t unpack_nccl_comm(PyObject* capsule) {
 }
 
 static void destroy_nccl_comm(PyObject* capsule) {
+  /*
+   * TODO(T30279827) Temporarily disable calling ncclCommDestroy
+   * Calling ncclCommDestroy while program exiting is undefined
+   * according to Nvidia, and lead to segfault in NCCL 2
+   * (whether it is called before or after the CUDA runtime destructor).
+   * Temporarily disable it in destructor to avoid segfault.
+   * Following up with Nvidia for long term solution.
+   */
+  return;
+
   HANDLE_TH_ERRORS
   ncclComm_t comm = unpack_nccl_comm(capsule);
   with_no_gil([&]{

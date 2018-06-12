@@ -14,7 +14,7 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = input->nDimension;
+  int ndim = input->_dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -87,7 +87,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
   int64_t nOutputCols, nOutputRows;
 
-  if (input->nDimension == 3) {
+  if (input->_dim() == 3) {
     nInputCols = input->size[2];
     nInputRows = input->size[1];
     nInputPlane = input->size[0];
@@ -142,7 +142,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
         kH, kW, dH, dW, padH, padW, output_data);
   THCudaCheck(cudaGetLastError());
 
-  if(input->nDimension == 3)
+  if(input->_dim() == 3)
     THCTensor_(resize3d)(state, output, nInputPlane, nOutputRows, nOutputCols);
 
   THCTensor_(free)(state, input);
@@ -173,7 +173,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   int dimCol = 2;
   int dimRow = 1;
 
-  if (input->nDimension == 3) {
+  if (input->_dim() == 3) {
     nInputPlane = input->size[0];
     batchSize = 1;
   }
@@ -205,8 +205,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
       --nOutputCols;
   }
 
-  THCUNN_check_dim_size(state, gradOutput, input->nDimension, dimRow, nOutputRows);
-  THCUNN_check_dim_size(state, gradOutput, input->nDimension, dimCol, nOutputCols);
+  THCUNN_check_dim_size(state, gradOutput, input->_dim(), dimRow, nOutputRows);
+  THCUNN_check_dim_size(state, gradOutput, input->_dim(), dimCol, nOutputCols);
   THCTensor_(resizeAs)(state, gradInput, input);
 
   int count = THCTensor_(nElement)(state, input);

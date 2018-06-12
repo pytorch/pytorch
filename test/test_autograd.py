@@ -15,7 +15,7 @@ from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
     suppress_warnings
-from torch.autograd import Variable, Function
+from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
 
@@ -2305,6 +2305,41 @@ class TestAutograd(TestCase):
         out, _ = l(s)
         out.sum().backward()
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+
+    def test_anomaly_detect_nan(self):
+        size = 10
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, inp1, inp2, fail_0th):
+                ctx.fail_0th = fail_0th
+                return inp1.sum(0, keepdim=True)
+
+            @staticmethod
+            def backward(ctx, gO):
+                gI = gO.clone().expand(size)
+                gI[0] = 0
+                gI[0] /= 0  # Generate a nan
+                if ctx.fail_0th:
+                    return gI, None, None
+                else:
+                    return None, gI, None
+
+        inp = torch.rand(size, requires_grad=True)
+        out = MyFunc.apply(inp, inp, True)
+        out.backward()  # Should not fail
+
+        inp = torch.rand(size, requires_grad=True)
+        out = MyFunc.apply(inp, inp, True)
+        with self.assertRaisesRegexp(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
+            with detect_anomaly():
+                out.backward()
+
+        inp = torch.rand(size, requires_grad=True)
+        out = MyFunc.apply(inp, inp, False)
+        with self.assertRaisesRegexp(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
+            with detect_anomaly():
+                out.backward()
 
 
 def index_variable(shape, max_indices):

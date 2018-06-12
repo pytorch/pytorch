@@ -136,6 +136,12 @@ class ProcessGroupGlooTest(TestCase):
                 self.assertEqual(torch.Tensor([i * self.size + j]), xs[0])
                 self.assertEqual(torch.Tensor([i * self.size + j]), xs[1])
 
+        # Test overloaded convenience function
+        x = torch.Tensor([self.rank + 1.0])
+        work = pg.broadcast(x, root=0)
+        work.wait()
+        self.assertEqual(torch.Tensor([1.0]), x)
+
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.size)
@@ -165,6 +171,12 @@ class ProcessGroupGlooTest(TestCase):
         x = torch.Tensor([self.rank + 1.0])
         allreduce(x, c10d.ReduceOp.MAX)
         self.assertEqual(torch.Tensor([self.size]), x)
+
+        # Test overloaded convenience function (defaults to using sum)
+        x = torch.Tensor([self.rank + 1.0])
+        work = pg.allreduce(x)
+        work.wait()
+        self.assertEqual(torch.Tensor([float(self.size * (self.size + 1) / 2)]), x)
 
 
 if __name__ == '__main__':
