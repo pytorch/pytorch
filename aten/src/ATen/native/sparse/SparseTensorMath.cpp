@@ -363,7 +363,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
   int64_t nDim = dense.dim();
   int64_t nDimI = sparse._dimI();
 
-  if (!isSameTensor(r, dense)) raw_copy_sparse_(r, dense);
+  if (!isSameTensor(r, dense)) r.copy_(dense);
 
   if (nDim > nDimI) {
     auto indices_accessor = indices.accessor<int64_t, 2>();
@@ -555,7 +555,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
     r.zero_();
   } else if (cast_beta == 1) {
     if (!isSameTensor(r, t)) {
-      raw_copy_sparse_(r, t);
+      r.copy_(t);
     }
   } else {
     at::mul_out(r, t, beta);
