@@ -1,4 +1,4 @@
-#include "caffe2/operator/expand_op.h"
+#include "caffe2/operators/expand_op.h"
 
 #include <algorithm>
 #include <functional>
