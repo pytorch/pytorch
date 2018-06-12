@@ -2533,7 +2533,7 @@ class TestScript(JitTestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2582,7 +2582,7 @@ class TestScript(JitTestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2607,7 +2607,7 @@ class TestScript(JitTestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2624,7 +2624,7 @@ class TestScript(JitTestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2641,7 +2641,7 @@ class TestScript(JitTestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3, dtype=torch.long))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2671,7 +2671,7 @@ class TestScript(JitTestCase):
         result = mte(torch.zeros(2, 3))
         reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
         self.assertEqual(result, reference)
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.ones(2, 3),), None, verbose=False,
             example_outputs=result, propagate=True))
 
@@ -2730,12 +2730,12 @@ class TestScript(JitTestCase):
         f2 = Foo(linear)
         outputs_f2 = f2(torch.ones(1, 10, dtype=torch.float))
 
-        onnx_ish = torch.onnx._export_to_pretty_string(
+        onnx_ish = torch.onnx.export_to_pretty_string(
             f1,
             (torch.ones(1, 10, dtype=torch.float), ),
             None, verbose=False, example_outputs=outputs_f1)
         self.assertExpected(onnx_ish, subname='f1')
-        onnx_ish = torch.onnx._export_to_pretty_string(
+        onnx_ish = torch.onnx.export_to_pretty_string(
             f2,
             (torch.ones(1, 10, dtype=torch.float), ),
             None, verbose=False, example_outputs=outputs_f2)
@@ -2753,8 +2753,8 @@ class TestScript(JitTestCase):
         foo = torch.jit.trace(torch.zeros(1, 2, 3))(Foo())
         outputs = foo(torch.zeros(1, 2, 3))
         f = io.BytesIO()
-        s = torch.onnx._export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
-                                                example_outputs=outputs)
+        s = torch.onnx.export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
+                                               example_outputs=outputs)
         self.assertExpected(s)
 
     def test_shape_analysis_loop(self):
@@ -3076,7 +3076,7 @@ class TestPytorchExportModes(JitTestCase):
         x = torch.rand(3, 4)
         y = torch.rand(3, 4)
         f = io.BytesIO()
-        exported = torch.onnx._export_to_pretty_string(
+        exported = torch.onnx.export_to_pretty_string(
             ModelWithAtenNotONNXOp(), (x, y), f,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
         self.assertExpected(exported)

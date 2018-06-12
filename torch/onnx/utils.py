@@ -42,7 +42,8 @@ def set_training(model, mode):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=False,
-           input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX):
+           input_names=None, output_names=None, aten=False, export_raw_ir=False,
+           operator_export_type=None):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -77,12 +78,18 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             input nodes of the graph, in order
         output_names(list of strings, default empty list): names to assign to the
             output nodes of the graph, in order
-        aten (bool, default False): export the model in aten mode. If using aten mode,
-            all the ops original exported by the functions in symbolic.py are exported
-            as ATen ops.
-        export_raw_ir (bool, default False): export the internal IR directly instead
-            of converting it to ONNX ops.
+        aten (bool, default False): [DEPRECATED. use operator_export_type] export the
+            model in aten mode. If using aten mode, all the ops original exported
+            by the functions in symbolic.py are exported as ATen ops.
+        export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
+            export the internal IR directly instead of converting it to ONNX ops.
     """
+    if aten or export_raw_ir:
+        assert operator_export_type is None
+        assert aten ^ export_raw_ir
+        operator_export_type = OperatorExportTypes.ATEN if aten else OperatorExportTypes.RAW
+    elif operator_export_type is None:
+        operator_export_type = OperatorExportTypes.ONNX
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type)
 
@@ -175,6 +182,21 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
         print(graph)
 
     return graph, params, torch_out
+
+
+def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
+                            input_names=None, output_names=None, aten=False, export_raw_ir=False,
+                            operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
+                            example_outputs=None, propagate=False):
+    if aten or export_raw_ir:
+        assert operator_export_type is None
+        assert aten ^ export_raw_ir
+        operator_export_type = OperatorExportTypes.ATEN if aten else OperatorExportTypes.RAW
+    elif operator_export_type is None:
+        operator_export_type = OperatorExportTypes.ONNX
+    return _export_to_pretty_string(model, args, f, export_params, verbose, training,
+                                    input_names, output_names, operator_export_type,
+                                    export_type, example_outputs, propagate)
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
@@ -405,8 +427,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
 
         elif ns == "aten":
             is_exportable_aten_op = hasattr(torch.onnx.symbolic, op_name)
-            if (operator_export_type == OperatorExportTypes.ONNX_ATEN) or \
-                    (not is_exportable_aten_op and operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK):
+            is_onnx_aten_export = operator_export_type == OperatorExportTypes.ONNX_ATEN
+            is_aten_fallback_export = operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK
+            if is_onnx_aten_export or (not is_exportable_aten_op and is_aten_fallback_export):
                 # Direct ATen export requested
                 attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
                 outputs = n.outputsSize()
