@@ -12,13 +12,13 @@ namespace at { namespace internal {
 
 // thread_local variable with internal linkage
 // requires no guarding as it's storage duration is defined to be per thread
-static thread_local tbb::task_scheduler_init tbbinit(
-    tbb::task_scheduler_init::deferred);
 // Tracks number of threads uses which TBB doesn't track.
 static thread_local int num_threads_ = -1;
 
 // Negative number of threads means default value
 void init_tbb_num_threads() {
+  static thread_local tbb::task_scheduler_init tbbinit(
+      tbb::task_scheduler_init::deferred);
   static thread_local bool first_call = true;
   int num_threads = at::get_num_threads();
   // In order to have control over the number of threads this function
