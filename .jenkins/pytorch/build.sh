@@ -25,7 +25,6 @@ pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Install pyHIPIFY in the docker image
-  sudo update-alternatives --install /usr/bin/python python /usr/bin/python3.6 50
   rm -rf pyHIPIFY || true
   git clone https://github.com/ROCm-Developer-Tools/pyHIPIFY.git
   chmod a+x pyHIPIFY/*.py
