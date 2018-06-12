@@ -12,9 +12,6 @@ MODULE_HEAD = """
 #include "torch/csrc/nn/type_checks.h"
 
 """
-with open(os.path.join(os.path.dirname(__file__), 'templates', 'nn_tail.cpp'), 'r') as f:
-    MODULE_TAIL = Template(f.read())
-
 REGISTER_METHOD_TEMPLATE = Template('  {"$name", (PyCFunction)$name, METH_STATIC | METH_VARARGS, NULL},\n')
 
 MODULE_METHODS_TEMPLATE = Template("""
@@ -110,7 +107,10 @@ PyObject * $name(PyObject *_unused, PyObject *args)
         self.module_name = module_name
         self.declarations = []
 
-    def process_full_file(self, code):
+    def process_full_file(self, code, template_path):
+        with open(os.path.join(template_path, 'nn_tail.cpp'), 'r') as f:
+            MODULE_TAIL = Template(f.read())
+
         short_name = self.module_name.split('.')[-1]
         new_code = MODULE_HEAD
         new_code += code
