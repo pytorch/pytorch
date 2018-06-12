@@ -517,6 +517,9 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
+  // NOTE: We need to be able to access OperatorExportTypes from ONNX for use in
+  // the export side of JIT, so this ONNX init needs to appear before the JIT
+  // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
   torch::autograd::initNNFunctions(module);
