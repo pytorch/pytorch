@@ -14,6 +14,24 @@
 #include <functional>
 #include <list>
 
+// These #defines are useful when writing passes as the collapse
+//
+// if (!cond) {
+//   continue; // or break; or return;
+// }
+//
+// into a single line without negation
+
+#define NOM_REQUIRE_OR_(_cond, _expr) \
+  if (!(_cond)) {                     \
+    _expr;                            \
+  }
+
+#define NOM_REQUIRE_OR_CONT(_cond) NOM_REQUIRE_OR_(_cond, continue)
+#define NOM_REQUIRE_OR_BREAK(_cond) NOM_REQUIRE_OR_(_cond, break)
+#define NOM_REQUIRE_OR_RET_NULL(_cond) NOM_REQUIRE_OR_(_cond, return nullptr)
+#define NOM_REQUIRE_OR_RET(_cond) NOM_REQUIRE_OR_(_cond, return )
+
 // Implements accessors for a generic type T. If the type is not
 // specified (i.e., void template type) then the partial specification
 // gives an empty type.
