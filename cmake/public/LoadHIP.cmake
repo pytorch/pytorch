@@ -120,5 +120,4 @@ IF(HIP_FOUND)
 
   set(thrust_INCLUDE_DIRS ${THRUST_PATH} ${THRUST_PATH}/thrust/system/cuda/detail/cub-hip)
 
-  
 ENDIF()

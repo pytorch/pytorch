@@ -446,27 +446,26 @@ if(BUILD_CAFFE2)
   include(cmake/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
-    caffe2_update_option(USE_ROCM ON)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_PLATFORM_HCC__=1")
+
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_PLATFORM_HCC__=1")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -fPIC")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-macro-redefined")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-inconsistent-missing-override")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-exceptions")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-negative")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-overflow")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
-    # TODO: replace hardcoded path
-    INCLUDE_DIRECTORIES(/opt/rocm/include /opt/rocm/hiprand/include /opt/rocm/rocrand/include /opt/rocm/miopen/include /data/Thrust/thrust/system/cuda/detail/cub-hip)
-    include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/src)
-    LINK_DIRECTORIES(/opt/rocm/lib /opt/rocm/hiprand/lib /opt/rocm/rocrand/lib /opt/rocm/miopen/lib)
-    set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
-    set(Caffe2_HIP_INCLUDES
-      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${Caffe2_HIP_INCLUDES} ${thrust_INCLUDE_DIRS})
+
+    HIP_INCLUDE_DIRECTORIES(
+      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS})
+
     set(Caffe2_HIP_DEPENDENCY_LIBS
       ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
-
     # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-         rocrand hiprand rocblas MIOpen)
+      roc::rocblas)
+
+    caffe2_update_option(USE_ROCM ON)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
