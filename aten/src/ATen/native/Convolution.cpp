@@ -102,6 +102,11 @@ auto ConvParams::view1d_as_2d() -> void {
 }
 
 auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
+  if (detail::getCUDAHooks().compiledWithMIOpen()) {
+    if (!input.type().is_cuda() || !cudnn_enabled)
+      return false;
+    return true;
+  }
   if (!detail::getCUDAHooks().compiledWithCuDNN()) {
     return false;
   }

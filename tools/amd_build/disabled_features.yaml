@@ -1,5 +1,5 @@
 {
-  "disabled_hip_function_calls":
+  "disable_unsupported_hip_calls":
     [
       {
         "path": "aten/src/THC/generic/THCTensorSort.cu",
@@ -73,6 +73,12 @@
         }
       },
       {
+        "path": "aten/src/ATen/native/cuda/Distributions.cu",
+        "s_constants": {
+          "#include <nvfunctional>": ""
+        }
+      },
+      {
         "path": "aten/src/THC/THCNumerics.cuh",
         "s_constants": {
           "#ifdef __CUDA_ARCH__": "#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)",
@@ -129,10 +135,16 @@
   "disabled_modules": [
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
-    "aten/src/ATen/native/cuda/Distributions.cu",
-    "aten/src/THCUNN/RReLU.cu"
+    "aten/src/THCUNN/RReLU.cu",
+    "aten/src/ATen/native/cuda/Distributions.cu"
   ],
   "disabled_functions": [
+    {
+      "path": "aten/src/ATen/cuda/CUDAApplyUtils.cuh",
+      "functions": [
+        "kernelPointwiseApply4"
+      ]
+    },
     {
       "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
       "non_device_functions": [
@@ -148,7 +160,9 @@
     {
       "path": "aten/src/ATen/native/cuda/Distributions.cu",
       "functions": [
-        "_s_poisson_cuda"
+        "_s_poisson_cuda",
+        "poisson_cuda_kernel",
+        "gamma_cuda_kernel"
       ]
     },
     {
@@ -304,3 +318,4 @@
     }
   ]
 }
+

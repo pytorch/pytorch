@@ -49,11 +49,13 @@ FILE(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
 FILE(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
 FILE(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
 FILE(GLOB cudnn_cpp "cudnn/*.cpp")
+FILE(GLOB miopen_cpp "miopen/*.cpp")
 FILE(GLOB mkl_cpp "mkl/*.cpp")
 FILE(GLOB mkldnn_cpp "mkldnn/*.cpp")
 
 FILE(GLOB native_cpp "native/*.cpp")
 FILE(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
+FILE(GLOB native_miopen_cpp "native/miopen/*.cpp")
 FILE(GLOB native_cuda_cu "native/cuda/*.cu")
 FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
 FILE(GLOB native_mkl_cpp "native/mkl/*.cpp")
@@ -70,10 +72,20 @@ endif()
 IF(NOT NO_CUDA OR USE_ROCM)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
   set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu})
-  set(all_cuda_cpp ${native_cudnn_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
+  set(all_cuda_cpp ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
+
+  IF(USE_ROCM)
+    set(all_cuda_cpp ${native_miopen_cpp} ${all_cuda_cpp})
+  ELSE()
+    set(all_cuda_cpp ${native_cudnn_cpp} ${all_cuda_cpp})
+  ENDIF()
+
   IF(CUDNN_FOUND)
     SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
+  ELSEIF(MIOPEN_FOUND)
+    SET(all_cuda_cpp ${all_cuda_cpp} ${miopen_cpp})
   ENDIF()
+
 endif()
 
 filter_list(generated_h generated_cpp "\\.h$")
@@ -203,7 +215,7 @@ if(NOT MSVC)
   set(BUILD_TESTS ${__aten_sleef_build_tests} CACHE BOOL "Build tests" FORCE)
 endif()
 
-IF(NOT NO_CUDA)
+IF(NOT NO_CUDA AND NOT USE_ROCM)
   IF ($ENV{ATEN_STATIC_CUDA})
     # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
     # we first have to build a fake lib that links with no device callbacks,
@@ -274,6 +286,12 @@ IF(USE_ROCM)
  FIND_LIBRARY(HIPRNG_LIBRARY hiprng HINTS ${HIPRNG_PATH}/lib)
 
  list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${HIPBLAS_LIBRARY} ${HIPRNG_LIBRARY})
+
+ # Set necessary HIPCC Flags
+ SET(HIP_HCC_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
+
+ # Set necessary CXX Flags
+ SET(CMAKE_CXX_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${CMAKE_CXX_FLAGS}")
 ENDIF()
 
 # Include CPU paths for CUDA as well
@@ -370,6 +388,9 @@ if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
     set_property(TARGET ATen_cpu PROPERTY CXX_STANDARD 11)
     if(NOT NO_CUDA OR USE_ROCM)
       set_property(TARGET ATen_cuda PROPERTY CXX_STANDARD 11)
+    endif()
+    if(USE_ROCM)
+      set_target_properties(ATen_cuda PROPERTIES LINKER_LANGUAGE HIP)
     endif()
   endif()
 endif()
