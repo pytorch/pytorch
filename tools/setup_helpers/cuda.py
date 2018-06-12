@@ -58,10 +58,7 @@ def find_cuda_version(cuda_home):
     if len(candidates) > 0:
         return candidates[0]
 
-# Note(jiayq): when migrating from NO_CUDA to USE_CUDA, the former case is checking
-# with default False, so we need to preserve old behavior by checking USE_CUDA with
-# default ON.
-if not check_env_flag('USE_CUDA', 'ON') or check_env_flag('WITH_ROCM'):
+if check_env_flag('NO_CUDA') or check_env_flag('WITH_ROCM'):
     WITH_CUDA = False
     CUDA_HOME = None
     CUDA_VERSION = None
