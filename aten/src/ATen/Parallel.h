@@ -26,11 +26,11 @@ constexpr int64_t TBB_GRAIN_SIZE = 32768;
 } // namespace internal
 
 template <class F>
-void parallel_for(
+inline void parallel_for(
     int64_t begin,
     int64_t end,
     int64_t grain_size,
-    F f) {
+    const F& f) {
   internal::init_tbb_num_threads();
 
 #ifdef __PPC64__
@@ -41,7 +41,7 @@ void parallel_for(
 
   thread_local static default_partitioner_type ap;
 
-  if ((end - begin) < grain_size) {
+  if ((end - begin) < grain_size || get_num_threads() == 1) {
     f(begin, end);
   } else {
     tbb::parallel_for(
