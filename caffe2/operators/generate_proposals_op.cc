@@ -242,14 +242,15 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   out_rois->Resize(0, roi_col_count);
   out_rois_probs->Resize(0);
 
-  // Use openmp for acceleration?
+  std::vector<ERArrXXf> im_boxes(num_images);
+  std::vector<EArrXf> im_probs(num_images);
   for (int i = 0; i < num_images; i++) {
     auto cur_im_info = im_info.row(i);
     auto cur_bbox_deltas = GetSubTensorView<float>(bbox_deltas, i);
     auto cur_scores = GetSubTensorView<float>(scores, i);
 
-    ERArrXXf im_i_boxes;
-    EArrXf im_i_probs;
+    ERArrXXf& im_i_boxes = im_boxes[i];
+    EArrXf& im_i_probs = im_probs[i];
     ProposalsForOneImage(
         cur_im_info,
         all_anchors,
@@ -257,25 +258,31 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
         cur_scores,
         &im_i_boxes,
         &im_i_probs);
+  }
 
+  int roi_counts = 0;
+  for (int i = 0; i < num_images; i++) {
+    roi_counts += im_boxes[i].rows();
+  }
+  out_rois->Extend(roi_counts, 50, &context_);
+  out_rois_probs->Extend(roi_counts, 50, &context_);
+  float* out_rois_ptr = out_rois->mutable_data<float>();
+  float* out_rois_probs_ptr = out_rois_probs->mutable_data<float>();
+  for (int i = 0; i < num_images; i++) {
+    const ERArrXXf& im_i_boxes = im_boxes[i];
+    const EArrXf& im_i_probs = im_probs[i];
     int csz = im_i_boxes.rows();
-    int cur_start_idx = out_rois->dim(0);
-
-    out_rois->Extend(csz, 50, &context_);
-    out_rois_probs->Extend(csz, 50, &context_);
 
     // write rois
-    Eigen::Map<ERArrXXf> cur_rois(
-        out_rois->mutable_data<float>() + cur_start_idx * roi_col_count,
-        csz,
-        5);
+    Eigen::Map<ERArrXXf> cur_rois(out_rois_ptr, csz, 5);
     cur_rois.col(0).setConstant(i);
     cur_rois.block(0, 1, csz, 4) = im_i_boxes;
 
     // write rois_probs
-    Eigen::Map<EArrXf>(
-        out_rois_probs->mutable_data<float>() + cur_start_idx, csz) =
-        im_i_probs;
+    Eigen::Map<EArrXf>(out_rois_probs_ptr, csz) = im_i_probs;
+
+    out_rois_ptr += csz * roi_col_count;
+    out_rois_probs_ptr += csz;
   }
 
   return true;
