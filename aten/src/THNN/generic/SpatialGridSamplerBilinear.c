@@ -12,9 +12,9 @@
 
 static inline void THNN_(SpatialGridSamplerBilinear_shapeCheck)
      (THTensor *input, THTensor *grid, THTensor *gradOutput) {
-  THNN_ARGCHECK(input->nDimension == 4, 2, input,
+  THNN_ARGCHECK(input->_dim() == 4, 2, input,
     "4D input tensor expected but got: %s");
-  THNN_ARGCHECK(grid->nDimension == 4, 2, grid,
+  THNN_ARGCHECK(grid->_dim() == 4, 2, grid,
     "4D grid tensor expected but got: %s");
 
   int nbatch   = THTensor_(size)(input, 0);
