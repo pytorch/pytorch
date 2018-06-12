@@ -1,5 +1,7 @@
 #include <torch/nn/module.h>
 
+#include <torch/nn/cursor.h>
+
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <ATen/Error.h>
@@ -42,43 +44,36 @@ std::shared_ptr<Module> Module::clone() const {
       "> instead of torch::nn::Module to inherit the ability to clone.");
 }
 
-std::map<std::string, Variable> Module::parameters() const {
-  std::map<std::string, Variable> ret;
-  for (const auto& child : children_) {
-    for (auto& p : child.value->parameters()) {
-      ret[child.key + "." + p.first] = p.second;
-    }
-  }
-  for (const auto& parameter : parameters_) {
-    ret[parameter.key] = parameter.value;
-  }
-  return ret;
+ModuleCursor Module::modules() {
+  return ModuleCursor(*this);
 }
 
-Variable& Module::param(std::string const& name) {
-  Module* container = this;
-  auto begin = 0;
-  while (true) {
-    auto dot_pos = name.find('.', begin);
-    if (dot_pos == std::string::npos) {
-      break;
-    }
+ConstModuleCursor Module::modules() const {
+  return ConstModuleCursor(*this);
+}
 
-    const auto child_name = name.substr(begin, dot_pos - begin);
-    if (auto* child = container->children_.find(child_name)) {
-      container = child->get();
-    } else {
-      AT_ERROR("No such child: ", child_name);
-    }
+ModuleCursor Module::children() {
+  return ModuleCursor(*this, /*maximum_depth=*/1);
+}
 
-    begin = dot_pos + 1; // Skip the dot
-  }
+ConstModuleCursor Module::children() const {
+  return ConstModuleCursor(*this, /*maximum_depth=*/1);
+}
 
-  const auto parameter_name = name.substr(begin);
-  if (auto* parameter = container->parameters_.find(parameter_name)) {
-    return *parameter;
-  }
-  AT_ERROR("No such param: ", parameter_name);
+ParameterCursor Module::parameters() {
+  return ParameterCursor(*this);
+}
+
+ConstParameterCursor Module::parameters() const {
+  return ConstParameterCursor(*this);
+}
+
+BufferCursor Module::buffers() {
+  return BufferCursor(*this);
+}
+
+ConstBufferCursor Module::buffers() const {
+  return ConstBufferCursor(*this);
 }
 
 void Module::train() {

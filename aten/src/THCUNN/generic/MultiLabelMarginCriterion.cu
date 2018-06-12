@@ -17,10 +17,10 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   istarget = THCTensor_(newContiguous)(state, istarget);
   THCTensor_(resizeAs)(state, istarget, input);
 
-  if(input->nDimension == 1)
+  if(input->_dim() == 1)
   {
     int dim = input->size[0];
-    THArgCheck((target->nDimension == 1) && (target->size[0] == dim), 3,
+    THArgCheck((target->_dim() == 1) && (target->size[0] == dim), 3,
         "inconsistent target size");
     THCTensor_(resize1d)(state, output, 1);
 
@@ -38,11 +38,11 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         );
     THCudaCheck(cudaGetLastError());
   }
-  else if(input->nDimension == 2)
+  else if(input->_dim() == 2)
   {
     int nframe = input->size[0];
     int dim = input->size[1];
-    THArgCheck((target->nDimension == 2) && (target->size[0] == nframe)
+    THArgCheck((target->_dim() == 2) && (target->size[0] == nframe)
                && (target->size[1] == dim), 3, "inconsistent target size");
 
     dim3 blocks(input->size[0]);
@@ -106,12 +106,12 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  if(gradInput->nDimension == 1)
+  if(gradInput->_dim() == 1)
   {
     int dim = gradInput->size[0];
-    THArgCheck((target->nDimension == 1) && (target->size[0] == dim), 3,
+    THArgCheck((target->_dim() == 1) && (target->size[0] == dim), 3,
                "inconsistent target size");
-    THArgCheck((istarget->nDimension == 1) && (istarget->size[0] == dim), 3,
+    THArgCheck((istarget->_dim() == 1) && (istarget->size[0] == dim), 3,
                "inconsistent isTarget size");
     dim3 blocks(1);
     dim3 threads(MULTILABELMARGIN_THREADS);
@@ -128,13 +128,13 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         reduce);
 
   }
-  else if(gradInput->nDimension == 2)
+  else if(gradInput->_dim() == 2)
   {
     int nframe = gradInput->size[0];
     int dim = gradInput->size[1];
-    THArgCheck((target->nDimension == 2) && (target->size[0] == nframe)
+    THArgCheck((target->_dim() == 2) && (target->size[0] == nframe)
                && (target->size[1] == dim), 3, "inconsistent target size");
-    THArgCheck((istarget->nDimension == 2) && (istarget->size[0] == nframe)
+    THArgCheck((istarget->_dim() == 2) && (istarget->size[0] == nframe)
                && (istarget->size[1] == dim), 3, "inconsistent isTarget size");
     dim3 blocks(gradInput->size[0]);
     dim3 threads(MULTILABELMARGIN_THREADS);

@@ -313,9 +313,9 @@ int THCSTensor_(isSameSizeAs)(THCState *state, const THCSTensor *self, const THC
 
 int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, const THCTensor* src)
 {
-  if (self->nDimensionI + self->nDimensionV != src->nDimension)
+  if (self->nDimensionI + self->nDimensionV != src->_dim())
     return 0;
-  for(int d = 0; d < src->nDimension; ++d) {
+  for(int d = 0; d < src->_dim(); ++d) {
     if(self->size[d] != src->size[d]) {
       return 0;
     }

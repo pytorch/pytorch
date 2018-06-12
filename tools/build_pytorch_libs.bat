@@ -18,11 +18,9 @@ set LINK_FLAGS=/DEBUG:FULL
 mkdir torch/lib/tmp_install
 
 IF "%~1"=="--with-cuda" (
-  set /a NO_CUDA=0
   set /a USE_CUDA=1
   shift
 ) ELSE (
-  set /a NO_CUDA=1
   set /a USE_CUDA=0
 )
 
@@ -156,13 +154,14 @@ goto:eof
                   -DTHC_SO_VERSION=1 ^
                   -DTHNN_SO_VERSION=1 ^
                   -DTHCUNN_SO_VERSION=1 ^
-                  -DNO_CUDA=%NO_CUDA% ^
+                  -DUSE_CUDA=%USE_CUDA% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
                   -Dnanopb_BUILD_GENERATOR=0 ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
-  IF NOT %ERRORLEVEL%==0 exit 1
+  IF ERRORLEVEL 1 exit 1
+  IF NOT ERRORLEVEL 0 exit 1
   cd ../..
   @endlocal
 
@@ -198,7 +197,8 @@ goto:eof
                   -DWITH_ROCM=%WITH_ROCM%
 
   %MAKE_COMMAND%
-  IF NOT %ERRORLEVEL%==0 exit 1
+  IF ERRORLEVEL 1 exit 1
+  IF NOT ERRORLEVEL 0 exit 1
   cd ..
   @endlocal
 

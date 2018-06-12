@@ -8,7 +8,7 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
   int dW, int dH)
 {
   THArgCheck(
-    weight != NULL && weight->nDimension == 3
+    weight != NULL && weight->_dim() == 3
     && connTable != NULL && connTable->size[0] == weight->size[0], 4,
     "3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
@@ -18,9 +18,9 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
   int dimc = 0;
   int64_t nbatch = 1;
 
-  THArgCheck(input->nDimension == 3 || input->nDimension == 4, 2, "3D or 4D(batch mode) tensor expected");
+  THArgCheck(input->_dim() == 3 || input->_dim() == 4, 2, "3D or 4D(batch mode) tensor expected");
 
-  if (input->nDimension == 4)
+  if (input->_dim() == 4)
   {
     nbatch = input->size[0];
     dimc++;
@@ -39,7 +39,7 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
   const int64_t output_w = (input_w - kW) / dW + 1;
   const int64_t output_h = (input_h - kH) / dH + 1;
 
-  if (input->nDimension == 3)
+  if (input->_dim() == 3)
     THTensor_(resize3d)(output, nOutputPlane, output_h, output_w);
   else
     THTensor_(resize4d)(output, input->size[0], nOutputPlane, output_h, output_w);
@@ -109,7 +109,7 @@ void THNN_(SpatialConvolutionMap_updateGradInput)(
   int dW, int dH)
 {
   THArgCheck(
-    weight != NULL && weight->nDimension == 3
+    weight != NULL && weight->_dim() == 3
     && connTable != NULL && connTable->size[0] == weight->size[0], 5,
     "3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
@@ -118,7 +118,7 @@ void THNN_(SpatialConvolutionMap_updateGradInput)(
   int dimw = 2;
   int dimh = 1;
   int64_t nbatch = 1;
-  if (input->nDimension == 4)
+  if (input->_dim() == 4)
   {
     nbatch = input->size[0];
     dimw++;
@@ -196,7 +196,7 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THArgCheck(
-    gradWeight != NULL && gradWeight->nDimension == 3
+    gradWeight != NULL && gradWeight->_dim() == 3
     && connTable != NULL && connTable->size[0] == gradWeight->size[0], 5,
     "3D gradWeight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
@@ -205,7 +205,7 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
   int dimw = 2;
   int dimh = 1;
   int64_t nbatch = 1;
-  if (input->nDimension == 4)
+  if (input->_dim() == 4)
   {
     nbatch = input->size[0];
     dimw++;
