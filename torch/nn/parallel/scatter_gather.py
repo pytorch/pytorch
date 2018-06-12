@@ -6,8 +6,7 @@ def scatter(inputs, target_gpus, dim=0):
     r"""
     Slices tensors into approximately equal chunks and
     distributes them across given GPUs. Duplicates
-    references to objects that are not tensors. Does not
-    support Tensors.
+    references to objects that are not tensors.
     """
     def scatter_map(obj):
         if isinstance(obj, torch.Tensor):

@@ -477,6 +477,77 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
 
     @given(
+        inputs=hu.lengths_tensor(
+            dtype=np.float32,
+            min_value=1,
+            max_value=5,
+            allow_empty=True,
+        ),
+        **hu.gcs
+    )
+    def test_lengths_mean(self, inputs, gc, dc):
+        X, Y = inputs
+        op = core.CreateOperator("LengthsMean", ["X", "Y"], "out")
+
+        def ref(D, L):
+            R = np.zeros(shape=(L.size, ) + D.shape[1:], dtype=D.dtype)
+            line = 0
+            for g in range(L.size):
+                for _ in range(L[g]):
+                    if len(D.shape) > 1:
+                        R[g, :] += D[line, :]
+                    else:
+                        R[g] += D[line]
+                    line += 1
+                if L[g] > 1:
+                    if len(D.shape) > 1:
+                        R[g, :] = R[g, :] / L[g]
+                    else:
+                        R[g] = R[g] / L[g]
+
+            return [R]
+
+        self.assertReferenceChecks(gc, op, [X, Y], ref)
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 0, [0])
+
+    @given(
+        inputs=hu.sparse_lengths_tensor(
+            dtype=np.float32,
+            min_value=1,
+            max_value=5,
+            allow_empty=True
+        ),
+        **hu.gcs
+    )
+    def test_sparse_lengths_mean(self, inputs, gc, dc):
+        X, Y, Z = inputs
+        op = core.CreateOperator("SparseLengthsMean", ["X", "Y", "Z"], "out")
+
+        def ref(D, I, L):
+            R = np.zeros(shape=(L.size, ) + D.shape[1:], dtype=D.dtype)
+            line = 0
+            for g in range(L.size):
+                for _ in range(L[g]):
+                    if len(D.shape) > 1:
+                        R[g, :] += D[I[line], :]
+                    else:
+                        R[g] += D[I[line]]
+                    line += 1
+
+                if L[g] > 1:
+                    if len(D.shape) > 1:
+                        R[g, :] = R[g, :] / L[g]
+                    else:
+                        R[g] = R[g] / L[g]
+
+            return [R]
+
+        self.assertReferenceChecks(gc, op, [X, Y, Z], ref)
+        self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
+
+    @given(
         grad_on_weights=st.booleans(),
         inputs=hu.sparse_lengths_tensor(
             dtype=np.float32,
@@ -522,6 +593,16 @@ class TestSegmentOps(hu.HypothesisTestCase):
         Z = np.random.randint(0, 50, size=8).astype(np.int64)
         op = core.CreateOperator(
             "SparseLengthsIndicesInGradientSumGradient", ["X", "Y", "Z"], "out"
+        )
+        self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
+
+    @given(**hu.gcs)
+    def test_sparse_lengths_indices_in_gradient_mean_gpu(self, gc, dc):
+        X = np.random.rand(3, 3, 4, 5).astype(np.float32)
+        Y = np.asarray([3, 3, 2]).astype(np.int32)
+        Z = np.random.randint(0, 50, size=8).astype(np.int64)
+        op = core.CreateOperator(
+            "SparseLengthsIndicesInGradientMeanGradient", ["X", "Y", "Z"], "out"
         )
         self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
 

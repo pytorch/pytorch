@@ -33,6 +33,7 @@
 #include "torch/csrc/Generator.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/tensor/python_tensor.h"
 #include "torch/csrc/utils/device.h"
 #include "torch/csrc/utils/object_ptr.h"
@@ -58,7 +59,7 @@ struct ParsedArgs {
 };
 
 struct PythonArgParser {
-  explicit PythonArgParser(std::vector<std::string> fmts);
+  explicit PythonArgParser(std::vector<std::string> fmts, bool traceable=false);
 
   template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
@@ -71,15 +72,18 @@ private:
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
   ssize_t max_args;
+  bool traceable;
 };
 
 struct PythonArgs {
-  PythonArgs(int idx, const FunctionSignature& signature, PyObject** args)
+  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args)
     : idx(idx)
+    , traceable(traceable)
     , signature(signature)
     , args(args) {}
 
   int idx;
+  bool traceable;
   const FunctionSignature& signature;
   PyObject** args;
 
@@ -101,6 +105,7 @@ struct PythonArgs {
   inline Device device(int i);
   inline Device deviceWithDefault(int i, const Device& default_device);
   inline int64_t deviceInt64(int i);
+  inline at::optional<Device> deviceOptional(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -157,7 +162,7 @@ struct FunctionParameter {
 template<int N>
 inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
   if (N < max_args) {
-    throw ValueError("dst does not have enough capacity, expected %d (got %d)",
+    throw ValueError("PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
         (int)max_args, N);
   }
   return raw_parse(args, kwargs, dst.args);
@@ -171,7 +176,7 @@ inline at::Tensor PythonArgs::tensor(int i) {
     // a test for Py_None here; instead, you need to mark the argument
     // as *allowing none*; you can do this by writing 'Tensor?' instead
     // of 'Tensor' in the ATen metadata.
-    throw TypeError("expected Variable as argument %d, but got %s", i,
+    throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(args[i])->tp_name);
   }
   return reinterpret_cast<THPVariable*>(args[i])->cdata;
@@ -203,7 +208,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
-      throw TypeError("expected Variable as element %d in argument %d, but got %s",
+      throw TypeError("expected Tensor as element %d in argument %d, but got %s",
                  idx, i, Py_TYPE(args[i])->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
@@ -224,7 +229,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
-      throw TypeError("expected Variable as element %d in argument %d, but got %s",
+      throw TypeError("expected Tensor as element %d in argument %d, but got %s",
                  idx, i, Py_TYPE(args[i])->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
@@ -241,7 +246,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   PyObject* arg = args[i];
   auto size = signature.params[i].size;
   if (size > 0 && THPUtils_checkLong(arg)) {
-    return std::vector<int64_t>(size, THPUtils_unpackLong(arg));
+    return std::vector<int64_t>(size, THPUtils_unpackIndex(arg));
   }
   auto tuple = PyTuple_Check(arg);
   size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
@@ -249,7 +254,17 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
-      res[idx] = THPUtils_unpackLong(obj);
+      // Elements of torch.Size are tensors during tracing, and we need to record extra
+      // information before they are turned into an IntList
+      if (traceable && THPVariable_Check(obj)) {
+        auto & var = THPVariable_Unpack(obj);
+        jit::tracer::ArgumentStash::stashIntListElem(
+            signature.params[i].name, size, idx, var);
+        res[idx] = var.toCLong();
+        continue;
+      } else {
+        res[idx] = THPUtils_unpackIndex(obj);
+      }
     } catch (std::runtime_error &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),
@@ -330,6 +345,11 @@ inline Device PythonArgs::deviceWithDefault(int i, const Device& default_device)
 inline int64_t PythonArgs::deviceInt64(int i) {
   auto dev = device(i);
   return dev.deviceInt64();
+}
+
+inline at::optional<Device> PythonArgs::deviceOptional(int i) {
+  if (!args[i]) return at::nullopt;
+  return device(i);
 }
 
 inline std::string PythonArgs::string(int i) {

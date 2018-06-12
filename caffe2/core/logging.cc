@@ -37,10 +37,15 @@ size_t ReplaceAll(string& s, const char* from, const char* to) {
   return numReplaced;
 }
 
-static std::function<string(void)> FetchStackTrace = []() { return ""; };
+namespace {
+std::function<string(void)>* GetFetchStackTrace() {
+  static std::function<string(void)> func = []() { return ""; };
+  return &func;
+};
+} // namespace
 
 void SetStackTraceFetcher(std::function<string(void)> fetcher) {
-  FetchStackTrace = fetcher;
+  *GetFetchStackTrace() = fetcher;
 }
 
 static std::function<void(const OperatorDef&)> OperatorLogger =
@@ -70,7 +75,7 @@ EnforceNotMet::EnforceNotMet(
           ". ",
           msg,
           " ")},
-      stack_trace_(FetchStackTrace()) {
+      stack_trace_((*GetFetchStackTrace())()) {
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << msg_stack_[0];
   }
@@ -145,6 +150,11 @@ bool InitCaffeLogging(int* argc, char** argv) {
     ::google::InstallFailureSignalHandler();
 #endif
   }
+  UpdateLoggingLevelsFromFlags();
+  return true;
+}
+
+void UpdateLoggingLevelsFromFlags() {
   // If caffe2_log_level is set and is lower than the min log level by glog,
   // we will transfer the caffe2_log_level setting to glog to override that.
   FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
@@ -156,7 +166,6 @@ bool InitCaffeLogging(int* argc, char** argv) {
   if (FLAGS_caffe2_log_level < 0) {
     FLAGS_v = std::min(FLAGS_v, -FLAGS_caffe2_log_level);
   }
-  return true;
 }
 
 void ShowLogInfoToStderr() {
@@ -191,6 +200,9 @@ bool InitCaffeLogging(int* argc, char** argv) {
     FLAGS_caffe2_log_level = FATAL;
   }
   return true;
+}
+
+void UpdateLoggingLevelsFromFlags() {
 }
 
 void ShowLogInfoToStderr() {

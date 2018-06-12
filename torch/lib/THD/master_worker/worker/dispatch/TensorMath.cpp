@@ -188,7 +188,7 @@ static void tensorCatArray(rpc::RPCMessage& raw_message) {
   at::Tensor result = unpackRetrieveTensor(raw_message);
   int numInputs = unpackInteger(raw_message);
   std::vector<at::Tensor> inputs(numInputs);
-  for (std::size_t i = 0; i < numInputs; i++)
+  for (size_t i = 0; i < numInputs; i++)
     inputs[i] = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
@@ -556,7 +556,7 @@ static void tensorRand(rpc::RPCMessage& raw_message) {
   at::Generator *_generator = unpackRetrieveGenerator(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  at::ArrayRef<int64_t> sizeRef(size->data, size->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(size), THLongStorage_size(size));
   at::rand_out(r, sizeRef, _generator);
   THLongStorage_free(size);
 }
@@ -566,7 +566,7 @@ static void tensorRandn(rpc::RPCMessage& raw_message) {
   at::Generator *_generator = unpackRetrieveGenerator(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  at::ArrayRef<int64_t> sizeRef(size->data, size->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(size), THLongStorage_size(size));
   at::randn_out(r, sizeRef, _generator);
   THLongStorage_free(size);
 }

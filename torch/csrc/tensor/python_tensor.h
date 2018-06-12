@@ -1,6 +1,7 @@
 #pragma once
 
 #include "torch/csrc/python_headers.h"
+#include "torch/csrc/utils/device.h"
 #include <ATen/ATen.h>
 
 namespace torch { namespace tensor {
@@ -22,5 +23,8 @@ void py_set_default_dtype(PyObject* dtype_obj);
 // Gets the ATen type object for the default tensor type. Note that the
 // returned value will be a VariableType instance.
 at::Type& get_default_tensor_type();
+
+// Gets the torch::Device object of a given at::Tensor
+Device getDevice(const at::Tensor& tensor);
 
 }} // namespace torch::tensor

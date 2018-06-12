@@ -525,21 +525,21 @@ bool DecodeMultipleClipsFromVideo(
   buffer_rgb.clear();
 
   if (sampledFrames.size() < params.num_of_required_frame_) {
-    LOG(ERROR)
-        << "The video seems faulty and we could not decode enough frames: "
-        << sampledFrames.size() << " VS " << params.num_of_required_frame_;
+    // LOG(ERROR) << "The video seems faulty and we could not decode enough
+    // frames: "
+    //            << sampledFrames.size() << " VS " <<
+    //            params.num_of_required_frame_;
     FreeDecodedData(sampledFrames);
     return true;
   }
 
   height = sampledFrames[0]->height_;
   width = sampledFrames[0]->width_;
-  float sample_stepsz = 1.0;
-  if (clip_per_video > 1) {
-    sample_stepsz =
-        float(sampledFrames.size() - params.num_of_required_frame_) /
-        (clip_per_video - 1.0);
-  }
+  float sample_stepsz = (clip_per_video <= 1)
+      ? 0
+      : (float(sampledFrames.size() - params.num_of_required_frame_) /
+         (clip_per_video - 1));
+
   int image_size = 3 * height * width;
   int clip_size = params.num_of_required_frame_ * image_size;
   // get the RGB frames for each clip

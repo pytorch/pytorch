@@ -12,6 +12,10 @@
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
 
+#ifndef CAFFE2_USE_CUDNN
+#error("This Caffe2 install is not built with cudnn, so you should not include this file.");
+#endif
+
 static_assert(
     CUDNN_VERSION >= 5000,
     "Caffe2 requires cudnn version 5.0 or above.");
@@ -95,9 +99,15 @@ inline size_t cudnnRuntimeVersion() {
 // Check compatibility of compiled and runtime cuDNN versions
 inline void CheckCuDNNVersions() {
   // Version format is major*1000 + minor*100 + patch
-  // Major, minor and patch versions must all match
+  // If compiled with version < 7, major, minor and patch must all match
+  // If compiled with version >= 7, then either
+  //    runtime_version > compiled_version
+  //    major and minor match
   bool version_match = cudnnCompiledVersion() == cudnnRuntimeVersion();
-  CAFFE_ENFORCE(version_match,
+  bool compiled_with_7 = cudnnCompiledVersion() >= 7000;
+  bool backwards_compatible_7 = compiled_with_7 && cudnnRuntimeVersion() >= cudnnCompiledVersion();
+  bool patch_compatible = compiled_with_7 && (cudnnRuntimeVersion() / 100) == (cudnnCompiledVersion() / 100);
+  CAFFE_ENFORCE(version_match || backwards_compatible_7 || patch_compatible,
                 "cuDNN compiled (", cudnnCompiledVersion(), ") and "
                 "runtime (", cudnnRuntimeVersion(), ") versions mismatch");
 }

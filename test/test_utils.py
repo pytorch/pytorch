@@ -17,10 +17,9 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
-from torch.utils.serialization import load_lua
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS
+from common import IS_WINDOWS, IS_PPC
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -28,10 +27,13 @@ from common import TestCase, run_tests, download_file
 
 try:
     import cffi
-    from torch.utils.ffi import compile_extension
     HAS_CFFI = True
 except ImportError:
     HAS_CFFI = False
+
+
+if HAS_CFFI:
+    from torch.utils.ffi import create_extension
 
 
 class SimplePlugin(Plugin):
@@ -111,6 +113,15 @@ class DatasetMock(object):
 
     def __len__(self):
         return 10
+
+
+class RandomDatasetMock(object):
+
+    def __getitem__(self, index):
+        return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
+
+    def __len__(self):
+        return 1000
 
 
 class TestCheckpoint(TestCase):
@@ -230,6 +241,20 @@ class TestDataLoader(TestCase):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
 
+    def test_random_seed(self):
+        def run():
+            dataloader = torch.utils.data.DataLoader(RandomDatasetMock(),
+                                                     batch_size=2,
+                                                     num_workers=4,
+                                                     shuffle=True)
+            return next(iter(dataloader))
+
+        torch.manual_seed(2018)
+        x1 = run()
+        torch.manual_seed(2018)
+        x2 = run()
+        self.assertEqual(x1, x2)
+
     def test_single_keep(self):
         dataloader = torch.utils.data.DataLoader(self.dataset,
                                                  batch_size=self.batch_size,
@@ -246,7 +271,7 @@ class TestDataLoader(TestCase):
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
-    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
+    @unittest.skip("FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN")
     def test_multi_keep(self):
         dataloader = torch.utils.data.DataLoader(self.dataset,
                                                  batch_size=self.batch_size,
@@ -255,7 +280,6 @@ class TestDataLoader(TestCase):
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
-    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_multi_drop(self):
         dataloader = torch.utils.data.DataLoader(self.dataset,
                                                  batch_size=self.batch_size,
@@ -357,16 +381,18 @@ class TestFFI(TestCase):
         shutil.rmtree(self.tmpdir)
 
     @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
+    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
+    @unittest.skipIf(IS_PPC, "skip for ppc64le due to incompatible exception handling")
     def test_cpu(self):
-        compile_extension(
+        create_extension(
             name='test_extensions.cpulib',
-            header=test_dir + '/ffi/src/cpu/lib.h',
+            headers=[test_dir + '/ffi/src/cpu/lib.h'],
             sources=[
                 test_dir + '/ffi/src/cpu/lib1.c',
                 test_dir + '/ffi/src/cpu/lib2.c',
             ],
             verbose=False,
-        )
+        ).build()
         from test_extensions import cpulib
         tensor = torch.ones(2, 2).float()
 
@@ -385,16 +411,17 @@ class TestFFI(TestCase):
                           lambda: cpulib.bad_func(tensor, 2, 1.5))
 
     @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
+    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
     def test_gpu(self):
-        compile_extension(
+        create_extension(
             name='gpulib',
-            header=test_dir + '/ffi/src/cuda/cudalib.h',
+            headers=[test_dir + '/ffi/src/cuda/cudalib.h'],
             sources=[
                 test_dir + '/ffi/src/cuda/cudalib.c',
             ],
             with_cuda=True,
             verbose=False,
-        )
+        ).build()
         import gpulib
         tensor = torch.ones(2, 2).float()
 
@@ -520,7 +547,7 @@ class TestBottleneck(TestCase):
         if scriptargs != '':
             scriptargs = ' {}'.format(scriptargs)
         rc, out, err = self._run(
-            'python -m torch.utils.bottleneck {}{}'.format(filepath, scriptargs))
+            '{} -m torch.utils.bottleneck {}{}'.format(sys.executable, filepath, scriptargs))
         return rc, out, err
 
     def _check_run_args(self):
@@ -564,14 +591,14 @@ class TestBottleneck(TestCase):
             'Distance between autograd prof output and end of output not in [6, 100] lines', output))
 
     def _check_cuda(self, output):
-        if torch.cuda.is_available():
+        if HAS_CUDA:
             results = re.search('CUDA mode', output)
             self.assertIsNotNone(results, self._fail_msg('Should tell users CUDA', output))
         else:
             results = re.search('CUDA mode', output)
             self.assertIsNone(results, self._fail_msg('Should not tell users about CUDA', output))
 
-    @unittest.skipIf(torch.cuda.is_available(), 'CPU-only test')
+    @unittest.skipIf(HAS_CUDA, 'CPU-only test')
     def test_bottleneck_cpu_only(self):
         rc, out, err = self._run_bottleneck('bottleneck/test.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
@@ -582,8 +609,7 @@ class TestBottleneck(TestCase):
         self._check_cprof_summary(out)
         self._check_cuda(out)
 
-    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
-    @unittest.skipIf(not torch.cuda.is_available(), 'No CUDA')
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
@@ -718,6 +744,7 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
-TestLuaReader.init()
 if __name__ == '__main__':
+    from torch.utils.serialization import load_lua
+    TestLuaReader.init()
     run_tests()

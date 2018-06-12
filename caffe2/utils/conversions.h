@@ -175,7 +175,7 @@ CONVERSIONS_DECL float16 To(const float in) {
 #if __CUDA_ARCH__
   // hacky interface between C2 fp16 and CUDA
 #if CUDA_VERSION >= 9000
-  half rh = static_cast<half>(in);
+  half rh = __float2half(in); 
   return halfToFloat16(rh);
 #else
   float16 ret;

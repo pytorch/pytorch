@@ -1,35 +1,36 @@
-#include "caffe2/operators/elementwise_op.h"
-#include "caffe2/utils/math.h"
+#include "caffe2/operators/cos_op.h"
+
+#include <algorithm>
+#include <functional>
 
 namespace caffe2 {
 
-struct CosCPUFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CPUContext* device_context) {
-    math::Cos<T, CPUContext>(n, x, y, device_context);
-  }
-};
-
-struct CosGradientCPUFunctor {
-  template <typename T>
-  inline void
-  Run(const int n, const T* x, const T* dy, T* dx, CPUContext* /* unused */) {
-    ConstEigenVectorArrayMap<T> dyM(dy, n);
-    ConstEigenVectorArrayMap<T> xM(x, n);
-    EigenVectorMap<T>(dx, n) = -dyM * sin(xM);
-  }
-};
+template <>
+template <typename T>
+bool CosGradientFunctor<CPUContext>::Forward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& /* X_dims */,
+    const T* dY,
+    const T* X,
+    T* dX,
+    CPUContext* /* context */) const {
+  const int size = std::accumulate(
+      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+  ConstEigenVectorArrayMap<T> dY_arr(dY, size);
+  ConstEigenVectorArrayMap<T> X_arr(X, size);
+  EigenVectorMap<T>(dX, size) = -dY_arr * X_arr.sin();
+  return true;
+}
 
 REGISTER_CPU_OPERATOR(
     Cos,
-    UnaryElementwiseOp<TensorTypes<float>, CPUContext, CosCPUFunctor>);
+    UnaryElementwiseOp<TensorTypes<float>, CPUContext, CosFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(
     CosGradient,
     BinaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
-        WithoutBroadcast<CosGradientCPUFunctor>>);
+        CosGradientFunctor<CPUContext>>);
 
 OPERATOR_SCHEMA(Cos)
     .NumInputs(1)
@@ -46,15 +47,21 @@ Calculates the cosine of the given input tensor, element-wise.
 
 OPERATOR_SCHEMA(CosGradient).NumInputs(2).NumOutputs(1).IdenticalTypeAndShape();
 
+namespace {
+
 class GetCosGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+  std::vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "CosGradient",
         "",
-        std::vector<string>{I(0), GO(0)},
-        std::vector<string>{GI(0)});
+        std::vector<std::string>{GO(0), I(0)},
+        std::vector<std::string>{GI(0)});
   }
 };
+
+} // namespace
+
 REGISTER_GRADIENT(Cos, GetCosGradient);
+
 } // namespace caffe2

@@ -19,7 +19,7 @@ derivatives_path = os.path.join(os.path.dirname(__file__), 'derivatives.yaml')
 deprecated_path = os.path.join(os.path.dirname(__file__), 'deprecated.yaml')
 
 VIEW_FUNCTIONS = {
-    'alias', 'as_strided', 'expand', 'narrow', 'permute', 'select', 'slice',
+    'alias', 'as_strided', 'diagonal', 'expand', 'narrow', 'permute', 'select', 'slice',
     'squeeze', 't', 'transpose', 'unfold', 'unsqueeze', 'view',
 }
 

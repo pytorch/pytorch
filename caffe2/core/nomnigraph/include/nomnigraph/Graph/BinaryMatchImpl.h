@@ -1,11 +1,15 @@
-#ifndef NOM_GRAPH_ALGORITHMS_H
-#error "This should only be included by Graph/Algorithms.h"
-#endif
+#ifndef NOM_GRAPH_BINARYMATCHIMPL_H
+#define NOM_GRAPH_BINARYMATCHIMPL_H
+
+#include "nomnigraph/Graph/Graph.h"
+
+namespace nom {
+namespace algorithm {
 
 /// \brief A binary graph matching algorithm based on Kahn's algorithm.
-template <typename T, typename U, typename F>
-std::vector<Subgraph<T, U>> binaryMatch(Graph<T, U> *g, F condition) {
-  using G = Graph<T, U>;
+template <typename F, typename T, typename... U>
+std::vector<Subgraph<T, U...>> binaryMatch(Graph<T, U...>* g, F condition) {
+  using G = Graph<T, U...>;
 
   auto swappableCondition = [&](typename G::NodeRef m, bool match) {
     return match ? condition(m) : !condition(m);
@@ -15,7 +19,7 @@ std::vector<Subgraph<T, U>> binaryMatch(Graph<T, U> *g, F condition) {
   std::unordered_set<typename G::EdgeRef> edgeSet(edges.begin(), edges.end());
 
   // Topologically sorted matching subgraphs.
-  std::vector<Subgraph<T,U>> sortedNodes;
+  std::vector<Subgraph<T, U...>> sortedNodes;
 
   // Find the initial frontier.
   std::vector<typename G::NodeRef> frontier;
@@ -90,8 +94,15 @@ std::vector<Subgraph<T, U>> binaryMatch(Graph<T, U> *g, F condition) {
   }
 
   if (edgeSet.size()) {
-    assert(0 && "Invalid graph for Kahn's algorithm, cycle detected.  Please use Tarjans.");
+    assert(
+        0 &&
+        "Invalid graph for Kahn's algorithm, cycle detected.  Please use Tarjans.");
   }
 
   return sortedNodes;
 }
+
+} // namespace algorithm
+} // namespace nom
+
+#endif // NOM_GRAPH_BINARYMATCHIMPL_H

@@ -44,7 +44,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
 
   if (exactInputHeight < kH || exactInputWidth < kW) {
     THError("Calculated padded input size per channel: (%ld x %ld). "
-      "Kernel size: (%ld x %ld). Kernel size can't greater than actual input size",
+      "Kernel size: (%ld x %ld). Kernel size can't be greater than actual input size",
       exactInputHeight, exactInputWidth, kH, kW);
   }
 
@@ -123,7 +123,7 @@ static void THNN_(SpatialConvolutionMM_updateOutput_frame)(
   if (bias) {
     for(i = 0; i < nOutputPlane; i++)
         THVector_(fill)
-	  (output->storage->data + output->storageOffset + output->stride[0] * i,
+	  (THStorage_(data)(output->storage) + output->storageOffset + output->stride[0] * i,
 	   THTensor_(get1d)(bias, i), outputHeight*outputWidth);
   } else {
     THTensor_(zero)(output);
@@ -334,10 +334,10 @@ static void THNN_(SpatialConvolutionMM_accGradParameters_frame)(
     {
       int64_t k;
       real sum = 0;
-      real *data = gradOutput2d->storage->data + gradOutput2d->storageOffset + i*gradOutput2d->stride[0];
+      real *data = THStorage_(data)(gradOutput2d->storage) + gradOutput2d->storageOffset + i*gradOutput2d->stride[0];
       for(k = 0; k < gradOutput2d->size[1]; k++)
         sum += data[k];
-      (gradBias->storage->data + gradBias->storageOffset)[i] += scale*sum;
+      (THStorage_(data)(gradBias->storage) + gradBias->storageOffset)[i] += scale*sum;
     }
   }
 

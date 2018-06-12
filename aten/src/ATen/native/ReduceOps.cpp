@@ -3,6 +3,7 @@
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
+#include "ATen/WrapDimUtilsMulti.h"
 #include "cpu/ReduceOpsKernel.h"
 
 #include <algorithm>
@@ -35,7 +36,7 @@ Tensor cumsum(const Tensor& self, int64_t dim) {
 
 static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_ASSERT(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
+  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
             "provided dtype must match dtype of result in cumsum.  Got %s and %s.",
             at::toString(result.type().scalarType()), at::toString(dtype.value()));
   return at::_cumsum_out(result, self.toType(result.type().scalarType()), dim);
@@ -63,7 +64,7 @@ Tensor cumprod(const Tensor& self, int64_t dim) {
 
 static inline Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_ASSERT(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
+  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
             "provided dtype must match dtype of result in cumprod.  Got %s and %s.",
             at::toString(result.type().scalarType()), at::toString(dtype.value()));
   return at::_cumprod_out(result, self.toType(result.type().scalarType()), dim);
@@ -121,10 +122,6 @@ Tensor _prod_cpu(const Tensor &self) {
   return self._prodall();
 }
 
-Tensor _sum_cuda(const Tensor &self_) { return self_._sumall(); }
-
-Tensor _prod_cuda(const Tensor &self_) { return self_._prodall(); }
-
 // \ALL REDUCE ################################################################
 
 // DIM REDUCE #################################################################
@@ -155,23 +152,23 @@ static Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
   return result;
 }
 
-static inline Tensor &sum_out(Tensor &result, const Tensor &self, int64_t dim,
+static inline Tensor &sum_out(Tensor &result, const Tensor &self, IntList dim,
                  bool keepdim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_ASSERT(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
+  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
             "provided dtype must match dtype of result in sum.  Got %s and %s.",
             at::toString(result.type().scalarType()), at::toString(dtype.value()));
   return at::_sum_out(result, self.toType(result.type().scalarType()), dim, keepdim);
 }
 
-Tensor& sum_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
+Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
   return at::native::sum_out(result, self, dim, keepdim, at::optional<ScalarType>(dtype));
 }
-Tensor& sum_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim) {
+Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim) {
   return at::native::sum_out(result, self, dim, keepdim, nullopt);
 }
 
-Tensor& sum_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
+Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, ScalarType dtype) {
   return at::native::sum_out(result, self, dim, false, dtype);
 }
 
@@ -192,7 +189,7 @@ Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
 static inline Tensor &prod_out(Tensor &result, const Tensor &self, int64_t dim,
                  bool keepdim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_ASSERT(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
+  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
             "provided dtype must match dtype of result in prod.  Got %s and %s.",
             at::toString(result.type().scalarType()), at::toString(dtype.value()));
   return at::_prod_out(result, self.toType(result.type().scalarType()), dim, keepdim);
@@ -223,29 +220,19 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
   return at::_th_prod_out(result, self, dim, keepdim);
 }
 
-Tensor &_sum_out_cuda(Tensor &result, const Tensor &self, int64_t dim,
-                      bool keepdim) {
-  return at::_th_sum_out(result, self, dim, keepdim);
-}
-
-Tensor &_prod_out_cuda(Tensor &result, const Tensor &self, int64_t dim,
-                       bool keepdim) {
-  return at::_th_prod_out(result, self, dim, keepdim);
-}
-
-static inline Tensor sum(const Tensor &self, int64_t dim_, bool keepdim, optional<ScalarType> dtype) {
+static inline Tensor sum(const Tensor &self, IntList dim_, bool keepdim, optional<ScalarType> dtype) {
   return at::_sum(integer_upcast(self, dtype), dim_, keepdim);
 }
 
-Tensor sum(const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
+Tensor sum(const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
   return at::native::sum(self, dim, keepdim, at::optional<ScalarType>(dtype));
 }
 
-Tensor sum(const Tensor& self, int64_t dim, bool keepdim) {
+Tensor sum(const Tensor& self, IntList dim, bool keepdim) {
   return at::native::sum(self, dim, keepdim, nullopt);
 }
 
-Tensor sum(const Tensor& self, int64_t dim, ScalarType dtype) {
+Tensor sum(const Tensor& self, IntList dim, ScalarType dtype) {
   return at::native::sum(self, dim, false, dtype);
 }
 
@@ -277,6 +264,86 @@ Tensor _prod(const Tensor &self, int64_t dim_, bool keepdim) {
   return at::_prod_out(result, self, dim, keepdim);
 }
 
+Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool keepdim) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+  auto maxes = at::max_values(self, dim, true);
+  result = at::where((maxes == INFINITY).__or__(maxes == -INFINITY),
+		     maxes,
+		     maxes + at::log(at::sum(at::exp(self - maxes), dim, true)));
+  if (! keepdim)
+    result.squeeze_(dim);
+  return result;
+}
+
+Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+  Tensor result = self.type().tensor();
+  return at::native::logsumexp_out(result, self, dim, keepdim);
+}
+
 // \DIM REDUCE ################################################################
+
+// MULTI DIM REDUCE ###########################################################
+
+template <Tensor (reduce_1)(const Tensor &, int64_t, bool)>
+inline Tensor reduce_multi_associative(const Tensor &self, IntList dims_, bool keepdim) {
+  if (dims_.size() == 1) {
+    return reduce_1(self, dims_[0], keepdim);
+  }
+  if (dims_.size() == 0) {
+    return self;
+  }
+  int64_t ndims = self.dim();
+  auto reduce_dims = dim_list_to_bitset(dims_, ndims);
+  Tensor result = self;
+  for (int64_t dim = ndims-1; dim >= 0; dim--) {
+    if (reduce_dims[dim])
+      result = reduce_1(result, dim, keepdim);
+  }
+  return result;
 }
+
+template <Tensor (reduce_1)(const Tensor &, int64_t, bool),
+	  Tensor& (reduce_1_out)(Tensor& result, const Tensor &, int64_t, bool)>
+inline Tensor& reduce_multi_associative_out(Tensor &result, const Tensor &self, IntList dims_, bool keepdim) {
+  if (dims_.size() == 1) {
+    return reduce_1_out(result, self, dims_[0], keepdim);
+  }
+  int64_t ndims = self.dim();
+  auto reduce_dims = dim_list_to_bitset(dims_, ndims);
+  Tensor t = self;
+  int64_t last_reduction = dims_.size()-1;
+  int64_t num_reduction = 0;
+  for (int64_t dim = ndims-1; dim >= 0; dim--) {
+    if (reduce_dims[dim]) {
+      if (num_reduction < last_reduction) {
+	t = reduce_1(t, dim, keepdim);
+      } else {
+	reduce_1_out(result, t, dim, keepdim);
+      }
+      num_reduction++;
+    }
+  }
+  return result;
 }
+
+
+Tensor& _sum_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
+  if (self.is_cuda()) {
+    return at::_sum_cuda_out(result, self, dim, keepdim);
+  }
+  else {
+    return _sum_out_cpu(result, self, dim, keepdim);
+  }
+}
+
+Tensor _sum(const Tensor &self, IntList dims, bool keepdim) {
+  return reduce_multi_associative<_sum>(self, dims, keepdim);
+}
+
+Tensor& _sum_out(Tensor &result, const Tensor &self, IntList dims, bool keepdim)
+{
+  return reduce_multi_associative_out<_sum, _sum_out>(result, self, dims, keepdim);
+}
+
+}} // namespace at::native

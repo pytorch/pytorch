@@ -41,8 +41,8 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
 
   THCPStream* self = (THCPStream *)ptr.get();
   self->cdata = stream;
-  self->device = stream ? stream->device : current_device;
-  self->cuda_stream = stream ? stream->stream : NULL;
+  self->device = stream ? THCStream_device(stream) : current_device;
+  self->cuda_stream = stream ? THCStream_stream(stream) : NULL;
   return (PyObject *)ptr.release();
   END_HANDLE_TH_ERRORS
 }

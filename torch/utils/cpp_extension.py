@@ -36,6 +36,8 @@ def _find_cuda_home():
                 cuda_home = os.path.dirname(os.path.dirname(nvcc))
             except Exception:
                 cuda_home = None
+    if cuda_home and not torch.cuda.is_available():
+        print("No CUDA runtime is found, using CUDA_HOME='{}'".format(cuda_home))
     return cuda_home
 
 
@@ -56,7 +58,11 @@ for instructions on how to install GCC 4.9 or higher.
 
                               !! WARNING !!
 '''
-CUDA_HOME = _find_cuda_home() if torch.cuda.is_available() else None
+CUDA_HOME = _find_cuda_home()
+# PyTorch releases have the version pattern major.minor.patch, whereas when
+# PyTorch is built from source, we append the git commit hash, which gives
+# it the below pattern.
+BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -71,6 +77,8 @@ def check_compiler_abi_compatibility(compiler):
         False if the compiler is (likely) ABI-incompatible with PyTorch,
         else True.
     '''
+    if BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__):
+        return True
     try:
         check_cmd = '{}' if sys.platform == 'win32' else '{} --version'
         info = subprocess.check_output(
@@ -245,7 +253,13 @@ class BuildExtension(build_ext):
         check_compiler_abi_compatibility(compiler)
 
     def _define_torch_extension_name(self, extension):
-        define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
+        # pybind11 doesn't support dots in the names
+        # so in order to support extensions in the packages
+        # like torch._C, we take the last part of the string
+        # as the library name
+        names = extension.name.split('.')
+        name = names[-1]
+        define = '-DTORCH_EXTENSION_NAME={}'.format(name)
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
                 args.append(define)
@@ -288,7 +302,7 @@ def CppExtension(name, sources, *args, **kwargs):
         kwargs['library_dirs'] = library_dirs
 
         libraries = kwargs.get('libraries', [])
-        libraries.append('ATen')
+        libraries.append('caffe2')
         libraries.append('_C')
         kwargs['libraries'] = libraries
 
@@ -331,7 +345,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries = kwargs.get('libraries', [])
     libraries.append('cudart')
     if sys.platform == 'win32':
-        libraries.append('ATen')
+        libraries.append('caffe2')
+        libraries.append('caffe2_gpu')
         libraries.append('_C')
     kwargs['libraries'] = libraries
 
@@ -461,20 +476,152 @@ def load(name,
                 extra_cflags=['-O2'],
                 verbose=True)
     '''
+    return _jit_compile(
+        name,
+        [sources] if isinstance(sources, str) else sources,
+        extra_cflags,
+        extra_cuda_cflags,
+        extra_ldflags,
+        extra_include_paths,
+        build_directory or _get_build_directory(name, verbose),
+        verbose)
 
-    verify_ninja_availability()
 
-    # Allows sources to be a single path or a list of paths.
-    if isinstance(sources, str):
-        sources = [sources]
+def load_inline(name,
+                cpp_sources,
+                cuda_sources=None,
+                functions=None,
+                extra_cflags=None,
+                extra_cuda_cflags=None,
+                extra_ldflags=None,
+                extra_include_paths=None,
+                build_directory=None,
+                verbose=False):
+    '''
+    Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
-    if build_directory is None:
-        build_directory = _get_build_directory(name, verbose)
+    This function behaves exactly like :func:`load`, but takes its sources as
+    strings rather than filenames. These strings are stored to files in the
+    build directory, after which the behavior of :func:`load_inline` is
+    identical to :func:`load`.
 
+    See `the
+    tests <https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions.py>`_
+    for good examples of using this function.
+
+    Sources may omit two required parts of a typical non-inline C++ extension:
+    the necessary header includes, as well as the (pybind11) binding code. More
+    precisely, strings passed to ``cpp_sources`` are first concatenated into a
+    single ``.cpp`` file. This file is then prepended with ``#include
+    <torch/torch.h>``.
+
+    Furthermore, if the ``functions`` argument is supplied, bindings will be
+    automatically generated for each function specified. ``functions`` can
+    either be a list of function names, or a dictionary mapping from function
+    names to docstrings. If a list is given, the name of each function is used
+    as its docstring.
+
+    The sources in ``cuda_sources`` are concatenated into a separate ``.cu``
+    file and  prepended with ``ATen/ATen.h``, ``cuda.h`` and ``cuda_runtime.h``
+    includes. The ``.cpp`` and ``.cu`` files are compiled separately, but
+    ultimately linked into a single library. Note that no bindings are
+    generated for functions in ``cuda_sources`` per  se. To bind to a CUDA
+    kernel, you must create a C++ function that calls it, and either declare or
+    define this C++ function in one of the ``cpp_sources`` (and include its
+    name in ``functions``).
+
+    See :func:`load` for a description of arguments omitted below.
+
+    Args:
+        cpp_sources: A string, or list of strings, containing C++ source code.
+        cuda_sources: A string, or list of strings, containing CUDA source code.
+        functions: A list of function names for which to generate function
+            bindings. If a dictionary is given, it should map function names to
+            docstrings (which are otherwise just the function names).
+
+    Example:
+        >>> from torch.utils.cpp_extension import load_inline
+        >>> source = \'\'\'
+        at::Tensor sin_add(at::Tensor x, at::Tensor y) {
+          return x.sin() + y.sin();
+        }
+        \'\'\'
+        >>> module = load_inline(name='inline_extension',
+                                 cpp_sources=[source],
+                                 functions=['sin_add'])
+    '''
+    build_directory = build_directory or _get_build_directory(name, verbose)
+
+    source_files = []
+
+    if isinstance(cpp_sources, str):
+        cpp_sources = [cpp_sources]
+    cuda_sources = cuda_sources or []
+    if isinstance(cuda_sources, str):
+        cuda_sources = [cuda_sources]
+
+    cpp_sources.insert(0, '#include <torch/torch.h>')
+
+    # If `functions` is supplied, we create the pybind11 bindings for the user.
+    # Here, `functions` is (or becomes, after some processing) a map from
+    # function names to function docstrings.
+    if functions is not None:
+        cpp_sources.append('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {')
+        if isinstance(functions, str):
+            functions = [functions]
+        if isinstance(functions, list):
+            # Make the function docstring the same as the function name.
+            functions = dict((f, f) for f in functions)
+        elif not isinstance(functions, dict):
+            raise ValueError(
+                "Expected 'functions' to be a list or dict, but was {}".format(
+                    type(functions)))
+        for function_name, docstring in functions.items():
+            cpp_sources.append('m.def("{0}", &{0}, "{1}");'.format(
+                function_name, docstring))
+        cpp_sources.append('}')
+
+    cpp_source_path = os.path.join(build_directory, 'main.cpp')
+    with open(cpp_source_path, 'w') as cpp_source_file:
+        cpp_source_file.write('\n'.join(cpp_sources))
+
+    sources = [cpp_source_path]
+
+    if cuda_sources:
+        cuda_sources.insert(0, '#include <ATen/ATen.h>')
+        cuda_sources.insert(1, '#include <cuda.h>')
+        cuda_sources.insert(2, '#include <cuda_runtime.h>')
+
+        cuda_source_path = os.path.join(build_directory, 'cuda.cu')
+        with open(cuda_source_path, 'w') as cuda_source_file:
+            cuda_source_file.write('\n'.join(cuda_sources))
+
+        sources.append(cuda_source_path)
+
+    return _jit_compile(
+        name,
+        sources,
+        extra_cflags,
+        extra_cuda_cflags,
+        extra_ldflags,
+        extra_include_paths,
+        build_directory,
+        verbose)
+
+
+def _jit_compile(name,
+                 sources,
+                 extra_cflags,
+                 extra_cuda_cflags,
+                 extra_ldflags,
+                 extra_include_paths,
+                 build_directory,
+                 verbose):
     baton = FileBaton(os.path.join(build_directory, 'lock'))
-
     if baton.try_acquire():
         try:
+            verify_ninja_availability()
+            check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
             with_cuda = any(map(_is_cuda_file, sources))
             extra_ldflags = _prepare_ldflags(
                 extra_ldflags or [],
@@ -530,7 +677,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         torch_path = os.path.dirname(os.path.dirname(here))
         lib_path = os.path.join(torch_path, 'lib')
 
-        extra_ldflags.append('ATen.lib')
+        extra_ldflags.append('caffe2.lib')
+        if with_cuda:
+            extra_ldflags.append('caffe2_gpu.lib')
         extra_ldflags.append('_C.lib')
         extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
         extra_ldflags.append('/LIBPATH:{}'.format(lib_path))
@@ -598,6 +747,11 @@ def _write_ninja_file(path,
                       extra_ldflags,
                       extra_include_paths,
                       with_cuda=False):
+    extra_cflags = [flag.strip() for flag in extra_cflags]
+    extra_cuda_cflags = [flag.strip() for flag in extra_cuda_cflags]
+    extra_ldflags = [flag.strip() for flag in extra_ldflags]
+    extra_include_paths = [flag.strip() for flag in extra_include_paths]
+
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
     config.append('cxx = {}'.format(os.environ.get('CXX', 'c++')))

@@ -1,8 +1,7 @@
-#include "THCStream.h"
+#include "THCStream.hpp"
 
 #include <mutex>
 #include <cuda_runtime_api.h>
-#include "THAtomic.h"
 
 #define MAX_DEVICES 256
 static THCStream default_streams[MAX_DEVICES];
@@ -32,6 +31,9 @@ THC_API THCStream* THCStream_defaultStream(int device)
   return &default_streams[device];
 }
 
+THC_API cudaStream_t THCStream_stream(THCStream* self) { return self->stream; }
+THC_API int THCStream_device(THCStream* self) { return self->device; }
+
 THCStream* THCStream_newWithPriority(int flags, int priority)
 {
   THCStream* self = (THCStream*) malloc(sizeof(THCStream));
@@ -46,7 +48,7 @@ void THCStream_free(THCStream* self)
   if (!self || !self->stream) {
     return;
   }
-  if (THAtomicDecrementRef(&self->refcount)) {
+  if (--self->refcount == 0) {
     THCudaCheckWarn(cudaStreamDestroy(self->stream));
     free(self);
   }
@@ -55,6 +57,6 @@ void THCStream_free(THCStream* self)
 void THCStream_retain(THCStream* self)
 {
   if (self->stream) {
-    THAtomicIncrementRef(&self->refcount);
+    self->refcount++;
   }
 }

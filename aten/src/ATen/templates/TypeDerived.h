@@ -1,4 +1,7 @@
 #pragma once
+
+// ${generated_comment}
+
 #include "ATen/Type.h"
 #include "ATen/Context.h"
 #include "ATen/TensorMethods.h"
@@ -25,7 +28,7 @@ struct ${Type} final : public Type {
   virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const override;
   virtual std::unique_ptr<Generator> generator() const override;
   virtual const char * toString() const override;
-  virtual std::size_t elementSizeInBytes() const override;
+  virtual size_t elementSizeInBytes() const override;
   virtual TypeID ID() const override;
   static const char * typeString();
   virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const override;
@@ -35,6 +38,7 @@ struct ${Type} final : public Type {
   // virtual Tensor * add(Tensor & a, Tensor & b) override;
 
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
+  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
   ${type_derived_method_declarations}
 };
 

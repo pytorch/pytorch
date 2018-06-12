@@ -2,6 +2,7 @@
 // port from Caffe
 
 #include "THCUNN.h"
+#include "THCTensor.hpp"
 #include "THCDeviceTensor.cuh"
 #include "THCDeviceTensorUtils.cuh"
 #include "THCNumerics.cuh"
@@ -242,8 +243,8 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   // At this point each thread in the block has a local gradient, which we need to
   // accumulate prior to writing the global value
   AccT *buf = smem.getPointer();
-  AccT tval = reduceBlock<AccT, ReduceAdd<AccT, AccT>>(
-      buf, blockDim.x, grad, ReduceAdd<AccT, AccT>(), ScalarConvert<float, AccT>::to(0));
+  AccT tval = reduceBlock<AccT, ReduceAdd<AccT>>(
+      buf, blockDim.x, grad, ReduceAdd<AccT>(), ScalarConvert<float, AccT>::to(0));
 
   // After reduction, first thread in the block has the gradient, so its responsible
   // for writing it to gradWeight

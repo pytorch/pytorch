@@ -292,8 +292,6 @@ def runOpBenchmark(
     input_device_options=None,
     iterations=10,
 ):
-    if input_device_options is None:
-        input_device_options = {}
     op = copy.deepcopy(op)
     op.device_option.CopyFrom(device_option)
     net = caffe2_pb2.NetDef()
@@ -301,11 +299,13 @@ def runOpBenchmark(
     net.name = op.name if op.name else "test"
 
     with temp_workspace():
+        _input_device_options = input_device_options or \
+            core.InferOpBlobDevicesAsDict(op)[0]
         for (n, b) in zip(op.input, inputs):
             workspace.FeedBlob(
                 n,
                 b,
-                device_option=input_device_options.get(n, device_option)
+                device_option=_input_device_options.get(n, device_option)
             )
         workspace.CreateNet(net)
         ret = workspace.BenchmarkNet(net.name, 1, iterations, True)
@@ -519,9 +519,6 @@ class HypothesisTestCase(test_util.TestCase):
 
                 self.assertReferenceChecks(gc, op, [X], softsign)
         """
-        if input_device_options is None:
-            input_device_options = {}
-
         op = copy.deepcopy(op)
         op.device_option.CopyFrom(device_option)
 
@@ -530,11 +527,13 @@ class HypothesisTestCase(test_util.TestCase):
                 raise ValueError(
                     'must supply an input for each input on the op: %s vs %s' %
                     (op.input, inputs))
+            _input_device_options = input_device_options or \
+                core.InferOpBlobDevicesAsDict(op)[0]
             for (n, b) in zip(op.input, inputs):
                 workspace.FeedBlob(
                     n,
                     b,
-                    device_option=input_device_options.get(n, device_option)
+                    device_option=_input_device_options.get(n, device_option)
                 )
             net = core.Net("opnet")
             net.Proto().op.extend([op])
@@ -600,8 +599,6 @@ class HypothesisTestCase(test_util.TestCase):
             as_kwargs=True,
             init_net=None,
     ):
-        if input_device_options is None:
-            input_device_options = {}
         if as_kwargs:
             assert len(set(list(op.input) + list(op.output))) == \
                 len(op.input) + len(op.output), \
@@ -610,11 +607,13 @@ class HypothesisTestCase(test_util.TestCase):
         op.device_option.CopyFrom(device_option)
 
         with temp_workspace():
+            _input_device_options = input_device_options or \
+                core.InferOpBlobDevicesAsDict(op)[0]
             for (n, b) in zip(op.input, inputs):
                 workspace.FeedBlob(
                     n,
                     b,
-                    device_option=input_device_options.get(n, device_option)
+                    device_option=_input_device_options.get(n, device_option)
                 )
             if init_net:
                 workspace.RunNetOnce(init_net)
@@ -635,18 +634,17 @@ class HypothesisTestCase(test_util.TestCase):
         exception=(Exception,),
         regexp=None,
     ):
-        if input_device_options is None:
-            input_device_options = {}
-
         op = copy.deepcopy(op)
         op.device_option.CopyFrom(device_option)
 
         with temp_workspace():
+            _input_device_options = input_device_options or \
+                core.InferOpBlobDevicesAsDict(op)[0]
             for (n, b) in zip(op.input, inputs):
                 workspace.FeedBlob(
                     n,
                     b,
-                    device_option=input_device_options.get(n, device_option)
+                    device_option=_input_device_options.get(n, device_option)
                 )
             if regexp is None:
                 self.assertRaises(exception, workspace.RunOperatorOnce, op)

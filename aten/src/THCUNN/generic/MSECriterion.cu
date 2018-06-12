@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "generic/MSECriterion.cu"
 #else
 
-#include "THCApply.cuh"
-
 void THNN_(MSECriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -44,7 +42,7 @@ void THNN_(MSECriterion_updateOutput)(
   }
 
   THCTensor_(resizeAs)(state, output, input);
-  THC_pointwiseApply3(
+  THC_pointwiseApply3<real, real, real>(
       state,
       input,
       target,

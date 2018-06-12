@@ -27,10 +27,19 @@ if ! which conda; then
   pip install mkl mkl-devel
 fi
 
-python setup.py install
+# sccache will fail for CUDA builds if all cores are used for compiling
+# gcc 7.2 with sccache seems to have intermittent OOM issue if all cores are used
+if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7.2* ]]) && which sccache > /dev/null; then
+  export MAX_JOBS=`expr $(nproc) - 1`
+fi
 
-# Add the ATen test binaries so that they won't be git clean'ed away
-git add -f aten/build/src/ATen/test
+# Target only our CI GPU machine's CUDA arch to speed up the build
+export TORCH_CUDA_ARCH_LIST=5.2
+
+WERROR=1 python setup.py install
+
+# Add the test binaries so that they won't be git clean'ed away
+git add -f build/bin
 
 # Testing ATen install
 if [[ "$BUILD_ENVIRONMENT" != *cuda* ]]; then
@@ -60,8 +69,8 @@ fi
 
 # Test no-Python build
 if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-  echo "Building libtorch with NO_PYTHON"
+  echo "Building libtorch"
   # NB: Install outside of source directory (at the same level as the root
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-  VERBOSE=1 tools/cpp_build/build_all.sh "$PWD/../cpp-build"
+  WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$PWD/../cpp-build"
 fi

@@ -7,7 +7,7 @@ THCTensor_(fill)(THCState* state, THCTensor *self_, real value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
 
-  if (!THC_pointwiseApply1(
+  if (!THC_pointwiseApply1<real>(
         state, self_, TensorFillOp<real>(value))) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
@@ -25,7 +25,7 @@ THCTensor_(zero)(THCState *state, THCTensor *self_)
                                 sizeof(real) * THCTensor_(nElement)(state, self_),
                                 THCState_getCurrentStream(state)));
   } else {
-    if (!THC_pointwiseApply1(
+    if (!THC_pointwiseApply1<real>(
           state, self_,
           TensorFillOp<real>(ScalarConvert<int, real>::to(0)))) {
       THArgCheck(false, 1, CUTORCH_DIM_WARNING);
@@ -174,7 +174,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     if (dim == cat_dimension) {
       result_dim_size = cat_dim_size;
     }
-    size->data[dim] = result_dim_size;
+    THLongStorage_data(size)[dim] = result_dim_size;
   }
   THCTensor_(resize)(state, result, size, NULL);
   THLongStorage_free(size);
@@ -192,10 +192,10 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   if (numInputs > 1 &&
       !hasEmptyInput &&
       THCTensor_(nDimension)(state, result) <= CAT_ARRAY_MAX_INPUT_DIMS &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, result) &&
-      TensorUtils<THCTensor>::allContiguous(state, inputs, numInputs) &&
-      TensorUtils<THCTensor>::all32BitIndexable(state, inputs, numInputs) &&
-      TensorUtils<THCTensor>::allSameDevice(state, inputs, numInputs)) {
+      THCTensor_canUse32BitIndexMath(state, result) &&
+      THCTensor_allContiguous(state, inputs, numInputs) &&
+      THCTensor_all32BitIndexable(state, inputs, numInputs) &&
+      THCTensor_allSameDevice(state, inputs, numInputs)) {
 
     // First, let's set up our kernel parameters. We start with a raw pointer to the storage
     // for the output Tensor.

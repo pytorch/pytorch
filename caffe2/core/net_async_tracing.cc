@@ -207,7 +207,7 @@ void Tracer::renameThreads() {
   std::unordered_map<int, int> numa_counters;
   std::unordered_map<long, int> tid_to_numa;
   std::hash<std::thread::id> hasher;
-  const long numa_multiplier = 10e9;
+  const long numa_multiplier = 1000000000;
   for (auto& event : events_) {
     if (event.thread_label_ >= 0 || event.op_id_ < 0) {
       continue;
@@ -255,7 +255,7 @@ Tracer::~Tracer() {
   renameThreads();
   std::stringstream serialized;
   serialized << "[\n";
-  for (auto idx = 0; idx < events_.size(); ++idx) {
+  for (size_t idx = 0; idx < events_.size(); ++idx) {
     serialized << serializeEvent(events_[idx]);
     if (idx != events_.size() - 1) {
       serialized << ",\n";

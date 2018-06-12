@@ -44,7 +44,7 @@ TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
 }
 
-std::size_t UndefinedType::elementSizeInBytes() const {
+size_t UndefinedType::elementSizeInBytes() const {
   AT_ERROR("elementSizeInBytes not defined for UndefinedType");
 }
 
@@ -67,6 +67,10 @@ const char * UndefinedType::typeString() {
 
 Tensor & UndefinedType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   AT_ERROR("s_copy not defined for UndefinedType");
+}
+
+Tensor & UndefinedType::_s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const {
+  AT_ERROR("_s_copy_from not defined for UndefinedType");
 }
 
 }

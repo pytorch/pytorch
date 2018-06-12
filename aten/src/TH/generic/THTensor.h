@@ -6,22 +6,19 @@
 
 #define TH_TENSOR_REFCOUNTED 1
 
-typedef struct THTensor
-{
-    int64_t *size;
-    int64_t *stride;
-    int nDimension;
+// Struct definition moved to THTensor.hpp
+typedef struct THTensor THTensor;
 
-    // Note: storage->size may be greater than the recorded size
-    // of a tensor
-    THStorage *storage;
-    ptrdiff_t storageOffset;
-    int refcount;
-
-    char flag;
-
-} THTensor;
-
+// These used to be distinct types; for some measure of backwards compatibility and documentation
+// alias these to the single THTensor type.
+#define THFloatTensor THTensor
+#define THDoubleTensor THTensor
+#define THHalfTensor THTensor
+#define THByteTensor THTensor
+#define THCharTensor THTensor
+#define THShortTensor THTensor
+#define THIntTensor THTensor
+#define THLongTensor THTensor
 
 /**** access methods ****/
 TH_API THStorage* THTensor_(storage)(const THTensor *self);

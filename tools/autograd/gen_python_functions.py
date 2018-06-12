@@ -8,6 +8,7 @@ import re
 from .nested_dict import nested_dict
 from tools.shared.module_loader import import_module
 from .gen_autograd import template_path
+from .gen_variable_type import should_trace
 from .utils import write
 
 CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
@@ -18,8 +19,10 @@ SKIP_PYTHON_BINDINGS = [
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', 'sparse_raw_resize_', '_unsafe_view', 'tensor',
     'sparse_coo_tensor', '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
+    'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*',
+    'arange.*', 'range.*', '_gesv.*', 'slice',
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
@@ -36,7 +39,7 @@ static PyObject * ${pycname}(PyObject* self, PyObject* args, PyObject* kwargs)
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     ${signatures}
-  });
+  }, /*traceable=*/${traceable});
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -126,12 +129,12 @@ def should_generate_python_binding(declaration):
             return False
 
     # TODO: fix handling of SparseTensor. We don't want to generate Python
-    # bindings to SparseTensor overloads, such as add(Tensor, SparseTensor),
+    # bindings to SparseTensor overloads, such as add(Tensor, SparseTensorRef),
     # since the Tensor-based signature already dynamically dispatches correctly.
     # However, _sparse_mask only has a SparseTensor signature so we need to bind
     # that function.
     for arg in declaration['arguments']:
-        if arg['type'] == 'SparseTensor' and declaration['name'] != '_sparse_mask':
+        if arg['type'] == 'SparseTensorRef' and declaration['name'] != '_sparse_mask':
             return False
 
     return True
@@ -204,7 +207,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
     unpack_methods = {
         'const Tensor &': 'tensor',
-        'SparseTensor': 'tensor',
+        'SparseTensorRef': 'tensor',
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
@@ -237,17 +240,17 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         return None
 
     def auto_gpu(option, has_device_bind):
-        tensor_arg = first_tensor_arg(option['arguments'])
-        if tensor_arg is not None:
-            if not has_device_bind:
-                return 'AutoGPU auto_gpu({});'.format(tensor_arg)
-            else:  # e.g. for ones_like, the default is the device of the tensor arg
-                device_to_use = '({}.type().is_cuda() ? {}.get_device() : -1)'.format(tensor_arg, tensor_arg)
-                return 'AutoGPU auto_gpu(device == -1 ? {} : device);'.format(device_to_use)
-        elif has_device_bind:
-            return 'AutoGPU auto_gpu(device);'
-        else:
-            return ''
+        if option['auto_gpu']:
+            tensor_arg = first_tensor_arg(option['arguments'])
+            if tensor_arg is not None:
+                if not has_device_bind:
+                    return 'AutoGPU auto_gpu({});'.format(tensor_arg)
+                else:  # e.g. for ones_like, the default is the device of the tensor arg
+                    device_to_use = '({}.type().is_cuda() ? {}.get_device() : -1)'.format(tensor_arg, tensor_arg)
+                    return 'AutoGPU auto_gpu(device == -1 ? {} : device);'.format(device_to_use)
+            elif has_device_bind:
+                return 'AutoGPU auto_gpu(device);'
+        return ''
 
     def emit_single_dispatch(declaration, out_idx, base_env):
         env = {}
@@ -307,8 +310,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
             if typename == 'Storage &':
                 expr = '*' + expr
-            if typename == 'SparseTensor':
-                expr = 'SparseTensor({})'.format(expr)
+            if typename == 'SparseTensorRef':
+                expr = 'SparseTensorRef({})'.format(expr)
 
             dispatch_type = typename
             if dispatch_type == 'Tensor':
@@ -406,7 +409,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_call'] = 'at::{}'.format(declaration['name'])
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
-        env['AutoNoGIL'] = 'AutoNoGIL no_gil;'
+        env['AutoNoGIL'] = 'AutoNoGIL no_gil;' if not declaration['with_gil'] else ''
         env['AutoGPU'] = auto_gpu(declaration, has_device_bind)
 
         env = nested_dict(env, nested_dict(base_env, declaration))
@@ -539,13 +542,15 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if not has_self:
                 # Use 'input' instead of 'self' for NN functions
                 signature = signature.replace('Tensor self', 'Tensor input')
-            signature = signature.replace('SparseTensor', 'Tensor')
+            signature = signature.replace('SparseTensorRef', 'Tensor')
             if dictionary['base'].get('deprecated', False):
                 signature += '|deprecated'
             env['signatures'].append('"{}",'.format(signature))
             env['dispatch'].append(emit_dispatch(i, dictionary, env))
 
         env['dispatch'].append('}')
+
+        env['traceable'] = 'true' if all(should_trace(d) for d in declarations) else 'false'
 
         if len(declarations) == 1 and len(declarations[0]['args']) == 1 and has_self:
             tmpl = PY_VARIABLE_METHOD_NOARGS

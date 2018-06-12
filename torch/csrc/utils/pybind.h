@@ -57,4 +57,7 @@ public:
   }
 };
 
+// http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
+template <typename T>
+struct type_caster<at::optional<T>> : optional_caster<at::optional<T>> {};
 }} // namespace pybind11::detail

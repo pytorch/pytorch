@@ -35,7 +35,7 @@ struct PyFunction : public Function {
   variable_list legacy_apply(const variable_list& inputs);
 
   virtual void release_variables() override;
-  virtual std::string name() override;
+  virtual std::string name() const override;
   virtual std::shared_ptr<Function> get_shared_ptr() override;
   virtual bool is_traceable() override;
 

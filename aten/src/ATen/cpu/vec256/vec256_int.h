@@ -16,12 +16,6 @@ struct Vec256i {
   operator __m256i() const {
     return values;
   }
-  void load(const void *ptr) {
-    values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
-  }
-  void store(void *ptr) const {
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
-  }
 };
 
 template <>
@@ -30,20 +24,50 @@ struct Vec256<int64_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int64_t v) { values = _mm256_set1_epi64x(v); }
-  static Vec256<int64_t> s_load(const void* ptr) {
-    Vec256<int64_t> vec;
-    vec.load(ptr);
-    return vec;
-  }
-  void load_partial(const void *ptr, int count) {
-    int64_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
-    load(tmp_values);
-  }
-  void store_partial(void* ptr, int count) const {
+  template <int64_t mask>
+  static Vec256<int64_t> blend(Vec256<int64_t> a, Vec256<int64_t> b) {
     __at_align32__ int64_t tmp_values[size];
-    store(tmp_values);
-    std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
+    a.store(tmp_values);
+    if (mask & 0x01)
+      tmp_values[0] = _mm256_extract_epi16(b.values, 0);
+    if (mask & 0x02)
+      tmp_values[1] = _mm256_extract_epi16(b.values, 1);
+    if (mask & 0x04)
+      tmp_values[2] = _mm256_extract_epi16(b.values, 2);
+    if (mask & 0x08)
+      tmp_values[3] = _mm256_extract_epi16(b.values, 3);
+    return loadu(tmp_values);
+  }
+  static Vec256<int64_t>
+  set(Vec256<int64_t> a, Vec256<int64_t> b, int64_t count = size) {
+    switch (count) {
+      case 0:
+        return a;
+      case 1:
+        return blend<1>(a, b);
+      case 2:
+        return blend<3>(a, b);
+      case 3:
+        return blend<7>(a, b);
+    }
+    return b;
+  }
+  static Vec256<int64_t> loadu(const void* ptr) {
+    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+  }
+  static Vec256<int64_t> loadu(const void* ptr, int64_t count) {
+    __at_align32__ int64_t tmp_values[size];
+    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
+    return loadu(tmp_values);
+  }
+  void store(void* ptr, int count = size) const {
+    if (count == size) {
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
+    } else {
+      __at_align32__ int64_t tmp_values[size];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
+    }
   }
   Vec256<int64_t> abs() const {
     auto zero = _mm256_set1_epi64x(0);
@@ -59,20 +83,48 @@ struct Vec256<int32_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int32_t v) { values = _mm256_set1_epi32(v); }
-  static Vec256<int32_t> s_load(const void* ptr) {
-    Vec256<int32_t> vec;
-    vec.load(ptr);
-    return vec;
+  template <int64_t mask>
+  static Vec256<int32_t> blend(Vec256<int32_t> a, Vec256<int32_t> b) {
+    return _mm256_blend_epi32(a, b, mask);
   }
-  void load_partial(const void *ptr, int count) {
-    int32_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
-    load(tmp_values);
+  static Vec256<int32_t>
+  set(Vec256<int32_t> a, Vec256<int32_t> b, int32_t count = size) {
+    switch (count) {
+      case 0:
+        return a;
+      case 1:
+        return blend<1>(a, b);
+      case 2:
+        return blend<3>(a, b);
+      case 3:
+        return blend<7>(a, b);
+      case 4:
+        return blend<15>(a, b);
+      case 5:
+        return blend<31>(a, b);
+      case 6:
+        return blend<63>(a, b);
+      case 7:
+        return blend<127>(a, b);
+    }
+    return b;
   }
-  void store_partial(void* ptr, int count) const {
+  static Vec256<int32_t> loadu(const void* ptr) {
+    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+  }
+  static Vec256<int32_t> loadu(const void* ptr, int32_t count) {
     __at_align32__ int32_t tmp_values[size];
-    store(tmp_values);
-    std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
+    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
+    return loadu(tmp_values);
+  }
+  void store(void* ptr, int count = size) const {
+    if (count == size) {
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
+    } else {
+      __at_align32__ int32_t tmp_values[size];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
+    }
   }
   Vec256<int32_t> abs() const {
     return _mm256_abs_epi32(values);
@@ -85,20 +137,98 @@ struct Vec256<int16_t> : public Vec256i {
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int16_t v) { values = _mm256_set1_epi16(v); }
-  static Vec256<int16_t> s_load(const void* ptr) {
-    Vec256<int16_t> vec;
-    vec.load(ptr);
-    return vec;
-  }
-  void load_partial(const void *ptr, int count) {
-    int16_t tmp_values[size];
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
-    load(tmp_values);
-  }
-  void store_partial(void* ptr, int count) const {
+  template <int64_t mask>
+  static Vec256<int16_t> blend(Vec256<int16_t> a, Vec256<int16_t> b) {
     __at_align32__ int16_t tmp_values[size];
-    store(tmp_values);
-    std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+    a.store(tmp_values);
+    if (mask & 0x01)
+      tmp_values[0] = _mm256_extract_epi16(b.values, 0);
+    if (mask & 0x02)
+      tmp_values[1] = _mm256_extract_epi16(b.values, 1);
+    if (mask & 0x04)
+      tmp_values[2] = _mm256_extract_epi16(b.values, 2);
+    if (mask & 0x08)
+      tmp_values[3] = _mm256_extract_epi16(b.values, 3);
+    if (mask & 0x10)
+      tmp_values[4] = _mm256_extract_epi16(b.values, 4);
+    if (mask & 0x20)
+      tmp_values[5] = _mm256_extract_epi16(b.values, 5);
+    if (mask & 0x40)
+      tmp_values[6] = _mm256_extract_epi16(b.values, 6);
+    if (mask & 0x80)
+      tmp_values[7] = _mm256_extract_epi16(b.values, 7);
+    if (mask & 0x100)
+      tmp_values[8] = _mm256_extract_epi16(b.values, 8);
+    if (mask & 0x200)
+      tmp_values[9] = _mm256_extract_epi16(b.values, 9);
+    if (mask & 0x400)
+      tmp_values[10] = _mm256_extract_epi16(b.values, 10);
+    if (mask & 0x800)
+      tmp_values[11] = _mm256_extract_epi16(b.values, 11);
+    if (mask & 0x1000)
+      tmp_values[12] = _mm256_extract_epi16(b.values, 12);
+    if (mask & 0x2000)
+      tmp_values[13] = _mm256_extract_epi16(b.values, 13);
+    if (mask & 0x4000)
+      tmp_values[14] = _mm256_extract_epi16(b.values, 14);
+    if (mask & 0x8000)
+      tmp_values[15] = _mm256_extract_epi16(b.values, 15);
+    return loadu(tmp_values);
+  }
+  static Vec256<int16_t>
+  set(Vec256<int16_t> a, Vec256<int16_t> b, int16_t count = size) {
+    switch (count) {
+      case 0:
+        return a;
+      case 1:
+        return blend<1>(a, b);
+      case 2:
+        return blend<3>(a, b);
+      case 3:
+        return blend<7>(a, b);
+      case 4:
+        return blend<15>(a, b);
+      case 5:
+        return blend<31>(a, b);
+      case 6:
+        return blend<63>(a, b);
+      case 7:
+        return blend<127>(a, b);
+      case 8:
+        return blend<255>(a, b);
+      case 9:
+        return blend<511>(a, b);
+      case 10:
+        return blend<1023>(a, b);
+      case 11:
+        return blend<2047>(a, b);
+      case 12:
+        return blend<4095>(a, b);
+      case 13:
+        return blend<8191>(a, b);
+      case 14:
+        return blend<16383>(a, b);
+      case 15:
+        return blend<32767>(a, b);
+    }
+    return b;
+  }
+  static Vec256<int16_t> loadu(const void* ptr) {
+    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+  }
+  static Vec256<int16_t> loadu(const void* ptr, int16_t count) {
+    __at_align32__ int16_t tmp_values[size];
+    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    return loadu(tmp_values);
+  }
+  void store(void* ptr, int count = size) const {
+    if (count == size) {
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
+    } else {
+      __at_align32__ int16_t tmp_values[size];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+    }
   }
   Vec256<int16_t> abs() const {
     return _mm256_abs_epi16(values);

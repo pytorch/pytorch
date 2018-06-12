@@ -58,7 +58,7 @@ struct DispatchStub {
     }
 #endif
     int def = static_cast<int>(CPUCapability::DEFAULT);
-    AT_ASSERT(table[def], "DispatchStub: missing default kernel");
+    AT_ASSERTM(table[def], "DispatchStub: missing default kernel");
     return table[def];
   }
 

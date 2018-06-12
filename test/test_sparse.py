@@ -5,7 +5,7 @@ import itertools
 import random
 import unittest
 from common import TestCase, run_tests
-from common_nn import TEST_CUDA
+from common_cuda import TEST_CUDA
 from test_torch import TestTorch
 from numbers import Number
 
@@ -385,6 +385,34 @@ class TestSparse(TestCase):
         self.assertTrue(x_coalesced.is_coalesced())
         self.assertFalse(y_uncoalesced.is_coalesced())
 
+    def test_t_empty(self):
+        x = self.SparseTensor(2, 3)
+        x.t_()
+        self.assertEqual(torch.Size([3, 2]), x.size())
+        self.assertEqual(0, x._indices().numel())
+        self.assertEqual(0, x._values().numel())
+        self.assertEqual(x._dimI(), 2)
+        self.assertEqual(x._dimV(), 0)
+
+        x = self.SparseTensor(2, 3)
+        y = x.t()
+        self.assertEqual(torch.Size([3, 2]), y.size())
+        self.assertEqual(0, y._indices().numel())
+        self.assertEqual(0, y._values().numel())
+        self.assertEqual(x._dimI(), 2)
+        self.assertEqual(x._dimV(), 0)
+
+    def test_add_zeros(self):
+        def test_shape(sparse_dims, sizes):
+            x, _, _ = self._gen_sparse(sparse_dims, 20, sizes)
+            zeros = torch.zeros(sizes, layout=torch.sparse_coo).to(x.device)
+            self.assertEqual(zeros + x, x)
+            self.assertEqual(x + zeros, x)
+
+        test_shape(1, [1])
+        test_shape(4, [3, 17, 19, 5])
+        test_shape(2, [3, 17, 19, 5])
+
     @cpu_only
     def test_mm(self):
         def test_shape(di, dj, dk):
@@ -688,7 +716,7 @@ class TestSparse(TestCase):
         to_test_one_arg = {
             'zeros_like': lambda x: torch.zeros_like(x),
             'transpose': lambda x: x.transpose(0, 1),
-            'transpose_': lambda x: x.transpose(0, 1),
+            'transpose_': lambda x: x.transpose_(0, 1),
             't': lambda x: x.t(),
             't_': lambda x: x.t_(),
             'div': lambda x: x.div(2),
@@ -882,6 +910,12 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "values and sizes are inconsistent"):
             self.SparseTensor(indices, values, sizes)
 
+    def test_factory_empty_indices(self):
+        device = 'cuda' if self.is_cuda else 'cpu'
+        tensor = torch.sparse_coo_tensor([], [], torch.Size([]), device=device)
+        expected_indices = torch.tensor([], dtype=torch.long, device=device)
+        self.assertEqual(tensor._indices(), expected_indices)
+
     @cpu_only
     def test_factory_type_inference(self):
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=torch.float32))
@@ -890,6 +924,19 @@ class TestSparse(TestCase):
         self.assertEqual(torch.float64, t.dtype)
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1]))
         self.assertEqual(torch.int64, t.dtype)
+
+    @cuda_only
+    def test_factory_device_type_inference(self):
+        # both indices/values are CUDA
+        shape = (1, 3)
+        for indices_device in ['cuda', 'cpu']:
+            for values_device in ['cuda', 'cpu']:
+                for sparse_device in ['cuda', 'cpu', None]:
+                    t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
+                                                torch.tensor([1.], device=values_device),
+                                                (1, 3), device=sparse_device)
+                    should_be_cuda = sparse_device == 'cuda' or (sparse_device is None and values_device == 'cuda')
+                    self.assertEqual(should_be_cuda, t.is_cuda)
 
     @cpu_only
     def test_factory_copy(self):

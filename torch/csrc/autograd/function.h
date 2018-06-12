@@ -5,6 +5,7 @@
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/autograd/type_and_shape.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
@@ -32,6 +33,9 @@ using variable_list = std::vector<Variable>;
 using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
+
+// Custom deleter to prevent stack overflows.
+void deleteFunction(Function* function);
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                               Function
@@ -84,13 +88,18 @@ using IndexRange = std::pair<size_t, size_t>;
 struct Function : std::enable_shared_from_this<Function> {
  public:
   /// Construct a new `Function` with `num_inputs` inputs and the given
-  /// `next_edges`.
+  /// `next_edges`. sequence_nr is a (currently THE) hint to prioritization
+  /// in the backward() pass, with higher sequence numbers prioritized
+  /// before lower sequence numbers.
   explicit Function(
-      uint32_t num_inputs = 0,
+      uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
-      : sequence_nr_(next_sequence_nr_++),
-        num_inputs_(num_inputs),
-        next_edges_(std::move(next_edges)) {}
+      : sequence_nr_(sequence_nr),
+      next_edges_(std::move(next_edges)) {}
+
+  explicit Function(
+      edge_list&& next_edges = edge_list())
+      : Function(next_sequence_nr_++, std::move(next_edges)) {}
 
   /// Functions are neither copyable nor moveable.
   Function(const Function& other) = delete;
@@ -112,20 +121,37 @@ struct Function : std::enable_shared_from_this<Function> {
   // Graph Connectivity API
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  // Inputs
+  // Inputs. NOTE: inputs of the grad_fn correspond to Tensor outputs of the
+  // forward function.
 
-  /// Increments the number of inputs of the function and returns the previous
-  /// value.
-  uint32_t bump_inputs() noexcept {
-    return num_inputs_++;
+  // Marker for expected undefined input
+  struct undefined_input {};
+
+  /// Adds the type and shape metadata for a new input. Returns the index of
+  /// of the new input.
+  uint32_t add_input_metadata(const at::Type& type, at::IntList shape) noexcept {
+    uint32_t input_nr = input_metadata_.size();
+    input_metadata_.emplace_back(type, shape);
+    return input_nr;
   }
 
-  void set_num_inputs(uint32_t num_inputs) noexcept {
-    num_inputs_ = num_inputs;
+  /// Adds a placeholder for an input that will not be used.
+  uint32_t add_input_metadata(undefined_input u) noexcept {
+    uint32_t input_nr = input_metadata_.size();
+    input_metadata_.emplace_back();
+    return input_nr;
   }
 
   uint32_t num_inputs() const noexcept {
-    return num_inputs_;
+    return input_metadata_.size();
+  }
+
+  const TypeAndShape& input_metadata(size_t index) const {
+    return input_metadata_[index];
+  }
+
+  void clear_input_metadata() {
+    input_metadata_.clear();
   }
 
   // Outputs ("Next Edges")
@@ -174,7 +200,7 @@ struct Function : std::enable_shared_from_this<Function> {
   }
 
   /// Returns the name of the dynamic type of the function, for debugging.
-  virtual std::string name();
+  virtual std::string name() const;
 
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
@@ -301,12 +327,12 @@ struct Function : std::enable_shared_from_this<Function> {
   // fields.
   const uint64_t sequence_nr_;
 
-  uint32_t num_inputs_;
   edge_list next_edges_;
   PyObject* pyobj_ = nullptr; // weak reference
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
   auto_unique_ptr<jit::tracer::FunctionTracingState> tracing_state_;
+  at::SmallVector<TypeAndShape, 2> input_metadata_;
 };
 
 /// See Function::is_traceable() for definition.
@@ -344,13 +370,14 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
 /// `input_nr` thus equal to `function->num_inputs()`. Additionally, it
 /// increments the `Function`'s number of inputs by one. Approximately
 /// equivalent to `variable.set_gradient_edge(function,
-/// function->bump_inputs())`. If you don't want the `Function`'s `num_inputs`
-/// to be incremented, use `set_gradient_edge` directly.
+/// function->add_input_metadata(variable.type(), variable.sizes()))`.
+/// If you don't want the `Function`'s `num_inputs` to be incremented, use
+/// `set_gradient_edge` directly.
 inline void create_gradient_edge(
     Variable& variable,
     std::shared_ptr<Function> function) {
   // Copy before move.
-  const auto input_nr = function->bump_inputs();
+  const auto input_nr = function->add_input_metadata(variable.type(), variable.sizes());
   variable.set_gradient_edge({std::move(function), input_nr});
 }
 

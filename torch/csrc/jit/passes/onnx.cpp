@@ -67,7 +67,7 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
       ss << num_old_outputs << ", but got " << outputs.size() << ")";
       throw std::runtime_error(ss.str());
     }
-    for (std::size_t i = 0; i < num_old_outputs; ++i) {
+    for (size_t i = 0; i < num_old_outputs; ++i) {
       auto old = old_outputs[i];
       if (outputs[i]) {
         // Allow symbolic() to skip specifying the type of the return node.
@@ -102,6 +102,7 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
   auto cloneNode = [&](Node * node) {
     auto n_ = ctx.block->appendNode(ctx.block->owningGraph()->createClone(node, envFn));
     for(size_t i = 0; i < node->outputs().size(); i++) {
+      // n_->outputs()[i]->setType(node->outputs()[i]->type());
       env[node->outputs()[i]] = n_->outputs()[i];
     }
   };
@@ -217,6 +218,7 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
   }
   for (auto output : old_block->outputs()) {
     ctx.block->registerOutput(env.at(output));
+    env.at(output)->setType(output->type());
   }
 
   // Copy stage from original graph

@@ -22,18 +22,19 @@
 #include <limits>
 #include <numeric>
 #include <random>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
 
-#include "caffe2/utils/cpu_neon.h"
 #include "caffe2/core/context.h"
+#include "caffe2/utils/cpu_neon.h"
 
 #include "Eigen/Core"
 #include "Eigen/Dense"
 
 #ifdef CAFFE2_USE_MKL
 #include <mkl.h>
-#endif  // CAFFE2_USE_MKL
+#endif // CAFFE2_USE_MKL
 
 #ifdef CAFFE2_USE_HPTT
 #include <hptt.h>
@@ -43,16 +44,7 @@
 #include <process.h>
 #endif
 
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-#include "unsupported/Eigen/CXX11/Tensor"
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
 namespace caffe2 {
-
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-template <typename T, int D>
-using EigenTensorMap = Eigen::TensorMap<Eigen::Tensor<T, D>>;
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
 
 namespace math {
 
@@ -100,40 +92,40 @@ void Gemm<float, CPUContext>(
     C_mat *= beta;
   }
   switch (TransA) {
-  case CblasNoTrans: {
-    switch (TransB) {
-    case CblasNoTrans:
-      C_mat.noalias() += alpha * (
-          ConstEigenMatrixMap<float>(B, N, K) *
-          ConstEigenMatrixMap<float>(A, K, M));
-      return;
-    case CblasTrans:
-      C_mat.noalias() += alpha * (
-          ConstEigenMatrixMap<float>(B, K, N).transpose() *
-          ConstEigenMatrixMap<float>(A, K, M));
-      return;
-    default:
-      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+    case CblasNoTrans: {
+      switch (TransB) {
+        case CblasNoTrans:
+          C_mat.noalias() += alpha *
+              (ConstEigenMatrixMap<float>(B, N, K) *
+               ConstEigenMatrixMap<float>(A, K, M));
+          return;
+        case CblasTrans:
+          C_mat.noalias() += alpha *
+              (ConstEigenMatrixMap<float>(B, K, N).transpose() *
+               ConstEigenMatrixMap<float>(A, K, M));
+          return;
+        default:
+          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+      }
     }
-  }
-  case CblasTrans: {
-    switch (TransB) {
-    case CblasNoTrans:
-      C_mat.noalias() += alpha * (
-          ConstEigenMatrixMap<float>(B, N, K) *
-          ConstEigenMatrixMap<float>(A, M, K).transpose());
-      return;
-    case CblasTrans:
-      C_mat.noalias() += alpha * (
-          ConstEigenMatrixMap<float>(B, K, N).transpose() *
-          ConstEigenMatrixMap<float>(A, M, K).transpose());
-      return;
-    default:
-      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+    case CblasTrans: {
+      switch (TransB) {
+        case CblasNoTrans:
+          C_mat.noalias() += alpha *
+              (ConstEigenMatrixMap<float>(B, N, K) *
+               ConstEigenMatrixMap<float>(A, M, K).transpose());
+          return;
+        case CblasTrans:
+          C_mat.noalias() += alpha *
+              (ConstEigenMatrixMap<float>(B, K, N).transpose() *
+               ConstEigenMatrixMap<float>(A, M, K).transpose());
+          return;
+        default:
+          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+      }
     }
-  }
-  default:
-    LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransA";
+    default:
+      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransA";
   }
 }
 
@@ -166,14 +158,14 @@ void GemmEx<float, CPUContext>(
     case CblasNoTrans: {
       switch (TransB) {
         case CblasNoTrans:
-          C_mat.noalias() +=
-              alpha * (ConstStridedMap(B, N, K, OuterStride(ldb)) *
-                       ConstStridedMap(A, K, M, OuterStride(lda)));
+          C_mat.noalias() += alpha *
+              (ConstStridedMap(B, N, K, OuterStride(ldb)) *
+               ConstStridedMap(A, K, M, OuterStride(lda)));
           return;
         case CblasTrans:
-          C_mat.noalias() +=
-              alpha * (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
-                       ConstStridedMap(A, K, M, OuterStride(lda)));
+          C_mat.noalias() += alpha *
+              (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
+               ConstStridedMap(A, K, M, OuterStride(lda)));
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
@@ -182,14 +174,14 @@ void GemmEx<float, CPUContext>(
     case CblasTrans: {
       switch (TransB) {
         case CblasNoTrans:
-          C_mat.noalias() +=
-              alpha * (ConstStridedMap(B, N, K, OuterStride(ldb)) *
-                       ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
+          C_mat.noalias() += alpha *
+              (ConstStridedMap(B, N, K, OuterStride(ldb)) *
+               ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
           return;
         case CblasTrans:
-          C_mat.noalias() +=
-              alpha * (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
-                       ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
+          C_mat.noalias() += alpha *
+              (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
+               ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
@@ -222,15 +214,15 @@ void Gemv<float, CPUContext>(
   }
   switch (TransA) {
     case CblasNoTrans: {
-      y_vec.noalias() += alpha * (
-          ConstEigenMatrixMap<float>(A, N, M).transpose() *
-          ConstEigenVectorMap<float>(x, N));
+      y_vec.noalias() += alpha *
+          (ConstEigenMatrixMap<float>(A, N, M).transpose() *
+           ConstEigenVectorMap<float>(x, N));
       return;
     }
     case CblasTrans: {
-      y_vec.noalias() += alpha * (
-          ConstEigenMatrixMap<float>(A, N, M) *
-          ConstEigenVectorMap<float>(x, M));
+      y_vec.noalias() += alpha *
+          (ConstEigenMatrixMap<float>(A, N, M) *
+           ConstEigenVectorMap<float>(x, M));
       return;
     }
     default:
@@ -256,13 +248,12 @@ void Gemv<float, CPUContext>(
 CAFFE2_SPECIALIZED_SCALE(float)
 #undef CAFFE2_SPECIALIZED_SCALE
 
-#define CAFFE2_SPECIALIZED_DOT(T)                                              \
-template<>                                                                     \
-void Dot<T, CPUContext>(                                                       \
-    const int N, const T* a, const T* b, T* y,                                 \
-    CPUContext* context) {                                                     \
-  *y = ConstEigenVectorMap<T>(a, N).dot(ConstEigenVectorMap<T>(b, N));         \
-}
+#define CAFFE2_SPECIALIZED_DOT(T)                                        \
+  template <>                                                            \
+  void Dot<T, CPUContext>(                                               \
+      const int N, const T* a, const T* b, T* y, CPUContext* context) {  \
+    *y = ConstEigenVectorMap<T>(a, N).dot(ConstEigenVectorMap<T>(b, N)); \
+  }
 CAFFE2_SPECIALIZED_DOT(float)
 #undef CAFFE2_SPECIALIZED_DOT
 
@@ -280,17 +271,22 @@ CAFFE2_SPECIALIZED_DOT(float)
 CAFFE2_SPECIALIZED_AXPY(float)
 #undef CAFFE2_SPECIALIZED_AXPY
 
-#define CAFFE2_SPECIALIZED_AXPBY(T)                                            \
-template <>                                                                    \
-void Axpby<T, CPUContext>(const int N, const T alpha, const T* x,              \
-                          const T beta, T* y, CPUContext* context) {           \
-  EigenVectorMap<T> y_vec(y, N);                                               \
-  y_vec = y_vec * beta + ConstEigenVectorMap<T>(x, N) * alpha;                 \
-}
+#define CAFFE2_SPECIALIZED_AXPBY(T)                              \
+  template <>                                                    \
+  void Axpby<T, CPUContext>(                                     \
+      const int N,                                               \
+      const T alpha,                                             \
+      const T* x,                                                \
+      const T beta,                                              \
+      T* y,                                                      \
+      CPUContext* context) {                                     \
+    EigenVectorMap<T> y_vec(y, N);                               \
+    y_vec = y_vec * beta + ConstEigenVectorMap<T>(x, N) * alpha; \
+  }
 CAFFE2_SPECIALIZED_AXPBY(float)
 #undef CAFFE2_SPECIALIZED_AXPBY
 
-#else  // CAFFE2_USE_EIGEN_FOR_BLAS
+#else // CAFFE2_USE_EIGEN_FOR_BLAS
 
 template <>
 void Gemm<float, CPUContext>(
@@ -308,8 +304,21 @@ void Gemm<float, CPUContext>(
     TensorProto::DataType /*math_type*/) {
   int lda = (TransA == CblasNoTrans) ? K : M;
   int ldb = (TransB == CblasNoTrans) ? N : K;
-  cblas_sgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B, ldb,
-              beta, C, N);
+  cblas_sgemm(
+      CblasRowMajor,
+      TransA,
+      TransB,
+      M,
+      N,
+      K,
+      alpha,
+      A,
+      lda,
+      B,
+      ldb,
+      beta,
+      C,
+      N);
 }
 
 template <>
@@ -328,8 +337,21 @@ void GemmEx<float, CPUContext>(
     float* C,
     const int ldc,
     CPUContext* /*context*/) {
-  cblas_sgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B, ldb,
-              beta, C, ldc);
+  cblas_sgemm(
+      CblasRowMajor,
+      TransA,
+      TransB,
+      M,
+      N,
+      K,
+      alpha,
+      A,
+      lda,
+      B,
+      ldb,
+      beta,
+      C,
+      ldc);
 }
 
 template <>
@@ -402,7 +424,7 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
       CPUContext*) {                                   \
     cblas_##prefix##axpby(N, alpha, x, 1, beta, y, 1); \
   }
-#else  // CAFFE2_USE_MKL
+#else // CAFFE2_USE_MKL
 #define CAFFE2_SPECIALIZED_AXPBY(T, prefix)     \
   template <>                                   \
   void Axpby<T, CPUContext>(                    \
@@ -415,11 +437,11 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
     cblas_##prefix##scal(N, beta, y, 1);        \
     cblas_##prefix##axpy(N, alpha, x, 1, y, 1); \
   }
-#endif  // CAFFE2_USE_MKL
+#endif // CAFFE2_USE_MKL
 CAFFE2_SPECIALIZED_AXPBY(float, s)
 #undef CAFFE2_SPECIALIZED_AXPBY
 
-#endif  // CAFFE2_USE_EIGEN_FOR_BLAS
+#endif // CAFFE2_USE_EIGEN_FOR_BLAS
 
 template <>
 void GemmBatched<float, CPUContext>(
@@ -519,8 +541,16 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, vsLn)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log, vdLn)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cos, vsCos)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cos, vdCos)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Acos, vsAcos)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Acos, vdAcos)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sin, vsSin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sin, vdSin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Asin, vsAsin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Asin, vdAsin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, vsTan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tan, vdTan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, vsAtan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Atan, vdAtan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, vsAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Abs, vdAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, vsSqrt)
@@ -550,45 +580,49 @@ DELEGATE_POWX_FUNCTION(float, vsPowx)
 DELEGATE_POWX_FUNCTION(double, vdPowx)
 #undef DELEGATE_POWX_FUNCTION
 
-#define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Funcname, OriginalFunc) \
-  template <>                                                      \
-  void Funcname<T, CPUContext>(                                    \
-      const int N, const T* a, const T* b, T* y, CPUContext*) {    \
-    OriginalFunc(N, a, b, y);                                      \
+#define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Func, FuncImpl)      \
+  template <>                                                   \
+  void Func<T, CPUContext>(                                     \
+      const int N, const T* A, const T* B, T* C, CPUContext*) { \
+    FuncImpl(N, A, B, C);                                       \
   }
-DELEGATE_SIMPLE_BINARY_FUNCTION(float,  Add, vsAdd)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float, Add, vsAdd)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Add, vdAdd)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float,  Sub, vsSub)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float, Sub, vsSub)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Sub, vdSub)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float,  Mul, vsMul)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float, Mul, vsMul)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Mul, vdMul)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float,  Div, vsDiv)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float, Div, vsDiv)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Div, vdDiv)
 #undef DELEGATE_SIMPLE_BINARY_FUNCTION
 
-#else  // CAFFE2_USE_MKL
+#else // CAFFE2_USE_MKL
 
 #define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, expr)                    \
   template <>                                                                \
   void Funcname<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
-    EigenVectorMap<T>(y, N) = ConstEigenVectorMap<T>(x, N).array().expr();   \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).expr();      \
   }
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Exp, exp)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, log)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cos, cos)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Acos, acos)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sin, sin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Asin, asin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, tan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, atan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, abs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, rsqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, square)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
-#define DELEGATE_SINCOS_FUNCTION(T)                                        \
-  template <>                                                              \
-  void SinCos<T, CPUContext>(                                              \
-      const int N, const T* x, T* ys, T* yc, CPUContext*) {                \
-    EigenVectorMap<T>(ys, N) = ConstEigenVectorMap<T>(x, N).array().sin(); \
-    EigenVectorMap<T>(yc, N) = ConstEigenVectorMap<T>(x, N).array().cos(); \
+#define DELEGATE_SINCOS_FUNCTION(T)                                     \
+  template <>                                                           \
+  void SinCos<T, CPUContext>(                                           \
+      const int N, const T* x, T* ys, T* yc, CPUContext*) {             \
+    EigenVectorMap<T>(ys, N) = ConstEigenVectorArrayMap<T>(x, N).sin(); \
+    EigenVectorMap<T>(yc, N) = ConstEigenVectorArrayMap<T>(x, N).cos(); \
   }
 DELEGATE_SINCOS_FUNCTION(float)
 DELEGATE_SINCOS_FUNCTION(double)
@@ -597,36 +631,56 @@ DELEGATE_SINCOS_FUNCTION(double)
 #define DELEGATE_POWX_FUNCTION(T)                                             \
   template <>                                                                 \
   void Powx<T, CPUContext>(const int N, const T* a, T b, T* y, CPUContext*) { \
-    EigenVectorMap<T>(y, N) = ConstEigenVectorMap<T>(a, N).array().pow(b);    \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(a, N).pow(b);       \
   }
 DELEGATE_POWX_FUNCTION(float)
 #undef DELEGATE_POWX_FUNCTION
 
-#endif  // CAFFE2_USE_MKL
+#endif // CAFFE2_USE_MKL
 
+#define DELEGATE_NEG_FUNCTION(T)                                        \
+  template <>                                                           \
+  void Neg<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
+    EigenVectorMap<T>(y, N) = -ConstEigenVectorMap<T>(x, N);            \
+  }
+DELEGATE_NEG_FUNCTION(float)
+DELEGATE_NEG_FUNCTION(double)
+DELEGATE_NEG_FUNCTION(std::int32_t)
+DELEGATE_NEG_FUNCTION(std::int64_t)
+#undef DELEGATE_NEG_FUNCTION
 
-#define EIGEN_SIMPLE_BINARY_FUNCTION(T, Funcname, expr)                        \
-template <>                                                                    \
-void Funcname<T, CPUContext>(                                                  \
-    const int N, const T* a, const T* b, T* y,                                 \
-    CPUContext*) {                                                             \
-  EigenVectorMap<T>(y, N) =                                                    \
-      ConstEigenVectorMap<T>(a, N).array() expr                                \
-      ConstEigenVectorMap<T>(b, N).array();                                    \
-}
+#define DELEGATE_SIGN_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Sign<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).sign();  \
+  }
+DELEGATE_SIGN_FUNCTION(float)
+DELEGATE_SIGN_FUNCTION(double)
+DELEGATE_SIGN_FUNCTION(std::int32_t)
+DELEGATE_SIGN_FUNCTION(std::int64_t)
+#undef DELEGATE_SIGN_FUNCTION
+
+#define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)             \
+  template <>                                                   \
+  void Func<T, CPUContext>(                                     \
+      const int N, const T* A, const T* B, T* C, CPUContext*) { \
+    EigenVectorMap<T>(C, N) = ConstEigenVectorArrayMap<T>(A, N) \
+        expr ConstEigenVectorArrayMap<T>(B, N);                 \
+  }
 
 #ifdef CAFFE2_USE_MKL
 
-#define DEFINE_SIMPLE_BINARY_FUNCTION(Funcname, expr)                          \
-EIGEN_SIMPLE_BINARY_FUNCTION(int32_t, Funcname, expr)                          \
-EIGEN_SIMPLE_BINARY_FUNCTION(int64_t, Funcname, expr)
+#define DEFINE_SIMPLE_BINARY_FUNCTION(Func, expr)        \
+  EIGEN_SIMPLE_BINARY_FUNCTION(std::int32_t, Func, expr) \
+  EIGEN_SIMPLE_BINARY_FUNCTION(std::int64_t, Func, expr)
 
 #else
 
-#define DEFINE_SIMPLE_BINARY_FUNCTION(Funcname, expr)                          \
-EIGEN_SIMPLE_BINARY_FUNCTION(float, Funcname, expr)                            \
-EIGEN_SIMPLE_BINARY_FUNCTION(int32_t, Funcname, expr)                          \
-EIGEN_SIMPLE_BINARY_FUNCTION(int64_t, Funcname, expr)
+#define DEFINE_SIMPLE_BINARY_FUNCTION(Func, expr)        \
+  EIGEN_SIMPLE_BINARY_FUNCTION(float, Func, expr)        \
+  EIGEN_SIMPLE_BINARY_FUNCTION(double, Func, expr)       \
+  EIGEN_SIMPLE_BINARY_FUNCTION(std::int32_t, Func, expr) \
+  EIGEN_SIMPLE_BINARY_FUNCTION(std::int64_t, Func, expr)
 
 #endif
 
@@ -635,9 +689,8 @@ DEFINE_SIMPLE_BINARY_FUNCTION(Sub, -)
 DEFINE_SIMPLE_BINARY_FUNCTION(Mul, *)
 DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
 
+#undef DEFINE_SIMPLE_BINARY_FUNCTION
 #undef EIGEN_SIMPLE_BINARY_FUNCTION
-#undef DEFINE_FLOAT_BINARY_FUNCTION
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Common math functions being used in Caffe that do not have a BLAS or MKL
@@ -674,134 +727,7 @@ CAFFE2_SPECIALIZED_REDUCEMAX(int64_t)
 
 #undef CAFFE2_SPECIALIZED_REDUCEMAX
 
-namespace internal {
-
-void IncreaseIndexInDims(const int n, const int* dims, int* index) {
-  for (int i = n - 1; i >= 0; --i) {
-    ++index[i];
-    if (index[i] >= dims[i]) {
-      index[i] -= dims[i];
-    } else {
-      break;
-    }
-  }
-}
-
-int GetIndexFromDims(const int n, const int* dims, const int* index) {
-  int sum = 0;
-  for (int i = 0; i < n; ++i) {
-    if (dims[i] > 1) {
-      sum = sum * dims[i] + index[i];
-    }
-  }
-  return sum;
-}
-
-} // namespace internal
-
 namespace {
-
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
-template <typename T, class Reducer, int kNumDims, int kNumAxes>
-void EigenReduceTensorImpl(
-    const int* dims,
-    const int* axes,
-    const Reducer& reducer,
-    const T* X,
-    T* Y) {
-  Eigen::DSizes<Eigen::DenseIndex, kNumDims> X_dims;
-  Eigen::DSizes<Eigen::DenseIndex, kNumDims> Y_dims;
-  Eigen::array<Eigen::DenseIndex, kNumAxes> reduce_dims;
-  for (int i = 0; i < kNumDims; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[kNumDims - 1 - i]);
-  }
-  for (int i = 0; i < kNumAxes; ++i) {
-    Y_dims[kNumDims - 1 - axes[i]] = static_cast<Eigen::DenseIndex>(1);
-    reduce_dims[kNumAxes - 1 - i] =
-        static_cast<Eigen::DenseIndex>(kNumDims - 1 - axes[i]);
-  }
-  EigenTensorMap<T, kNumDims>(Y, Y_dims) =
-      EigenTensorMap<T, kNumDims>(const_cast<T*>(X), X_dims)
-          .reduce(reduce_dims, reducer);
-}
-
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-
-template <typename T, class Reducer>
-bool EigenReduceTensor(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const Reducer& reducer,
-    const T* X,
-    T* Y) {
-  switch (num_dims) {
-    case 1: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 1, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 2: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 2, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 2, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 3: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 3, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 3, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 3: {
-          EigenReduceTensorImpl<T, Reducer, 3, 3>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    case 4: {
-      switch (num_axes) {
-        case 1: {
-          EigenReduceTensorImpl<T, Reducer, 4, 1>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 2: {
-          EigenReduceTensorImpl<T, Reducer, 4, 2>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 3: {
-          EigenReduceTensorImpl<T, Reducer, 4, 3>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        case 4: {
-          EigenReduceTensorImpl<T, Reducer, 4, 4>(dims, axes, reducer, X, Y);
-          return true;
-        }
-        default: { return false; }
-      }
-    }
-    default: { return false; }
-  }
-}
 
 template <typename T, class Reducer>
 void ReduceTensor(
@@ -814,6 +740,7 @@ void ReduceTensor(
     const T* X,
     T* Y,
     CPUContext* context) {
+  CAFFE_ENFORCE_LE(num_axes, num_dims);
   std::vector<int> Y_dims(dims, dims + num_dims);
   for (int i = 0; i < num_axes; ++i) {
     Y_dims[axes[i]] = 1;
@@ -826,104 +753,10 @@ void ReduceTensor(
   std::vector<int> index(num_dims, 0);
   for (int X_index = 0; X_index < X_size; ++X_index) {
     const int Y_index =
-        internal::GetIndexFromDims(num_dims, Y_dims.data(), index.data());
+        utils::GetIndexFromDims(num_dims, Y_dims.data(), index.data());
     Y[Y_index] = reducer(Y[Y_index], X[X_index]);
-    internal::IncreaseIndexInDims(num_dims, dims, index.data());
+    utils::IncreaseIndexInDims(num_dims, dims, index.data());
   }
-}
-
-template <typename T>
-void ReduceMinImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::MinReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ReduceTensor(
-      num_dims,
-      dims,
-      num_axes,
-      axes,
-      [](const T& a, const T& b) { return std::min(a, b); },
-      std::numeric_limits<T>::max(),
-      X,
-      Y,
-      context);
-}
-
-template <typename T>
-void ReduceMaxImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::MaxReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ReduceTensor(
-      num_dims,
-      dims,
-      num_axes,
-      axes,
-      [](const T& a, const T& b) { return std::max(a, b); },
-      std::numeric_limits<T>::lowest(),
-      X,
-      Y,
-      context);
-}
-
-template <typename T>
-void ReduceSumImpl(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* Y,
-    CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::SumReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  ReduceTensor(
-      num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context);
 }
 
 template <typename T>
@@ -935,19 +768,6 @@ void ReduceMeanImpl(
     const T* X,
     T* Y,
     CPUContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  if (EigenReduceTensor(
-          num_dims,
-          dims,
-          num_axes,
-          axes,
-          Eigen::internal::MeanReducer<T>(),
-          X,
-          Y)) {
-    return;
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
   ReduceTensor(
       num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context);
   const int X_size =
@@ -962,49 +782,77 @@ void ReduceMeanImpl(
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_REDUCE_MIN(T)                             \
-  template <>                                                        \
-  void ReduceMin<T, CPUContext>(                                     \
-      const int num_dims,                                            \
-      const int* dims,                                               \
-      const int num_axes,                                            \
-      const int* axes,                                               \
-      const T* X,                                                    \
-      T* Y,                                                          \
-      CPUContext* context) {                                         \
-    ReduceMinImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_REDUCE_MIN(T)                       \
+  template <>                                                  \
+  void ReduceMin<T, CPUContext>(                               \
+      const int num_dims,                                      \
+      const int* dims,                                         \
+      const int num_axes,                                      \
+      const int* axes,                                         \
+      const T* X,                                              \
+      T* Y,                                                    \
+      CPUContext* context) {                                   \
+    ReduceTensor(                                              \
+        num_dims,                                              \
+        dims,                                                  \
+        num_axes,                                              \
+        axes,                                                  \
+        [](const T& a, const T& b) { return std::min(a, b); }, \
+        std::numeric_limits<T>::max(),                         \
+        X,                                                     \
+        Y,                                                     \
+        context);                                              \
   }
+CAFFE2_SPECIALIZED_REDUCE_MIN(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_MIN(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_MIN(float)
+CAFFE2_SPECIALIZED_REDUCE_MIN(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MIN
 
-#define CAFFE2_SPECIALIZED_REDUCE_MAX(T)                             \
-  template <>                                                        \
-  void ReduceMax<T, CPUContext>(                                     \
-      const int num_dims,                                            \
-      const int* dims,                                               \
-      const int num_axes,                                            \
-      const int* axes,                                               \
-      const T* X,                                                    \
-      T* Y,                                                          \
-      CPUContext* context) {                                         \
-    ReduceMaxImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_REDUCE_MAX(T)                       \
+  template <>                                                  \
+  void ReduceMax<T, CPUContext>(                               \
+      const int num_dims,                                      \
+      const int* dims,                                         \
+      const int num_axes,                                      \
+      const int* axes,                                         \
+      const T* X,                                              \
+      T* Y,                                                    \
+      CPUContext* context) {                                   \
+    ReduceTensor(                                              \
+        num_dims,                                              \
+        dims,                                                  \
+        num_axes,                                              \
+        axes,                                                  \
+        [](const T& a, const T& b) { return std::max(a, b); }, \
+        std::numeric_limits<T>::lowest(),                      \
+        X,                                                     \
+        Y,                                                     \
+        context);                                              \
   }
+CAFFE2_SPECIALIZED_REDUCE_MAX(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_MAX(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_MAX(float)
+CAFFE2_SPECIALIZED_REDUCE_MAX(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_MAX
 
-#define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                             \
-  template <>                                                        \
-  void ReduceSum<T, CPUContext>(                                     \
-      const int num_dims,                                            \
-      const int* dims,                                               \
-      const int num_axes,                                            \
-      const int* axes,                                               \
-      const T* X,                                                    \
-      T* Y,                                                          \
-      CPUContext* context) {                                         \
-    ReduceSumImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_REDUCE_SUM(T)                                      \
+  template <>                                                                 \
+  void ReduceSum<T, CPUContext>(                                              \
+      const int num_dims,                                                     \
+      const int* dims,                                                        \
+      const int num_axes,                                                     \
+      const int* axes,                                                        \
+      const T* X,                                                             \
+      T* Y,                                                                   \
+      CPUContext* context) {                                                  \
+    ReduceTensor(                                                             \
+        num_dims, dims, num_axes, axes, std::plus<T>(), T(0), X, Y, context); \
   }
+CAFFE2_SPECIALIZED_REDUCE_SUM(std::int32_t)
+CAFFE2_SPECIALIZED_REDUCE_SUM(std::int64_t)
 CAFFE2_SPECIALIZED_REDUCE_SUM(float)
+CAFFE2_SPECIALIZED_REDUCE_SUM(double)
 #undef CAFFE2_SPECIALIZED_REDUCE_SUM
 
 #define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                             \
@@ -1045,9 +893,9 @@ void BroadcastImpl(
   std::vector<int> index(Y_ndim, 0);
   for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
     const int X_index =
-        internal::GetIndexFromDims(Y_ndim, X_dims_ex.data(), index.data());
+        utils::GetIndexFromDims(Y_ndim, X_dims_ex.data(), index.data());
     Y[Y_index] = X[X_index];
-    internal::IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
+    utils::IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
   }
 }
 
@@ -1065,7 +913,10 @@ void BroadcastImpl(
       CPUContext* /* context */) {                          \
     BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, X, Y); \
   }
+CAFFE2_SPECIALIZED_BROADCAST(std::int32_t)
+CAFFE2_SPECIALIZED_BROADCAST(std::int64_t)
 CAFFE2_SPECIALIZED_BROADCAST(float)
+CAFFE2_SPECIALIZED_BROADCAST(double)
 #undef CAFFE2_SPECIALIZED_BROADCAST
 
 namespace {
@@ -1094,10 +945,10 @@ void MomentsImpl(
   std::vector<int> index(num_dims, 0);
   for (int X_index = 0; X_index < X_size; ++X_index) {
     const int Y_index =
-        internal::GetIndexFromDims(num_dims, Y_dims.data(), index.data());
+        utils::GetIndexFromDims(num_dims, Y_dims.data(), index.data());
     mean[Y_index] += X[X_index];
     variance[Y_index] += X[X_index] * X[X_index];
-    internal::IncreaseIndexInDims(num_dims, dims, index.data());
+    utils::IncreaseIndexInDims(num_dims, dims, index.data());
   }
   for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
     mean[Y_index] /= static_cast<T>(scale);
@@ -1166,42 +1017,169 @@ CAFFE2_SPECIALIZED_ELEMWISEMAX(float)
 CAFFE2_SPECIALIZED_MAXIMUM(float)
 #undef CAFFE2_SPECIALIZED_MAXIMUM
 
-// AddToRow and AddToCol adds the corresponding row/col vector b to the matrix a
-// of shape M x N. The actual implementation uses eigen which is column major,
-// so notice the row/column swap in the actual implementation.
-#define DELEGATE_BROADCAST_BINARY_FUNCTION(T, Funcname, expr)                \
-  template <>                                                                \
-  void Funcname##ToRow<T, CPUContext>(                                       \
-      const int M, const int N, const T* a, const T* b, T* y, CPUContext*) { \
-    EigenArrayMap<T>(y, N, M) = ConstEigenArrayMap<T>(a, N, M).colwise()     \
-                                    expr ConstEigenVectorArrayMap<T>(b, N);  \
-  }                                                                          \
-  /* inplace versions */                                                     \
-  template <>                                                                \
-  void Funcname##ToRow<T, CPUContext>(                                       \
-      const int M, const int N, const T* x, T* y, CPUContext*) {             \
-    EigenArrayMap<T>(y, N, M).colwise() expr## =                             \
-        ConstEigenVectorArrayMap<T>(x, N);                                   \
-  }                                                                          \
-  template <>                                                                \
-  void Funcname##ToCol<T, CPUContext>(                                       \
-      const int M, const int N, const T* x, T* y, CPUContext*) {             \
-    EigenArrayMap<T>(y, N, M).rowwise() expr## =                             \
-        ConstEigenVectorArrayMap<T>(x, M).transpose();                       \
+// The actual implementation uses eigen which is column major, so notice the
+// row/column swap in the actual implementation.
+
+#define DELEGATE_EIGEN_2D_BROADCAST_1ST_BINARY_FUNCTION(T, Func, expr) \
+  template <>                                                          \
+  void Rowwise##Func<T, CPUContext, true>(                             \
+      const int rows,                                                  \
+      const int cols,                                                  \
+      const T* A,                                                      \
+      const T* B,                                                      \
+      T* C,                                                            \
+      CPUContext*) {                                                   \
+    if (C == B) {                                                      \
+      EigenArrayMap<T>(C, cols, rows).colwise() expr## =               \
+          ConstEigenVectorArrayMap<T>(A, cols);                        \
+    } else {                                                           \
+      EigenArrayMap<T>(C, cols, rows) =                                \
+          ConstEigenArrayMap<T>(B, cols, rows)                         \
+              .colwise() expr ConstEigenVectorArrayMap<T>(A, cols);    \
+    }                                                                  \
+  }                                                                    \
+  template <>                                                          \
+  void Colwise##Func<T, CPUContext, true>(                             \
+      const int rows,                                                  \
+      const int cols,                                                  \
+      const T* A,                                                      \
+      const T* B,                                                      \
+      T* C,                                                            \
+      CPUContext*) {                                                   \
+    if (C == B) {                                                      \
+      EigenArrayMap<T>(C, cols, rows).rowwise() expr## =               \
+          ConstEigenVectorArrayMap<T>(A, rows).transpose();            \
+    } else {                                                           \
+      EigenArrayMap<T>(C, cols, rows) =                                \
+          ConstEigenArrayMap<T>(B, cols, rows)                         \
+              .rowwise() expr ConstEigenVectorArrayMap<T>(A, rows)     \
+              .transpose();                                            \
+    }                                                                  \
   }
 
-#define DEFINE_BROADCAST_BINARY_FUNCTION(name, op)                       \
-  DELEGATE_BROADCAST_BINARY_FUNCTION(int32_t, name, op)                  \
-  DELEGATE_BROADCAST_BINARY_FUNCTION(int64_t, name, op)                  \
-  DELEGATE_BROADCAST_BINARY_FUNCTION(float, name, op)                    \
+#define DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(T, Func, expr) \
+  template <>                                                          \
+  void Rowwise##Func<T, CPUContext, false>(                            \
+      const int rows,                                                  \
+      const int cols,                                                  \
+      const T* A,                                                      \
+      const T* B,                                                      \
+      T* C,                                                            \
+      CPUContext*) {                                                   \
+    if (C == A) {                                                      \
+      EigenArrayMap<T>(C, cols, rows).colwise() expr## =               \
+          ConstEigenVectorArrayMap<T>(B, cols);                        \
+    } else {                                                           \
+      EigenArrayMap<T>(C, cols, rows) =                                \
+          ConstEigenArrayMap<T>(A, cols, rows)                         \
+              .colwise() expr ConstEigenVectorArrayMap<T>(B, cols);    \
+    }                                                                  \
+  }                                                                    \
+  template <>                                                          \
+  void Colwise##Func<T, CPUContext, false>(                            \
+      const int rows,                                                  \
+      const int cols,                                                  \
+      const T* A,                                                      \
+      const T* B,                                                      \
+      T* C,                                                            \
+      CPUContext*) {                                                   \
+    if (C == A) {                                                      \
+      EigenArrayMap<T>(C, cols, rows).rowwise() expr## =               \
+          ConstEigenVectorArrayMap<T>(B, rows).transpose();            \
+    } else {                                                           \
+      EigenArrayMap<T>(C, cols, rows) =                                \
+          ConstEigenArrayMap<T>(A, cols, rows)                         \
+              .rowwise() expr ConstEigenVectorArrayMap<T>(B, rows)     \
+              .transpose();                                            \
+    }                                                                  \
+  }
 
-DEFINE_BROADCAST_BINARY_FUNCTION(Add, +)
-DEFINE_BROADCAST_BINARY_FUNCTION(Sub, -)
-DEFINE_BROADCAST_BINARY_FUNCTION(Mul, *)
-DEFINE_BROADCAST_BINARY_FUNCTION(Div, /)
+#define DELEGATE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(T, Func, expr) \
+  DELEGATE_EIGEN_2D_BROADCAST_1ST_BINARY_FUNCTION(T, Func, expr)   \
+  DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(T, Func, expr)
 
-#undef DEFINE_BROADCAST_BINARY_FUNCTION
-#undef DELEGATE_BROADCAST_BINARY_FUNCTION
+#define DEFINE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(Func, expr)           \
+  DELEGATE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(float, Func, expr)        \
+  DELEGATE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(double, Func, expr)       \
+  DELEGATE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(std::int32_t, Func, expr) \
+  DELEGATE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(std::int64_t, Func, expr)
+
+DEFINE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(Add, +)
+DEFINE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(Mul, *)
+
+#undef DEFINE_EIGEN_2D_BROADCAST_BINARY_FUNCTION
+#undef DELEGATE_EIGEN_2D_BROADCAST_BINARY_FUNCTION
+
+#define DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(T)           \
+  template <>                                               \
+  void RowwiseSub<T, CPUContext, true>(                     \
+      const int rows,                                       \
+      const int cols,                                       \
+      const T* A,                                           \
+      const T* B,                                           \
+      T* C,                                                 \
+      CPUContext*) {                                        \
+    EigenArrayMap<T>(C, cols, rows) =                       \
+        (-ConstEigenArrayMap<T>(B, cols, rows)).colwise() + \
+        ConstEigenVectorArrayMap<T>(A, cols);               \
+  }                                                         \
+  template <>                                               \
+  void ColwiseSub<T, CPUContext, true>(                     \
+      const int rows,                                       \
+      const int cols,                                       \
+      const T* A,                                           \
+      const T* B,                                           \
+      T* C,                                                 \
+      CPUContext*) {                                        \
+    EigenArrayMap<T>(C, cols, rows) =                       \
+        (-ConstEigenArrayMap<T>(B, cols, rows)).rowwise() + \
+        ConstEigenVectorArrayMap<T>(A, rows).transpose();   \
+  }                                                         \
+  DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(T, Sub, -)
+
+DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(float)
+DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(double)
+DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(std::int32_t)
+DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(std::int64_t)
+
+#undef DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION
+
+#define DEFINE_EIGEN_2D_BROADCAST_DIV_FUNCTION(T)                  \
+  template <>                                                      \
+  void RowwiseDiv<T, CPUContext, true>(                            \
+      const int rows,                                              \
+      const int cols,                                              \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      T* C,                                                        \
+      CPUContext*) {                                               \
+    EigenArrayMap<T>(C, cols, rows) =                              \
+        ConstEigenArrayMap<T>(B, cols, rows).inverse().colwise() * \
+        ConstEigenVectorArrayMap<T>(A, cols);                      \
+  }                                                                \
+  template <>                                                      \
+  void ColwiseDiv<T, CPUContext, true>(                            \
+      const int rows,                                              \
+      const int cols,                                              \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      T* C,                                                        \
+      CPUContext*) {                                               \
+    EigenArrayMap<T>(C, cols, rows) =                              \
+        ConstEigenArrayMap<T>(B, cols, rows).inverse().rowwise() * \
+        ConstEigenVectorArrayMap<T>(A, rows).transpose();          \
+  }                                                                \
+  DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(T, Div, /)
+
+DEFINE_EIGEN_2D_BROADCAST_DIV_FUNCTION(float)
+DEFINE_EIGEN_2D_BROADCAST_DIV_FUNCTION(double)
+DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(std::int32_t, Div, /)
+DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(std::int64_t, Div, /)
+
+#undef DEFINE_EIGEN_2D_BROADCAST_DIV_FUNCTION
+
+#undef DELEGATE_EIGEN_2D_BROADCAST_1ST_BINARY_FUNCTION
+#undef DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION
 
 #define CAFFE2_SPECIALIZED_SET(T)                                             \
   template <>                                                                 \
@@ -1227,48 +1205,13 @@ CAFFE2_SPECIALIZED_SET(uint8_t);
 CAFFE2_SPECIALIZED_SET(uint16_t);
 #undef CAFFE2_SPECIALIZED_SET
 
-#define CAFFE2_INSTANTIATE_BINARY_OP(name, op, T)                  \
-  template <>                                                      \
-  void name<T, CPUContext>(                                        \
-      const int n, const T* a, const T* b, bool* y, CPUContext*) { \
-    for (int i = 0; i < n; ++i) {                                  \
-      y[i] = a[i] op b[i];                                         \
-    }                                                              \
-  }                                                                \
-  template <>                                                      \
-  void name##ToRow<T, CPUContext>(                                 \
-      const int m,                                                 \
-      const int n,                                                 \
-      const T* a,                                                  \
-      const T* b,                                                  \
-      bool* y,                                                     \
-      CPUContext*) {                                               \
-    for (int i = 0; i < n * m; ++i) {                              \
-      y[i] = a[i] op b[i % n];                                     \
-    }                                                              \
-  }
-
-#define CAFFE2_DEFINE_BINARY_OP(name, op)         \
-  CAFFE2_INSTANTIATE_BINARY_OP(name, op, float)   \
-  CAFFE2_INSTANTIATE_BINARY_OP(name, op, int32_t) \
-  CAFFE2_INSTANTIATE_BINARY_OP(name, op, int64_t)
-
-CAFFE2_DEFINE_BINARY_OP(LT, <);
-CAFFE2_DEFINE_BINARY_OP(LE, <=);
-CAFFE2_DEFINE_BINARY_OP(GT, >);
-CAFFE2_DEFINE_BINARY_OP(GE, >=);
-
-CAFFE2_INSTANTIATE_BINARY_OP(Or, |, bool);
-CAFFE2_INSTANTIATE_BINARY_OP(And, &, bool);
-CAFFE2_INSTANTIATE_BINARY_OP(Xor, ^, bool);
-
 template <>
 void Not<bool, CPUContext>(
-    const int n,
+    const int N,
     const bool* x,
     bool* y,
     CPUContext* /*context*/) {
-  for (int i = 0; i < n; ++i) {
+  for (int i = 0; i < N; ++i) {
     y[i] = !x[i];
   }
 }
@@ -1293,6 +1236,363 @@ void Not<bool, CPUContext>(
 CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(float);
 #undef CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH
 
+namespace {
+
+template <typename TIn, typename TOut, class BinaryOperator, bool kBroadcast1st>
+void RowwiseBinaryOp(
+    const int rows,
+    const int cols,
+    const BinaryOperator& op,
+    const TIn* A,
+    const TIn* B,
+    TOut* C) {
+  for (int i = 0; i < rows; ++i) {
+    for (int j = 0; j < cols; ++j) {
+      const int C_index = i * cols + j;
+      const int A_index = kBroadcast1st ? j : C_index;
+      const int B_index = kBroadcast1st ? C_index : j;
+      C[C_index] = op(A[A_index], B[B_index]);
+    }
+  }
+}
+
+template <typename TIn, typename TOut, class BinaryOperator, bool kBroadcast1st>
+void ColwiseBinaryOp(
+    const int rows,
+    const int cols,
+    const BinaryOperator& op,
+    const TIn* A,
+    const TIn* B,
+    TOut* C) {
+  for (int i = 0; i < rows; ++i) {
+    for (int j = 0; j < cols; ++j) {
+      const int C_index = i * cols + j;
+      const int A_index = kBroadcast1st ? i : C_index;
+      const int B_index = kBroadcast1st ? C_index : i;
+      C[C_index] = op(A[A_index], B[B_index]);
+    }
+  }
+}
+
+template <typename TIn, typename TOut, class Operator1, class Operator2>
+void BinaryOpWith2DBroadcasting(
+    const int ndim,
+    const int* dims,
+    const int pivot,
+    const bool broadcast_1st,
+    const Operator1& op1,
+    const Operator2& op2,
+    const TIn* A,
+    const TIn* B,
+    TOut* C,
+    CPUContext* context) {
+  const int rows =
+      std::accumulate(dims, dims + pivot, 1, std::multiplies<int>());
+  const int cols =
+      std::accumulate(dims + pivot, dims + ndim, 1, std::multiplies<int>());
+  if (broadcast_1st) {
+    op1(rows, cols, A, B, C, context);
+  } else {
+    op2(rows, cols, A, B, C, context);
+  }
+}
+
+template <typename TIn, typename TOut, class BinaryOperator>
+void BroadcastBinaryOpImpl(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims,
+    const int* C_dims,
+    const BinaryOperator& op,
+    const TIn* A,
+    const TIn* B,
+    TOut* C) {
+  std::vector<int> index(ndim, 0);
+  const int C_size =
+      std::accumulate(C_dims, C_dims + ndim, 1, std::multiplies<int>());
+  for (int C_index = 0; C_index < C_size; ++C_index) {
+    const int A_index = utils::GetIndexFromDims(ndim, A_dims, index.data());
+    const int B_index = utils::GetIndexFromDims(ndim, B_dims, index.data());
+    C[C_index] = op(A[A_index], B[B_index]);
+    utils::IncreaseIndexInDims(ndim, C_dims, index.data());
+  }
+}
+
+} // namespace
+
+#define DELEGATE_1D_BINARY_FUNCTION(TIn, TOut, Func, Op)               \
+  template <>                                                          \
+  void Func<TIn, CPUContext>(                                          \
+      const int N, const TIn* A, const TIn* B, TOut* C, CPUContext*) { \
+    std::transform(A, A + N, B, C, Op<TIn>());                         \
+  }
+
+#define DEFINE_1D_COMPARE_FUNCTION(Func, Op)                \
+  DELEGATE_1D_BINARY_FUNCTION(float, bool, Func, Op)        \
+  DELEGATE_1D_BINARY_FUNCTION(double, bool, Func, Op)       \
+  DELEGATE_1D_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
+  DELEGATE_1D_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
+  DELEGATE_1D_BINARY_FUNCTION(bool, bool, Func, Op)
+
+DEFINE_1D_COMPARE_FUNCTION(EQ, std::equal_to)
+DEFINE_1D_COMPARE_FUNCTION(NE, std::not_equal_to)
+DEFINE_1D_COMPARE_FUNCTION(LT, std::less)
+DEFINE_1D_COMPARE_FUNCTION(LE, std::less_equal)
+DEFINE_1D_COMPARE_FUNCTION(GT, std::greater)
+DEFINE_1D_COMPARE_FUNCTION(GE, std::greater_equal)
+
+#undef DEFINE_1D_COMPARE_FUNCTION
+
+DELEGATE_1D_BINARY_FUNCTION(bool, bool, And, std::logical_and)
+DELEGATE_1D_BINARY_FUNCTION(bool, bool, Or, std::logical_or)
+DELEGATE_1D_BINARY_FUNCTION(bool, bool, Xor, std::bit_xor)
+
+#define DEFINE_1D_BITWISE_BINARY_FUNCTION(Func, op)                 \
+  DELEGATE_1D_BINARY_FUNCTION(bool, bool, Func, op)                 \
+  DELEGATE_1D_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, op) \
+  DELEGATE_1D_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, op)
+
+DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseAnd, std::bit_and)
+DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseOr, std::bit_or)
+DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
+
+#undef DEFINE_1D_BITWISE_BINARY_FUNCTION
+
+#undef DELEGATE_1D_BINARY_FUNCTION
+
+#define DELEGATE_2D_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op)             \
+  template <>                                                                  \
+  void Rowwise##Func<TIn, CPUContext, true>(                                   \
+      const int rows,                                                          \
+      const int cols,                                                          \
+      const TIn* A,                                                            \
+      const TIn* B,                                                            \
+      TOut* C,                                                                 \
+      CPUContext*) {                                                           \
+    RowwiseBinaryOp<TIn, TOut, Op<TIn>, true>(rows, cols, Op<TIn>(), A, B, C); \
+  }                                                                            \
+  template <>                                                                  \
+  void Rowwise##Func<TIn, CPUContext, false>(                                  \
+      const int rows,                                                          \
+      const int cols,                                                          \
+      const TIn* A,                                                            \
+      const TIn* B,                                                            \
+      TOut* C,                                                                 \
+      CPUContext*) {                                                           \
+    RowwiseBinaryOp<TIn, TOut, Op<TIn>, false>(                                \
+        rows, cols, Op<TIn>(), A, B, C);                                       \
+  }                                                                            \
+  template <>                                                                  \
+  void Colwise##Func<TIn, CPUContext, true>(                                   \
+      const int rows,                                                          \
+      const int cols,                                                          \
+      const TIn* A,                                                            \
+      const TIn* B,                                                            \
+      TOut* C,                                                                 \
+      CPUContext*) {                                                           \
+    ColwiseBinaryOp<TIn, TOut, Op<TIn>, true>(rows, cols, Op<TIn>(), A, B, C); \
+  }                                                                            \
+  template <>                                                                  \
+  void Colwise##Func<TIn, CPUContext, false>(                                  \
+      const int rows,                                                          \
+      const int cols,                                                          \
+      const TIn* A,                                                            \
+      const TIn* B,                                                            \
+      TOut* C,                                                                 \
+      CPUContext*) {                                                           \
+    ColwiseBinaryOp<TIn, TOut, Op<TIn>, false>(                                \
+        rows, cols, Op<TIn>(), A, B, C);                                       \
+  }
+
+#define DEFINE_2D_COMPARE_FUNCTION(Func, Op)                          \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(float, bool, Func, Op)        \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(double, bool, Func, Op)       \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, Func, Op)
+
+DEFINE_2D_COMPARE_FUNCTION(EQ, std::equal_to)
+DEFINE_2D_COMPARE_FUNCTION(NE, std::not_equal_to)
+DEFINE_2D_COMPARE_FUNCTION(LT, std::less)
+DEFINE_2D_COMPARE_FUNCTION(LE, std::less_equal)
+DEFINE_2D_COMPARE_FUNCTION(GT, std::greater)
+DEFINE_2D_COMPARE_FUNCTION(GE, std::greater_equal)
+
+#undef DEFINE_2D_COMPARE_FUNCTION
+
+DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, And, std::logical_and)
+DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, Or, std::logical_or)
+DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, Xor, std::bit_xor)
+
+#define DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(Func, Op)                 \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, Func, Op)                 \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
+  DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
+
+DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseAnd, std::bit_and)
+DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseOr, std::bit_or)
+DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
+
+#undef DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION
+
+#undef DELEGATE_2D_BROADCAST_BINARY_FUNCTION
+
+#define DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(T)   \
+  template <>                                     \
+  void RowwiseDiv<T, CPUContext, true>(           \
+      const int rows,                             \
+      const int cols,                             \
+      const T* A,                                 \
+      const T* B,                                 \
+      T* C,                                       \
+      CPUContext*) {                              \
+    RowwiseBinaryOp<T, T, std::divides<T>, true>( \
+        rows, cols, std::divides<T>(), A, B, C);  \
+  }                                               \
+  template <>                                     \
+  void ColwiseDiv<T, CPUContext, true>(           \
+      const int rows,                             \
+      const int cols,                             \
+      const T* A,                                 \
+      const T* B,                                 \
+      T* C,                                       \
+      CPUContext*) {                              \
+    ColwiseBinaryOp<T, T, std::divides<T>, true>( \
+        rows, cols, std::divides<T>(), A, B, C);  \
+  }
+DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int32_t)
+DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int64_t)
+#undef DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION
+
+#define DELEGATE_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op) \
+  template <>                                                   \
+  void Func<TIn, CPUContext>(                                   \
+      const int A_ndim,                                         \
+      const int* A_dims,                                        \
+      const int B_ndim,                                         \
+      const int* B_dims,                                        \
+      const TIn* A,                                             \
+      const TIn* B,                                             \
+      TOut* C,                                                  \
+      CPUContext* context) {                                    \
+    const int ndim = std::max(A_ndim, B_ndim);                  \
+    std::vector<int> A_dims_array(ndim);                        \
+    std::vector<int> B_dims_array(ndim);                        \
+    std::vector<int> C_dims_array(ndim);                        \
+    utils::ComputeBroadcastBinaryOpDims(                        \
+        A_ndim,                                                 \
+        A_dims,                                                 \
+        B_ndim,                                                 \
+        B_dims,                                                 \
+        A_dims_array.data(),                                    \
+        B_dims_array.data(),                                    \
+        C_dims_array.data());                                   \
+    if (A_dims_array == B_dims_array) {                         \
+      const int size = std::accumulate(                         \
+          C_dims_array.cbegin(),                                \
+          C_dims_array.cend(),                                  \
+          1,                                                    \
+          std::multiplies<int>());                              \
+      Func<TIn, CPUContext>(size, A, B, C, context);            \
+      return;                                                   \
+    }                                                           \
+    int pivot;                                                  \
+    bool broadcast_1st;                                         \
+    if (utils::IsRowwiseBroadcastBinaryOp(                      \
+            ndim,                                               \
+            A_dims_array.data(),                                \
+            B_dims_array.data(),                                \
+            &pivot,                                             \
+            &broadcast_1st)) {                                  \
+      BinaryOpWith2DBroadcasting(                               \
+          ndim,                                                 \
+          C_dims_array.data(),                                  \
+          pivot,                                                \
+          broadcast_1st,                                        \
+          Rowwise##Func<TIn, CPUContext, true>,                 \
+          Rowwise##Func<TIn, CPUContext, false>,                \
+          A,                                                    \
+          B,                                                    \
+          C,                                                    \
+          context);                                             \
+      return;                                                   \
+    }                                                           \
+    if (utils::IsColwiseBroadcastBinaryOp(                      \
+            ndim,                                               \
+            A_dims_array.data(),                                \
+            B_dims_array.data(),                                \
+            &pivot,                                             \
+            &broadcast_1st)) {                                  \
+      BinaryOpWith2DBroadcasting(                               \
+          ndim,                                                 \
+          C_dims_array.data(),                                  \
+          pivot,                                                \
+          broadcast_1st,                                        \
+          Colwise##Func<TIn, CPUContext, true>,                 \
+          Colwise##Func<TIn, CPUContext, false>,                \
+          A,                                                    \
+          B,                                                    \
+          C,                                                    \
+          context);                                             \
+      return;                                                   \
+    }                                                           \
+    BroadcastBinaryOpImpl(                                      \
+        ndim,                                                   \
+        A_dims_array.data(),                                    \
+        B_dims_array.data(),                                    \
+        C_dims_array.data(),                                    \
+        Op<TIn>(),                                              \
+        A,                                                      \
+        B,                                                      \
+        C);                                                     \
+  }
+
+#define DEFINE_BROADCAST_COMPARE_FUNCTION(Func, Op)                \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(float, bool, Func, Op)        \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(double, bool, Func, Op)       \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Func, Op)
+
+DEFINE_BROADCAST_COMPARE_FUNCTION(EQ, std::equal_to)
+DEFINE_BROADCAST_COMPARE_FUNCTION(NE, std::not_equal_to)
+DEFINE_BROADCAST_COMPARE_FUNCTION(LT, std::less)
+DEFINE_BROADCAST_COMPARE_FUNCTION(LE, std::less_equal)
+DEFINE_BROADCAST_COMPARE_FUNCTION(GT, std::greater)
+DEFINE_BROADCAST_COMPARE_FUNCTION(GE, std::greater_equal)
+
+#undef DEFINE_BROADCAST_COMPARE_FUNCTION
+
+#define DEFINE_BROADCAST_BINARY_FUNCTION(Func, Op)                         \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(float, float, Func, Op)               \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(double, double, Func, Op)             \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
+
+DEFINE_BROADCAST_BINARY_FUNCTION(Add, std::plus)
+DEFINE_BROADCAST_BINARY_FUNCTION(Sub, std::minus)
+DEFINE_BROADCAST_BINARY_FUNCTION(Mul, std::multiplies)
+DEFINE_BROADCAST_BINARY_FUNCTION(Div, std::divides)
+
+#undef DEFINE_BROADCAST_BINARY_FUNCTION
+
+DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, And, std::logical_and)
+DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Or, std::logical_or)
+DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Xor, std::bit_xor)
+
+#define DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(Func, Op)                 \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Func, Op)                 \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
+
+DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseAnd, std::bit_and)
+DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseOr, std::bit_or)
+DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
+
+#undef DEFINE_BITWISE_BROADCAST_BINARY_FUNCTION
+
+#undef DELEGATE_BROADCAST_BINARY_FUNCTION
+
 template <>
 void RandUniform<float, CPUContext>(
     const size_t n,
@@ -1301,7 +1601,7 @@ void RandUniform<float, CPUContext>(
     float* r,
     CPUContext* context) {
   std::uniform_real_distribution<float> distribution(a, b);
-  for (auto i = 0; i < n; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }
 }
@@ -1314,7 +1614,7 @@ void RandUniform<int, CPUContext>(
     int* r,
     CPUContext* context) {
   std::uniform_int_distribution<int> distribution(a, b);
-  for (auto i = 0; i < n; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }
 }
@@ -1359,7 +1659,7 @@ void RandGaussian<float, CPUContext>(
     float* r,
     CPUContext* context) {
   std::normal_distribution<float> distribution(mean, std);
-  for (auto i = 0; i < n; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }
 }
@@ -1404,115 +1704,123 @@ void Select<float, CPUContext>(
     y[i] = x[i * D + idx[i]];
   }
 }
-// Ported from caffe 1.
-template <>
-void Im2colNd<float, CPUContext, StorageOrder::NCHW>(
-    const float* data_img,
-    const int* im_shape,
-    const int* col_shape,
-    const int /* img_size*/,
-    const int /* col_size*/,
-    const int* kernel_shape,
-    const int* stride,
-    const int* dilation,
-    const int* pad,
-    const int N,
-    float* data_col,
-    CPUContext* /* context */,
-    bool accumulate_output) {
-  int kernel_size = 1;
-  for (int i = 0; i < N; ++i) {
-    kernel_size *= kernel_shape[i];
-  }
-  const int channels_col = col_shape[0];
-  vector<int> d_offset(N, 0);
-  vector<int> d_iter(N, 0);
-  for (int c_col = 0; c_col < channels_col; ++c_col) {
-    // Loop over spatial axes in reverse order to compute a per-axis offset.
-    int offset = c_col;
-    for (int d_i = N - 1; d_i >= 0; --d_i) {
-      if (d_i < N - 1) {
-        offset /= kernel_shape[d_i + 1];
-      }
-      d_offset[d_i] = offset % kernel_shape[d_i];
-    }
-    for (bool incremented = true; incremented;) {
-      // Loop over spatial axes in forward order to compute the indices in the
-      // image and column, and whether the index lies in the padding.
-      int index_col = c_col;
-      int index_im = c_col / kernel_size;
-      bool is_padding = false;
-      for (int d_i = 0; d_i < N; ++d_i) {
-        const int d = d_iter[d_i];
-        const int d_im =
-            d * stride[d_i] - pad[d_i] + d_offset[d_i] * dilation[d_i];
-        is_padding |= d_im < 0 || d_im >= im_shape[d_i + 1];
-        index_col *= col_shape[d_i + 1];
-        index_col += d;
-        index_im *= im_shape[d_i + 1];
-        index_im += d_im;
-      }
-      if (!accumulate_output) {
-        if (is_padding) {
-          data_col[index_col] = 0;
-        } else {
-          data_col[index_col] = data_img[index_im];
-        }
-      } else if (!is_padding) { // col2im
-        data_col[index_im] += data_img[index_col];
-      }
-      // Loop over spatial axes in reverse order to choose an index,
-      // like counting.
-      incremented = false;
-      for (int d_i = N - 1; d_i >= 0; --d_i) {
-        const int d_max = col_shape[d_i + 1];
-        DCHECK_LT(d_iter[d_i], d_max);
-        if (d_iter[d_i] == d_max - 1) {
-          d_iter[d_i] = 0;
-        } else { // d_iter[d_i] < d_max - 1
-          ++d_iter[d_i];
-          incremented = true;
-          break;
-        }
-      }
-    } // while(incremented) {
-  } // for (int c = 0; c < channels_col; ++c) {
-}
 
-template <>
-void Col2imNd<float, CPUContext, StorageOrder::NCHW>(
-    const float* data_col,
-    const int* img_shape,
-    const int* col_shape,
+namespace {
+
+template <typename T, bool kCol2Im>
+void Im2ColNdNCHWImpl(
+    const int N,
     const int img_size,
     const int col_size,
+    const int* img_shape,
+    const int* col_shape,
     const int* kernel_shape,
     const int* stride,
     const int* dilation,
     const int* pad,
-    const int N,
-    float* data_img,
+    const float* X_data,
+    float* Y_data,
     CPUContext* context) {
-  Set<float, CPUContext>(img_size, 0, data_img, context);
-  Im2colNd<float, CPUContext, StorageOrder::NCHW>(
-      data_col,
-      img_shape,
-      col_shape,
+  if (kCol2Im) {
+    Set<T, CPUContext>(img_size, 0, Y_data, context);
+  }
+  const int outer_size = col_shape[0];
+  const int inner_size = col_size / outer_size;
+  const int kernel_size = std::accumulate(
+      kernel_shape, kernel_shape + N, 1, std::multiplies<int>());
+  std::vector<int> d_offset(N, 0);
+  std::vector<int> d_iter(N, 0);
+  for (int i = 0; i < outer_size; ++i) {
+    // Loop over spatial axes in reverse order to compute a per-axis offset.
+    int offset = i;
+    for (int d_i = N - 1; d_i >= 0; --d_i) {
+      d_offset[d_i] = offset % kernel_shape[d_i];
+      offset /= kernel_shape[d_i];
+    }
+    for (int j = 0; j < inner_size; ++j) {
+      // Loop over spatial axes in forward order to compute the indices in the
+      // image and column, and whether the index lies in the padding.
+      const int col_index = i * inner_size + j;
+      int img_index = i / kernel_size;
+      bool is_padding = false;
+      for (int d_i = 0; d_i < N; ++d_i) {
+        const int d_img = d_iter[d_i] * stride[d_i] - pad[d_i] +
+            d_offset[d_i] * dilation[d_i];
+        is_padding |= d_img < 0 || d_img >= img_shape[d_i + 1];
+        img_index = img_index * img_shape[d_i + 1] + d_img;
+      }
+      if (!kCol2Im) {
+        Y_data[col_index] = is_padding ? 0 : X_data[img_index];
+      } else if (!is_padding) {
+        Y_data[img_index] += X_data[col_index];
+      }
+      utils::IncreaseIndexInDims(N, col_shape + 1, d_iter.data());
+    }
+  }
+}
+
+} // namespace
+
+template <>
+void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const float* img_data,
+    float* col_data,
+    CPUContext* context) {
+  Im2ColNdNCHWImpl<float, false>(
+      N,
       img_size,
       col_size,
+      img_shape,
+      col_shape,
       kernel_shape,
       stride,
       dilation,
       pad,
-      N,
-      data_img,
-      context,
-      true);
+      img_data,
+      col_data,
+      context);
 }
 
 template <>
-void Im2col<float, CPUContext, StorageOrder::NCHW>(
-    const float* data_im,
+void Col2ImNd<float, CPUContext, StorageOrder::NCHW>(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const float* col_data,
+    float* img_data,
+    CPUContext* context) {
+  Im2ColNdNCHWImpl<float, true>(
+      N,
+      img_size,
+      col_size,
+      img_shape,
+      col_shape,
+      kernel_shape,
+      stride,
+      dilation,
+      pad,
+      col_data,
+      img_data,
+      context);
+}
+
+template <>
+void Im2Col<float, CPUContext, StorageOrder::NCHW>(
     const int channels,
     const int height,
     const int width,
@@ -1526,7 +1834,8 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
     const int pad_r,
     const int stride_h,
     const int stride_w,
-    float* data_col,
+    const float* img_data,
+    float* col_data,
     CPUContext* /*context*/) {
   const int output_h =
       (height + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h +
@@ -1544,9 +1853,9 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
       const auto rest = k % (kernel_h * kernel_w);
       const auto kh = rest / kernel_w;
       const auto kw = rest % kernel_w;
-      auto* dst = data_col + nip * (kernel_h * kernel_w * output_h * output_w) +
+      auto* dst = col_data + nip * (kernel_h * kernel_w * output_h * output_w) +
           kh * (kernel_w * output_h * output_w) + kw * (output_h * output_w);
-      const auto* src = data_im + nip * (height * width);
+      const auto* src = img_data + nip * (height * width);
       for (auto y = 0; y < output_h; y++) {
         const auto iy = y * stride_h + kh;
         const auto ix = kw;
@@ -1574,22 +1883,22 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
     const int pad_h = pad_t;
     const int pad_w = pad_l;
     const int channel_size = height * width;
-    for (int channel = channels; channel--; data_im += channel_size) {
+    for (int channel = channels; channel--; img_data += channel_size) {
       for (int kernel_row = 0; kernel_row < kernel_h; kernel_row++) {
         for (int kernel_col = 0; kernel_col < kernel_w; kernel_col++) {
           int input_row = -pad_h + kernel_row * dilation_h;
           for (int output_rows = output_h; output_rows; output_rows--) {
             if (!is_a_ge_zero_and_a_lt_b(input_row, height)) {
               for (int output_cols = output_w; output_cols; output_cols--) {
-                *(data_col++) = 0;
+                *(col_data++) = 0;
               }
             } else {
               int input_col = -pad_w + kernel_col * dilation_w;
               for (int output_col = output_w; output_col; output_col--) {
                 if (is_a_ge_zero_and_a_lt_b(input_col, width)) {
-                  *(data_col++) = data_im[input_row * width + input_col];
+                  *(col_data++) = img_data[input_row * width + input_col];
                 } else {
-                  *(data_col++) = 0;
+                  *(col_data++) = 0;
                 }
                 input_col += stride_w;
               }
@@ -1618,19 +1927,19 @@ void Im2col<float, CPUContext, StorageOrder::NCHW>(
       for (int w = 0; w < width_col; ++w) {
         int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
         int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
-        if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width)
-          data_col[(c * height_col + h) * width_col + w] =
-              data_im[(c_im * height + h_pad) * width + w_pad];
-        else
-          data_col[(c * height_col + h) * width_col + w] = 0;
+        if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width) {
+          col_data[(c * height_col + h) * width_col + w] =
+              img_data[(c_im * height + h_pad) * width + w_pad];
+        } else {
+          col_data[(c * height_col + h) * width_col + w] = 0;
+        }
       }
     }
   }
 }
 
 template <>
-void Im2col<float, CPUContext, StorageOrder::NHWC>(
-    const float* data_im,
+void Im2Col<float, CPUContext, StorageOrder::NHWC>(
     const int channels,
     const int height,
     const int width,
@@ -1644,7 +1953,8 @@ void Im2col<float, CPUContext, StorageOrder::NHWC>(
     const int pad_r,
     const int stride_h,
     const int stride_w,
-    float* data_col,
+    const float* img_data,
+    float* col_data,
     CPUContext* /*context*/) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
@@ -1659,13 +1969,15 @@ void Im2col<float, CPUContext, StorageOrder::NHWC>(
       for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
         for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
           if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
-            memcpy(data_col, data_im + (ih * width + iw) * channels,
-                   sizeof(float) * channels);
+            memcpy(
+                col_data,
+                img_data + (ih * width + iw) * channels,
+                sizeof(float) * channels);
           } else {
             // This should be simply padded with zero.
-            memset(data_col, 0, sizeof(float) * channels);
+            memset(col_data, 0, sizeof(float) * channels);
           }
-          data_col += channels;
+          col_data += channels;
         }
       }
       w_pad += stride_w;
@@ -1675,8 +1987,7 @@ void Im2col<float, CPUContext, StorageOrder::NHWC>(
 }
 
 template <>
-void Col2im<float, CPUContext, StorageOrder::NCHW>(
-    const float* data_col,
+void Col2Im<float, CPUContext, StorageOrder::NCHW>(
     const int channels,
     const int height,
     const int width,
@@ -1690,7 +2001,8 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
     const int pad_r,
     const int stride_h,
     const int stride_w,
-    float* data_im,
+    const float* col_data,
+    float* img_data,
     CPUContext* context) {
   const int output_h =
       (height + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h +
@@ -1699,7 +2011,7 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
       (width + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w +
       1;
 
-  Set<float, CPUContext>(height * width * channels, 0, data_im, context);
+  Set<float, CPUContext>(height * width * channels, 0, img_data, context);
 
   // Fast path for zero padding and no dilation
   // From Torch, modified THNN_(unfolded_acc)
@@ -1710,10 +2022,10 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
       const auto rest = k % (kernel_h * kernel_w);
       const auto kh = rest / kernel_w;
       const auto kw = rest % kernel_w;
-      const auto* dst = data_col +
+      const auto* dst = col_data +
           nip * (kernel_h * kernel_w * output_h * output_w) +
           kh * (kernel_w * output_h * output_w) + kw * (output_h * output_w);
-      auto* src = data_im + nip * (height * width);
+      auto* src = img_data + nip * (height * width);
       for (auto y = 0; y < output_h; y++) {
         const auto iy = y * stride_h + kh;
         const auto ix = kw;
@@ -1741,20 +2053,20 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
     const int pad_h = pad_t;
     const int pad_w = pad_l;
     const int channel_size = height * width;
-    for (int channel = channels; channel--; data_im += channel_size) {
+    for (int channel = channels; channel--; img_data += channel_size) {
       for (int kernel_row = 0; kernel_row < kernel_h; kernel_row++) {
         for (int kernel_col = 0; kernel_col < kernel_w; kernel_col++) {
           int input_row = -pad_h + kernel_row * dilation_h;
           for (int output_rows = output_h; output_rows; output_rows--) {
             if (!is_a_ge_zero_and_a_lt_b(input_row, height)) {
-              data_col += output_w;
+              col_data += output_w;
             } else {
               int input_col = -pad_w + kernel_col * dilation_w;
               for (int output_col = output_w; output_col; output_col--) {
                 if (is_a_ge_zero_and_a_lt_b(input_col, width)) {
-                  data_im[input_row * width + input_col] += *data_col;
+                  img_data[input_row * width + input_col] += *col_data;
                 }
-                data_col++;
+                ++col_data;
                 input_col += stride_w;
               }
             }
@@ -1782,8 +2094,8 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
         int h_pad = h * stride_h - pad_t + h_offset * dilation_h;
         int w_pad = w * stride_w - pad_l + w_offset * dilation_w;
         if (h_pad >= 0 && h_pad < height && w_pad >= 0 && w_pad < width) {
-          data_im[(c_im * height + h_pad) * width + w_pad] +=
-              data_col[(c * height_col + h) * width_col + w];
+          img_data[(c_im * height + h_pad) * width + w_pad] +=
+              col_data[(c * height_col + h) * width_col + w];
         }
       }
     }
@@ -1791,8 +2103,7 @@ void Col2im<float, CPUContext, StorageOrder::NCHW>(
 }
 
 template <>
-void Col2im<float, CPUContext, StorageOrder::NHWC>(
-    const float* data_col,
+void Col2Im<float, CPUContext, StorageOrder::NHWC>(
     const int channels,
     const int height,
     const int width,
@@ -1806,12 +2117,13 @@ void Col2im<float, CPUContext, StorageOrder::NHWC>(
     const int pad_r,
     const int stride_h,
     const int stride_w,
-    float* data_im,
+    const float* col_data,
+    float* img_data,
     CPUContext* context) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
 
-  Set<float, CPUContext>(height * width * channels, 0, data_im, context);
+  Set<float, CPUContext>(height * width * channels, 0, img_data, context);
   int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
   int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int h_pad = -pad_t;
@@ -1821,11 +2133,11 @@ void Col2im<float, CPUContext, StorageOrder::NHWC>(
       for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
         for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
           if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
-            auto* data_im_patch = data_im + (ih * width + iw) * channels;
+            auto* img_data_patch = img_data + (ih * width + iw) * channels;
             Add<float, CPUContext>(
-                  channels, data_im_patch, data_col, data_im_patch, context);
+                channels, img_data_patch, col_data, img_data_patch, context);
           }
-          data_col += channels;
+          col_data += channels;
         }
       }
       w_pad += stride_w;
@@ -1837,6 +2149,7 @@ void Col2im<float, CPUContext, StorageOrder::NHWC>(
 template <>
 void BiasCHW<float, CPUContext>(
     const float* bias,
+    const float* /*bias_multiplier*/,
     const int bias_channels,
     const int image_size,
     float* image,
@@ -1854,10 +2167,9 @@ void BiasCHW<float, CPUContext>(
 
     // FIXME: if input < kVecSizeInFloat, can't vectorize at all
 
-    int prologue =
-      kVecSizeInFloat -
-      // remainder in floats
-      (((uintptr_t) image) % (sizeof(float32x4_t))) / sizeof(float);
+    int prologue = kVecSizeInFloat -
+        // remainder in floats
+        (((uintptr_t)image) % (sizeof(float32x4_t))) / sizeof(float);
 
     int i = 0;
     // Prologue loop
@@ -2061,70 +2373,8 @@ void TransposeCPUImpl(
           X + block_size * X_index,
           block_size * sizeof(T));
     }
-    internal::IncreaseIndexInDims(itr_axes, Y_dims.data(), index.data());
+    utils::IncreaseIndexInDims(itr_axes, Y_dims.data(), index.data());
   }
-}
-
-template <typename T, int D>
-void EigenTransposeImpl(const int* dims, const int* axes, const T* X, T* Y) {
-  Eigen::DSizes<Eigen::DenseIndex, D> X_dims;
-  Eigen::DSizes<Eigen::DenseIndex, D> Y_dims;
-  Eigen::array<Eigen::DenseIndex, D> axes_array;
-#pragma unroll
-  for (int i = 0; i < D; ++i) {
-    X_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - i]);
-    Y_dims[i] = static_cast<Eigen::DenseIndex>(dims[D - 1 - axes[i]]);
-    axes_array[D - 1 - i] = static_cast<Eigen::DenseIndex>(D - 1 - axes[i]);
-  }
-  EigenTensorMap<T, D>(Y, Y_dims) =
-      EigenTensorMap<T, D>(const_cast<T*>(X), X_dims).shuffle(axes_array);
-}
-
-template <typename T>
-bool EigenTranspose(
-    const int ndim,
-    const int* dims,
-    const int* axes,
-    const T* X,
-    T* Y) {
-#if EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  switch (ndim) {
-    case 1: {
-      EigenTransposeImpl<T, 1>(dims, axes, X, Y);
-      return true;
-    }
-    case 2: {
-      EigenTransposeImpl<T, 2>(dims, axes, X, Y);
-      return true;
-    }
-    case 3: {
-      EigenTransposeImpl<T, 3>(dims, axes, X, Y);
-      return true;
-    }
-    case 4: {
-      EigenTransposeImpl<T, 4>(dims, axes, X, Y);
-      return true;
-    }
-    case 5: {
-      EigenTransposeImpl<T, 5>(dims, axes, X, Y);
-      return true;
-    }
-    case 6: {
-      EigenTransposeImpl<T, 6>(dims, axes, X, Y);
-      return true;
-    }
-    case 7: {
-      EigenTransposeImpl<T, 7>(dims, axes, X, Y);
-      return true;
-    }
-    case 8: {
-      EigenTransposeImpl<T, 8>(dims, axes, X, Y);
-      return true;
-    }
-    default: { return false; }
-  }
-#endif // EIGEN_VERSION_AT_LEAST(3, 3, 0)
-  return false;
 }
 
 } // namespace
@@ -2142,25 +2392,19 @@ void Transpose<float, CPUContext>(
     return;
   }
 #endif // CAFFE2_USE_HPTT
-  if (EigenTranspose(ndim, dims, axes, X, Y)) {
-    return;
-  }
   TransposeCPUImpl(ndim, dims, axes, X, Y);
 }
 
-#define CAFFE2_SPECIALIZED_TRANSPOSE(T)           \
-  template <>                                     \
-  void Transpose<T, CPUContext>(                  \
-      const int ndim,                             \
-      const int* dims,                            \
-      const int* axes,                            \
-      const T* X,                                 \
-      T* Y,                                       \
-      CPUContext* /* context */) {                \
-    if (EigenTranspose(ndim, dims, axes, X, Y)) { \
-      return;                                     \
-    }                                             \
-    TransposeCPUImpl(ndim, dims, axes, X, Y);     \
+#define CAFFE2_SPECIALIZED_TRANSPOSE(T)       \
+  template <>                                 \
+  void Transpose<T, CPUContext>(              \
+      const int ndim,                         \
+      const int* dims,                        \
+      const int* axes,                        \
+      const T* X,                             \
+      T* Y,                                   \
+      CPUContext* /* context */) {            \
+    TransposeCPUImpl(ndim, dims, axes, X, Y); \
   }
 CAFFE2_SPECIALIZED_TRANSPOSE(double)
 CAFFE2_SPECIALIZED_TRANSPOSE(int)

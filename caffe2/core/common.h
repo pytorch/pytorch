@@ -147,6 +147,12 @@ private:                                                                       \
 #define CAFFE2_API CAFFE2_IMPORT
 #endif
 
+#ifdef CAFFE2_BUILD_OBSERVER_LIB
+#define CAFFE2_OBSERVER_API CAFFE2_EXPORT
+#else
+#define CAFFE2_OBSERVER_API CAFFE2_IMPORT
+#endif
+
 
 #if defined(_MSC_VER)
 #define NOMINMAX
@@ -274,11 +280,13 @@ class SkipIndices<> {
 // as the underlying boolean variable is going to be switched on when one
 // loads libcaffe2_gpu.so.
 bool HasCudaRuntime();
+bool HasHipRuntime();
 namespace internal {
 // Sets the Cuda Runtime flag that is used by HasCudaRuntime(). You should
 // never use this function - it is only used by the Caffe2 gpu code to notify
 // Caffe2 core that cuda runtime has been loaded.
 void SetCudaRuntimeFlag();
+void SetHipRuntimeFlag();
 }
 // Returns which setting Caffe2 was configured and built with (exported from
 // CMake)

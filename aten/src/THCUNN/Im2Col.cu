@@ -4,6 +4,8 @@
 
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 
 #include "generic/Im2Col.cu"
 #include "THCGenerateFloatTypes.h"

@@ -93,6 +93,9 @@ class DistributedDataParallel(Module):
                            the module at beginning of the forward function.
                            (default: True)
 
+    Attributes:
+        module (Module): the module to be parallelized
+
     Example::
 
         >>> torch.distributed.init_process_group(world_size=4, init_method='...')
@@ -102,6 +105,9 @@ class DistributedDataParallel(Module):
     def __init__(self, module, device_ids=None, output_device=None, dim=0,
                  broadcast_buffers=True):
         super(DistributedDataParallel, self).__init__()
+        if dist._backend not in (dist.dist_backend.NCCL, dist.dist_backend.GLOO):
+            raise ValueError('Invalid backend, only NCCL and GLOO backends are supported by DistributedDataParallel')
+
         if device_ids is None:
             device_ids = list(range(torch.cuda.device_count()))
         if output_device is None:

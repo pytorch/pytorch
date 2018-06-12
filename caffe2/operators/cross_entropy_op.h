@@ -74,12 +74,20 @@ class SigmoidCrossEntropyWithLogitsOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         log_D_trick_(OperatorBase::template GetSingleArgument<bool>(
             "log_D_trick",
-            false)) {}
+            false)),
+        unjoined_lr_loss_(OperatorBase::template GetSingleArgument<bool>(
+            "unjoined_lr_loss",
+            false)) {
+    CAFFE_ENFORCE(
+        !(log_D_trick_ && unjoined_lr_loss_),
+        "log_D_trick_ and unjoined_lr_loss_ cannot be set as True simultaneously");
+  }
 
   bool RunOnDevice() override;
 
  protected:
   bool log_D_trick_;
+  bool unjoined_lr_loss_;
 };
 
 template <typename T, class Context>
@@ -92,12 +100,16 @@ class SigmoidCrossEntropyWithLogitsGradientOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         log_D_trick_(OperatorBase::template GetSingleArgument<bool>(
             "log_D_trick",
+            false)),
+        unjoined_lr_loss_(OperatorBase::template GetSingleArgument<bool>(
+            "unjoined_lr_loss",
             false)) {}
 
   bool RunOnDevice() override;
 
  protected:
   bool log_D_trick_;
+  bool unjoined_lr_loss_;
 };
 
 template <typename T, class Context>

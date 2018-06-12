@@ -85,10 +85,16 @@ class Params {
 
   // params for video resolution
   int video_res_type_ = VideoResType::USE_WIDTH_HEIGHT;
+
+  // the size of the patch croped from the input video
   int crop_height_ = -1;
   int crop_width_ = -1;
+
+  // minimal resolution for resizing when using USE_MINIMAL_WIDTH_HEIGHT
   int height_min_ = -1;
   int width_min_ = -1;
+
+  // the video resolution after resizing
   int scale_w_ = -1;
   int scale_h_ = -1;
 
@@ -112,6 +118,21 @@ class Params {
   Params& fps(float v) {
     intervals_.clear();
     intervals_.emplace_back(0, v);
+    return *this;
+  }
+
+  /**
+   * Sample output frames at a specified list of timestamps
+   * Timestamps must be in increasing order, and timestamps past the end of the
+   * video will be ignored
+   * Setting here will reset intervals_
+   */
+  Params& setSampleTimestamps(const std::vector<double>& timestamps) {
+    intervals_.clear();
+    // insert an interval per desired frame.
+    for (auto& timestamp : timestamps) {
+      intervals_.emplace_back(timestamp, SpecialFps::SAMPLE_TIMESTAMP_ONLY);
+    }
     return *this;
   }
 

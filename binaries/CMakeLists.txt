@@ -10,6 +10,7 @@ caffe2_binary_target("split_db.cc")
 
 caffe2_binary_target("db_throughput.cc")
 
+
 if (USE_CUDA)
   caffe2_binary_target("inspect_gpus.cc")
   target_link_libraries(inspect_gpus ${CUDA_LIBRARIES})
@@ -45,7 +46,10 @@ if (USE_OPENCV)
 endif()
 
 if (USE_OBSERVERS)
-  caffe2_binary_target("caffe2_benchmark.cc")
+  add_executable(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
+  target_link_libraries(caffe2_benchmark  ${Caffe2_MAIN_LIBS})
+  target_link_libraries(caffe2_benchmark ${Caffe2_MODULES})
+  install(TARGETS caffe2_benchmark DESTINATION bin)
 endif()
 
 # ---[ tutorials

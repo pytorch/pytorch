@@ -1,0 +1,63 @@
+ModelProto {
+  producer_name: "pytorch"
+  domain: ""
+  doc_string: ""
+  graph:
+    GraphProto {
+      name: "torch-jit-export"
+      inputs: [{name: "x.1", type:Tensor dims: 1 10},{name: "1", type:Tensor dims: 20 10},{name: "2", type:Tensor dims: 20}]
+      outputs: [{name: "5", type:Tensor dims: 1 20}]
+      initializers: [TensorProto shape: [20 10],TensorProto shape: [20]]
+      nodes: [
+        Node {type: "Add", inputs: [x.1,x.1], outputs: [3], attributes: []},
+        Node {type: "Constant", inputs: [], outputs: [4], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
+        Node {type: "If", inputs: [4], outputs: [5], attributes: [{ name: 'then_branch', type: graph, value:
+            GraphProto {
+              name: "torch-jit-export1"
+              inputs: []
+              outputs: [{name: "7", type:Tensor dims: 1 20}]
+              initializers: []
+              nodes: [
+                Node {type: "Constant", inputs: [], outputs: [6], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
+                Node {type: "If", inputs: [6], outputs: [7], attributes: [{ name: 'then_branch', type: graph, value:
+                    GraphProto {
+                      name: "torch-jit-export2"
+                      inputs: []
+                      outputs: [{name: "8", type:Tensor dims: 1 20}]
+                      initializers: []
+                      nodes: [
+                        Node {type: "Gemm", inputs: [3,1,2], outputs: [8], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'broadcast', type: int, value: 1},{ name: 'transB', type: int, value: 1}]}
+                      ]
+                    }
+
+                  },{ name: 'else_branch', type: graph, value:
+                    GraphProto {
+                      name: "torch-jit-export3"
+                      inputs: []
+                      outputs: [{name: "9", type:Tensor dims: 1 20}]
+                      initializers: []
+                      nodes: [
+                        Node {type: "Gemm", inputs: [3,1,2], outputs: [9], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'broadcast', type: int, value: 1},{ name: 'transB', type: int, value: 1}]}
+                      ]
+                    }
+
+                  }]}
+              ]
+            }
+
+          },{ name: 'else_branch', type: graph, value:
+            GraphProto {
+              name: "torch-jit-export4"
+              inputs: []
+              outputs: [{name: "10", type:Tensor dims: 1 20}]
+              initializers: []
+              nodes: [
+                Node {type: "Gemm", inputs: [3,1,2], outputs: [10], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'broadcast', type: int, value: 1},{ name: 'transB', type: int, value: 1}]}
+              ]
+            }
+
+          }]}
+      ]
+    }
+  opset_import: [OperatorSetIdProto { domain: }],
+}

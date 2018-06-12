@@ -62,6 +62,10 @@ const char* metaSpec = R"DOC(
     key: "INPUTS_BLOB_TYPE"
     value: "data"
   }
+  blobs {
+      key: "OUTPUTS_BLOB_TYPE"
+      value: "y"
+  }
   nets {
     key: "GLOBAL_INIT_NET_TYPE"
     value: {

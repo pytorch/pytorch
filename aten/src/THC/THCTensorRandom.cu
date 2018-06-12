@@ -5,7 +5,7 @@
 #include "THCTensorMath.h"
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorRandom.cuh"
-#include "THCGenerator.h"
+#include "THCGenerator.hpp"
 
 #include <thrust/functional.h>
 #include <curand.h>
