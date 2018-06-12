@@ -9,8 +9,9 @@
 
 const int WARP_SIZE = 32;
 
-__device__ __forceinline__ bool warpHasCollision(int val)
-{
+__device__ __forceinline__ bool warpHasCollision(
+    int val,
+    unsigned int mask = 0xffffffff) {
   // Compare our value to the values stored in the next 16 lanes,
   // wrapping around at 32. If any pair of values is the same than
   // there is a collision in the warp.
@@ -22,7 +23,11 @@ __device__ __forceinline__ bool warpHasCollision(int val)
   #pragma unroll
   for (int i = 1; i <= 16; i++)
   {
+#if CUDA_VERSION >= 9000
+    dup |= (__shfl_sync(mask, val, (laneId + i) % 32) == val);
+#else
     dup |= (__shfl(val, (laneId + i) % 32) == val);
+#endif
   }
 
 #else
@@ -39,7 +44,11 @@ __device__ __forceinline__ bool warpHasCollision(int val)
 
 #endif
 
+#if CUDA_VERSION >= 9000
+  return __any_sync(mask, dup) != 0;
+#else
   return __any(dup) != 0;
+#endif
 }
 
 template <typename Dtype>
@@ -187,13 +196,12 @@ struct FastPow<DType, AccType, 2>
 
 /* Calculate norms of the rows of weight_ptr given by idx_ptr and capture them in norms */
 template <typename DType, typename AccType, typename IndexType, int Norm>
-__global__
-void calculate_norms_and_renorm(DType *weights, 
-                                THCIndex_t *indices, 
-                                AccType normType,
-                                AccType maxNorm, 
-                                IndexType dim)
-{
+__global__ void calculate_norms_and_renorm(
+    DType* weights,
+    THCIndex_t* indices,
+    AccType normType,
+    AccType maxNorm,
+    IndexType dim) {
   // Some casting hacks since dynamic shared memory and templates don't work together:
   extern __shared__ unsigned char smem[];
   AccType *sdata = reinterpret_cast<AccType *>(smem);
@@ -211,9 +219,10 @@ void calculate_norms_and_renorm(DType *weights,
         (sdata, blockDim.x, v, ReduceAdd<AccType>(), accZero);
 
   if (tid == 0) {
-    sdata[0] = std::pow(v, 
-        THCNumerics<AccType>::div(ScalarConvert<int, AccType>::to(1), normType)
-    );
+    sdata[0] = std::pow(
+        v,
+        THCNumerics<AccType>::div(
+            ScalarConvert<int, AccType>::to(1), normType));
   }
   __syncthreads();
   // now we renormalize the blocks that need it

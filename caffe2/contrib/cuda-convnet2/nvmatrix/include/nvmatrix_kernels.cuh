@@ -67,7 +67,7 @@
 
 #define AWR_NUM_THREADS           256
 #define WARP_SIZE                 32
-#define AWR_NUM_WARPS             AWR_NUM_THREADS / WARP_SIZE 
+#define AWR_NUM_WARPS             AWR_NUM_THREADS / WARP_SIZE
 #define AWR_LOG_NUM_THREADS       8
 #define LOG_WARP_SIZE             5
 #define AWR_LOG_NUM_WARPS         3
@@ -79,10 +79,14 @@ __global__ void kTile(const float* src, float* tgt, const uint srcWidth, const u
 __global__ void kDotProduct_r(float* a, float* b, float* target, const uint numElements);
 __global__ void kSetupCurand(curandState *state, unsigned long long seed);
 
-template<typename T> 
-__device__ T shfl_down(T a, int b, int c=WARP_SIZE) {
+template<typename T>
+__device__ T shfl_down(T a, int b, int c=WARP_SIZE, unsigned int mask = 0xffffffff) {
 #if __CUDA_ARCH__ >= 300
+  #if CUDA_VERSION >= 9000
+    return __shfl_down_sync(mask, a, b, c);
+  #else
     return __shfl_down(a, b, c);
+  #endif
 #else
     return 0;
 #endif
@@ -119,7 +123,7 @@ __global__ void kEltwiseTernaryOpFlat(const float* a, const float* b, const floa
  * dest here is assumed to be "not transposed" -- height and width correspond to it.
  * b is assumed to be transposed.
  * a can be either transposed or not -- depending on parameter.
- * 
+ *
  * Performs dest := op(a, b)
  */
 template<class Op, bool checkBounds, bool aTrans, bool reverse>
@@ -278,7 +282,7 @@ __global__ void kColVectorOp(float* mat, float* vec, float* tgtMat,
     const uint by = ADD_VEC_THREADS_Y * blockIdx.y;
     const uint bx = ADD_VEC_THREADS_X * blockIdx.x;
     const uint tidx = ADD_VEC_THREADS_X * threadIdx.y + threadIdx.x;
-    
+
     mat += threadIdx.y * matStride;
     vec += tidx;
     tgtMat += threadIdx.y * tgtStride;
@@ -372,7 +376,7 @@ __global__ void kAggRows_wholerow(const float* mat, float* matSum, const uint wi
     __shared__ float accum[AWR_NUM_THREADS];
     volatile float* vMyAccum = &accum[tidx];
     float* myAccum = &accum[tidx];
-    
+
     matSum += blockIdx.y;
     mat += width * blockIdx.y;
 
@@ -417,7 +421,7 @@ __global__ void kAggRows_wholerow_nosync(const float* mat, float* matSum, const 
     const uint tidx = threadIdx.x;
     const uint warpIdx = tidx / WARP_SIZE;
     const uint lane = tidx % WARP_SIZE;
-    
+
     __shared__ float accum[(WARP_SIZE + 1) * AWR_NUM_WARPS];
     __shared__ float finalAccum[AWR_NUM_WARPS];
 
@@ -433,7 +437,7 @@ __global__ void kAggRows_wholerow_nosync(const float* mat, float* matSum, const 
         rAccum = agg(rAccum, uop(mat[x]));
     }
     myAccum[0] = rAccum;
-    
+
     // Each warp does a reduction that doesn't require synchronizatoin
     #pragma unroll
     for (uint i = 0; i < LOG_WARP_SIZE; i++) {
