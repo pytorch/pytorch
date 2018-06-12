@@ -2,11 +2,8 @@ import os
 import itertools
 import importlib
 
-try:
-    THNN_H_PATH = get_file_path('torch/lib/THNN.h')
-    THCUNN_H_PATH = get_file_path('torch/lib/THCUNN.h')
-except:
-    pass
+THNN_H_PATH = get_file_path('torch/lib/THNN.h')
+THCUNN_H_PATH = get_file_path('torch/lib/THCUNN.h')
 
 
 def _unpickle_backend(backend_name):

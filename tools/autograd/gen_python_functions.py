@@ -6,15 +6,12 @@
 from collections import defaultdict
 import re
 from .nested_dict import nested_dict
+from tools.shared.module_loader import import_module
 from .gen_autograd import template_path
 from .gen_variable_type import should_trace
 from .utils import write
 
-try:
-    from src.ATen.code_template import CodeTemplate
-except ImportError:
-    from tools.shared.module_loader import import_module
-    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
