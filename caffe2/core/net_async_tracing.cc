@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/common.h"
 #include "caffe2/core/net_async_tracing.h"
 
 #include "caffe2/utils/string_utils.h"
@@ -323,7 +322,7 @@ int extractShardId(const std::string& name) {
     while (right_pos < name.length() && isdigit(name[right_pos])) {
       right_pos++;
     }
-    return std::stoi(name.substr(left_pos, right_pos - left_pos));
+    return caffe2::stoi(name.substr(left_pos, right_pos - left_pos));
   } else {
     return -1;
   }
