@@ -203,6 +203,10 @@ bool AsyncSchedulingNet::RunAsync() {
     finishRun();
   }
 
+  if (is_blocking_) {
+    Wait();
+  }
+
   return true;
 }
 
