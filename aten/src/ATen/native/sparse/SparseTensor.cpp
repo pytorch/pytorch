@@ -46,6 +46,10 @@ int64_t _nnz_sparse(const SparseTensor& self) {
   return _get_sparse_impl(self)->nnz();
 }
 
+// TODO: This is wrong: if nnz == 0 but indices/values is not
+// empty then we'll return all the values, even the ones that
+// are "masked out" by nnz
+
 Tensor _indices_sparse(const SparseTensor& self) {
   auto nnz = self._nnz();
   if (nnz == 0) {
@@ -223,7 +227,9 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
 SparseTensor clone_sparse(const SparseTensor& self) {
   SparseTensor other = new_sparse(self.type());
   _raw_resize_sparse(other, self._dimI(), self._dimV(), self.sizes());
-  _copy_into_sparse(other, self._indices(), self._values());
+  // NB: This seems to preserve the size of the UN-narrowed indices and
+  // values.  Veeery interesting.
+  _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values());
   _get_sparse_impl(other)->set_coalesced(self.is_coalesced());
   _get_sparse_impl(other)->set_nnz(self._nnz());
   return other;
@@ -285,7 +291,8 @@ Tensor sparse_to_dense(const SparseTensor& self) {
 SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (isSameTensor(self, src)) return self;
   _raw_resize_sparse(self, src._dimI(), src._dimV(), src.sizes());
-  _copy_into_sparse(self, src._indices(), src._values());
+  // NB: This seems to copy the underlying full indices/values buffer
+  _copy_into_sparse(self, _get_sparse_impl(src)->indices(), _get_sparse_impl(src)->values());
   _get_sparse_impl(self)->set_coalesced(src.is_coalesced());
   _get_sparse_impl(self)->set_nnz(src._nnz());
   return self;

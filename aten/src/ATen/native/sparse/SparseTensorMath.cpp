@@ -75,13 +75,17 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
   AT_ASSERT(!self.is_variable_or_undefined());
   AT_ASSERT(self.is_sparse());
 
-  if (self._indices().dim()) {
+  // NB: You must use _get_sparse_impl(self)->indices()
+  // and not self._indices(), because the latter will possibly
+  // return a view (which means that the in-place operation will
+  // not work).
+  if (_get_sparse_impl(self)->indices().numel()) {
     // TODO: To be fixed when we support zero-size dims
-    self._indices().resize_({0});
+    _get_sparse_impl(self)->indices().resize_({0});
   }
 
-  if (self._values().dim()) {
-    self._values().resize_({0});
+  if (_get_sparse_impl(self)->values().numel()) {
+    _get_sparse_impl(self)->values().resize_({0});
   }
   _get_sparse_impl(self)->set_nnz(0);
   _get_sparse_impl(self)->set_coalesced(true); // NB: This is new
