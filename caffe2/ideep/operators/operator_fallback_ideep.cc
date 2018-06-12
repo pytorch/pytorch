@@ -94,7 +94,7 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<CollectAndDistributeFpnRpnProposalsOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     BoxWithNMSLimit,
-    IDEEPFallbackOp<BoxWithNMSLimitOp<CPUContext>>);
+    IDEEPFallbackOp<BoxWithNMSLimitOp<CPUContext>, SkipIndices<0,1,2>>);
 REGISTER_IDEEP_OPERATOR(
     BBoxTransform,
     IDEEPFallbackOp<BBoxTransformOp<float, CPUContext>>);
