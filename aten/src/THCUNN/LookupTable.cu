@@ -8,12 +8,6 @@
 #include "../THC/THCTensorMathReduce.cuh"
 
 const int WARP_SIZE = 32;
-#if __CUDACC_VER_MAJOR__ >= 9
-#define __BALLOT(var)  __ballot_sync(0xffffffff, var)
-#else
-#define __BALLOT(var)  __ballot(var)
-#endif
-
 
 template 
   <typename Dtype, 
@@ -72,7 +66,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
         if(threadIdx.x >= n_this_chunk)
           match_found_this_thread = 0;
-        unsigned int matchmask = __BALLOT(match_found_this_thread);
+        unsigned int matchmask = WARP_BALLOT(match_found_this_thread);
 
         int first_remaining_peer = __ffs(matchmask) - 1;
 
