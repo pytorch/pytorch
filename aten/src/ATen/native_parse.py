@@ -38,6 +38,11 @@ def parse_arguments(args, func_decl, func_name, func_return):
     arguments = []
     python_default_inits = func_decl.get('python_default_init', {})
     is_out_fn = func_name.endswith('_out')
+    if is_out_fn and func_decl.get('variants', []) not in ['function', ['function']]:
+        raise RuntimeError("Native functions suffixed with _out MUST be declared with only the function variant; "
+                           "e.g., variants: function; otherwise you will tickle a Python argument binding bug "
+                           "(which usually manifests itself as the result variable being undefined.) "
+                           "The culprit was: {}".format(func_name))
     kwarg_only = False
 
     # TODO: Use a real parser here; this will get bamboozled
