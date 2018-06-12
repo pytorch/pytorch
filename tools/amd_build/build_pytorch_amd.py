@@ -72,6 +72,6 @@ for root, _directories, files in os.walk(os.path.join(out_dir, "torch")):
 
 # Execute the Hipify Script.
 args = ["--project-directory", proj_dir,
-        "--output-directory", out_dir,
+        "--output-directory", proj_dir, #out_dir,
         "--include-dirs"] + include_dirs + ["--yaml-settings", yaml_file, "--add-static-casts", "True"]
 os.execv("/opt/rocm/bin/hipify-python.py",['python'] + args)
