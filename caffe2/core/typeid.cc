@@ -8,7 +8,7 @@
 
 using std::string;
 
-namespace c10 {
+namespace caffe2 {
 
 std::unordered_map<TypeId, string>& gTypeNames() {
   static std::unordered_map<TypeId, string> g_type_names;
@@ -44,9 +44,9 @@ string Demangle(const char* name) {
 
 string GetExceptionString(const std::exception& e) {
 #ifdef __GXX_RTTI
-      return Demangle(typeid(e).name()) + ": " + e.what();
+  return Demangle(typeid(e).name()) + ": " + e.what();
 #else
-      return string("Exception (no RTTI available): ") + e.what();
+  return string("Exception (no RTTI available): ") + e.what();
 #endif // __GXX_RTTI
 }
 
@@ -68,4 +68,4 @@ struct UninitializedTypeNameRegisterer {
 static UninitializedTypeNameRegisterer g_uninitialized_type_name_registerer;
 
 } // namespace
-}
+} // namespace caffe2

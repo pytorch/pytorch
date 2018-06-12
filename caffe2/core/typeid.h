@@ -16,12 +16,12 @@
 #include "caffe2/core/common.h"
 #include "caffe2/utils/IdWrapper.h"
 
-namespace c10 {
+namespace caffe2 {
 
 /**
  * Dynamic type ID of a Tensor argument.  It represents something like CPUFloatTensor, etc.
  */
-class TypeId final : public guts::IdWrapper<TypeId, intptr_t> {
+class TypeId final : public c10::guts::IdWrapper<TypeId, intptr_t> {
 public:
   constexpr explicit TypeId(intptr_t id): IdWrapper(id) {}
 
@@ -50,9 +50,9 @@ inline bool operator<(TypeId lhs, TypeId rhs) {
 
 }
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(c10::TypeId)
+C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeId)
 
-namespace c10 {
+namespace caffe2 {
 
 std::unordered_map<TypeId, std::string>& gTypeNames();
 std::unordered_set<std::string>& gRegisteredTypeNames();
@@ -389,7 +389,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
     return type_id;                                                           \
   }
 #else // _MSC_VER
-#define C10_KNOWN_TYPE(T)                                                     \
+#define CAFFE_KNOWN_TYPE(T)                                                   \
   template <>                                                                 \
   TypeId TypeMeta::Id<T>() {                                                  \
       static bool type_id_bit[1];                                             \
@@ -400,18 +400,20 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   }
 #endif
 
+// Adapters for legacy code
+using CaffeTypeId = TypeId;
+
 }
 
-// Define adapters for legacy code
-namespace caffe2 {
-using CaffeTypeId = c10::TypeId;
-using TypeMeta = c10::TypeMeta;
+// Define adapters for c10 code
+namespace c10 {
+using TypeId = caffe2::TypeId;
+using TypeMeta = caffe2::TypeMeta;
 
-// Needs to be called from ::caffe2 namespace
-#define CAFFE_KNOWN_TYPE(T)                              \
-  } namespace c10 {                                      \
-  using namespace ::caffe2;                              \
-  C10_KNOWN_TYPE(T)                                      \
-  } namespace caffe2 {
+// Needs to be called from top level (i.e. outside of any) namespace
+#define C10_KNOWN_TYPE(T)                              \
+  namespace caffe2 {                                   \
+    CAFFE_KNOWN_TYPE(T)                                \
+  }
 
 }

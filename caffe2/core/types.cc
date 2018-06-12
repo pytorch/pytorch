@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-namespace c10 {
 
 C10_KNOWN_TYPE(float) ;
 C10_KNOWN_TYPE(int) ;
@@ -34,7 +33,7 @@ C10_KNOWN_TYPE(long) ;
 C10_KNOWN_TYPE(std::vector<long>) ;
 #endif // CAFFE2_UNIQUE_LONG_TYPEMETA
 
-}
+
 namespace caffe2 {
 
 TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
