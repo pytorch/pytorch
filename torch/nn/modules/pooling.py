@@ -10,6 +10,14 @@ class _MaxPoolNd(Module):
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
                  return_indices=False, ceil_mode=False):
         super(_MaxPoolNd, self).__init__()
+        self.set_arguments(
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            return_indices=return_indices,
+            ceil_mode=ceil_mode,
+        )
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
@@ -273,6 +281,11 @@ class MaxUnpool1d(_MaxUnpoolNd):
 
     def __init__(self, kernel_size, stride=None, padding=0):
         super(MaxUnpool1d, self).__init__()
+        self.set_arguments(
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+        )
         self.kernel_size = _single(kernel_size)
         self.stride = _single(stride or kernel_size)
         self.padding = _single(padding)
@@ -345,6 +358,11 @@ class MaxUnpool2d(_MaxUnpoolNd):
 
     def __init__(self, kernel_size, stride=None, padding=0):
         super(MaxUnpool2d, self).__init__()
+        self.set_arguments(
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+        )
         self.kernel_size = _pair(kernel_size)
         self.stride = _pair(stride or kernel_size)
         self.padding = _pair(padding)
@@ -405,6 +423,11 @@ class MaxUnpool3d(_MaxUnpoolNd):
 
     def __init__(self, kernel_size, stride=None, padding=0):
         super(MaxUnpool3d, self).__init__()
+        self.set_arguments(
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+        )
         self.kernel_size = _triple(kernel_size)
         self.stride = _triple(stride or kernel_size)
         self.padding = _triple(padding)
@@ -469,6 +492,13 @@ class AvgPool1d(_AvgPoolNd):
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool1d, self).__init__()
+        self.set_arguments(
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            ceil_mode=ceil_mode,
+            count_include_pad=count_include_pad,
+        )
         self.kernel_size = _single(kernel_size)
         self.stride = _single(stride if stride is not None else kernel_size)
         self.padding = _single(padding)
@@ -536,6 +566,13 @@ class AvgPool2d(_AvgPoolNd):
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool2d, self).__init__()
+        self.set_arguments(
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            ceil_mode=ceil_mode,
+            count_include_pad=count_include_pad,
+        )
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
@@ -607,6 +644,13 @@ class AvgPool3d(_AvgPoolNd):
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool3d, self).__init__()
+        self.set_arguments(
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            ceil_mode=ceil_mode,
+            count_include_pad=count_include_pad,
+        )
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
@@ -658,6 +702,13 @@ class FractionalMaxPool2d(Module):
     def __init__(self, kernel_size, output_size=None, output_ratio=None,
                  return_indices=False, _random_samples=None):
         super(FractionalMaxPool2d, self).__init__()
+        self.set_arguments(
+            kernel_size=kernel_size,
+            output_size=output_size,
+            output_ratio=output_ratio,
+            return_indices=return_indices,
+            _random_samples=_random_samples,
+        )
         self.kernel_size = _pair(kernel_size)
         self.return_indices = return_indices
         self.register_buffer('_random_samples', _random_samples)
@@ -685,6 +736,12 @@ class _LPPoolNd(Module):
 
     def __init__(self, norm_type, kernel_size, stride=None, ceil_mode=False):
         super(_LPPoolNd, self).__init__()
+        self.set_arguments(
+            norm_type=norm_type,
+            kernel_size=kernel_size,
+            stride=stride,
+            ceil_mode=ceil_mode,
+        )
         self.norm_type = norm_type
         self.kernel_size = kernel_size
         self.stride = stride
@@ -792,6 +849,10 @@ class _AdaptiveMaxPoolNd(Module):
 
     def __init__(self, output_size, return_indices=False):
         super(_AdaptiveMaxPoolNd, self).__init__()
+        self.set_arguments(
+            output_size=output_size,
+            return_indices=return_indices,
+        )
         self.output_size = output_size
         self.return_indices = return_indices
 
@@ -895,6 +956,9 @@ class _AdaptiveAvgPoolNd(Module):
 
     def __init__(self, output_size):
         super(_AdaptiveAvgPoolNd, self).__init__()
+        self.set_arguments(
+            output_size=output_size,
+        )
         self.output_size = output_size
 
     def extra_repr(self):

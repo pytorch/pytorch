@@ -150,6 +150,57 @@ class Module(object):
         else:
             self._parameters[name] = param
 
+    def set_arguments(self, **kwargs):
+        r"""Assign arguments for this module instance.
+
+        Arguments are key-value pairs that define the module behaviour.
+        They are usually passed to `__init__`.
+        Call `set_arguments` in `__init__` to register the arguments.
+
+        Example:
+            class MyModule(Module):
+                def __init__(self, spam=42, eggs=False):
+                    self(MyModule, self).__init__()
+                    self.set_arguments(spam=spam, eggs=eggs)
+
+        Args:
+            **kwargs: argument values for this module instance.
+        """
+        self._arguments = kwargs.copy()
+
+    @property
+    def arguments(self):
+        r"""Get arguments of this module instance.
+
+        Returns:
+            dict with module arguments.
+        """
+        if not hasattr(self, '_arguments'):
+            raise NotImplementedError
+        return self._arguments.copy()
+
+    def new_module(self, **kwargs):
+        r"""Create a new instance of this module.
+
+        The new instance will have different, freshly initialized
+        parameter values.
+        Module arguments will be the same, except ones specified
+        in the keyword arguments of this method.
+
+        Args:
+            **kwargs: arguments to replace in the new module.
+
+        Returns:
+            new instance of this module.
+        """
+        if not hasattr(self, '_arguments'):
+            raise NotImplementedError("cannot create new module '{}': "
+                                      "set_arguments() has not been called"
+                                      .format(type(self).__name__))
+        new_arguments = self.arguments
+        new_arguments.update(**kwargs)
+        return type(self)(**new_arguments)
+
     def add_module(self, name, module):
         r"""Adds a child module to the current module.
 
