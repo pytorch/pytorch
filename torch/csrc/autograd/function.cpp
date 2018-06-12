@@ -1,5 +1,6 @@
 #include "torch/csrc/autograd/function.h"
 
+#include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/ir.h"
@@ -97,6 +98,13 @@ void Function::set_up_context_edge(
   auto backward_eval = Eval::getBackwardEval(inputs, outputs);
   if (backward_eval)
     backward_eval->forward_ctx_select = ctx_select;
+}
+
+AnomalyMetadata* Function::metadata() noexcept {
+  if (!anomaly_metadata_) {
+    anomaly_metadata_ = Engine::get_default_engine().make_anomaly_metadata();
+  }
+  return anomaly_metadata_.get();
 }
 
 /*

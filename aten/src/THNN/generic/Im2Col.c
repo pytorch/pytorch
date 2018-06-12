@@ -52,7 +52,7 @@ void THNN_(Im2Col_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   bool batched_input = true;
-  if (input->nDimension == 3) {
+  if (input->_dim() == 3) {
     batched_input = false;
     THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
   }
