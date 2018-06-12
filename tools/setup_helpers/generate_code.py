@@ -81,7 +81,7 @@ def generate_code(ninja_global=None,
 
     # Build THNN/THCUNN.cwrap and then THNN/THCUNN.cpp. These are primarily
     # used by the legacy NN bindings.
-    generate_nn_wrappers(nn_path, install_dir)
+    generate_nn_wrappers(nn_path, install_dir, 'tools/cwrap/plugins/templates')
 
     # Build ATen based Variable classes
     autograd_gen_dir = install_dir or 'torch/csrc/autograd/generated'
@@ -89,8 +89,8 @@ def generate_code(ninja_global=None,
     for d in (autograd_gen_dir, jit_gen_dir):
         if not os.path.exists(d):
             os.makedirs(d)
-    gen_autograd(declarations_path or DECLARATIONS_PATH, autograd_gen_dir)
-    gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir)
+    gen_autograd(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
+    gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir, 'tools/jit/templates')
 
 
 def main():
