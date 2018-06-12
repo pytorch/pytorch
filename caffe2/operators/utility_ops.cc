@@ -1296,4 +1296,20 @@ output: [ 4  6  8 10 12 14 16]
 REGISTER_CPU_OPERATOR(Range, RangeOp<CPUContext>);
 NO_GRADIENT(Range);
 
+REGISTER_CPU_OPERATOR(Identity, IdentityOp<CPUContext>);
+REGISTER_GRADIENT(Identity, GetIdentityGradient);
+
+OPERATOR_SCHEMA(Identity)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShapeOfInput(0)
+    .SetDoc("Identity operator, copy the tensor from input to output.")
+    .Input(0, "tensor", "Tensor to copy data from")
+    .Output(
+        0,
+        "output",
+        "Tensor to copy input into."
+        " Can be in-place");
+
 } // namespace caffe2
