@@ -9,6 +9,7 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
         utils/bench_utils.cc
         utils/math_cpu.cc
         utils/math_utils.cc
+        utils/thread_name.cc
         )
 
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
