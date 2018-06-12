@@ -203,7 +203,7 @@ if(NOT MSVC)
   set(BUILD_TESTS ${__aten_sleef_build_tests} CACHE BOOL "Build tests" FORCE)
 endif()
 
-IF(NOT NO_CUDA)
+IF(NOT NO_CUDA AND NOT USE_ROCM)
   IF ($ENV{ATEN_STATIC_CUDA})
     # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
     # we first have to build a fake lib that links with no device callbacks,
@@ -250,6 +250,10 @@ IF(NOT NO_CUDA)
       ${CUDA_LIBRARIES}
       ${CUDA_cusparse_LIBRARY}
       ${CUDA_curand_LIBRARY})
+
+      # Set necessary HIPCC/CXX Flags
+      SET(HIP_HCC_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
+      SET(CMAKE_CXX_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${CMAKE_CXX_FLAGS}")
   ENDIF()
 
   if(CUDNN_FOUND)
