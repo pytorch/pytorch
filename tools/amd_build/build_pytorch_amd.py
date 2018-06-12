@@ -2,8 +2,15 @@
 import shutil
 import subprocess
 import os
+import sys
 from shutil import copytree, ignore_patterns
 from functools import reduce
+
+def openf(filename, mode):
+   if sys.version_info[0] == 3:
+      return open(filename, mode, errors='ignore')
+   else:
+      return open(filename, mode)
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
@@ -31,7 +38,7 @@ for root, _, files in os.walk(os.path.join(out_dir, "aten/src/ATen")):
             filepath = os.path.join(root, filename)
 
             # Add the include header!
-            with open(filepath, "r+") as f:
+            with openf(filepath, "r+", encoding='utf-8') as f:
                 txt = f.read()
                 result = '#include "hip/hip_runtime.h"\n%s' % txt
                 f.seek(0)
@@ -53,7 +60,7 @@ for root, _directories, files in os.walk(os.path.join(out_dir, "torch")):
             if reduce(lambda result, exclude: source.endswith(exclude) or result, ignore_files, False):
                 continue
             # Update contents.
-            with open(source, "r+") as f:
+            with openf(source, "r+", encoding='utf-8') as f:
                 contents = f.read()
                 contents = contents.replace("WITH_CUDA", "WITH_ROCM")
                 contents = contents.replace("CUDA_VERSION", "0")
