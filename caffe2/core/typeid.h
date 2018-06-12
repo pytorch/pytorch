@@ -21,40 +21,40 @@ namespace caffe2 {
 /**
  * Dynamic type ID of a Tensor argument.  It represents something like CPUFloatTensor, etc.
  */
-class TypeId final : public c10::guts::IdWrapper<TypeId, intptr_t> {
+class CaffeTypeId final : public c10::guts::IdWrapper<CaffeTypeId, intptr_t> {
 public:
-  constexpr explicit TypeId(intptr_t id): IdWrapper(id) {}
+  constexpr explicit CaffeTypeId(intptr_t id): IdWrapper(id) {}
 
-  friend std::ostream& operator<<(std::ostream& stream, TypeId typeId);
-  friend bool operator<(TypeId lhs, TypeId rhs);
+  friend std::ostream& operator<<(std::ostream& stream, CaffeTypeId typeId);
+  friend bool operator<(CaffeTypeId lhs, CaffeTypeId rhs);
 
   // Don't use this default constructor!
   // Unfortunately, a default constructor needs to be defined because of https://reviews.llvm.org/D41223
-  constexpr TypeId(): IdWrapper(0) {}
+  constexpr CaffeTypeId(): IdWrapper(0) {}
 
   // TODO Can we get rid of uninitialized?
-  static constexpr TypeId uninitialized() {
-    return TypeId(0);
+  static constexpr CaffeTypeId uninitialized() {
+    return CaffeTypeId(0);
   }
 };
 
-inline std::ostream& operator<<(std::ostream& stream, TypeId typeId) {
+inline std::ostream& operator<<(std::ostream& stream, CaffeTypeId typeId) {
   return stream << typeId.underlyingId();
 }
 
 // Allow usage in std::map / std::set
 // TODO Disallow this and rather use std::unordered_map/set everywhere
-inline bool operator<(TypeId lhs, TypeId rhs) {
+inline bool operator<(CaffeTypeId lhs, CaffeTypeId rhs) {
   return lhs.underlyingId() < rhs.underlyingId();
 }
 
 }
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeId)
+C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::CaffeTypeId)
 
 namespace caffe2 {
 
-std::unordered_map<TypeId, std::string>& gTypeNames();
+std::unordered_map<CaffeTypeId, std::string>& gTypeNames();
 std::unordered_set<std::string>& gRegisteredTypeNames();
 
 // A utility function to demangle a function name.
@@ -83,7 +83,7 @@ std::mutex& gTypeRegistrationMutex();
 
 template <typename T>
 struct TypeNameRegisterer {
-  TypeNameRegisterer(TypeId id, const std::string& literal_name) {
+  TypeNameRegisterer(CaffeTypeId id, const std::string& literal_name) {
     std::lock_guard<std::mutex> guard(gTypeRegistrationMutex());
 #ifdef __GXX_RTTI
     (void)literal_name;
@@ -147,7 +147,7 @@ class TypeMeta {
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
   TypeMeta(
-      TypeId i,
+      CaffeTypeId i,
       size_t s,
       PlacementNew* ctor,
       TypedCopy* copy,
@@ -164,7 +164,7 @@ class TypeMeta {
   /**
    * Returns the type id.
    */
-  const TypeId& id() const noexcept {
+  const CaffeTypeId& id() const noexcept {
     return id_;
   }
   /**
@@ -217,7 +217,7 @@ class TypeMeta {
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  CAFFE2_API static TypeId Id();
+  CAFFE2_API static CaffeTypeId Id();
 
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
@@ -344,7 +344,7 @@ class TypeMeta {
   }
 
  private:
-  TypeId id_;
+  CaffeTypeId id_;
   size_t itemsize_;
   PlacementNew* ctor_;
   TypedCopy* copy_;
@@ -381,9 +381,9 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                                   \
   template <>                                                                 \
-  CAFFE2_EXPORT TypeId TypeMeta::Id<T>() {                                    \
+  CAFFE2_EXPORT CaffeTypeId TypeMeta::Id<T>() {                                    \
     static bool type_id_bit[1];                                               \
-    static const TypeId type_id(reinterpret_cast<intptr_t>(type_id_bit));     \
+    static const CaffeTypeId type_id(reinterpret_cast<intptr_t>(type_id_bit));     \
     static TypeNameRegisterer<T> registerer(                                  \
         type_id, #T);                                                         \
     return type_id;                                                           \
@@ -391,23 +391,20 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #else // _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                                   \
   template <>                                                                 \
-  TypeId TypeMeta::Id<T>() {                                                  \
+  CaffeTypeId TypeMeta::Id<T>() {                                                  \
       static bool type_id_bit[1];                                             \
-    static const TypeId type_id(reinterpret_cast<intptr_t>(type_id_bit));     \
+    static const CaffeTypeId type_id(reinterpret_cast<intptr_t>(type_id_bit));     \
     static TypeNameRegisterer<T> registerer(                                  \
         type_id, #T);                                                         \
     return type_id;                                                           \
   }
 #endif
 
-// Adapters for legacy code
-using CaffeTypeId = TypeId;
-
 }
 
 // Define adapters for c10 code
 namespace c10 {
-using TypeId = caffe2::TypeId;
+using TypeId = caffe2::CaffeTypeId;
 using TypeMeta = caffe2::TypeMeta;
 
 // Needs to be called from top level (i.e. outside of any) namespace

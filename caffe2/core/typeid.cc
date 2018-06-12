@@ -10,8 +10,8 @@ using std::string;
 
 namespace caffe2 {
 
-std::unordered_map<TypeId, string>& gTypeNames() {
-  static std::unordered_map<TypeId, string> g_type_names;
+std::unordered_map<CaffeTypeId, string>& gTypeNames() {
+  static std::unordered_map<CaffeTypeId, string> g_type_names;
   return g_type_names;
 }
 
@@ -62,7 +62,7 @@ namespace {
 // intended to be only instantiated once here.
 struct UninitializedTypeNameRegisterer {
     UninitializedTypeNameRegisterer() {
-      gTypeNames()[TypeId::uninitialized()] = "nullptr (uninitialized)";
+      gTypeNames()[CaffeTypeId::uninitialized()] = "nullptr (uninitialized)";
     }
 };
 static UninitializedTypeNameRegisterer g_uninitialized_type_name_registerer;
