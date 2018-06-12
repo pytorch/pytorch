@@ -1581,6 +1581,9 @@ PYBIND11_MODULE(caffe2_pybind11_state, m) {
 
   addGlobalMethods(m);
   addObjectMethods(m);
+#ifdef WITH_PRIVATE_PYBIND_STATE
+  addPrivateMethods(m);
+#endif
 }
 
 } // namespace python

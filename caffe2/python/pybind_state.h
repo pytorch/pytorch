@@ -40,6 +40,20 @@ void addGlobalMethods(pybind11::module& m);
 // Expose Workspace, Net, Blob
 void addObjectMethods(pybind11::module& m);
 
+/**
+ * Pybind11 would crash on py::gil_scoped_acquired if you call it from a
+ * different translation unit than the one that originated the call (i.e.,
+ * caffe2_pybind11_state or caffe2_pybind11_state_gpu).
+ *
+ * addPrivateMethods() allows you to link private bindings to the main module.
+ *
+ * DO NOT ADD ANYTHING HERE
+ * define NO_IMPORT_ARRAY and include this file in another source file
+ */
+#ifdef WITH_PRIVATE_PYBIND_STATE
+void addPrivateMethods(pybind11::module& m);
+#endif
+
 // Get current workspace
 Workspace* GetCurrentWorkspace();
 
