@@ -69,7 +69,6 @@ def rewrite_run_net_simple(net, ideep=True):
         net.ParseFromString(
                 C.transform_optimizeForIDEEP(net.SerializeToString()))
 
-
 def rewrite_model_helper_simple(model, ideep=True):
     model = copy.deepcopy(model)
     # All parameter initialization should run on MKL
