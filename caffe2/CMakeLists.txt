@@ -288,7 +288,7 @@ endif()
 # ---[ Check if warnings should be errors.
 if ($ENV{WERROR})
   target_compile_options(caffe2 PRIVATE -Werror)
-  if(USE_CUDA OR USE_ROCM)
+  if(USE_CUDA)
     target_compile_options(caffe2_gpu PRIVATE -Werror)
   endif()
 endif()

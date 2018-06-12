@@ -14,7 +14,6 @@ def openf(filename, mode):
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
-out_dir = os.path.join(os.path.dirname(proj_dir), "pytorch_amd")
 include_dirs = [
     "aten",
     "torch"
@@ -23,16 +22,13 @@ include_dirs = [
 # List of operators currently disabled
 yaml_file = os.path.join(amd_build_dir, "disabled_features.yaml")
 
-# Create the pytorch_amd directory
-shutil.copytree(proj_dir, out_dir)
-
 # Apply patch files.
 patch_folder = os.path.join(amd_build_dir, "patches")
 for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
-    subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=out_dir)
+    subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
 
 # HIPCC Compiler doesn't provide host defines - Automatically include them.
-for root, _, files in os.walk(os.path.join(out_dir, "aten/src/ATen")):
+for root, _, files in os.walk(os.path.join(proj_dir, "aten/src/ATen")):
     for filename in files:
         if filename.endswith(".cu") or filename.endswith(".cuh"):
             filepath = os.path.join(root, filename)
@@ -52,7 +48,7 @@ for root, _, files in os.walk(os.path.join(out_dir, "aten/src/ATen")):
 # Make various replacements inside AMD_BUILD/torch directory
 ignore_files = ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp",
                 "csrc/cuda/cuda_check.h", "csrc/jit/fusion_compiler.cpp"]
-for root, _directories, files in os.walk(os.path.join(out_dir, "torch")):
+for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
     for filename in files:
         if filename.endswith(".cpp") or filename.endswith(".h"):
             source = os.path.join(root, filename)
@@ -72,6 +68,6 @@ for root, _directories, files in os.walk(os.path.join(out_dir, "torch")):
 
 # Execute the Hipify Script.
 args = ["--project-directory", proj_dir,
-        "--output-directory", proj_dir, #out_dir,
+        "--output-directory", proj_dir,
         "--include-dirs"] + include_dirs + ["--yaml-settings", yaml_file, "--add-static-casts", "True"]
 os.execv("/opt/rocm/bin/hipify-python.py",['python'] + args)
