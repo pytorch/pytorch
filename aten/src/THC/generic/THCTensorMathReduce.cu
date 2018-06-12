@@ -329,7 +329,7 @@ THC_API accreal
 THCTensor_(meanall)(THCState *state, THCTensor *self)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  THArgCheck(self->nDimension > 0, 1, "empty Tensor");
+  THArgCheck(self->_dim() > 0, 1, "empty Tensor");
   return THCTensor_(sumall)(state, self)/THCTensor_(nElement)(state, self);
 }
 

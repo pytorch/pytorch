@@ -13,7 +13,7 @@ typedef struct THCTensor
 {
     int64_t *size;
     int64_t *stride;
-    int nDimension;
+    int64_t dim_;
 
     THCStorage *storage;
     ptrdiff_t storageOffset;
@@ -29,6 +29,12 @@ typedef struct THCTensor
     template <typename T>
     inline T * unsafe_data() const {
       return storage->unsafe_data<T>() + storageOffset;
+    }
+
+    // NOTE: this returns the "old" TH dimension view where no dimensions represents an empty tensor.
+    // There will be a dim() function that gives the new view that supports 0-sized dimensions.
+    inline int64_t _dim() const {
+      return dim_;
     }
 } THCTensor;
 
