@@ -89,8 +89,13 @@ def generate_code(ninja_global=None,
     for d in (autograd_gen_dir, jit_gen_dir):
         if not os.path.exists(d):
             os.makedirs(d)
+<<<<<<< HEAD
     gen_autograd(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
     gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir, 'tools/jit/templates')
+=======
+    gen_autograd(declarations_path or DECLARATIONS_PATH, autograd_gen_dir)
+    gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir)
+>>>>>>> f5ab3fa... Resolve conflicts for torch/_thnn/utils.py
 
 
 def main():
