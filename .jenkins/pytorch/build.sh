@@ -31,7 +31,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   sudo cp -p pyHIPIFY/*.py /opt/rocm/bin
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
-  WERROR=1 HIPCC_VERBOSE=1 VERBOSE=1 WITH_ROCM=1 python setup.py install
+  HIPCC_VERBOSE=1 VERBOSE=1 WITH_ROCM=1 python setup.py install
   exit
 fi
 
