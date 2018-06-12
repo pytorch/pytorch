@@ -250,8 +250,7 @@ class _DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
-            self.worker_queue_idx = 0
+            self.index_queue = multiprocessing.Queue()
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
@@ -263,7 +262,7 @@ class _DataLoaderIter(object):
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queues[i],
+                    args=(self.dataset, self.index_queue,
                           self.worker_result_queue, self.collate_fn, base_seed + i,
                           self.worker_init_fn, i))
                 for i in range(self.num_workers)]
@@ -345,8 +344,7 @@ class _DataLoaderIter(object):
         indices = next(self.sample_iter, None)
         if indices is None:
             return
-        self.index_queues[self.worker_queue_idx].put((self.send_idx, indices))
-        self.worker_queue_idx = (self.worker_queue_idx + 1) % self.num_workers
+        self.index_queue.put((self.send_idx, indices))
         self.batches_outstanding += 1
         self.send_idx += 1
 
@@ -370,8 +368,8 @@ class _DataLoaderIter(object):
             if not self.shutdown:
                 self.shutdown = True
                 self.done_event.set()
-                for q in self.index_queues:
-                    q.put(None)
+                for _ in self.workers:
+                    self.index_queue.put(None)
                 # if some workers are waiting to put, make place for them
                 try:
                     while not self.worker_result_queue.empty():
