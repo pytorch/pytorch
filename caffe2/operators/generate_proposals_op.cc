@@ -103,7 +103,6 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
     const utils::ConstTensorView<float>& scores_tensor,
     ERArrXXf* out_boxes,
     EArrXf* out_probs) const {
-  const auto& pre_nms_topN = rpn_pre_nms_topN_;
   const auto& post_nms_topN = rpn_post_nms_topN_;
   const auto& nms_thresh = rpn_nms_thresh_;
   const auto& min_size = rpn_min_size_;
@@ -139,11 +138,39 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   Eigen::Map<ERMatXf>(scores.data(), H * W, A) =
       Eigen::Map<const ERMatXf>(scores_tensor.data(), A, H * W).transpose();
 
+  std::vector<int> order(scores.size());
+  std::iota(order.begin(), order.end(), 0);
+  if (rpn_pre_nms_topN_ <= 0 || rpn_pre_nms_topN_ >= scores.size()) {
+    // 4. sort all (proposal, score) pairs by score from highest to lowest
+    // 5. take top pre_nms_topN (e.g. 6000)
+    std::sort(order.begin(), order.end(), [&scores](int lhs, int rhs) {
+      return scores[lhs] > scores[rhs];
+    });
+  } else {
+    // Avoid sorting possibly large arrays; First partition to get top K
+    // unsorted and then sort just those (~20x faster for 200k scores)
+    std::partial_sort(
+        order.begin(),
+        order.begin() + rpn_pre_nms_topN_,
+        order.end(),
+        [&scores](int lhs, int rhs) { return scores[lhs] > scores[rhs]; });
+    order.resize(rpn_pre_nms_topN_);
+  }
+
+  ERArrXXf bbox_deltas_sorted;
+  ERArrXXf all_anchors_sorted;
+  EArrXf scores_sorted;
+  utils::GetSubArrayRows(
+      bbox_deltas, utils::AsEArrXt(order), &bbox_deltas_sorted);
+  utils::GetSubArrayRows(
+      all_anchors.array(), utils::AsEArrXt(order), &all_anchors_sorted);
+  utils::GetSubArray(scores, utils::AsEArrXt(order), &scores_sorted);
+
   // Transform anchors into proposals via bbox transformations
   static const std::vector<float> bbox_weights{1.0, 1.0, 1.0, 1.0};
   auto proposals = utils::bbox_transform(
-      all_anchors.array(),
-      bbox_deltas,
+      all_anchors_sorted,
+      bbox_deltas_sorted,
       bbox_weights,
       utils::BBOX_XFORM_CLIP_DEFAULT,
       correct_transform_coords_);
@@ -154,30 +181,21 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
 
   // 3. remove predicted boxes with either height or width < min_size
   auto keep = utils::filter_boxes(proposals, min_size, im_info);
-  DCHECK_LE(keep.size(), scores.size());
-
-  // 4. sort all (proposal, score) pairs by score from highest to lowest
-  // 5. take top pre_nms_topN (e.g. 6000)
-  std::sort(keep.begin(), keep.end(), [&scores](int lhs, int rhs) {
-    return scores[lhs] > scores[rhs];
-  });
-
-  if (pre_nms_topN > 0 && pre_nms_topN < keep.size()) {
-    keep.resize(pre_nms_topN);
-  }
+  DCHECK_LE(keep.size(), scores_sorted.size());
 
   // 6. apply loose nms (e.g. threshold = 0.7)
   // 7. take after_nms_topN (e.g. 300)
   // 8. return the top proposals (-> RoIs top)
   if (post_nms_topN > 0 && post_nms_topN < keep.size()) {
-    keep = utils::nms_cpu(proposals, scores, keep, nms_thresh, post_nms_topN);
+    keep = utils::nms_cpu(
+        proposals, scores_sorted, keep, nms_thresh, post_nms_topN);
   } else {
-    keep = utils::nms_cpu(proposals, scores, keep, nms_thresh);
+    keep = utils::nms_cpu(proposals, scores_sorted, keep, nms_thresh);
   }
 
   // Generate outputs
   utils::GetSubArrayRows(proposals, utils::AsEArrXt(keep), out_boxes);
-  utils::GetSubArray(scores, utils::AsEArrXt(keep), out_probs);
+  utils::GetSubArray(scores_sorted, utils::AsEArrXt(keep), out_probs);
 }
 
 template <>
