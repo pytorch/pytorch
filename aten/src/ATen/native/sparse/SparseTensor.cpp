@@ -393,7 +393,7 @@ void sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const SparseTensor& m
   int64_t dimI = mask._dimI();
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
-  Tensor r_values = t._values().type().tensor(mask_values.sizes());
+  Tensor r_values = r._values().type().tensor(mask_values.sizes());
   _alias_into_sparse(r, mask_indices.clone(), r_values);
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();
