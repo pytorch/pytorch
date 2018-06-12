@@ -3,7 +3,7 @@ try:
 except ImportError:
     from urlparse import urlparse
 
-from torch.distributed import c10d
+import torch.distributed.c10d as c10d
 
 
 _rendezvous_handlers = {}
