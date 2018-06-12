@@ -109,12 +109,7 @@ def wrap_nn(thnn_h_path, install_dir, template_path):
     for fn in nn_functions:
         for t in ['Float', 'Double']:
             wrapper += wrap_function(fn.name, t, fn.arguments)
-    install_dir = install_dir or 'torch/csrc/nn'
-    try:
-        os.makedirs(install_dir)
-    except OSError:
-        pass
-    with open(os.path.join(install_dir, 'THNN.cwrap'), 'w') as f:
+    with open('torch/csrc/nn/THNN.cwrap', 'w') as f:
         f.write(wrapper)
     cwrap(os.path.join(install_dir, 'THNN.cwrap'),
           plugins=[NNExtension('torch._C._THNN'), NullableArguments()],
@@ -128,8 +123,7 @@ def wrap_cunn(thcunn_h_path, install_dir, template_path):
     for fn in cunn_functions:
         for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
             wrapper += wrap_function(fn.name, t, fn.arguments)
-    install_dir = install_dir or 'torch/csrc/nn'
-    with open(os.path.join(install_dir, 'THCUNN.cwrap'), 'w') as f:
+    with open('torch/csrc/nn/THCUNN.cwrap', 'w') as f:
         f.write(wrapper)
     cwrap(os.path.join(install_dir, 'THCUNN.cwrap'),
           plugins=[NNExtension('torch._C._THCUNN'), NullableArguments(), AutoGPU(has_self=False)],
