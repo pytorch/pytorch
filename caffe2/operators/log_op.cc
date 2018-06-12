@@ -9,8 +9,6 @@ REGISTER_CPU_OPERATOR(
     Log,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, LogFunctor<CPUContext>>);
 
-#if !CAFFE2_MOBILE
-
 OPERATOR_SCHEMA(Log)
     .NumInputs(1)
     .NumOutputs(1)
@@ -45,7 +43,5 @@ class GetLogGradient : public GradientMakerBase {
 } // namespace
 
 REGISTER_GRADIENT(Log, GetLogGradient);
-
-#endif // !CAFFE2_MOBILE
 
 } // namespace caffe2
