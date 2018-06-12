@@ -51,6 +51,7 @@ public:
   // respect to indices and values
   void raw_resize_(int64_t dimI, int64_t dimV, ArrayRef<int64_t> size) {
     // TODO: is this the correct idiom?
+    AT_CHECK(size.size() != 0, "cannot resize a sparse tensor into a scalar");
     size_ = size;
     dimI_ = dimI;
     dimV_ = dimV;

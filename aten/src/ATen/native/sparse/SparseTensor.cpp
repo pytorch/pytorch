@@ -164,7 +164,8 @@ SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, c
   }
 
   const SparseType& dtype = values.type().toSparse();
-  if (indices.dim() == 0 && values.dim() == 0) {
+  // NB: used to be a dim() == 0 test, but that's legacy TH semantics
+  if (indices.numel() == 0 && values.numel() == 0) {
     return new_with_size_sparse(dtype, sizes);
   }
 

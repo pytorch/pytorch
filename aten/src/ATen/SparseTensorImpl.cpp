@@ -3,8 +3,14 @@
 
 namespace at {
 
+// SparseTensorImpl defaults to a [0] size tensor with one sparse dimension and
+// no dense dimensions.  This is kind of arbitrary but we want the math to work
+// out.
 SparseTensorImpl::SparseTensorImpl(Type * type)
     : TensorImpl(type)
+    , size_{0}
+    , dimI_(1)
+    , dimV_(0)
     , indices_(type->toDense().toScalarType(ScalarType::Long).tensor())
     , values_(type->toDense().tensor()) {
       AT_ASSERT(type->is_sparse() && !type->is_variable_or_undefined());
@@ -34,7 +40,9 @@ std::unique_ptr<Storage> SparseTensorImpl::storage() {
 }
 
 void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tensor& values) {
-  bool empty = values.dim() == 0;
+  // TODO: Explicit empty test is needed because we don't handle size zero
+  // dimensions at the moment
+  bool empty = values.numel() == 0;
   AT_CHECK(values.type().toSparse() == type(), "values type must match sparse tensor type");
   AT_CHECK(indices.type().scalarType() == kLong);
   AT_CHECK(indices.type().backend() == values.type().backend());
@@ -44,7 +52,7 @@ void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tenso
     AT_CHECK(indices.size(0) == dimI_, "indices has incorrect first dimension, expected ", dimI_, ", got ", indices.size(0));
     AT_CHECK(values.dim() == dimV_ + 1, "values has incorrect number of dimensions, expected ", dimV_ + 1, ", got ", values.dim());
   } else {
-    AT_CHECK(indices.dim() == 0, "if values is empty, indices must be empty too");
+    AT_CHECK(indices.numel() == 0, "if values is empty, indices must be empty too");
   }
   indices_ = indices;
   values_ = values;

@@ -326,6 +326,7 @@ SparseTensor& add_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar a
 
 // --------------------------------------------------------------------
 // add(Tensor, SparseTensorRef, Scalar)
+//    formerly known as spcadd
 // --------------------------------------------------------------------
 
 template <typename scalar_t>
