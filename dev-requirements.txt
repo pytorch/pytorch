@@ -1,0 +1,7 @@
+-r requirements.txt
+ninja
+flake8
+numpy
+scipy
+mkl
+mkl-devel
