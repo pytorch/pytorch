@@ -24,10 +24,10 @@ THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices,
 }
 
 void THCSTensor_(zero)(THCState *state, THCSTensor *self) {
-  if (self->indices->nDimension) {
+  if (self->indices->_dim()) {
     THCIndexTensor_(resizeNd)(state, self->indices, 0, NULL, NULL);
   }
-  if (self->values->nDimension) {
+  if (self->values->_dim()) {
     THCTensor_(resizeNd)(state, self->values, 0, NULL, NULL);
   }
   self->nnz = 0;
@@ -66,8 +66,8 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
       "matrices expected, got %dD tensor", sparse_->nDimensionI);
   THArgCheck(sparse_->nDimensionV == 0, 2,
       "scalar values expected, got %dD values", sparse_->nDimensionV);
-  THArgCheck(dense->nDimension == 2, 2,
-      "matrices expected, got %dD tensor", dense->nDimension);
+  THArgCheck(dense->_dim() == 2, 2,
+      "matrices expected, got %dD tensor", dense->_dim());
 
   int64_t m = THCSTensor_(size)(state, sparse_, 0);
   int64_t k = THCSTensor_(size)(state, sparse_, 1);
@@ -186,8 +186,8 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
       "matrices expected, got %dD tensor", sparse_->nDimensionI);
   THArgCheck(sparse_->nDimensionV == 0, 3,
       "scalar values expected, got %dD values", sparse_->nDimensionV);
-  THArgCheck(dense->nDimension == 2, 4,
-      "matrices expected, got %dD tensor", dense->nDimension);
+  THArgCheck(dense->_dim() == 2, 4,
+      "matrices expected, got %dD tensor", dense->_dim());
 
   int64_t m = THCSTensor_(size)(state, sparse_, 0);
   int64_t k = THCSTensor_(size)(state, sparse_, 1);

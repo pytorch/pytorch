@@ -20,7 +20,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          int padT, int padW, int padH,
                          int dilationT, int dilationW, int dilationH,
                          bool ceilMode) {
-  int ndim = input->nDimension;
+  int ndim = input->_dim();
   int inputSlices;
   int inputTime;
   int inputHeight;
@@ -43,7 +43,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
              "dilation should be greater than 0, but got dilationT: %d dilationH: %d dilationW: %d",
              dilationT, dilationH, dilationW);
 
-  if (input->nDimension == 5)
+  if (input->_dim() == 5)
   {
     dimf++;
     dimt++;

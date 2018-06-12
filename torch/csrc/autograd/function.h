@@ -3,6 +3,7 @@
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/grad_mode.h"
+#include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/autograd/type_and_shape.h"
@@ -95,7 +96,11 @@ struct Function : std::enable_shared_from_this<Function> {
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
       : sequence_nr_(sequence_nr),
-      next_edges_(std::move(next_edges)) {}
+      next_edges_(std::move(next_edges)) {
+    if (AnomalyMode::is_enabled()) {
+      metadata()->store_stack();
+    }
+  }
 
   explicit Function(
       edge_list&& next_edges = edge_list())
@@ -236,6 +241,10 @@ struct Function : std::enable_shared_from_this<Function> {
     pyobj_ = pyobj;
   }
 
+  /// Returns the anomaly metadata stored for this `Function`.
+  /// If none exist, creates a new empty one.
+  AnomalyMetadata* metadata() noexcept;
+
   /// Create a context edge for the JIT.
   static void set_up_context_edge(
       jit::Node* this_node,
@@ -329,6 +338,7 @@ struct Function : std::enable_shared_from_this<Function> {
 
   edge_list next_edges_;
   PyObject* pyobj_ = nullptr; // weak reference
+  std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
   auto_unique_ptr<jit::tracer::FunctionTracingState> tracing_state_;

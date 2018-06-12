@@ -1,4 +1,5 @@
 #include "caffe2/core/typeid.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/scope_guard.h"
 
 #if !defined(_MSC_VER)
@@ -44,6 +45,12 @@ string GetExceptionString(const std::exception& e) {
 #else
   return string("Exception (no RTTI available): ") + e.what();
 #endif // __GXX_RTTI
+}
+
+void TypeMeta::_ThrowRuntimeTypeLogicError(const std::string& msg) {
+  // In earlier versions it used to be std::abort() but it's a bit hard-core
+  // for a library
+  CAFFE_THROW(msg);
 }
 
 namespace {
