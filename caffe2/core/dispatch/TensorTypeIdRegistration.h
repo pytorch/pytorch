@@ -86,7 +86,7 @@ inline TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
   return id_;
 }
 
-}
+}  // namespace c10
 
 #define C10_DECLARE_TENSOR_TYPE(TensorName)                                      \
   TensorTypeId TensorName();                                                     \

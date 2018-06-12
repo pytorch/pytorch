@@ -27,6 +27,6 @@ private:
   friend std::ostream& operator<<(std::ostream&, TensorTypeId);
 };
 
-}
+}  // namespace c10
 
 C10_DEFINE_HASH_FOR_IDWRAPPER(c10::TensorTypeId)

@@ -57,4 +57,4 @@ TensorTypeIdRegistrar::~TensorTypeIdRegistrar() {
   TensorTypeIds::singleton().deregister(id_);
 }
 
-}
+}  // namespace c10
