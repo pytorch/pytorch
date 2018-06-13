@@ -617,6 +617,7 @@ def group_declarations(declarations):
 #
 # See Note[Order of overloads matters]
 def sort_declarations(grouped_decls):
+
     # TODO: This is a hack!
     #
     # For some reason, when you specify a Scalar argument in a native
@@ -635,7 +636,8 @@ def sort_declarations(grouped_decls):
     # at the source but I have never understood what dynamic_type is
     # supposed to be.
     def normalized_dynamic_type(arg):
-        if arg['dynamic_type'] == 'real': return 'Scalar'
+        if arg['dynamic_type'] == 'real':
+            return 'Scalar'
         return arg['dynamic_type']
 
     def is_coord_smaller(arg1, arg2):
@@ -647,7 +649,8 @@ def sort_declarations(grouped_decls):
         if len(args1) != len(args2):
             return False
         any_smaller = any(is_coord_smaller(arg1, arg2) for arg1, arg2 in zip(args1, args2))
-        all_smaller_or_equal = all(normalized_dynamic_type(arg1) == normalized_dynamic_type(arg2) or is_coord_smaller(arg1, arg2)
+        all_smaller_or_equal = all(normalized_dynamic_type(arg1) == normalized_dynamic_type(arg2) or
+                                   is_coord_smaller(arg1, arg2)
                                    for arg1, arg2 in zip(args1, args2))
         return any_smaller and all_smaller_or_equal
 
