@@ -253,16 +253,12 @@ if(USE_ROCM)
   set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
-  target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   IF(BUILD_ATEN)
     aten_set_target_props(caffe2_hip)
   ENDIF()
-
-  target_link_libraries(caffe2_hip PUBLIC caffe2)
-  target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
   # To avoid having to do above, keep this commented.

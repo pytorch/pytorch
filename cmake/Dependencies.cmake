@@ -446,6 +446,7 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
+    caffe2_update_option(USE_ROCM ON)
 
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -fPIC")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_PLATFORM_HCC__=1")
@@ -459,8 +460,10 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-overflow")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
 
-    HIP_INCLUDE_DIRECTORIES(
-      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS})
+    set(Caffe2_HIP_INCLUDES
+      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
+    # This is needed for library added by hip_add_library (same for hip_add_executable)
+    hip_include_directories(${Caffe2_HIP_INCLUDES})}
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
       ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipblas_LIBRARIES})
@@ -471,8 +474,6 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
     # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
       roc::rocblas)
-
-    caffe2_update_option(USE_ROCM ON)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
