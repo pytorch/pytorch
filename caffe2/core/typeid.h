@@ -19,7 +19,9 @@
 namespace caffe2 {
 
 /**
- * Dynamic type ID of a Tensor argument.  It represents something like CPUFloatTensor, etc.
+ * A type id is a unique id for a given C++ type.
+ * You need to register your types using CAFFE_KNOWN_TYPE(MyType) to be able to use CaffeTypeId with custom types.
+ * This is for example used to store the dtype of tensors.
  */
 class CaffeTypeId final : public c10::guts::IdWrapper<CaffeTypeId, intptr_t> {
 public:
