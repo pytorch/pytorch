@@ -23,19 +23,17 @@ class ExpandOp final : public Operator<Context> {
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
   }
-  const Tensor<CPUContext> GetShape() {
-	return Input(1);
-  }
-  template <typename T>
+ template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    const auto& Y_shape_tensor = GetShape();
+    const auto& Y_shape_tensor = Input(1);
+	std::vector<int> shape_dims(Y_shape_tensor.size());
+	context_.template Copy<int, Context, CPUContext>(Y_shape_tensor.size(), Y_shape_tensor.template data<int>(), shape_dims.data());
     const int* Y_shape = Y_shape_tensor.template data<int>();
     auto* Y = Output(0);
-    const int ndim = Y_shape_tensor.size();
+    const int ndim = shape_dims.size();
     const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
     std::vector<int> Y_dims;
-    const std::vector<int> shape_dims(Y_shape, Y_shape + ndim);
     Y_dims.reserve(std::max(ndim, X.ndim()));
     // ndim, X.ndim() might equal to 0
     std::cout << "loginfoo " << ndim << " " << X.ndim() << std::endl;

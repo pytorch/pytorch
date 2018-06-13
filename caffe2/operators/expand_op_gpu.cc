@@ -9,15 +9,6 @@
 
 namespace caffe2 {
 
-template <typename InputTypes, class Expander>
-const Tensor<CPUContext> ExpandOp<InputTypes, CUDAContext, Expander>::GetShape() {
-	const auto& shape_gpu = Input(1);
-	Tensor<CPUContext> shape_cpu;
-	shape_cpu.Resize(shape_gpu.size());
-	shape_cpu.CopyFrom(shape_gpu, &context_);
-	return shape_cpu;
-}
-
 REGISTER_CUDA_OPERATOR(
     Expand,
     ExpandOp<
