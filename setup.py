@@ -981,6 +981,7 @@ if WITH_CUDA:
     THNVRTC = Extension("torch._nvrtc",
                         sources=['torch/csrc/nvrtc.cpp'],
                         language='c++',
+                        extra_compile_args=main_compile_args + extra_compile_args,
                         include_dirs=include_dirs,
                         library_dirs=library_dirs + cuda_stub_path,
                         extra_link_args=thnvrtc_link_flags,
