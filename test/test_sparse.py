@@ -406,8 +406,10 @@ class TestSparse(TestCase):
         def test_shape(sparse_dims, sizes):
             x, _, _ = self._gen_sparse(sparse_dims, 20, sizes)
             zeros = torch.zeros(sizes, layout=torch.sparse_coo).to(x.device)
-            self.assertEqual(zeros + x, x)
-            self.assertEqual(x + zeros, x)
+            r1 = zeros + x
+            r2 = x + zeros
+            self.assertEqual(r1, x)
+            self.assertEqual(r2, x)
 
         test_shape(1, [1])
         test_shape(4, [3, 17, 19, 5])
@@ -776,6 +778,7 @@ class TestSparse(TestCase):
             ('sspaddmm_b', lambda sp, de: sp.sspaddmm(2, sp, de), False),
             ('sspaddmm_b_a', lambda sp, de: sp.sspaddmm(3, 2, sp, de), False),
             ('addmm', lambda sp, de: de.addmm(sp, de), True),
+            # TODO: This looks like a typo
             ('addmm_', lambda sp, de: de.addmm(sp, de), True),
             ('mm', lambda sp, de: torch.mm(sp, de), True),
             ('mm_out', lambda sp, de: torch.mm(sp, de, out=de), True),
