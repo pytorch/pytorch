@@ -58,7 +58,7 @@ inline void _vec_log_softmax_lastdim(
             scalar_t* input_data = input_data_base + i * dim_size;
             scalar_t max_input = max_input_arr[j];
             tmp_sum_scalar[j] = vec256::map_reduce_all<scalar_t>(
-                [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
+                [max_input](Vec x) { return vec256::exp(x - Vec(max_input)); },
                 [](Vec x, Vec y) { return x + y; },
                 input_data,
                 dim_size);
@@ -66,7 +66,7 @@ inline void _vec_log_softmax_lastdim(
           // See [Note AVX-SSE transitions] for why this should call the
           // vectorized version (aside from perf improvements).
           vec256::map2(
-              [](Vec x, Vec y) { return x.log() + y; },
+              [](Vec x, Vec y) { return vec256::log(x) + y; },
               tmp_sum_scalar,
               tmp_sum_scalar,
               max_input_arr,
@@ -110,7 +110,7 @@ inline void _vec_softmax_lastdim(
               input_data,
               dim_size);
           vec256::map(
-              [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
+              [max_input](Vec x) { return vec256::exp(x - Vec(max_input)); },
               output_data,
               input_data,
               dim_size);
@@ -161,7 +161,7 @@ inline void _vec_host_softmax_backward_lastdim(
           }
           if (log_softmax) {
             vec256::map2(
-                [sum](Vec x, Vec y) { return x - ((y.exp()) * Vec(sum)); },
+                [sum](Vec x, Vec y) { return x - (vec256::exp(y) * Vec(sum)); },
                 grad_input_data,
                 grad_data,
                 output_data,

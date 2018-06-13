@@ -13,9 +13,10 @@ namespace {
 #if defined(__AVX__) && !defined(_MSC_VER)
 
 template <> class Vec256<double> {
+private:
+  __m256d values;
 public:
   static constexpr int size = 4;
-  __m256d values;
   Vec256() {}
   Vec256(__m256d v) : values(v) {}
   Vec256(double val) {
@@ -26,7 +27,7 @@ public:
   }
   template <int64_t mask>
   static Vec256<double> blend(Vec256<double> a, Vec256<double> b) {
-    return _mm256_blend_pd(a.values, b.values, mask);
+    return _mm256_blend_pd(a, b, mask);
   }
   static Vec256<double> set(Vec256<double> a, Vec256<double> b, int64_t count = size) {
     switch (count) {
@@ -41,92 +42,47 @@ public:
     }
     return b;
   }
-  static Vec256<double> loadu(const void* ptr, int64_t count = size) {
-    if (count == size)
+  static Vec256<double> load(const void* ptr, int64_t count = size, int64_t stride = 1) {
+    if (count == size && stride == 1)
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
 
+// #ifdef __AVX2__
+//     if(count == size) {
+//       __m256i vindex = _mm256_set_epi64x(3 * stride, 2 * stride, 1 * stride, 0);
+//       return _mm256_i64gather_pd(reinterpret_cast<const double*>(ptr), vindex, 1);
+//     }
+// #endif
+
     __at_align32__ double tmp_values[size];
-    std::memcpy(
-        tmp_values,
-        reinterpret_cast<const double*>(ptr),
-        count * sizeof(double));
+    if (stride == 1) {
+      std::memcpy(
+          tmp_values,
+          reinterpret_cast<const double*>(ptr),
+          count * sizeof(double));
+    } else {
+      for (int64_t i = 0; i < count; i++) {
+        tmp_values[i] = reinterpret_cast<const double*>(ptr)[i * stride];
+      }
+    }
     return _mm256_load_pd(tmp_values);
   }
-  void store(void* ptr, int count = size) const {
-    if (count == size) {
+  void store(void* ptr, int64_t count = size, int64_t stride = 1) const {
+    if (count == size && stride == 1) {
       _mm256_storeu_pd(reinterpret_cast<double*>(ptr), values);
     } else {
       double tmp_values[size];
       _mm256_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(double));
+      if (stride == 1) {
+        std::memcpy(ptr, tmp_values, count * sizeof(double));
+      } else {
+        for (int64_t i = 0; i < count; i++) {
+          reinterpret_cast<double*>(ptr)[i * stride] = tmp_values[i];
+        }
+      }
     }
   }
-  Vec256<double> map(double (*f)(double)) const {
-    __at_align32__ double tmp[4];
-    store(tmp);
-    for (int64_t i = 0; i < 4; i++) {
-      tmp[i] = f(tmp[i]);
-    }
-    return loadu(tmp);
-  }
-  Vec256<double> abs() const {
-    auto mask = _mm256_set1_pd(-0.f);
-    return _mm256_andnot_pd(mask, values);
-  }
-  Vec256<double> acos() const {
-    return Vec256<double>(Sleef_acosd4_u10(values));
-  }
-  Vec256<double> asin() const {
-    return Vec256<double>(Sleef_asind4_u10(values));
-  }
-  Vec256<double> atan() const {
-    return Vec256<double>(Sleef_atand4_u10(values));
-  }
-  Vec256<double> erf() const {
-    return Vec256<double>(Sleef_erfd4_u10(values));
-  }
-  Vec256<double> exp() const {
-    return Vec256<double>(Sleef_expd4_u10(values));
-  }
-  Vec256<double> expm1() const {
-    return Vec256<double>(Sleef_expm1d4_u10(values));
-  }
-  Vec256<double> log() const {
-    return Vec256<double>(Sleef_logd4_u10(values));
-  }
-  Vec256<double> log2() const {
-    return Vec256<double>(Sleef_log2d4_u10(values));
-  }
-  Vec256<double> log10() const {
-    return Vec256<double>(Sleef_log10d4_u10(values));
-  }
-  Vec256<double> log1p() const {
-    return Vec256<double>(Sleef_log1pd4_u10(values));
-  }
-  Vec256<double> sin() const {
-    return map(std::sin);
-  }
-  Vec256<double> cos() const {
-    return map(std::cos);
-  }
-  Vec256<double> ceil() const {
-    return _mm256_ceil_pd(values);
-  }
-  Vec256<double> floor() const {
-    return _mm256_floor_pd(values);
-  }
-  Vec256<double> round() const {
-    return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
-  }
-  Vec256<double> tanh() const {
-    return Vec256<double>(Sleef_tanhd4_u10(values));
-  }
-  Vec256<double> trunc() const {
-    return _mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
-  }
-  Vec256<double> sqrt() const {
-    return _mm256_sqrt_pd(values);
-  }
+  const double& operator[](int idx) const  = delete;
+  double& operator[](int idx) = delete;
 };
 
 template <>
@@ -154,6 +110,126 @@ Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_max_pd(a, b);
 }
 
-#endif
+template <>
+Vec256<double> inline min(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_min_pd(a, b);
+}
 
-}}}
+template <>
+Vec256<double> inline map(double (*f)(double), Vec256<double> x) = delete;
+
+template <>
+Vec256<double> inline abs(Vec256<double> x) {
+  auto mask = _mm256_set1_pd(((double)(-0.)));
+  return _mm256_andnot_pd(mask, x);
+}
+
+template <>
+Vec256<double> inline acos(Vec256<double> x) {
+  return Vec256<double>(Sleef_acosd4_u10(x));
+}
+
+template <>
+Vec256<double> inline asin(Vec256<double> x) {
+  return Vec256<double>(Sleef_asind4_u10(x));
+}
+
+template <>
+Vec256<double> inline atan(Vec256<double> x) {
+  return Vec256<double>(Sleef_atand4_u10(x));
+}
+
+template <>
+Vec256<double> inline erf(Vec256<double> x) {
+  return Vec256<double>(Sleef_erfd4_u10(x));
+}
+
+template <>
+Vec256<double> inline exp(Vec256<double> x) {
+  return Vec256<double>(Sleef_expd4_u10(x));
+}
+
+template <>
+Vec256<double> inline expm1(Vec256<double> x) {
+  return Vec256<double>(Sleef_expm1d4_u10(x));
+}
+
+template <>
+Vec256<double> inline log(Vec256<double> x) {
+  return Vec256<double>(Sleef_logd4_u10(x));
+}
+
+template <>
+Vec256<double> inline log2(Vec256<double> x) {
+  return Vec256<double>(Sleef_log2d4_u10(x));
+}
+
+template <>
+Vec256<double> inline log10(Vec256<double> x) {
+  return Vec256<double>(Sleef_log10d4_u10(x));
+}
+
+template <>
+Vec256<double> inline log1p(Vec256<double> x) {
+  return Vec256<double>(Sleef_log1pd4_u10(x));
+}
+
+template <>
+Vec256<double> inline sin(Vec256<double> x) = delete;
+
+template <>
+Vec256<double> inline cos(Vec256<double> x) = delete;
+
+template <>
+Vec256<double> inline ceil(Vec256<double> x) {
+  return _mm256_ceil_pd(x);
+}
+
+template <>
+Vec256<double> inline floor(Vec256<double> x) {
+  return _mm256_floor_pd(x);
+}
+
+template <>
+Vec256<double> inline round(Vec256<double> x) {
+  return _mm256_round_pd(
+      x, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+}
+
+template <>
+Vec256<double> inline tanh(Vec256<double> x) {
+  return Vec256<double>(Sleef_tanhd4_u10(x));
+}
+
+template <>
+Vec256<double> inline trunc(Vec256<double> x) {
+  return _mm256_round_pd(x, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+}
+
+template <>
+Vec256<double> inline sqrt(Vec256<double> x) {
+  return _mm256_sqrt_pd(x);
+}
+
+template <>
+Vec256<double> inline reciprocal(Vec256<double> x) {
+  return _mm256_div_pd(_mm256_set1_pd(1), x);
+}
+
+template <>
+Vec256<double> inline rsqrt(Vec256<double> x) {
+  return reciprocal(sqrt(x));
+}
+
+template <>
+Vec256<double> inline sigmoid(Vec256<double> x) {
+  return _mm256_div_pd(
+      _mm256_set1_pd(1),
+      _mm256_add_pd(
+          _mm256_set1_pd(1),
+          exp(Vec256<double>(_mm256_sub_pd(_mm256_set1_pd(0), x)))));
+}
+#endif
+}
+} // namespace vec256
+} // namespace at

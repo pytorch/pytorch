@@ -21,8 +21,10 @@ namespace {
 // emulates vectorized types
 template <class T>
 struct Vec256 {
+private:
+  T values[32 / sizeof(T)] = {0};
+public:
   static constexpr int size = 32 / sizeof(T);
-  T values[32 / sizeof(T)];
   Vec256() {}
   Vec256(T val) {
     for (int i = 0; i != size; i++) {
@@ -47,132 +49,224 @@ struct Vec256 {
     Vec256 vec;
     for (int64_t i = 0; i < size; i++) {
       if (i < count) {
-        vec.values[i] = b.values[i];
+        vec[i] = b[i];
       } else {
-        vec.values[i] = a.values[i];
+        vec[i] = a[i];
       }
     }
     return vec;
   }
-  static Vec256<T> loadu(const void* ptr) {
+  static Vec256<T> load(
+      const void* ptr,
+      int64_t count = size,
+      int64_t stride = 1) {
     Vec256 vec;
-    std::memcpy(vec.values, ptr, 32);
+    if (stride == 1) {
+      std::memcpy(vec.values, ptr, count * sizeof(T));
+    } else {
+      for (int64_t i = 0; i < count; i++)
+        vec.values[i] = reinterpret_cast<const T*>(ptr)[i * stride];
+    }
     return vec;
   }
-  static Vec256<T> loadu(const void* ptr, int64_t count) {
-    Vec256 vec;
-    std::memcpy(vec.values, ptr, count * sizeof(T));
-    return vec;
-  }
-  void store(void* ptr, int count = size) const {
-    std::memcpy(ptr, values, count * sizeof(T));
-  }
-  Vec256<T> map(T (*f)(T)) const {
-    Vec256<T> ret;
-    for (int64_t i = 0; i != size; i++) {
-      ret.values[i] = f(values[i]);
+  void store(void* ptr, int64_t count = size, int64_t stride = 1) const {
+    if (stride == 1) {
+      std::memcpy(ptr, values, count * sizeof(T));
+    } else {
+      for (int64_t i = 0; i < count; i++)
+        reinterpret_cast<T*>(ptr)[i * stride] = values[i];
     }
-    return ret;
   }
-  Vec256<T> abs() const {
-    Vec256<T> ret;
-    for (int64_t i = 0; i < size; i++) {
-      ret.values[i] = values[i] < 0 ? -values[i] : values[i];
-    }
-    return ret;
+  const T& operator [](int idx) const {
+    return values[idx];
   }
-  Vec256<T> acos() const {
-    return map(std::acos);
-  }
-  Vec256<T> asin() const {
-    return map(std::asin);
-  }
-  Vec256<T> atan() const {
-    return map(std::atan);
-  }
-  Vec256<T> erf() const {
-    return map(std::erf);
-  }
-  Vec256<T> exp() const {
-    return map(std::exp);
-  }
-  Vec256<T> expm1() const {
-    return map(std::expm1);
-  }
-  Vec256<T> log() const {
-    return map(std::log);
-  }
-  Vec256<T> log10() const {
-    return map(std::log10);
-  }
-  Vec256<T> log1p() const {
-    return map(std::log1p);
-  }
-  Vec256<T> log2() const {
-    return map(std::log2);
-  }
-  Vec256<T> ceil() const {
-    return map(std::ceil);
-  }
-  Vec256<T> cos() const {
-    return map(std::cos);
-  }
-  Vec256<T> floor() const {
-    return map(std::floor);
-  }
-  Vec256<T> round() const {
-    return map(std::round);
-  }
-  Vec256<T> sin() const {
-    return map(std::sin);
-  }
-  Vec256<T> tanh() const {
-    return map(std::tanh);
-  }
-  Vec256<T> trunc() const {
-    return map(std::trunc);
-  }
-  Vec256<T> sqrt() const {
-    return map(std::sqrt);
+  T& operator [](int idx) {
+    return values[idx];
   }
 };
+template <class T>Vec256<T> inline map(T (*f)(T), Vec256<T> x) {
+  Vec256<T> ret;
+  for (int64_t i = 0; i != Vec256<T>::size; i++) {
+    ret[i] = f(x[i]);
+  }
+  return ret;
+}
+
+template <class T>Vec256<T> inline abs(Vec256<T> x) {
+  Vec256<T> ret;
+  for (int64_t i = 0; i < Vec256<T>::size; i++) {
+    ret[i] = x[i] < 0 ? -x[i] : x[i];
+  }
+  return ret;
+}
+
+template <class T>
+Vec256<T> inline acos(Vec256<T> x) {
+  return map(std::acos, x);
+}
+
+template <class T>
+Vec256<T> inline asin(Vec256<T> x) {
+  return map(std::asin, x);
+}
+
+template <class T>
+Vec256<T> inline atan(Vec256<T> x) {
+  return map(std::atan, x);
+}
+
+template <class T>
+Vec256<T> inline erf(Vec256<T> x) {
+  return map(std::erf, x);
+}
+
+template <class T>
+Vec256<T> inline exp(Vec256<T> x) {
+  return map(std::exp, x);
+}
+
+template <class T>
+Vec256<T> inline expm1(Vec256<T> x) {
+  return map(std::expm1, x);
+}
+
+template <class T>
+Vec256<T> inline log(Vec256<T> x) {
+  return map(std::log, x);
+}
+
+template <class T>
+Vec256<T> inline log10(Vec256<T> x) {
+  return map(std::log10, x);
+}
+
+template <class T>
+Vec256<T> inline log1p(Vec256<T> x) {
+  return map(std::log1p, x);
+}
+
+template <class T>
+Vec256<T> inline log2(Vec256<T> x) {
+  return map(std::log2, x);
+}
+
+template <class T>
+Vec256<T> inline ceil(Vec256<T> x) {
+  return map(std::ceil, x);
+}
+
+template <class T>
+Vec256<T> inline cos(Vec256<T> x) {
+  return map(std::cos, x);
+}
+
+template <class T>
+Vec256<T> inline floor(Vec256<T> x) {
+  return map(std::floor, x);
+}
+
+template <class T>
+Vec256<T> inline round(Vec256<T> x) {
+  return map(std::round, x);
+}
+
+template <class T>
+Vec256<T> inline sin(Vec256<T> x) {
+  return map(std::sin, x);
+}
+
+template <class T>
+Vec256<T> inline sqrt(Vec256<T> x) {
+  return map(std::sqrt, x);
+}
+
+template <class T>
+Vec256<T> inline neg(Vec256<T> x) {
+  return Vec256<T>(0) - x;
+}
+
+template <class T>
+Vec256<T> inline reciprocal(Vec256<T> x) {
+  Vec256<T> ret;
+  for (int64_t i = 0; i < Vec256<T>::size; i++) {
+    ret[i] = 1 / x[i];
+  }
+  return ret;
+}
+
+template <class T>
+Vec256<T> inline rsqrt(Vec256<T> x) {
+  return reciprocal(sqrt(x));
+}
+
+template <class T>
+Vec256<T> inline sigmoid(Vec256<T> x) {
+  Vec256<T> ret;
+  for (int64_t i = 0; i < Vec256<T>::size; i++) {
+    ret[i] = ((T)1.0) / (((T)1.0) + std::exp(-x[i]));
+  }
+  return ret;
+}
+
+template <class T>
+Vec256<T> inline tanh(Vec256<T> x) {
+  return map(std::tanh, x);
+}
+
+template <class T>
+Vec256<T> inline trunc(Vec256<T> x) {
+  return map(std::trunc, x);
+}
+
+template <class T>
+Vec256<T> inline frac(Vec256<T> x) {
+  return x - trunc(x);
+}
 
 template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = a.values[i] + b.values[i];
+    c[i] = a[i] + b[i];
   }
   return c;
 }
 
 template <class T> Vec256<T> operator-(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = a.values[i] - b.values[i];
+    c[i] = a[i] - b[i];
   }
   return c;
 }
 
 template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = a.values[i] * b.values[i];
+    c[i] = a[i] * b[i];
   }
   return c;
 }
 
 template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = a.values[i] / b.values[i];
+    c[i] = a[i] / b[i];
   }
   return c;
 }
 
 template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
+  Vec256<T> c;
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c.values[i] = std::max(a.values[i], b.values[i]);
+    c[i] = std::max(a[i], b[i]);
+  }
+  return c;
+}
+
+template <class T> Vec256<T> min(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c;
+  for (int i = 0; i != Vec256<T>::size; i++) {
+    c[i] = std::min(a[i], b[i]);
   }
   return c;
 }
