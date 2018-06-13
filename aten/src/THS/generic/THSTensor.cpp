@@ -188,10 +188,16 @@ int THSTensor_(isCoalesced)(const THSTensor *self) {
 allocating tensors every time */
 
 void THSTensor_(mulSlice)(
+  THTensor *dstBuffer, THTensor *src1Buffer, THTensor *src2Buffer,
+  THTensor *dst, THTensor *src1, THTensor *src2,
+  int64_t dim, int64_t dstIdx, int64_t src1Idx, int64_t src2Idx) {
   THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 void THSTensor_(divSlice)(
+  THTensor *dstBuffer, THTensor *src1Buffer, THTensor *src2Buffer,
+  THTensor *dst, THTensor *src1, THTensor *src2,
+  int64_t dim, int64_t dstIdx, int64_t src1Idx, int64_t src2Idx) {
   THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
