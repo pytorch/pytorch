@@ -122,7 +122,7 @@ void checkExecutorOverride(std::string& net_type) {
   for (const auto& kv : defaultOverrides()) {
     overrides[kv.first] = kv.second;
   }
-  for (size_t idx = 0; idx < executors.size() - 1; idx += 2) {
+  for (size_t idx = 0; idx < executors.size(); idx += 2) {
     overrides[executors[idx]] = executors[idx + 1];
   }
   if (overrides.count(net_type)) {
