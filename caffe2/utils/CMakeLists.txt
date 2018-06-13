@@ -18,7 +18,8 @@ list(APPEND Caffe2_CPU_SRCS
   utils/cpuid.cc
   utils/bench_utils.cc
   utils/math_cpu.cc
-  utils/math_utils.cc)
+  utils/math_utils.cc
+  utils/thread_name.cc)
 
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
 # pthreadpool with a very similar interface. Neither NNPACK, nor this
