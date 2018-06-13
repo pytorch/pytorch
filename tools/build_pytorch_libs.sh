@@ -170,7 +170,7 @@ function build() {
               -DTHNN_SO_VERSION=1 \
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
-              -DNO_CUDA=$((1-$WITH_CUDA)) \
+              -DUSE_CUDA=$WITH_CUDA \
               -DNO_NNPACK=$((1-$WITH_NNPACK)) \
               -DNCCL_EXTERNAL=1 \
               -Dnanopb_BUILD_GENERATOR=0 \

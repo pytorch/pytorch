@@ -8,6 +8,7 @@ import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
+from torch.onnx import OperatorExportTypes
 from common import TestCase, run_tests, IS_WINDOWS
 from textwrap import dedent
 import os
@@ -94,7 +95,7 @@ def get_fn(file_name, script_path):
 
 class JitTestCase(TestCase):
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
-        torch.onnx._optimize_trace(trace, aten=False)
+        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
@@ -137,7 +138,8 @@ class TestJit(JitTestCase):
             return torch._C.GraphExecutor(graph, False)(*inputs)
 
         proto, _ = trace.graph().export(initializers, onnx_opset_version=0,
-                                        defer_weight_export=False, export_raw_ir=True)
+                                        defer_weight_export=False,
+                                        operator_export_type=OperatorExportTypes.RAW)
         self.assertFalse(initializers)
 
         imported_graph, initializers = torch._C._jit_import_graph(proto)
@@ -2531,7 +2533,7 @@ class TestScript(JitTestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2580,7 +2582,7 @@ class TestScript(JitTestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2605,7 +2607,7 @@ class TestScript(JitTestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2622,7 +2624,7 @@ class TestScript(JitTestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2639,7 +2641,7 @@ class TestScript(JitTestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3, dtype=torch.long))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2669,7 +2671,7 @@ class TestScript(JitTestCase):
         result = mte(torch.zeros(2, 3))
         reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
         self.assertEqual(result, reference)
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.ones(2, 3),), None, verbose=False,
             example_outputs=result, propagate=True))
 
@@ -2728,12 +2730,12 @@ class TestScript(JitTestCase):
         f2 = Foo(linear)
         outputs_f2 = f2(torch.ones(1, 10, dtype=torch.float))
 
-        onnx_ish = torch.onnx._export_to_pretty_string(
+        onnx_ish = torch.onnx.export_to_pretty_string(
             f1,
             (torch.ones(1, 10, dtype=torch.float), ),
             None, verbose=False, example_outputs=outputs_f1)
         self.assertExpected(onnx_ish, subname='f1')
-        onnx_ish = torch.onnx._export_to_pretty_string(
+        onnx_ish = torch.onnx.export_to_pretty_string(
             f2,
             (torch.ones(1, 10, dtype=torch.float), ),
             None, verbose=False, example_outputs=outputs_f2)
@@ -2751,8 +2753,8 @@ class TestScript(JitTestCase):
         foo = torch.jit.trace(torch.zeros(1, 2, 3))(Foo())
         outputs = foo(torch.zeros(1, 2, 3))
         f = io.BytesIO()
-        s = torch.onnx._export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
-                                                example_outputs=outputs)
+        s = torch.onnx.export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
+                                               example_outputs=outputs)
         self.assertExpected(s)
 
     def test_shape_analysis_loop(self):
@@ -3027,7 +3029,7 @@ class TestScript(JitTestCase):
 
 
 # Smoke tests for export methods
-class TestPytorchExportModes(unittest.TestCase):
+class TestPytorchExportModes(JitTestCase):
     class MyModel(nn.Module):
         def __init__(self):
             super(TestPytorchExportModes.MyModel, self).__init__()
@@ -3063,6 +3065,21 @@ class TestPytorchExportModes(unittest.TestCase):
         torch.onnx._export(torch_model, (fake_input), d, verbose=False,
                            export_type=torch.onnx.ExportTypes.DIRECTORY)
         shutil.rmtree(d)
+
+    def test_aten_fallback(self):
+        class ModelWithAtenNotONNXOp(nn.Module):
+            def forward(self, x, y):
+                abcd = x + y
+                defg = torch.qr(abcd)
+                return defg
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+        f = io.BytesIO()
+        exported = torch.onnx.export_to_pretty_string(
+            ModelWithAtenNotONNXOp(), (x, y), f,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        self.assertExpected(exported)
 
 
 if __name__ == '__main__':

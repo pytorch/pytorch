@@ -67,7 +67,7 @@ if(AT_MKLDNN_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkldnn_cpp})
 endif()
 
-IF(NOT NO_CUDA OR USE_ROCM)
+IF(USE_CUDA OR USE_ROCM)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
   set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu})
   set(all_cuda_cpp ${native_cudnn_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
@@ -109,13 +109,13 @@ IF(BLAS_FOUND)
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
     list(APPEND ATen_CPU_DEPENDENCY_LIBS
       "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-    if(NOT NO_CUDA OR USE_ROCM)
+    if(USE_CUDA OR USE_ROCM)
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
         "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     endif()
   ELSE ($ENV{TH_BINARY_BUILD})
     list(APPEND ATen_CPU_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
-    if(NOT NO_CUDA OR USE_ROCM)
+    if(USE_CUDA OR USE_ROCM)
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${BLAS_LIBRARIES}")
     endif()
   ENDIF ($ENV{TH_BINARY_BUILD})
@@ -123,7 +123,7 @@ ENDIF(BLAS_FOUND)
 
 IF(LAPACK_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  if(NOT NO_CUDA OR USE_ROCM)
+  if(USE_CUDA OR USE_ROCM)
     # Although Lapack provides CPU (and thus, one might expect that ATen_cuda
     # would not need this at all), some of our libraries (magma in particular)
     # backend to CPU BLAS/LAPACK implementations, and so it is very important
@@ -203,7 +203,7 @@ if(NOT MSVC)
   set(BUILD_TESTS ${__aten_sleef_build_tests} CACHE BOOL "Build tests" FORCE)
 endif()
 
-IF(NOT NO_CUDA)
+IF(USE_CUDA AND NOT USE_ROCM)
   IF ($ENV{ATEN_STATIC_CUDA})
     # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
     # we first have to build a fake lib that links with no device callbacks,
@@ -250,6 +250,10 @@ IF(NOT NO_CUDA)
       ${CUDA_LIBRARIES}
       ${CUDA_cusparse_LIBRARY}
       ${CUDA_curand_LIBRARY})
+
+      # Set necessary HIPCC/CXX Flags
+      SET(HIP_HCC_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
+      SET(CMAKE_CXX_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${CMAKE_CXX_FLAGS}")
   ENDIF()
 
   if(CUDNN_FOUND)
@@ -271,7 +275,7 @@ ENDIF()
 IF(USE_ROCM)
  ### Link in the ROCm libraries BLAS / RNG.
  FIND_LIBRARY(HIPBLAS_LIBRARY hipblas HINTS ${HIPBLAS_PATH}/lib)
- FIND_LIBRARY(HIPRNG_LIBRARY hiprng HINTS ${HIPRNG_PATH}/lib)
+ FIND_LIBRARY(HIPRNG_LIBRARY hcrng HINTS ${HIPRNG_PATH}/lib)
 
  list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${HIPBLAS_LIBRARY} ${HIPRNG_LIBRARY})
 ENDIF()
@@ -282,8 +286,8 @@ list(APPEND ATen_CUDA_INCLUDE ${ATen_CPU_INCLUDE})
 # We have two libraries: libATen_cpu.so and libATen_cuda.so,
 # with libATen_cuda.so depending on libATen_cpu.so.  The CPU library
 # contains CPU code only.  libATen_cpu.so is invariant to the setting
-# of NO_CUDA (it always builds the same way); libATen_cuda.so is only
-# built when NO_CUDA=0 and CUDA is available.
+# of USE_CUDA (it always builds the same way); libATen_cuda.so is only
+# built when USE_CUDA=1 and CUDA is available.
 set(ATen_CPU_SRCS ${all_cpu_cpp})
 if(AT_LINK_STYLE STREQUAL "INTERFACE")
   # Source code can't be added to an interface library, so it is
@@ -307,7 +311,7 @@ else()
   set(ATen_CPU_SRCS)
 endif()
 
-if(NOT NO_CUDA OR USE_ROCM)
+if(USE_CUDA OR USE_ROCM)
   if(AT_LINK_STYLE STREQUAL "INTERFACE")
     # Source code can't be added to an interface library, so it is
     # passed back to be compiled into the containing library
@@ -352,7 +356,7 @@ if(NOT NO_CUDA OR USE_ROCM)
 endif()
 
 if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
-  if(NOT NO_CUDA)
+  if(USE_CUDA)
     if (NOT $ENV{ATEN_STATIC_CUDA})
       cuda_add_cublas_to_target(ATen_cuda)
       cuda_add_cufft_to_target(ATen_cuda)
@@ -361,14 +365,14 @@ if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
 
   if(NOT MSVC)
     aten_compile_options(ATen_cpu)
-    if(NOT NO_CUDA OR USE_ROCM)
+    if(USE_CUDA OR USE_ROCM)
       aten_compile_options(ATen_cuda)
     endif()
   endif()
 
   if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
     set_property(TARGET ATen_cpu PROPERTY CXX_STANDARD 11)
-    if(NOT NO_CUDA OR USE_ROCM)
+    if(USE_CUDA OR USE_ROCM)
       set_property(TARGET ATen_cuda PROPERTY CXX_STANDARD 11)
     endif()
   endif()
@@ -382,7 +386,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   get_filename_component(ATEN_CPU_OUTPUT_NAME ${ATEN_CPU_OUTPUT_NAME} NAME)
   set(ATEN_LIBRARIES
     "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_LIB_DIR}/${ATEN_CPU_OUTPUT_NAME}")
-  if(NOT NO_CUDA OR USE_ROCM)
+  if(USE_CUDA OR USE_ROCM)
     get_target_property(ATEN_CUDA_OUTPUT_NAME ATen_cuda LOCATION)
     get_filename_component(ATEN_CUDA_OUTPUT_NAME ${ATEN_CUDA_OUTPUT_NAME} NAME)
     list(APPEND ATEN_LIBRARIES
@@ -394,7 +398,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     LIBRARY DESTINATION "${AT_INSTALL_LIB_DIR}"
     ARCHIVE DESTINATION "${AT_INSTALL_LIB_DIR}")
 
-  if(NOT NO_CUDA OR USE_ROCM)
+  if(USE_CUDA OR USE_ROCM)
     install(TARGETS ATen_cuda
       RUNTIME DESTINATION "${AT_INSTALL_BIN_DIR}"
       LIBRARY DESTINATION "${AT_INSTALL_LIB_DIR}"
@@ -444,7 +448,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     install(TARGETS ${test_name} DESTINATION test)
   endforeach()
 
-  if(NOT NO_CUDA OR USE_ROCM)
+  if(USE_CUDA OR USE_ROCM)
     foreach(test_src ${ATen_CUDA_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       torch_cuda_based_add_executable(${test_name} "${test_src}")

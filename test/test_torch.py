@@ -2385,6 +2385,7 @@ class TestTorch(TestCase):
         except RuntimeError as e:
             return 'invalid multinomial distribution' in str(e)
 
+    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @unittest.skipIf(not PY3,
                      "spawn start method is not supported in Python 2, \
                      but we need it for for testing failure case for CPU RNG on Windows")
@@ -6606,6 +6607,20 @@ class TestTorch(TestCase):
 
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
+
+    def test_load_error_msg(self):
+        expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
+                            "Please pre-load the data into a buffer like io.BytesIO and " +
+                            "try to load from it instead.")
+        if PY3:
+            import urllib.request
+            import io
+            resource = urllib.request.urlopen('https://download.pytorch.org/test_data/linear.pt')
+            self.assertRaisesRegex(io.UnsupportedOperation, expected_err_msg, lambda: torch.load(resource))
+        else:
+            import urllib
+            resource = urllib.urlopen('https://download.pytorch.org/test_data/linear.pt')
+            self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])

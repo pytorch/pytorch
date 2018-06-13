@@ -983,7 +983,7 @@ def sigmoid(input):
 # etc.
 
 def linear(input, weight, bias=None):
-    """
+    r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
     Shape:

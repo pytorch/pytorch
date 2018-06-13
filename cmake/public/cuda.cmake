@@ -1,12 +1,9 @@
 # ---[ cuda
 
-# Check if we need to use the new FindCUDA functionalities, which are included
-# since 3.7.0. Also, we know that VS2017 needs the new FindCUDA functionality,
-# so we will simply enable it for the whole Windows build.
-if (MSVC OR ${CMAKE_VERSION} VERSION_LESS 3.7.0)
-  list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
-  include(CMakeInitializeConfigs)
-endif()
+# sccache is only supported in CMake master and not in the newest official
+# release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
+include(CMakeInitializeConfigs)
 
 # Find CUDA.
 find_package(CUDA 7.0)
@@ -362,20 +359,20 @@ endif()
 # Debug and Release symbol support
 if (MSVC)
   if ((${CMAKE_BUILD_TYPE} MATCHES "Release") OR (${CMAKE_BUILD_TYPE} MATCHES "RelWithDebInfo") OR (${CMAKE_BUILD_TYPE} MATCHES "MinSizeRel"))
-    if (${BUILD_SHARED_LIBS})
-      list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD")
-    else()
+    if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MT")
+    else()
+      list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD")
     endif()
   elseif(${CMAKE_BUILD_TYPE} MATCHES "Debug")
     message(FATAL_ERROR
             "Caffe2 currently does not support the combination of MSVC, Cuda "
             "and Debug mode. Either set USE_CUDA=OFF or set the build type "
             "to Release")
-    if (${BUILD_SHARED_LIBS})
-      list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MDd")
-    else()
+    if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MTd")
+    else()
+      list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MDd")
     endif()
   else()
     message(FATAL_ERROR "Unknown cmake build type: " ${CMAKE_BUILD_TYPE})

@@ -587,7 +587,7 @@ class Module(object):
                 destination[prefix + name] = param if keep_vars else param.data
         for name, buf in self._buffers.items():
             if buf is not None:
-                destination[prefix + name] = buf
+                destination[prefix + name] = buf if keep_vars else buf.data
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)

@@ -8,16 +8,8 @@ else()
   option(USE_CUDA "Use CUDA" ON)
   option(TORCH_BUILD_TEST "Build torch test binaries" ON)
 
-  # Legacy options, which we will eventually remove
-  cmake_dependent_option(
-      NO_CUDA "Legacy no CUDA" OFF
-      "USE_CUDA" ON)
-
   # Flag for shared dependencies
   set(BUILD_TORCH ON)
-endif()
-if (NOT USE_CUDA)
-  set(NO_CUDA ON)
 endif()
 
 cmake_policy(VERSION 3.0)
@@ -53,7 +45,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-if(NOT NO_CUDA)
+if(USE_CUDA)
   set(CMAKE_MODULE_PATH
     ${INSTALL_PREFIX}/share/cmake
     ${TORCH_SRC_DIR}/../cmake/Modules
@@ -111,7 +103,7 @@ if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
 
-if(NOT NO_CUDA)
+if(USE_CUDA)
   add_definitions(-DWITH_CUDA)
 
   set(TORCH_CUDA_LIBRARIES
@@ -296,7 +288,7 @@ target_link_libraries(torch
   ${CAFFE2_LIBRARY}
   ${NANOPB_LIBRARY}
 )
-if(NOT NO_CUDA)
+if(USE_CUDA)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
     target_link_libraries(torch -Wl,--no-as-needed ${CAFFE2_GPU_LIBRARY} -Wl,--as-needed)
   else()
@@ -324,7 +316,7 @@ target_include_directories(torch SYSTEM PUBLIC
   "${TORCH_SRC_DIR}/../third_party/cereal/include" # For cereal/
   "${TORCH_SRC_DIR}/../third_party/nanopb")
 
-if(NOT NO_CUDA)
+if(USE_CUDA)
   target_include_directories(torch SYSTEM PUBLIC "${CUDA_INCLUDE_DIRS}")
 endif()
 

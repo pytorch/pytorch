@@ -13,8 +13,8 @@ IS_CONDA = 'conda' in sys.version or 'Continuum' in sys.version or any([x.starts
 CONDA_DIR = os.path.join(os.path.dirname(sys.executable), '..')
 
 
-def check_env_flag(name):
-    return os.getenv(name, '').upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
+def check_env_flag(name, default=''):
+    return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
 
 
 def gather_paths(env_vars):
