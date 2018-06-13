@@ -4,9 +4,6 @@ include(../cmake/Codegen.cmake)
 # ---[ Declare source file lists
 
 # ---[ Shared build
-add_subdirectory(proto)
-add_subdirectory(core)
-add_subdirectory(core/dispatch)
 add_subdirectory(utils)
 
 # ---[ ATen build
@@ -60,8 +57,11 @@ endif()
 if(BUILD_CAFFE2)
   # Note: the folders that are being commented out have not been properly
   # addressed yet.
+  add_subdirectory(proto)
   add_subdirectory(contrib)
+  add_subdirectory(core)
   add_subdirectory(core/nomnigraph)
+  add_subdirectory(core/dispatch)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)
   endif()
@@ -151,8 +151,14 @@ if (FALSE)
 endif()
 
 # ---[ List of libraries to link with
-add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
-add_dependencies(caffe2_protos Caffe_PROTO Caffe2_PROTO)
+if (BUILD_CAFFE2)
+  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
+  add_dependencies(caffe2_protos Caffe_PROTO Caffe2_PROTO)
+else()
+  # Do not include caffe2 or caffe protos, but rather have it only be
+  # a library to attach local protobuf.
+  add_library(caffe2_protos STATIC utils/dummy.cpp)
+endif()
 # If we are going to link protobuf locally inside caffe2 libraries, what we will do is
 # to create a helper static library that always contains libprotobuf source files, and
 # link the caffe2 related dependent libraries to it.
