@@ -109,7 +109,12 @@ def wrap_nn(thnn_h_path, install_dir, template_path):
     for fn in nn_functions:
         for t in ['Float', 'Double']:
             wrapper += wrap_function(fn.name, t, fn.arguments)
-    with open('torch/csrc/nn/THNN.cwrap', 'w') as f:
+    install_dir = install_dir or 'torch/csrc/nn'
+    try:
+        os.makedirs(install_dir)
+    except OSError:
+        pass
+    with open(os.path.join(install_dir, 'THNN.cwrap'), 'w') as f:
         f.write(wrapper)
     cwrap(os.path.join(install_dir, 'THNN.cwrap'),
           plugins=[NNExtension('torch._C._THNN'), NullableArguments()],
