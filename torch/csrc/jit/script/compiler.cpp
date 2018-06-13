@@ -253,6 +253,20 @@ Value* createConstant(Graph& g, const SourceRange& loc, const at::Tensor& val) {
   return g.insertNode(n)->output();
 }
 
+Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
+  JIT_ASSERT(val.numel() == 1);
+  auto* output = createConstant(g, loc, val);
+  if (val.type().scalarType() == at::kLong) {
+    output->setType(IntType::get());
+  } else if (val.type().scalarType() == at::kFloat) {
+    output->setType(FloatType::get());
+  } else {
+    throw ErrorReport(loc) << "createNumber with unknown scalar type ("
+							<< val.type().scalarType() << "). Please file a bug report.";
+  }
+  return output;
+}
+
 Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs) {
   // bake in constant propagation for the all-constant case because it is
   // common to see constant lists like [1, 2] passed to attributes
@@ -409,7 +423,13 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         err() << "argument '" << schema.arguments[i].name << "' not provided.\n" << loc;
         return at::nullopt;
       }
-      positional_inputs[i] = NamedValue(loc, i, createConstant(graph, loc, *default_value));
+      if (schema.arguments[i].type->isSubtypeOf(*NumberType::get())) {
+        positional_inputs[i] = NamedValue(
+            loc, i, createNumber(graph, loc, *default_value));
+      } else {
+        positional_inputs[i] = NamedValue(
+          loc, i, createConstant(graph, loc, *default_value));
+      }
     }
 
     // check input types
@@ -1302,9 +1322,15 @@ private:
 
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint()) {
-      return createConstant(*graph, c.range(), at::CPU(at::kFloat).scalarTensor(c.asFloatingPoint()));
+      return createNumber(
+          *graph,
+          c.range(),
+          at::CPU(at::kFloat).scalarTensor(c.asFloatingPoint()));
     } else {
-      return createConstant(*graph, c.range(), at::CPU(at::kLong).scalarTensor(c.asIntegral()));
+      return createNumber(
+          *graph,
+          c.range(),
+          at::CPU(at::kLong).scalarTensor(c.asIntegral()));
     }
   }
 
