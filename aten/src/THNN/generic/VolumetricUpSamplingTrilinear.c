@@ -5,7 +5,7 @@
 #define TH_GENERIC_FILE "generic/VolumetricUpSamplingTrilinear.c"
 #else
 
-#include "upsampling.h"
+#include "linear_upsampling.h"
 
 static inline void THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
@@ -83,23 +83,23 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
     }
     return;
   }
-  const accreal rdepth  = upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
-  const accreal rheight = upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
-  const accreal rwidth  = upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rdepth  = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
+  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth  = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   for (int t2 = 0; t2 < outputDepth; ++t2) {
-    const accreal t1r = upsampling_compute_source_index<accreal>(rdepth, t2, align_corners);
+    const accreal t1r = linear_upsampling_compute_source_index<accreal>(rdepth, t2, align_corners);
     const int t1 = t1r;
     const int t1p = (t1 < inputDepth - 1) ? 1 : 0;
     const real t1lambda = t1r - t1;
     const real t0lambda = (real)1. - t1lambda;
     for (int h2 = 0; h2 < outputHeight; ++h2) {
-      const accreal h1r = upsampling_compute_source_index<accreal>(rheight, h2, align_corners);
+      const accreal h1r = linear_upsampling_compute_source_index<accreal>(rheight, h2, align_corners);
       const int h1 = h1r;
       const int h1p = (h1 < inputHeight - 1) ? 1 : 0;
       const real h1lambda = h1r - h1;
       const real h0lambda = (real)1. - h1lambda;
       for (int w2 = 0; w2 < outputWidth; ++w2) {
-        const accreal w1r = upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
+        const accreal w1r = linear_upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
         const int w1 = w1r;
         const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
         const real w1lambda = w1r - w1;
@@ -173,23 +173,23 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
     }
     return;
   }
-  const accreal rdepth  = upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
-  const accreal rheight = upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
-  const accreal rwidth  = upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rdepth  = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
+  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth  = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   for (int t2 = 0; t2 < outputDepth; ++t2) {
-    const accreal t1r = upsampling_compute_source_index<accreal>(rdepth, t2, align_corners);
+    const accreal t1r = linear_upsampling_compute_source_index<accreal>(rdepth, t2, align_corners);
     const int t1 = t1r;
     const int t1p = (t1 < inputDepth - 1) ? 1 : 0;
     const real t1lambda = t1r - t1;
     const real t0lambda = (real)1. - t1lambda;
     for (int h2 = 0; h2 < outputHeight; ++h2) {
-      const accreal h1r = upsampling_compute_source_index<accreal>(rheight, h2, align_corners);
+      const accreal h1r = linear_upsampling_compute_source_index<accreal>(rheight, h2, align_corners);
       const int h1 = h1r;
       const int h1p = (h1 < inputHeight - 1) ? 1 : 0;
       const real h1lambda = h1r - h1;
       const real h0lambda = (real)1. - h1lambda;
       for (int w2 = 0; w2 < outputWidth; ++w2) {
-        const accreal w1r = upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
+        const accreal w1r = linear_upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
         const int w1 = w1r;
         const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
         const real w1lambda = w1r - w1;

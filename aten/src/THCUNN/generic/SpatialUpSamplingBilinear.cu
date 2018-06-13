@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/SpatialUpSamplingBilinear.cu"
 #else
 
-#include "../upsampling.h"
+#include "../linear_upsampling.h"
 
 static inline void THNN_(SpatialUpSamplingBilinear_shapeCheck)
                         (THCState *state,
@@ -55,8 +55,8 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
   THCDeviceTensor<real, 4> idata = toDeviceTensor<real, 4>(state, input);
   THCDeviceTensor<real, 4> odata = toDeviceTensor<real, 4>(state, output);
   THAssert(inputHeight > 0 && inputWidth > 0 && outputHeight > 0 && outputWidth > 0);
-  const accreal rheight = upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
-  const accreal rwidth = upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
@@ -92,8 +92,8 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<real, 4> data1 = toDeviceTensor<real, 4>(state, gradInput);
   THCDeviceTensor<real, 4> data2 = toDeviceTensor<real, 4>(state, gradOutput);
-  const accreal rheight = upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
-  const accreal rwidth = upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;

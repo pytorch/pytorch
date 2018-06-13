@@ -1,8 +1,8 @@
-#ifndef THNN_UPSAMPLING_H
-#define THNN_UPSAMPLING_H
+#ifndef THNN_LINEAR_UPSAMPLING_H
+#define THNN_LINEAR_UPSAMPLING_H
 
 template<typename T>
-static inline T upsampling_compute_scale(
+static inline T linear_upsampling_compute_scale(
                           int inputSize, int outputSize, bool align_corners) {
   if (outputSize > 1) {
     return align_corners ? (T) (inputSize - 1) / (outputSize - 1)
@@ -13,7 +13,7 @@ static inline T upsampling_compute_scale(
 }
 
 template<typename T>
-static inline T upsampling_compute_source_index(
+static inline T linear_upsampling_compute_source_index(
                           T scale, int dst_index, bool align_corners) {
   if (align_corners) {
     return scale * dst_index;
@@ -25,5 +25,4 @@ static inline T upsampling_compute_source_index(
 
 
 #endif
-
 

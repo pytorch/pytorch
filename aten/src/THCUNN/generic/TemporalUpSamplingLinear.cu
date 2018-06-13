@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/TemporalUpSamplingLinear.cu"
 #else
 
-#include "../upsampling.h"
+#include "../linear_upsampling.h"
 
 static inline void THNN_(TemporalUpSamplingLinear_shapeCheck)
                         (THCState *state,
@@ -50,7 +50,7 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
   THCDeviceTensor<real, 3> idata = toDeviceTensor<real, 3>(state, input);
   THCDeviceTensor<real, 3> odata = toDeviceTensor<real, 3>(state, output);
   THAssert(inputWidth > 0 && outputWidth > 0);
-  const accreal rwidth = upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
@@ -83,7 +83,7 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<real, 3> data1 = toDeviceTensor<real, 3>(state, gradInput);
   THCDeviceTensor<real, 3> data2 = toDeviceTensor<real, 3>(state, gradOutput);
-  const accreal rwidth = upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
