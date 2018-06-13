@@ -60,28 +60,7 @@ THSTensor* THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, int64_t 
 
 // directly assign without cloning or retaining (internal method)
 THSTensor* THSTensor_(_move)(THSTensor *self, THLongTensor *indices, THTensor *values) {
-  int empty = THTensor_(nDimension)(values) == 0;
-  if (!empty) {
-    THArgCheck(THLongTensor_nDimension(indices) == 2, 1,
-        "indices must be nDim x nnz");
-    THArgCheck(THLongTensor_size(indices, 1) == THTensor_(size)(values, 0), 1,
-        "indices and values must have same nnz");
-    THArgCheck(THLongTensor_size(indices, 0) == self->nDimensionI, 2,
-        "indices has incorrect first dimension, expected %d, got %d", self->nDimensionI, THLongTensor_size(indices, 0));
-    THArgCheck(THTensor_(nDimension)(values) == self->nDimensionV + 1, 3,
-        "values has incorrect number of dimensions, expected %d, got %d", self->nDimensionV + 1, THTensor_(nDimension)(values));
-  } else {
-    THArgCheck(THLongTensor_nDimension(indices) == 0, 2,
-        "if values is empty, indices must be empty too");
-  }
-  THLongTensor_free(self->indices);
-  THTensor_(free)(self->values);
-  self->indices = indices;
-  self->values = values;
-  self->nnz = empty ? 0 : THTensor_(size)(values, 0);
-  self->coalesced = 0;
-
-  return self;
+  THError("Internal error! THSTensor_(_move)(self, indices, values) shouldn't be called; use _alias_into_sparse(self, indices, values) instead");
 }
 
 THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *values) {
