@@ -615,7 +615,24 @@ def group_declarations(declarations):
 # choice of overload, and we want a different order.
 def sort_declarations(grouped_decls):
     def is_coord_smaller(arg1, arg2):
-        return arg1['dynamic_type'] == 'real' and arg2['dynamic_type'] == 'Tensor'
+        # TODO: Test for Scalar here is a hack!
+        #
+        # For some reason, when you specify a Scalar argument in a native
+        # function, you get a Declarations.yaml entry that looks like this:
+        #
+        #   - default: 1
+        #     dynamic_type: Scalar
+        #     is_nullable: false
+        #     kwarg_only: true
+        #     name: alpha
+        #     type: Scalar
+        #
+        # This is contrast to when there is a 'real' argument in TH
+        # Declarations.cwrap; this gets (correctly?) translated into
+        # dynamic_type: real, and type: Scalar.  I would like to fix this
+        # at the source but I have never understood what dynamic_type is
+        # supposed to be.
+        return (arg1['dynamic_type'] == 'real' or arg1['dynamic_type'] == 'Scalar') and arg2['dynamic_type'] == 'Tensor'
 
     def is_smaller(d1, d2):
         """Returns True if d1 < d2 in the partial order."""
