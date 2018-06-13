@@ -1262,6 +1262,7 @@
     - floating_point
   backends:
     - CPU
+    - CUDA
   variants:
     - method
     - function
@@ -1277,6 +1278,7 @@
     - floating_point
   backends:
     - CPU
+    - CUDA
   cname: i0
   return: self
   arguments:
