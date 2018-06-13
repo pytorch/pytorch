@@ -238,7 +238,7 @@ class ModuleDict(Module):
     def clear(self):
         """Remove all items from the ModuleDict.
         """
-        self._modules = OrderedDict()
+        self._modules.clear()
 
     def pop(self, key):
         r"""Remove key from the ModuleDict and return its module.
@@ -422,7 +422,7 @@ class ParameterDict(Module):
     def clear(self):
         """Remove all items from the ParameterDict.
         """
-        self._parameters = OrderedDict()
+        self._parameters.clear()
 
     def pop(self, key):
         r"""Remove key from the ParameterDict and return its parameter.
