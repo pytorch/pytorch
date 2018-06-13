@@ -6659,6 +6659,7 @@ class TestTorch(TestCase):
             self.assertEqual(t1, t2, 0)
 
     def test_print(self):
+        default_type = torch.Tensor().type()
         for t in torch._tensor_classes:
             if t == torch.HalfTensor:
                 continue  # HalfTensor does not support fill
@@ -6721,7 +6722,6 @@ class TestTorch(TestCase):
                  "                inf])")
         self.assertEqual(x.__repr__(), str(x))
         self.assertEqual(x_str, str(x))
-        torch.set_default_dtype(torch.float)
 
         # test summary
         x = torch.zeros(10000)
@@ -6741,7 +6741,7 @@ class TestTorch(TestCase):
             x_str = "tensor([123])"
             self.assertEqual(x.__repr__(), str(x))
             self.assertEqual(x_str, str(x))
-            torch.set_default_tensor_type(torch.FloatTensor)
+        torch.set_default_tensor_type(default_type)
 
         # test integral floats and requires_grad
         x = torch.tensor([123.], requires_grad=True)
