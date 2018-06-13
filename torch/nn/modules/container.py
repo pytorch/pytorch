@@ -254,12 +254,12 @@ class ModuleDict(Module):
         r"""Return an iterable of the ModuleDict’s keys.
         """
         return self._modules.keys()
- 
+
     def items(self):
         r"""Return an iterable of the ModuleDict’s key/value pairs.
         """
         return self._modules.items()
- 
+
     def values(self):
         r"""Return an iterable of the ModuleDict’s values.
         """
@@ -274,8 +274,9 @@ class ModuleDict(Module):
         """
         if not isinstance(mapping, Iterable):
             raise TypeError("ModuleDict.update should be called with an "
-                            "iterable of key/value pairs, but got " 
-                            + type(mapping).__name__)
+                            "iterable of key/value pairs, but got " +
+                            type(mapping).__name__)
+
         for key, module in mapping:
             self.add_module(str(key), module)
 
@@ -438,12 +439,12 @@ class ParameterDict(Module):
         r"""Return an iterable of the ParameterDict’s keys.
         """
         return self._parameters.keys()
- 
+
     def items(self):
         r"""Return an iterable of the ParameterDict’s key/value pairs.
         """
         return self._parameters.items()
- 
+
     def values(self):
         r"""Return an iterable of the ParameterDict’s values.
         """
@@ -458,7 +459,8 @@ class ParameterDict(Module):
         """
         if not isinstance(mapping, Iterable):
             raise TypeError("ParametersDict.update should be called with an "
-                            "iterable of key/value pairs, but got " 
-                            + type(mapping).__name__)
+                            "iterable of key/value pairs, but got " +
+                            type(mapping).__name__)
+
         for key, parameter in mapping:
             self.register_parameter(str(key), parameter)

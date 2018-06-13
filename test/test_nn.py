@@ -1099,7 +1099,7 @@ class TestNN(NNTestCase):
     def test_ModuleDict(self):
         modules = OrderedDict([
             ('act', nn.ReLU()),
-            ('conv', nn.Conv2d(10,10,3)),
+            ('conv', nn.Conv2d(10, 10, 3)),
             ('fc', nn.Linear(5, 5)),
         ])
 
@@ -1132,7 +1132,7 @@ class TestNN(NNTestCase):
         modules.update(next_modules)
         module_dict.update(next_modules)
         check()
-        
+
         del module_dict['fc']
         del modules['fc']
         check()
@@ -1257,7 +1257,7 @@ class TestNN(NNTestCase):
         parameters.update(next_parameters)
         parameter_dict.update(next_parameters)
         check()
-        
+
         del parameter_dict['p3']
         del parameters['p3']
         check()
@@ -1276,8 +1276,8 @@ class TestNN(NNTestCase):
         check()
 
         s = nn.Sequential(OrderedDict([
-            ('conv', nn.Conv2d(10,10,3)),
-            ('fc', nn.Linear(10,10)),
+            ('conv', nn.Conv2d(10, 10, 3)),
+            ('fc', nn.Linear(10, 10)),
         ]))
         parameter_dict = nn.ParameterDict(s.named_parameters())
         parameters = s.named_parameters()
