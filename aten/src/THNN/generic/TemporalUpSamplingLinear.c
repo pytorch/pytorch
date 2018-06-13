@@ -75,6 +75,7 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
     const real w1lambda = w1r - w1;
     const real w0lambda = (real)1. - w1lambda;
     const real* pos1 = &idata[w1];
+    // index w2 is interpolated by idata[w1] and (itself or idata[w1 + 1]) 
     real* pos2 = &odata[w2];
     for (int c = 0; c < channels; ++c) {
       pos2[0] = w0lambda * pos1[0] + w1lambda * pos1[w1p];
