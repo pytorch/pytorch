@@ -24,6 +24,13 @@ ELSE()
   SET(HCC_PATH $ENV{HCC_PATH})
 ENDIF()
 
+# HSA_PATH
+IF(NOT DEFINED ENV{HSA_PATH})
+  SET(HSA_PATH ${ROCM_PATH}/hsa)
+ELSE()
+  SET(HSA_PATH $ENV{HSA_PATH})
+ENDIF()
+
 # HIPBLAS_PATH
 IF(NOT DEFINED ENV{HIPBLAS_PATH})
   SET(HIPBLAS_PATH ${ROCM_PATH}/hipblas)
@@ -125,6 +132,11 @@ IF(HIP_FOUND)
   FIND_LIBRARY(hiprng_LIBRARIES hcrng HINTS ${HIPRNG_PATH}/lib)
   FIND_LIBRARY(hipblas_LIBRARIES hipblas HINTS ${HIPBLAS_PATH}/lib)
   FIND_LIBRARY(hipsparse_LIBRARIES hipsparse HINTS ${HIPSPARSE_PATH}/lib)
+
+
+  # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.
+  set(hcc_INCLUDE_DIRS ${HCC_PATH}/include)
+  set(hsa_INCLUDE_DIRS ${HSA_PATH}/include)
 
   set(thrust_INCLUDE_DIRS ${THRUST_PATH} ${THRUST_PATH}/thrust/system/cuda/detail/cub-hip)
 

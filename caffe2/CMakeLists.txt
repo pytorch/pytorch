@@ -255,12 +255,23 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  # Call again since Caffe2_HIP_INCLUDES is extended with ATen files. 
+  IF(BUILD_ATEN)
+     HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
+  ENDIF()
+  IF(BUILD_CAFFE2)
+     set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  ENDIF()
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
-
+  
+  # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
+  set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${HIP_HIPCC_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
-
+  
+  # Since PyTorch files contain HIP headers, this is also needed to capture the includes. 
+  target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
+ 
   IF(BUILD_ATEN)
     aten_set_target_props(caffe2_hip)
   ENDIF()
