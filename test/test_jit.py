@@ -480,6 +480,7 @@ class TestJit(JitTestCase):
         # NB: must not require grad; if it requires grad, it's always a Tensor
         x = torch.tensor(2.)
         y = torch.tensor(3.)
+
         def fn(x, y):
             return x - y
         trace, _ = torch.jit.get_trace_graph(fn, (x, y), nderivs=0)
