@@ -529,6 +529,7 @@ custom_half_precision = {
     'var': 1e-3,
     '__lshift__': 1e-3,
     '__rshift__': 1e-3,
+    'i0': 1e-2,
 }
 
 simple_pointwise = [
@@ -567,6 +568,7 @@ simple_pointwise_float = [
     'lgamma',
     'digamma',
     'trigamma',
+    'i0',
 ]
 
 for fn in simple_pointwise_float:
