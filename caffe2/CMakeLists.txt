@@ -257,13 +257,6 @@ if(USE_ROCM)
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
-  set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
-
-  target_include_directories(
-    caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
-  target_include_directories(
-    caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
-
   IF(BUILD_ATEN)
     aten_set_target_props(caffe2_hip)
   ENDIF()
