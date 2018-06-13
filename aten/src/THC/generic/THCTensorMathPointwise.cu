@@ -223,6 +223,18 @@ void THCTensor_(i0)(THCState* state, THCTensor* self_, THCTensor* src) {
   THCudaCheck(cudaGetLastError());
 }
 
+void THCTensor_(i1)(THCState* state, THCTensor* self_, THCTensor* src) {
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
+  if (self_ != src) {
+    THCTensor_(resizeAs)(state, self_, src);
+  }
+  if (!THC_pointwiseApply2<real, real>(state, self_, src, TensorI1Op<real, accreal>())) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
 THC_API void
 THCTensor_(lerp)(THCState *state, THCTensor *result, THCTensor *a, THCTensor *b, real w)
 {
