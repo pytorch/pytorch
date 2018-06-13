@@ -534,6 +534,7 @@ simple_pointwise_float = [
     'lgamma',
     'digamma',
     'trigamma',
+    'i0',
 ]
 
 for fn in simple_pointwise_float:
