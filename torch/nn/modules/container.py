@@ -187,6 +187,99 @@ class ModuleList(Module):
         return self
 
 
+class ModuleDict(Module):
+    r"""Holds submodules in a dictionary.
+
+    ModuleDict can be indexed like a regular Python dictionary, but modules it
+    contains are properly registered, and will be visible by all Module methods.
+
+    Arguments:
+        mapping (iterable, optional): an iterable of key/:class:`~torch.nn.Module``
+            pairs to add.
+
+    Example::
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.choices = nn.ModuleDict({
+                        'conv': nn.Conv2d(10, 10, 3),
+                        'pool': nn.MaxPool2d(3)
+                })
+
+            def forward(self, x, choice):
+                x = self.choices[choice](x)
+                return x
+    """
+
+    def __init__(self, mapping=None):
+        super(ModuleDict, self).__init__()
+        if mapping is not None:
+            self.update(mapping)
+
+    def __getitem__(self, key):
+        return self._modules[str(key)]
+
+    def __setitem__(self, key, module):
+        self.add_module(str(key), module)
+
+    def __delitem__(self, key):
+        del self._modules[str(key)]
+
+    def __len__(self):
+        return len(self._modules)
+
+    def __iter__(self):
+        return iter(self._modules.keys())
+
+    def __contains__(self, key):
+        return str(key) in self._modules
+
+    def clear(self):
+        """Remove all items from the ModuleDict.
+        """
+        self._modules = OrderedDict()
+
+    def pop(self, key):
+        r"""Remove key from the ModuleDict and return its module.
+
+        Arguments:
+            key (string): key to pop from the ModuleDict
+        """
+        v = self[key]
+        del self[key]
+        return v
+
+    def keys(self):
+        r"""Return an iterable of the ModuleDict’s keys.
+        """
+        return self._modules.keys()
+ 
+    def items(self):
+        r"""Return an iterable of the ModuleDict’s key/value pairs.
+        """
+        return self._modules.items()
+ 
+    def values(self):
+        r"""Return an iterable of the ModuleDict’s values.
+        """
+        return self._modules.values()
+
+    def update(self, mapping):
+        r"""Update the ModuleDict with the key/value pairs from mapping,
+        overwriting existing keys.
+
+        Arguments:
+            mapping (iterable): iterable of key/value pairs
+        """
+        if not isinstance(mapping, Iterable):
+            raise TypeError("ModuleDict.update should be called with an "
+                            "iterable of key/value pairs, but got " 
+                            + type(mapping).__name__)
+        for key, module in mapping:
+            self.add_module(str(key), module)
+
+
 class ParameterList(Module):
     r"""Holds parameters in a list.
 
@@ -276,3 +369,96 @@ class ParameterList(Module):
                 torch.typename(p.data), size_str, device_str)
             tmpstr = tmpstr + '  (' + k + '): ' + parastr + '\n'
         return tmpstr
+
+
+class ParameterDict(Module):
+    r"""Holds parameters in a dictionary.
+
+    ParameterDict can be indexed like a regular Python dictionary, but parameters it
+    contains are properly registered, and will be visible by all Module methods.
+
+    Arguments:
+        mapping (iterable, optional): an iterable of key/:class:`~torch.nn.Parameter``
+            pairs to add.
+
+    Example::
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.choices = nn.ParameterDict({
+                        'left': nn.Parameter(torch.randn(10, 10)),
+                        'right': nn.Parameter(torch.randn(10, 10))
+                })
+
+            def forward(self, x, choice):
+                x = self.params[choice].mm(x)
+                return x
+    """
+
+    def __init__(self, mapping=None):
+        super(ParameterDict, self).__init__()
+        if mapping is not None:
+            self.update(mapping)
+
+    def __getitem__(self, key):
+        return self._parameters[str(key)]
+
+    def __setitem__(self, key, parameter):
+        self.register_parameter(str(key), parameter)
+
+    def __delitem__(self, key):
+        del self._parameters[str(key)]
+
+    def __len__(self):
+        return len(self._parameters)
+
+    def __iter__(self):
+        return iter(self._parameters.keys())
+
+    def __contains__(self, key):
+        return str(key) in self._parameters
+
+    def clear(self):
+        """Remove all items from the ParameterDict.
+        """
+        self._parameters = OrderedDict()
+
+    def pop(self, key):
+        r"""Remove key from the ParameterDict and return its parameter.
+
+        Arguments:
+            key (string): key to pop from the ParameterDict
+        """
+        v = self[key]
+        del self[key]
+        return v
+
+    def keys(self):
+        r"""Return an iterable of the ParameterDict’s keys.
+        """
+        return self._parameters.keys()
+ 
+    def items(self):
+        r"""Return an iterable of the ParameterDict’s key/value pairs.
+        """
+        return self._parameters.items()
+ 
+    def values(self):
+        r"""Return an iterable of the ParameterDict’s values.
+        """
+        return self._parameters.values()
+
+    def update(self, mapping):
+        r"""Update the ParameterDict with the key/value pairs from mapping,
+        overwriting existing keys.
+
+        Arguments:
+            mapping (iterable): iterable of key/value pairs
+        """
+        if not isinstance(mapping, Iterable):
+            raise TypeError("ParametersDict.update should be called with an "
+                            "iterable of key/value pairs, but got " 
+                            + type(mapping).__name__)
+        for key, parameter in mapping:
+            self.register_parameter(str(key), parameter)
