@@ -606,6 +606,15 @@ static Value* ensureTensor(const SourceRange& range, Value* v) {
   return v;
 }
 
+static Value* ensureTensorOrNumber(const SourceRange& range, Value* v) {
+  if(!v->type()->isSubtypeOf(*NumberType::get()) && !isTensorSubtype(v)) {
+    throw ErrorReport(range) << "expected a Number or Tensor value but found a "
+                             << *v->type();
+  }
+  return v;
+}
+
+
 void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values) {
   for(auto value : values) {
     ensureTensor(range, value);
@@ -886,13 +895,13 @@ private:
     {
       WithInsertPoint guard(n);
       if (max_trip_count) {
-        max_trip_count_val = emitExpr(max_trip_count.value());
+        max_trip_count_val = emitExpr(max_trip_count.value(), ensureTensorOrNumber);
       } else {
         max_trip_count_val =
             emitConst(Const::create(range, std::to_string(INT_MAX)));
       }
       if (cond) {
-        cond_val = emitExpr(cond.value());
+        cond_val = emitExpr(cond.value(), ensureTensorOrNumber);
       } else {
         cond_val = emitBooleanConst(range, true);
       }
@@ -912,7 +921,7 @@ private:
 
       // Also emit the conditional
       if (cond) {
-        Value* body_cond_value = emitExpr(cond.value());
+        Value* body_cond_value = emitExpr(cond.value(), ensureTensorOrNumber);
         body_block->registerOutput(body_cond_value);
       } else {
         Value* cond_value_dummy = emitBooleanConst(range, true);
@@ -1419,7 +1428,9 @@ private:
       TreeList&& inputs) {
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
-    const auto input_values = getValues(applyInputs->trees());
+    const auto input_values = getValues(applyInputs->trees(),
+                                        /*maybe_unpack*/false,
+                                        ensureTensorOrNumber);
     Value* tensor = input_values[0];
     Value* begin = input_values[1];
     Value* end = input_values[2];
@@ -1443,7 +1454,9 @@ private:
       TreeList&& inputs) {
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
-    const auto input_values = getValues(applyInputs->trees());
+    const auto input_values = getValues(applyInputs->trees(),
+                                        /*maybe_unpack*/false,
+                                        ensureTensorOrNumber);
     Value* tensor = input_values[0];
     Value* dim =
         createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(0));
