@@ -111,9 +111,7 @@ option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
 option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
-cmake_dependent_option(
-    USE_NUMA "Use NUMA (only available on Linux)" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_NUMA "Use NUMA (only available on Linux)" ON)
 cmake_dependent_option(
     USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
     "USE_CUDA" OFF)
