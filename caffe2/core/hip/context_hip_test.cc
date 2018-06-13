@@ -111,7 +111,8 @@ TEST(HIPContextTest, TestSameThreadSameObject)
     HIPContext context_b(0);
     EXPECT_EQ(context_a.hip_stream(), context_b.hip_stream());
     EXPECT_EQ(context_a.rocblas_handle(), context_b.rocblas_handle());
-    EXPECT_EQ(context_a.hip_stream(), getStreamForHandle(context_b.rocblas_handle()));
+    EXPECT_EQ(
+        context_a.hip_stream(), getStreamForHandle(context_b.rocblas_handle()));
     // hipRAND generators are context-local.
     EXPECT_NE(context_a.hiprand_generator(), context_b.hiprand_generator());
 }
@@ -124,7 +125,9 @@ TEST(HIPContextTest, TestSameThreadDifferntObjectIfDifferentDevices)
         HIPContext context_b(1);
         EXPECT_NE(context_a.hip_stream(), context_b.hip_stream());
         EXPECT_NE(context_a.rocblas_handle(), context_b.rocblas_handle());
-        EXPECT_NE(context_a.hip_stream(), getStreamForHandle(context_b.rocblas_handle()));
+        EXPECT_NE(
+            context_a.hip_stream(),
+            getStreamForHandle(context_b.rocblas_handle()));
         EXPECT_NE(context_a.hiprand_generator(), context_b.hiprand_generator());
     }
 }

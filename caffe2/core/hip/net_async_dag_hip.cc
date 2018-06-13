@@ -150,14 +150,14 @@ bool AsyncDAGNet::RunAt(int chain_id, const std::vector<int>& chain)
     {
         ProfiledRange r(operator_nodes_[idx].operator_->debug_def(), kRunColor);
         {
-            TRACE_EVENT(
+          TRACE_EVENT(
               tracing::TRACE_OP,
               idx,
               tracing::TRACE_TASK,
               chain_id,
               tracing::TRACE_STREAM,
               stream_id);
-            success &= operator_nodes_[idx].operator_->RunAsync(stream_id);
+          success &= operator_nodes_[idx].operator_->RunAsync(stream_id);
         }
     }
 

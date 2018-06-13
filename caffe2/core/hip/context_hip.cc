@@ -257,17 +257,19 @@ static inline int RectifyGPUID(const int gpu_id) {
 }
 
 HIPContext::HIPContext(const int gpu_id)
-    : gpu_id_(RectifyGPUID(gpu_id)), random_seed_(RandomNumberSeed())
-{
-    static Caffe2HipInitializerHelper g_hip_initializer_;
+    : gpu_id_(RectifyGPUID(gpu_id)), random_seed_(RandomNumberSeed()) {
+  static Caffe2HipInitializerHelper g_hip_initializer_;
 }
 
 HIPContext::HIPContext(const DeviceOption& option)
-    : gpu_id_(option.has_hip_gpu_id() ? RectifyGPUID(option.hip_gpu_id()) : CaffeHipGetDevice()),
-      random_seed_(option.has_random_seed() ? option.random_seed() : RandomNumberSeed())
-{
-    static Caffe2HipInitializerHelper g_hip_initializer_;
-    DCHECK_EQ(option.device_type(), HIP);
+    : gpu_id_(
+          option.has_hip_gpu_id() ? RectifyGPUID(option.hip_gpu_id())
+                                  : CaffeHipGetDevice()),
+      random_seed_(
+          option.has_random_seed() ? option.random_seed()
+                                   : RandomNumberSeed()) {
+  static Caffe2HipInitializerHelper g_hip_initializer_;
+  DCHECK_EQ(option.device_type(), HIP);
 }
 
 // shared mutex to lock out alloc / free during NCCL launches

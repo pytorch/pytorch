@@ -37,86 +37,76 @@ namespace caffe2 {
  *                            GPUFallbackOp<MyMagicOp, SkipIndices<0>>);
  */
 template <class CPUOp, typename SkipOutputCopy = SkipIndices<>>
-class GPUFallbackOp final : public Operator<HIPContext>
-{
-    public:
-    USE_OPERATOR_FUNCTIONS(HIPContext);
-    GPUFallbackOp(const OperatorDef& def, Workspace* ws) : Operator<HIPContext>(def, ws)
-    {
-        CAFFE_ENFORCE_EQ(def.device_option().device_type(), HIP);
-        OperatorDef base_def_(def);
-        // base_def_ runs on CPU, so we will set its device option to CPU.
-        base_def_.clear_device_option();
-        base_def_.mutable_device_option()->set_device_type(CPU);
-        // Set up the symbols for the local workspace.
-        for(const string& name : def.input())
-        {
-            local_input_blobs_.push_back(local_ws_.CreateBlob(name));
-            CHECK_NOTNULL(local_input_blobs_.back());
-        }
-        base_op_.reset(new CPUOp(base_def_, &local_ws_));
-        for(const string& name : def.output())
-        {
-            local_output_blobs_.push_back(local_ws_.GetBlob(name));
-            CHECK_NOTNULL(local_output_blobs_.back());
-        }
+class GPUFallbackOp final : public Operator<HIPContext> {
+ public:
+  USE_OPERATOR_FUNCTIONS(HIPContext);
+  GPUFallbackOp(const OperatorDef& def, Workspace* ws)
+      : Operator<HIPContext>(def, ws) {
+    CAFFE_ENFORCE_EQ(def.device_option().device_type(), HIP);
+    OperatorDef base_def_(def);
+    // base_def_ runs on CPU, so we will set its device option to CPU.
+    base_def_.clear_device_option();
+    base_def_.mutable_device_option()->set_device_type(CPU);
+    // Set up the symbols for the local workspace.
+    for (const string& name : def.input()) {
+      local_input_blobs_.push_back(local_ws_.CreateBlob(name));
+      CHECK_NOTNULL(local_input_blobs_.back());
+    }
+    base_op_.reset(new CPUOp(base_def_, &local_ws_));
+    for (const string& name : def.output()) {
+      local_output_blobs_.push_back(local_ws_.GetBlob(name));
+      CHECK_NOTNULL(local_output_blobs_.back());
+    }
+  }
+
+  bool RunOnDevice() override {
+    bool need_sync = false;
+    for (int i = 0; i < InputSize(); ++i) {
+      if (OperatorBase::InputIsType<TensorHIP>(i)) {
+        local_input_blobs_[i]->template GetMutable<TensorCPU>()->CopyFrom(
+            Input(i), &context_);
+        need_sync = true;
+      } else {
+        VLOG(1) << "Input " << i << " is not TensorHIP. Skipping copy.";
+        // Note(jiayq): This removes a const but conceptually
+        // local_input_blobs will only be used as const blob input for the
+        // base op so we are still fine.
+        local_input_blobs_[i]->ShareExternal(
+            const_cast<void*>(OperatorBase::Inputs()[i]->GetRaw()),
+            OperatorBase::Inputs()[i]->meta());
+      }
     }
 
-    bool RunOnDevice() override
-    {
-        bool need_sync = false;
-        for(int i = 0; i < InputSize(); ++i)
-        {
-            if(OperatorBase::InputIsType<TensorHIP>(i))
-            {
-                local_input_blobs_[i]->template GetMutable<TensorCPU>()->CopyFrom(Input(i),
-                                                                                  &context_);
-                need_sync = true;
-            }
-            else
-            {
-                VLOG(1) << "Input " << i << " is not TensorHIP. Skipping copy.";
-                // Note(jiayq): This removes a const but conceptually
-                // local_input_blobs will only be used as const blob input for the
-                // base op so we are still fine.
-                local_input_blobs_[i]->ShareExternal(
-                    const_cast<void*>(OperatorBase::Inputs()[i]->GetRaw()),
-                    OperatorBase::Inputs()[i]->meta());
-            }
-        }
-
-        // Sync to make sure copies are done.
-        if(need_sync)
-        {
-            context_.FinishDeviceComputation();
-        }
-
-        if(!base_op_->Run())
-        {
-            LOG(ERROR) << "Base op run failed in GPUFallbackOp. Def: "
-                       << ProtoDebugString(this->debug_def());
-            return false;
-        }
-        for(int i = 0; i < OutputSize(); ++i)
-        {
-            if(SkipOutputCopy::Contains(i))
-            {
-                VLOG(1) << "Copy output: index " << i << " skipped.";
-                continue;
-            }
-            CAFFE_ENFORCE(local_output_blobs_[i]->template IsType<TensorCPU>(),
-                          "GPU fallback op currently does not support non-TensorCPU "
-                          "output type who needs copying.");
-            Output(i)->CopyFrom(local_output_blobs_[i]->template Get<TensorCPU>(), &context_);
-        }
-        return true;
+    // Sync to make sure copies are done.
+    if (need_sync) {
+      context_.FinishDeviceComputation();
     }
 
-    protected:
-    Workspace local_ws_;
-    vector<Blob*> local_input_blobs_;
-    vector<Blob*> local_output_blobs_;
-    std::unique_ptr<CPUOp> base_op_;
+    if (!base_op_->Run()) {
+      LOG(ERROR) << "Base op run failed in GPUFallbackOp. Def: "
+                 << ProtoDebugString(this->debug_def());
+      return false;
+    }
+    for (int i = 0; i < OutputSize(); ++i) {
+      if (SkipOutputCopy::Contains(i)) {
+        VLOG(1) << "Copy output: index " << i << " skipped.";
+        continue;
+      }
+      CAFFE_ENFORCE(
+          local_output_blobs_[i]->template IsType<TensorCPU>(),
+          "GPU fallback op currently does not support non-TensorCPU "
+          "output type who needs copying.");
+      Output(i)->CopyFrom(
+          local_output_blobs_[i]->template Get<TensorCPU>(), &context_);
+    }
+    return true;
+  }
+
+ protected:
+  Workspace local_ws_;
+  vector<Blob*> local_input_blobs_;
+  vector<Blob*> local_output_blobs_;
+  std::unique_ptr<CPUOp> base_op_;
 };
 
 } // namespace caffe2

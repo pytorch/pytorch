@@ -5,8 +5,8 @@
 #include <gtest/gtest.h>
 
 #include "caffe2/core/context.h"
-#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/flags.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/utility_ops.h"
 #include "caffe2/utils/math.h"
 
@@ -402,12 +402,7 @@ TEST_F(ReduceTensorGPUTest, ReduceMinGPUTest) {
         num_dims, dims, num_axes, axes, X, Y, context);
   };
   // Test for 1D tensor.
-  RunRedcueTensorTest(
-      reduce_min,
-      {3},
-      {0},
-      {1.0f, 2.0f, 3.0f},
-      {1.0f});
+  RunRedcueTensorTest(reduce_min, {3}, {0}, {1.0f, 2.0f, 3.0f}, {1.0f});
 
   // Test for 2D Tensor.
   RunRedcueTensorTest(
@@ -423,11 +418,7 @@ TEST_F(ReduceTensorGPUTest, ReduceMinGPUTest) {
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
       {1.0f, 2.0f, 3.0f});
   RunRedcueTensorTest(
-      reduce_min,
-      {2, 3},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {1.0f});
+      reduce_min, {2, 3}, {0, 1}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}, {1.0f});
 
   // Test for 3D tensor.
   RunRedcueTensorTest(
@@ -465,12 +456,7 @@ TEST_F(ReduceTensorGPUTest, ReduceMaxGPUTest) {
         num_dims, dims, num_axes, axes, X, Y, context);
   };
   // Test for 1D tensor.
-  RunRedcueTensorTest(
-      reduce_max,
-      {3},
-      {0},
-      {1.0f, 2.0f, 3.0f},
-      {3.0f});
+  RunRedcueTensorTest(reduce_max, {3}, {0}, {1.0f, 2.0f, 3.0f}, {3.0f});
 
   // Test for 2D Tensor.
   RunRedcueTensorTest(
@@ -486,11 +472,7 @@ TEST_F(ReduceTensorGPUTest, ReduceMaxGPUTest) {
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
       {4.0f, 5.0f, 6.0f});
   RunRedcueTensorTest(
-      reduce_max,
-      {2, 3},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {6.0f});
+      reduce_max, {2, 3}, {0, 1}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}, {6.0f});
 
   // Test for 3D tensor.
   RunRedcueTensorTest(
@@ -519,11 +501,7 @@ TEST_F(ReduceTensorGPUTest, ReduceSumGPUTest) {
   }
   // Test for 1D tensor.
   RunRedcueTensorTest(
-      math::ReduceSum<float, HIPContext>,
-      {3},
-      {0},
-      {1.0f, 2.0f, 3.0f},
-      {6.0f});
+      math::ReduceSum<float, HIPContext>, {3}, {0}, {1.0f, 2.0f, 3.0f}, {6.0f});
 
   // Test for 2D Tensor.
   RunRedcueTensorTest(

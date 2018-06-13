@@ -47,9 +47,9 @@ TEST(EnginePrefTest, GPUDeviceDefaultPreferredEngines)
     op_def.set_type("JustTest");
 
     {
-        const auto op = CreateOperator(op_def, &ws);
-        EXPECT_NE(nullptr, op.get());
-        EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "HIP");
+      const auto op = CreateOperator(op_def, &ws);
+      EXPECT_NE(nullptr, op.get());
+      EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "HIP");
     }
 }
 

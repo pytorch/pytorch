@@ -299,7 +299,9 @@ namespace {
 class HipRuntimeFlagFlipper
 {
     public:
-    HipRuntimeFlagFlipper() { internal::SetHipRuntimeFlag(); }
+     HipRuntimeFlagFlipper() {
+       internal::SetHipRuntimeFlag();
+     }
 };
 static HipRuntimeFlagFlipper g_flipper;
 } // namespace
