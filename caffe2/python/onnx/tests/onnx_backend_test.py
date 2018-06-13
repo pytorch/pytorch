@@ -47,18 +47,7 @@ backend_test.exclude('(test_cast_.*'
                      '|test_operator_rnn.*_cuda)')
 
 # Temporarily skip some ONNX backend tests with broadcasting.
-backend_test.exclude('(test_xor_bcast'
-                     '|test_or_bcast'
-                     '|test_and_bcast'
-                     '|test_greater_bcast'
-                     '|test_equal_bcast'
-                     '|test_less_bcast'
-                     '|test_add_bcast'
-                     '|test_sub_bcast'
-                     '|test_mul_bcast'
-                     '|test_div_bcast'
-                     '|test_pow_bcast'
-                     '|test_gemm_broadcast'
+backend_test.exclude('(test_pow_bcast'
                      ')')
 
 # Skip vgg to speed up CI
