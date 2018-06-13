@@ -254,8 +254,10 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  # This is needed for library added by hip_add_library (same for hip_add_executable)
-  HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
+  # Call again since Caffe2_HIP_INCLUDES is extended with ATen files. 
+  IF(BUILD_ATEN)
+     HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
+  ENDIF()
   IF(BUILD_CAFFE2)
      set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
   ENDIF()
