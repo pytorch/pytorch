@@ -5,7 +5,6 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
         utils/signal_handler.cc
         utils/string_utils.cc
         utils/threadpool/ThreadPool.cc
-        utils/thread_name.cc
         utils/cpuid.cc
         utils/bench_utils.cc
         utils/math_cpu.cc
