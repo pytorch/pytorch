@@ -64,19 +64,11 @@ THSTensor* THSTensor_(_move)(THSTensor *self, THLongTensor *indices, THTensor *v
 }
 
 THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *values) {
-  // Note: Not like torch.set, this is an internal method
-  return THSTensor_(_move)(
-    self, THLongTensor_newClone(indices), THTensor_(newClone)(values));
+  THError("Internal error! THSTensor_(_set)(self, indices, values) shouldn't be called; use _copy_into_sparse(self, indices, values) instead");
 }
 
 static inline THSTensor* THSTensor_(_newWithDimsAndTensor)(int64_t nDimI, int64_t nDimV, int64_t *sizes, THLongTensor *indices, THTensor *values) {
-  THSTensor *self = THSTensor_(new)();
-  THSTensor_(rawResize)(self, nDimI, nDimV, sizes);
-
-  // NB: by default, we do NOT clone indices/values into the sparse tensor.
-  // Efficient API by default!
-  THSTensor_(_move)(self, THLongTensor_newWithTensor(indices), THTensor_(newWithTensor)(values));
-  return self;
+  THError("Internal error! THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, sizes, indices, values) shouldn't be called; use _new_with_dims_and_tensor_sparse(dtype, nDimI, nDimV, sizes, indices, values) instead");
 }
 
 /*** end helper methods ***/
@@ -84,91 +76,23 @@ static inline THSTensor* THSTensor_(_newWithDimsAndTensor)(int64_t nDimI, int64_
 /* Empty init */
 THSTensor *THSTensor_(new)(void)
 {
-  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
-  THSTensor_(rawInit)(self);
-  return self;
+  THError("Internal error! THSTensor_(new)() shouldn't be called; use dtype.tensor() instead");
 }
 
 /* Pointer-copy init */
 THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values)
 {
-  // If sizes are not given, it is inferred as max index of each dim.
-  int64_t nDimI = THLongTensor_size(indices, 0);
-  int64_t nDimV = THTensor_(nDimension)(values) - 1;
-
-  THLongTensor *ignore = THLongTensor_new();
-  THLongTensor *computed_indices_sizes = THLongTensor_new();
-  THLongTensor *computed_sizes = THLongTensor_newWithSize1d(nDimI + nDimV);
-  THLongTensor_max(computed_indices_sizes, ignore, indices, 1, 1);
-  THLongTensor_add(computed_indices_sizes, computed_indices_sizes, 1);
-  for (int d = 0; d < nDimI; d++) {
-      THLongTensor_fastSet1d(computed_sizes, d, THLongTensor_fastGet1d(computed_indices_sizes, d));
-  }
-  for (int d = 0; d < nDimV; d++) {
-      THLongTensor_fastSet1d(computed_sizes, nDimI + d, THTensor_(size)(values, d + 1));
-  }
-
-  THSTensor *self = THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, THLongTensor_data(computed_sizes), indices, values);
-  THLongTensor_free(computed_indices_sizes);
-  THLongTensor_free(computed_sizes);
-  THLongTensor_free(ignore);
-  return self;
+  THError("Internal error! THSTensor_(newWithTensor)(indices, values) shouldn't be called; use dtype.sparse_coo_tensor(indices, values) instead");
 }
 
 THSTensor *THSTensor_(newWithTensorAndSizeUnsafe)(THLongTensor *indices, THTensor *values, THLongStorage *sizes)
 {
-  if (sizes == NULL)
-  {
-    return THSTensor_(newWithTensor)(indices, values);
-  }
-  if (THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0)
-  {
-    return THSTensor_(newWithSize)(sizes, NULL);
-  }
-
-  int64_t nDimI = THLongTensor_size(indices, 0);
-  int64_t nDimV = THTensor_(nDimension)(values) - 1;
-
-  return THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, THLongStorage_data(sizes), indices, values);
+  THError("Internal error! THSTensor_(newWithTensorAndSizeUnsafe)(indices, values, sizes) shouldn't be called; use dtype._sparse_coo_tensor_unsafe(indices, values, unsafe) instead");
 }
 
 THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongStorage *sizes)
 {
-  if (sizes == NULL)
-  {
-    return THSTensor_(newWithTensor)(indices, values);
-  }
-  if (THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0)
-  {
-    return THSTensor_(newWithSize)(sizes, NULL);
-  }
-
-  int64_t nDimI = THLongTensor_size(indices, 0);
-  int64_t nDimV = THTensor_(nDimension)(values) - 1;
-  THArgCheck(THLongStorage_size(sizes) == nDimI + nDimV, 2,
-      "number of dimensions must be nDimI + nDimV");
-
-  THLongTensor *max_indices = THLongTensor_new();
-  THLongTensor *ignore = THLongTensor_new();
-  THLongTensor_max(max_indices, ignore, indices, 1, 0);
-  THLongTensor_free(ignore);
-  for (int d = 0; d < nDimI; d++) {
-    int64_t max_index_in_dim = THLongTensor_fastGet1d(max_indices, d);
-    int64_t dim_size = THLongStorage_data(sizes)[d];
-    THArgCheck(max_index_in_dim < dim_size, 2,
-        "sizes is inconsistent with indices: for dim %d, size is %lld but found index %lld",
-        d, (long long)dim_size, (long long)max_index_in_dim);
-  }
-  for (int d = 0; d < nDimV; d++) {
-    int64_t values_size = THTensor_(size)(values, d + 1);
-    int64_t specified_size = THLongStorage_data(sizes)[nDimI + d];
-    THArgCheck(values_size <= specified_size, 2,
-        "values and sizes are inconsistent: sizes[%d] is %lld but values.size(%d) is %lld",
-        d + nDimI, (long long)specified_size, d + 1, (long long)values_size);
-  }
-  THLongTensor_free(max_indices);
-
-  return THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, THLongStorage_data(sizes), indices, values);
+  THError("Internal error! THSTensor_(newWithTensorAndSize)(indices, values, sizes) shouldn't be called; use dtype.sparse_coo_tensor(indices, values, sizes) instead");
 }
 
 THSTensor *THSTensor_(newWithSize)(THLongStorage *size, THLongStorage *_ignored)
