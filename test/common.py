@@ -94,7 +94,10 @@ def get_cuda_memory_usage():
     # we don't need CUDA synchronize because the statistics are not tracked at
     # actual freeing, but at when marking the block as free.
     num_devices = torch.cuda.device_count()
+    torch.cuda.synchronize()
+    gc.set_debug(gc.DEBUG_UNCOLLECTABLE)
     gc.collect()
+    print(gc.garbage)
     return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
 
 
@@ -188,7 +191,7 @@ class TestCase(unittest.TestCase):
         test_method = getattr(self, method_name)
         self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
         # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
-        if self._do_cuda_memory_leak_check and not IS_WINDOWS:
+        if self._do_cuda_memory_leak_check:
             # the import below may initialize CUDA context, so we do it only if
             # self._do_cuda_memory_leak_check is True.
             from common_cuda import TEST_CUDA
