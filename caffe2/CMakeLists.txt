@@ -250,31 +250,15 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
+  set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
-  IF(BUILD_ATEN)
-    # Set necessary HIPCC Flags
-    SET(HIP_HCC_FLAGS "-fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
-    SET(Caffe2_HIP_CXX_FLAGS "-fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${Caffe2_HIP_CXX_FLAGS}")
-  ENDIF()
-
-  # Since the HIP_ADD_LIBRARY is a MACRO, we need to set HIP_HCC_FLAGS prior to calling it.
-  # Also, Since HIP_INCLUDE_DIRECTORIES is a MACRO, we must call it before HIP_ADD_LIBRARY.
-  HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
-
-  set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
-
-  target_include_directories(
-    caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
-  target_include_directories(
-    caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
+  target_link_libraries(caffe2_hip PUBLIC caffe2)
+  target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   IF(BUILD_ATEN)
     aten_set_target_props(caffe2_hip)
   ENDIF()
-
-  target_link_libraries(caffe2_hip PUBLIC caffe2)
-  target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
   # To avoid having to do above, keep this commented.
@@ -300,9 +284,6 @@ if(BUILD_CAFFE2)
     if (USE_CUDA)
       list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_GPU_TEST_SRCS})
     endif()
-    if(USE_ROCM)
-      list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_HIP_TEST_SRCS})
-    endif()
 
     foreach(test_src ${Caffe2_ALL_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
@@ -319,11 +300,16 @@ if(BUILD_CAFFE2)
 
     if(USE_ROCM)
       foreach(test_src ${Caffe2_HIP_TEST_SRCS})
+        set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
         get_filename_component(test_name ${test_src} NAME_WE)
-        set_target_properties(${test_name} PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
-        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE HIP)
+        hip_add_executable(${test_name} "${test_src}")
+        target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
         if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
           target_compile_features(${test_name} PRIVATE cxx_range_for)
+        endif()
+        add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+        if (INSTALL_TEST)
+          install(TARGETS ${test_name} DESTINATION test)
         endif()
       endforeach()
     endif()
@@ -426,6 +412,26 @@ if(BUILD_CAFFE2)
       install(TARGETS caffe2_pybind11_state_gpu DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
     endif()
 
+    if(USE_ROCM)
+      set_source_files_properties(${Caffe2_HIP_PYTHON_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+      hip_add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
+      if (APPLE)
+        set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
+      endif()
+      set_target_properties(
+          caffe2_pybind11_state_hip PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+          ${CMAKE_BINARY_DIR}/caffe2/python)
+      target_link_libraries(
+          caffe2_pybind11_state_hip caffe2_library caffe2_hip_library)
+      if (WIN32)
+        target_link_libraries(caffe2_pybind11_state_hip ${PYTHON_LIBRARIES})
+      endif(WIN32)
+      install(TARGETS caffe2_pybind11_state_hip DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
+    endif()
+
     if (MSVC AND CMAKE_GENERATOR MATCHES "Visual Studio")
       # If we are building under windows, we will copy the file from
       # build/caffe2/python/{Debug,Release}/caffe2_pybind11_state.pyd
@@ -443,6 +449,14 @@ if(BUILD_CAFFE2)
             TARGET windows_python_copy_lib POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy
             $<TARGET_FILE:caffe2_pybind11_state_gpu>
+            ${CMAKE_BINARY_DIR}/caffe2/python)
+      endif()
+      if (USE_ROCM)
+        add_dependencies(windows_python_copy_lib caffe2_pybind11_state_hip)
+        add_custom_command(
+            TARGET windows_python_copy_lib POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+            $<TARGET_FILE:caffe2_pybind11_state_hip>
             ${CMAKE_BINARY_DIR}/caffe2/python)
       endif()
     endif()
