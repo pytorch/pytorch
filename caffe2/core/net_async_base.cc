@@ -68,9 +68,9 @@ AsyncNetBase::AsyncNetBase(
     operators_.push_back(op_ptr);
   }
 
-  const auto& execution_chains = dag_utils::computeChains(operator_nodes_);
-  chains_.reserve(execution_chains.size());
-  for (const auto& kv : execution_chains) {
+  execution_chains_ = dag_utils::computeChains(operator_nodes_);
+  chains_.reserve(execution_chains_.size());
+  for (const auto& kv : execution_chains_) {
     chains_.push_back(kv.second);
   }
   chain_nodes_ = dag_utils::prepareChainGraphNodes(operator_nodes_, chains_);
