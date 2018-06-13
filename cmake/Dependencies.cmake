@@ -457,7 +457,7 @@ if(BUILD_CAFFE2)
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
 
     HIP_INCLUDE_DIRECTORIES(
-      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS})
+      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
       ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
@@ -516,13 +516,6 @@ if(BUILD_CAFFE2)
     else()
       include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
     endif()
-  endif()
-  if(USE_ROCM)
-    include_directories($ENV{THRUST_ROOT})
-    #For cub-hip
-    include_directories($ENV{THRUST_ROOT}/thrust/system/cuda/detail/cub-hip)
-    message(STATUS "Found Thrust: $ENV{THRUST_ROOT}")
-    message(STATUS "Found cub-hip: $ENV{THRUST_ROOT}/thrust/system/cuda/detail/cub-hip")
   endif()
 endif()
 
