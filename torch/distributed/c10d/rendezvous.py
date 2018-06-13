@@ -28,7 +28,7 @@ def register_rendezvous_handler(scheme, handler):
     Arguments:
         scheme (str): URL scheme to identify your rendezvous handler.
         handler (function): Handler that is invoked when the
-            `rendezvous()` function is called with an URL that uses
+            `rendezvous()` function is called with a URL that uses
             the corresponding scheme. It must be a generator function
             that yields the triplet.
     """
