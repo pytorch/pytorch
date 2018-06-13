@@ -377,6 +377,33 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+
+static Value* numToTensor(
+    const SourceRange& loc,
+    Graph& graph,
+    Value* value) {
+  JIT_ASSERT(value->type()->isSubtypeOf(*NumberType::get()));
+  auto* result = graph.insertNode(graph.create(prim::NumToTensor, {value})
+      ->setSourceLocation(std::make_shared<SourceRange>(loc)))
+      ->output();
+  result->setType(DynamicType::get());
+  return result;
+}
+
+static Value* tensorToNum(
+    const SourceRange& loc,
+    Graph& graph,
+    Value* value,
+    const TypePtr type) {
+  JIT_ASSERT(value->type()->isSubtypeOf(*DynamicType::get()));
+  JIT_ASSERT(type->isSubtypeOf(*NumberType::get()));
+  auto* result = graph.insertNode(graph.create(prim::TensorToNum, {value})
+      ->setSourceLocation(std::make_shared<SourceRange>(loc)))
+      ->output();
+  result->setType(type);
+  return result;
+}
+
 at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
@@ -445,6 +472,13 @@ at::optional<std::vector<Value*>> tryMatchSchema(
          v.value->type()->isSubtypeOf(*ListType::ofTensors())) {
         auto unpacked = createTupleUnpack(v.value);
         v.value = createStack(graph, loc, unpacked);
+      }
+
+      // implicit conversion from Tensor to Python Number
+      // FIXME: remove this when we support passing numbers into script fns
+      if (v.value->type()->isSubtypeOf(*DynamicType::get()) &&
+        arg.type->isSubtypeOf(*NumberType::get())) {
+        v.value = tensorToNum(loc, graph, v.value, arg.type);
       }
 
       if(!v.value->type()->isSubtypeOf(*arg.type)) {
