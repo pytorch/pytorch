@@ -11,7 +11,7 @@
 #include <caffe2/core/hip/common_hip.h>
 #endif
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+#if __CUDA_ARCH__ || __HIP_DEVICE_COMPILE__
 #define CONVERSIONS_DECL __host__ __device__ inline
 #else
 #define CONVERSIONS_DECL inline
@@ -175,19 +175,13 @@ CONVERSIONS_DECL OUT To(const IN in) {
 // explicit for fp16
 template <>
 CONVERSIONS_DECL float16 To(const float in) {
-#if __CUDA_ARCH__
+#if __CUDA_ARCH__ && CUDA_VERSION >= 9000
   // hacky interface between C2 fp16 and CUDA
-#if CUDA_VERSION >= 9000
   half rh = __float2half(in);
   return halfToFloat16(rh);
-#else
+#elif __CUDA_ARCH__ || __HIP_DEVICE_COMPILE__
   float16 ret;
   ret.x = __float2half(in).x;
-  return ret;
-#endif // CUDA_VERSION >= 9000
-#elif __HIP_DEVICE_COMPILE__
-  float16 ret;
-  ret.x = __float2half(in);
   return ret;
 #else
   return cpu_float2half_rn(in);
@@ -196,17 +190,13 @@ CONVERSIONS_DECL float16 To(const float in) {
 
 template <>
 CONVERSIONS_DECL float To(const float16 in) {
-#if __CUDA_ARCH__
-#if CUDA_VERSION >= 9000
+#if __CUDA_ARCH__ && CUDA_VERSION >= 9000
   __half_raw tmp;
-#else
-  __half tmp;
-#endif
   tmp.x = in.x;
   return __half2float(tmp);
-#elif __HIP_DEVICE_COMPILE__
+#elif __CUDA_ARCH__ || __HIP_DEVICE_COMPILE__
   __half tmp;
-  tmp = in.x;
+  tmp.x = in.x;
   return __half2float(tmp);
 #else
   return cpu_half2float(in);
