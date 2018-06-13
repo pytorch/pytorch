@@ -23,11 +23,13 @@ class ExpandOp final : public Operator<Context> {
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
   }
-
+  const Tensor<CPUContext> GetShape() {
+	return Input(1);
+  }
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    const auto& Y_shape_tensor = Input(1);
+    const auto& Y_shape_tensor = GetShape();
     const int* Y_shape = Y_shape_tensor.template data<int>();
     auto* Y = Output(0);
     const int ndim = Y_shape_tensor.size();

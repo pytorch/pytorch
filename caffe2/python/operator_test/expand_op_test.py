@@ -44,6 +44,6 @@ class TestExpandOp(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(max_dim=5, dtype=np.float32),
            **hu.gcs)
-    def test_expand_normal(self, X, gc, dc):
+    def test_expand(self, X, gc, dc):
         self.run_expand_op_test(
             "Expand", X, gc, dc)
