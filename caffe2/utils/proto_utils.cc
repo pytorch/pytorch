@@ -17,40 +17,7 @@
 
 using ::google::protobuf::MessageLite;
 
-namespace caffe {
-
-// Caffe wrapper functions for protobuf's GetEmptyStringAlreadyInited() function
-// used to avoid duplicated global variable in the case when protobuf
-// is built with hidden visibility.
-const ::std::string& GetEmptyStringAlreadyInited() {
-  return ::google::protobuf::internal::GetEmptyStringAlreadyInited();
-}
-
-}  // namespace caffe
-
-namespace ONNX_NAMESPACE {
-
-// ONNX wrapper functions for protobuf's GetEmptyStringAlreadyInited() function
-// used to avoid duplicated global variable in the case when protobuf
-// is built with hidden visibility.
-const ::std::string& GetEmptyStringAlreadyInited() {
-  return ::google::protobuf::internal::GetEmptyStringAlreadyInited();
-}
-
-}  // namespace ONNX_NAMESPACE
-
 namespace caffe2 {
-
-// Caffe2 wrapper functions for protobuf's GetEmptyStringAlreadyInited() function
-// used to avoid duplicated global variable in the case when protobuf
-// is built with hidden visibility.
-const ::std::string& GetEmptyStringAlreadyInited() {
-  return ::google::protobuf::internal::GetEmptyStringAlreadyInited();
-}
-
-void ShutdownProtobufLibrary() {
-  ::google::protobuf::ShutdownProtobufLibrary();
-}
 
 std::string DeviceTypeName(const int32_t& d) {
   switch (d) {

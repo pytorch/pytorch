@@ -40,3 +40,8 @@ set -e
 if [[ $? -ne 0 ]]; then
   JOBS=4
 fi
+
+# Make sure an ONNX namespace is set
+if [ -z "$ONNX_NAMESPACE" ]; then
+  ONNX_NAMESPACE="onnx_torch"
+fi

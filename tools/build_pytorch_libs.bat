@@ -178,6 +178,7 @@ goto:eof
                   -DBUILD_ATEN=ON ^
                   -DBUILD_PYTHON=OFF ^
                   -DBUILD_BINARY=OFF ^
+                  -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^

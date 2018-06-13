@@ -3,6 +3,9 @@ include(../cmake/Codegen.cmake)
 
 # ---[ Declare source file lists
 
+# ---[ Shared build
+add_subdirectory(utils)
+
 # ---[ ATen build
 if(BUILD_ATEN)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
@@ -55,9 +58,8 @@ if(BUILD_CAFFE2)
   # Note: the folders that are being commented out have not been properly
   # addressed yet.
   add_subdirectory(proto)
-  add_subdirectory(core)
-  add_subdirectory(utils)
   add_subdirectory(contrib)
+  add_subdirectory(core)
   add_subdirectory(core/nomnigraph)
   add_subdirectory(core/dispatch)
   if (USE_NVRTC)
@@ -149,50 +151,52 @@ if (FALSE)
 endif()
 
 # ---[ List of libraries to link with
-if(BUILD_CAFFE2)
+if (BUILD_CAFFE2)
   add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
   add_dependencies(caffe2_protos Caffe_PROTO Caffe2_PROTO)
-  # If we are going to link protobuf locally inside caffe2 libraries, what we will do is
-  # to create a helper static library that always contains libprotobuf source files, and
-  # link the caffe2 related dependent libraries to it.
-  target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
-  # Reason for this public dependency is as follows:
-  # (1) Strictly speaking, we should not expose any Protobuf related functions. We should
-  #     only use function interfaces wrapped with our own public API, and link protobuf
-  #     locally.
-  # (2) However, currently across the Caffe2 codebase, we have extensive use of protobuf
-  #     functionalities. For example, not only libcaffe2.so uses it, but also other
-  #     binaries such as python extensions etc. As a result, we will have to have a
-  #     transitive dependency to libprotobuf.
-  #
-  # Good thing is that, if we specify CAFFE2_LINK_LOCAL_PROTOBUF, then we do not need to
-  # separately deploy protobuf binaries - libcaffe2.so will contain all functionalities
-  # one needs. One can verify this via ldd.
-  #
-  # TODO item in the future includes:
-  # (1) Enable using lite protobuf
-  # (2) Properly define public API that do not directly depend on protobuf itself.
-  # (3) Expose the libprotobuf.a file for dependent libraries to link to.
-  #
-  # What it means for users/developers?
-  # (1) Users: nothing affecting the users, other than the fact that CAFFE2_LINK_LOCAL_PROTOBUF
-  #     avoids the need to deploy protobuf.
-  # (2) Developers: if one simply uses core caffe2 functionality without using protobuf,
-  #     nothing changes. If one has a dependent library that uses protobuf, then one needs to
-  #     have the right protobuf version as well as linking to libprotobuf.a.
-  target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
+else()
+  # Do not include caffe2 or caffe protos, but rather have it only be
+  # a library to attach local protobuf.
+  add_library(caffe2_protos STATIC utils/dummy.cpp)
 endif()
+# If we are going to link protobuf locally inside caffe2 libraries, what we will do is
+# to create a helper static library that always contains libprotobuf source files, and
+# link the caffe2 related dependent libraries to it.
+target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
+# Reason for this public dependency is as follows:
+# (1) Strictly speaking, we should not expose any Protobuf related functions. We should
+#     only use function interfaces wrapped with our own public API, and link protobuf
+#     locally.
+# (2) However, currently across the Caffe2 codebase, we have extensive use of protobuf
+#     functionalities. For example, not only libcaffe2.so uses it, but also other
+#     binaries such as python extensions etc. As a result, we will have to have a
+#     transitive dependency to libprotobuf.
+#
+# Good thing is that, if we specify CAFFE2_LINK_LOCAL_PROTOBUF, then we do not need to
+# separately deploy protobuf binaries - libcaffe2.so will contain all functionalities
+# one needs. One can verify this via ldd.
+#
+# TODO item in the future includes:
+# (1) Enable using lite protobuf
+# (2) Properly define public API that do not directly depend on protobuf itself.
+# (3) Expose the libprotobuf.a file for dependent libraries to link to.
+#
+# What it means for users/developers?
+# (1) Users: nothing affecting the users, other than the fact that CAFFE2_LINK_LOCAL_PROTOBUF
+#     avoids the need to deploy protobuf.
+# (2) Developers: if one simply uses core caffe2 functionality without using protobuf,
+#     nothing changes. If one has a dependent library that uses protobuf, then one needs to
+#     have the right protobuf version as well as linking to libprotobuf.a.
+target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
 
 # Compile exposed libraries.
 add_library(caffe2 ${Caffe2_CPU_SRCS})
-if (BUILD_CAFFE2)
-  caffe2_interface_library(caffe2_protos caffe2_protos_whole)
-  target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
-  if (${CAFFE2_LINK_LOCAL_PROTOBUF})
-    target_link_libraries(caffe2 INTERFACE protobuf::libprotobuf)
-  else()
-    target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
-  endif()
+caffe2_interface_library(caffe2_protos caffe2_protos_whole)
+target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
+if (${CAFFE2_LINK_LOCAL_PROTOBUF})
+  target_link_libraries(caffe2 INTERFACE protobuf::libprotobuf)
+else()
+  target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
 endif()
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
