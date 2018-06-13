@@ -1,0 +1,3 @@
+#pragma once
+
+#cmakedefine WITH_C10D_NCCL
