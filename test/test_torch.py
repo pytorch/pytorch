@@ -5805,6 +5805,19 @@ class TestTorch(TestCase):
         self.assertEqual(t1.size(), size)
         self.assertEqual(t1.stride(), stride)
 
+        # test argument names
+        t1 = torch.Tensor()
+        # 1. case when source is tensor
+        t1.set_(source=t2)
+        self.assertEqual(t1.storage()._cdata, t2.storage()._cdata)
+        # 2. case when source is storage
+        t1.set_(source=t2.storage())
+        self.assertEqual(t1.storage()._cdata, t2.storage()._cdata)
+        # 3. case when source is storage, and other args also specified
+        t1.set_(source=t2.storage(), storage_offset=0, size=size, stride=stride)
+        self.assertEqual(t1.size(), size)
+        self.assertEqual(t1.stride(), stride)
+
     def test_equal(self):
         # Contiguous, 1D
         t1 = torch.Tensor((3, 4, 9, 10))
