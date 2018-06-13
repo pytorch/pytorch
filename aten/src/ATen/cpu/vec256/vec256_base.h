@@ -125,6 +125,9 @@ struct Vec256 {
   Vec256<T> floor() const {
     return map(std::floor);
   }
+  Vec256<T> neg() const {
+    return map([](T x) { return -x; });
+  }
   Vec256<T> round() const {
     return map(std::round);
   }
@@ -145,6 +148,9 @@ struct Vec256 {
   }
   Vec256<T> sqrt() const {
     return map(std::sqrt);
+  }
+  Vec256<T> reciprocal() const {
+    return map([](T x) { return (T)(1) / x; });
   }
   Vec256<T> rsqrt() const {
     return map([](T x) { return 1 / std::sqrt(x); });
