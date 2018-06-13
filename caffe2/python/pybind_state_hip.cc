@@ -7,7 +7,7 @@
 
 #include "caffe2/core/hip/common_miopen.h"
 #include "caffe2/core/hip/context_hip.h"
-#include "caffe2/operators/operator_fallback_hip.h"
+#include "caffe2/operators/hip/operator_fallback_hip.h"
 
 namespace caffe2 {
 namespace python {

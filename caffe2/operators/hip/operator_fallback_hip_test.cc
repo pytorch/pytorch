@@ -1,7 +1,7 @@
 #include <iostream>
 
 #include "caffe2/core/operator.h"
-#include "caffe2/operators/operator_fallback_hip.h"
+#include "caffe2/operators/hip/operator_fallback_hip.h"
 #include <gtest/gtest.h>
 
 namespace caffe2 {
