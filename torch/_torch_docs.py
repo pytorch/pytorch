@@ -2198,7 +2198,8 @@ stabilized.
 
 For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
 
-           :math:`\text{logsumexp}(x)_{i} = \log \sum_j \exp(x_ij).`
+    .. math::
+        \text{logsumexp}(x)_{i} = \log \sum_j \exp(x_{ij})
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
