@@ -1328,9 +1328,6 @@ class TestScript(TestCase):
                     d = 4
                 c = a + b
             return d
-
-        self.assertExpected(str(torch.jit.script(func).graph))
-
         inputs = self._make_scalar_vars([1, -1], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 

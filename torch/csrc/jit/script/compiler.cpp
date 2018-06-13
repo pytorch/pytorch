@@ -111,6 +111,22 @@ struct Environment {
 
     return sv;
   }
+
+  SugaredValuePtr createCapturedInputIfNeeded(const SourceRange& loc, std::string ident) {
+    auto in_frame = findInThisFrame(ident);
+    if (in_frame)
+      return in_frame;
+
+    // recursively handles the case where parent blocks are also loops
+    auto from_parent = next ? next->createCapturedInputIfNeeded(loc, ident) : nullptr;
+
+    // recursively create the captured input if it is the loop block
+    if (from_parent && getBlockOwningKind() == prim::Loop) {
+      from_parent = createCapturedInput(from_parent->asValue(loc, method), ident);
+    }
+    return from_parent;
+  }
+
   Block* block() {
     return b;
   }
@@ -158,12 +174,8 @@ struct Environment {
         << " but is now being assigned to a value of type " << as_simple_value->type()->name();
       }
     }
-    if (as_simple_value &&
-        !findInThisFrame(name) &&
-        findInParentFrame(name) &&
-        (getBlockOwningKind() == prim::Loop || getBlockOwningKind() == prim::If)) {
-      createCapturedInput(as_simple_value, name);
-    }
+    if (as_simple_value)
+      createCapturedInputIfNeeded(loc, name);
     value_table[name] = std::move(value);
   }
 
@@ -175,14 +187,7 @@ struct Environment {
   }
 
   SugaredValuePtr getSugaredVar(const std::string& ident, SourceRange range, bool required=true) {
-    auto retval = findInThisFrame(ident);
-
-    if (!retval && (retval = findInParentFrame(ident)) &&
-        (getBlockOwningKind() == prim::Loop || getBlockOwningKind() == prim::If)) {
-      if(Value* simple_val = asSimple(retval)) {
-        retval = createCapturedInput(simple_val, ident);
-      }
-    }
+    auto retval = createCapturedInputIfNeeded(range, ident);
 
     if(!retval) {
       retval = resolver(ident);
@@ -223,28 +228,6 @@ struct Environment {
       }
     }
   }
-
-  // for each captured input, create/refer new one in enclosing
-  // scope, and replace references in the block, delete branch block
-  // inputs, and the corresponding field in value_map
-  void deleteIfStmtCapturedInputs(const SourceRange& loc) {
-    // block inputs should be 1:1 to the captured_inputs
-    JIT_ASSERT(b->inputs().size() == captured_inputs.size());
-    for(int i = captured_inputs.size() - 1; i >= 0; -- i) {
-      std::string name = captured_inputs[i];
-      Ident ident = Ident::create(loc, name);
-      Value* parent_frame_var = next->getVar(ident);
-      Value* captured_val = b->inputs()[i];
-      captured_val->replaceAllUsesWith(parent_frame_var);
-      // If unmutated, we can delete it from value_map. Safe to call asValue
-      // here since captured values are all guaranteed to be Simple
-      if (value_table[name]->asValue(loc, method) == captured_val) {
-        value_table.erase(name);
-      }
-      b->eraseInput(i);
-    }
-  }
-
   std::vector<std::string> definedVariables() {
     std::vector<std::string> result;
     for(auto & kv : value_table) {
@@ -759,14 +742,11 @@ private:
       WithInsertPoint guard(b);
       Value* out_val = emitExpr(expr);
       b->registerOutput(out_val);
-      return popFrame();
+      popFrame();
     };
 
-    auto save_true = emit_if_expr(true_block, expr.true_expr());
-    auto save_false = emit_if_expr(false_block, expr.false_expr());
-
-    save_true->deleteIfStmtCapturedInputs(expr.range());
-    save_false->deleteIfStmtCapturedInputs(expr.range());
+    emit_if_expr(true_block, expr.true_expr());
+    emit_if_expr(false_block, expr.false_expr());
 
     // Add op outputs
     auto expr_value = n->addOutput(); // Resulting value
@@ -784,9 +764,7 @@ private:
 
     // Emit both blocks once to get the union of all mutated values
     auto save_true = emitSingleIfBranch(true_block, stmt.trueBranch());
-    save_true->deleteIfStmtCapturedInputs(stmt.range());
     auto save_false = emitSingleIfBranch(false_block, stmt.falseBranch());
-    save_false->deleteIfStmtCapturedInputs(stmt.range());
 
     // In python, every variable assigned in an if statement escapes
     // the scope of the if statement (all variables are scoped to the function).
@@ -828,13 +806,11 @@ private:
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
-      // find value in frame without creating vars (avoid using getVar)
-      auto tv = save_true->findInAnyFrame(x);
-      auto tv_val = tv->asValue(stmt.range(),method);
-      true_block->registerOutput(tv_val);
-      auto fv = save_false->findInAnyFrame(x);
-      false_block->registerOutput(fv->asValue(stmt.range(),method));
-      environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(tv_val->type()));
+      auto tv = save_true->getVar(x, stmt.range());
+      true_block->registerOutput(tv);
+      auto fv = save_false->getVar(x, stmt.range());
+      false_block->registerOutput(fv);
+      environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(tv->type()));
     }
 
   }
