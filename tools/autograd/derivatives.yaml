@@ -84,7 +84,11 @@
 - name: add(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
 
-- name: add(Tensor self, Tensor other, *, Scalar alpha)
+- name: s_native_add(Tensor self, Tensor other, *, Scalar alpha)
+  self: grad
+  other: maybe_multiply(grad, alpha)
+
+- name: th_add(Tensor self, Tensor other, *, Scalar alpha)
   self: grad
   other: maybe_multiply(grad, alpha)
 
@@ -103,7 +107,12 @@
   tensor1: grad * tensor2 * value
   tensor2: grad * tensor1 * value
 
-- name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
+- name: th_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
+  self: maybe_multiply(grad, beta)
+  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
+  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
+
+- name: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
@@ -439,7 +448,11 @@
 - name: mul(Tensor self, Scalar other)
   self: grad * other
 
-- name: mul(Tensor self, Tensor other)
+- name: s_native_mul(Tensor self, Tensor other)
+  self: grad * other
+  other: grad * self
+
+- name: th_mul(Tensor self, Tensor other)
   self: grad * other
   other: grad * self
 
@@ -610,7 +623,11 @@
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
 
-- name: sub(Tensor self, Tensor other, *, Scalar alpha)
+- name: s_native_sub(Tensor self, Tensor other, *, Scalar alpha)
+  self: grad
+  other: -grad * alpha
+
+- name: th_sub(Tensor self, Tensor other, *, Scalar alpha)
   self: grad
   other: -grad * alpha
 
