@@ -97,58 +97,35 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
 
 THSTensor *THSTensor_(newWithSize)(THLongStorage *size, THLongStorage *_ignored)
 {
-  THSTensor *self = THSTensor_(new)();
-  THSTensor_(rawResize)(self, size->size, 0, THLongStorage_data(size));
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(newWithSize1d)(int64_t size0)
 {
-  int64_t size[1] = {size0};
-  THSTensor *self = THSTensor_(new)();
-  THSTensor_(rawResize)(self, 1, 0, size);
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(newWithSize2d)(int64_t size0, int64_t size1)
 {
-  int64_t size[2] = {size0, size1};
-  THSTensor *self = THSTensor_(new)();
-  THSTensor_(rawResize)(self, 2, 0, size);
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2)
 {
-  int64_t size[3] = {size0, size1, size2};
-  THSTensor *self = THSTensor_(new)();
-  THSTensor_(rawResize)(self, 3, 0, size);
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
-  int64_t size[4] = {size0, size1, size2, size3};
-  THSTensor *self = THSTensor_(new)();
-  THSTensor_(rawResize)(self, 4, 0, size);
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(newClone)(THSTensor *self) {
-  THSTensor *other = THSTensor_(new)();
-  THSTensor_(rawResize)(other, self->nDimensionI, self->nDimensionV, self->size);
-
-  THSTensor_(_set)(other, self->indices, self->values);
-
-  other->coalesced = self->coalesced;
-  other->nnz = self->nnz;
-  return other;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
-  THSTensor *other = THSTensor_(newClone)(self);
-  THSTensor_(transpose)(other, d1, d2);
-  return other;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 /******************************************************************************
@@ -157,133 +134,65 @@ THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
 
 int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor* src)
 {
-  int d;
-  if (self->nDimensionI != src->nDimensionI || self->nDimensionV != src->nDimensionV)
-    return 0;
-  for(d = 0; d < self->nDimensionI + self->nDimensionV; ++d)
-  {
-    if(self->size[d] != src->size[d])
-      return 0;
-  }
-  return 1;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(resizeLegacy)(THSTensor *self, THLongStorage *size)
 {
-  THSTensor_(rawResize)(self, size->size, 0, THLongStorage_data(size));
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(resizeAs)(THSTensor *self, THSTensor *src)
 {
-  if(!THSTensor_(isSameSizeAs)(self, src)) {
-    THSTensor_(rawResize)(self, src->nDimensionI, src->nDimensionV, src->size);
-  }
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(resize1d)(THSTensor *self, int64_t size0)
 {
-  int64_t size[1] = {size0};
-  THSTensor_(rawResize)(self, 1, 0, size);
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(resize2d)(THSTensor *self, int64_t size0, int64_t size1)
 {
-  int64_t size[2] = {size0, size1};
-  THSTensor_(rawResize)(self, 2, 0, size);
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(resize3d)(THSTensor *self, int64_t size0, int64_t size1, int64_t size2)
 {
-  int64_t size[3] = {size0, size1, size2};
-  THSTensor_(rawResize)(self, 3, 0, size);
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(resize4d)(THSTensor *self, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
-  int64_t size[4] = {size0, size1, size2, size3};
-  THSTensor_(rawResize)(self, 4, 0, size);
-  return self;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THTensor *THSTensor_(toDense)(THSTensor *self) {
-  THLongStorage *size;
-  THTensor *dst;
-
-  // set up the new tensor
-  size = THSTensor_(newSizeOf)(self);
-  dst = THTensor_(newWithSize)(size, NULL);
-  THLongStorage_free(size);
-  THTensor_(zero)(dst);
-
-  // real one = ScalarConvert<int, real>::to(1);
-  THSTensor_(spcadd)(dst, dst, 1, self);
-  return dst;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
-  if (self == src) return;
-  THSTensor_(rawResize)(self, src->nDimensionI, src->nDimensionV, src->size);
-  THSTensor_(_set)(self, src->indices, src->values);
-  self->nnz = src->nnz;
-  self->coalesced = src->coalesced;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 // In place transpose
 void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
-  int64_t nDimI = THSTensor_(nDimensionI)(self);
-  THArgCheck(d1 < nDimI && d2 < nDimI, 0, "Transposed dimensions should be sparse. Got nDimI: %" PRId64 ", d1: %" PRId64 ", d2: %" PRId64, nDimI, d1, d2);
-  THLongTensor *indices = THSTensor_(newIndices)(self);
-  ptrdiff_t i;
-  for (i = 0; i < THSTensor_(nnz)(self); i++) {
-    int64_t tmp = THLongTensor_fastGet2d(indices, d1, i);
-    THLongTensor_fastSet2d(indices, d1, i,
-        THLongTensor_fastGet2d(indices, d2, i));
-    THLongTensor_fastSet2d(indices, d2, i, tmp);
-  }
-  i = self->size[d1];
-  self->size[d1] = self->size[d2];
-  self->size[d2] = i;
-  THLongTensor_free(indices);
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 int THSTensor_(isCoalesced)(const THSTensor *self) {
-  return self->coalesced;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 /* Internal slice operations. Buffers can be reused across calls to avoid
 allocating tensors every time */
 
 void THSTensor_(mulSlice)(
-  THTensor *dstBuffer, THTensor *src1Buffer, THTensor *src2Buffer,
-  THTensor *dst, THTensor *src1, THTensor *src2,
-  int64_t dim, int64_t dstIdx, int64_t src1Idx, int64_t src2Idx) {
-  if (src1->_dim() > 1) {
-    THTensor_(select)(src1Buffer, src1, dim, src1Idx);
-    THTensor_(select)(src2Buffer, src2, dim, src2Idx);
-    THTensor_(select)(dstBuffer, dst, dim, dstIdx);
-    THTensor_(cmul)(dstBuffer, src1Buffer, src2Buffer);
-  } else {
-    THTensor_(fastSet1d)(dst, dstIdx, THTensor_(fastGet1d)(src1, src1Idx) * THTensor_(fastGet1d)(src2, src2Idx));
-  }
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 void THSTensor_(divSlice)(
-  THTensor *dstBuffer, THTensor *src1Buffer, THTensor *src2Buffer,
-  THTensor *dst, THTensor *src1, THTensor *src2,
-  int64_t dim, int64_t dstIdx, int64_t src1Idx, int64_t src2Idx) {
-  if (src1->_dim() > 1) {
-    THTensor_(select)(src1Buffer, src1, dim, src1Idx);
-    THTensor_(select)(src2Buffer, src2, dim, src2Idx);
-    THTensor_(select)(dstBuffer, dst, dim, dstIdx);
-    THTensor_(cdiv)(dstBuffer, src1Buffer, src2Buffer);
-  } else {
-    THTensor_(fastSet1d)(dst, dstIdx, THTensor_(fastGet1d)(src1, src1Idx) / THTensor_(fastGet1d)(src2, src2Idx));
-  }
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THTensor *THSTensor_(newValuesWithSizeOf)(THTensor *values, int64_t nnz) {
