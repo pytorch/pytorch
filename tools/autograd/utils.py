@@ -1,6 +1,5 @@
 import re
 import os
-from tools.shared.module_loader import import_module
 from .nested_dict import nested_dict
 
 
