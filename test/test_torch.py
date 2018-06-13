@@ -6707,8 +6707,9 @@ class TestTorch(TestCase):
         self.assertEqual(x_str, str(x))
 
         # test dtype
-        x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.double)
-        x_str = ("tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,"
+        torch.set_default_dtype(torch.float)
+        x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.float64)
+        x_str = ("tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,\n"
                  "                inf], dtype=torch.float64)")
         self.assertEqual(x.__repr__(), str(x))
         self.assertEqual(x_str, str(x))
@@ -6716,7 +6717,7 @@ class TestTorch(TestCase):
         # test changing default dtype
         default_type = torch.Tensor().type()
         torch.set_default_dtype(torch.float64)
-        x_str = ("tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,"
+        x_str = ("tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,\n"
                  "                inf])")
         self.assertEqual(x.__repr__(), str(x))
         self.assertEqual(x_str, str(x))
