@@ -9,4 +9,5 @@ if is_available() and not torch._C._c10d_init():
     raise RuntimeError("c10d initialization failed")
 
 
-from .rendezvous import rendezvous, register_rendezvous_handler
+if is_available():
+    from .rendezvous import rendezvous, register_rendezvous_handler
