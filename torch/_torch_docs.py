@@ -616,7 +616,7 @@ Arguments:
     minlength (int): optional, min number of bins. Should be non-negative.
 
 Shape:
-    output (Tensor): ``Size([argmax(input) + 1])``
+    output (Tensor): ``Size([max(input) + 1])``
 
 Example::
 

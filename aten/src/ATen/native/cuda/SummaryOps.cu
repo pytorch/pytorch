@@ -3,7 +3,8 @@
 
 namespace at {
 namespace cuda {
-#define MIN_NUMBER_BINS_FOR_GLOBAL_MEM 5000
+#define THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM 100
+#define THRESH_NUMBER_BINS_FOR_GLOBAL_MEM 1000
 #define FOR_KERNEL_LOOP(i, lim)                                      \
   for (IndexType i = blockIdx.x * blockDim.x + threadIdx.x; i < lim; \
        i += gridDim.x * blockDim.x)
@@ -131,6 +132,16 @@ __global__ void kernelHistogram1D(
       HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, getOp);      \
   }
 
+inline int64_t getFreeGlobalMemory() {
+  // no need to use `cudaSetDevice`
+  size_t free_mem, total_mem;
+  cudaMemGetInfo(&free_mem, &total_mem);
+  AT_ASSERTM(
+      cudaGetLastError() == cudaSuccess,
+      "CUDA_tensor_histogram failed to get free global memory");
+  return static_cast<int64_t>(free_mem);
+}
+
 /*
   Calculate the frequency of the input values.
 
@@ -140,13 +151,13 @@ __global__ void kernelHistogram1D(
   See `help torch.bincount` for details on the math.
 
   3 implementations based of input size and memory usage:
-    case: #bins < blockDim.x
+    case: #bins < THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM and enough shared mem
         SHARED: Each block atomically adds to it's own **shared** hist copy,
         then atomically updates the global tensor.
-    case: blockDim.x <= #bins < MIN_NUMBER_BINS_FOR_GLOBAL_MEM
+    case: #bins < THRESH_NUMBER_BINS_FOR_GLOBAL_MEM and enough global mem
         MULTI_BLOCK: Each block atomically adds to it's own **global** hist
         copy, then atomically updates the global tensor.
-    case: MIN_NUMBER_BINS_FOR_GLOBAL_MEM <= #bins
+    case: THRESH_NUMBER_BINS_FOR_GLOBAL_MEM <= #bins
         GLOBAL: all threads atomically update to a single **global** hist copy.
  */
 template <typename output_t, typename input_t, bool HasWeights>
@@ -168,38 +179,33 @@ bool CUDA_tensor_histogram(
   const dim3 block = getApplyBlock();
   dim3 grid;
   int64_t curDevice = current_device();
-  if (curDevice == -1)
-    return false;
-  if (!getApplyGrid(totalElements, grid, curDevice)) {
+  if (curDevice == -1 || !getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
-#if CUDA_VERSION < 9000
-  grid.x = std::min(
-      (unsigned int)at::globalContext()
-              .getCurrentDeviceProperties()
-              ->multiProcessorCount *
-          AT_APPLY_BLOCKS_PER_SM,
-      grid.x);
-#endif
 
-  CUDAHistogramMemoryType memType = CUDAHistogramMemoryType::SHARED;
+  CUDAHistogramMemoryType memType = CUDAHistogramMemoryType::GLOBAL;
   auto maxSharedMem =
       at::globalContext().getCurrentDeviceProperties()->sharedMemPerBlock;
   auto sharedMem = nbins * sizeof(output_t) + 8; // 8 guard bytes
+  auto maxGlobalMem = getFreeGlobalMemory();
+  auto multiBlockMem = nbins * grid.x * sizeof(output_t) + 8; // 8 guard bytes
   // determine memory type to use in the kernel
-  if (nbins < block.x && sharedMem < maxSharedMem) {
+  if (nbins < THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM &&
+      sharedMem < maxSharedMem) {
     memType = CUDAHistogramMemoryType::SHARED;
-  } else if (nbins < MIN_NUMBER_BINS_FOR_GLOBAL_MEM) {
+  } else if (
+      nbins < THRESH_NUMBER_BINS_FOR_GLOBAL_MEM &&
+      multiBlockMem < (maxGlobalMem / 2)) {
+    // check against half of free mem to be extra safe
+    // due to cached allocator, we may anyway have slightly more free mem
     memType = CUDAHistogramMemoryType::MULTI_BLOCK;
-  } else {
-    memType = CUDAHistogramMemoryType::GLOBAL;
   }
 
   // alloc memory for MULTI_BLOCK
   using IndexType = int64_t;
   auto aInfo = detail::getTensorInfo<output_t, IndexType>(a);
   auto bInfo = detail::getTensorInfo<input_t, IndexType>(b);
-  detail::TensorInfo<output_t, IndexType> pInfo = aInfo;
+  detail::TensorInfo<output_t, IndexType> pInfo(nullptr, 0, {}, {});
   Tensor partial_output;
   if (memType == CUDAHistogramMemoryType::MULTI_BLOCK) {
     partial_output = a.type().zeros({grid.x, nbins});
@@ -224,7 +230,8 @@ bool CUDA_tensor_histogram(
 #undef HANDLE_CASE
 #undef HANDLE_SWITCH_CASE
 #undef FOR_KERNEL_LOOP
-#undef MIN_NUMBER_BINS_FOR_GLOBAL_MEM
+#undef THRESH_NUMBER_BINS_FOR_GLOBAL_MEM
+#undef THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM
 } // namespace cuda
 
 namespace {
