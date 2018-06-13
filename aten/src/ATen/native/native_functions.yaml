@@ -1369,17 +1369,17 @@
 - func: div_(Tensor self, Scalar other) -> Tensor
 
 
-- func: s_native_addmm_out(Tensor result, Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: s_native_addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
     CPU: s_addmm_out_sparse_dense_cpu
 
-- func: s_native_addmm(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
     CPU: s_addmm_sparse_dense_cpu
 
-- func: s_native_addmm_(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: s_native_addmm_(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
     CPU: s_addmm_sparse_dense_cpu_

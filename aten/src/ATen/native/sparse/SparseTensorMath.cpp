@@ -569,13 +569,11 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
 Tensor& s_addmm_out_sparse_dense_cpu(
     Tensor& r,
     const Tensor& t,
-    SparseTensorRef sparse__,
+    const SparseTensor& sparse_,
     const Tensor& dense,
     Scalar beta,
     Scalar alpha
 ) {
-  const SparseTensor& sparse_ = sparse__.tref;
-
   // TODO: This error message seems awfully opaque
   AT_CHECK(sparse_._dimI() == 2, "matrices expected, got ", sparse_._dimI(), "D tensor");
   AT_CHECK(sparse_._dimV() == 0, "scalar values expected, got ", sparse_._dimV(), "D values");
@@ -620,7 +618,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
 
 Tensor s_addmm_sparse_dense_cpu(
     const Tensor& t,
-    SparseTensorRef sparse,
+    const SparseTensor& sparse,
     const Tensor& dense,
     Scalar beta,
     Scalar alpha
@@ -632,7 +630,7 @@ Tensor s_addmm_sparse_dense_cpu(
 
 Tensor& s_addmm_sparse_dense_cpu_(
     Tensor& t,
-    SparseTensorRef sparse,
+    const SparseTensor& sparse,
     const Tensor& dense,
     Scalar beta,
     Scalar alpha
@@ -699,7 +697,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   _get_sparse_impl(newSparse)->_sizes_mut()[0] = outNnz; // TODO: use something safer
 
   // Compute output values tensor with sparse * dense multiplication
-  s_addmm_out_sparse_dense_cpu(values, values, SparseTensorRef(newSparse), dense, 0, alpha);
+  s_addmm_out_sparse_dense_cpu(values, values, newSparse, dense, 0, alpha);
   _get_sparse_impl(r)->set_indices_and_values(indices, values);  // TODO: sigh
 
   return r;
