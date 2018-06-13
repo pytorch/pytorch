@@ -148,11 +148,12 @@ void initPythonIRBindings(PyObject * module_) {
       PropagateInputShapes(g, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
     })
     .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
-                      int64_t onnx_opset_version, bool defer_weight_export, bool export_raw_ir) {
+                      int64_t onnx_opset_version, bool defer_weight_export,
+                      ::torch::onnx::OperatorExportTypes operator_export_type) {
       std::string graph;
       RawDataExportMap export_map;
       std::tie(graph, export_map) = ExportGraph(
-        g, initializers, onnx_opset_version, defer_weight_export, export_raw_ir);
+        g, initializers, onnx_opset_version, defer_weight_export, operator_export_type);
       std::unordered_map<std::string, py::bytes> python_serialized_export_map;
       for (auto& kv : export_map) {
         auto t = kv.second;
@@ -166,15 +167,16 @@ void initPythonIRBindings(PyObject * module_) {
     }, py::arg("initializers"),
        py::arg("onnx_opset_version")=0,
        py::arg("defer_weight_export")=false,
-       py::arg("export_raw_ir")=false )
+       py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::ONNX)
     .def("prettyPrintExport", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
-                      int64_t onnx_opset_version, bool defer_weight_export, bool export_raw_ir) {
+                      int64_t onnx_opset_version, bool defer_weight_export,
+                      ::torch::onnx::OperatorExportTypes operator_export_type) {
       return PrettyPrintExportedGraph(
-        g, initializers, onnx_opset_version, defer_weight_export, export_raw_ir);
+        g, initializers, onnx_opset_version, defer_weight_export, operator_export_type);
     }, py::arg("initializers"),
        py::arg("onnx_opset_version")=0,
        py::arg("defer_weight_export")=false,
-       py::arg("export_raw_ir")=false )
+       py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::ONNX)
     .def("wrapPyFuncWithSymbolic", [](Graph &g, py::function func, std::vector<Value*> inputs, size_t n_outputs, py::function symbolic) {
       // This function should be used for situations where we have a Python function
       // that should have different behavior when exporting for JIT interpreter
