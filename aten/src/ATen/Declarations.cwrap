@@ -60,14 +60,14 @@
       scalar_check: False
       arguments:
         - THTensor* self
-        - THStorage* storage
+        - THStorage* source
         - CONSTANT 0
         - CONSTANT __storage_size.get()
         - CONSTANT NULL
     - cname: setStorage
       arguments:
         - THTensor* self
-        - THStorage* sourceStorage
+        - THStorage* source
         - long storage_offset
         - THSize* size
         - arg: THStride* stride
