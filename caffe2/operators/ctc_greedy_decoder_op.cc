@@ -54,7 +54,8 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
     output_len_data[i] = t_dec;
   }
 
-  values->Resize(vector<TIndex>{values_cach.size()});
+  int32_t values_cach_size = values_cach.size();
+  values->Resize(vector<TIndex>{values_cach_size});
   int* values_data = values->mutable_data<int>();
   for (int i = 0; i < values_cach.size(); ++i) {
     values_data[i] = values_cach.at(i);
