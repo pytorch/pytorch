@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorRef.h>
+#include <ATen/ExpandUtils.h>
 
 namespace at { namespace native {
 
@@ -102,7 +103,9 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     auto self_sparse = self.is_sparse();
     auto other_sparse = other.is_sparse();
     if (self_sparse && other_sparse) {
-      return native_add_out(result, self, other, alpha);
+      Tensor b_self, b_other;
+      std::tie(b_self, b_other) = expand_outplace(self, other, "add_out");
+      return s_native_add_out(result, b_self, b_other, alpha);
     } else if (!self_sparse && other_sparse) {
       // TODO: Perhaps doing overload selection with SparseTensorRef is
       // confusing, and we should have given these overloads different names.
@@ -131,7 +134,9 @@ Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
     auto self_sparse = self.is_sparse();
     auto other_sparse = other.is_sparse();
     if (self_sparse && other_sparse) {
-      return native_add(self, other, alpha);
+      Tensor b_self, b_other;
+      std::tie(b_self, b_other) = expand_outplace(self, other, "add");
+      return s_native_add(b_self, b_other, alpha);
     } else if (!self_sparse && other_sparse) {
       return native_add(self, SparseTensorRef(other), alpha);
     } else {
@@ -148,7 +153,9 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
     auto self_sparse = self.is_sparse();
     auto other_sparse = other.is_sparse();
     if (self_sparse && other_sparse) {
-      return native_add_(self, other, alpha);
+      Tensor b_other;
+      std::tie(b_other) = expand_inplace(self, other, "add_");
+      return s_native_add_(self, b_other, alpha);
     } else if (!self_sparse && other_sparse) {
       return native_add_(self, SparseTensorRef(other), alpha);
     } else {
@@ -162,7 +169,9 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (_has_native(self)) {
-    return native_sub_out(result, self, other, alpha);
+    Tensor b_self, b_other;
+    std::tie(b_self, b_other) = expand_outplace(self, other, "sub_out");
+    return s_native_sub_out(result, b_self, b_other, alpha);
   } else {
     return th_sub_out(result, self, other, alpha);
   }
@@ -170,7 +179,9 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
 
 Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
   if (_has_native(self)) {
-    return native_sub(self, other, alpha);
+    Tensor b_self, b_other;
+    std::tie(b_self, b_other) = expand_outplace(self, other, "sub");
+    return s_native_sub(b_self, b_other, alpha);
   } else {
     return th_sub(self, other, alpha);
   }
@@ -178,7 +189,9 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
   if (_has_native(self)) {
-    return native_sub_(self, other, alpha);
+    Tensor b_other;
+    std::tie(b_other) = expand_inplace(self, other, "sub_");
+    return s_native_sub_(self, b_other, alpha);
   } else {
     return th_sub_(self, other, alpha);
   }
@@ -187,7 +200,9 @@ Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (_has_native(self)) {
-    return native_mul_out(result, self, other);
+    Tensor b_self, b_other;
+    std::tie(b_self, b_other) = expand_outplace(self, other, "mul_out");
+    return s_native_mul_out(result, self, other);
   } else {
     return th_mul_out(result, self, other);
   }
@@ -195,7 +210,9 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
 
 Tensor mul(const Tensor& self, const Tensor& other) {
   if (_has_native(self)) {
-    return native_mul(self, other);
+    Tensor b_self, b_other;
+    std::tie(b_self, b_other) = expand_outplace(self, other, "mul");
+    return s_native_mul(self, other);
   } else {
     return th_mul(self, other);
   }
@@ -203,7 +220,9 @@ Tensor mul(const Tensor& self, const Tensor& other) {
 
 Tensor& mul_(Tensor& self, const Tensor& other) {
   if (_has_native(self)) {
-    return native_mul_(self, other);
+    Tensor b_other;
+    std::tie(b_other) = expand_inplace(self, other, "mul_");
+    return s_native_mul_(self, b_other);
   } else {
     return th_mul_(self, other);
   }
@@ -263,7 +282,9 @@ Tensor& addmm_out(Tensor& result, const Tensor& self, const Tensor& mat1, const 
     // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
     auto mat1_sparse = mat1.is_sparse();
     if (mat1_sparse) {
-      return native_addmm_out(result, self, SparseTensorRef(mat1), mat2, beta, alpha);
+      Tensor b_self;
+      std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+      return s_native_addmm_out(result, b_self, SparseTensorRef(mat1), mat2, beta, alpha);
     } else {
       return th_addmm_out(result, self, mat1, mat2, beta, alpha);
     }
@@ -277,7 +298,9 @@ Tensor addmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar 
     // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
     auto mat1_sparse = mat1.is_sparse();
     if (mat1_sparse) {
-      return native_addmm(self, SparseTensorRef(mat1), mat2, beta, alpha);
+      Tensor b_self;
+      std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+      return s_native_addmm(b_self, SparseTensorRef(mat1), mat2, beta, alpha);
     } else {
       return th_addmm(self, mat1, mat2, beta, alpha);
     }
@@ -291,7 +314,8 @@ Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta
     // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
     auto mat1_sparse = mat1.is_sparse();
     if (mat1_sparse) {
-      return native_addmm_(self, SparseTensorRef(mat1), mat2, beta, alpha);
+      // inplace is not broadcasting
+      return s_native_addmm_(self, SparseTensorRef(mat1), mat2, beta, alpha);
     } else {
       return th_addmm_(self, mat1, mat2, beta, alpha);
     }

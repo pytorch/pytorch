@@ -1232,30 +1232,30 @@
 
 
 
-- func: native_add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+- func: s_native_add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    SparseCPU: add_out_sparse_cpu
+    SparseCPU: s_add_out_sparse_cpu
 
 - func: native_add_out(Tensor result, Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
     CPU: add_out_dense_sparse_cpu
 
-- func: native_add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+- func: s_native_add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    SparseCPU: add_sparse_cpu
+    SparseCPU: s_add_sparse_cpu
 
 - func: native_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
     CPU: add_dense_sparse_cpu
 
-- func: native_add_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+- func: s_native_add_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    SparseCPU: add_sparse_cpu_
+    SparseCPU: s_add_sparse_cpu_
 
 - func: native_add_(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
   variants: function
@@ -1272,20 +1272,20 @@
 
 
 
-- func: native_sub_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+- func: s_native_sub_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    SparseCPU: sub_out_sparse_cpu
+    SparseCPU: s_sub_out_sparse_cpu
 
-- func: native_sub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+- func: s_native_sub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    SparseCPU: sub_sparse_cpu
+    SparseCPU: s_sub_sparse_cpu
 
-- func: native_sub_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+- func: s_native_sub_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    SparseCPU: sub_sparse_cpu_
+    SparseCPU: s_sub_sparse_cpu_
 
 - func: sub_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
@@ -1297,20 +1297,20 @@
 
 
 
-- func: native_mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+- func: s_native_mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
   variants: function
   dispatch:
-    SparseCPU: mul_out_sparse_cpu
+    SparseCPU: s_mul_out_sparse_cpu
 
-- func: native_mul(Tensor self, Tensor other) -> Tensor
+- func: s_native_mul(Tensor self, Tensor other) -> Tensor
   variants: function
   dispatch:
-    SparseCPU: mul_sparse_cpu
+    SparseCPU: s_mul_sparse_cpu
 
-- func: native_mul_(Tensor self, Tensor other) -> Tensor
+- func: s_native_mul_(Tensor self, Tensor other) -> Tensor
   variants: function
   dispatch:
-    SparseCPU: mul_sparse_cpu_
+    SparseCPU: s_mul_sparse_cpu_
 
 - func: native_mul_out(Tensor result, Tensor self, Scalar other) -> Tensor
   variants: function
@@ -1369,20 +1369,20 @@
 - func: div_(Tensor self, Scalar other) -> Tensor
 
 
-- func: native_addmm_out(Tensor result, Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: s_native_addmm_out(Tensor result, Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    CPU: addmm_out_sparse_dense_cpu
+    CPU: s_addmm_out_sparse_dense_cpu
 
-- func: native_addmm(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: s_native_addmm(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    CPU: addmm_sparse_dense_cpu
+    CPU: s_addmm_sparse_dense_cpu
 
-- func: native_addmm_(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: s_native_addmm_(Tensor self, SparseTensorRef mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    CPU: addmm_sparse_dense_cpu_
+    CPU: s_addmm_sparse_dense_cpu_
 
 - func: addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function

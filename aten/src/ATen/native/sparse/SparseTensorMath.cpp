@@ -313,24 +313,6 @@ SparseTensor& s_add_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar
   return s_add_out_sparse_cpu(t, t, src, alpha);
 }
 
-SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
-  Tensor b_t, b_src;
-  std::tie(b_t, b_src) = expand_outplace(t, src, "add_out_sparse_cpu");
-  return s_add_out_sparse_cpu(r, b_t, b_src, value);
-}
-
-SparseTensor add_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
-  Tensor b_t, b_src;
-  std::tie(b_t, b_src) = expand_outplace(t, src, "add_sparse_cpu");
-  return s_add_sparse_cpu(b_t, b_src, alpha);
-}
-
-SparseTensor& add_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar alpha) {
-  Tensor b_src;
-  std::tie(b_src) = expand_inplace(t, src, "add_sparse_cpu_");
-  return s_add_sparse_cpu_(t, b_src, alpha);
-}
-
 // --------------------------------------------------------------------
 // add(Tensor, SparseTensorRef, Scalar)
 //    formerly known as spcadd
@@ -409,27 +391,27 @@ Tensor& add_dense_sparse_cpu_(Tensor& t, SparseTensorRef src, Scalar alpha) {
 // sub(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 
-SparseTensor& sub_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
+SparseTensor& s_sub_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
   // UGH... We're doing two dispatches on scalar type here for no good reason.
   // NB: I tried adding an operator- to Scalar, but there isn't any good way
   // to negate the tensor, because I have a TensorBase...
   AT_DISPATCH_ALL_TYPES(
       t.type(), "sub_sparse", [&] {
         scalar_t cast_value = value.to<scalar_t>();
-        add_out_sparse_cpu(r, t, src, -cast_value);
+        s_add_out_sparse_cpu(r, t, src, -cast_value);
       }
   );
   return r;
 }
 
-SparseTensor sub_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
+SparseTensor s_sub_sparse_cpu(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
   SparseTensor r = t.type().tensor();
-  sub_out_sparse_cpu(r, t, src, alpha);
+  s_sub_out_sparse_cpu(r, t, src, alpha);
   return r;
 }
 
-SparseTensor& sub_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar alpha) {
-  return sub_out_sparse_cpu(t, t, src, alpha);
+SparseTensor& s_sub_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar alpha) {
+  return s_sub_out_sparse_cpu(t, t, src, alpha);
 }
 
 // --------------------------------------------------------------------
@@ -530,24 +512,6 @@ SparseTensor s_mul_sparse_cpu(const SparseTensor& t, const SparseTensor& src) {
 
 SparseTensor& s_mul_sparse_cpu_(SparseTensor& t, const SparseTensor& src) {
   return s_mul_out_sparse_cpu(t, t, src);
-}
-
-SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src) {
-  Tensor b_t, b_src;
-  std::tie(b_t, b_src) = expand_outplace(t, src, "mul_out_sparse_cpu");
-  return s_mul_out_sparse_cpu(r, b_t, b_src);
-}
-
-SparseTensor mul_sparse_cpu(const SparseTensor& t, const SparseTensor& src) {
-  Tensor b_t, b_src;
-  std::tie(b_t, b_src) = expand_outplace(t, src, "mul_sparse_cpu");
-  return s_mul_sparse_cpu(b_t, b_src);
-}
-
-SparseTensor& mul_sparse_cpu_(SparseTensor& t, const SparseTensor& src) {
-  Tensor b_src;
-  std::tie(b_src) = expand_inplace(t, src, "mul_sparse_cpu_");
-  return s_mul_sparse_cpu_(t, b_src);
 }
 
 // --------------------------------------------------------------------
@@ -662,44 +626,18 @@ Tensor s_addmm_sparse_dense_cpu(
     Scalar alpha
 ) {
   Tensor r = t.type().tensor();
-  addmm_out_sparse_dense_cpu(r, t, sparse, dense, beta, alpha);
+  s_addmm_out_sparse_dense_cpu(r, t, sparse, dense, beta, alpha);
   return r;
 }
 
-// inplace is not broadcasting
-Tensor& addmm_sparse_dense_cpu_(
+Tensor& s_addmm_sparse_dense_cpu_(
     Tensor& t,
     SparseTensorRef sparse,
     const Tensor& dense,
     Scalar beta,
     Scalar alpha
 ) {
-  return addmm_out_sparse_dense_cpu(t, t, sparse, dense, beta, alpha);
-}
-
-Tensor& addmm_out_sparse_dense_cpu(
-    Tensor& result,
-    const Tensor& self,
-    SparseTensorRef mat1,
-    const Tensor& mat2,
-    Scalar beta,
-    Scalar alpha
-) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.tref.size(0), mat2.size(1)}, "addmm_out_dense_sparse_cpu");
-  return s_addmm_out_sparse_dense_cpu(result, b_self, mat1, mat2, beta, alpha);
-}
-
-Tensor addmm_sparse_dense_cpu(
-    const Tensor& self,
-    SparseTensorRef mat1,
-    const Tensor& mat2,
-    Scalar beta,
-    Scalar alpha
-) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.tref.size(0), mat2.size(1)}, "th_addmm_out");
-  return s_addmm_sparse_dense_cpu(b_self, mat1, mat2, beta, alpha);
+  return s_addmm_out_sparse_dense_cpu(t, t, sparse, dense, beta, alpha);
 }
 
 
@@ -761,7 +699,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   _get_sparse_impl(newSparse)->_sizes_mut()[0] = outNnz; // TODO: use something safer
 
   // Compute output values tensor with sparse * dense multiplication
-  addmm_out_sparse_dense_cpu(values, values, SparseTensorRef(newSparse), dense, 0, alpha);
+  s_addmm_out_sparse_dense_cpu(values, values, SparseTensorRef(newSparse), dense, 0, alpha);
   _get_sparse_impl(r)->set_indices_and_values(indices, values);  // TODO: sigh
 
   return r;
