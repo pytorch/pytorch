@@ -18,7 +18,7 @@ class TestCTCGreedyDecoderOp(hu.HypothesisTestCase):
         max_time=st.sampled_from([2, 10, 30, 50]),
         num_classes=st.sampled_from([2, 10, 26, 40]),
         merge_repeated=st.sampled_from([True, False]),
-        **hu.gcs
+        **hu.gcs_cpu_only
     )
     def test_ctc_greedy_decoder(
         self, batch, max_time,
