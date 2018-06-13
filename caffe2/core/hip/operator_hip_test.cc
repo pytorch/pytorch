@@ -49,9 +49,7 @@ TEST(EnginePrefTest, GPUDeviceDefaultPreferredEngines)
     {
         const auto op = CreateOperator(op_def, &ws);
         EXPECT_NE(nullptr, op.get());
-        // MIOPEN should be taken as it's in the default global preferred engines
-        // list
-        EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "MIOPEN");
+        EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "HIP");
     }
 }
 
