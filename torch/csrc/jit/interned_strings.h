@@ -29,6 +29,11 @@ enum class SymbolNamespace : unsigned char {
 //
 // TODO: Consider moving the synthetic onnx operators to their own
 // namespace.
+//
+// prim::Cast
+// Right now this is a dummy node that holds no information. The script frontend
+// uses it by sending in an input and declaring the type of the output.
+// During shape propagation, the type of the input is propagated to the output.
 
 #define FORALL_PRIM_SYMBOLS(_) \
 _(prim, Assign) \
@@ -58,7 +63,9 @@ _(prim, Store) \
 _(prim, Undefined) \
 _(prim, Starred) \
 _(prim, TupleConstruct) \
-_(prim, TupleUnpack)
+_(prim, TupleUnpack) \
+_(prim, NumToTensor) \
+_(prim, TensorToNum) \
 /* end */
 
 // Workaround for some not-yet-defined ATen symbols, see
