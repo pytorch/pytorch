@@ -16,8 +16,8 @@ struct Tensor;
 
 namespace at {
 struct TensorImpl : public Retainable {
-  explicit TensorImpl(Type* type, bool is_variable = false)
-      : is_scalar(false), type_(type), is_variable_(is_variable) {}
+  explicit TensorImpl(Type * type)
+  : is_scalar(false), type_(type) {}
 
   Type & type() const {
     return *type_;
@@ -79,13 +79,8 @@ struct TensorImpl : public Retainable {
 
   AT_API virtual void set_data(Tensor new_data);
 
-  AT_API bool is_variable() const noexcept {
-    return is_variable_;
-  }
-
- protected:
+protected:
   bool is_scalar;
   Type * type_;
-  bool is_variable_;
 };
 } // namespace at
