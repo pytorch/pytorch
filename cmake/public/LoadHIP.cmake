@@ -135,8 +135,8 @@ IF(HIP_FOUND)
 
 
   # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.
-  set(hsa_INCLUDE_DIRS ${HCC_PATH}/include)
-  set(hcc_INCLUDE_DIRS ${HSA_PATH}/include)
+  set(hcc_INCLUDE_DIRS ${HCC_PATH}/include)
+  set(hsa_INCLUDE_DIRS ${HSA_PATH}/include)
 
   set(thrust_INCLUDE_DIRS ${THRUST_PATH} ${THRUST_PATH}/thrust/system/cuda/detail/cub-hip)
 
