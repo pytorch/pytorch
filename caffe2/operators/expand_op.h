@@ -31,7 +31,8 @@ class ExpandOp final : public Operator<Context> {
 	context_.template Copy<int, Context, CPUContext>(Y_shape_tensor.size(), Y_shape_tensor.template data<int>(), shape_dims.data());
     const int* Y_shape = Y_shape_tensor.template data<int>();
     auto* Y = Output(0);
-    const int ndim = shape_dims.size();
+
+	const int ndim = shape_dims.size();
     const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
     std::vector<int> Y_dims;
     Y_dims.reserve(std::max(ndim, X.ndim()));

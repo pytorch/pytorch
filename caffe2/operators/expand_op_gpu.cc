@@ -11,7 +11,8 @@ namespace caffe2 {
 
 REGISTER_CUDA_OPERATOR(
     Expand,
-    ExpandOp<
+
+	ExpandOp<
         TensorTypes<std::int32_t, std::int64_t, float, double>,
         CUDAContext,
         Expander<CUDAContext>>);
