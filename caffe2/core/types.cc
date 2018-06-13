@@ -6,32 +6,35 @@
 #include <string>
 #include <vector>
 
+namespace caffe2 {
 
-C10_KNOWN_TYPE(float) ;
-C10_KNOWN_TYPE(int) ;
-C10_KNOWN_TYPE(std::string) ;
-C10_KNOWN_TYPE(bool) ;
-C10_KNOWN_TYPE(uint8_t) ;
-C10_KNOWN_TYPE(int8_t) ;
-C10_KNOWN_TYPE(uint16_t) ;
-C10_KNOWN_TYPE(int16_t) ;
-C10_KNOWN_TYPE(int64_t) ;
-C10_KNOWN_TYPE(caffe2::float16) ;
-C10_KNOWN_TYPE(double) ;
-C10_KNOWN_TYPE(char) ;
-C10_KNOWN_TYPE(std::unique_ptr<std::mutex>) ;
-C10_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>) ;
-C10_KNOWN_TYPE(std::vector<int32_t>) ;
-C10_KNOWN_TYPE(std::vector<int64_t>) ;
-C10_KNOWN_TYPE(std::vector<unsigned long>) ;
-C10_KNOWN_TYPE(bool*) ;
-C10_KNOWN_TYPE(char*) ;
-C10_KNOWN_TYPE(int*) ;
+CAFFE_KNOWN_TYPE(float) ;
+CAFFE_KNOWN_TYPE(int) ;
+CAFFE_KNOWN_TYPE(std::string) ;
+CAFFE_KNOWN_TYPE(bool) ;
+CAFFE_KNOWN_TYPE(uint8_t) ;
+CAFFE_KNOWN_TYPE(int8_t) ;
+CAFFE_KNOWN_TYPE(uint16_t) ;
+CAFFE_KNOWN_TYPE(int16_t) ;
+CAFFE_KNOWN_TYPE(int64_t) ;
+CAFFE_KNOWN_TYPE(caffe2::float16) ;
+CAFFE_KNOWN_TYPE(double) ;
+CAFFE_KNOWN_TYPE(char) ;
+CAFFE_KNOWN_TYPE(std::unique_ptr<std::mutex>) ;
+CAFFE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>) ;
+CAFFE_KNOWN_TYPE(std::vector<int32_t>) ;
+CAFFE_KNOWN_TYPE(std::vector<int64_t>) ;
+CAFFE_KNOWN_TYPE(std::vector<unsigned long>) ;
+CAFFE_KNOWN_TYPE(bool*) ;
+CAFFE_KNOWN_TYPE(char*) ;
+CAFFE_KNOWN_TYPE(int*) ;
 
 #ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
-C10_KNOWN_TYPE(long) ;
-C10_KNOWN_TYPE(std::vector<long>) ;
+CAFFE_KNOWN_TYPE(long) ;
+CAFFE_KNOWN_TYPE(std::vector<long>) ;
 #endif // CAFFE2_UNIQUE_LONG_TYPEMETA
+
+} // namespace caffe2
 
 
 namespace caffe2 {
