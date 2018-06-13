@@ -159,6 +159,10 @@ struct Tensor : public detail::TensorBase {
 
   friend void detail::set_data(Tensor& tensor, Tensor new_data);
 
+  bool is_variable() const noexcept {
+    return pImpl->is_variable();
+  }
+
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
 
