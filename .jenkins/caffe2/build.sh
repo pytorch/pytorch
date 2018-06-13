@@ -154,7 +154,7 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   # https://github.com/ROCm-Developer-Tools/HIP/pull/516
   # remove this hack once it's merged.
   if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
-    sed -i 's/\ -I${dir}/\ $<$<BOOL:${dir}>:-I${dir}>)/' /opt/rocm/hip/cmake/FindHIP.cmake
+    sudo sed -i 's/\ -I${dir}/\ $<$<BOOL:${dir}>:-I${dir}>)/' /opt/rocm/hip/cmake/FindHIP.cmake
   fi
 
   export LANG=C.UTF-8
