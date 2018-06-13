@@ -80,8 +80,9 @@ class _Formatter(object):
 
         else:
             copy = torch.DoubleTensor(tensor.size()).copy_(tensor).view(tensor.nelement())
+            copy_list = copy.tolist()
             try:
-                for value in copy.tolist():
+                for value in copy_list:
                     if value != math.ceil(value):
                         self.int_mode = False
                         break
@@ -90,11 +91,12 @@ class _Formatter(object):
                 self.int_mode = False
 
             if self.int_mode:
-                for value in copy.tolist():
+                for value in copy_list:
                     value_str = '{:.0f}'.format(value)
                     if math.isnan(value) or math.isinf(value):
                         self.max_width = max(self.max_width, len(value_str))
                     else:
+                        # for finites, appending a decimal will increase the len by 1
                         self.max_width = max(self.max_width, len(value_str) + 1)
 
             else:
@@ -122,11 +124,11 @@ class _Formatter(object):
 
                 if exp_max - exp_min > PRINT_OPTS.precision or exp_max > 8 or exp_min < -4:
                     self.sci_mode = True
-                    for value in copy.tolist():
+                    for value in copy_list:
                         value_str = ('{:.' + str(PRINT_OPTS.precision) + 'e}').format(value)
                         self.max_width = max(self.max_width, len(value_str))
                 else:
-                    for value in copy.tolist():
+                    for value in copy_list:
                         value_str = ('{:.' + str(PRINT_OPTS.precision) + 'f}').format(value)
                         self.max_width = max(self.max_width, len(value_str))
 
@@ -156,9 +158,7 @@ def _scalar_str(self, formatter):
 def _vector_str(self, indent, formatter, summarize):
     # length includes spaces and comma between elements
     element_length = formatter.width() + 2
-    elements_per_line = int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
-    if elements_per_line < 1:
-        elements_per_line = 1
+    elements_per_line = max(1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length))))
     char_per_line = element_length * elements_per_line
 
     if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:

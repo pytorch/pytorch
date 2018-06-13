@@ -6676,7 +6676,7 @@ class TestTorch(TestCase):
             obj.__repr__()
             str(obj)
 
-        # test  big integer
+        # test big integer
         x = torch.tensor(2341234123412341)
         x_str = "tensor(2341234123412341)"
         self.assertEqual(x.__repr__(), str(x))
@@ -6709,9 +6709,18 @@ class TestTorch(TestCase):
         # test dtype
         x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.double)
         x_str = ("tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,"
-                 "                inf], dtype=torch.float64")
-        x.__repr__()
-        str(x)
+                 "                inf], dtype=torch.float64)")
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertEqual(x_str, str(x))
+
+        # test changing default dtype
+        default_type = torch.Tensor().type()
+        torch.set_default_dtype(torch.float64)
+        x_str = ("tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,"
+                 "                inf])")
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertEqual(x_str, str(x))
+        torch.set_default_dtype(torch.float)
 
         # test summary
         x = torch.zeros(10000)
@@ -6725,6 +6734,13 @@ class TestTorch(TestCase):
             x_str = "tensor([123], device='cuda:0')"
             self.assertEqual(x.__repr__(), str(x))
             self.assertEqual(x_str, str(x))
+
+            # test changing default to cuda
+            torch.set_default_tensor_type(torch.cuda.FloatTensor)
+            x_str = "tensor([123])"
+            self.assertEqual(x.__repr__(), str(x))
+            self.assertEqual(x_str, str(x))
+            torch.set_default_tensor_type(torch.FloatTensor)
 
         # test integral floats and requires_grad
         x = torch.tensor([123.], requires_grad=True)
