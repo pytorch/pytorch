@@ -1269,6 +1269,7 @@
   variants: method, function
 
 - func: add_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: method
 
 
 
@@ -1294,6 +1295,7 @@
   variants: method, function
 
 - func: sub_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: method
 
 
 
@@ -1340,8 +1342,10 @@
   variants: method, function
 
 - func: mul_(Tensor self, Tensor other) -> Tensor
+  variants: method
 
 - func: mul_(Tensor self, Scalar other) -> Tensor
+  variants: method
 
 
 
@@ -1367,6 +1371,7 @@
   variants: method, function
 
 - func: div_(Tensor self, Scalar other) -> Tensor
+  variants: method
 
 
 - func: s_native_addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -1391,6 +1396,7 @@
   variants: method, function
 
 - func: addmm_(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: method
 
 
 - func: native_tensor(Type self_ty) -> Tensor
@@ -1451,6 +1457,7 @@
     CPU: sparse_mask_cpu
 
 - func: _sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
+  variants: method
 
 
 - func: native_to_dense(Tensor self) -> Tensor
