@@ -128,5 +128,3 @@ def wrap_cunn(thcunn_h_path, install_dir, template_path):
     cwrap(os.path.join(install_dir, 'THCUNN.cwrap'),
           plugins=[NNExtension('torch._C._THCUNN'), NullableArguments(), AutoGPU(has_self=False)],
           template_path=template_path)
-
-
