@@ -404,6 +404,15 @@ static Value* tensorToNum(
   return result;
 }
 
+static inline bool isIntUsedAsIntList(
+    const Value* value,
+    const Argument& arg) {
+  // NB: attribute_info->data equals the "k" in IntList[k]
+  return value->type()->kind() == TypeKind::IntType &&
+         arg.type->isSubtypeOf(*DynamicType::get()) &&
+         arg.attribute_info && arg.attribute_info->data;
+}
+
 at::optional<std::vector<Value*>> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
@@ -465,11 +474,26 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       NamedValue v = *positional_inputs[i];
       const auto& arg = schema.arguments[i];
 
-      // implicit conversion from List[Tensor] -> Tensor for when the argument
+      // An IntList[1] is a union of int and IntList.
+      // Reinterpret an int as an "IntList" (a tensor)
+      if (isIntUsedAsIntList(v.value, arg)) {
+        if (v.value->node()->kind() == prim::Constant) {
+          // peephole optimization where we make a Tensor rather than
+          // a prim::TupleConstruct to wrap the int
+          auto* node = v.value->node();
+          v.value = createConstant(graph, loc, node->t(attr::value));
+        } else {
+          auto* node = graph.insertNode(graph.create(prim::TupleConstruct, { v.value }));
+          std::vector<TypePtr> tmp = { IntType::get() };
+          v.value = node->output()->setType(std::make_shared<TupleType>(tmp));
+        }
+      }
+
+      // implicit conversion from List[int] -> Tensor for when the argument
       // is an IntList in aten, for things like x.expand(sizes=[3,4,5])
       if(arg.attribute_info &&
          arg.attribute_info->kind == AttributeKind::is &&
-         v.value->type()->isSubtypeOf(*ListType::ofTensors())) {
+         v.value->type()->isSubtypeOf(*ListType::ofInts())) {
         auto unpacked = createTupleUnpack(v.value);
         v.value = createStack(graph, loc, unpacked);
       }

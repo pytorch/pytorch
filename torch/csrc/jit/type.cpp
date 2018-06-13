@@ -67,5 +67,9 @@ TypePtr ListType::ofTensors() {
   static auto value = std::make_shared<ListType>(DynamicType::get());
   return value;
 }
+TypePtr ListType::ofInts() {
+  static auto value = std::make_shared<ListType>(IntType::get());
+  return value;
+}
 
 }} // namespace torch::jit

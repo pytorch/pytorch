@@ -236,6 +236,7 @@ struct ListType : public Type {
   }
   // common cast List[Tensor]
   static TypePtr ofTensors();  
+  static TypePtr ofInts();
 private:
   TypePtr elem;
 };
