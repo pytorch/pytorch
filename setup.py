@@ -104,6 +104,7 @@ import importlib
 
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
+from tools.setup_helpers.rocm import WITH_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (WITH_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
@@ -126,7 +127,6 @@ DEBUG = check_env_flag('DEBUG')
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
-WITH_ROCM = check_env_flag('WITH_ROCM')
 
 FULL_CAFFE2 = check_env_flag('FULL_CAFFE2')
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
@@ -631,8 +631,10 @@ library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.so')]
-if WITH_CUDA or WITH_ROCM:
+if WITH_CUDA:
     CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
+if WITH_ROCM:
+    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_hip.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
@@ -643,14 +645,18 @@ NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 if IS_DARWIN:
     CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.dylib')]
-    if WITH_CUDA or WITH_ROCM:
+    if WITH_CUDA:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_gpu.dylib'))
+    if WITH_ROCM:
+        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_hip.dylib'))
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
     CAFFE2_LIBS = [os.path.join(lib_path, 'caffe2.lib')]
-    if WITH_CUDA or WITH_ROCM:
+    if WITH_CUDA:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
+    if WITH_ROCM:
+        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
     if DEBUG:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
     else:

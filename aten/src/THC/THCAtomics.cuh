@@ -103,7 +103,7 @@ static inline  __device__ void atomicAdd(half *address, half val) {
 
   do {
     assumed = old;
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     half hsum;
     hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
     hsum = THCNumerics<half>::add(hsum, val);
@@ -135,7 +135,7 @@ static inline  __device__  void atomicAdd(double *address, double val) {
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
 } while (assumed != old);
 }
-#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000)
+#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
   // This needs to be defined for the host side pass
   static inline  __device__  void atomicAdd(double *address, double val) { }
 #endif

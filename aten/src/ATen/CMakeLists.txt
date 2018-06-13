@@ -203,7 +203,7 @@ if(NOT MSVC)
   set(BUILD_TESTS ${__aten_sleef_build_tests} CACHE BOOL "Build tests" FORCE)
 endif()
 
-IF(USE_CUDA)
+IF(USE_CUDA AND NOT USE_ROCM)
   IF ($ENV{ATEN_STATIC_CUDA})
     # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
     # we first have to build a fake lib that links with no device callbacks,
@@ -250,6 +250,10 @@ IF(USE_CUDA)
       ${CUDA_LIBRARIES}
       ${CUDA_cusparse_LIBRARY}
       ${CUDA_curand_LIBRARY})
+
+      # Set necessary HIPCC/CXX Flags
+      SET(HIP_HCC_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
+      SET(CMAKE_CXX_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${CMAKE_CXX_FLAGS}")
   ENDIF()
 
   if(CUDNN_FOUND)
@@ -271,7 +275,7 @@ ENDIF()
 IF(USE_ROCM)
  ### Link in the ROCm libraries BLAS / RNG.
  FIND_LIBRARY(HIPBLAS_LIBRARY hipblas HINTS ${HIPBLAS_PATH}/lib)
- FIND_LIBRARY(HIPRNG_LIBRARY hiprng HINTS ${HIPRNG_PATH}/lib)
+ FIND_LIBRARY(HIPRNG_LIBRARY hcrng HINTS ${HIPRNG_PATH}/lib)
 
  list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${HIPBLAS_LIBRARY} ${HIPRNG_LIBRARY})
 ENDIF()
