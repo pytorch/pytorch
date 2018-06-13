@@ -1416,15 +1416,23 @@
   variants: function
 
 
+# NB: The function overloads are removed to avoid a nasty bug where
+# you say at::native_sparse_coo_tensor(indices, values), and then
+# it does the dispatch based on indices (wrong wrong wrong!)  Without
+# the variants, you must call this on type directly.
+#
+# Maybe this meant we were supposed to take a dtype as an argument here.
+# Hmmmmm.
+
 - func: native_sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
-  variants: function
+  variants: []
   dispatch:
-    CPU: new_with_tensor_sparse
+    SparseCPU: new_with_tensor_sparse
 
 - func: native_sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
-  variants: function
+  variants: []
   dispatch:
-    CPU: new_with_tensor_and_size_sparse
+    SparseCPU: new_with_tensor_and_size_sparse
 
 - func: sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
   variants: function
@@ -1434,9 +1442,9 @@
 
 
 - func: _native_sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
-  variants: function
+  variants: []
   dispatch:
-    CPU: new_with_tensor_and_size_unsafe_sparse
+    SparseCPU: new_with_tensor_and_size_unsafe_sparse
 
 - func: _sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
   variants: function

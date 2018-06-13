@@ -343,25 +343,25 @@ Tensor tensor(const Type& dtype, ArrayRef<int64_t> size) {
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values) {
   if (!indices.is_cuda()) {
-    return native_sparse_coo_tensor(indices, values);
+    return values.type().toSparse().native_sparse_coo_tensor(indices, values);
   } else {
-    return th_sparse_coo_tensor(indices, values);
+    return values.type().toSparse().th_sparse_coo_tensor(indices, values);
   }
 }
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size) {
   if (!indices.is_cuda()) {
-    return native_sparse_coo_tensor(indices, values, size);
+    return values.type().toSparse().native_sparse_coo_tensor(indices, values, size);
   } else {
-    return th_sparse_coo_tensor(indices, values, size);
+    return values.type().toSparse().th_sparse_coo_tensor(indices, values, size);
   }
 }
 
 Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size) {
   if (!indices.is_cuda()) {
-    return _native_sparse_coo_tensor_unsafe(indices, values, size);
+    return values.type().toSparse()._native_sparse_coo_tensor_unsafe(indices, values, size);
   } else {
-    return _th_sparse_coo_tensor_unsafe(indices, values, size);
+    return values.type().toSparse()._th_sparse_coo_tensor_unsafe(indices, values, size);
   }
 }
 
