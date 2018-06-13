@@ -24,6 +24,8 @@ gcc --version
 pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export HCC_AMDGPU_TARGET=gfx900
+
   # TODO: Install pyHIPIFY in the docker image
   rm -rf pyHIPIFY || true
   git clone https://github.com/ROCm-Developer-Tools/pyHIPIFY.git
