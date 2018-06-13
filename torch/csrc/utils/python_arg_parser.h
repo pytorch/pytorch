@@ -18,6 +18,26 @@
 //   } else {
 //     norm(r.scalar(0));
 //   }
+//
+// We auto-generate most uses of PythonArgParser; the generated files
+// are torch/csrc/autograd/generated/python_*.cpp
+//
+// Some gotchas that you should watch out for:
+//
+//    - Note [Order of overloads matters]
+//      Order of overloads matters.  A set of input arguments may
+//      bind to multiple argument specs; we will always pick the
+//      first one in PythonArgParser.  However, when you are writing
+//      overloads in, e.g., native_functions.yaml, you don't have to
+//      worry about what order you write them, because the code
+//      generation logic always gives the overloads a canonical
+//      order, where Tensor overloads come first, before Scalar overloads.
+//      This logic is in sort_declarations in
+//      tools/autograd/gen_python_functions.py
+//
+//    - Zero-dim tensors (e.g., torch.tensor(2)) bind to both
+//      Scalar and Tensor, UNLESS they require grad (in which case
+//      they only bind to Tensor).
 
 
 #include "torch/csrc/python_headers.h"
