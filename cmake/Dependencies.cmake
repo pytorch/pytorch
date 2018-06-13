@@ -15,7 +15,7 @@ if(BUILD_CAFFE2)
 endif()
 
 # ---[ protobuf
-if(BUILD_CAFFE2)
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)
     set(CAFFE2_USE_LITE_PROTO 1)
   endif()
@@ -303,18 +303,16 @@ if(USE_FFMPEG)
 endif()
 
 # ---[ EIGEN
-if(BUILD_CAFFE2)
-  # Due to license considerations, we will only use the MPL2 parts of Eigen.
-  set(EIGEN_MPL2_ONLY 1)
-  find_package(Eigen3)
-  if(EIGEN3_FOUND)
-    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
-  else()
-    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
-    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
-  endif()
-  include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
+# Due to license considerations, we will only use the MPL2 parts of Eigen.
+set(EIGEN_MPL2_ONLY 1)
+find_package(Eigen3)
+if(EIGEN3_FOUND)
+  message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+else()
+  message(STATUS "Did not find system Eigen. Using third party subdirectory.")
+  set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
 endif()
+include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
@@ -516,14 +514,12 @@ if(USE_NCCL)
 endif()
 
 # ---[ CUB
-if(BUILD_CAFFE2)
-  if(USE_CUDA)
-    find_package(CUB)
-    if(CUB_FOUND)
-      include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
-    else()
-      include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
-    endif()
+if(USE_CUDA)
+  find_package(CUB)
+  if(CUB_FOUND)
+    include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
+  else()
+    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
   endif()
 endif()
 
@@ -704,9 +700,10 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # We will build onnx as static libs and embed it directly into the binary.
   set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  # Do not do post-processing if caffe2 is not included in the build,
-  # otherwise the caffe2 protobuf symbols will not be found
-  if (BUILD_CAFFE2 AND CAFFE2_LINK_LOCAL_PROTOBUF)
+  # If linking local protobuf, make sure ONNX has the same protobuf
+  # patches as Caffe2 and Caffe proto. This forces some functions to
+  # not be inline and instead route back to the statically-linked protobuf.
+  if (CAFFE2_LINK_LOCAL_PROTOBUF)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)

@@ -8,16 +8,13 @@
 #endif  // !CAFFE2_USE_LITE_PROTO
 
 #include "caffe2/core/logging.h"
+#include "caffe2/utils/proto_wrap.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 namespace caffe2 {
 
 using std::string;
 using ::google::protobuf::MessageLite;
-
-// A wrapper function to shut down protobuf library (this is needed in ASAN
-// testing and valgrind cases to avoid protobuf appearing to "leak" memory).
-void ShutdownProtobufLibrary();
 
 // A wrapper function to return device name string for use in blob serialization
 // / deserialization. This should have one to one correspondence with
