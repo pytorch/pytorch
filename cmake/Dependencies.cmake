@@ -448,9 +448,23 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
-    set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -fPIC")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_PLATFORM_HCC__=1")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -DCUDA_HAS_FP16=1")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_NO_HALF_OPERATORS__=1")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_NO_HALF_CONVERSIONS__=1")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-macro-redefined")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-inconsistent-missing-override")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-exceptions")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-negative")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-overflow")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
+
     set(Caffe2_HIP_INCLUDES
-      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${Caffe2_HIP_INCLUDES} ${thrust_INCLUDE_DIRS})
+      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
+    # This is needed for library added by hip_add_library (same for hip_add_executable)
+    hip_include_directories(${Caffe2_HIP_INCLUDES})
+
     set(Caffe2_HIP_DEPENDENCY_LIBS
       ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipblas_LIBRARIES})
     # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
