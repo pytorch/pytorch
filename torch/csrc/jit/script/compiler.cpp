@@ -600,7 +600,8 @@ struct NoneValue : SugaredValue {
 
 static Value* ensureTensor(const SourceRange& range, Value* v) {
   if(!isTensorSubtype(v)) {
-    throw ErrorReport(range) << "expected a tensor value but found a tuple";
+    throw ErrorReport(range) << "expected a tensor value but found a "
+                             << *v->type();
   }
   return v;
 }
