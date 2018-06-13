@@ -102,7 +102,7 @@ struct Reduction {
       sum = std::accumulate(buf, buf + WIDTH, scalar_t(ident), ReduceScalar());
     }
 
-    for (int i = k * WIDTH; i != size; i++) {
+    for (int64_t i = k * WIDTH; i != size; i++) {
       sum = ReduceScalar()(sum, data[i]);
     }
     return sum;
