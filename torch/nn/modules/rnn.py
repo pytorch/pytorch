@@ -603,8 +603,10 @@ class RNNCell(RNNCellBase):
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
 
-    def forward(self, input, hx):
+    def forward(self, input, hx=None):
         self.check_forward_input(input)
+        if hx is None:
+            hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
         self.check_forward_hidden(input, hx)
         if self.nonlinearity == "tanh":
             func = self._backend.RNNTanhCell
@@ -698,8 +700,11 @@ class LSTMCell(RNNCellBase):
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
 
-    def forward(self, input, hx):
+    def forward(self, input, hx=None):
         self.check_forward_input(input)
+        if hx is None:
+            hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
+            hx = (hx, hx)
         self.check_forward_hidden(input, hx[0], '[0]')
         self.check_forward_hidden(input, hx[1], '[1]')
         return self._backend.LSTMCell(
@@ -778,8 +783,10 @@ class GRUCell(RNNCellBase):
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
 
-    def forward(self, input, hx):
+    def forward(self, input, hx=None):
         self.check_forward_input(input)
+        if hx is None:
+            hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
         self.check_forward_hidden(input, hx)
         return self._backend.GRUCell(
             input, hx,
