@@ -125,7 +125,7 @@ class GlobalInitIsCalledGuard {
  * successive calls will parse flags and re-set caffe2 logging levels from
  * flags as needed, but NOT re-run early init and init functions.
  *
- * GlobalInit is *NOT* thread-safe and should not be called concurrently.
+ * GlobalInit is also thread-safe and can be called concurrently.
  */
 bool GlobalInit(int* pargc, char*** argv);
 
