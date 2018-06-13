@@ -254,12 +254,16 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  # This is needed for library added by hip_add_library (same for hip_add_executable)
+  HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
+  IF(BUILD_CAFFE2)
+     set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  ENDIF()
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
-
+  set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${HIP_HIPCC_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
-
+  target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
   IF(BUILD_ATEN)
     aten_set_target_props(caffe2_hip)
   ENDIF()
