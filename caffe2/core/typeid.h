@@ -404,8 +404,6 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 
 // Define adapters for c10 code
 namespace c10 {
-using TypeId = caffe2::CaffeTypeId;
-using TypeMeta = caffe2::TypeMeta;
 
 // Needs to be called from top level (i.e. outside of any) namespace
 #define C10_KNOWN_TYPE(T)                              \
