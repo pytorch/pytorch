@@ -24,8 +24,12 @@ bool isDifferentiable(Node * n) {
   if (n->kind() == aten::addmm && n->inputs().size() > 3) {
     return false;
   }
+  if (n->kind() == aten::type_as && !n->inputs()[0]->isTensor()) {
+    return false;
+  }
   return differentiable_kinds.count(n->kind()) > 0;
 }
+
 
 bool isDifferentiable(Graph & g) {
   return std::all_of(g.nodes().begin(), g.nodes().end(),
@@ -43,7 +47,7 @@ bool outputRequiresGrad(Node* node, std::function<bool(Value*)> requires_grad) {
     case aten::eq:
       return false;
     case aten::type_as:
-//type_as has two inputs, the second of which (setting type) might require grad, but it still won't affect the output of type_as requiring grad.
+    //type_as has two inputs, the second of which (setting type) might require grad, but it still won't affect the output of type_as requiring grad.
       return requires_grad(node->inputs()[0]);
     default:
       return std::any_of(node->inputs().begin(), node->inputs().end(), requires_grad);
