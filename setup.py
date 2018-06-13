@@ -1027,7 +1027,6 @@ if __name__ == '__main__':
         package_data={
             'torch': [
                 'lib/*.so*',
-                'lib/*.a',
                 'lib/*.dylib*',
                 'lib/*.dll',
                 'lib/*.lib',
