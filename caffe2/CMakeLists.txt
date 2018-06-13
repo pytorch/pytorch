@@ -42,6 +42,12 @@ if(BUILD_ATEN)
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
+
+  IF(USE_ROCM)
+    # Set the HIP Variables
+    set(Caffe2_HIP_SRCS ${ATen_CUDA_SRCS})
+    set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${Caffe2_GPU_INCLUDE})
+  ENDIF(USE_ROCM)
 endif()
 
 # ---[ Caffe2 build
@@ -205,7 +211,7 @@ caffe2_interface_library(caffe2 caffe2_library)
 list(APPEND Caffe2_MAIN_LIBS caffe2_library)
 
 # ---[ CUDA library.
-if(USE_CUDA OR (USE_ROCM AND NOT BUILD_CAFFE2))
+if(USE_CUDA)
   # A hack to deal with cuda library dependencies and modern CMake: the
   # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
   # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
@@ -243,31 +249,46 @@ if(USE_CUDA OR (USE_ROCM AND NOT BUILD_CAFFE2))
 endif()
 
 # ---[ Caffe2 HIP sources.
-if(BUILD_CAFFE2)
-  if(USE_ROCM)
-    HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
-    set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
+if(USE_ROCM)
+  HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
 
-    target_include_directories(
-      caffe2_hip PUBLIC ${Caffe2_HIP_INCLUDES})
-    target_include_directories(
-      caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
+  IF(BUILD_ATEN)
+    # Set necessary HIPCC Flags
+    SET(HIP_HCC_FLAGS "-fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
+    SET(Caffe2_HIP_CXX_FLAGS "-fPIC -DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${Caffe2_HIP_CXX_FLAGS}")
+  ENDIF()
 
-    target_link_libraries(caffe2_hip PUBLIC caffe2)
-    target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
+  # Since the HIP_ADD_LIBRARY is a MACRO, we need to set HIP_HCC_FLAGS prior to calling it.
+  # Also, Since HIP_INCLUDE_DIRECTORIES is a MACRO, we must call it before HIP_ADD_LIBRARY.
+  HIP_ADD_LIBRARY(caffe2_hip ${Caffe2_HIP_SRCS})
 
-    set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
+  set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${Caffe2_HIP_CXX_FLAGS})
 
-    caffe2_interface_library(caffe2_hip caffe2_hip_library)
-    list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
-    install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
-  endif()
+  target_include_directories(
+    caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
+  target_include_directories(
+    caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
+
+  IF(BUILD_ATEN)
+    aten_set_target_props(caffe2_hip)
+  ENDIF()
+
+  target_link_libraries(caffe2_hip PUBLIC caffe2)
+  target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
+
+  # https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
+  # To avoid having to do above, keep this commented.
+  set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
+
+  caffe2_interface_library(caffe2_hip caffe2_hip_library)
+  list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
+  install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
 endif()
 
 # ---[ Check if warnings should be errors.
 if ($ENV{WERROR})
   target_compile_options(caffe2 PRIVATE -Werror)
-  if(USE_CUDA OR USE_ROCM)
+  if(USE_CUDA)
     target_compile_options(caffe2_gpu PRIVATE -Werror)
   endif()
 endif()
@@ -315,7 +336,8 @@ if(BUILD_CAFFE2)
   # Aten tests should only run when Caffe2 is not built
   set(__aten_test_dir "test/aten")
 endif()
-if(BUILD_ATEN)
+# Todo - Set up ATen tests for ROCm in an upcoming PR
+if(BUILD_ATEN AND NOT USE_ROCM)
   foreach(test_src ${ATen_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
