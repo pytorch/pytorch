@@ -84,7 +84,7 @@ void THSTensor_(pow)(THSTensor *r_, THSTensor *t_, real value) {
 
 #if defined(THS_REAL_IS_FLOAT) || defined(THS_REAL_IS_DOUBLE)
 accreal THSTensor_(normall)(THSTensor *self, real value) {
-  THError("Internal error! normall shouldn't be called; use at::native_norm instead");
+  THError("Internal error! THSTensor_(normall)(self, value) shouldn't be called; use self.norm(value) instead");
 }
 
 /* floating point only, because that is what TH supports */

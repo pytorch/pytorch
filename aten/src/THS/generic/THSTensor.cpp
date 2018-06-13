@@ -8,53 +8,39 @@
 
 int THSTensor_(nDimension)(const THSTensor *self)
 {
-  return self->nDimensionI + self->nDimensionV;
+  THError("Internal error! THSTensor_(nDimension)(self) shouldn't be called; use self.dim() instead");
 }
 
 int THSTensor_(nDimensionI)(const THSTensor *self)
 {
-  return self->nDimensionI;
+  THError("Internal error! THSTensor_(nDimensionI)(self) shouldn't be called; use self._dimI() instead");
 }
 
 int THSTensor_(nDimensionV)(const THSTensor *self)
 {
-  return self->nDimensionV;
+  THError("Internal error! THSTensor_(nDimensionV)(self) shouldn't be called; use self._dimV() instead");
 }
 
 int64_t THSTensor_(size)(const THSTensor *self, int dim)
 {
-  THArgCheck((dim >= 0) && (dim < self->nDimensionI + self->nDimensionV),
-      1, "dimension %d out of range of %dD tensor",
-      dim+1, THSTensor_(nDimension)(self));
-  return self->size[dim];
+  THError("Internal error! THSTensor_(size)(self, dim) shouldn't be called; use self.size(dim) instead");
 }
 
 ptrdiff_t THSTensor_(nnz)(const THSTensor *self) {
-  return self->nnz;
+  THError("Internal error! THSTensor_(nnz)(self) shouldn't be called; use self._nnz() instead");
 }
 
 THLongStorage *THSTensor_(newSizeOf)(THSTensor *self)
 {
-  THLongStorage *size = THLongStorage_newWithSize(self->nDimensionI + self->nDimensionV);
-  THLongStorage_rawCopy(size, self->size);
-  return size;
+  THError("Internal error! THSTensor_(newSizeOf)(self) shouldn't be called; use dtype.tensor(self.size()) instead");
 }
 
 THLongTensor *THSTensor_(newIndices)(const THSTensor *self) {
-  if (self->nnz == 0) {
-    // Narrows don't work on 0-length tensors
-    THLongTensor_retain(self->indices);
-    return self->indices;
-  }
-  return THLongTensor_newNarrow(self->indices, 1, 0, self->nnz);
+  THError("Internal error! THSTensor_(newIndices)(self) shouldn't be called; use self._indices() instead");
 }
 
 THTensor *THSTensor_(newValues)(const THSTensor *self) {
-  if (self->nnz == 0) {
-    THTensor_(retain)(self->values);
-    return self->values;
-  }
-  return THTensor_(newNarrow)(self->values, 0, 0, self->nnz);
+  THError("Internal error! THSTensor_(newValues)(self) shouldn't be called; use self._values() instead");
 }
 
 
@@ -65,30 +51,11 @@ THTensor *THSTensor_(newValues)(const THSTensor *self) {
 /*** Helper methods ***/
 static void THSTensor_(rawInit)(THSTensor *self)
 {
-  new (&self->refcount) std::atomic<int>(1);
-  self->size = static_cast<int64_t *>(THAlloc(sizeof(int64_t)));
-  self->size[0] = 0;
-  self->indices = THLongTensor_new();
-  self->values = THTensor_(new)();
-  self->nDimensionI = 0;
-  self->nDimensionV = 0;
-  self->coalesced = 0;
-  self->nnz = 0;
-  // self->flag = TH_TENSOR_REFCOUNTED;
+  THError("Internal error! THSTensor_(rawInit)(self) shouldn't be called; dtype.tensor() allocated sparse tensors should already be initialized");
 }
 
 THSTensor* THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, int64_t *size) {
-  // Only resize valid sizes into tensor.
-  int64_t dims = nDimI + nDimV == 0 ? 1 : nDimI + nDimV; // FIXME: nDimI + nDimV should not be 0.
-  self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*(dims));
-
-  for (int64_t d = 0; d < dims; d++) {
-    self->size[d] = size[d];
-  }
-  self->nDimensionI = nDimI;
-  self->nDimensionV = nDimV;
-
-  return self;
+  THError("Internal error! THSTensor_(rawResize)(self, nDimI, nDimV, size) shouldn't be called; use _get_sparse_impl(self)->raw_resize_(dimI, dimV, size) instead");
 }
 
 // directly assign without cloning or retaining (internal method)
