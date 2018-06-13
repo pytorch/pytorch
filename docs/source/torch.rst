@@ -204,6 +204,7 @@ Reduction Ops
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: dist
+.. autofunction:: logsumexp
 .. autofunction:: mean
 .. autofunction:: median
 .. autofunction:: mode

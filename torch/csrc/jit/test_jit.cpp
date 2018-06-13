@@ -34,6 +34,8 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
+#include "onnx/onnx_pb.h"
+
 
 #include <vector>
 #include <iostream>
@@ -875,6 +877,11 @@ void testControlFlow() {
   REQUIRE(256 == run_binary("while_test",2,0));
 }
 
+void testProto() {
+  ::ONNX_NAMESPACE::ModelProto proto;
+  proto.set_producer_name("foo");
+}
+
 std::string runJITCPPTests() {
   std::stringstream out;
   testControlFlow();
@@ -893,6 +900,7 @@ std::string runJITCPPTests() {
   fromQualStringTests();
   argumentSpecTest();
   shapeAnalysisTest();
+  testProto();
   return out.str();
 }
 
