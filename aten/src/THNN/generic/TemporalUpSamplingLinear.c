@@ -5,6 +5,8 @@
 #define TH_GENERIC_FILE "generic/TemporalUpSamplingLinear.c"
 #else
 
+#include "upsampling.h"
+
 static inline void THNN_(TemporalUpSamplingLinear_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
       int nBatch, int nChannels,
@@ -65,9 +67,9 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
     }
     return;
   }
-  const float rwidth = THNN_(linear_upsampling_compute_scale)(inputWidth, outputWidth, align_corners);
+  const accreal rwidth = upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   for (int w2 = 0; w2 < outputWidth; ++w2) {
-    const float w1r = THNN_(linear_upsampling_compute_source_index)(rwidth, w2, align_corners);
+    const accreal w1r = upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
     const int w1 = w1r;
     const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
     const real w1lambda = w1r - w1;
@@ -120,9 +122,9 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
     }
     return;
   }
-  const float rwidth = THNN_(linear_upsampling_compute_scale)(inputWidth, outputWidth, align_corners);
+  const accreal rwidth = upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   for (int w2 = 0; w2 < outputWidth; ++w2) {
-    const float w1r = THNN_(linear_upsampling_compute_source_index)(rwidth, w2, align_corners);
+    const accreal w1r = upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
     const int w1 = w1r;
     const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
     const real w1lambda = w1r - w1;

@@ -1909,8 +1909,8 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             raise ValueError('either size or scale_factor should be defined')
         if size is not None and scale_factor is not None:
             raise ValueError('only one of size or scale_factor should be defined')
-        if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
-            raise ValueError('scale_factor must be of integer type or a tuple of integer types')
+        #if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
+        #    raise ValueError('scale_factor must be of integer type or a tuple of integer types')
 
     def _scale_factor(dim):
         _check_size_scale_factor()
@@ -1936,7 +1936,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         if size is not None:
             return size
         scale_factors = _ntuple(dim)(scale_factor)
-        return [input.size(i + 2) * scale_factors[i] for i in range(dim)]
+        return [math.floor(input.size(i + 2) * scale_factors[i]) for i in range(dim)]
 
     if mode == 'nearest':
         if align_corners is not None:

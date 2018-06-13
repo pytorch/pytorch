@@ -1,9 +1,9 @@
-#ifndef THCUNN_LINEAR_UPSAMPLING_H
-#define THCUNN_LINEAR_UPSAMPLING_H
+#ifndef THCUNN_UPSAMPLING_H
+#define THCUNN_UPSAMPLING_H
 
 template<typename Acctype>
 __host__ __forceinline__
-static Acctype linear_upsampling_compute_scale(
+static Acctype upsampling_compute_scale(
                           int inputSize, int outputSize, bool align_corners) {
   if (outputSize > 1) {
     return align_corners ? (Acctype) (inputSize - 1) / (outputSize - 1)
@@ -15,7 +15,7 @@ static Acctype linear_upsampling_compute_scale(
 
 template<typename Acctype>
 __device__ __forceinline__
-static Acctype linear_upsampling_compute_source_index(
+static Acctype upsampling_compute_source_index(
                           Acctype scale, int dst_index, bool align_corners) {
   if (align_corners) {
     return scale * dst_index;

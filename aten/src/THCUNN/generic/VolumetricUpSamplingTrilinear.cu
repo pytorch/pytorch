@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/VolumetricUpSamplingTrilinear.cu"
 #else
 
-#include "../linear_upsampling.h"
+#include "../upsampling.h"
 
 static inline void THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
                         (THCState *state,
@@ -58,9 +58,9 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
   THCDeviceTensor<real, 5> idata = toDeviceTensor<real, 5>(state, input);
   THCDeviceTensor<real, 5> odata = toDeviceTensor<real, 5>(state, output);
   THAssert(inputDepth > 0 && inputHeight > 0 && inputWidth > 0 && outputDepth > 0 && outputHeight > 0 && outputWidth > 0);
-  const accreal rdepth = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
-  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
-  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rdepth = upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
+  const accreal rheight = upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth = upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputDepth * outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
@@ -98,9 +98,9 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<real, 5> data1 = toDeviceTensor<real, 5>(state, gradInput);
   THCDeviceTensor<real, 5> data2 = toDeviceTensor<real, 5>(state, gradOutput);
-  const accreal rdepth = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
-  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
-  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rdepth = upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
+  const accreal rheight = upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth = upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputDepth * outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
