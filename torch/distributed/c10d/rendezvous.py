@@ -3,7 +3,7 @@ try:
 except ImportError:
     from urlparse import urlparse
 
-import torch.distributed.c10d as c10d
+from . import FileStore, TCPStore
 
 
 _rendezvous_handlers = {}
@@ -35,7 +35,8 @@ def register_rendezvous_handler(scheme, handler):
     global _rendezvous_handlers
     if scheme in _rendezvous_handlers:
         raise RuntimeError(
-            "Rendezvous handler for {}:// already registered".format(scheme))
+            "Rendezvous handler for {}:// already registered".format(scheme)
+        )
     _rendezvous_handlers[scheme] = handler
 
 
@@ -43,56 +44,55 @@ def rendezvous(url, **kwargs):
     global _rendezvous_handlers
     result = urlparse(url)
     if result.scheme not in _rendezvous_handlers:
-        raise RuntimeError(
-            "No rendezvous handler for {}://".format(result.scheme))
+        raise RuntimeError("No rendezvous handler for {}://".format(result.scheme))
     return _rendezvous_handlers[result.scheme](url, **kwargs)
 
 
 def _file_rendezvous_handler(url):
     def _error(msg):
-        return ValueError('file:// rendezvous: ' + msg)
+        return ValueError("file:// rendezvous: " + msg)
 
     result = urlparse(url)
     path = result.path
     if not path:
-        raise _error('path missing')
-    query = dict(pair.split('=') for pair in filter(None, result.query.split('&')))
-    if 'rank' not in query:
-        raise _error('rank parameter missing')
-    if 'size' not in query:
-        raise _error('size parameter missing')
+        raise _error("path missing")
+    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
+    if "rank" not in query:
+        raise _error("rank parameter missing")
+    if "size" not in query:
+        raise _error("size parameter missing")
 
-    rank = int(query['rank'])
-    size = int(query['size'])
-    store = c10d.FileStore(path)
+    rank = int(query["rank"])
+    size = int(query["size"])
+    store = FileStore(path)
     yield (store, rank, size)
 
     # If this configuration is invalidated, there is nothing we can do about it
-    raise RuntimeError('Unable to perform rerendezvous using file:// method')
+    raise RuntimeError("Unable to perform rerendezvous using file:// method")
 
 
 def _tcp_rendezvous_handler(url):
     def _error(msg):
-        return ValueError('tcp:// rendezvous: ' + msg)
+        return ValueError("tcp:// rendezvous: " + msg)
 
     result = urlparse(url)
     if not result.port:
-        raise _error('port number missing')
-    query = dict(pair.split('=') for pair in filter(None, result.query.split('&')))
-    if 'rank' not in query:
-        raise _error('rank parameter missing')
-    if 'size' not in query:
-        raise _error('size parameter missing')
+        raise _error("port number missing")
+    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
+    if "rank" not in query:
+        raise _error("rank parameter missing")
+    if "size" not in query:
+        raise _error("size parameter missing")
 
-    rank = int(query['rank'])
-    size = int(query['size'])
-    start_daemon = (rank == 0)
-    store = c10d.TCPStore(result.hostname, result.port, start_daemon)
+    rank = int(query["rank"])
+    size = int(query["size"])
+    start_daemon = rank == 0
+    store = TCPStore(result.hostname, result.port, start_daemon)
     yield (store, rank, size)
 
     # If this configuration is invalidated, there is nothing we can do about it
-    raise RuntimeError('Unable to perform rerendezvous using tcp:// method')
+    raise RuntimeError("Unable to perform rerendezvous using tcp:// method")
 
 
-register_rendezvous_handler('file', _file_rendezvous_handler)
-register_rendezvous_handler('tcp', _tcp_rendezvous_handler)
+register_rendezvous_handler("file", _file_rendezvous_handler)
+register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
