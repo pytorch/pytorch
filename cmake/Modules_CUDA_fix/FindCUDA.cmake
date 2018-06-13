@@ -1419,6 +1419,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
     foreach(_blacklisted ${CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST})
       list(REMOVE_ITEM ${CUDA_FLAGS} "${_blacklisted}")
     endforeach()
+    string(REPLACE ";" " " ${CUDA_FLAGS} "${${CUDA_FLAGS}}")
   endmacro()
 
   # Only add the CMAKE_{C,CXX}_FLAGS if we are propagating host flags.  We
@@ -1453,7 +1454,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
       set(_cuda_C_FLAGS "${CMAKE_${CUDA_C_OR_CXX}_FLAGS_${config_upper}}")
       _filter_blacklisted_host_flags(_cuda_C_FLAGS)
       if(_cuda_fix_g3)
-        string(REPLACE ";-g3;" ";-g;" _cuda_C_FLAGS "${_cuda_C_FLAGS}")
+        string(REPLACE "-g3" "-g" _cuda_C_FLAGS "${_cuda_C_FLAGS}")
       endif()
 
       string(APPEND _cuda_host_flags "\nset(CMAKE_HOST_FLAGS_${config_upper} ${_cuda_C_FLAGS})")
