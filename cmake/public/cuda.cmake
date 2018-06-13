@@ -350,6 +350,7 @@ foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration se
 endforeach()
 
 # Set C++11 support
+set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if (NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
