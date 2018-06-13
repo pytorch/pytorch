@@ -48,7 +48,6 @@ backend_test.exclude('(test_cast_.*'
 
 # Temporarily skip some ONNX backend tests with broadcasting.
 backend_test.exclude('(test_pow_bcast'
-                     '|test_gemm_broadcast'
                      ')')
 
 # Skip vgg to speed up CI
