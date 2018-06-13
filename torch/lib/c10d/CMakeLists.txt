@@ -148,7 +148,7 @@ if(BUILD_EXAMPLES)
   add_subdirectory(example)
 endif()
 
-option(BUILD_TEST "Build tests" OFF)
+option(BUILD_TEST "Build tests" ON)
 if(BUILD_TEST)
   enable_testing()
   add_subdirectory(test)
