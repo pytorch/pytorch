@@ -155,7 +155,7 @@ void checkChainingAndRun(
     FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
-    auto* dag = dynamic_cast_if_rtti<DAGNetBase*>(net.get());
+    auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
     CHECK_NOTNULL(dag);
     const auto& chains = dag->TEST_execution_chains();
     EXPECT_TRUE(chains == expected);
@@ -182,7 +182,7 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
     FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
-    auto* dag = dynamic_cast_if_rtti<DAGNetBase*>(net.get());
+    auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
     CHECK_NOTNULL(dag);
     const auto& chains = dag->TEST_execution_chains();
     EXPECT_EQ(expected_num_chains, chains.size());
@@ -579,7 +579,14 @@ TEST(NetTest, FailingOperator) {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     for (int i = 0; i < 10; i++) {
       counter.exchange(0);
-      ASSERT_FALSE(net->Run());
+      bool run_result = false;
+      try {
+        run_result = net->Run();
+      } catch (const std::exception&) {
+        // async_scheduling would throw
+      }
+      ASSERT_FALSE(run_result);
+
       ASSERT_EQ(1, counter.load());
     }
   }
@@ -674,17 +681,6 @@ TEST(NetTest, ExecutorOverride) {
   NetDef net_def;
   CAFFE_ENFORCE(
       ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
-
-  {
-    Workspace ws;
-    auto old = FLAGS_caffe2_override_executor;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_override_executor = old; });
-    FLAGS_caffe2_override_executor = "";
-
-    std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
-    auto dag_net = caffe2::dynamic_cast_if_rtti<DAGNet*>(net.get());
-    ASSERT_TRUE(dag_net != nullptr);
-  }
 
   {
     Workspace ws;
