@@ -706,6 +706,8 @@ class TestJit(JitTestCase):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
         trace, _ = torch.jit.get_trace_graph(doit, (x, y))
+        self.run_pass('dce', trace)
+        self.run_pass('canonicalize', trace)
         g = trace.graph()
         g2 = torch._C.Graph()
         g_to_g2 = {}
