@@ -24,7 +24,7 @@ cmake -DUSE_CUDA:BOOL=$USE_CUDA \
       -DCMAKE_INSTALL_MESSAGE=NEVER \
       -DVERBOSE:BOOL=${VERBOSE:-0} \
       -G "$GENERATE" \
-      $SCRIPTPATH/libtorch
+      $PYTORCHPATH/torch
 $MAKE -j "$JOBS"
 
 popd
