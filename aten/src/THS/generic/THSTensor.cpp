@@ -196,151 +196,25 @@ void THSTensor_(divSlice)(
 }
 
 THTensor *THSTensor_(newValuesWithSizeOf)(THTensor *values, int64_t nnz) {
-  THTensor *new_values;
-  if (THTensor_(nDimension)(values) == 0) { // values tensor uninitialized
-    new_values = THTensor_(newWithSize1d)(nnz);
-  } else {
-    THLongStorage *size = THTensor_(newSizeOf)(values);
-    THLongStorage_data(size)[0] = nnz;
-    new_values = THTensor_(newWithSize)(size, NULL);
-    THLongStorage_free(size);
-  }
-  return new_values;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
-  if (self->nnz < 2) {
-    self->coalesced = 1;
-  }
-  if (self->coalesced) {
-    THSTensor_(retain)(self);
-    return self;
-  }
-  THLongTensor *indices = THSTensor_(newIndices)(self);
-  THTensor *values_ = THSTensor_(newValues)(self);
-  THTensor *values = THTensor_(newContiguous)(values_);
-  int64_t nDimI = THSTensor_(nDimensionI)(self);
-  int64_t nDimV = THSTensor_(nDimensionV)(self);
-
-  THLongTensor *indicesScalar = THLongTensor_newWithSize1d(self->nnz);
-  THLongTensor *indicesSlice = THLongTensor_new();
-  THLongTensor *indicesBuffer = THLongTensor_newWithSize1d(self->nnz);
-  THLongTensor *indicesPermutation = THLongTensor_newWithSize1d(self->nnz);
-  THLongTensor_zero(indicesScalar);
-  int64_t factor = 1;
-  for (int64_t d = nDimI - 1; d >= 0; d--) {
-    THLongTensor_select(indicesSlice, indices, 0, d);
-    THLongTensor_cadd(indicesScalar, indicesScalar, factor, indicesSlice);
-    factor *= self->size[d];
-  }
-
-  THLongTensor *newIndices = THLongTensor_new();
-  THTensor *newValues = THTensor_(new)();
-  THLongTensor_resizeAs(newIndices, indices);
-  THTensor_(resizeAs)(newValues, values_);
-  // THSTensor_(_move)(self, newIndices, newValues);
-  THSTensor *dst = THSTensor_(new)();
-  THSTensor_(rawResize)(dst, nDimI, nDimV, self->size);
-  THSTensor_(_move)(dst, newIndices, newValues);
-
-  THLongTensor_sort(indicesBuffer, indicesPermutation, indicesScalar, 0, 0);
-
-  int64_t i = -1;
-  int64_t prev = -1;
-  int64_t blockSize = values->stride[0];
-  for (int64_t j = 0; j < self->nnz; j++) {
-    int64_t pos = THLongTensor_fastGet1d(indicesPermutation, j);
-    int64_t curr = THLongTensor_fastGet1d(indicesBuffer, j);
-    if (curr == prev) {
-      THBlas_(axpy)(blockSize, 1,
-        THTensor_(data)(values) + pos * blockSize, 1,
-        THTensor_(data)(newValues) + i * blockSize, 1);
-    } else {
-      ++i;
-      for (int64_t d = 0; d < nDimI; d++) {
-        THLongTensor_fastSet2d(newIndices, d, i, THLongTensor_fastGet2d(indices, d, pos));
-      }
-      THBlas_(copy)(blockSize,
-        THTensor_(data)(values) + pos * blockSize, 1,
-        THTensor_(data)(newValues) + i * blockSize, 1);
-    }
-    prev = curr;
-  }
-  dst->nnz = i + 1;
-  dst->coalesced = 1;
-  THLongTensor_free(indicesScalar);
-  THLongTensor_free(indicesBuffer);
-  THLongTensor_free(indicesPermutation);
-  THLongTensor_free(indicesSlice);
-  THLongTensor_free(indices);
-  THTensor_(free)(values_);
-  THTensor_(free)(values);
-
-  return dst;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
-  THArgCheck(mask->coalesced, 2, "mask is uncoalesced");
-  THSTensor_(resizeAs)(r_, mask);
-  if (mask->nnz == 0) {
-    THSTensor_(zero)(r_);
-    return;
-  }
-  int64_t nDim = THTensor_(nDimension)(t);
-  int64_t nDimI = THSTensor_(nDimensionI)(mask);
-  THLongTensor *mask_indices_ = THSTensor_(newIndices)(mask);
-  THTensor *mask_values_ = THSTensor_(newValues)(mask);
-  THTensor *r_values_ = THTensor_(new)();
-  THTensor_(resizeAs)(r_values_, mask_values_);
-  THSTensor_(_move)(r_, THLongTensor_newClone(mask_indices_), r_values_);
-  r_->coalesced = mask->coalesced;
-  r_->nnz = mask->nnz;
-
-  if (nDim > nDimI) {
-    THTensor *srcBuffer = THTensor_(new)();
-    THTensor *dstBuffer = THTensor_(new)();
-    for (int64_t i = 0; i < r_->nnz; i++) {
-      THTensor_(set)(srcBuffer, t);
-      for (int64_t d = 0; d < nDimI; d++) {
-        THTensor_(select)(srcBuffer, srcBuffer, 0, THLongTensor_fastGet2d(mask_indices_, d, i));
-      }
-      THTensor_(select)(dstBuffer, r_values_, 0, i);
-      THTensor_(copy)(dstBuffer, srcBuffer);
-    }
-    THTensor_(free)(srcBuffer);
-    THTensor_(free)(dstBuffer);
-  } else {
-    for (int64_t i = 0; i < r_->nnz; i++) {
-      int64_t idx = 0;
-      for (int64_t d = 0; d < nDimI; d++) {
-        idx += THLongTensor_fastGet2d(mask_indices_, d, i) * t->stride[d];
-      }
-      real val = (THStorage_(data)(t->storage) + t->storageOffset)[idx];
-      THTensor_(fastSet1d)(r_values_, i, val);
-    }
-  }
-
-  THLongTensor_free(mask_indices_);
-  THTensor_(free)(mask_values_);
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 void THSTensor_(free)(THSTensor *self)
 {
-  if(!self)
-    return;
-  if(--self->refcount == 0)
-  {
-    THFree(self->size);
-    THLongTensor_free(self->indices);
-    THTensor_(free)(self->values);
-    self->refcount.~atomic<int>();
-    THFree(self);
-  }
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 void THSTensor_(retain)(THSTensor *self)
 {
-  self->refcount++;
+  THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
 #endif
