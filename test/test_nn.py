@@ -4856,13 +4856,16 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='linear', align_corners=align_corners)
 
-            m = nn.Upsample(size=4, **kwargs)
-            in_t = torch.ones(1, 1, 2)
-            out_t = m(Variable(in_t))
-            self.assertEqual(torch.ones(1, 1, 4), out_t.data)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 1, 2)
+                out_size = math.floor(in_t.shape[-1] * scale_factor)
+                out_t = m(Variable(in_t))
+                self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
 
-            input = torch.randn(1, 1, 2, requires_grad=True)
-            gradcheck(lambda x: F.upsample(x, 4, **kwargs), (input,))
+                input = torch.randn(1, 1, 2, requires_grad=True)
+                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), (input,))
 
     def test_upsamplingLinear1d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
@@ -4889,13 +4892,16 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='bilinear', align_corners=align_corners)
 
-            m = nn.Upsample(size=4, **kwargs)
-            in_t = torch.ones(1, 1, 2, 2)
-            out_t = m(Variable(in_t))
-            self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 1, 2, 2)
+                out_size = math.floor(in_t.shape[-1] * scale_factor)
+                out_t = m(Variable(in_t))
+                self.assertEqual(torch.ones(1, 1, out_size, out_size), out_t.data)
 
-            input = torch.randn(1, 1, 2, 2, requires_grad=True)
-            gradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
+                input = torch.randn(1, 1, 2, 2, requires_grad=True)
+                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
@@ -4918,17 +4924,20 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='trilinear', align_corners=align_corners)
 
-            m = nn.Upsample(size=4, **kwargs)
-            in_t = torch.ones(1, 1, 2, 2, 2)
-            out_t = m(Variable(in_t))
-            self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 1, 2, 2, 2)
+                out_size = math.floor(in_t.shape[-1] * scale_factor)
+                out_t = m(Variable(in_t))
+                self.assertEqual(torch.ones(1, 1, out_size, out_size, out_size), out_t.data)
 
-            input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
-            self.assertEqual(
-                F.upsample(input, (4, 4, 4), **kwargs),
-                F.upsample(input, scale_factor=2, **kwargs))
-            gradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
-            gradgradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
+                input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
+                self.assertEqual(
+                    F.upsample(input, (out_size, out_size, out_size), **kwargs),
+                    F.upsample(input, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
+                gradgradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
     def test_upsamplingTrilinear3d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
