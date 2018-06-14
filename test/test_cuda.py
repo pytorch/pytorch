@@ -1405,7 +1405,7 @@ class TestCuda(TestCase):
         torch.cuda.manual_seed(11042)
         sample = torch.multinomial(freqs, 1000, True)
         self.assertNotEqual(freqs[sample].min(), 0)
-    
+
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
@@ -1415,10 +1415,10 @@ class TestCuda(TestCase):
             mp.set_start_method('spawn')
         except RuntimeError:
             pass
-        with mp.Pool(1, initializer = self.mute) as pool:
+        with mp.Pool(1, initializer=self.mute) as pool:
             errors = pool.map(method, [arg])
             for e in errors:
-                if not 'device-side assert triggered' in str(e):
+                if 'device-side assert triggered' not in str(e):
                     self.fail(e)
 
     @staticmethod
