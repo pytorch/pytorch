@@ -630,8 +630,8 @@ static void THCTensor_(rawInit)(THCState *state, THCTensor *self)
   new (&self->refcount) std::atomic<int>(1);
   self->storage = THCStorage_(new)(state);
   self->storageOffset = 0;
-  self->size = (int64_t *)THAlloc(sizeof(int64_t));
-  self->stride = (int64_t *)THAlloc(sizeof(int64_t));
+  self->size = static_cast<int64_t *>(THAlloc(sizeof(int64_t)));
+  self->stride = static_cast<int64_t *>(THAlloc(sizeof(int64_t)));
   self->size[0] = 0;
   self->stride[0] = 1;
   self->dim_ = 1;

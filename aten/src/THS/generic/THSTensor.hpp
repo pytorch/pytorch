@@ -26,7 +26,7 @@ typedef struct THSTensor
     }
 
     inline int64_t dim() const {
-      // FixME: nDimensionI and nDimensionV should be set correctly by THS
+      // FIXME: nDimensionI and nDimensionV should be set correctly by THS
       return (nDimensionI + nDimensionV) == 0 ? 1 : (nDimensionI + nDimensionV);
     }
 } THSTensor;
