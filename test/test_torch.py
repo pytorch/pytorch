@@ -4684,6 +4684,12 @@ class TestTorch(TestCase):
         self.assertEqual(reference[None, 2, None, None], reference.unsqueeze(0)[:, 2].unsqueeze(0).unsqueeze(0))
         self.assertEqual(reference[None, 2:5, None, None], reference.unsqueeze(0)[:, 2:5].unsqueeze(2).unsqueeze(2))
 
+        # indexing 0-length slice
+        self.assertEqual(torch.tensor([]), reference[slice(0)])
+        self.assertEqual(torch.tensor([]), reference[slice(0), 2])
+        self.assertEqual(torch.tensor([]), reference[2, slice(0)])
+        self.assertEqual(torch.tensor([]), reference[2, 1:1, 2])
+
         # indexing with step
         reference = consec((10, 10, 10))
         self.assertEqual(reference[1:5:2], torch.stack([reference[1], reference[3]], 0))

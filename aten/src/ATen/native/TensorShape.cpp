@@ -314,6 +314,10 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   }
   auto storage_offset = self.storage_offset() + start * strides[dim];
   auto len = end - start;
+  if (len == 0) {
+    // TODO: currently we don't have support for 0-sized dims, return size 0 tensor for now
+    return self.type().tensor();
+  }
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
   return self.as_strided(sizes, strides, storage_offset);
