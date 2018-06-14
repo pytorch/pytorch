@@ -12,13 +12,6 @@
 #include <mutex>
 #include <cstdint>
 
-// Forwarde declare these CUDA types here to avoid including CUDA headers in
-// ATen headers, which would make ATen always require CUDA to build.
-struct THCState;
-struct CUstream_st;
-typedef struct CUstream_st *cudaStream_t;
-struct cudaDeviceProp;
-
 namespace at {
 
 enum class IsVariable {
@@ -90,6 +83,9 @@ public:
   }
   cudaStream_t getCurrentCUDAStreamOnDevice(int64_t device) const {
     return detail::getCUDAHooks().getCurrentCUDAStreamOnDevice(thc_state.get(), device);
+  }
+  cusparseHandle_t getCurrentCUDASparseHandle() const {
+    return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
   }
   cudaDeviceProp* getCurrentDeviceProperties() const {
     return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
