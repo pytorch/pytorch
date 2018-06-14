@@ -248,6 +248,8 @@ class _DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
+            self.prepare_iters_early = loader.prepare_iters_early
+            self.prime_next_iter = loader.prime_next_iter
             self.index_queue = multiprocessing.Queue()
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
@@ -289,9 +291,10 @@ class _DataLoaderIter(object):
             _set_SIGCHLD_handler()
             self.worker_pids_set = True
 
-            # prime the prefetch loop
-            for _ in range(2 * self.num_workers):
-                self._put_indices()
+            if not self.prepare_iters_early:
+                # prime the prefetch loop
+                for _ in range(2 * self.num_workers):
+                    self.put_indices()
 
     def __len__(self):
         return len(self.batch_sampler)
@@ -337,18 +340,21 @@ class _DataLoaderIter(object):
     def __iter__(self):
         return self
 
-    def _put_indices(self):
+    def put_indices(self):
         assert self.batches_outstanding < 2 * self.num_workers
         indices = next(self.sample_iter, None)
         if indices is None:
-            return
+            return False
         self.index_queue.put((self.send_idx, indices))
         self.batches_outstanding += 1
         self.send_idx += 1
+        return True
 
     def _process_next_batch(self, batch):
         self.rcvd_idx += 1
-        self._put_indices()
+        success = self.put_indices()
+        if not success and self.prepare_iters_early:
+            self.prime_next_iter()
         if isinstance(batch, ExceptionWrapper):
             raise batch.exc_type(batch.exc_msg)
         return batch
@@ -445,7 +451,7 @@ class DataLoader(object):
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
                  num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
-                 timeout=0, worker_init_fn=None):
+                 timeout=0, worker_init_fn=None, prepare_iters_early=False):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -454,6 +460,9 @@ class DataLoader(object):
         self.drop_last = drop_last
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
+        self.prepare_iters_early = prepare_iters_early
+        if self.prepare_iters_early:
+            self.next_iters = collections.deque()
 
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')
@@ -474,6 +483,9 @@ class DataLoader(object):
             raise ValueError('num_workers option cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
 
+        if self.num_workers == 0 and self.prepare_iters_early:
+            raise ValueError("Can't prepare iterators early without using any workers")
+
         if batch_sampler is None:
             if sampler is None:
                 if shuffle:
@@ -485,6 +497,20 @@ class DataLoader(object):
         self.sampler = sampler
         self.batch_sampler = batch_sampler
         self.__initialized = True
+        if self.num_workers > 0 and self.prepare_iters_early:
+            for _ in range(self.num_workers):
+                self.prime_next_iter()
+
+    def prime_next_iter(self):
+        assert self.prepare_iters_early
+        for next_iter in self.next_iters:
+            success = next_iter.put_indices()
+            if success:
+                break
+        else:
+            next_iter = _DataLoaderIter(self)
+            next_iter.put_indices()
+            self.next_iters.append(next_iter)
 
     def __setattr__(self, attr, val):
         if self.__initialized and attr in ('batch_size', 'sampler', 'drop_last'):
@@ -494,6 +520,8 @@ class DataLoader(object):
         super(DataLoader, self).__setattr__(attr, val)
 
     def __iter__(self):
+        if self.prepare_iters_early:
+            return self.next_iters.popleft()
         return _DataLoaderIter(self)
 
     def __len__(self):
