@@ -3237,9 +3237,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 self.affine1 = nn.Linear(4, 128)
                 self.affine2 = nn.Linear(128, 2)
 
-                self.saved_log_probs = []
-                self.rewards = []
-
             def forward(self, x):
                 x = F.relu(self.affine1(x))
                 action_scores = self.affine2(x)
@@ -3337,7 +3334,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         premise = torch.LongTensor(48, 128).random_(0, 100)
         hypothesis = torch.LongTensor(24, 128).random_(0, 100)
 
-        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False, verbose=True)
+        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False)
 
     def test_super_resolution(self):
         import torch.nn.init as init
@@ -3354,8 +3351,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 self.conv4 = nn.Conv2d(32, upscale_factor ** 2, (3, 3), (1, 1), (1, 1))
                 self.pixel_shuffle = nn.PixelShuffle(upscale_factor)
 
-                self._initialize_weights()
-
             def forward(self, x):
                 x = self.relu(self.conv1(x))
                 x = self.relu(self.conv2(x))
@@ -3363,14 +3358,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 x = self.pixel_shuffle(self.conv4(x))
                 return x
 
-            def _initialize_weights(self):
-                init.orthogonal_(self.conv1.weight, init.calculate_gain('relu'))
-                init.orthogonal_(self.conv2.weight, init.calculate_gain('relu'))
-                init.orthogonal_(self.conv3.weight, init.calculate_gain('relu'))
-                init.orthogonal_(self.conv4.weight)
-
         net = Net(upscale_factor=4)
-        net._initialize_weights()
         self.checkTrace(net, (torch.rand(5, 1, 64, 64),))
 
     @unittest.skip('This needs to be re-written into a script module')
