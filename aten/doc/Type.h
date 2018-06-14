@@ -330,9 +330,9 @@ struct AT_API Type {
   virtual Tensor & i1_out(Tensor & result, const Tensor & self) const;
   virtual Tensor i1(const Tensor & self) const;
   virtual Tensor & i1_(Tensor & self) const;
-  //virtual Tensor & iv_out(Tensor & result, const Scalar v, const Tensor & self) const;
-  //virtual Tensor iv(const Scalar v, const Tensor & self) const;
-  //virtual Tensor & iv_(const Scalar v, Tensor & self) const;
+  virtual Tensor & iv_out(Tensor & result, const Tensor & v, const Tensor & self) const;
+  virtual Tensor iv(const Tensor & v, const Tensor & self) const;
+  virtual Tensor & iv_(const Tensor & v, Tensor & self) const;
   virtual Tensor & digamma_out(Tensor & result, const Tensor & self) const;
   virtual Tensor digamma(const Tensor & self) const;
   virtual Tensor & digamma_(Tensor & self) const;

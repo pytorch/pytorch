@@ -125,8 +125,8 @@ static inline Tensor & i0_out(Tensor & result, const Tensor & self);
 static inline Tensor i0(const Tensor & self);
 static inline Tensor & i1_out(Tensor & result, const Tensor & self);
 static inline Tensor i1(const Tensor & self);
-//static inline Tensor & iv_out(Tensor & result, const Scalar v, const Tensor & self);
-//static inline Tensor iv(const Scalar v, const Tensor & self);
+static inline Tensor & iv_out(Tensor & result, const Tensor & v, const Tensor & self);
+static inline Tensor iv(const Tensor & v, const Tensor & self);
 static inline Tensor & exp_out(Tensor & result, const Tensor & self);
 static inline Tensor exp(const Tensor & self);
 static inline Tensor & expm1_out(Tensor & result, const Tensor & self);
@@ -1328,6 +1328,12 @@ static inline Tensor & atan2_out(Tensor & result, const Tensor & self, const Ten
 }
 static inline Tensor atan2(const Tensor & self, const Tensor & other) {
     return infer_type(self).atan2(self, other);
+}
+static inline Tensor & iv_out(Tensor & result, const Tensor & v, const Tensor & v) {
+    return infer_type(self).iv_out(result, v, self);
+}
+static inline Tensor iv(const Tensor & v, const Tensor & self) {
+    return infer_type(self).iv(v, self);
 }
 static inline Tensor & pow_out(Tensor & result, const Tensor & self, Scalar exponent) {
     return infer_type(self).pow_out(result, self, exponent);

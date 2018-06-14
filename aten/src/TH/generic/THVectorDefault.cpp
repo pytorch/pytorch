@@ -250,7 +250,6 @@ VECTOR_IMPLEMENT_FUNCTION(abs,abs)
 
 VECTOR_IMPLEMENT_FUNCTION(i0,TH_MATH_NAME(TH_i0))
 VECTOR_IMPLEMENT_FUNCTION(i1,TH_MATH_NAME(TH_i1))
-//VECTOR_IMPLEMENT_FUNCTION(iv,TH_MATH_NAME(TH_iv))
 VECTOR_IMPLEMENT_FUNCTION(log,TH_MATH_NAME(log))
 VECTOR_IMPLEMENT_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 VECTOR_IMPLEMENT_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
@@ -283,6 +282,22 @@ VECTOR_IMPLEMENT_FUNCTION(abs,TH_MATH_NAME(fabs))
 VECTOR_IMPLEMENT_FUNCTION(trunc,TH_MATH_NAME(trunc))
 VECTOR_IMPLEMENT_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 VECTOR_IMPLEMENT_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
+
+/*void THVector_(iv)(real *r, const real *v, const real *t, const ptrdiff_t n)
+{
+  ptrdiff_t i = 0;
+
+  for(; i<n-4; i+=4)
+  {
+    r[i] = TH_MATH_NAME(TH_iv)(v[i],t[i]);
+    r[i+1] = TH_MATH_NAME(TH_iv)(v[i+1],t[i+1]);
+    r[i+2] = TH_MATH_NAME(TH_iv)(v[i+2],t[i+2]);
+    r[i+3] = TH_MATH_NAME(TH_iv)(v[i+3],t[i+3]);
+  }
+
+  for(; i < n; i++)
+    r[i] = TH_MATH_NAME(TH_iv)(v[i],t[i]);
+}*/
 
 #undef TH_MATH_NAME
 #endif /* floating point only part */

@@ -222,8 +222,8 @@ struct Tensor : public detail::TensorBase {
   Tensor i0() const;
   Tensor & i1_();
   Tensor i1() const;
-  //Tensor & iv_(Scalar v);
-  //Tensor iv(Scalar v) const;
+  Tensor & iv_(const Tensor & v);
+  Tensor iv(const Tensor & v) const;
   Tensor & log_();
   Tensor log() const;
   Tensor & log1p_();

@@ -419,6 +419,13 @@ class TestTorch(TestCase):
         from scipy.special import i1
         self._test_math(torch.i1, i1)
 
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_iv(self):
+        from scipy.special import iv
+        for v in range(2, 15):
+            self._test_math(lambda x: torch.iv(torch.tensor(v, dtype=torch.double), x),
+                            lambda x: iv(v, x).item())
+
     def test_asin(self):
         self._test_math(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
 
@@ -2725,7 +2732,7 @@ class TestTorch(TestCase):
             "sub", "mul", "div", "fmod", "remainder",
             "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
             "addcdiv", "addcmul", "masked_scatter", "masked_select", "masked_fill",
-            "map", "map2", "copy"
+            "map", "map2", "copy", "iv"
         }
         # functions with three tensor arguments
         fns_3_args = {"addcdiv", "addcmul", "map2"}
