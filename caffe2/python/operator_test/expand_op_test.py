@@ -28,7 +28,7 @@ class TestExpandOp(hu.HypothesisTestCase):
             shape_list.insert(0, k)
             i -= 1
             j -= 1
-        shape = np.array(shape_list, dtype=np.int32)
+        shape = np.array(shape_list, dtype=np.int64)
 
         op = core.CreateOperator(
             op_name,

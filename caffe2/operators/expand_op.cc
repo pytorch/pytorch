@@ -12,15 +12,13 @@ REGISTER_CPU_OPERATOR(
     Expand,
     ExpandOp<
         TensorTypes<std::int32_t, std::int64_t, float, double>,
-        CPUContext,
-        Expander<CPUContext>>);
+        CPUContext>);
 
 REGISTER_CPU_OPERATOR(
     ExpandGradient,
     ExpandGradientOp<
         TensorTypes<std::int32_t, std::int64_t, float, double>,
-        CPUContext,
-        Expander<CPUContext>>);
+        CPUContext>);
 
 OPERATOR_SCHEMA(Expand)
     .NumInputs(2)
@@ -32,7 +30,7 @@ OPERATOR_SCHEMA(Expand)
     .Input(1, "shape", "(*Tensor`<int>`*): expand shape")
     .Output(0, "Y", "(*Tensor`<float>`*): expanded tensor");
 
-OPERATOR_SCHEMA(ExpandGradient).NumInputs(3).NumOutputs(1);
+OPERATOR_SCHEMA(ExpandGradient).NumInputs(2).NumOutputs(1);
 
 namespace {
 
@@ -42,7 +40,7 @@ class GetExpandGradient final : public GradientMakerBase {
     return SingleGradientDef(
         def_.type() + "Gradient",
         "",
-        std::vector<string>{GO(0), I(0), O(0)},
+        std::vector<string>{GO(0), I(0)},
         std::vector<string>{GI(0)});
   }
 };
