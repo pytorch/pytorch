@@ -72,13 +72,13 @@ class _Formatter(object):
         self.max_width = 1
 
         if not self.floating_dtype:
-            copy = torch.LongTensor(tensor.size()).copy_(tensor).view(tensor.nelement())
+            copy = torch.empty(tensor.size(), dtype=torch.long).copy_(tensor).view(tensor.nelement())
             for value in copy.tolist():
                 value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
-            copy = torch.DoubleTensor(tensor.size()).copy_(tensor).view(tensor.nelement())
+            copy = torch.empty(tensor.size(), dtype=torch.float64).copy_(tensor).view(tensor.nelement())
             copy_list = copy.tolist()
             try:
                 for value in copy_list:
@@ -122,6 +122,7 @@ class _Formatter(object):
                 else:
                     exp_max = 1
 
+                # these conditions for using scientific notation are based on numpy
                 if exp_max - exp_min > PRINT_OPTS.precision or exp_max > 8 or exp_min < -4:
                     self.sci_mode = True
                     for value in copy_list:
