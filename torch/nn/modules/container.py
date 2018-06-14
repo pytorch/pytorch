@@ -279,8 +279,8 @@ class ModuleDict(Module):
         an iterable, overwriting existing keys.
 
         Arguments:
-            modules (iterable): a mapping (dictionary) of (string: module) or
-                an iterable of key/value pairs of type (string, module)
+            modules (iterable): a mapping (dictionary) of (string: :class:`~torch.nn.Module``) or
+                an iterable of key/value pairs of type (string, :class:`~torch.nn.Module``)
         """
         if not isinstance(modules, Iterable):
             raise TypeError("ModuleDict.update should be called with an "
