@@ -103,6 +103,9 @@ cudaStream_t CUDAHooks::getCurrentCUDAStreamOnDevice(
     int64_t device) const {
   return THCState_getCurrentStreamOnDevice(thc_state, device);
 }
+cusparseHandle_t CUDAHooks::getCurrentCUDASparseHandle(THCState* thc_state) const {
+  return THCState_getCurrentSparseHandle(thc_state);
+}
 struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(
     THCState* thc_state) const {
   return THCState_getCurrentDeviceProperties(thc_state);
