@@ -4687,6 +4687,7 @@ class TestTorch(TestCase):
         self.assertEqual(torch.tensor([]), reference[slice(0)])
         self.assertEqual(torch.tensor([]), reference[slice(0), 2])
         self.assertEqual(torch.tensor([]), reference[2, slice(0)])
+        self.assertEqual(torch.tensor([]), reference[2, 1:1, 2])
 
         # indexing with step
         reference = consec((10, 10, 10))
