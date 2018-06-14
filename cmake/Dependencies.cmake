@@ -849,7 +849,7 @@ if (BUILD_ATEN)
   ENDIF()
 
   IF (CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
-    MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.CudaHalfTensor")
+    MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
     LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__")
     add_compile_options(-DCUDA_HAS_FP16=1)
   ELSE()
