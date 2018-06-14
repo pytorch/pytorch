@@ -1738,6 +1738,27 @@ class TestCuda(TestCase):
         a += 5
         self.assertEqual(a, b)
 
+    def test_bincount_cuda(self):
+        TestTorch._test_bincount(self, device='cuda')
+        # ensure CUDA code coverage
+        input_size = (5000,)
+        w = torch.randn(input_size, device='cuda')
+        w_cpu = w.cpu()
+        # test shared memory impl
+        t = torch.randint(50, input_size, dtype=torch.int8, device='cuda')
+        self.assertEqual(t.cpu().bincount(), t.bincount())
+        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+        # test multi block memory impl
+        # see `THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM` in SummaryOps.cu
+        t = torch.randint(500, input_size, dtype=torch.int64, device='cuda')
+        self.assertEqual(t.cpu().bincount(), t.bincount())
+        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+        # test global memory impl
+        # see `THRESH_NUMBER_BINS_FOR_GLOBAL_MEM` in SummaryOps.cu
+        t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
+        self.assertEqual(t.cpu().bincount(), t.bincount())
+        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000

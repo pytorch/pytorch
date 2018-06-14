@@ -178,6 +178,11 @@
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
   variants: function
 
+- func: bincount(Tensor self, Tensor? weights={}, int64_t minlength=0) -> Tensor
+  dispatch:
+    CPU: _bincount_cpu
+    CUDA: _bincount_cuda
+
 - func: blackman_window(Type dtype, int64_t window_length, bool periodic=True) -> Tensor
   variants: function
 
