@@ -70,7 +70,7 @@ else:
             return os.getppid() == self.manager_pid
 
 
-def _worker_loop(dataset, index_queue, data_queue, seed, init_fn, worker_id):
+def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
     global _use_shared_memory
     _use_shared_memory = True
 
@@ -99,44 +99,14 @@ def _worker_loop(dataset, index_queue, data_queue, seed, init_fn, worker_id):
                 break
         if r is None:
             break
-        batch_idx, inbatch_idx, sample_idx = r
+        idx, batch_indices = r
         try:
-            if sample_idx is not Ellipsis:
-                sample = dataset[sample_idx]
-            else:
-                sample = Ellipsis
+            samples = collate_fn([dataset[i] for i in batch_indices])
         except Exception:
-            data_queue.put((batch_idx, inbatch_idx, ExceptionWrapper(sys.exc_info())))
+            data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
-            data_queue.put((batch_idx, inbatch_idx, sample))
-            del sample
-
-
-def _collator_loop(result_queue, batch_queue, batch_size, collate_fn):
-    from collections import defaultdict
-    batches = defaultdict(lambda: [None]*batch_size)
-    while True:
-        r = result_queue.get()
-        if r is None:
-            break
-        batch_idx, inbatch_idx, sample = r
-
-        if sample is Ellipsis:
-            # Reduce batch size if the last batch was not dropped
-            batches[batch_idx] = batches[batch_idx][:inbatch_idx]
-        else:
-            batches[batch_idx][inbatch_idx] = sample
-
-        # Check if the batch is full
-        if all(batches[batch_idx]):
-            exceptions = [sample for sample in batches[batch_idx] if isinstance(sample, ExceptionWrapper)]
-            if exceptions:
-                # Send only one exception like in the previous version. This can improved later.
-                batch_queue.put((batch_idx, exceptions[0]))
-            else:
-                batch = collate_fn(batches[batch_idx])
-                batch_queue.put((batch_idx, batch))
-            del batches[batch_idx]
+            data_queue.put((idx, samples))
+            del samples
 
 
 def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
@@ -265,7 +235,6 @@ class _DataLoaderIter(object):
 
     def __init__(self, loader):
         self.dataset = loader.dataset
-        self.batch_size = loader.batch_size
         self.collate_fn = loader.collate_fn
         self.batch_sampler = loader.batch_sampler
         self.num_workers = loader.num_workers
@@ -281,7 +250,6 @@ class _DataLoaderIter(object):
             self.worker_init_fn = loader.worker_init_fn
             self.index_queue = multiprocessing.Queue()
             self.worker_result_queue = multiprocessing.SimpleQueue()
-            self.batch_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
             self.shutdown = False
@@ -293,14 +261,9 @@ class _DataLoaderIter(object):
                 multiprocessing.Process(
                     target=_worker_loop,
                     args=(self.dataset, self.index_queue,
-                          self.worker_result_queue, base_seed + i,
+                          self.worker_result_queue, self.collate_fn, base_seed + i,
                           self.worker_init_fn, i))
                 for i in range(self.num_workers)]
-
-            self.collator = multiprocessing.Process(
-                target=_collator_loop,
-                args=(self.worker_result_queue, self.batch_queue, self.batch_size,
-                      self.collate_fn))
 
             if self.pin_memory or self.timeout > 0:
                 self.data_queue = queue.Queue()
@@ -311,19 +274,16 @@ class _DataLoaderIter(object):
                     maybe_device_id = None
                 self.worker_manager_thread = threading.Thread(
                     target=_worker_manager_loop,
-                    args=(self.batch_queue, self.data_queue, self.done_event, self.pin_memory,
+                    args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
                           maybe_device_id))
                 self.worker_manager_thread.daemon = True
                 self.worker_manager_thread.start()
             else:
-                self.data_queue = self.batch_queue
+                self.data_queue = self.worker_result_queue
 
             for w in self.workers:
                 w.daemon = True  # ensure that the worker exits on process exit
                 w.start()
-
-            self.collator.daemon = True
-            self.collator.start()
 
             _update_worker_pids(id(self), tuple(w.pid for w in self.workers))
             _set_SIGCHLD_handler()
@@ -382,11 +342,7 @@ class _DataLoaderIter(object):
         indices = next(self.sample_iter, None)
         if indices is None:
             return
-        for inbatch_idx, data_idx in enumerate(indices):
-            self.index_queue.put((self.send_idx, inbatch_idx, data_idx))
-        # If not dropping last, pass sentinel to signal the end
-        if (inbatch_idx + 1) != self.batch_size:
-            self.index_queue.put((self.send_idx, inbatch_idx+1, Ellipsis))
+        self.index_queue.put((self.send_idx, indices))
         self.batches_outstanding += 1
         self.send_idx += 1
 
