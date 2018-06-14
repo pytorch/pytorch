@@ -3078,6 +3078,12 @@ class TestScript(JitTestCase):
         self.checkScript(fn, (torch.tensor(1),))
         self.checkScript(fn, (torch.tensor(2),))
 
+    def test_where(self):
+        def fn(x, y):
+            return torch.where(x > 0.0, x, y)
+
+        self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
