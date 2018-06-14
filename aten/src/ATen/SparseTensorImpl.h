@@ -21,7 +21,8 @@ struct SparseTensorImpl : public TensorImpl {
 
   // A sparse tensor is 'coalesced' if every index occurs at most once in
   // the indices tensor, and the indices are in sorted order.
-  // Most math operations can only be performed on ordered sparse tensors
+  // Most math operations can only be performed on coalesced sparse tensors,
+  // because many algorithms proceed by merging two sorted lists (of indices).
   bool coalesced_ = false;
 
 public:

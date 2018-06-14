@@ -4,8 +4,10 @@
 namespace at {
 
 // SparseTensorImpl defaults to a [0] size tensor with one sparse dimension and
-// no dense dimensions.  This is kind of arbitrary but we want the math to work
-// out.
+// no dense dimensions.  This is kind of arbitrary but we want an empty tensor
+// to have one dimension (zero dimensions means its scalar), and we have
+// the invariant that dim == dimI + dimV, so *one* of the inner dimensions
+// has to be one.
 SparseTensorImpl::SparseTensorImpl(Type * type)
     : TensorImpl(type)
     , size_{0}
@@ -56,6 +58,10 @@ void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tenso
   }
   indices_ = indices;
   values_ = values;
+  // TODO: Eliminate this ternary when we handle size zero dimensions.
+  // (Actually, this will "accidentally" work today because all zero-size
+  // tensors have size [0], and so you'll get 0 when empty is zero; but it's
+  // more explicit this way.)
   nnz_ = empty ? 0 : values.size(0);
   coalesced_ = 0;
 }
