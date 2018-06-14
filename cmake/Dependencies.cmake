@@ -15,7 +15,7 @@ if(BUILD_CAFFE2)
 endif()
 
 # ---[ protobuf
-if(BUILD_CAFFE2)
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)
     set(CAFFE2_USE_LITE_PROTO 1)
   endif()
@@ -303,18 +303,16 @@ if(USE_FFMPEG)
 endif()
 
 # ---[ EIGEN
-if(BUILD_CAFFE2)
-  # Due to license considerations, we will only use the MPL2 parts of Eigen.
-  set(EIGEN_MPL2_ONLY 1)
-  find_package(Eigen3)
-  if(EIGEN3_FOUND)
-    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
-  else()
-    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
-    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
-  endif()
-  include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
+# Due to license considerations, we will only use the MPL2 parts of Eigen.
+set(EIGEN_MPL2_ONLY 1)
+find_package(Eigen3)
+if(EIGEN3_FOUND)
+  message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+else()
+  message(STATUS "Did not find system Eigen. Using third party subdirectory.")
+  set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
 endif()
+include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
@@ -448,9 +446,24 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
-    set(Caffe2_HIP_CXX_FLAGS "-D__HIP_PLATFORM_HCC__=1")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -fPIC")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_PLATFORM_HCC__=1")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -DCUDA_HAS_FP16=1")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_NO_HALF_OPERATORS__=1")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_NO_HALF_CONVERSIONS__=1")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-macro-redefined")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-inconsistent-missing-override")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-exceptions")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-negative")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-overflow")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
+
     set(Caffe2_HIP_INCLUDES
-      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${Caffe2_HIP_INCLUDES} ${thrust_INCLUDE_DIRS})
+      ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
+    
+    # This is needed for library added by hip_add_library (same for hip_add_executable)	
+    hip_include_directories(${Caffe2_HIP_INCLUDES})
+
     set(Caffe2_HIP_DEPENDENCY_LIBS
       ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipblas_LIBRARIES})
     # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
@@ -502,14 +515,12 @@ if(USE_NCCL)
 endif()
 
 # ---[ CUB
-if(BUILD_CAFFE2)
-  if(USE_CUDA)
-    find_package(CUB)
-    if(CUB_FOUND)
-      include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
-    else()
-      include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
-    endif()
+if(USE_CUDA)
+  find_package(CUB)
+  if(CUB_FOUND)
+    include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
+  else()
+    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
   endif()
 endif()
 
@@ -690,9 +701,10 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # We will build onnx as static libs and embed it directly into the binary.
   set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  # Do not do post-processing if caffe2 is not included in the build,
-  # otherwise the caffe2 protobuf symbols will not be found
-  if (BUILD_CAFFE2 AND CAFFE2_LINK_LOCAL_PROTOBUF)
+  # If linking local protobuf, make sure ONNX has the same protobuf
+  # patches as Caffe2 and Caffe proto. This forces some functions to
+  # not be inline and instead route back to the statically-linked protobuf.
+  if (CAFFE2_LINK_LOCAL_PROTOBUF)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)

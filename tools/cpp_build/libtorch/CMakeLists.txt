@@ -26,7 +26,7 @@ if (VERBOSE)
 endif()
 
 set(CAFFE2_INCLUDE_DIR "${CAFFE2_PATH}")
-set(CAFFE2_BUILD_INCLUDE_DIR "${CAFFE2_BUILD_PATH}")
+set(CAFFE2_BUILD_LIB_DIR "${CAFFE2_BUILD_PATH}/lib")
 set(CAFFE2_INSTALL_INCLUDE_DIR "${INSTALL_PREFIX}/include")
 set(CAFFE2_INSTALL_SHARE_DIR "${INSTALL_PREFIX}/share")
 set(CAFFE2_INSTALL_LIB_DIR "${INSTALL_PREFIX}/lib")
@@ -38,6 +38,9 @@ find_library(CAFFE2_LIBRARY caffe2
 find_library(CAFFE2_GPU_LIBRARY caffe2_gpu
   NAMES libcaffe2_gpu.so libcaffe2_gpu.dylib caffe2_gpu.lib
   PATHS ${CAFFE2_INSTALL_LIB_DIR} NO_DEFAULT_PATH)
+find_library(PROTOBUF_LIBRARY protobuf
+  NAMES libprotobuf.a libprotobufd.a libprotobuf.lib libprotobufd.lib
+  PATHS ${CAFFE2_BUILD_LIB_DIR} NO_DEFAULT_PATH)
 find_library(NANOPB_LIBRARY protobuf-nanopb
   PATHS ${NANOPB_BUILD_PATH} NO_DEFAULT_PATH)
 
@@ -89,7 +92,7 @@ if(USE_CUDA)
   endif()
 endif()
 
-add_definitions(-DUSE_CATCH -D_FORCE_INLINES)
+add_definitions(-DUSE_CATCH -D_FORCE_INLINES -DONNX_NAMESPACE=${ONNX_NAMESPACE})
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -286,6 +289,7 @@ endif()
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
   ${CAFFE2_LIBRARY}
+  ${PROTOBUF_LIBRARY}
   ${NANOPB_LIBRARY}
 )
 if(USE_CUDA)
@@ -299,7 +303,6 @@ endif()
 target_include_directories(torch
   PUBLIC
   "${CAFFE2_INCLUDE_DIR}"
-  "${CAFFE2_BUILD_INCLUDE_DIR}"
   "${CAFFE2_INSTALL_INCLUDE_DIR}"
   "${CAFFE2_INSTALL_INCLUDE_DIR}/TH"
   "${TORCH_SRC_DIR}/.."

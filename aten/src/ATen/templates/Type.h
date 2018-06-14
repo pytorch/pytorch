@@ -13,7 +13,7 @@
 #include "ATen/Tensor.h"
 
 #include <array>
-#include <cstdint>
+#include <cstddef>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -56,15 +56,16 @@ enum class TypeID {
 
 
 struct AT_API Type {
-  explicit Type(Context * context, bool is_variable_or_undefined)
-  : context(context), is_variable_or_undefined_(is_variable_or_undefined) {}
+  explicit Type(Context* context, bool is_variable, bool is_undefined)
+      : context(context), is_variable_(is_variable), is_undefined_(is_undefined) {}
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
   virtual Backend backend() const = 0;
   virtual bool is_cuda() const = 0;
   virtual bool is_sparse() const = 0;
   virtual bool is_distributed() const = 0;
-  bool is_variable_or_undefined() const noexcept { return is_variable_or_undefined_; }
+  bool is_variable() const noexcept { return is_variable_; }
+  bool is_undefined() const noexcept { return is_undefined_; }
   static void registerCPU(Context * context);
   virtual std::unique_ptr<Storage> storage() const = 0;
   virtual std::unique_ptr<Storage> storage(size_t size) const = 0;
@@ -102,11 +103,12 @@ struct AT_API Type {
   ${type_method_declarations}
 protected:
   Context* context;
-  bool is_variable_or_undefined_ = false;
+  bool is_variable_;
+  bool is_undefined_;
 };
 
-inline bool Tensor::is_variable_or_undefined() const noexcept {
-  return type().is_variable_or_undefined();
+inline bool Tensor::is_variable() const noexcept {
+  return type().is_variable();
 }
 
 } // namespace at
