@@ -15,6 +15,7 @@
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/autograd/python_anomaly_mode.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/DynamicTypes.h"
@@ -207,7 +208,7 @@ auto PyFunction::release_variables() -> void {
   f->has_freed_buffers = 1;
 }
 
-auto PyFunction::name() -> std::string {
+auto PyFunction::name() const -> std::string {
   AutoGIL gil;
   auto f = (THPFunction*) obj;
   auto name = std::string(Py_TYPE(f)->tp_name);
@@ -245,7 +246,7 @@ static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 
 static int THPFunction_clear(THPFunction *self)
 {
-  self->cdata.set_num_inputs(0);
+  self->cdata.clear_input_metadata();
 
   Py_CLEAR(self->needs_input_grad);
 
@@ -293,7 +294,6 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
-  self->cdata.set_num_inputs(0);
   return obj;
 }
 
@@ -425,6 +425,10 @@ static void _wrap_outputs(THPFunction *self,
     // Note that output Variables may be repeated. In that case, the last call
     // to set_history wins.
     auto var = as_variable(obj, i);
+    if (cdata) {
+      auto output_nr = cdata->add_input_metadata(var.type(), var.sizes());
+      TORCH_ASSERT(i == (int)output_nr);
+    }
     set_history(var, i, is_input, is_modified, is_differentiable);
 
     if (is_executable) {
@@ -616,7 +620,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   THPObjectPtr outputs(PyTuple_New(num_outputs));
   if (!outputs) throw python_error();
 
-  grad_fn->cdata.set_num_inputs(num_outputs);
+  grad_fn->cdata.clear_input_metadata();
 
   // Record type, device, and size information about inputs
   if (is_executable) {
@@ -935,6 +939,13 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
   return result.release();
 }
 
+PyObject *THPFunction_metadata(THPFunction *self, void *_unused)
+{
+  auto metadata = static_cast<PyAnomalyMetadata*>(self->cdata.metadata())->dict();
+
+  Py_INCREF(metadata);
+  return metadata;
+}
 
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
@@ -992,6 +1003,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, nullptr, nullptr, nullptr},
   {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
   {"_is_tracing", &getMember<char, &THPFunction::is_traced, PyBool_FromLong>, nullptr, nullptr, nullptr},
+  {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
   {nullptr}
 };
 

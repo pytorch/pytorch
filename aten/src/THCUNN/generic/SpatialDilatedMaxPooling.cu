@@ -18,7 +18,7 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
              "dilation should be greater than zero, but got dilationH: %d dilationW: %d",
              dilationH, dilationW);
 
-  int ndim = input->nDimension;
+  int ndim = input->_dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -101,7 +101,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
   int64_t nOutputCols, nOutputRows;
 
-  if (input->nDimension == 3) {
+  if (input->_dim() == 3) {
     nInputCols = input->size[2];
     nInputRows = input->size[1];
     nInputPlane = input->size[0];
@@ -151,7 +151,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
       kH, kW, dH, dW, padH, padW, dilationH, dilationW, output_data, indices_data);
   THCudaCheck(cudaGetLastError());
 
-  if(input->nDimension == 3)
+  if(input->_dim() == 3)
     THCTensor_(resize3d)(state, output, nInputPlane, nOutputRows, nOutputCols);
 
   THCTensor_(free)(state, input);
@@ -180,7 +180,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
   int64_t nOutputCols, nOutputRows;
 
-  if (input->nDimension == 3) {
+  if (input->_dim() == 3) {
     nInputCols = input->size[2];
     nInputRows = input->size[1];
     nInputPlane = input->size[0];

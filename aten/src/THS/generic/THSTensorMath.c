@@ -6,10 +6,10 @@
 #define COL_PTR2(t, c) (THTensor_(data)(t) + (c) * (t)->stride[1])
 
 void THSTensor_(zero)(THSTensor *self) {
-  if (self->indices->nDimension) {
+  if (self->indices->_dim()) {
     THLongTensor_resizeNd(self->indices, 0, NULL, NULL);
   }
-  if (self->values->nDimension) {
+  if (self->values->_dim()) {
     THTensor_(resizeNd)(self->values, 0, NULL, NULL);
   }
   self->nnz = 0;
@@ -337,8 +337,8 @@ void THSTensor_(spaddmm)(THTensor *r_,
       "matrices expected, got %dD tensor", sparse_->nDimensionI);
   THArgCheck(sparse_->nDimensionV == 0, 2,
       "scalar values expected, got %dD values", sparse_->nDimensionV);
-  THArgCheck(dense->nDimension == 2, 2,
-      "matrices expected, got %dD tensor", dense->nDimension);
+  THArgCheck(dense->_dim() == 2, 2,
+      "matrices expected, got %dD tensor", dense->_dim());
 
   THSTensor *sparse = THSTensor_(newCoalesce)(sparse_);
 
@@ -410,8 +410,8 @@ void THSTensor_(sspaddmm)(THSTensor *r_,
       "matrices expected, got %dD tensor", sparse_->nDimensionI);
   THArgCheck(sparse_->nDimensionV == 0, 2,
       "scalar values expected, got %dD values", sparse_->nDimensionV);
-  THArgCheck(dense->nDimension == 2, 2,
-      "matrices expected, got %dD tensor", dense->nDimension);
+  THArgCheck(dense->_dim() == 2, 2,
+      "matrices expected, got %dD tensor", dense->_dim());
 
   THSTensor *sparse = THSTensor_(newCoalesce)(sparse_);
 
@@ -498,8 +498,8 @@ void THSTensor_(hspmm)(THSTensor *r_, real alpha, THSTensor *sparse_, THTensor *
       "matrices expected, got %dD tensor", sparse_->nDimensionI);
   THArgCheck(sparse_->nDimensionV == 0, 2,
       "scalar values expected, got %dD values", sparse_->nDimensionV);
-  THArgCheck(dense->nDimension == 2, 2,
-      "matrices expected, got %dD tensor", dense->nDimension);
+  THArgCheck(dense->_dim() == 2, 2,
+      "matrices expected, got %dD tensor", dense->_dim());
 
   int64_t m = THSTensor_(size)(sparse_, 0);
   int64_t k = THSTensor_(size)(sparse_, 1);

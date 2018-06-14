@@ -24,6 +24,12 @@ void initONNXBindings(PyObject* module) {
       .value("COMPLEX64", onnx_TensorProto_DataType_COMPLEX64)
       .value("COMPLEX128", onnx_TensorProto_DataType_COMPLEX128);
 
+  py::enum_<OperatorExportTypes>(onnx, "OperatorExportTypes")
+    .value("ONNX", OperatorExportTypes::ONNX)
+    .value("ONNX_ATEN", OperatorExportTypes::ONNX_ATEN)
+    .value("ONNX_ATEN_FALLBACK", OperatorExportTypes::ONNX_ATEN_FALLBACK)
+    .value("RAW", OperatorExportTypes::RAW);
+
   py::class_<ModelProto>(onnx, "ModelProto")
       .def("prettyPrint", &ModelProto::prettyPrint);
 }

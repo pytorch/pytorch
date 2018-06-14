@@ -1,7 +1,9 @@
 # ---[ GPU files
 # ------[ cuDNN
-file(GLOB tmp *_cudnn.cc)
-set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
+if (USE_CUDNN)
+  file(GLOB tmp *_cudnn.cc)
+  set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
+endif()
 # ------[ general GPU
 file(GLOB tmp *_gpu.cc)
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
@@ -24,7 +26,11 @@ exclude(Caffe2_HIP_SRCS "${Caffe2_HIP_SRCS}" ${tmp})
 
 # ---[ CPU files.
 file(GLOB tmp *.cc)
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
+# Manually remove the cudnn files since we might be using USE_CUDNN=OFF
+# TODO: when we move to explicit file list, this would not be needed.
+file(GLOB tmp_cudnn *_cudnn.cc)
+exclude(tmp "${tmp}" ${tmp_cudnn})
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:dispatch> ${tmp})
 # exclude test files and gpu files
 file(GLOB tmp *_test.cc)
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${tmp})

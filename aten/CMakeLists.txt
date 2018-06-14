@@ -13,12 +13,8 @@ else()
       USE_CUDNN "Use cuDNN" ON
       "USE_CUDA" OFF)
   option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-  option(ATEN_NO_CONTRIB "Do not build ATen contrib" OFF)
 
   # Legacy options, which we will eventually remove
-  cmake_dependent_option(
-      NO_CUDA "Legacy no CUDA" OFF
-      "USE_CUDA" ON)
   cmake_dependent_option(
       WITH_CUDNN "Legacy cuDNN" ON
       "USE_CUDNN" OFF)
@@ -28,9 +24,6 @@ else()
 
   # Flag for shared dependencies
   set(BUILD_ATEN ON)
-endif()
-if (NOT USE_CUDA)
-  set(NO_CUDA ON)
 endif()
 
 # Create the project in all cases
@@ -91,7 +84,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 endif()
 
-if(NOT NO_CUDA)
+if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CUDA_INCLUDE_DIRS})
 endif()
 
@@ -137,13 +130,13 @@ if(USE_ROCM)
   add_subdirectory(src/THCUNN)
   add_subdirectory(src/THCS)
   message("ROCm is enabled.")
-elseif(NOT NO_CUDA)
+elseif(USE_CUDA)
   SET(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
   add_subdirectory(src/THCS)
 else()
-  message("disabling CUDA because NO_CUDA is set")
+  message("disabling CUDA because USE_CUDA is set false")
   SET(AT_CUDA_ENABLED 0)
 endif()
 
@@ -156,13 +149,6 @@ list(APPEND ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include
   ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 add_subdirectory(src/ATen)
-
-if(ATEN_NO_CONTRIB)
-  message("disable contrib because ATEN_NO_CONTRIB is set")
-else()
-  add_subdirectory(contrib/data)
-  add_subdirectory(contrib/meter)
-endif()
 
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # Pass source, includes, and libs to parent

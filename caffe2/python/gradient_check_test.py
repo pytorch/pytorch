@@ -507,6 +507,7 @@ class TestIf(test_util.TestCase):
 
 
 class TestWhile(test_util.TestCase):
+    @unittest.skip("Skip flaky test.")
     def testWhile(self):
         with NetBuilder(_use_control_ops=True) as nb:
             ops.Copy(ops.Const(0), "i")

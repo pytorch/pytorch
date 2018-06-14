@@ -83,9 +83,9 @@ struct Tensor : public detail::TensorBase {
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 
-  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`,
-  /// or has undefined type. Defined in Type.h because of include order issues.
-  bool is_variable_or_undefined() const noexcept;
+  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
+  /// Defined in Type.h because of include order issues.
+  bool is_variable() const noexcept;
 
   template<typename T>
   T * data() const;

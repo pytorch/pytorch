@@ -54,7 +54,7 @@ TEST_CASE("optim") {
   auto model = std::make_shared<Sequential>(
       SigmoidLinear(Linear(2, 8).build()), SigmoidLinear(Linear(8, 1).build()));
 
-  // FLAKY!
+  // Flaky
   // SECTION("lbfgs") {
   //   auto optim = LBFGS(model, 5e-2).max_iter(5).make();
   //   REQUIRE(test_optimizer_xor(optim, model));

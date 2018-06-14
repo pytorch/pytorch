@@ -9,7 +9,7 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
                          int pleft, int pright,
                          int ptop, int pbottom,
                          int pfront, int pback) {
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
              "input tensor must fit into 32-bit index math");
   int numInputDims = THCTensor_(nDimension)(state, input);
 
@@ -40,7 +40,7 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
              idepth, iheight, iwidth, odepth, oheight, owidth);
 
   if (gradOutput != NULL) {
-    THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, gradOutput),
+    THArgCheck(THCTensor_canUse32BitIndexMath(state, gradOutput),
                3, "output gradient tensor must fit into 32-bit index math");
 
     THArgCheck(numPlanes == THCTensor_(size)(state, gradOutput, planeDim), 3,

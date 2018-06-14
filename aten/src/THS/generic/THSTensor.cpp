@@ -390,7 +390,7 @@ void THSTensor_(mulSlice)(
   THTensor *dstBuffer, THTensor *src1Buffer, THTensor *src2Buffer,
   THTensor *dst, THTensor *src1, THTensor *src2,
   int64_t dim, int64_t dstIdx, int64_t src1Idx, int64_t src2Idx) {
-  if (src1->nDimension > 1) {
+  if (src1->_dim() > 1) {
     THTensor_(select)(src1Buffer, src1, dim, src1Idx);
     THTensor_(select)(src2Buffer, src2, dim, src2Idx);
     THTensor_(select)(dstBuffer, dst, dim, dstIdx);
@@ -404,7 +404,7 @@ void THSTensor_(divSlice)(
   THTensor *dstBuffer, THTensor *src1Buffer, THTensor *src2Buffer,
   THTensor *dst, THTensor *src1, THTensor *src2,
   int64_t dim, int64_t dstIdx, int64_t src1Idx, int64_t src2Idx) {
-  if (src1->nDimension > 1) {
+  if (src1->_dim() > 1) {
     THTensor_(select)(src1Buffer, src1, dim, src1Idx);
     THTensor_(select)(src2Buffer, src2, dim, src2Idx);
     THTensor_(select)(dstBuffer, dst, dim, dstIdx);

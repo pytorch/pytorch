@@ -255,7 +255,7 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
         y_cpu_nhwc.data<float>(), y_cpu_nhwc.size());
     int max_diff_idx = -1;
     (y_cpu_vec - y_gpu_vec).cwiseAbs().maxCoeff(&max_diff_idx);
-    EXPECT_FLOAT_EQ(y_cpu_vec[max_diff_idx], y_gpu_vec[max_diff_idx]);
+    EXPECT_NEAR(y_cpu_vec[max_diff_idx], y_gpu_vec[max_diff_idx], 1e-1);
 
     max_diff_idx = -1;
     (y_cpu_vec - y_cpu_nhwc_vec).cwiseAbs().maxCoeff(&max_diff_idx);

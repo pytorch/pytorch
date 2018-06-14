@@ -130,7 +130,7 @@ THC_API void
 THCTensor_(rshift)(THCState* state, THCTensor *self_, THCTensor *src_, real value)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-  THCTensor_(mul)(state, self_, src_, pow(2, value));
+  THCTensor_(mul)(state, self_, src_, pow(2, -value));
 #elif defined(THC_REAL_IS_HALF)
   return THError("rshift not supported for torch.CudaHalfTensor");
 #else
@@ -191,7 +191,7 @@ THCTensor_(remainder)(THCState *state, THCTensor *self_, THCTensor *src_, real v
 void THCTensor_(tril)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  THArgCheck(src_->nDimension == 2, 1, "expected a matrix");
+  THArgCheck(src_->_dim() == 2, 1, "expected a matrix");
 
   if (self_ != src_)
     THCTensor_(resizeAs)(state, self_, src_);
@@ -220,7 +220,7 @@ void THCTensor_(tril)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
 void THCTensor_(triu)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  THArgCheck(src_->nDimension == 2, 1, "expected a matrix");
+  THArgCheck(src_->_dim() == 2, 1, "expected a matrix");
 
   if (self_ != src_)
     THCTensor_(resizeAs)(state, self_, src_);

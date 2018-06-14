@@ -9,6 +9,8 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 
+#include <thrust/functional.h>
+
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
 
@@ -19,117 +21,604 @@
 namespace caffe2 {
 namespace math {
 
-#define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(T, Funcname, function)          \
-  __global__ void _Kernel_##T##_##Funcname(const int N, const T* x, T* y) { \
-    CUDA_1D_KERNEL_LOOP(i, N) {                                             \
-      y[i] = function(x[i]);                                                \
-    }                                                                       \
-  }                                                                         \
-  template <>                                                               \
-  void Funcname<T, CUDAContext>(                                            \
-      const int N, const T* x, T* y, CUDAContext* context) {                \
-    _Kernel_##T##_##Funcname<<<                                             \
-        CAFFE_GET_BLOCKS(N),                                                \
-        CAFFE_CUDA_NUM_THREADS,                                             \
-        0,                                                                  \
-        context->cuda_stream()>>>(N, x, y);                                 \
-  }
+namespace {
 
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Exp, expf);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Log, logf);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cos, cosf);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Acos, acosf);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sin, sinf);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Asin, asinf);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tan, tanf);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Atan, atanf);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Abs, fabsf);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqrt, sqrtf);
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, InvSqrt, rsqrtf);
+inline __host__ __device__ bool Not(const bool x) {
+  return !x;
+}
 
-__device__ float cuda_sqrf(const float x) {
+template <typename T>
+inline __host__ __device__ T Negate(const T& x) {
+  return -x;
+}
+
+template <typename T>
+inline __host__ __device__ T Square(const T& x) {
   return x * x;
 }
 
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, cuda_sqrf);
+template <typename T>
+inline __host__ __device__ T Sign(const T& x) {
+  return x > 0 ? T(1) : (x < 0 ? T(-1) : T(0));
+}
+
+#define DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Func, expr)        \
+  template <typename T>                                               \
+  struct Func##Functor {                                              \
+    inline __host__ __device__ T                                      \
+    operator()(const T& lhs, const T& rhs) const {                    \
+      return lhs expr rhs;                                            \
+    }                                                                 \
+  };                                                                  \
+  template <>                                                         \
+  struct Func##Functor<float16> {                                     \
+    inline __host__ __device__ float16                                \
+    operator()(const float16& lhs, const float16& rhs) const {        \
+      return convert::To<float, float16>(convert::To<float16, float>( \
+          lhs) expr convert::To<float16, float>(rhs));                \
+    }                                                                 \
+  };
+DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Add, +)
+DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Sub, -)
+DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Mul, *)
+DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Div, /)
+#undef DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR
+
+template <typename T>
+__global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 350
+    sincos(__ldg(X + i), S + i, C + i);
+#else
+    sincos(X[i], S + i, C + i);
+#endif
+  }
+}
+
+template <typename TIn, typename TOut, class BinaryOperator>
+__global__ void SimpleBinaryOpCUDAKernel(
+    const int N,
+    const BinaryOperator op,
+    const TIn* A,
+    const TIn* B,
+    TOut* C) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    C[i] = op(A[i], B[i]);
+  }
+}
+
+template <typename TIn, typename TOut, class BinaryOperator, bool broadcast_1st>
+__global__ void RowwiseBinaryOpCUDAKenel(
+    const int rows,
+    const int cols,
+    const BinaryOperator op,
+    const TIn* A,
+    const TIn* B,
+    TOut* C) {
+  const int size = rows * cols;
+  CUDA_1D_KERNEL_LOOP(C_index, size) {
+    const int j = C_index % cols;
+    const int A_index = broadcast_1st ? j : C_index;
+    const int B_index = broadcast_1st ? C_index : j;
+    C[C_index] = op(A[A_index], B[B_index]);
+  }
+}
+
+template <typename TIn, typename TOut, class BinaryOperator, bool broadcast_1st>
+__global__ void ColwiseBinaryOpCUDAKenel(
+    const int rows,
+    const int cols,
+    const BinaryOperator op,
+    const TIn* A,
+    const TIn* B,
+    TOut* C) {
+  const int size = rows * cols;
+  CUDA_1D_KERNEL_LOOP(C_index, size) {
+    const int i = C_index / cols;
+    const int A_index = broadcast_1st ? i : C_index;
+    const int B_index = broadcast_1st ? C_index : i;
+    C[C_index] = op(A[A_index], B[B_index]);
+  }
+}
+
+template <typename TIn, typename TOut, class BinaryOperator, int D>
+__global__ void BroadcastBinaryOpCUDAKernel(
+    const int size,
+    const SimpleArray<int, D> A_strides,
+    const SimpleArray<int, D> B_strides,
+    const SimpleArray<int, D> C_dims,
+    const BinaryOperator op,
+    const TIn* A,
+    const TIn* B,
+    TOut* C) {
+  CUDA_1D_KERNEL_LOOP(C_index, size) {
+    int A_index = 0;
+    int B_index = 0;
+    int C_index_val = C_index;
+#pragma unroll
+    for (int i = D - 1; i >= 0; --i) {
+      const int d = C_index_val % C_dims.data[i];
+      A_index += A_strides.data[i] == 0 ? 0 : d * A_strides.data[i];
+      B_index += B_strides.data[i] == 0 ? 0 : d * B_strides.data[i];
+      C_index_val /= C_dims.data[i];
+    }
+    C[C_index] = op(A[A_index], B[B_index]);
+  }
+}
+
+template <typename TIn, typename TOut, class BinaryOperator>
+void BinaryOpWith2DBroadcasting(
+    const int ndim,
+    const int* dims,
+    const int pivot,
+    const bool rowwise_broadcast,
+    const bool broadcast_1st,
+    const BinaryOperator& op,
+    const TIn* A,
+    const TIn* B,
+    TOut* C,
+    CUDAContext* context) {
+  const int rows =
+      std::accumulate(dims, dims + pivot, 1, std::multiplies<int>());
+  const int cols =
+      std::accumulate(dims + pivot, dims + ndim, 1, std::multiplies<int>());
+  const int size = rows * cols;
+  if (rowwise_broadcast) {
+    if (broadcast_1st) {
+      RowwiseBinaryOpCUDAKenel<TIn, TOut, BinaryOperator, true>
+          <<<CAFFE_GET_BLOCKS(size),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context->cuda_stream()>>>(rows, cols, op, A, B, C);
+    } else {
+      RowwiseBinaryOpCUDAKenel<TIn, TOut, BinaryOperator, false>
+          <<<CAFFE_GET_BLOCKS(size),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context->cuda_stream()>>>(rows, cols, op, A, B, C);
+    }
+  } else {
+    if (broadcast_1st) {
+      ColwiseBinaryOpCUDAKenel<TIn, TOut, BinaryOperator, true>
+          <<<CAFFE_GET_BLOCKS(size),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context->cuda_stream()>>>(rows, cols, op, A, B, C);
+    } else {
+      ColwiseBinaryOpCUDAKenel<TIn, TOut, BinaryOperator, false>
+          <<<CAFFE_GET_BLOCKS(size),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context->cuda_stream()>>>(rows, cols, op, A, B, C);
+    }
+  }
+}
+
+template <typename TIn, typename TOut, class BinaryOperator, int D>
+void BroadcastBinaryOpImpl(
+    const int* A_dims,
+    const int* B_dims,
+    const int* C_dims,
+    const BinaryOperator& op,
+    const TIn* A,
+    const TIn* B,
+    TOut* C,
+    CUDAContext* context) {
+  SimpleArray<int, D> A_strides_array;
+  SimpleArray<int, D> B_strides_array;
+  SimpleArray<int, D> C_dims_array;
+  int A_stride = 1;
+  int B_stride = 1;
+  for (int i = D - 1; i >= 0; --i) {
+    A_strides_array.data[i] = A_dims[i] == 1 ? 0 : A_stride;
+    B_strides_array.data[i] = B_dims[i] == 1 ? 0 : B_stride;
+    A_stride *= A_dims[i];
+    B_stride *= B_dims[i];
+  }
+  std::copy(C_dims, C_dims + D, C_dims_array.data);
+  const int size =
+      std::accumulate(C_dims, C_dims + D, 1, std::multiplies<int>());
+  BroadcastBinaryOpCUDAKernel<TIn, TOut, BinaryOperator, D>
+      <<<CAFFE_GET_BLOCKS(size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(
+          size, A_strides_array, B_strides_array, C_dims_array, op, A, B, C);
+}
+
+template <typename TIn, typename TOut, class BinaryOperator>
+void BroadcastBinaryOp(
+    const int A_ndim,
+    const int* A_dims,
+    const int B_ndim,
+    const int* B_dims,
+    const BinaryOperator& op,
+    const TIn* A,
+    const TIn* B,
+    TOut* C,
+    CUDAContext* context) {
+  const int ndim = std::max(A_ndim, B_ndim);
+  std::vector<int> A_dims_array(ndim);
+  std::vector<int> B_dims_array(ndim);
+  std::vector<int> C_dims_array(ndim);
+  utils::ComputeBroadcastBinaryOpDims(
+      A_ndim,
+      A_dims,
+      B_ndim,
+      B_dims,
+      A_dims_array.data(),
+      B_dims_array.data(),
+      C_dims_array.data());
+  if (A_dims_array == B_dims_array) {
+    const int size = std::accumulate(
+        C_dims_array.cbegin(), C_dims_array.cend(), 1, std::multiplies<int>());
+    SimpleBinaryOpCUDAKernel<TIn, TOut, BinaryOperator>
+        <<<CAFFE_GET_BLOCKS(size),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context->cuda_stream()>>>(size, op, A, B, C);
+    return;
+  }
+  int pivot;
+  bool broadcast_1st;
+  if (utils::IsRowwiseBroadcastBinaryOp(
+          ndim,
+          A_dims_array.data(),
+          B_dims_array.data(),
+          &pivot,
+          &broadcast_1st)) {
+    BinaryOpWith2DBroadcasting<TIn, TOut, BinaryOperator>(
+        ndim,
+        C_dims_array.data(),
+        pivot,
+        true,
+        broadcast_1st,
+        op,
+        A,
+        B,
+        C,
+        context);
+    return;
+  }
+  if (utils::IsColwiseBroadcastBinaryOp(
+          ndim,
+          A_dims_array.data(),
+          B_dims_array.data(),
+          &pivot,
+          &broadcast_1st)) {
+    BinaryOpWith2DBroadcasting<TIn, TOut, BinaryOperator>(
+        ndim,
+        C_dims_array.data(),
+        pivot,
+        false,
+        broadcast_1st,
+        op,
+        A,
+        B,
+        C,
+        context);
+    return;
+  }
+  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_3(
+      ndim,
+      BroadcastBinaryOpImpl,
+      TIn,
+      TOut,
+      BinaryOperator,
+      A_dims_array.data(),
+      B_dims_array.data(),
+      C_dims_array.data(),
+      op,
+      A,
+      B,
+      C,
+      context);
+}
+
+} // namespace
+
+#define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(T, Func, op)            \
+  __global__ void Func##CUDAKernel(const int N, const T* X, T* Y) { \
+    CUDA_1D_KERNEL_LOOP(i, N) {                                     \
+      Y[i] = op(X[i]);                                              \
+    }                                                               \
+  }                                                                 \
+  template <>                                                       \
+  void Func<T, CUDAContext>(                                        \
+      const int N, const T* x, T* y, CUDAContext* context) {        \
+    Func##CUDAKernel<<<                                             \
+        CAFFE_GET_BLOCKS(N),                                        \
+        CAFFE_CUDA_NUM_THREADS,                                     \
+        0,                                                          \
+        context->cuda_stream()>>>(N, x, y);                         \
+  }
+
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Exp, expf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Log, logf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cos, cosf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Acos, acosf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sin, sinf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Asin, asinf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tan, tanf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Atan, atanf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Abs, fabsf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqrt, sqrtf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, InvSqrt, rsqrtf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, Square<float>)
+
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(bool, Not, Not)
+
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Neg, Negate<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Neg, Negate<double>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int32_t, Neg, Negate<std::int32_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int64_t, Neg, Negate<std::int64_t>)
+
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sign, Sign<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Sign, Sign<double>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int32_t, Sign, Sign<std::int32_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int64_t, Sign, Sign<std::int64_t>)
 
 #undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
 
-#define DELEGATE_SINCOS_CUDA_FUNCTION(T)                             \
-  __global__ void _Kernel_##T##_##SinCos(                            \
-      const int N, const T* x, T* ys, T* yc) {                       \
-    CUDA_1D_KERNEL_LOOP(i, N) {                                      \
-      sincos(x[i], ys + i, yc + i);                                  \
-    }                                                                \
-  }                                                                  \
+#define CAFFE2_SPECIALIZED_CUDA_SINCOS(T)                            \
   template <>                                                        \
   void SinCos<T, CUDAContext>(                                       \
       const int N, const T* x, T* ys, T* yc, CUDAContext* context) { \
-    _Kernel_##T##_##SinCos<<<                                        \
+    SinCosCUDAKernel<<<                                              \
         CAFFE_GET_BLOCKS(N),                                         \
         CAFFE_CUDA_NUM_THREADS,                                      \
         0,                                                           \
         context->cuda_stream()>>>(N, x, ys, yc);                     \
   }
+CAFFE2_SPECIALIZED_CUDA_SINCOS(float)
+CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
+#undef CAFFE2_SPECIALIZED_CUDA_SINCOS
 
-DELEGATE_SINCOS_CUDA_FUNCTION(float)
-DELEGATE_SINCOS_CUDA_FUNCTION(double)
-
-#undef DELEGATE_SINCOS_CUDA_FUNCTION
-
-#define DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION(T, Funcname, expr)         \
-  __global__ void _Kernel_##T##_##Funcname(                                   \
-      const int N, const T* a, const T* b, T* y) {                            \
-    CUDA_1D_KERNEL_LOOP(i, N) {                                               \
-      float r = convert::To<T, float>(a[i]) expr convert::To<T, float>(b[i]); \
-      y[i] = convert::To<float, T>(r);                                        \
-    }                                                                         \
-  }                                                                           \
-  template <>                                                                 \
-  void Funcname<T, CUDAContext>(                                              \
-      const int N, const T* a, const T* b, T* y, CUDAContext* context) {      \
-    _Kernel_##T##_##Funcname<<<                                               \
-        CAFFE_GET_BLOCKS(N),                                                  \
-        CAFFE_CUDA_NUM_THREADS,                                               \
-        0,                                                                    \
-        context->cuda_stream()>>>(N, a, b, y);                                \
+#define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op) \
+  template <>                                                     \
+  void Func<TIn, CUDAContext>(                                    \
+      const int N,                                                \
+      const TIn* A,                                               \
+      const TIn* B,                                               \
+      TOut* C,                                                    \
+      CUDAContext* context) {                                     \
+    SimpleBinaryOpCUDAKernel<TIn, TOut, Op<TIn>>                  \
+        <<<CAFFE_GET_BLOCKS(N),                                   \
+           CAFFE_CUDA_NUM_THREADS,                                \
+           0,                                                     \
+           context->cuda_stream()>>>(N, Op<TIn>(), A, B, C);      \
   }
 
-DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION(float, Add, +);
-DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION(int32_t, Add, +);
-DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION(float, Sub, -);
-DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION(float, Mul, *);
-DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION(float, Div, /);
+#define DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(Func, Op)                \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, bool, Func, Op)        \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, bool, Func, Op)       \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Func, Op)
 
-DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION(float16, Add, +);
-DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION(float16, Sub, -);
-DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION(float16, Mul, *);
-DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION(float16, Div, /);
+DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(EQ, thrust::equal_to)
+DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(NE, thrust::not_equal_to)
+DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(LT, thrust::less)
+DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(LE, thrust::less_equal)
+DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(GT, thrust::greater)
+DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(GE, thrust::greater_equal)
 
-#undef DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION
+#undef DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION
 
-#define DELEGATE_SIMPLE_CUDA_BINARY_PREFIX_FUNCTION(T, Funcname, func)    \
-  __global__ void _Kernel_##T##_##Funcname(                               \
-      const int N, const T* a, const T* b, T* y) {                        \
-    CUDA_1D_KERNEL_LOOP(i, N) {                                           \
-      float r =                                                           \
-          func(convert::To<T, float>(a[i]), convert::To<T, float>(b[i])); \
-      y[i] = convert::To<float, T>(r);                                    \
-    }                                                                     \
-  }                                                                       \
-  template <>                                                             \
-  void Funcname<T, CUDAContext>(                                          \
-      const int N, const T* a, const T* b, T* y, CUDAContext* context) {  \
-    _Kernel_##T##_##Funcname<<<                                           \
-        CAFFE_GET_BLOCKS(N),                                              \
-        CAFFE_CUDA_NUM_THREADS,                                           \
-        0,                                                                \
-        context->cuda_stream()>>>(N, a, b, y);                            \
+#define DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Func, Op)                         \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op) \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, float, Func, Op)               \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, double, Func, Op)             \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float16, float16, Func, Op)
+
+DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Add, AddFunctor)
+DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Sub, SubFunctor)
+DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Mul, MulFunctor)
+DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Div, DivFunctor)
+
+#undef DEFINE_SIMPLE_CUDA_BINARY_FUNCTION
+
+DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, And, thrust::logical_and)
+DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Or, thrust::logical_or)
+DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Xor, thrust::bit_xor)
+
+#define DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(Func, Op)                 \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Func, Op)                 \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
+  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
+
+DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseAnd, thrust::bit_and)
+DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseOr, thrust::bit_or)
+DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
+
+#undef DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION
+
+DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
+    float,
+    float,
+    ElemwiseMax,
+    thrust::maximum);
+
+#undef DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION
+
+#define DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op) \
+  template <>                                                           \
+  void Rowwise##Func<TIn, CUDAContext, true>(                           \
+      const int rows,                                                   \
+      const int cols,                                                   \
+      const TIn* A,                                                     \
+      const TIn* B,                                                     \
+      TOut* C,                                                          \
+      CUDAContext* context) {                                           \
+    const int size = rows * cols;                                       \
+    RowwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, true>                  \
+        <<<CAFFE_GET_BLOCKS(size),                                      \
+           CAFFE_CUDA_NUM_THREADS,                                      \
+           0,                                                           \
+           context->cuda_stream()>>>(rows, cols, Op<TIn>(), A, B, C);   \
+  }                                                                     \
+  template <>                                                           \
+  void Rowwise##Func<TIn, CUDAContext, false>(                          \
+      const int rows,                                                   \
+      const int cols,                                                   \
+      const TIn* A,                                                     \
+      const TIn* B,                                                     \
+      TOut* C,                                                          \
+      CUDAContext* context) {                                           \
+    const int size = rows * cols;                                       \
+    RowwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, false>                 \
+        <<<CAFFE_GET_BLOCKS(size),                                      \
+           CAFFE_CUDA_NUM_THREADS,                                      \
+           0,                                                           \
+           context->cuda_stream()>>>(rows, cols, Op<TIn>(), A, B, C);   \
+  }                                                                     \
+  template <>                                                           \
+  void Colwise##Func<TIn, CUDAContext, true>(                           \
+      const int rows,                                                   \
+      const int cols,                                                   \
+      const TIn* A,                                                     \
+      const TIn* B,                                                     \
+      TOut* C,                                                          \
+      CUDAContext* context) {                                           \
+    const int size = rows * cols;                                       \
+    ColwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, true>                  \
+        <<<CAFFE_GET_BLOCKS(size),                                      \
+           CAFFE_CUDA_NUM_THREADS,                                      \
+           0,                                                           \
+           context->cuda_stream()>>>(rows, cols, Op<TIn>(), A, B, C);   \
+  }                                                                     \
+  template <>                                                           \
+  void Colwise##Func<TIn, CUDAContext, false>(                          \
+      const int rows,                                                   \
+      const int cols,                                                   \
+      const TIn* A,                                                     \
+      const TIn* B,                                                     \
+      TOut* C,                                                          \
+      CUDAContext* context) {                                           \
+    const int size = rows * cols;                                       \
+    ColwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, false>                 \
+        <<<CAFFE_GET_BLOCKS(size),                                      \
+           CAFFE_CUDA_NUM_THREADS,                                      \
+           0,                                                           \
+           context->cuda_stream()>>>(rows, cols, Op<TIn>(), A, B, C);   \
   }
 
-DELEGATE_SIMPLE_CUDA_BINARY_PREFIX_FUNCTION(float, ElemwiseMax, fmaxf);
+#define DEFINE_2D_BROADCAST_CUDA_COMPARE_FUNCTION(Func, Op)                \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(float, bool, Func, Op)        \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(double, bool, Func, Op)       \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(bool, bool, Func, Op)
 
-#undef DELEGATE_SIMPLE_CUDA_BINARY_INFIX_FUNCTION
+DEFINE_2D_BROADCAST_CUDA_COMPARE_FUNCTION(EQ, thrust::equal_to)
+DEFINE_2D_BROADCAST_CUDA_COMPARE_FUNCTION(NE, thrust::not_equal_to)
+DEFINE_2D_BROADCAST_CUDA_COMPARE_FUNCTION(LT, thrust::less)
+DEFINE_2D_BROADCAST_CUDA_COMPARE_FUNCTION(LE, thrust::less_equal)
+DEFINE_2D_BROADCAST_CUDA_COMPARE_FUNCTION(GT, thrust::greater)
+DEFINE_2D_BROADCAST_CUDA_COMPARE_FUNCTION(GE, thrust::greater_equal)
+
+#undef DEFINE_2D_BROADCAST_CUDA_COMPARE_FUNCTION
+
+#define DEFINE_2D_BROADCAST_CUDA_BINARY_FUNCTION(Func, Op)             \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(                          \
+      std::int32_t, std::int32_t, Func, Op)                            \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(                          \
+      std::int64_t, std::int64_t, Func, Op)                            \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(float, float, Func, Op)   \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(double, double, Func, Op) \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(float16, float16, Func, Op)
+
+DEFINE_2D_BROADCAST_CUDA_BINARY_FUNCTION(Add, AddFunctor)
+DEFINE_2D_BROADCAST_CUDA_BINARY_FUNCTION(Sub, SubFunctor)
+DEFINE_2D_BROADCAST_CUDA_BINARY_FUNCTION(Mul, MulFunctor)
+DEFINE_2D_BROADCAST_CUDA_BINARY_FUNCTION(Div, DivFunctor)
+
+#undef DEFINE_2D_BROADCAST_CUDA_BINARY_FUNCTION
+
+DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(bool, bool, And, thrust::logical_and)
+DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(bool, bool, Or, thrust::logical_or)
+DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(bool, bool, Xor, thrust::bit_xor)
+
+#define DEFINE_2D_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(Func, Op) \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(bool, bool, Func, Op) \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(                      \
+      std::int32_t, std::int32_t, Func, Op)                        \
+  DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(                      \
+      std::int64_t, std::int64_t, Func, Op)
+
+DEFINE_2D_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseAnd, thrust::bit_and)
+DEFINE_2D_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseOr, thrust::bit_or)
+DEFINE_2D_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
+
+#undef DEFINE_2D_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION
+
+#undef DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION
+
+#define DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op)  \
+  template <>                                                         \
+  void Func<TIn, CUDAContext>(                                        \
+      const int A_ndim,                                               \
+      const int* A_dims,                                              \
+      const int B_ndim,                                               \
+      const int* B_dims,                                              \
+      const TIn* A,                                                   \
+      const TIn* B,                                                   \
+      TOut* C,                                                        \
+      CUDAContext* context) {                                         \
+    BroadcastBinaryOp<TIn, TOut, Op<TIn>>(                            \
+        A_ndim, A_dims, B_ndim, B_dims, Op<TIn>(), A, B, C, context); \
+  }
+
+#define DEFINE_BROADCAST_CUDA_COMPARE_FUNCTION(Func, Op)                \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(float, bool, Func, Op)        \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(double, bool, Func, Op)       \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(bool, bool, Func, Op)
+
+DEFINE_BROADCAST_CUDA_COMPARE_FUNCTION(EQ, thrust::equal_to)
+DEFINE_BROADCAST_CUDA_COMPARE_FUNCTION(NE, thrust::not_equal_to)
+DEFINE_BROADCAST_CUDA_COMPARE_FUNCTION(LT, thrust::less)
+DEFINE_BROADCAST_CUDA_COMPARE_FUNCTION(LE, thrust::less_equal)
+DEFINE_BROADCAST_CUDA_COMPARE_FUNCTION(GT, thrust::greater)
+DEFINE_BROADCAST_CUDA_COMPARE_FUNCTION(GE, thrust::greater_equal)
+
+#undef DEFINE_BROADCAST_CUDA_COMPARE_FUNCTION
+
+#define DEFINE_BROADCAST_CUDA_BINARY_FUNCTION(Func, Op)             \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(                          \
+      std::int32_t, std::int32_t, Func, Op)                         \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(                          \
+      std::int64_t, std::int64_t, Func, Op)                         \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(float, float, Func, Op)   \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(double, double, Func, Op) \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(float16, float16, Func, Op)
+
+DEFINE_BROADCAST_CUDA_BINARY_FUNCTION(Add, AddFunctor)
+DEFINE_BROADCAST_CUDA_BINARY_FUNCTION(Sub, SubFunctor)
+DEFINE_BROADCAST_CUDA_BINARY_FUNCTION(Mul, MulFunctor)
+DEFINE_BROADCAST_CUDA_BINARY_FUNCTION(Div, DivFunctor)
+
+#undef DEFINE_BROADCAST_CUDA_BINARY_FUNCTION
+
+DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(bool, bool, And, thrust::logical_and)
+DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(bool, bool, Or, thrust::logical_or)
+DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(bool, bool, Xor, thrust::bit_xor)
+
+#define DEFINE_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(Func, Op) \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(bool, bool, Func, Op) \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(                      \
+      std::int32_t, std::int32_t, Func, Op)                     \
+  DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
+
+DEFINE_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseAnd, thrust::bit_and)
+DEFINE_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseOr, thrust::bit_or)
+DEFINE_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
+
+#undef DEFINE_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION
+
+#undef DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION
 
 #define DELEGATE_REDUCTION_FUNCTION(T, Funcname, func)                  \
   template <>                                                           \
@@ -2228,43 +2717,6 @@ void Maximum(
 
 namespace {
 
-std::vector<int> MakeTransposeAxes(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes) {
-  std::vector<int> transpose_axes(num_dims);
-  const int d = num_dims - num_axes;
-  std::copy_n(axes, num_axes, transpose_axes.begin() + d);
-  std::sort(transpose_axes.begin() + d, transpose_axes.end());
-  int p = 0;
-  int q = d;
-  for (int i = 0; i < num_dims; ++i) {
-    if (q < num_dims && i == transpose_axes[q]) {
-      ++q;
-    } else {
-      transpose_axes[p++] = i;
-    }
-  }
-  return transpose_axes;
-}
-
-template <int D>
-void ComputeTransposedStrides(
-    const int* X_dims,
-    const int* axes,
-    int* X_strides) {
-  int buff[D];
-  int cur_stride = 1;
-  for (int i = D - 1; i >= 0; --i) {
-    buff[i] = cur_stride;
-    cur_stride *= X_dims[i];
-  }
-  for (int i = 0; i < D; ++i) {
-    X_strides[i] = buff[axes[i]];
-  }
-}
-
 template <typename T, class Reducer, int D>
 __global__ void ReduceTensorCUDAKernel(
     const int outer_size,
@@ -2282,9 +2734,9 @@ __global__ void ReduceTensorCUDAKernel(
       int X_index = 0;
       int Y_index = i * inner_size + j;
 #pragma unroll
-      for (int i = D - 1; i >= 0; --i) {
-        X_index += (Y_index % Y_dims.data[i]) * X_strides.data[i];
-        Y_index /= Y_dims.data[i];
+      for (int d = D - 1; d >= 0; --d) {
+        X_index += (Y_index % Y_dims.data[d]) * X_strides.data[d];
+        Y_index /= Y_dims.data[d];
       }
 #if __CUDA_ARCH__ >= 350
       val = reducer(val, __ldg(X + X_index));
@@ -2313,7 +2765,7 @@ void ReduceTensorCUDAImpl(
     CUDAContext* context) {
   SimpleArray<int, D> X_strides;
   SimpleArray<int, D> Y_dims;
-  ComputeTransposedStrides<D>(dims, axes, X_strides.data);
+  utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
   for (int i = 0; i < D; ++i) {
     Y_dims.data[i] = dims[axes[i]];
   }
@@ -2337,8 +2789,9 @@ void ReduceTensorCUDA(
     T* Y,
     CUDAContext* context) {
   CAFFE_ENFORCE_LE(num_axes, num_dims);
-  const std::vector<int> transpose_axes =
-      MakeTransposeAxes(num_dims, dims, num_axes, axes);
+  std::vector<int> transpose_axes(num_dims);
+  utils::ComputeTransposeAxesForReduceOp(
+      num_dims, num_axes, axes, transpose_axes.data());
   const int pivot = num_dims - num_axes;
   int outer_size = 1;
   for (int i = 0; i < pivot; ++i) {
@@ -2648,7 +3101,7 @@ void MomentsCUDAImpl(
     CUDAContext* context) {
   SimpleArray<int, D> X_strides;
   SimpleArray<int, D> Y_dims;
-  ComputeTransposedStrides<D>(dims, axes, X_strides.data);
+  utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
   for (int i = 0; i < D; ++i) {
     Y_dims.data[i] = dims[axes[i]];
   }
@@ -2671,8 +3124,9 @@ void MomentsCUDA(
     T* variance,
     CUDAContext* context) {
   CAFFE_ENFORCE_LE(num_axes, num_dims);
-  const std::vector<int> transpose_axes =
-      MakeTransposeAxes(num_dims, dims, num_axes, axes);
+  std::vector<int> transpose_axes(num_dims);
+  utils::ComputeTransposeAxesForReduceOp(
+      num_dims, num_axes, axes, transpose_axes.data());
   const int pivot = num_dims - num_axes;
   int outer_size = 1;
   for (int i = 0; i < pivot; ++i) {
@@ -2757,7 +3211,7 @@ void TransposeCUDAImpl(
     CUDAContext* context) {
   SimpleArray<int, D> X_strides;
   SimpleArray<int, D> Y_dims;
-  ComputeTransposedStrides<D>(dims, axes, X_strides.data);
+  utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
   int size = 1;
   for (int i = 0; i < D; ++i) {
     Y_dims.data[i] = dims[axes[i]];

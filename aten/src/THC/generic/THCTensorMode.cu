@@ -180,9 +180,9 @@ THC_API void THCTensor_(mode)(THCState *state,
 
   // Resize output value, index Tensors to appropriate sizes (i.e. the same as
   // the input Tensor, except at dim=dimension, the size is 1)
-  TensorUtils<THCTensor>::preserveReduceDimSemantics(
+  THCTensor_preserveReduceDimSemantics(
       state, values, ndim, dimension, keepdim);
-  TensorUtils<THCudaLongTensor>::preserveReduceDimSemantics(
+  THCTensor_preserveReduceDimSemantics(
       state, indices, ndim, dimension, keepdim);
   dim = THCTensor_(newSizeOf)(state, input);
   THLongStorage_set(dim, dimension, 1);
@@ -209,7 +209,7 @@ THC_API void THCTensor_(mode)(THCState *state,
   // 3. Can use 32-bit index math for indexing (mainly just for implementation conciseness, could be changed)
   if (sliceSize <= MAX_BLOCK_SIZE &&
       slices <= MAX_GRID_SIZE &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, input)) {
+      THCTensor_canUse32BitIndexMath(state, input)) {
     // Beginning our optimized implementation. First thing we want to do is to transpose
     // the input Tensor along the sort dimension, and then make it contiguous
     transposed = THCTensor_(newTranspose)(state, input, dimension, ndim - 1);

@@ -4,7 +4,7 @@
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_gatherKernel<TYPE, REAL, DIMS>                                \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>(               \
+  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(gather)(THCState* state, THCTensor *tensor,
@@ -37,17 +37,19 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THArgCheck(getApplyGrid(state, totalElements, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
-  if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
+  if (THCTensor_maybeOverlappingIndices(state, tensor)) {
     oldTensor = tensor;
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
 
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, tensor) &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
+  if (THCTensor_canUse32BitIndexMath(state, tensor) &&
+      THCTensor_canUse32BitIndexMath(state, src) &&
+      THCTensor_canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
       getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<real, unsigned int> srcInfo =
@@ -86,7 +88,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   }
 
   if (oldTensor) {
-    TensorUtils<THCTensor>::copyIgnoringOverlaps(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
@@ -98,7 +100,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterKernel<TYPE, REAL, DIMS>                               \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>(               \
+  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLongTensor *index, THCTensor *src) {
@@ -130,17 +132,19 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THArgCheck(getApplyGrid(state, totalElements, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
-  if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
+  if (THCTensor_maybeOverlappingIndices(state, tensor)) {
     oldTensor = tensor;
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
 
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, tensor) &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
+  if (THCTensor_canUse32BitIndexMath(state, tensor) &&
+      THCTensor_canUse32BitIndexMath(state, src) &&
+      THCTensor_canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
       getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<real, unsigned int> srcInfo =
@@ -175,7 +179,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
   }
 
   if (oldTensor) {
-    TensorUtils<THCTensor>::copyIgnoringOverlaps(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
@@ -186,7 +190,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterAddKernel<TYPE, REAL, DIMS>                               \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>(               \
+  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaLongTensor *index, THCTensor *src) {
@@ -217,17 +221,19 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THArgCheck(getApplyGrid(state, totalElements, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
-  if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
+  if (THCTensor_maybeOverlappingIndices(state, tensor)) {
     oldTensor = tensor;
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
 
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, tensor) &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
+  if (THCTensor_canUse32BitIndexMath(state, tensor) &&
+      THCTensor_canUse32BitIndexMath(state, src) &&
+      THCTensor_canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
       getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<real, unsigned int> srcInfo =
@@ -262,7 +268,7 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
   }
 
   if (oldTensor) {
-    TensorUtils<THCTensor>::copyIgnoringOverlaps(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
@@ -273,7 +279,7 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterFillKernel<TYPE, REAL, DIMS>                           \
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(      \
+      <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(      \
           tensorInfo, indexInfo, value, dim, (TYPE)totalElements);
 
 void
@@ -302,16 +308,18 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
   const dim3 block = getApplyBlock();
   dim3 grid;
-  THArgCheck(getApplyGrid(state, totalElements, grid), 1, CUTORCH_DIM_WARNING);
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  THArgCheck(getApplyGrid(state, totalElements, grid, curDevice), 1, CUTORCH_DIM_WARNING);
 
   THCTensor* oldTensor = NULL;
-  if (TensorUtils<THCTensor>::maybeOverlappingIndices(state, tensor)) {
+  if (THCTensor_maybeOverlappingIndices(state, tensor)) {
     oldTensor = tensor;
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
 
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, tensor) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, index)) {
+  if (THCTensor_canUse32BitIndexMath(state, tensor) &&
+      THCTensor_canUse32BitIndexMath(state, index)) {
     TensorInfo<real, unsigned int> tensorInfo =
       getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
     TensorInfo<int64_t, unsigned int> indexInfo =
@@ -342,7 +350,7 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   }
 
   if (oldTensor) {
-    TensorUtils<THCTensor>::copyIgnoringOverlaps(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
