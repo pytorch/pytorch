@@ -3253,17 +3253,18 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqual(self_variable.type(), self_variable.grad.type())
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
-for test in method_tests:
-    name, self_size, args = test[:3]
+
+def add_test(
+        name,
+        self_size,
+        args,
+        variant_name='',
+        dim_args_idx=(),
+        skipTestIf=(),
+        output_process_fn=lambda x: x):
     basic_test_name = 'test_' + name
-    if len(test) >= 4 and test[3] != '':
-        basic_test_name += '_' + test[3]
-
-    dim_args_idx = test[4] if len(test) >= 5 else []
-
-    skipTestIf = test[5] if len(test) >= 6 else []
-
-    output_process_fn = test[6] if len(test) >= 7 else lambda x: x
+    if variant_name != '':
+        basic_test_name += '_' + variant_name
 
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
@@ -3379,6 +3380,8 @@ for test in method_tests:
 
         setattr(TestAutograd, test_name, do_test)
 
+for test in method_tests:
+    add_test(*test)
 
 if __name__ == '__main__':
     run_tests()
