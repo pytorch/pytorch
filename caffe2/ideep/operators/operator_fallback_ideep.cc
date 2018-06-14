@@ -15,6 +15,8 @@
 #include <caffe2/operators/given_tensor_fill_op.h>
 #include <caffe2/operators/load_save_op.h>
 #include <caffe2/operators/loss_op.h>
+#include <caffe2/operators/pad_op.h>
+#include <caffe2/operators/prelu_op.h>
 #include <caffe2/operators/reshape_op.h>
 #include <caffe2/operators/roi_align_op.h>
 #include <caffe2/operators/softmax_op.h>
@@ -98,5 +100,12 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     BBoxTransform,
     IDEEPFallbackOp<BBoxTransformOp<float, CPUContext>>);
+
+REGISTER_IDEEP_OPERATOR(
+    PadImage,
+    IDEEPFallbackOp<PadImageOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    PRelu,
+    IDEEPFallbackOp<PReluOp<float, CPUContext>>);
 
 } // namespace caffe2
