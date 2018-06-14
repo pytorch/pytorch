@@ -1258,6 +1258,15 @@ class TestNN(NNTestCase):
         parameter_dict.update(next_parameters)
         check()
 
+        next_parameters = OrderedDict([
+            ('p5', Parameter(torch.randn(10, 10))),
+            ('p6', Parameter(torch.randn(10, 10))),
+        ])
+        parameters.update(next_parameters)
+        parameter_dict.update(next_parameters)
+        check()
+
+
         del parameter_dict['p3']
         del parameters['p3']
         check()
