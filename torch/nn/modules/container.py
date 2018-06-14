@@ -1,5 +1,5 @@
 import warnings
-from collections import OrderedDict, Iterable
+from collections import OrderedDict, Iterable, Mapping
 from itertools import islice
 import operator
 
@@ -194,8 +194,8 @@ class ModuleDict(Module):
     contains are properly registered, and will be visible by all Module methods.
 
     Arguments:
-        mapping (iterable, optional): an iterable of key/:class:`~torch.nn.Module``
-            pairs to add.
+        modules (iterable, optional): a mapping (dictionary) of (string: module)
+            or an iterable of key/value pairs of type (string, module)
 
     Example::
 
@@ -206,25 +206,34 @@ class ModuleDict(Module):
                         'conv': nn.Conv2d(10, 10, 3),
                         'pool': nn.MaxPool2d(3)
                 })
+                self.activations = nn.ModuleDict([
+                        ['lrelu', nn.LeakyReLU()],
+                        ['prelu', nn.PReLU()]
+                ])
 
-            def forward(self, x, choice):
+            def forward(self, x, choice, act):
                 x = self.choices[choice](x)
+                x = self.activations[act](x)
                 return x
     """
 
-    def __init__(self, mapping=None):
+    def __init__(self, modules=None):
         super(ModuleDict, self).__init__()
-        if mapping is not None:
-            self.update(mapping)
+        if modules is not None:
+            self.update(modules)
 
     def __getitem__(self, key):
-        return self._modules[str(key)]
+        return self._modules[key]
 
     def __setitem__(self, key, module):
-        self.add_module(str(key), module)
+        if not isinstance(key, str):
+            raise TypeError("ModuleDict.__setitem__ key should be string, but got " +
+                            type(key).__name__)
+
+        self.add_module(key, module)
 
     def __delitem__(self, key):
-        del self._modules[str(key)]
+        del self._modules[key]
 
     def __len__(self):
         return len(self._modules)
@@ -233,7 +242,7 @@ class ModuleDict(Module):
         return iter(self._modules.keys())
 
     def __contains__(self, key):
-        return str(key) in self._modules
+        return key in self._modules
 
     def clear(self):
         """Remove all items from the ModuleDict.
@@ -265,24 +274,25 @@ class ModuleDict(Module):
         """
         return self._modules.values()
 
-    def update(self, mapping):
-        r"""Update the ModuleDict with the key/value pairs from mapping,
-        overwriting existing keys.
+    def update(self, modules):
+        r"""Update the ModuleDict with the key/value pairs from a mapping or
+        an iterable, overwriting existing keys.
 
         Arguments:
-            mapping (iterable): dictionary or iterable of key/value pairs
+            modules (iterable): a mapping (dictionary) of (string: module) or
+                an iterable of key/value pairs of type (string, module)
         """
-        if not isinstance(mapping, Iterable):
+        if not isinstance(modules, Iterable):
             raise TypeError("ModuleDict.update should be called with an "
                             "iterable of key/value pairs, but got " +
-                            type(mapping).__name__)
+                            type(modules).__name__)
 
-        if isinstance(mapping, dict):
-            for key, module in mapping.items():
-                self.add_module(str(key), module)
+        if isinstance(modules, Mapping):
+            for key, module in modules.items():
+                self[key] = module
         else:
-            for key, module in mapping:
-                self.add_module(str(key), module)
+            for key, module in modules:
+                self[key] = module
 
 
 class ParameterList(Module):
@@ -383,8 +393,9 @@ class ParameterDict(Module):
     contains are properly registered, and will be visible by all Module methods.
 
     Arguments:
-        mapping (iterable, optional): an iterable of key/:class:`~torch.nn.Parameter``
-            pairs to add.
+        parameters (iterable, optional): a mapping (dictionary) of
+            (string : :class:`~torch.nn.Parameter``) or an iterable of key/value pairs
+            of type (string, :class:`~torch.nn.Parameter``)
 
     Example::
 
@@ -401,19 +412,23 @@ class ParameterDict(Module):
                 return x
     """
 
-    def __init__(self, mapping=None):
+    def __init__(self, parameters=None):
         super(ParameterDict, self).__init__()
-        if mapping is not None:
-            self.update(mapping)
+        if parameters is not None:
+            self.update(parameters)
 
     def __getitem__(self, key):
-        return self._parameters[str(key)]
+        return self._parameters[key]
 
     def __setitem__(self, key, parameter):
-        self.register_parameter(str(key), parameter)
+        if not isinstance(key, str):
+            raise TypeError("ParameterDict.__setitem__ key should be string, "
+                            "but got " + type(key).__name__)
+
+        self.register_parameter(key, parameter)
 
     def __delitem__(self, key):
-        del self._parameters[str(key)]
+        del self._parameters[key]
 
     def __len__(self):
         return len(self._parameters)
@@ -422,7 +437,7 @@ class ParameterDict(Module):
         return iter(self._parameters.keys())
 
     def __contains__(self, key):
-        return str(key) in self._parameters
+        return key in self._parameters
 
     def clear(self):
         """Remove all items from the ParameterDict.
@@ -454,21 +469,23 @@ class ParameterDict(Module):
         """
         return self._parameters.values()
 
-    def update(self, mapping):
-        r"""Update the ParameterDict with the key/value pairs from mapping,
-        overwriting existing keys.
+    def update(self, parameters):
+        r"""Update the ParameterDict with the key/value pairs from a mapping or
+        an iterable, overwriting existing keys.
 
         Arguments:
-            mapping (iterable): dictionary or iterable of key/value pairs
+            parameters (iterable): a mapping (dictionary) of
+                (string : :class:`~torch.nn.Parameter``) or an iterable of
+                key/value pairs of type (string, :class:`~torch.nn.Parameter``)
         """
-        if not isinstance(mapping, Iterable):
+        if not isinstance(parameters, Iterable):
             raise TypeError("ParametersDict.update should be called with an "
                             "iterable of key/value pairs, but got " +
-                            type(mapping).__name__)
+                            type(parameters).__name__)
 
-        if isinstance(mapping, dict):
-            for key, parameter in mapping.items():
-                self.register_parameter(str(key), parameter)
+        if isinstance(parameters, Mapping):
+            for key, parameter in parameters.items():
+                self[key] = parameter
         else:
-            for key, parameter in mapping:
-                self.register_parameter(str(key), parameter)
+            for key, parameter in parameters:
+                self[key] = parameter

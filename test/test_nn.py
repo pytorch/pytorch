@@ -1,4 +1,4 @@
-import math
+:import math
 import random
 import string
 import unittest
@@ -1109,8 +1109,8 @@ class TestNN(NNTestCase):
             self.assertEqual(len(module_dict), len(modules))
             for k1, m2 in zip(modules, module_dict.children()):
                 self.assertIs(modules[k1], m2)
-            for m1, k2 in zip(modules, module_dict):
-                self.assertIs(m1, module_dict[k2])
+            for k1, k2 in zip(modules, module_dict):
+                self.assertIs(modules[k1], module_dict[k2])
             for k in module_dict:
                 self.assertIs(module_dict[k], modules[k])
             for k in module_dict.keys():
@@ -1122,13 +1122,23 @@ class TestNN(NNTestCase):
             for k in modules.keys():
                 self.assertTrue(k in module_dict)
         check()
+
         modules['conv'] = nn.Conv2d(3, 4, 3)
         module_dict['conv'] = modules['conv']
         check()
+
         next_modules = [
             ('fc2', nn.Linear(5, 5)),
             ('act', nn.Sigmoid()),
         ]
+        modules.update(next_modules)
+        module_dict.update(next_modules)
+        check()
+
+        next_modules = OrderedDict([
+            ('fc3', nn.Linear(5, 5)),
+            ('act2', nn.Sigmoid()),
+        ])
         modules.update(next_modules)
         module_dict.update(next_modules)
         check()
@@ -1231,8 +1241,8 @@ class TestNN(NNTestCase):
             self.assertEqual(len(parameter_dict), len(parameters))
             for k1, m2 in zip(parameters, parameter_dict.parameters()):
                 self.assertIs(parameters[k1], m2)
-            for m1, k2 in zip(parameters, parameter_dict):
-                self.assertIs(m1, parameter_dict[k2])
+            for k1, k2 in zip(parameters, parameter_dict):
+                self.assertIs(parameters[k1], parameter_dict[k2])
             for k in parameter_dict:
                 self.assertIs(parameter_dict[k], parameters[k])
             for k in parameter_dict.keys():
@@ -1265,7 +1275,6 @@ class TestNN(NNTestCase):
         parameters.update(next_parameters)
         parameter_dict.update(next_parameters)
         check()
-
 
         del parameter_dict['p3']
         del parameters['p3']
