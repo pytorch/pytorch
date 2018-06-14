@@ -24,7 +24,7 @@ bool isDifferentiable(Node * n) {
   if (n->kind() == aten::addmm && n->inputs().size() > 3) {
     return false;
   }
-  if (n->kind() == aten::type_as && !n->inputs()[0]->isTensor()) {
+  if (n->kind() == aten::type_as && !n->inputs()[1]->isTensor()) {
     return false;
   }
   return differentiable_kinds.count(n->kind()) > 0;
