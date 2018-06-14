@@ -7,12 +7,6 @@ from .activation import LogSoftmax
 from .. import functional as F
 
 
-def _assert_no_grad(tensor):
-    assert not tensor.requires_grad, \
-        "nn criterions don't compute the gradient w.r.t. targets - please " \
-        "mark these tensors as not requiring gradients"
-
-
 class _Loss(Module):
     def __init__(self, size_average=True, reduce=True):
         super(_Loss, self).__init__()
@@ -81,7 +75,6 @@ class L1Loss(_Loss):
         super(L1Loss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
         return F.l1_loss(input, target, size_average=self.size_average,
                          reduce=self.reduce)
 
@@ -189,7 +182,6 @@ class NLLLoss(_WeightedLoss):
         self.ignore_index = ignore_index
 
     def forward(self, input, target):
-        _assert_no_grad(target)
         return F.nll_loss(input, target, self.weight, self.size_average,
                           self.ignore_index, self.reduce)
 
@@ -253,7 +245,6 @@ class PoissonNLLLoss(_Loss):
         self.eps = eps
 
     def forward(self, log_input, target):
-        _assert_no_grad(target)
         return F.poisson_nll_loss(log_input, target, self.log_input, self.full,
                                   self.size_average, self.eps, self.reduce)
 
@@ -336,7 +327,6 @@ class KLDivLoss(_Loss):
         super(KLDivLoss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
         return F.kl_div(input, target, size_average=self.size_average, reduce=self.reduce)
 
 
@@ -394,7 +384,6 @@ class MSELoss(_Loss):
         super(MSELoss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
         return F.mse_loss(input, target, size_average=self.size_average, reduce=self.reduce)
 
 
@@ -454,7 +443,6 @@ class BCELoss(_WeightedLoss):
         super(BCELoss, self).__init__(weight, size_average, reduce)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
         return F.binary_cross_entropy(input, target, weight=self.weight,
                                       size_average=self.size_average,
                                       reduce=self.reduce)
@@ -620,7 +608,6 @@ class MultiLabelMarginLoss(_Loss):
         super(MultiLabelMarginLoss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
         return F.multilabel_margin_loss(input, target, size_average=self.size_average,
                                         reduce=self.reduce)
 
@@ -672,7 +659,6 @@ class SmoothL1Loss(_Loss):
         super(SmoothL1Loss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
         return F.smooth_l1_loss(input, target, size_average=self.size_average,
                                 reduce=self.reduce)
 
@@ -706,7 +692,6 @@ class SoftMarginLoss(_Loss):
         super(SoftMarginLoss, self).__init__(size_average, reduce)
 
     def forward(self, input, target):
-        _assert_no_grad(target)
         return F.soft_margin_loss(input, target, size_average=self.size_average,
                                   reduce=self.reduce)
 
@@ -789,7 +774,6 @@ class CrossEntropyLoss(_WeightedLoss):
         self.ignore_index = ignore_index
 
     def forward(self, input, target):
-        _assert_no_grad(target)
         return F.cross_entropy(input, target, self.weight, self.size_average,
                                self.ignore_index, self.reduce)
 
