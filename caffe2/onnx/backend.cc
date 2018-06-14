@@ -854,6 +854,12 @@ Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     attributes.remove("consumed_inputs");
   }
 
+  if (opset_version > 6) {
+    auto& attributes = onnx_node->attributes;
+    auto* attr = attributes.AddRewrittenAttibute("is_test");
+    attr->set_i(1);
+  }
+
   return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
 }
 
