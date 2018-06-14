@@ -24,65 +24,81 @@ namespace at { namespace native {
 namespace {
 
 static const int WARP_SIZE = 32;
+static const int BLOCKDIMY = 32;
 
-__device__ __forceinline__ bool warp_has_collision(int val) {
-  // Compare our value to the values stored in the next 16 lanes,
-  // wrapping around at 32. If any pair of values is the same than
-  // there is a collision in the warp.
-  bool dup = 0;
-  const int laneId = threadIdx.x % 32;
-  #pragma unroll
-  for (int i = 1; i <= 16; i++) {
-    dup |= (WARP_SHFL(val, (laneId + i) % 32) == val);
-  }
-  return __any(dup) != 0;
-}
+template 
+  <typename scalar_t, 
+   typename accscalar_t>
+__global__ void embedding_backward_feature_kernel
+  (int64_t* indices, 
+   const scalar_t* __restrict__ grad, 
+   scalar_t* __restrict__ grad_weight,
+   int n, // OK to pass as int, we don't expect 2 billion+ samples in one shot
+   int64_t stride,
+   int padding_idx)
+{
+  extern __shared__ char buf[];
+  accscalar_t* smem = (accscalar_t*)buf;
+  accscalar_t* my_s = smem + WARP_SIZE*threadIdx.y;
+  int* indices_batch = (int*)(buf + sizeof(accscalar_t)*WARP_SIZE*blockDim.y);
 
-// parallelizes over features
-template <typename scalar_t>
-__global__ void embedding_backward_feature_kernel(
-  int64_t* indices, scalar_t* grad, scalar_t* grad_weight,
-  int64_t num_indices, int64_t stride, int padding_idx) {
+  const int s = (int)stride; // OK to make int, we don't expect 2 billion+ embedding row size
 
-  const int feature_dim = blockIdx.x * 4 + threadIdx.x / 32;
-  if (feature_dim >= stride) {
-    return;
-  }
+  const int f = threadIdx.x + blockIdx.x*blockDim.x; // feature_dim
 
-  // The strategy here is that each warp handles a single feature
-  // dimension.
-  // Within that feature dimension, points in the [batch][element]
-  // dimension can overlap, and we need to determine if threads want
-  // to add to the gradient in a colliding manner.
-  // Typically one would use floating-point atomicAdd() to resolve
-  // these collisions, but that is non-deterministic if there are
-  // collisions. Non-determinism for this code is really bad,
-  // especially in RNNs, and is prone to snowballing error.
-  // In order to get a deterministic order of execution, we handle
-  // non-colliding updates separately from colliding ones. Colliding
-  // updates are serialized in their order of execution by using the
-  // warp-wide collision detector `warp_has_collision`.
-  const int laneId = threadIdx.x % 32;
-  for (int64_t i = laneId; i < num_indices; i += WARP_SIZE) {
-    const int weight_index = (int)indices[i];
-    if (weight_index == padding_idx) {
-      continue;
-    }
+  for(int batch_start = 0; batch_start < n; batch_start += blockDim.x*blockDim.y)
+  {
+    // Entire block cooperates to load a batch of 1024 indices to process
+    int tid = threadIdx.x + threadIdx.y*blockDim.x;
+    if(batch_start + tid < n)
+      indices_batch[tid] = (int)indices[batch_start + tid];
+    
+    // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
+    for(int chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
+    {
+      // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group 
+      // leaders are done with their accumulates before other warps start loading again.
+      __syncthreads();  
+  
+      int n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y; 
 
-    auto value = grad[i * stride + feature_dim];
+      int src_row = chunk_start + threadIdx.y; 
+      int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
+      
+      // All warps load their smem segments with incoming grad data
+      if(src_row < n && f < s && dst_row != padding_idx)
+        my_s[threadIdx.x] = scalar_cast<accscalar_t>(grad[src_row*stride + f]);
+      
+      __syncthreads();
+    
+      // To ensure determinism, we can't just have each warp add its grad data to its dst_row.
+      // We need to check if any other warps pulled grad data targeting dst_row.
+      // If so, we elect the first warp in each matching group as the leader. 
+      // Each leader warp serializes the accumulates targeting dst_row in shared memory,
+      // then finishes by adding the accumulated buffer to dst_row in grad_weight.
+      if(dst_row != padding_idx && src_row < n) // Per-warp exit condition, safe with ballot_sync
+      {
+        int match_found_this_thread = 
+          (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
+        if(threadIdx.x >= n_this_chunk)
+          match_found_this_thread = 0;
+        unsigned int matchmask = WARP_BALLOT(match_found_this_thread);
 
-    // FIXME: should we accumulate as accreal?
-    // Check for collision
-    if (warp_has_collision(weight_index)) {
-      // Run all lanes sequentially; warp divergence
-      for (int i = 0; i < WARP_SIZE; ++i) {
-        if (laneId == i) {
-          grad_weight[weight_index * stride + feature_dim] += value;
+        int first_remaining_peer = __ffs(matchmask) - 1;
+
+        if(threadIdx.y == first_remaining_peer) // Nominate lowest-indexed warp as the leader
+        {
+          matchmask ^= (1 << first_remaining_peer);   
+          while(matchmask)
+          {
+            first_remaining_peer = __ffs(matchmask) - 1;
+            my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
+            matchmask ^= (1 << first_remaining_peer);
+          }
+          if(f < s)
+            grad_weight[dst_row*stride + f] += scalar_cast<scalar_t>(my_s[threadIdx.x]);
         }
       }
-    } else {
-      // No collision; warp coherence
-      grad_weight[weight_index * stride + feature_dim] += value;
     }
   }
 }
@@ -210,22 +226,31 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
   cudaStream_t stream = globalContext().getCurrentCUDAStream();
 
   if (num_indices <= 768 && !scale_grad_by_freq) {
-   dim3 grid(THCCeilDiv(stride, (int64_t) 4));
-   dim3 block(128);
+    dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
+    dim3 block(WARP_SIZE, BLOCKDIMY);
 
-   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
-     using cuda_scalar_t = cuda::into_type<scalar_t>;
-     embedding_backward_feature_kernel<<<grid, block, 0, stream>>>(
-       indices.data<int64_t>(),
-       grad.data<cuda_scalar_t>(),
-       grad_weight.data<cuda_scalar_t>(),
-       num_indices,
-       stride,
-       padding_idx);
-   });
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF
+      (grad.type(), 
+       "embedding_backward", 
+       [&] 
+       {
+         using cuda_scalar_t = cuda::into_type<scalar_t>;
+         using accscalar_t = acc_type<cuda_scalar_t, true>;
+         embedding_backward_feature_kernel<cuda_scalar_t, accscalar_t>
+           <<<grid, 
+              block, 
+              sizeof(accscalar_t)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
+              stream>>>
+           (indices.data<int64_t>(),
+            grad.data<cuda_scalar_t>(),
+            grad_weight.data<cuda_scalar_t>(),
+            num_indices,
+            stride,
+            padding_idx);
+       });
 
-   THCudaCheck(cudaGetLastError());
-   return grad_weight;
+    THCudaCheck(cudaGetLastError());
+    return grad_weight;
   }
 
   auto sorted_indices = indices.type().tensor(indices.sizes());
@@ -352,3 +377,4 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 }
 
 }}  // namespace at::native
+
