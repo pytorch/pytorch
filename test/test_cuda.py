@@ -5,6 +5,7 @@ import re
 import unittest
 import sys
 from itertools import repeat
+import os
 
 import torch
 import torch.cuda
@@ -1404,13 +1405,17 @@ class TestCuda(TestCase):
         torch.cuda.manual_seed(11042)
         sample = torch.multinomial(freqs, 1000, True)
         self.assertNotEqual(freqs[sample].min(), 0)
+    
+    @staticmethod
+    def mute():
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
 
     def _spawn_method(self, method, arg):
         try:
             mp.set_start_method('spawn')
         except RuntimeError:
             pass
-        with mp.Pool(1) as pool:
+        with mp.Pool(1, initializer = self.mute) as pool:
             self.assertTrue(pool.map(method, [arg]))
 
     @staticmethod
