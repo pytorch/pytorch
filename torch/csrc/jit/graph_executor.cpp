@@ -340,7 +340,6 @@ private:
 
     // these optimizations must run in the presence of variables
     // and when shape information is not statically known.
-
     EliminateDeadCode(graph);
     CheckInplace(graph);
     EliminateCommonSubexpression(graph);

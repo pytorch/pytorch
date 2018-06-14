@@ -16,7 +16,7 @@ bool isDifferentiable(Node * n) {
   static std::unordered_set<Symbol> differentiable_kinds = {
     aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
-    aten::unsqueeze, aten::expand, aten::addmm
+    aten::unsqueeze, aten::expand, aten::addmm, aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le, aten::type_as
   };
   // TODO: check this more generally via schema
   // This check ensures that the `alpha` and `beta` attributes on this addmm
@@ -24,13 +24,36 @@ bool isDifferentiable(Node * n) {
   if (n->kind() == aten::addmm && n->inputs().size() > 3) {
     return false;
   }
+  if (n->kind() == aten::type_as && !n->inputs().at(1)->isTensor()) {
+    return false;
+  }
   return differentiable_kinds.count(n->kind()) > 0;
 }
+
 
 bool isDifferentiable(Graph & g) {
   return std::all_of(g.nodes().begin(), g.nodes().end(),
                      static_cast<bool(*)(Node*)>(isDifferentiable));
 }
+
+
+bool outputRequiresGrad(Node* node, std::function<bool(Value*)> requires_grad) {
+  switch (node->kind()) {
+    case aten::le:
+    case aten::ge:
+    case aten::lt:
+    case aten::gt:
+    case aten::ne:
+    case aten::eq:
+      return false;
+    case aten::type_as:
+    //type_as has two inputs, the second of which (setting type) might require grad, but it still won't affect the output of type_as requiring grad.
+      return requires_grad(node->inputs().at(0));
+    default:
+      return std::any_of(node->inputs().begin(), node->inputs().end(), requires_grad);
+  }
+}
+
 
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
@@ -73,6 +96,8 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         return {-grads.at(0)};
       case aten::view:
         return {grads.at(0).view(inputs.at(0).sizes())};
+      case aten::type_as:
+        return {grads.at(0).type_as(inputs.at(0))};
       case aten::unsqueeze:
         return {grads.at(0).squeeze(node->i(attr::dim))};
       case aten::mm: {
@@ -176,7 +201,6 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
 static value_set findAllRequiresGradNodes(
         Graph& graph, const std::vector<bool>& input_requires_grad) {
   JIT_ASSERT(graph.inputs().size() == input_requires_grad.size());
-
   std::unordered_set<Value*> requires_grad_set;
   const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
 
@@ -187,7 +211,7 @@ static value_set findAllRequiresGradNodes(
   }
 
   for (Node * node : graph.nodes()) {
-    if (std::none_of(node->inputs().begin(), node->inputs().end(), requires_grad)) continue;
+    if (!outputRequiresGrad(node, requires_grad)) continue;
     for (Value * output : node->outputs())
       requires_grad_set.emplace(output);
   }
@@ -249,7 +273,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   auto reverse_node = graph.create(prim::Reverse, 0);
   auto reverse_block = reverse_node->addBlock();
   WithInsertPoint guard(reverse_block);
-
   auto requires_grad_set = findAllRequiresGradNodes(graph, input_requires_grad);
   const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
 
@@ -283,8 +306,8 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   for (auto it = graph.nodes().rbegin(), end = graph.nodes().rend(); it != end; ++it) {
     Node *node = *it;
     auto inputs = node->inputs();
-    if (std::none_of(inputs.begin(), inputs.end(), requires_grad))
-      continue;
+    if (!outputRequiresGrad(node, requires_grad)) continue;
+
     value_list grad_inputs = gradientForNode(node, fmap(node->outputs(), get_grad));
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
@@ -300,7 +323,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
   }
-
   return ReverseDetails(std::move(grad_map), std::move(requires_grad_set), reverse_block);
 }
 

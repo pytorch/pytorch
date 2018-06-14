@@ -148,7 +148,6 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     }
     default: ; // fall-through
   }
-
   std::vector<TensorType*> types;
   bool present;
   std::tie(types, present) = gatherTypes(node->inputs());
@@ -373,10 +372,10 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     bool shape_inferenceable = !std::any_of(types.begin(), types.end(), [](TensorType* t){
       return at::isIntegralType(t->scalarType());
     });
-    if (!shape_inferenceable) {
-      setDynamicType(node);
-    } else {
+    if (node->kind() == aten::type_as || shape_inferenceable ) {
       PropagateShapeOnNodeByRunningIt(node, types);
+    } else {
+      setDynamicType(node);
     }
   }
 }
