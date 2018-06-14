@@ -217,7 +217,7 @@ namespace ska
         template<typename T>
         struct EntryDefaultTable
         {
-            static constexpr const sherwood_v3_entry_constexpr<T> table[min_lookups] =
+            static constexpr const sherwood_v3_entry_constexpr<T> table[min_lookups]
                     {
                             sherwood_v3_entry_constexpr<T>(),
                             sherwood_v3_entry_constexpr<T>(),
