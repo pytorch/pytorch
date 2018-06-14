@@ -34,7 +34,6 @@ Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Genera
 }
 
 Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
-  printf("lambd = %g\n", lambd.toTensor().toType(CPU(kDouble)).data<double>()[0]);
   auto lambd_tensor = lambd.toTensor().toType(self.type().scalarType()).toBackend(self.is_cuda() ? Backend::CUDA : Backend::CPU);
   auto out_tensor = at::empty_like(self);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_cpu", [&] {
