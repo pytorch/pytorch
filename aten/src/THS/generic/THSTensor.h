@@ -32,12 +32,12 @@ TH_API THSTensor *THSTensor_(newClone)(THSTensor *self);
 TH_API THSTensor *THSTensor_(newTranspose)(THSTensor *self, int dimension1_, int dimension2_);
 
 /**** reshaping methods ***/
-TH_API THSTensor *THSTensor_(resize)(THSTensor *self, THLongStorage *size);
 TH_API THSTensor *THSTensor_(resizeAs)(THSTensor *self, THSTensor *src);
 TH_API THSTensor *THSTensor_(resize1d)(THSTensor *self, int64_t size0);
 TH_API THSTensor *THSTensor_(resize2d)(THSTensor *self, int64_t size0, int64_t size1);
 TH_API THSTensor *THSTensor_(resize3d)(THSTensor *self, int64_t size0, int64_t size1, int64_t size2);
 TH_API THSTensor *THSTensor_(resize4d)(THSTensor *self, int64_t size0, int64_t size1, int64_t size2, int64_t size3);
+TH_API THSTensor *THSTensor_(resizeLegacy)(THSTensor *self, THLongStorage *size);
 
 TH_API THTensor *THSTensor_(toDense)(THSTensor *self);
 TH_API void THSTensor_(copy)(THSTensor *self, THSTensor *src);

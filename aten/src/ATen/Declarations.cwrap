@@ -19,7 +19,7 @@
 [[
   name: resize_
   return: self
-  cname: resize
+  cname: resizeLegacy
   cpu_half: True
   arguments:
     - THTensor* self

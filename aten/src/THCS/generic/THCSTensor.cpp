@@ -66,7 +66,8 @@ THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self) {
 /*** Helper methods ***/
 static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
 {
-  self->size = NULL;
+  self->size = static_cast<int64_t *>(THAlloc(sizeof(int64_t)));
+  self->size[0] = 0;
   self->indices = THCIndexTensor_(new)(state);
   self->values = THCTensor_(new)(state);
   self->nDimensionI = 0;
@@ -79,9 +80,10 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
 
 THCSTensor* THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, int64_t *size) {
   // Only resize valid sizes into tensor.
-  self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*(nDimI + nDimV));
+  int64_t dims = nDimI + nDimV == 0 ? 1 : nDimI + nDimV; // FIXME: nDimI + nDimV should not be 0.
+  self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*(dims));
 
-  for (int64_t d = 0; d < nDimI + nDimV; d++) {
+  for (int64_t d = 0; d < dims; d++) {
     self->size[d] = size[d];
   }
   self->nDimensionI = nDimI;
@@ -323,7 +325,7 @@ int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, cons
   return 1;
 }
 
-THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, THLongStorage *size)
+THCSTensor *THCSTensor_(resizeLegacy)(THCState *state, THCSTensor *self, THLongStorage *size)
 {
   THCSTensor_(rawResize)(state, self, size->size, 0, THLongStorage_data(size));
   return self;
