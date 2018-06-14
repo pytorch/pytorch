@@ -1,14 +1,5 @@
 list(APPEND Caffe2_CPU_SRCS
-  utils/proto_wrap.cc)
-
-# ---[ only support the above when full caffe2 isn't built
-if (NOT BUILD_CAFFE2)
-  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
-  set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} PARENT_SCOPE)
-  return()
-endif()
-
-list(APPEND Caffe2_CPU_SRCS
+  utils/proto_wrap.cc
   utils/proto_utils.cc
   utils/murmur_hash3.cc
   utils/smart_tensor_printer.cc
