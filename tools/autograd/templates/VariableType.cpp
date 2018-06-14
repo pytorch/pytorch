@@ -15,10 +15,16 @@
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/variadic.h"
 
-#include <initializer_list>
-#include <iostream>
-#include <functional>
+#include <array>
 #include <cstddef>
+#include <functional>
+#include <initializer_list>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #ifdef _MSC_VER
 #ifdef Type

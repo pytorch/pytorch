@@ -948,7 +948,6 @@ public:
   }
   Node * createConstant(const at::Tensor& ref) {
     JIT_ASSERT(ref.defined());
-    at::AutoGPU guard(ref.type().is_cuda() ? ref.get_device() : -1);
     auto n = create(prim::Constant);
     n->t_(attr::value, ref.clone());
     n->output()->inferTypeFrom(ref);

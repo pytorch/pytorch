@@ -23,7 +23,7 @@
 #include "ATen/THLongStorageView.h"
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Utils.h"
-#include "ATen/AutoGPU.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/optional.h"
 
 #include <cstddef>

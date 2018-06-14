@@ -17,5 +17,6 @@
 #include "ATen/TensorMethods.h"
 #include "ATen/Dispatch.h"
 #include "ATen/DimVector.h"
-#include "ATen/AutoGPU.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/TensorOptions.h"
+#include "ATen/Layout.h"

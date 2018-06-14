@@ -424,7 +424,7 @@ void compressContiguous(
 } // anonymous namespace
 
 void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
-  at::AutoGPU gpu_guard(inputs);
+  at::DeviceGuard device_guard(inputs);
   JIT_ASSERT(inputs.size() == input_desc.size());
   JIT_ASSERT(outputs.size() == output_desc.size());
   size_t flat_outputs_size = 0;
@@ -484,7 +484,7 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
 }
 
 void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector<at::Tensor> & outputs) {
-  at::AutoGPU guard(inputs.back());
+  at::DeviceGuard guard(inputs.back());
   outputs.clear();
   outputs.reserve(outputDescriptors().size());
   for(auto & od : outputDescriptors()) {
@@ -509,7 +509,7 @@ void checkCUDAVersion(const cudaDeviceProp & prop) {
 struct CUDAFusionFunction : public CompiledFusionFunction {
   CUDAFusionFunction(const std::string & name, AnnotatedGraph & agraph)
   : CompiledFusionFunction(name, agraph) {
-    at::AutoGPU gpu_guard(agraph.device);
+    at::DeviceGuard device_guard(at::kCUDA, agraph.device);
 
     TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, agraph.device));
     checkCUDAVersion(prop);

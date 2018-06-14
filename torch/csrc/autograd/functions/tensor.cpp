@@ -1,15 +1,14 @@
 #include "torch/csrc/autograd/functions/tensor.h"
 
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/variable.h"
 
-#include <ATen/AutoGPU.h>
+#include <ATen/ATen.h>
 
-#include <cstdint>
+#include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -24,7 +23,7 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
     grad_inputs[0] = at::zeros_like(grad);
   }
   if (should_compute_output(1)) {
-    at::AutoGPU autoGPU(src_device);
+    at::DeviceGuard device_guard(at::kCUDA, src_device);
     if (grad.is_cuda() && grad.get_device() != src_device.value_or(-1)) {
       grad_inputs[1] = src_type->copy(grad);
     } else {

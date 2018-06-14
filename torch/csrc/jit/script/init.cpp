@@ -335,11 +335,11 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
   if (outputs.size() == 0) {
     return py::none();
   } else if (outputs.size() == 1) {
-    return py::cast(static_cast<autograd::Variable&>(outputs[0]));
+    return py::cast(autograd::as_variable_ref(outputs[0]));
   } else {
     py::tuple tuple(outputs.size());
     for(size_t i = 0; i < outputs.size(); i++) {
-      tuple[i] = py::cast(static_cast<autograd::Variable&>(outputs[i]));
+      tuple[i] = py::cast(autograd::as_variable_ref(outputs[i]));
     }
     return tuple;
   }
@@ -407,7 +407,7 @@ void initJitScriptBindings(PyObject* module) {
           py::tuple r(3);
           result[i] = std::make_tuple(
             p.key,
-            static_cast<const autograd::Variable&>(*p->slot()),
+            autograd::as_variable_ref(*p->slot()),
             p->is_buffer);
 
         }
@@ -448,7 +448,7 @@ void initJitScriptBindings(PyObject* module) {
           std::vector<at::Tensor*> parameters;
           gatherParametersAndBuffers(parameters, self);
           for(at::Tensor* param : parameters) {
-            inputs.push_back(static_cast<autograd::Variable&>(*param));
+            inputs.push_back(autograd::as_variable_ref(*param));
           }
           auto graph = tracer::createGraphByTracing(func, std::move(inputs), num_inputs);
           self.create_method(name, std::move(graph), std::move(parameters));

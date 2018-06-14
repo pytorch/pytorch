@@ -6,7 +6,7 @@
 #include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/variable.h"
 
-#include <ATen/AutoGPU.h>
+#include <ATen/DeviceGuard.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -205,7 +205,7 @@ Engine::~Engine() = default;
 
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-  at::AutoGPU guard(device);
+  at::DeviceGuard guard(at::kCUDA, device);
   worker_device = device;
   thread_main(nullptr);
 }
@@ -383,7 +383,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      AutoGPU guard(output);
+      at::DeviceGuard guard(output);
       if (output.defined() && output.ne(output).any().toCByte()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";

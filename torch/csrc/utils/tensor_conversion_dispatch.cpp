@@ -5,7 +5,7 @@
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
 
-#include <ATen/AutoGPU.h>
+#include <ATen/DeviceGuard.h>
 
 #include <cstddef>
 
@@ -29,7 +29,7 @@ at::Tensor dispatch_type_conversion(
     device_index.reset();
   }
 
-  at::AutoGPU auto_gpu(device_index);
+  at::DeviceGuard device_guard(at::kCUDA, device_index);
 
   const int32_t tensor_device = self.is_cuda() ? self.get_device() : -1;
   if (self.is_cuda() && type.is_cuda() && tensor_device != at::current_device()) {

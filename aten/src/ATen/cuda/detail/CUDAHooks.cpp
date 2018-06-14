@@ -2,6 +2,7 @@
 
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
+#include <ATen/Error.h>
 #include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
@@ -15,6 +16,7 @@
 
 #include <cuda.h>
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 
@@ -22,28 +24,35 @@ namespace at {
 namespace cuda {
 namespace detail {
 namespace {
-void check_status(int status) {
+
+void check_status(int32_t status) {
   AT_CHECK(
       static_cast<cudaError_t>(status) == cudaSuccess,
       "CUDA error (",
-      static_cast<int>(status),
+      static_cast<int32_t>(status),
       "): ",
       cudaGetErrorString(static_cast<cudaError_t>(status)));
 }
 
+void set_device(int32_t device) {
+  check_status(cudaSetDevice(device));
+}
+
+void get_device(int32_t* device) {
+  check_status(cudaGetDevice(device));
+}
+
+void unchecked_set_device(int32_t device) {
+  const auto return_code = cudaSetDevice(device);
+  (void)return_code;
+}
+
 struct DynamicCUDAInterfaceSetter {
   DynamicCUDAInterfaceSetter() {
-    // Technically it is U.B. to call a function through a pointer, when the
-    // pointer is of different type than its declaration. Here, we commit this
-    // sin because `cudaSetDevice` and `cudaGetDevice` return a `cudaError_t`
-    // enum, which we must avoid exposing to the CPU library, and because enums
-    // are compatible with `int` for all practical purposes.
-    at::detail::DynamicCUDAInterface::set_device =
-        reinterpret_cast<int (*)(int)>(cudaSetDevice);
-    at::detail::DynamicCUDAInterface::get_device =
-        reinterpret_cast<int (*)(int*)>(cudaGetDevice);
-    at::detail::DynamicCUDAInterface::check_status =
-        reinterpret_cast<void (*)(int)>(check_status);
+    at::detail::DynamicCUDAInterface::set_device = set_device;
+    at::detail::DynamicCUDAInterface::get_device = get_device;
+    at::detail::DynamicCUDAInterface::unchecked_set_device =
+        unchecked_set_device;
   }
 };
 

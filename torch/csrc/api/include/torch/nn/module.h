@@ -110,8 +110,11 @@ class Module {
   }
 
  protected:
-  autograd::Variable& register_parameter(std::string name, at::Tensor tensor);
-  autograd::Variable& register_buffer(std::string name, at::Tensor tensor);
+  Variable& register_parameter(
+      std::string name,
+      Variable tensor,
+      bool requires_grad = true);
+  Variable& register_buffer(std::string name, Variable tensor);
 
   template <typename ModuleType>
   std::shared_ptr<ModuleType> register_module(

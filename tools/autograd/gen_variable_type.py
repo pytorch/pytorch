@@ -203,8 +203,7 @@ def gen_variable_type(out, aten_declarations, template_path):
 
     for declaration in aten_declarations:
         # Factory methods shall not appear in `VariableType` at all, since they
-        # ultimately dispatch to `VariableType::tensor`, and because `Type`
-        # itself does not have the factory methods.
+        # don't dispatch via `Type`.
         if any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments']):
             continue
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))

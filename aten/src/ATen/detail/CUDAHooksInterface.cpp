@@ -1,18 +1,37 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
+#include <ATen/Error.h>
+
+#include <cstddef>
+#include <memory>
 #include <mutex>
 
 namespace at {
 namespace detail {
 
+void default_set_device(int32_t) {
+  AT_ERROR(
+      "DynamicCUDAInterface::set_device called "
+      "before CUDA library was loaded");
+}
+
+void default_get_device(int32_t*) {
+  AT_ERROR(
+      "DynamicCUDAInterface::get_device called "
+      "before CUDA library was loaded");
+}
+
+void default_unchecked_set_device(int32_t) {
+  AT_ERROR(
+      "DynamicCUDAInterface::unchecked_set_device called "
+      "before CUDA library was loaded");
+}
+
 // Default the static members of DynamicCUDAInterface.
-std::function<int(int)> DynamicCUDAInterface::set_device = [](int) {
-  return 0;
-};
-std::function<int(int*)> DynamicCUDAInterface::get_device = [](int*) {
-  return 0;
-};
-std::function<void(int)> DynamicCUDAInterface::check_status = [](int) {};
+void (*DynamicCUDAInterface::set_device)(int32_t) = default_set_device;
+void (*DynamicCUDAInterface::get_device)(int32_t*) = default_get_device;
+void (*DynamicCUDAInterface::unchecked_set_device)(int32_t) =
+    default_unchecked_set_device;
 
 const CUDAHooksInterface& getCUDAHooks() {
   static std::unique_ptr<CUDAHooksInterface> cuda_hooks;
@@ -24,15 +43,16 @@ const CUDAHooksInterface& getCUDAHooks() {
   // needing a lock, be careful; it doesn't look like Registry.h is thread
   // safe...)
   static std::once_flag once;
-  std::call_once(once, []{
+  std::call_once(once, [] {
     cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{});
     if (!cuda_hooks) {
-      cuda_hooks = std::unique_ptr<CUDAHooksInterface>(new CUDAHooksInterface());
+      cuda_hooks =
+          std::unique_ptr<CUDAHooksInterface>(new CUDAHooksInterface());
     }
   });
   return *cuda_hooks;
 }
-}
+} // namespace detail
 
 AT_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
 

@@ -117,6 +117,7 @@ def run(paths):
             declaration['return'] = list(func.get('return', return_type))
             declaration['variants'] = func.get('variants', ['method', 'function'])
             declaration['deprecated'] = func.get('deprecated', False)
+            declaration['device_guard'] = func.get('device_guard', True)
             declaration['arguments'] = func.get('arguments', parse_arguments(arguments, func,
                                                 declaration['name'], declaration['return']))
             declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])

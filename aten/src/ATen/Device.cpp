@@ -1,6 +1,5 @@
 #include <ATen/Device.h>
 
-#include <ATen/ATen.h>
 #include <ATen/Error.h>
 #include <ATen/optional.h>
 
@@ -11,13 +10,6 @@
 
 namespace at {
 namespace {
-optional<int32_t> device_index_if_cuda_tensor(Tensor tensor) {
-  if (tensor.is_cuda()) {
-    return tensor.get_device();
-  }
-  return nullopt;
-}
-
 std::pair<optional<Device::Type>, size_t> parse_type(
     const std::string& device_string) {
   auto position = device_string.find("cpu");
@@ -31,32 +23,30 @@ std::pair<optional<Device::Type>, size_t> parse_type(
   return {nullopt, 0};
 }
 
-/// Converts a `Backend` to a `Device::Type` if possible.
-/// We want to overtake the `kCPU` and `kCUDA` constants, but don't want the
-/// `Sparse` versions, since the layout is separate from the backend in the
-/// new tensor creation model.
-Device::Type backend_to_type(at::Backend backend) {
-  switch (backend) {
-    case kCPU:
-      return Device::Type::CPU;
-    case kCUDA:
-      return Device::Type::CUDA;
-    default:
-      AT_ERROR(
-          "Can only convert CPU or CUDA backend to Device::Type (got ",
-          toString(backend),
-          ")");
+optional<int32_t> device_index_if_cuda_tensor(Tensor tensor) {
+  if (tensor.is_cuda()) {
+    return tensor.get_device();
   }
+  return nullopt;
 }
 } // namespace
+
+Device::Device(Tensor tensor)
+    : Device(tensor.type().backend(), device_index_if_cuda_tensor(tensor)) {}
+
+Device::Device(Type type, at::optional<int32_t> index)
+    : type_(type), index_(index) {
+  AT_CHECK(index.value_or(0) >= 0, "Device index must not be negative");
+  AT_CHECK(
+      !is_cpu() || index.value_or(0) == 0, "CPU device index must be zero");
+}
+
+Device::Device(Type type) : Device(type, nullopt) {}
 
 Device::Device(Backend backend, at::optional<int32_t> index)
     : Device(backend_to_type(backend), index) {}
 
-Device::Device(Tensor tensor)
-    : Device(
-          toDense(tensor.type().backend()),
-          device_index_if_cuda_tensor(tensor)) {}
+Device::Device(Backend backend) : Device(backend, nullopt) {}
 
 // `std::regex` is still in a very incomplete state in GCC 4.8.x,
 // so we have to do our own parsing, like peasants.
@@ -121,6 +111,11 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   // e.g. '1', '123'
   type_ = optional_type.value_or(Type::CUDA);
 }
+
+void Device::set_index(at::optional<int32_t> index) {
+  index_ = index;
+}
+
 } // namespace at
 
 std::ostream& operator<<(std::ostream& stream, at::Device::Type type) {

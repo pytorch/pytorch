@@ -1,11 +1,11 @@
 #include "torch/csrc/jit/aten_dispatch.h"
 
-#include "torch/csrc/TensorOptions.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <ATen/ATen.h>
 
@@ -31,7 +31,8 @@ using at::Scalar;
 using at::Tensor;
 using at::IntList;
 using at::TensorList;
-using at::AutoGPU;
+using at::TensorOptions;
+using at::DeviceGuard;
 
 namespace {
 
@@ -45,6 +46,10 @@ void pack(Stack & stack, T&& v) {
 }
 template<>
 void pack(Stack & stack, Tensor&& v) {
+  stack.push_back(std::move(v));
+}
+template<>
+void pack(Stack & stack, autograd::Variable&& v) {
   stack.push_back(std::move(v));
 }
 template<>

@@ -1,6 +1,10 @@
 #pragma once
 
 #include <ATen/Error.h>
+#include <ATen/ScalarType.h>
+#include <ATen/Tensor.h>
+#include <ATen/TensorMethods.h>
+#include <ATen/Type.h>
 #include <ATen/optional.h>
 
 #include <cstddef>
@@ -13,7 +17,6 @@ struct Tensor;
 } // namespace at
 
 namespace at {
-
 /// Represents a a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
 /// (e.g. CPU or CUDA GPU), and a device index or ordinal, which identifies the
@@ -27,13 +30,24 @@ struct Device {
   /// The possible values of the device *type*.
   enum class Type { CPU, CUDA };
 
-  /// Constructs a new `Device` from a `Type` and an optional device index.
-  /* implicit */ Device(Type type, at::optional<int32_t> index = at::nullopt)
-      : type_(type), index_(index) {
-    AT_CHECK(index.value_or(0) >= 0, "Device index must not be negative");
-    AT_CHECK(
-        !is_cpu() || index.value_or(0) == 0, "CPU device index must be zero");
+  /// Converts a `Backend` to a `Device::Type` if possible.
+  static Type backend_to_type(Backend backend) {
+    switch (backend) {
+      case kCPU:
+      case kSparseCPU:
+        return Type::CPU;
+      case kCUDA:
+      case kSparseCUDA:
+        return Type::CUDA;
+      default:
+        AT_ERROR(
+            "Invalid backend ", toString(backend), " for Device construction");
+    }
   }
+
+  /// Constructs a new `Device` from a `Type` and an optional device index.
+  /* implicit */ Device(Type type, at::optional<int32_t> index);
+  /* implicit */ Device(Type type);
 
   /// Constructs a `Device` from a string description, for convenience.
   /// The string supplied must follow the following schema:
@@ -47,9 +61,8 @@ struct Device {
 
   /// Constructs a new `Device` from a `Backend` (which is converted to a
   /// `Type`, if possible) and an optional device index.
-  /* implicit */ Device(
-      Backend backend,
-      at::optional<int32_t> index = at::nullopt);
+  /* implicit */ Device(Backend backend, at::optional<int32_t> index);
+  /* implicit */ Device(Backend backend);
 
   /// Constructs a new `Device` from a `Tensor`'s type and, if it is a CUDA
   /// tensor, its device index.
@@ -68,9 +81,7 @@ struct Device {
   }
 
   /// Sets the device index.
-  void set_index(at::optional<int32_t> index) {
-    index_ = index;
-  }
+  void set_index(at::optional<int32_t> index);
 
   /// Returns the type of device this is.
   Type type() const noexcept {

@@ -11,6 +11,7 @@
 #include "ATen/ScalarType.h"
 #include "ATen/SparseTensorRef.h"
 #include "ATen/Tensor.h"
+#include "ATen/Deprecated.h"
 
 #include <array>
 #include <cstddef>

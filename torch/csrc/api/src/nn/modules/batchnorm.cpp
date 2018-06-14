@@ -1,6 +1,8 @@
 #include <torch/nn/modules/batchnorm.h>
 
 #include <torch/cuda.h>
+#include <torch/functions.h>
+#include <torch/tensor.h>
 
 #include <cstdint>
 
@@ -11,15 +13,15 @@ BatchNorm::BatchNorm(int64_t features) : features_(features) {}
 
 void BatchNorm::reset() {
   if (affine_) {
-    weight_ = register_parameter(
-        "weight", at::empty({features_}).uniform_());
-    bias_ = register_parameter("bias", at::zeros({features_}));
+    weight_ =
+        register_parameter("weight", torch::empty({features_}).uniform_());
+    bias_ = register_parameter("bias", torch::zeros({features_}));
   }
 
   if (stateful_) {
-    running_mean_ = register_buffer("running_mean", at::zeros({features_}));
+    running_mean_ = register_buffer("running_mean", torch::zeros({features_}));
     running_variance_ =
-        register_buffer("running_variance", at::ones({features_}));
+        register_buffer("running_variance", torch::ones({features_}));
   }
 }
 

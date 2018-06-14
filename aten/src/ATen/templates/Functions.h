@@ -9,7 +9,7 @@
 #include "ATen/Generator.h"
 #include "ATen/Deprecated.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/AutoGPU.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/TensorOptions.h"
 
 namespace at {

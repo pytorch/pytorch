@@ -7,7 +7,7 @@
 #include "torch/csrc/Exceptions.h"
 
 #include <ATen/ScalarType.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/Layout.h>
 
 namespace torch { namespace utils {
 

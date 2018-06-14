@@ -82,7 +82,7 @@ PY_VARIABLE_CALL_DISPATCH = CodeTemplate("""\
 ${dispatch_name}(${actuals})""")
 
 PY_VARIABLE_SET_REQUIRES_GRAD = CodeTemplate("""\
-set_requires_grad(${call_dispatch}, ${requires_grad})""")
+${call_dispatch}.set_requires_grad(${requires_grad})""")
 
 PY_VARIABLE_WRAP = CodeTemplate("""\
 return wrap(${call_dispatch});""")
@@ -116,17 +116,11 @@ SUPPORTED_RETURN_TYPES = {
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\
-const auto options = torch::TensorOptions()
+const auto options = TensorOptions()
     .dtype(${dtype})
     .device(${device})
     .layout(${layout}.layout)
     .requires_grad(${requires_grad});
-""")
-
-DEFAULT_DEVICE_INDEX_TO_SELF = CodeTemplate("""\
-if (!${device}.has_index() && self.is_cuda()) {
-  ${device}.set_index(self.get_device());
-}
 """)
 
 
@@ -307,9 +301,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
             if unpack_args:
                 body.append('auto {} = {};'.format(name, expr))
-                # For functions like `ones_like`, to default the device to that of the input tensor.
-                if 'Device' in typename and arg.get('python_default_init'):
-                    body.append(DEFAULT_DEVICE_INDEX_TO_SELF.substitute({'device': name}))
                 expr = name
 
             if typename == 'Storage &':
@@ -331,7 +322,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             actuals.append(actual)
             formal_args.append(formal)
 
-        unpack = any(arg.get('python_default_init') for arg in inputs)
+        # We always want to unpack when we have TensorOptions.
+        unpack = any(arg.get('python_default_init') for arg in inputs) or has_tensor_options
         for arg in inputs:
             if arg['simple_type'] in ['Type', 'TensorOptions']:
                 continue
@@ -432,7 +424,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_args'] = [arg for arg in env['dispatch_args'] if arg != 'self']
             env['dispatch_call'] = 'self.{}'.format(declaration['name'])
         elif 'namespace' in declaration['method_of']:
-            env['dispatch_call'] = 'at::{}'.format(declaration['name'])
+            namespace = 'torch' if (has_tensor_options or declaration['name'].endswith('_like')) else 'at'
+            env['dispatch_call'] = '{}::{}'.format(namespace, declaration['name'])
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
 
@@ -499,6 +492,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         if (is_factory_function and not has_type_input_arg) or has_options_arg:
             default_type = get_type_default(declaration)
+            py_default_dtype = 'self.type()' if is_like_function_with_options else None
             dtype_arg = {
                 'default': default_type,
                 'dynamic_type': 'Type',
@@ -507,9 +501,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'type': 'const Type &',
                 'simple_type': 'Type',
                 'is_type_dispatched': True,
+                'python_default_init': py_default_dtype,
             }
-            if is_like_function_with_options:
-                dtype_arg['python_default_init'] = 'self.type()'
             python_binding_arguments.append(dtype_arg)
         if is_factory_function or is_like_function_with_options:
             py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_function_with_options else None

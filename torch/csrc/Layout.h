@@ -2,7 +2,7 @@
 
 #include "torch/csrc/python_headers.h"
 
-#include <ATen/TensorOptions.h>
+#include <ATen/Layout.h>
 
 #include <string>
 

@@ -5,6 +5,7 @@
 #include <ATen/Generator.h>
 #include <ATen/Registry.h>
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 
@@ -130,9 +131,9 @@ AT_API const CUDAHooksInterface& getCUDAHooks();
 /// with only a single pointer indirection, while virtual dispatch would require
 /// two (one for the virtual call, one for `cudaSetDevice`/`cudaGetDevice`).
 struct AT_API DynamicCUDAInterface {
-  static std::function<int(int)> set_device;
-  static std::function<int(int*)> get_device;
-  static std::function<void(int)> check_status;
+  static void (*set_device)(int32_t);
+  static void (*get_device)(int32_t*);
+  static void (*unchecked_set_device)(int32_t);
 };
 } // namespace detail
 } // namespace at

@@ -2,13 +2,7 @@
 
 #include "torch/csrc/python_headers.h"
 
-namespace at {
-struct Device;
-struct Tensor;
-struct Type;
-template<typename T>
-struct optional;
-} // namespace at
+#include <ATen/ATen.h>
 
 namespace torch { namespace utils {
 

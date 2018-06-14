@@ -2,6 +2,9 @@
 
 #include <fstream>
 
+#include <torch/functions.h>
+#include <torch/tensor.h>
+
 #include "cereal/archives/binary.hpp"
 #include "cereal/types/polymorphic.hpp"
 

@@ -2,11 +2,11 @@
 
 // ${generated_comment}
 
+#include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
+#include "torch/csrc/tensor/python_tensor.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/tensor/python_tensor.h"
-#include "torch/csrc/TensorOptions.h"
 
 #include <ATen/ATen.h>
 
@@ -22,6 +22,7 @@ using at::IntList;
 using at::Generator;
 using at::SparseTensorRef;
 using at::Storage;
+using at::TensorOptions;
 
 static at::Type& default_type() {
   return torch::tensor::get_default_tensor_type();

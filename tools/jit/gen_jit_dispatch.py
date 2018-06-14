@@ -43,7 +43,7 @@ CALL_NAMESPACE = CodeTemplate("""\
 auto result = at::${name}(${args});
 """)
 CALL_METHOD = CodeTemplate("""\
-AutoGPU device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
+DeviceGuard device_guard(at::kCUDA, deviceForInputs(stack, ${num_dynamic_inputs}));
 auto result = (${first}).${name}(${args});
 """)
 CALL_TENSOR_OPTIONS = CodeTemplate("""\
@@ -53,7 +53,7 @@ const auto options = TensorOptions()
         .dtype(static_cast<at::ScalarType>(dtype))
         .layout(static_cast<at::Layout>(layout))
         .device({static_cast<at::Device::Type>(device[0]), device_index});
-auto result = at::${name}(${args}, options);
+auto result = torch::${name}(${args}, options);
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
@@ -85,8 +85,7 @@ def is_jit_arg(i, arg):
         return False
     if simple_type in default_only_types and 'default' not in arg:
         return False
-    # allow 'Type dtype' as the first argument only
-    if simple_type == 'Type' and (i > 0 or arg['name'] != 'dtype'):
+    if simple_type == 'Type':
         return False
     return True
 

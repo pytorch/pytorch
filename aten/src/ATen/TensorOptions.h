@@ -1,16 +1,14 @@
 #pragma once
 
+#include <ATen/Context.h>
 #include <ATen/Device.h>
 #include <ATen/Layout.h>
 #include <ATen/ScalarType.h>
+#include <ATen/Tensor.h>
+#include <ATen/Type.h>
 #include <ATen/optional.h>
 
 #include <cstddef>
-
-namespace at {
-struct Type;
-struct Tensor;
-} // namespace at
 
 namespace at {
 
@@ -20,8 +18,6 @@ namespace at {
 /// `torch::TensorOptions` subclass of this `TensorOptions`, which changes
 /// `type()` to return a variable type instead of a tensor type, such that
 /// variables are created inside factory methods, instead of tensors.
-/// Furthermore, it changes `apply` to perform certain post-creation steps, such
-/// as setting the `requires_grad` property of a `Variable`.
 struct TensorOptions {
   /// Constructs the `TensorOptions` with valid defaults, which are:
   /// - dtype: float
@@ -33,22 +29,26 @@ struct TensorOptions {
   /// If the `Tensor` has a CUDA type, the `device_index` will match that of the
   /// tensor. See the constructor from `Type` for the semantics w.r.t. the
   /// `type()` method.
-  explicit TensorOptions(Tensor tensor);
+  explicit TensorOptions(Tensor tensor, bool discard_runtime_type = false);
 
   /// Constructs the `TensorOptions` from a type and optional `device_index`.
   ///
-  /// NOTE: This changes the behavior of `TensorOptions::type()` in that it will
-  /// always return this `type`, irrespective of any `device` or `dtype` or
-  /// `layout` specified at a later time. This is to ensure that when a
-  /// `TensorOptions` object is constructed from a tensor's type, and that type
-  /// has a dynamic type other than `at::Type` (e.g.
-  /// `torch::autograd::VariableType`), constructing a new tensor from this
-  /// `TensorOptions` will use this same derived type. If instead the given
-  /// `type` were destructured into its components (backend, dtype and layout),
-  /// information about the runtime type of the `Type` would be lost.
+  /// If `discard_runtime_type` is false (the default), the behavior of
+  /// `TensorOptions::type()` is changed in that it will always return this
+  /// `type`, irrespective of any `device` or `dtype` or `layout` specified at a
+  /// later time. This is to ensure that when a `TensorOptions` object is
+  /// constructed from a tensor's type, and that type has a dynamic type other
+  /// than `at::Type` (e.g. `torch::autograd::VariableType`), constructing a new
+  /// tensor from this `TensorOptions` will use this same derived type. If
+  /// instead the given `type` were destructured into its components (backend,
+  /// dtype and layout), information about the runtime type of the `Type` would
+  /// be lost. Set `discard_runtime_type` to `true` to always destructure the
+  /// type into its components and discard its runtime type.
   /* implicit */ TensorOptions(
       const Type& type,
-      optional<int32_t> device_index = nullopt);
+      at::optional<int32_t> device_index,
+      bool discard_runtime_type = false);
+  /* implicit */ TensorOptions(const Type& type);
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
@@ -56,57 +56,102 @@ struct TensorOptions {
   }
 
   /// Constructs a `TensorOptions` object with the given device.
-  /* implicit */ TensorOptions(Device device) : TensorOptions() {
-    this->device(device);
-  }
+  /* implicit */ TensorOptions(Device device);
+
+  /// Constructs a `TensorOptions` object from a backend, forwarded to the
+  /// `Device` constructor.
+  /* implicit */ TensorOptions(Backend backend);
 
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
     this->dtype(dtype);
   }
 
-  virtual ~TensorOptions() = default;
+  /// Discards the runtime type stored if the `TensorOptions` was constructed
+  /// from a `Tensor` or a `Type`. See the documentation of the constructor from
+  /// a `Type` for implications on the behavior of the `type()` method on
+  /// `TensorOptions`.
+  const TensorOptions& discard_runtime_type() const {
+    type_ = nullptr;
+    return *this;
+  }
 
   // NOTE: These methods are defined in TensorOptions.cpp because I get funny
   // linker errors for their missing definition if they're defined in the
   // header. Who knows why?
 
   /// Sets the device of the `TensorOptions`.
-  virtual TensorOptions& device(Device device);
+  TensorOptions& device(Device device);
 
   /// Sets the device of the `TensorOptions` to CUDA, and then sets the device
   /// index to the given one.
-  virtual TensorOptions& device_index(int32_t device_index);
+  TensorOptions& device_index(int32_t device_index);
 
   /// Sets the dtype of the `TensorOptions`.
-  virtual TensorOptions& dtype(ScalarType dtype);
+  TensorOptions& dtype(ScalarType dtype) {
+    dtype_ = dtype;
+    return *this;
+  }
 
   /// Sets the layout of the `TensorOptions`.
-  virtual TensorOptions& layout(Layout layout);
+  TensorOptions& layout(Layout layout) {
+    layout_ = layout;
+    return *this;
+  }
+
+  /// Sets the `requires_grad` property of the `TensorOptions`.
+  TensorOptions& requires_grad(bool requires_grad = true) {
+    requires_grad_ = requires_grad;
+    return *this;
+  }
 
   /// Returns the device of the `TensorOptions`.
-  virtual const Device& device() const noexcept;
+  const Device& device() const noexcept {
+    return device_;
+  }
 
   /// Returns the optional device index of the `TensorOptions`.
-  virtual const at::optional<int32_t>& device_index() const noexcept;
+  const at::optional<int32_t>& device_index() const noexcept {
+    return device_.index();
+  }
 
   /// Returns the dtype of the `TensorOptions`.
-  virtual ScalarType dtype() const noexcept;
+  ScalarType dtype() const noexcept {
+    return dtype_;
+  }
 
   /// Returns the layout of the `TensorOptions`.
-  virtual Layout layout() const noexcept;
+  Layout layout() const noexcept {
+    return layout_;
+  }
+
+  /// Returns the `requires_grad` property of the `TensorOptions`.
+  bool requires_grad() const noexcept {
+    return requires_grad_;
+  }
 
   /// Constructs an `at::Type` from the members of the `TensorOptions`.
-  virtual const Type& type() const;
-
-  /// Applies certain options to a `Tensor` post-creation.
-  virtual Tensor apply(Tensor tensor) const;
+  const Type& type() const {
+    if (type_ != nullptr) {
+      return *type_;
+    }
+    Backend backend;
+    if (device_.type() == Device::Type::CPU) {
+      backend = (layout_ == kStrided) ? kCPU : kSparseCPU;
+    } else {
+      backend = (layout_ == kStrided) ? kCUDA : kSparseCUDA;
+    }
+    return getType(backend, dtype_);
+  }
 
  protected:
   ScalarType dtype_{kFloat};
   Device device_{kCPU};
   Layout layout_{Layout::Strided};
-  const Type* type_{nullptr};
+  bool requires_grad_{false};
+  // Not part of the observable API, so make `mutable` so we can set it to
+  // `null` in `discard_runtime_type`.
+  mutable const Type* type_{nullptr};
 };
 
 /// Convenience function that returns a `TensorOptions` object with the `dtype`
@@ -131,5 +176,11 @@ inline TensorOptions device(Device device) {
 /// `device_index` set to the given one.
 inline TensorOptions device_index(int32_t device_index) {
   return TensorOptions().device_index(device_index);
+}
+
+/// Convenience function that returns a `TensorOptions` object with the
+/// `requires_grad` set to the given one.
+inline TensorOptions requires_grad(bool requires_grad = true) {
+  return TensorOptions().requires_grad(requires_grad);
 }
 } // namespace at

@@ -82,6 +82,7 @@
   variants: function
 
 - func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> bool
+  device_guard: false
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
@@ -115,6 +116,14 @@
 
 - func: arange_out(Tensor result, Scalar end) -> Tensor
   variants: function
+
+- func: arange(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+  deprecated: true
+
+- func: arange(Type dtype, Scalar end) -> Tensor
+  variants: function
+  deprecated: true
 
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic
 # bounds on arange.  Normal arange is not traceable because it does not take any tensor inputs;
@@ -221,6 +230,7 @@
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
   variants: function
+  device_guard: false
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups) -> Tensor
   variants: function
@@ -474,8 +484,10 @@
 
 - func: empty_like(Tensor self, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    options: self.type()
+
+- func: empty(Type dtype, IntList size) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: erf(Tensor self) -> Tensor
 
@@ -540,6 +552,10 @@
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
+- func: eye(Type dtype, int64_t n, int64_t m=-1) -> Tensor
+  variants: function
+  deprecated: true
+
 - func: fill_(Tensor self, Scalar value) -> Tensor
 
 - func: fill_(Tensor self, Tensor value) -> Tensor
@@ -568,8 +584,10 @@
 
 - func: full_like(Tensor self, Scalar fill_value, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    options: self.type()
+
+- func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: hann_window(int64_t window_length, TensorOptions options={}) -> Tensor
   variants: function
@@ -639,18 +657,25 @@
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
 
 - func: is_cuda(Tensor self) -> bool
+  device_guard: false
 
 - func: is_distributed(Tensor self) -> bool
+  device_guard: false
 
 - func: is_floating_point(Tensor self) -> bool
+  device_guard: false
 
 - func: is_nonzero(Tensor self) -> bool
+  device_guard: false
 
 - func: is_same_size(Tensor self, Tensor other) -> bool
+  device_guard: false
 
 - func: is_signed(Tensor self) -> bool
+  device_guard: false
 
 - func: is_sparse(Tensor self) -> bool
+  device_guard: false
 
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
   variants: function
@@ -666,6 +691,10 @@
 
 - func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
   variants: function
+
+- func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: log(Tensor self) -> Tensor
 
@@ -733,6 +762,10 @@
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
   variants: function
 
+- func: logspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+  deprecated: true
+
 - func: log_softmax(Tensor self, int64_t dim) -> Tensor
   dispatch:
     CPU: log_softmax_cpu
@@ -798,8 +831,10 @@
 
 - func: ones_like(Tensor self, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    options: self.type()
+
+- func: ones(Type dtype, IntList size) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
@@ -826,8 +861,10 @@
 
 - func: rand_like(Tensor self, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    options: self.type()
+
+- func: rand(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: randint(int64_t high, IntList size, *, TensorOptions options={}) -> Tensor
   variants: function
@@ -840,6 +877,14 @@
 
 - func: randint(int64_t low, int64_t high, IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor
   variants: function
+
+- func: randint(Type dtype, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+  deprecated: true
+
+- func: randint(Type dtype, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: randint_out(Tensor result, int64_t high, IntList size, *) -> Tensor
   variants: function
@@ -861,13 +906,9 @@
 
 - func: randint_like(Tensor self, int64_t high, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    options: self.type()
 
 - func: randint_like(Tensor self, int64_t low, int64_t high, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    options: self.type()
 
 - func: randn(IntList size, *, TensorOptions options={}) -> Tensor
   variants: function
@@ -886,8 +927,10 @@
 
 - func: randn_like(Tensor self, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    options: self.type()
+
+- func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: randperm(int64_t n, *, TensorOptions options={}) -> Tensor
   variants: function
@@ -904,6 +947,10 @@
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
 
+- func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+  deprecated: true
+
 - func: range(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
   variants: function
 
@@ -915,6 +962,10 @@
 
 - func: range_out(Tensor result, Scalar start, Scalar end, Scalar step) -> Tensor
   variants: function
+
+- func: range(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -1016,6 +1067,7 @@
     CUDA: _sinh_out_cuda
 
 - func: size(Tensor self, int64_t dim) -> int64_t
+  device_guard: false
 
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
 
@@ -1068,6 +1120,7 @@
     fft_size: frame_length
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
+  device_guard: false
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: sum(Tensor self, *, ScalarType dtype) -> Tensor
@@ -1249,8 +1302,10 @@
 
 - func: zeros_like(Tensor self, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    options: self.type()
+
+- func: zeros(Type dtype, IntList size) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   dispatch:

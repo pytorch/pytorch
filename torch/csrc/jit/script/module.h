@@ -244,7 +244,7 @@ struct Module : public std::enable_shared_from_this<Module> {
   }
 
   autograd::Variable get_parameter(const std::string& name) const {
-    return static_cast<autograd::Variable&>(*parameter_slot(name));
+    return autograd::as_variable_ref(*parameter_slot(name));
   }
 
   // each module owns its method. The reference returned here

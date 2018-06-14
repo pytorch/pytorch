@@ -135,8 +135,9 @@ struct Tensor : public detail::TensorBase {
 
   // ~~~~~ Autograd API ~~~~~
 
-  void set_requires_grad(bool requires_grad) {
+  Tensor& set_requires_grad(bool requires_grad) {
     pImpl->set_requires_grad(requires_grad);
+    return *this;
   }
   bool requires_grad() const {
     return pImpl->requires_grad();

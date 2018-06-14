@@ -1307,7 +1307,7 @@ private:
     return emitNode(
                Symbol::aten("type_as"),
                input.range(),
-               {emitExpr(input), createConstant(*graph, input.range(), at::ones({1}, at::CPU(t)))},
+               {emitExpr(input), createConstant(*graph, input.range(), at::ones({1}, t))},
                1)
         ->output();
   }

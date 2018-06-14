@@ -3,7 +3,7 @@
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 
-#include <ATen/AutoGPU.h>
+#include <ATen/DeviceGuard.h>
 
 #include <cstddef>
 #include <utility>
@@ -21,7 +21,7 @@ void InputBuffer::add(size_t pos, Variable var) {
   if (!old_var.defined()) {
     buffer[pos] = std::move(var);
   } else {
-    at::AutoGPU auto_gpu(var);
+    at::DeviceGuard device_guard(var);
     // ATen doesn't route sparse additions correctly...
     if (old_var.type().is_sparse()) {
       buffer[pos] = var + old_var;

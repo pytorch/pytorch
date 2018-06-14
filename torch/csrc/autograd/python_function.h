@@ -15,7 +15,7 @@
 #include <memory>
 
 namespace at {
-struct AutoGPU;
+struct DeviceGuard;
 } // namespace at
 
 namespace torch { namespace jit { struct Graph; }}
@@ -24,7 +24,7 @@ namespace torch { namespace autograd {
 struct VariableInfo {
   explicit VariableInfo(const Variable& var);
 
-  Variable zeros(at::AutoGPU& gpu_guard) const;
+  Variable zeros(at::DeviceGuard& device_guard) const;
 
   at::Type* type;
   at::optional<int32_t> device;

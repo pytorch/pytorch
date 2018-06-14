@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 
 TEST_CASE("tensor/device-placement") {
-  SECTION("AutoGPU") {
+  SECTION("DeviceGuard") {
     // SECTION("On index zero by default") {
     //   auto tensor = at::ones({3, 3}, at::kCUDA);
     //   REQUIRE(tensor.get_device() == 0);
@@ -16,7 +16,7 @@ TEST_CASE("tensor/device-placement") {
     // /// default device is CUDA
     // torch::DeviceGuard guard(1);
 
-    // note that this is separate from AutoGPU. AutoGPU should move into the
+    // note that this is separate from DeviceGuard. DeviceGuard should move into the
     // detail namespace and do the actual thing. OptionGuard just modifies a
     // global singleton of option defaults. It operates at a higher level.
   }

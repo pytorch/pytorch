@@ -1,6 +1,5 @@
 #include "interpreter.h"
 
-#include "torch/csrc/TensorOptions.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/functions/special.h"
@@ -12,6 +11,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <exception>
 #include <iostream>
@@ -113,7 +113,7 @@ void desugarTripCounts(Block * b) {
         WithInsertPoint guard(n);
         // int i = 0
         Value* initial_trip_count =
-            g->insertNode(g->createConstant(at::zeros({1}, at::CPU(at::kLong))))
+            g->insertNode(g->createConstant(at::zeros({1}, at::kLong)))
                 ->output();
         // Set up initial iteration number value for loop-carried dependency
         n->removeInput(0);
@@ -133,7 +133,7 @@ void desugarTripCounts(Block * b) {
         // conjunctive stopping condition as above.
 
         Value* const_one =
-            g->insertNode(g->createConstant(at::ones({1}, at::CPU(at::kLong))))
+            g->insertNode(g->createConstant(at::ones({1}, at::kLong)))
                 ->output();
 
         Value* inc_trip_count =
@@ -772,7 +772,7 @@ struct CodeImpl {
           return [=](Stack& stack) {
             auto t = pop(stack);
             at::IntList sizes = t.sizes();
-            auto sizes_tensor = at::empty({static_cast<int64_t>(sizes.size())}, torch::dtype(at::kLong));
+            auto sizes_tensor = torch::empty({static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
             auto accessor = sizes_tensor.accessor<int64_t, 1>();
             for (size_t i=0; i<sizes.size(); ++i) {
               accessor[i] = sizes[i];

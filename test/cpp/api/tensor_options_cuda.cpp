@@ -4,7 +4,7 @@
 #include <ATen/Functions.h>
 #include <ATen/TensorOptions.h>
 
-#include <ATen/AutoGPU.h>
+#include <ATen/DeviceGuard.h>
 
 using namespace at;
 
@@ -45,14 +45,14 @@ TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[cuda]") {
   if (at::globalContext().getNumGPUs() > 1) {
     Tensor tensor;
     {
-      AutoGPU guard(1);
+      DeviceGuard guard(kCUDA, 1);
       tensor = empty(5, device(kCUDA));
     }
     options = TensorOptions(tensor);
     REQUIRE_OPTIONS(kCUDA, 1, kFloat, kStrided);
 
     {
-      AutoGPU guard(1);
+      DeviceGuard guard(kCUDA, 1);
       tensor = empty(5, device(kCUDA).layout(kSparse));
     }
     options = TensorOptions(tensor);

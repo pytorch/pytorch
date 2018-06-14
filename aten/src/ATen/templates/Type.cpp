@@ -10,7 +10,7 @@
 #include "ATen/Tensor.h"
 #include "ATen/TensorOptions.h"
 #include "ATen/UndefinedType.h"
-#include "ATen/AutoGPU.h"
+#include "ATen/DeviceGuard.h"
 
 #include <ATen/detail/VariableHooksInterface.h>
 
