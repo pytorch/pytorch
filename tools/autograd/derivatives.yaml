@@ -753,8 +753,12 @@
 - name: glu_forward(Tensor self, int64_t dim)
   self: glu_backward(grad, self, dim)
 
-- name: hardshrink_forward(Tensor self, Scalar lambd)
+- name: hardshrink(Tensor self, Scalar lambd)
   self: hardshrink_backward(grad, self, lambd)
+
+- name: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd)
+  grad_out: hardshrink_backward(grad, self, lambd)
+  self: zeros_like(grad)
 
 - name: hardtanh_forward(Tensor self, Scalar min_val, Scalar max_val)
   self: hardtanh_backward(grad, self, min_val, max_val)
@@ -952,10 +956,6 @@
 - name: glu_backward(Tensor grad_output, Tensor self, int64_t dim)
   grad_output: glu_double_backward_grad_output(grad, self, dim)
   self: glu_double_backward(grad, grad_output, self, dim)
-
-- name: hardshrink_backward(Tensor grad_output, Tensor self, Scalar lambd)
-  grad_output: hardshrink_backward(grad, self, lambd)
-  self: zeros_like(grad)
 
 - name: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val)
   grad_output: hardtanh_backward(grad, self, min_val, max_val)

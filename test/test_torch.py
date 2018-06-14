@@ -5574,6 +5574,24 @@ class TestTorch(TestCase):
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 
+    def test_hardshrink(self):
+        data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
+        float_types = [
+            'torch.DoubleTensor',
+            'torch.FloatTensor'
+        ]
+        for t in float_types:
+            data = data_original.type(t)
+            self.assertEqual(torch.tensor([1, 0.5, 0, 0.6]).view(2, 2), torch.nn.Hardshrink(0.3)(data))
+            self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), torch.nn.Hardshrink(0.5)(data))
+            self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), torch.nn.Hardshrink()(data))
+
+            # test non-contiguous case
+            self.assertEqual(torch.tensor([1, 0.3, 0.5, 0.6]).view(2, 2), torch.nn.Hardshrink(0.1)(data.t()))
+
+            # not supporting default lambd value for torch.hardshrink() due to a Scalar bug
+            self.assertRaises(TypeError, lambda: data.hardshrink())
+
     def test_unbiased(self):
         tensor = torch.randn(100)
         self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
