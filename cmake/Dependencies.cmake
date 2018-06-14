@@ -750,11 +750,13 @@ if (USE_NNAPI AND NOT ANDROID)
 endif()
 
 if (NOT BUILD_ATEN_MOBILE)
-  list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
-  if (USE_CUDA)
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
+  if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+    list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
+    if (USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
+    endif()
+    include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
   endif()
-  include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
 endif()
 
 if (USE_ZSTD)
@@ -872,7 +874,6 @@ if (NOT BUILD_ATEN_MOBILE)
   ############################################
   # Flags
   # When using MSVC
-  
   # Detect CUDA architecture and get best NVCC flags
   # finding cuda must be first because other things depend on the result
   #
@@ -881,7 +882,7 @@ if (NOT BUILD_ATEN_MOBILE)
   # compiler variables to run various probe tests.  We could try to fix
   # this, but since FindCUDA upstream is subsumed by first-class support
   # for CUDA language, it seemed not worth fixing.
-  
+
   IF (MSVC)
     # we want to respect the standard, and we are bored of those **** .
     ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)

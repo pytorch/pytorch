@@ -218,13 +218,21 @@ if [[ -z "$INTEGRATED" ]]; then
 
 else
 
-  FULL_CAFFE2=1 python setup.py install --user
-  # TODO: I'm not sure why this is necessary
+  # sccache will be stuck if  all cores are used for compiling
+  # see https://github.com/pytorch/pytorch/pull/7361
+  if [[ -n "${SCCACHE}" ]]; then
+    export MAX_JOBS=`expr $(nproc) - 1`
+  fi
+
+  sudo FULL_CAFFE2=1 python setup.py install --user
+
+  # This is to save test binaries for testing
   cp -r torch/lib/tmp_install $INSTALL_PREFIX
 
-fi
+  ls $INSTALL_PREFIX
 
-report_compile_cache_stats
+  report_compile_cache_stats
+fi
 
 
 ###############################################################################
@@ -232,7 +240,7 @@ report_compile_cache_stats
 ###############################################################################
 
 # Install ONNX into a local directory
-pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+sudo pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 report_compile_cache_stats
 

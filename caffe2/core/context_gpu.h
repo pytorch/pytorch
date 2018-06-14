@@ -137,7 +137,7 @@ class CAFFE2_API ThreadLocalCUDAObjects {
 
 CAFFE2_API BaseStaticContext* GetCUDAStaticContext();
 
-class CAFFE2_API CUDAContext final : public BaseContext {
+class CUDAContext final : public BaseContext {
  public:
   // The default cuda context constructor.
   explicit CUDAContext(const int gpu_id = -1);

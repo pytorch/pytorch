@@ -176,8 +176,8 @@ int AsyncNetBase::stream(int task_id) {
       stream_counters_.resize(gpu_id + 1, 0);
     }
     do {
-      stream_id = stream_counters_[gpu_id]++;
-      stream_counters_[gpu_id] %= streams_per_gpu_;
+      stream_id = stream_counters_.at(gpu_id)++;
+      stream_counters_.at(gpu_id) %= streams_per_gpu_;
     } while (check_stream_status_ && !isStreamFree(task_id, stream_id));
   }
   return stream_id;

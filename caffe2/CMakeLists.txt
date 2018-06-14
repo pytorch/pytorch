@@ -11,25 +11,23 @@ if (NOT BUILD_ATEN_MOBILE)
   add_subdirectory(../aten aten)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
-  if(BUILD_CAFFE2)
-    # Generate the headers wrapped by our operator
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
-    COMMAND
-    ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-      --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
-      --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
-      --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
-      --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
-    DEPENDS
-    ATEN_CPU_FILES_GEN_TARGET
-    ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
+  # Generate the headers wrapped by our operator
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
+  COMMAND
+  ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
+    --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
+    --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
+    --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
+    --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
+  DEPENDS
+  ATEN_CPU_FILES_GEN_TARGET
+  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
+  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
 
-    add_custom_target(__aten_op_header_gen
-      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
-    add_library(aten_op_header_gen INTERFACE)
-    add_dependencies(aten_op_header_gen __aten_op_header_gen)
-  endif()
+  add_custom_target(__aten_op_header_gen
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
+  add_library(aten_op_header_gen INTERFACE)
+  add_dependencies(aten_op_header_gen __aten_op_header_gen)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
@@ -341,7 +339,7 @@ endif()
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  # Get Compile Definitions from the directory (FindHIP.CMake bug)
+  # Get Compile Definitions from the directory (FindHIP.cmake bug)
   get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
   if(MY_DEFINITIONS)
     foreach(_item ${MY_DEFINITIONS})
@@ -421,11 +419,10 @@ if (BUILD_TEST)
       endif()
     endforeach()
   endif()
-
 endif()
 
 set(__aten_test_dir "test/aten")
-if(NOT USE_ROCM)
+if (NOT USE_ROCM)
   foreach(test_src ${ATen_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
@@ -435,7 +432,7 @@ if(NOT USE_ROCM)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     install(TARGETS ${test_name} DESTINATION ${__aten_test_dir})
   endforeach()
-
+  
   if(USE_CUDA OR USE_ROCM)
     foreach(test_src ${ATen_CUDA_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
