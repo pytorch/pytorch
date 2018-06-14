@@ -1036,8 +1036,10 @@
 ]]
 [[
   name: getDevice
-  python_name: get_device
+  python_name: th_get_device
   device_guard: False
+  variants:
+    - function
   backends:
     - CUDA
   aten_sparse: True
