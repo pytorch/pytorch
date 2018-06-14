@@ -8,12 +8,10 @@ REGISTER_CUDA_OPERATOR(
     Expand,
 	ExpandOp<
         TensorTypes<std::int32_t, std::int64_t, float, double>,
-        CUDAContext,
-        Expander<CUDAContext>>);
+        CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     ExpandGradient,
     ExpandGradientOp<
         TensorTypes<std::int32_t, std::int64_t, float, double>,
-        CUDAContext,
-        Expander<CUDAContext>>);
+        CUDAContext>);
 } // namespace caffe2
