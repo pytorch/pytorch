@@ -1107,8 +1107,8 @@ class TestNN(NNTestCase):
 
         def check():
             self.assertEqual(len(module_dict), len(modules))
-            for m1, m2 in zip(modules, module_dict.children()):
-                self.assertIs(m1, m2)
+            for k1, m2 in zip(modules, module_dict.children()):
+                self.assertIs(modules[k1], m2)
             for m1, k2 in zip(modules, module_dict):
                 self.assertIs(m1, module_dict[k2])
             for k in module_dict:
@@ -1117,8 +1117,8 @@ class TestNN(NNTestCase):
                 self.assertIs(module_dict[k], modules[k])
             for k, v in module_dict.items():
                 self.assertIs(v, modules[k])
-            for m1, m2 in zip(modules, module_dict.values()):
-                self.assertIs(m1, m2)
+            for k1, m2 in zip(modules, module_dict.values()):
+                self.assertIs(modules[k1], m2)
             for k in modules.keys():
                 self.assertTrue(k in module_dict)
         check()
@@ -1141,7 +1141,7 @@ class TestNN(NNTestCase):
             module_dict.update(nn.ReLU())
 
         s = nn.Sequential(modules)
-        module_dict = nn.ModuleDict(s.named_modules())
+        module_dict = nn.ModuleDict(s.named_children())
         check()
 
         c = module_dict.pop('conv')
@@ -1229,8 +1229,8 @@ class TestNN(NNTestCase):
 
         def check():
             self.assertEqual(len(parameter_dict), len(parameters))
-            for m1, m2 in zip(parameters, parameter_dict.parameters()):
-                self.assertIs(m1, m2)
+            for k1, m2 in zip(parameters, parameter_dict.parameters()):
+                self.assertIs(parameters[k1], m2)
             for m1, k2 in zip(parameters, parameter_dict):
                 self.assertIs(m1, parameter_dict[k2])
             for k in parameter_dict:
@@ -1239,8 +1239,8 @@ class TestNN(NNTestCase):
                 self.assertIs(parameter_dict[k], parameters[k])
             for k, v in parameter_dict.items():
                 self.assertIs(v, parameters[k])
-            for m1, m2 in zip(parameters, parameter_dict.values()):
-                self.assertIs(m1, m2)
+            for k1, m2 in zip(parameters, parameter_dict.values()):
+                self.assertIs(parameters[k1], m2)
             for k in parameters.keys():
                 self.assertTrue(k in parameter_dict)
 
