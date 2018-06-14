@@ -12,7 +12,6 @@ class __PrinterOptions(object):
 
 
 PRINT_OPTS = __PrinterOptions()
-SCALE_FORMAT = '{:.5e} *\n'
 
 
 # We could use **kwargs, but this will give better docs
@@ -96,7 +95,8 @@ class _Formatter(object):
                     if math.isnan(value) or math.isinf(value):
                         self.max_width = max(self.max_width, len(value_str))
                     else:
-                        # for finites, appending a decimal will increase the len by 1
+                        # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
+                        # to indicate that the tensor is of floating type. add 1 to the len to account for this.
                         self.max_width = max(self.max_width, len(value_str) + 1)
 
             else:
@@ -125,11 +125,11 @@ class _Formatter(object):
                 if exp_max - exp_min > PRINT_OPTS.precision or exp_max > 8 or exp_min < -4:
                     self.sci_mode = True
                     for value in copy_list:
-                        value_str = ('{:.' + str(PRINT_OPTS.precision) + 'e}').format(value)
+                        value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
                 else:
                     for value in copy_list:
-                        value_str = ('{:.' + str(PRINT_OPTS.precision) + 'f}').format(value)
+                        value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
 
     def width(self):
@@ -142,10 +142,9 @@ class _Formatter(object):
                 if not (math.isinf(value) or math.isnan(value)):
                     ret += '.'
             elif self.sci_mode:
-                ret = ('{:' + str(self.max_width) +
-                       '.' + str(PRINT_OPTS.precision) + 'e}').format(value)
+                ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
             else:
-                ret = ('{:.' + str(PRINT_OPTS.precision) + 'f}').format(value)
+                ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
