@@ -15,11 +15,15 @@
 #include <caffe2/operators/given_tensor_fill_op.h>
 #include <caffe2/operators/load_save_op.h>
 #include <caffe2/operators/loss_op.h>
+#include <caffe2/operators/pad_op.h>
+#include <caffe2/operators/prelu_op.h>
 #include <caffe2/operators/reshape_op.h>
 #include <caffe2/operators/roi_align_op.h>
 #include <caffe2/operators/softmax_op.h>
 #include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/utility_ops.h>
+#include <caffe2/sgd/iter_op.h>
+#include <caffe2/sgd/learning_rate_op.h>
 
 // can add more non-IDEEP operators if needed
 namespace caffe2 {
@@ -94,9 +98,34 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<CollectAndDistributeFpnRpnProposalsOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     BoxWithNMSLimit,
-    IDEEPFallbackOp<BoxWithNMSLimitOp<CPUContext>>);
+    IDEEPFallbackOp<BoxWithNMSLimitOp<CPUContext>, SkipIndices<0,1,2>>);
 REGISTER_IDEEP_OPERATOR(
     BBoxTransform,
     IDEEPFallbackOp<BBoxTransformOp<float, CPUContext>>);
 
+REGISTER_IDEEP_OPERATOR(
+    PadImage,
+    IDEEPFallbackOp<PadImageOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    PRelu,
+    IDEEPFallbackOp<PReluOp<float, CPUContext>>);
+
+REGISTER_IDEEP_OPERATOR(
+    AveragedLossGradient,
+    IDEEPFallbackOp<AveragedLossGradient<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    LabelCrossEntropyGradient,
+    IDEEPFallbackOp<LabelCrossEntropyGradientOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    SoftmaxGradient,
+    IDEEPFallbackOp<SoftmaxGradientOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Iter,
+    IDEEPFallbackOp<IterOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    LearningRate,
+    IDEEPFallbackOp<LearningRateOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    WeightedSum,
+    IDEEPFallbackOp<WeightedSumOp<CPUContext>>);
 } // namespace caffe2

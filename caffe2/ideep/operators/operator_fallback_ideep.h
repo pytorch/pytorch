@@ -52,11 +52,14 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     // Create output blobs in parent workspace,
     // then forward output blobs to local workspace.
     std::unordered_map<string, string> forwarded_output_blobs;
-    for (const string& name : base_def_.output()) {
-      string parent_name(name + "_cpu_output_blob_" + base_def_.type());
+    for (int i = 0; i < base_def_.output_size(); i++) {
+      string parent_name(base_def_.output(i));
+      if (!SkipOutputCopy::Contains(i)) {
+        parent_name += "_cpu_output_blob_" + base_def_.type();
+      }
       local_output_blobs_.push_back(ws->CreateBlob(parent_name));
       CHECK_NOTNULL(local_output_blobs_.back());
-      forwarded_output_blobs[name] = parent_name;
+      forwarded_output_blobs[base_def_.output(i)] = parent_name;
     }
     local_ws_.reset(new Workspace(ws, forwarded_output_blobs));
     // Set up the symbols for the local workspace.
@@ -106,13 +109,23 @@ class IDEEPFallbackOp final : public IDEEPOperator {
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
 
+      auto src_dims = src.dims();
+      if (src.ndim() == 0) {
+        VLOG(1) << "Copy output: index " << i << " skipped.";
+        Blob* dst = OperatorBase::OutputBlob(i);
+        dst->Reset(new Tensor<CPUContext>());
+        auto dtensor = dst->template GetMutable<TensorCPU>();
+        dtensor->Resize(src_dims);
+        dtensor->ShareData(src);
+        continue;
+      }
+
       if (src.template IsType<float>()) {
         Blob* dst = OperatorBase::OutputBlob(i);
         if (!dst->template IsType<itensor>()) {
           dst->Reset(new itensor());
         }
 
-        auto src_dims = src.dims();
         itensor::dims dst_dims (src_dims.begin(), src_dims.end());
         auto dtensor = dst->template GetMutable<itensor>();
         if (dtensor->get_dims() != dst_dims) {
