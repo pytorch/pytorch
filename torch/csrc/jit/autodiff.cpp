@@ -48,7 +48,7 @@ bool outputRequiresGrad(Node* node, std::function<bool(Value*)> requires_grad) {
       return false;
     case aten::type_as:
     //type_as has two inputs, the second of which (setting type) might require grad, but it still won't affect the output of type_as requiring grad.
-      return requires_grad(node->inputs()[0]);
+      return requires_grad(node->inputs().at(0));
     default:
       return std::any_of(node->inputs().begin(), node->inputs().end(), requires_grad);
   }
