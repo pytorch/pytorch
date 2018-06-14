@@ -354,6 +354,7 @@ Caffe2Backend::get_special_operators() const {
               {"BatchNormalization", &Caffe2Backend::CreateBatchNormalization},
               {"MatMul", &Caffe2Backend::CreateMatMul},
               {"Upsample", &Caffe2Backend::CreateUpsample},
+              {"Dropout", &Caffe2Backend::CreateDropout},
               {"LRN", &Caffe2Backend::CreateLRN}};
   return kSpecialOperators;
 }
@@ -904,6 +905,16 @@ Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) 
   c2_width->set_f(scales.Get(3));
 
   return c2_op;
+}
+
+Caffe2Ops Caffe2Backend::CreateDropout(OnnxNode* onnx_node, int opset_version) {
+  if (opset_version > 6) {
+    auto& attributes = onnx_node->attributes;
+    auto* attr = attributes.AddRewrittenAttibute("is_test");
+    attr->set_i(1);
+  }
+
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
 }
 
 Caffe2Ops Caffe2Backend::CreateLRN(OnnxNode* onnx_node, int opset_version) {
