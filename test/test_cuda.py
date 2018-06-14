@@ -1416,7 +1416,10 @@ class TestCuda(TestCase):
         except RuntimeError:
             pass
         with mp.Pool(1, initializer = self.mute) as pool:
-            self.assertTrue(pool.map(method, [arg]))
+            errors = pool.map(method, [arg])
+            for e in errors:
+                if not 'device-side assert triggered' in str(e):
+                    self.fail(e)
 
     @staticmethod
     def _test_multinomial_invalid_probs_cuda(probs):
@@ -1426,7 +1429,7 @@ class TestCuda(TestCase):
                 torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:
-            return 'device-side assert triggered' in str(e)
+            return e
 
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @unittest.skipIf(not PY3,
