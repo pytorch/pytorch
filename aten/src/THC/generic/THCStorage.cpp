@@ -40,51 +40,20 @@ real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 
 THCStorage* THCStorage_(new)(THCState *state)
 {
-  return THCStorage_(newWithSize)(state, 0);
+  return THCStorage_new(state, at::CTypeToScalarType<at::cuda::from_type<real>>::to());
 }
 
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
-  return THCStorage_(newWithAllocator)(
-    state, size,
-    state->cudaDeviceAllocator,
-    state->cudaDeviceAllocator->state);
+  return THCStorage_newWithSize(state, at::CTypeToScalarType<at::cuda::from_type<real>>::to(), size);
 }
 
 THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
                                           THCDeviceAllocator* allocator,
                                           void* allocatorContext)
 {
-  THArgCheck(size >= 0, 2, "invalid size");
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
-
-  THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
-  memset(storage, 0, sizeof(THCStorage));
-  new (&storage->refcount) std::atomic<int>(1);
-  storage->scalar_type = at::CTypeToScalarType<at::cuda::from_type<real>>::to();
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocator = allocator;
-  storage->allocatorContext = allocatorContext;
-  storage->size = size;
-  storage->device = device;
-
-  if(size > 0)
-  {
-    // update heap *before* attempting malloc, to free space for the malloc
-    cudaError_t err =
-      (*allocator->malloc)(allocatorContext,
-                           (void**)&(storage->data_ptr),
-                           size * sizeof(real),
-                           THCState_getCurrentStream(state));
-    if(err != cudaSuccess){
-      free(storage);
-    }
-    THCudaCheck(err);
-  } else {
-    storage->data_ptr = NULL;
-  }
-  return storage;
+  return THCStorage_newWithAllocator(state, at::CTypeToScalarType<at::cuda::from_type<real>>::to(),
+                                     size, allocator, allocatorContext);
 }
 
 THCStorage* THCStorage_(newWithSize1)(THCState *state, real data0)
@@ -170,8 +139,7 @@ void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char fla
 
 void THCStorage_(retain)(THCState *state, THCStorage *self)
 {
-  if(self && (self->flag & TH_STORAGE_REFCOUNTED))
-    self->refcount++;
+  THCStorage_retain(state, self);
 }
 
 int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage)

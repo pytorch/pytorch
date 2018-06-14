@@ -8,16 +8,8 @@ else()
   option(USE_CUDA "Use CUDA" ON)
   option(TORCH_BUILD_TEST "Build torch test binaries" ON)
 
-  # Legacy options, which we will eventually remove
-  cmake_dependent_option(
-      NO_CUDA "Legacy no CUDA" OFF
-      "USE_CUDA" ON)
-
   # Flag for shared dependencies
   set(BUILD_TORCH ON)
-endif()
-if (NOT USE_CUDA)
-  set(NO_CUDA ON)
 endif()
 
 cmake_policy(VERSION 3.0)
@@ -34,7 +26,7 @@ if (VERBOSE)
 endif()
 
 set(CAFFE2_INCLUDE_DIR "${CAFFE2_PATH}")
-set(CAFFE2_BUILD_INCLUDE_DIR "${CAFFE2_BUILD_PATH}")
+set(CAFFE2_BUILD_LIB_DIR "${CAFFE2_BUILD_PATH}/lib")
 set(CAFFE2_INSTALL_INCLUDE_DIR "${INSTALL_PREFIX}/include")
 set(CAFFE2_INSTALL_SHARE_DIR "${INSTALL_PREFIX}/share")
 set(CAFFE2_INSTALL_LIB_DIR "${INSTALL_PREFIX}/lib")
@@ -46,6 +38,9 @@ find_library(CAFFE2_LIBRARY caffe2
 find_library(CAFFE2_GPU_LIBRARY caffe2_gpu
   NAMES libcaffe2_gpu.so libcaffe2_gpu.dylib caffe2_gpu.lib
   PATHS ${CAFFE2_INSTALL_LIB_DIR} NO_DEFAULT_PATH)
+find_library(PROTOBUF_LIBRARY protobuf
+  NAMES libprotobuf.a libprotobufd.a libprotobuf.lib libprotobufd.lib
+  PATHS ${CAFFE2_BUILD_LIB_DIR} NO_DEFAULT_PATH)
 find_library(NANOPB_LIBRARY protobuf-nanopb
   PATHS ${NANOPB_BUILD_PATH} NO_DEFAULT_PATH)
 
@@ -53,7 +48,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-if(NOT NO_CUDA)
+if(USE_CUDA)
   set(CMAKE_MODULE_PATH
     ${INSTALL_PREFIX}/share/cmake
     ${TORCH_SRC_DIR}/../cmake/Modules
@@ -97,7 +92,7 @@ if(NOT NO_CUDA)
   endif()
 endif()
 
-add_definitions(-DNO_PYTHON -D_FORCE_INLINES)
+add_definitions(-DUSE_CATCH -D_FORCE_INLINES -DONNX_NAMESPACE=${ONNX_NAMESPACE})
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -111,7 +106,7 @@ if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
 
-if(NOT NO_CUDA)
+if(USE_CUDA)
   add_definitions(-DWITH_CUDA)
 
   set(TORCH_CUDA_LIBRARIES
@@ -201,6 +196,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/grad_mode.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
@@ -231,6 +227,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_addmm.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interned_strings.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
@@ -249,6 +246,7 @@ if (NOT NO_API)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/cursor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
@@ -257,7 +255,8 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp)
+    ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
+  )
 endif()
 
 add_library(torch SHARED ${TORCH_SRCS})
@@ -290,9 +289,10 @@ endif()
 target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
   ${CAFFE2_LIBRARY}
+  ${PROTOBUF_LIBRARY}
   ${NANOPB_LIBRARY}
 )
-if(NOT NO_CUDA)
+if(USE_CUDA)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
     target_link_libraries(torch -Wl,--no-as-needed ${CAFFE2_GPU_LIBRARY} -Wl,--as-needed)
   else()
@@ -303,7 +303,6 @@ endif()
 target_include_directories(torch
   PUBLIC
   "${CAFFE2_INCLUDE_DIR}"
-  "${CAFFE2_BUILD_INCLUDE_DIR}"
   "${CAFFE2_INSTALL_INCLUDE_DIR}"
   "${CAFFE2_INSTALL_INCLUDE_DIR}/TH"
   "${TORCH_SRC_DIR}/.."
@@ -320,7 +319,7 @@ target_include_directories(torch SYSTEM PUBLIC
   "${TORCH_SRC_DIR}/../third_party/cereal/include" # For cereal/
   "${TORCH_SRC_DIR}/../third_party/nanopb")
 
-if(NOT NO_CUDA)
+if(USE_CUDA)
   target_include_directories(torch SYSTEM PUBLIC "${CUDA_INCLUDE_DIRS}")
 endif()
 
@@ -357,6 +356,7 @@ if (TORCH_BUILD_TEST)
     add_executable(test_api
       ${TORCH_API_TEST_DIR}/any.cpp
       ${TORCH_API_TEST_DIR}/container.cpp
+      ${TORCH_API_TEST_DIR}/cursor.cpp
       ${TORCH_API_TEST_DIR}/integration.cpp
       ${TORCH_API_TEST_DIR}/main.cpp
       ${TORCH_API_TEST_DIR}/misc.cpp

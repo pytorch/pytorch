@@ -43,7 +43,7 @@ __device__ __forceinline__ unsigned int ACTIVE_MASK()
 #endif
 }
 
-__device__ __forceinline__ int WARP_BALLOT(int predicate, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ unsigned int WARP_BALLOT(int predicate, unsigned int mask = 0xffffffff)
 {
 #if CUDA_VERSION >= 9000
     return __ballot_sync(mask, predicate);

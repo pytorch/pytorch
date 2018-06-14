@@ -6,8 +6,14 @@
 
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
-#include "ATen/optional.h"
 #include "ATen/cpu/vec256/vec256.h"
+#include "ATen/optional.h"
+
+#ifdef __PPC64__
+using default_partitioner_type = tbb::simple_partitioner;
+#else
+using default_partitioner_type = tbb::affinity_partitioner;
+#endif
 
 namespace at { namespace native { namespace {
 
@@ -96,7 +102,7 @@ struct Reduction {
       sum = std::accumulate(buf, buf + WIDTH, scalar_t(ident), ReduceScalar());
     }
 
-    for (int i = k * WIDTH; i != size; i++) {
+    for (int64_t i = k * WIDTH; i != size; i++) {
       sum = ReduceScalar()(sum, data[i]);
     }
     return sum;

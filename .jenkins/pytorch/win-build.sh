@@ -44,7 +44,15 @@ set MAGMA_HOME=%cd%\\magma
 
 :: Install sccache
 mkdir %CD%\\tmp_bin
-if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe --quiet )
+if "%REBUILD%"=="" (
+  :check_sccache
+  %CD%\\tmp_bin\\sccache.exe --show-stats || (
+    taskkill /im sccache.exe /f /t || ver > nul
+    del %CD%\\tmp_bin\\sccache.exe
+    aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe
+    goto :check_sccache
+  )
+)
 
 :: Install Miniconda3
 if "%REBUILD%"=="" (
@@ -73,7 +81,7 @@ set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 :: Target only our CI GPU machine's CUDA arch to speed up the build
 set TORCH_CUDA_ARCH_LIST=5.2
 
-sccache --stop-server || set ERRORLEVEL=0
+sccache --stop-server
 sccache --start-server
 sccache --zero-stats
 set CC=sccache cl
@@ -87,7 +95,8 @@ if "%REBUILD%"=="" (
   set NO_CUDA=1
   python setup.py install
 )
-if %errorlevel% neq 0 exit /b %errorlevel%
+if errorlevel 1 exit /b 1
+if not errorlevel 0 exit /b 1
 if "%REBUILD%"=="" (
   sccache --show-stats
   sccache --zero-stats

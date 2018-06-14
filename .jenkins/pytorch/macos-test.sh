@@ -1,6 +1,6 @@
 #!/bin/bash
 
-COMPACT_JOB_NAME=pytorch-macos-10.13-py3-build-test
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export PATH="/usr/local/bin:$PATH"
@@ -21,7 +21,7 @@ rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 
-# Build and test PyTorch
+# Test PyTorch
 export MACOSX_DEPLOYMENT_TARGET=10.9
 export CXX=clang++
 export CC=clang

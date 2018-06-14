@@ -9,7 +9,7 @@
 #define TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM(TENSOR1, TENSOR2, TENSOR3, DIMENSION) \
 { \
   int shape_check_flag = 0;                                             \
-  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->_dim(); TH_TENSOR_DIM_APPLY_i++) \
   { \
     if (TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       continue; \
@@ -23,9 +23,9 @@
     } \
   } \
   if (shape_check_flag == 1) { \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
-    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->nDimension); \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->_dim()); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->_dim()); \
+    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->_dim()); \
     THError("Expected %s %s, %s %s and %s %s to have the same size apart from dimension %d", \
             #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str, DIMENSION); \
   } \
@@ -43,26 +43,26 @@
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
 \
-  if( (DIMENSION < 0) || (DIMENSION >= TENSOR1->nDimension) ) \
-    THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, TENSOR1->nDimension); \
+  if( (DIMENSION < 0) || (DIMENSION >= TENSOR1->_dim()) ) \
+    THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, TENSOR1->_dim()); \
   int same_dims = 1;                                                    \
-  if( TENSOR1->nDimension != TENSOR2->nDimension ) {                    \
+  if( TENSOR1->_dim() != TENSOR2->_dim() ) {                    \
     same_dims = 0;                                                      \
   } \
-  if( TENSOR1->nDimension != TENSOR3->nDimension ) { \
+  if( TENSOR1->_dim() != TENSOR3->_dim() ) { \
     same_dims = 0;                                   \
   } \
   if (same_dims == 0) { \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
-    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->nDimension); \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->_dim()); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->_dim()); \
+    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->_dim()); \
     THError("inconsistent tensor size, expected %s %s, %s %s and %s %s to have the same " \
             "number of dimensions", #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str); \
   }                                                                     \
   SIZE_CHECK(TENSOR1, TENSOR2, TENSOR3, DIMENSION)                      \
 \
-  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR1->nDimension)); \
-  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR1->_dim())); \
+  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->_dim(); TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
   TENSOR1##_data = (TENSOR1)->storage->data<TYPE1>()+(TENSOR1)->storageOffset; \
@@ -81,14 +81,14 @@
   { \
     CODE \
 \
-    if(TENSOR1->nDimension == 1) \
+    if(TENSOR1->_dim() == 1) \
        break; \
  \
-    for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+    for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->_dim(); TH_TENSOR_DIM_APPLY_i++) \
     { \
       if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       { \
-        if(TH_TENSOR_DIM_APPLY_i == TENSOR1->nDimension-1) \
+        if(TH_TENSOR_DIM_APPLY_i == TENSOR1->_dim()-1) \
         { \
           TH_TENSOR_DIM_APPLY_hasFinished = 1; \
           break; \
@@ -103,7 +103,7 @@
 \
       if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR1->size[TH_TENSOR_DIM_APPLY_i]) \
       { \
-        if(TH_TENSOR_DIM_APPLY_i == TENSOR1->nDimension-1) \
+        if(TH_TENSOR_DIM_APPLY_i == TENSOR1->_dim()-1) \
         { \
           TH_TENSOR_DIM_APPLY_hasFinished = 1; \
           break; \
@@ -150,29 +150,29 @@
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
 \
-  if( (DIMENSION < 0) || (DIMENSION >= TENSOR1->nDimension) ) \
-    THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, TENSOR1->nDimension); \
-  if( TENSOR1->nDimension != TENSOR2->nDimension ) {                    \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+  if( (DIMENSION < 0) || (DIMENSION >= TENSOR1->_dim()) ) \
+    THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, TENSOR1->_dim()); \
+  if( TENSOR1->_dim() != TENSOR2->_dim() ) {                    \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->_dim()); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->_dim()); \
     THError("inconsistent tensor size, expected %s %s and %s %s to have the same " \
             "number of dimensions", #TENSOR1, T1buff.str, #TENSOR2, T2buff.str);        \
   }                                                                     \
   TH_UNUSED int shape_check_flag = 0;                                             \
-  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->_dim(); TH_TENSOR_DIM_APPLY_i++) \
   { \
     if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       continue; \
     if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) { \
-      THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
-      THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+      THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->_dim()); \
+      THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->_dim()); \
       THError("Expected %s %s and %s %s to have the same size in dimension %d", \
               #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, DIMENSION);   \
     }                                                                   \
   } \
 \
-  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR1->nDimension)); \
-  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR1->_dim())); \
+  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->_dim(); TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
   TENSOR1##_data = (TENSOR1)->storage->data<TYPE1>()+(TENSOR1)->storageOffset; \
@@ -187,14 +187,14 @@
   { \
     CODE \
 \
-    if(TENSOR1->nDimension == 1) \
+    if(TENSOR1->_dim() == 1) \
        break; \
  \
-    for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+    for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->_dim(); TH_TENSOR_DIM_APPLY_i++) \
     { \
       if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       { \
-        if(TH_TENSOR_DIM_APPLY_i == TENSOR1->nDimension-1) \
+        if(TH_TENSOR_DIM_APPLY_i == TENSOR1->_dim()-1) \
         { \
           TH_TENSOR_DIM_APPLY_hasFinished = 1; \
           break; \
@@ -208,7 +208,7 @@
 \
       if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR1->size[TH_TENSOR_DIM_APPLY_i]) \
       { \
-        if(TH_TENSOR_DIM_APPLY_i == TENSOR1->nDimension-1) \
+        if(TH_TENSOR_DIM_APPLY_i == TENSOR1->_dim()-1) \
         { \
           TH_TENSOR_DIM_APPLY_hasFinished = 1; \
           break; \
@@ -274,25 +274,25 @@
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
 \
-  if( (DIMENSION < 0) || (DIMENSION >= TENSOR->nDimension) ) \
+  if( (DIMENSION < 0) || (DIMENSION >= TENSOR->_dim()) ) \
     THError("invalid dimension"); \
 \
   TENSOR##_data = (TENSOR)->storage->data<TYPE>()+(TENSOR)->storageOffset; \
   TENSOR##_stride = (TENSOR)->stride[DIMENSION]; \
   TENSOR##_size = TENSOR->size[DIMENSION]; \
   /* Counter stores the indices into the Tensor at any time */ \
-  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR->nDimension)); \
-  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR->_dim())); \
+  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR->_dim(); TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
   while(!TH_TENSOR_DIM_APPLY_hasFinished) \
   { \
     CODE \
 \
-    if(TENSOR->nDimension == 1) \
+    if(TENSOR->_dim() == 1) \
        break; \
  \
-    for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+    for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR->_dim(); TH_TENSOR_DIM_APPLY_i++) \
     { \
        /* Check if the index is equal to DIMENSION. We don't need to update the */ \
        /* offset if this is the case, and can consider the next index. However, */ \
@@ -300,7 +300,7 @@
        /* we have parsed the entire tensor and can exit */ \
       if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       { \
-        if(TH_TENSOR_DIM_APPLY_i == TENSOR->nDimension-1) \
+        if(TH_TENSOR_DIM_APPLY_i == TENSOR->_dim()-1) \
         { \
           TH_TENSOR_DIM_APPLY_hasFinished = 1; \
           break; \
@@ -315,7 +315,7 @@
       if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR->size[TH_TENSOR_DIM_APPLY_i]) \
       { \
         /* Handled TENSOR_size(dim) iterations for DIM_APPLY_i. If this is the last dimension, exit */ \
-        if(TH_TENSOR_DIM_APPLY_i == TENSOR->nDimension-1) \
+        if(TH_TENSOR_DIM_APPLY_i == TENSOR->_dim()-1) \
         { \
           TH_TENSOR_DIM_APPLY_hasFinished = 1; \
           break; \

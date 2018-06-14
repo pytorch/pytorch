@@ -186,7 +186,7 @@ class CWrapPlugin(object):
         """
         pass
 
-    def process_full_file(self, code):
+    def process_full_file(self, code, template_path):
         """Used to modify the code for the entire output file.
 
         The last thing any plugin can do. Code contains the results of wrapping

@@ -42,6 +42,10 @@
 #include "cudnn.h"
 #endif
 
+#ifdef WITH_C10D
+#include "torch/csrc/distributed/c10d/c10d.h"
+#endif
+
 #define WITH_NUMPY_IMPORT_ARRAY
 #include "torch/csrc/utils/numpy_stub.h"
 
@@ -487,6 +491,9 @@ static PyObject* initModule() {
 #ifdef WITH_DISTRIBUTED
   THPUtils_addPyMethodDefs(methods, THDPModule_methods());
 #endif
+#ifdef WITH_C10D
+  THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
+#endif
 
 #if PY_MAJOR_VERSION == 2
   ASSERT_TRUE(module = Py_InitModule("torch._C", methods.data()));
@@ -510,8 +517,11 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
-  torch::jit::initJITBindings(module);
+  // NOTE: We need to be able to access OperatorExportTypes from ONNX for use in
+  // the export side of JIT, so this ONNX init needs to appear before the JIT
+  // init.
   torch::onnx::initONNXBindings(module);
+  torch::jit::initJITBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
 #ifdef WITH_CUDA

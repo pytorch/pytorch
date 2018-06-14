@@ -7,8 +7,17 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/named_value.h"
 
+#include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+
 #include <ATen/optional.h>
+#include <ATen/ArrayRef.h>
+
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 // This file contains classes which assist in desugaring Python style
 // modules and their methods into flattened graphs which don't have any
@@ -189,69 +198,12 @@ private:
   std::unique_ptr<at::Tensor> parameter;
 };
 
-// simple ordered dict used only in Module
-// contains only the minimum necessary functionality for Module
-template<typename T>
-struct OrderedDict {
-  OrderedDict(const char * what)
-  : what(what) {}
-  // note: slight difference from python here.
-  // we do not allow for insertion of an already existing value,
-  // because we not allow allow methods or submodules to be updated
-  // once created
-  T& insert(const std::string& name,  T&& value) {
-    if(index_.count(name) != 0) {
-      std::stringstream ss;
-      ss << "module " << what << "'" << name << "' already defined.";
-      throw std::runtime_error(ss.str());
-    }
-    values_.push_back(std::move(value));
-    index_[name] = values_.size() - 1;
-    return values_.back();
-  }
-  at::optional<T&> find(const std::string& str) {
-    auto it = index_.find(str);
-    if(it == index_.end())
-      return at::nullopt;
-    return at::optional<T&>(values_.at(it->second));
-  }
-  at::optional<const T&> find(const std::string& str) const {
-    auto it = index_.find(str);
-    if(it == index_.end())
-      return at::nullopt;
-    return at::optional<const T&>(values_.at(it->second));
-  }
-  T& get(const std::string& name) {
-    if(auto v = find(name)) {
-      return *v;
-    }
-    std::stringstream ss;
-    ss << "module " << what << "'" << name << "' is not defined.";
-    throw std::runtime_error(ss.str());
-  }
-  const T& get(const std::string& name) const {
-    if(auto v = find(name)) {
-      return *v;
-    }
-    std::stringstream ss;
-    ss << "module " << what << "'" << name << "' is not defined.";
-    throw std::runtime_error(ss.str());
-  }
-  const std::vector<T>& values() const {
-    return values_;
-  }
-private:
-  std::unordered_map<std::string, size_t> index_;
-  std::vector<T> values_;
-  const char * what;
-};
-
 struct Module : public std::enable_shared_from_this<Module> {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
   Module()
-  : modules("modules")
-  , parameters("parameters")
-  , methods("methods")
+  : modules("Module")
+  , parameters("Parameter")
+  , methods("Method")
   , optimize(true) {}
 
   // note this doesn't change the flags of existing methods just ones
@@ -296,7 +248,7 @@ struct Module : public std::enable_shared_from_this<Module> {
   }
 
   // each module owns its method. The reference returned here
-  // is guarenteed to stay valid until this module has been destoryed
+  // is guarenteed to stay valid until this module has been destroyed
   Method& get_method(const std::string& name) const {
     return *methods.get(name);
   }
@@ -305,39 +257,38 @@ struct Module : public std::enable_shared_from_this<Module> {
     return modules.get(name).module;
   }
 
-  const std::vector<NamedModule>& get_modules() const {
-    return modules.values();
+  const detail::OrderedDict<std::string, NamedModule>& get_modules() const {
+    return modules;
   }
-  const  std::vector<NamedParameter>& get_parameters() const {
-    return parameters.values();
+  const detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
+    return parameters;
   }
-  const  std::vector<std::unique_ptr<Method>>& get_methods() const {
-    return methods.values();
+  const detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
+    return methods;
   }
 
-
-  at::optional<NamedParameter&> find_parameter(const std::string& name) {
+  NamedParameter* find_parameter(const std::string& name) {
     return parameters.find(name);
   }
-  at::optional<NamedModule&> find_module(const std::string& name) {
+  NamedModule* find_module(const std::string& name) {
     return modules.find(name);
   }
-  at::optional<Method&> find_method(const std::string& name) {
-    if(auto pm = methods.find(name))
-      return at::optional<Method&>(**pm);
-    return at::nullopt;
+  Method* find_method(const std::string& name) {
+    if (auto* pm = methods.find(name)) {
+      return pm->get();
+    }
+    return nullptr;
   }
 
-
-private:
+ private:
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  OrderedDict<NamedModule> modules;
-  OrderedDict<NamedParameter> parameters;
-  OrderedDict<std::unique_ptr<Method>> methods;
+  detail::OrderedDict<std::string, NamedModule> modules;
+  detail::OrderedDict<std::string, NamedParameter> parameters;
+  detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
 

@@ -24,15 +24,14 @@ bool hasUsedHandle(Node *node) {
 } // anonymous namespace
 
 // Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
-// Argument aten indicates whether we should export ops as "ATen" ONNX ops if possible.
-std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, bool aten) {
+std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto new_graph = std::make_shared<Graph>(graph->scope_root());
   std::unordered_map<Value*, Value*> env;
-  BlockToONNX(graph->block(), new_graph->block(), aten, env);
+  BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
   return new_graph;
 }
 
-void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_map<Value*, Value*> env) {
+void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExportTypes operator_export_type, std::unordered_map<Value*, Value*> env) {
   torch::autograd::SymbolicContext ctx;
   ctx.block = new_block;
 
@@ -67,7 +66,7 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
       ss << num_old_outputs << ", but got " << outputs.size() << ")";
       throw std::runtime_error(ss.str());
     }
-    for (std::size_t i = 0; i < num_old_outputs; ++i) {
+    for (size_t i = 0; i < num_old_outputs; ++i) {
       auto old = old_outputs[i];
       if (outputs[i]) {
         // Allow symbolic() to skip specifying the type of the return node.
@@ -144,7 +143,7 @@ void BlockToONNX(Block* old_block, Block* new_block, bool aten, std::unordered_m
 
     WithInsertPoint insert_point_guard(ctx.block);
     WithCurrentScope scope_guard(*ctx.block->owningGraph(), n->scope());
-    py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.block->owningGraph(), n, py_inputs, env, aten);
+    py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.block->owningGraph(), n, py_inputs, env, operator_export_type);
 
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)

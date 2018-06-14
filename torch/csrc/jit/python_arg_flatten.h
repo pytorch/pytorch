@@ -24,7 +24,7 @@ struct IODescriptor {
              std::tie(o.device, o.requires_grad, o.type, o.sizes);
     }
 
-    static std::size_t hash(const VariableMetadata& m) {
+    static size_t hash(const VariableMetadata& m) {
       return get_hash(m.sizes, m.device, m.requires_grad, m.type);
     }
 
@@ -39,7 +39,7 @@ struct IODescriptor {
            std::tie(o.structure, o.metadata, o.grad_enabled);
   }
 
-  static std::size_t hash(const IODescriptor& o) {
+  static size_t hash(const IODescriptor& o) {
     return get_hash(o.structure, o.metadata, o.grad_enabled);
   }
 

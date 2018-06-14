@@ -1,11 +1,12 @@
 #ifndef CAFFE2_OPERATORS_ELEMENTWISE_OP_TEST_H_
 #define CAFFE2_OPERATORS_ELEMENTWISE_OP_TEST_H_
 
+#include "caffe2/operators/elementwise_ops.h"
+
 #include <iostream>
 #include <string>
 #include <vector>
 
-#include "caffe2/operators/elementwise_op.h"
 #include <gtest/gtest.h>
 
 template <typename Context, typename T>

@@ -23,6 +23,23 @@ gcc --version
 # TODO: Don't run this...
 pip install -r requirements.txt || true
 
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export HCC_AMDGPU_TARGET=gfx900
+  export LANG=C.UTF-8
+  export LC_ALL=C.UTF-8
+
+  # TODO: Install pyHIPIFY in the docker image
+  rm -rf pyHIPIFY || true
+  git clone https://github.com/ROCm-Developer-Tools/pyHIPIFY.git
+  chmod a+x pyHIPIFY/*.py
+  sudo cp -p pyHIPIFY/*.py /opt/rocm/bin
+  rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
+  python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
+  HIPCC_VERBOSE=1 VERBOSE=1 WITH_ROCM=1 python setup.py install
+  exit
+fi
+
+# TODO: Don't install this here
 if ! which conda; then
   pip install mkl mkl-devel
 fi
@@ -69,7 +86,7 @@ fi
 
 # Test no-Python build
 if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-  echo "Building libtorch with NO_PYTHON"
+  echo "Building libtorch"
   # NB: Install outside of source directory (at the same level as the root
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
   WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$PWD/../cpp-build"

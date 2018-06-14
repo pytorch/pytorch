@@ -1264,6 +1264,7 @@ inline void Block::destroy() {
  // execute a Python function, used for Ops we can't optimize but that we want to optimize around
 struct PythonOp : public Node {
   static constexpr Symbol Kind = prim::PythonOp;
+
   PythonOp(Graph * graph)
   : Node(graph,prim::PythonOp) {}
   PythonOp* init(
@@ -1275,17 +1276,6 @@ struct PythonOp : public Node {
     this->cconv = cconv;
     return this;
   }
-  virtual Node * allocNewInstance(Graph * g) override {
-    return new PythonOp(g);
-  }
-  // recover the autograd.Function instance, if this PythonOp's function
-  // was originally SomeFunction.apply
-  // used in ONNX for discovering symbolics
-  at::optional<THPObjectPtr> autogradFunction() const;
-
-  //TODO: make this non-autograd specific
-  //remove is_legacy, avoid THPObjectPtr to avoid big PyTorch dependency
-
   // The Python object which contains the implementation of this function.
   // This is either a class (non-legacy) or an object (legacy).  See
   // TraceInterpreterState for execution semantics.
@@ -1297,14 +1287,25 @@ struct PythonOp : public Node {
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
-  std::string name() const;
-  virtual void cloneFrom(Node * other_) override;
+  virtual std::string name() const = 0;
+  virtual void writeScalars(std::ostream& out) const = 0;
+  virtual void cloneFrom(Node * other_) override = 0;
+  virtual Node * allocNewInstance(Graph * g) override = 0;
+  // recover the autograd.Function instance, if this PythonOp's function
+  // was originally SomeFunction.apply
+  // used in ONNX for discovering symbolics
+  virtual at::optional<THPObjectPtr> autogradFunction() const = 0;
+
 };
+// patched in when python bindings are loaded
+PythonOp* allocPythonOp(Graph* g);
+void setAllocPythonOp(PythonOp* (*v)(Graph* g));
+
 inline Node* Graph::createPythonOp(
     THPObjectPtr&& pyobj,
     const std::string& cconv,
     pyobj_list&& scalar_args) {
-  auto op = new PythonOp(this);
+  auto op = allocPythonOp(this);
   return op->init(
       std::move(pyobj),
       cconv,

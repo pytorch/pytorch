@@ -7,7 +7,7 @@
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
 #include "ATen/Generator.h"
-
+#include "ATen/Deprecated.h"
 
 namespace at {
 

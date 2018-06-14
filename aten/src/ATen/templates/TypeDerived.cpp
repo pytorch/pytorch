@@ -32,7 +32,7 @@ $extra_cuda_headers
 namespace at {
 
 ${Type}::${Type}(Context* context)
-: Type(context, /*is_variable_or_undefined=*/false) {}
+  : Type(context, /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
@@ -78,7 +78,7 @@ TypeID ${Type}::ID() const {
   return ${TypeID};
 }
 
-std::size_t ${Type}::elementSizeInBytes() const {
+size_t ${Type}::elementSizeInBytes() const {
   return sizeof(${ScalarType});
 }
 

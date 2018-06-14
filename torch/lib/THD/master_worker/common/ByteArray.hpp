@@ -6,16 +6,16 @@
 namespace thd { namespace rpc {
 
 struct ByteArray {
-  using size_type = std::size_t;
+  using size_type = size_t;
 
   ByteArray();
-  ByteArray(std::size_t size);
-  ByteArray(const char* arr, std::size_t size);
+  ByteArray(size_t size);
+  ByteArray(const char* arr, size_t size);
   ByteArray(ByteArray&& arr);
   ByteArray(const ByteArray& arr);
   ~ByteArray();
 
-  ByteArray& append(const char* arr, std::size_t size);
+  ByteArray& append(const char* arr, size_t size);
   const char* data() const;
   size_type length() const;
 

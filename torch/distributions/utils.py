@@ -96,7 +96,7 @@ def _sum_rightmost(value, dim):
     return value.reshape(required_shape).sum(-1)
 
 
-def log_sum_exp(tensor, keepdim=True):
+def _log_sum_exp(tensor, keepdim=True):
     r"""
     Numerically stable implementation for the `LogSumExp` operation. The
     summing is done along the last dimension.

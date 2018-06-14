@@ -290,20 +290,6 @@ static bool isTensorSubtype(Value* v) {
   return v->type()->isSubtypeOf(*DynamicType::get());
 }
 
-// if a value is a constant then try to turn into type T using the
-// same rules as the interpreter
-template<typename T>
-at::optional<T> constant_as(Value* v) {
-  if(v->node()->kind() != prim::Constant)
-    return at::nullopt;
-  auto tensor = v->node()->t(attr::value);
-  try {
-    return tensor_as<T>(std::move(tensor));
-  } catch (tensor_conversion_error& err) {
-    return at::nullopt;
-  }
-}
-
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<at::IntList>(input);
   if(list)
@@ -324,9 +310,21 @@ void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
   JIT_ASSERT(!node->hasAttributes());
   std::vector<Value*> new_inputs;
   Attributes<Node> attributes;
-  for(size_t i = 0; i < node->inputs().size(); ++i) {
+  for(size_t i = 0, n = 0; i < schema.arguments.size(); ++i) {
     const auto& arg = schema.arguments[i];
-    auto input = node->input(i);
+    // this was a builtin with a vararg list lowered,
+    if(arg.type->kind() == TypeKind::ListType) {
+      // we do not support constant lifting of the arg itself
+      if(arg.attribute_info)
+        return;
+      // but we do support it for other values so we need to skip all the vararg nodes:
+      size_t vararg_list_size = node->inputs().size() - (schema.arguments.size() - 1);
+      while(n < i + vararg_list_size) {
+        new_inputs.push_back(node->input(n++));
+      }
+      continue;
+    }
+    auto input = node->input(n++);
     if(arg.attribute_info) {
       switch(arg.attribute_info->kind) {
         case AttributeKind::i: {

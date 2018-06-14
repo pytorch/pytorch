@@ -98,6 +98,8 @@ struct DynamicType : public Type {
   static TypePtr get();
 };
 
+struct TensorType;
+using TensorTypePtr = std::shared_ptr<TensorType>;
 // This node represents a single Tensor value with a specific size
 struct TensorType : public Type {
   friend struct Type;
@@ -121,8 +123,8 @@ struct TensorType : public Type {
 
   at::ScalarType scalarType() const { return scalar_type_; }
   int device() const { return device_; }
-  const std::vector<std::int64_t>& sizes() const { return sizes_; }
-  const std::vector<std::int64_t>& strides() const { return strides_; }
+  const std::vector<int64_t>& sizes() const { return sizes_; }
+  const std::vector<int64_t>& strides() const { return strides_; }
 
   TypePtr withSizesStrides(at::IntList sizes, at::IntList strides) const {
     return std::make_shared<TensorType>(scalar_type_, device_, sizes, strides);
@@ -132,11 +134,18 @@ struct TensorType : public Type {
     return withSizesStrides(sizes, TensorType::contiguousStridesOf(sizes));
   }
 
-  TypePtr contiguous() const {
+  TensorTypePtr contiguous() const {
     auto t = std::make_shared<TensorType>(*this);
     t->strides_ = TensorType::contiguousStridesOf(sizes_);
     return t;
   }
+
+  TensorTypePtr toScalarType(at::ScalarType type){
+    auto t = std::make_shared<TensorType>(*this);
+    t->scalar_type_ = type;
+    return t;
+  }
+
   virtual bool operator==(const Type& rhs) const override {
     if(rhs.kind() != kind())
       return false;
@@ -163,7 +172,7 @@ private:
     if(sizes.size() == 0) // zero-dim case
       return strides;
     strides.back() = 1;
-    for(std::size_t i = strides.size() - 1; i > 0; i--) {
+    for(size_t i = strides.size() - 1; i > 0; i--) {
       strides[i-1] = strides[i] * sizes[i];
     }
     return strides;

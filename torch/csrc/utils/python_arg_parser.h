@@ -162,7 +162,7 @@ struct FunctionParameter {
 template<int N>
 inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
   if (N < max_args) {
-    throw ValueError("dst does not have enough capacity, expected %d (got %d)",
+    throw ValueError("PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
         (int)max_args, N);
   }
   return raw_parse(args, kwargs, dst.args);
@@ -176,7 +176,7 @@ inline at::Tensor PythonArgs::tensor(int i) {
     // a test for Py_None here; instead, you need to mark the argument
     // as *allowing none*; you can do this by writing 'Tensor?' instead
     // of 'Tensor' in the ATen metadata.
-    throw TypeError("expected Variable as argument %d, but got %s", i,
+    throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(args[i])->tp_name);
   }
   return reinterpret_cast<THPVariable*>(args[i])->cdata;
@@ -208,7 +208,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
-      throw TypeError("expected Variable as element %d in argument %d, but got %s",
+      throw TypeError("expected Tensor as element %d in argument %d, but got %s",
                  idx, i, Py_TYPE(args[i])->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
@@ -229,7 +229,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
-      throw TypeError("expected Variable as element %d in argument %d, but got %s",
+      throw TypeError("expected Tensor as element %d in argument %d, but got %s",
                  idx, i, Py_TYPE(args[i])->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;

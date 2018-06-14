@@ -15,7 +15,9 @@ namespace torch { namespace autograd {
 
 struct EvalOutput : Function {
   explicit EvalOutput(const Edge& next_edge_)
-      : Function(/*num_inputs=*/1), next_edge(next_edge_) {}
+      : Function(), next_edge(next_edge_) {
+    add_input_metadata(undefined_input());
+  }
 
   virtual variable_list apply(const variable_list& inputs) override {
     throw std::logic_error("EvalOutput::apply() called");

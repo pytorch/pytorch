@@ -35,8 +35,8 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
   NNPACKConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws),
         algorithm_(getConvolutionAlgorithm()),
-        transformStrategy_(getConvolutionTransformStrategy()),
         activation_(getActivationType()),
+        transformStrategy_(getConvolutionTransformStrategy()),
         ws_(ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,

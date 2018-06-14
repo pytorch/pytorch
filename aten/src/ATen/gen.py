@@ -99,7 +99,6 @@ class FileManager(object):
             raise Exception("Outputs declared with 'will_write' were " +
                             "never written: {}".format(self.filenames))
 
-
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
     TEMPLATE_PATH + "/GeneratorDerived.h")
@@ -114,6 +113,7 @@ TYPE_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.cpp")
 
 TENSOR_DERIVED_CPP = CodeTemplate.from_file(
     TEMPLATE_PATH + "/TensorDerived.cpp")
+SPARSE_TENSOR_DERIVED_CPP = TENSOR_DERIVED_CPP  # for now, anyhoo
 TENSOR_SPARSE_CPP = CodeTemplate.from_file(
     TEMPLATE_PATH + "/TensorSparse.cpp")
 TENSOR_DENSE_CPP = CodeTemplate.from_file(
@@ -123,6 +123,7 @@ REGISTER_CUDA_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.h")
 REGISTER_CUDA_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCUDA.cpp")
 
 TENSOR_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorDerived.h")
+SPARSE_TENSOR_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTensorDerived.h")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
@@ -327,16 +328,17 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         fm.write(env['Storage'] + ".cpp", STORAGE_DERIVED_CPP, env)
         fm.write(env['Storage'] + ".h", STORAGE_DERIVED_H, env)
         env['TensorDenseOrSparse'] = TENSOR_DENSE_CPP.substitute(env)
-        env['THTensor_nDimension'] = 'tensor->nDimension'
     else:
         env['TensorDenseOrSparse'] = TENSOR_SPARSE_CPP.substitute(env)
-        env['THTensor_nDimension'] = 'tensor->nDimensionI + tensor->nDimensionV'
 
     fm.write(env['Type'] + ".cpp", TYPE_DERIVED_CPP, env)
     fm.write(env['Type'] + ".h", TYPE_DERIVED_H, env)
 
     fm.write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP, env)
-    fm.write(env['Tensor'] + ".h", TENSOR_DERIVED_H, env)
+    if density != 'SPARSE':
+        fm.write(env['Tensor'] + ".h", TENSOR_DERIVED_H, env)
+    else:
+        fm.write(env['Tensor'] + ".h", SPARSE_TENSOR_DERIVED_H, env)
 
     type_register = TYPE_REGISTER.substitute(backend=env['Backend'], scalar_type=scalar_name, type_name=env['Type'])
     if env['DenseBackend'] == 'CPU':

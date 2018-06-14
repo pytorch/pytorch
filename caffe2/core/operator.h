@@ -189,7 +189,7 @@ class OperatorBase : public Observable<OperatorBase> {
 
     bool found_input;
     if (err->caller() != nullptr) {
-      for (int i = 0; i < inputs_.size(); i++) {
+      for (size_t i = 0; i < inputs_.size(); i++) {
         if (inputs_[i]->GetRaw() == err->caller()) {
           found_input = true;
           err->AppendMessage(
@@ -197,7 +197,7 @@ class OperatorBase : public Observable<OperatorBase> {
           break;
         }
       }
-      for (int i = 0; i < outputs_.size(); i++) {
+      for (size_t i = 0; i < outputs_.size(); i++) {
         if (outputs_[i]->GetRaw() == err->caller()) {
           if (found_input) {
             err->AppendMessage("\n OR ");
@@ -782,6 +782,30 @@ CAFFE_DECLARE_REGISTRY(
 // Macros for cudnn since we use it often
 #define REGISTER_CUDNN_OPERATOR(name, ...) \
   REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__)
+
+// Macros for HIP operators
+CAFFE_DECLARE_REGISTRY(
+    HIPOperatorRegistry,
+    OperatorBase,
+    const OperatorDef&,
+    Workspace*);
+#define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
+  CAFFE_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
+#define REGISTER_HIP_OPERATOR(name, ...)                           \
+  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
+  }                                                                 \
+  CAFFE_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
+#define REGISTER_HIP_OPERATOR_STR(str_name, ...) \
+  CAFFE_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
+
+#define REGISTER_HIP_OPERATOR_WITH_ENGINE(name, engine, ...) \
+  CAFFE_REGISTER_CLASS(                                       \
+      HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+
+#define REGISTER_MIOPEN_OPERATOR(name, ...) \
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__)
 
 // StaticLinkingProtector is a helper class that ensures that the Caffe2
 // library is linked correctly with whole archives (in the case of static

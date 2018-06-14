@@ -17,8 +17,8 @@ void Linear::reset() {
   bias_ = register_parameter("bias", at::CPU(at::kFloat).empty(out_));
 
   const auto stdv = 1.0 / std::sqrt(weight_.size(1));
-  for (auto& p : parameters()) {
-    p.second.data().uniform_(-stdv, stdv);
+  for (auto& p : this->parameters()) {
+    p->data().uniform_(-stdv, stdv);
   }
 }
 

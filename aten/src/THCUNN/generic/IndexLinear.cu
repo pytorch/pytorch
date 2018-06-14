@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/IndexLinear.cu"
 #else
 
-static bool THCUNN_checkKeysValues(THCState *state, THCudaLongTensor* keys,
+static bool THNN_(checkKeysValues)(THCState *state, THCudaLongTensor* keys,
                                    THCTensor* values)
 {
     return THCudaLongTensor_size(state, keys, 0) == THCTensor_(nElement)(state, values)
@@ -38,7 +38,7 @@ void THNN_(IndexLinear_updateOutput)(
                "weight matrix must be contiguous");
     THArgCheck(THCTensor_(isContiguous)(state, bias), 8,
                "bias vector must be contiguous");
-    THArgCheck(THCUNN_checkKeysValues(state, keys, values), 1,
+    THArgCheck(THNN_(checkKeysValues)(state, keys, values), 1,
                "Keys and values should have the same number of elements");
 
     int64_t batchSize = sizes->size[0];
@@ -127,7 +127,7 @@ void THNN_(IndexLinear_accGradParameters)(
                "bias vector must be contiguous");
     THArgCheck(THCTensor_(isContiguous)(state, valuesBuffer), 11,
                "valuesBuffer vector must be contiguous");
-    THArgCheck(THCUNN_checkKeysValues(state, keys, values), 1,
+    THArgCheck(THNN_(checkKeysValues)(state, keys, values), 1,
                "Keys and values should have the same number of elements");
 
     THCTensor_(resize2d)(state, gradWeight, keysSize, outDim * (maxNormalize > 0 ? 2 : 1));
@@ -179,7 +179,7 @@ void THNN_(IndexLinear_accUpdateGradParameters)(
                "weight matrix must be contiguous");
     THArgCheck(THCTensor_(isContiguous)(state, bias), 8,
                "bias vector must be contiguous");
-    THArgCheck(THCUNN_checkKeysValues(state, keys, values), 1,
+    THArgCheck(THNN_(checkKeysValues)(state, keys, values), 1,
                "Keys and values should have the same number of elements");
 
     int64_t batchSize = sizes->size[0];

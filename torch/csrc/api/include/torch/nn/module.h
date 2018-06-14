@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/detail/ordered_dict.h>
+#include <torch/nn/cursor.h>
 #include <torch/tensor.h>
 
 #include <torch/csrc/autograd/variable.h>
@@ -11,6 +13,13 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+
+namespace torch {
+namespace detail {
+template <typename T>
+class CursorBase;
+} // namespace detail
+} // namespace torch
 
 namespace torch {
 namespace nn {
@@ -30,18 +39,26 @@ class Module {
   /// Returns the name of the `Module`.
   const std::string& name() const noexcept;
 
+  /// Performs a recursive deep copy of the module and all its registered
+  /// parameters, buffers and submodules.
   virtual std::shared_ptr<Module> clone() const;
 
-  // Only construct parameters in initialize_parameters, and
-  // containers in initialize_containers. Most of the time, the containers are
-  // the only thing you need to add.
-  // You are guaranteed that containers are added before parameters.
-  virtual void initialize_containers() {}
-  virtual void initialize_parameters() {}
-  virtual void reset_parameters() {}
+  /// Provides a means to traverse the `Module` tree.
+  ModuleCursor modules();
+  ConstModuleCursor modules() const;
 
-  std::map<std::string, Variable> parameters() const;
-  Variable& param(std::string const&);
+  /// Traverses the (immediate) children of the `Module`.
+  ModuleCursor children();
+  ConstModuleCursor children() const;
+
+  /// Provides a means to recursively access the parameters of the `Module`
+  /// tree.
+  ParameterCursor parameters();
+  ConstParameterCursor parameters() const;
+
+  /// Provides a means to recursively access the buffers of the `Module` tree.
+  BufferCursor buffers();
+  ConstBufferCursor buffers() const;
 
   /// Enables training mode.
   virtual void train();
@@ -73,46 +90,51 @@ class Module {
   template <class Archive>
   void save(Archive& ar) const {
     auto params = parameters();
-    std::size_t size = params.size();
+    size_t size = params.size();
     ar(size);
     for (auto& p : params) {
-      ar(p.first, p.second);
+      ar(p.key, p.value);
     }
   }
 
   template <class Archive>
   void load(Archive& ar) {
     auto params = parameters();
-    std::size_t size;
+    size_t size;
     ar(size);
     std::string name;
-    for (std::size_t i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++) {
       ar(name);
       ar(params[name]);
     }
   }
 
  protected:
-  Variable register_parameter(const std::string& name, at::Tensor tensor);
-  Variable register_buffer(const std::string& name, at::Tensor tensor);
+  autograd::Variable& register_parameter(std::string name, at::Tensor tensor);
+  autograd::Variable& register_buffer(std::string name, at::Tensor tensor);
 
   template <typename ModuleType>
   std::shared_ptr<ModuleType> register_module(
-      const std::string& name,
-      const std::shared_ptr<ModuleType>& module) {
-    const auto pair = children_.emplace(name, module);
-    AT_CHECK(pair.second, "Module has already been registered");
-    return module;
+      std::string name,
+      std::shared_ptr<ModuleType> module) {
+    auto& base_module = children_.insert(std::move(name), std::move(module));
+    return std::static_pointer_cast<ModuleType>(base_module);
   }
 
  private:
+  template <typename T>
+  using OrderedDict = torch::detail::OrderedDict<std::string, T>;
+
   template <typename Derived>
   friend class CloneableModule;
+  template <typename T>
+  friend class detail::CursorBase;
 
   virtual void clone_(Module& other);
 
-  std::unordered_map<std::string, Variable> parameters_;
-  std::unordered_map<std::string, std::shared_ptr<Module>> children_;
+  OrderedDict<autograd::Variable> parameters_;
+  OrderedDict<autograd::Variable> buffers_;
+  OrderedDict<std::shared_ptr<Module>> children_;
 
   /// The module's name (e.g. "LSTM").
   mutable at::optional<std::string> name_;
@@ -139,7 +161,7 @@ class CloneableModule : public Module {
   std::shared_ptr<Derived> build() {
     auto module = std::make_shared<Derived>(static_cast<Derived&&>(*this));
     module->reset();
-    return std::move(module);
+    return module;
   }
 
   /// Performs a recursive "deep copy" of the `Module`, such that all parameters
@@ -151,13 +173,11 @@ class CloneableModule : public Module {
     copy->parameters_.clear();
     copy->children_.clear();
     copy->reset();
-    for (auto& parameter : parameters_) {
-      copy->parameters_.at(parameter.first)
-          .data()
-          .copy_(parameter.second.data());
+    for (const auto& parameter : parameters_) {
+      copy->parameters_[parameter.key].data().copy_(parameter->data());
     }
-    for (auto& child : children_) {
-      copy->children_.at(child.first)->clone_(*child.second);
+    for (const auto& child : children_) {
+      copy->children_[child.key]->clone_(*child.value);
     }
     return copy;
   }

@@ -60,7 +60,17 @@ std::ostream& operator<<(std::ostream & out, const TensorDesc & d) {
 
 namespace codegen {
 
+/*with type_as not checking type of its input, a fusion group can have non-fp32 tensor as input.
+Correct code for this case is generated, however, nvrtc does not know how to handle int*_t integer types,
+so typedefs help it handle those cases*/
+
 auto type_declarations_template = CodeTemplate(R"(
+#if defined(__CUDACC_RTC__)
+typedef unsigned char uint8_t; 
+typedef signed char int8_t; 
+typedef short int  int16_t; 
+typedef long long int int64_t; 
+#endif
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
 struct TensorInfo {
@@ -206,10 +216,11 @@ std::string encodeRHS(Node * n) {
     {aten::div, "${0} / ${1}"},
     {aten::eq, "${0} == ${1}"},
     {aten::fmod, "fmodf(${0}, ${1})"},
-    {aten::ge, "${0} >= ${1})"},
+    {aten::ge, "(${0} >= ${1})"},
     {aten::gt, "${0} > ${1}"},
-    {aten::le, "${0} <= ${1})"},
+    {aten::le, "(${0} <= ${1})"},
     {aten::lt, "${0} < ${1}"},
+    {aten::type_as, "(${0})"}, //everything is implicitly convertible to float
     {aten::mul, "${0} * ${1}"},
     {aten::ne, "${0} != ${1}"},
     {aten::remainder, "remainderf(${0}, ${1})"},
@@ -444,9 +455,9 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
     arguments.push_back(ti);
   };
   arguments.push_back(&numel);
-  for (std::size_t i = 0; i < input_desc.size(); ++i)
+  for (size_t i = 0; i < input_desc.size(); ++i)
     addTensorInfo(input_desc[i], inputs[i]);
-  for (std::size_t i = 0; i < output_desc.size(); ++i) {
+  for (size_t i = 0; i < output_desc.size(); ++i) {
     auto & c = concat_desc[i];
     at::Tensor o = outputs[i];
     if(c.nSubtensors == 1) {

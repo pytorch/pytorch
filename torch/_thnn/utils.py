@@ -2,8 +2,12 @@ import os
 import itertools
 import importlib
 
-THNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THNN.h')
-THCUNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THCUNN.h')
+# in fbcode, this fails in some cases, but we don't need it, therefore the try-catch
+try:
+    THNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THNN.h')
+    THCUNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THCUNN.h')
+except Exception:
+    pass
 
 
 def _unpickle_backend(backend_name):

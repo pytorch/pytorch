@@ -98,6 +98,12 @@ non-Variable arguments::
             # Gradients of non-Tensor arguments to forward must be None.
             return grad_output * ctx.constant, None
 
+.. note::
+    Inputs to ``backward``, i.e., :attr:`grad_output`, can also be Tensors that
+    track history. So if ``backward`` is implemented with differentiable
+    operations, (e.g., invocation of another custom
+    :class:`~torch.autograd.function`), higher order derivatives will work.
+
 You probably want to check if the backward method you implemented actually
 computes the derivatives of your function. It is possible by comparing with
 numerical approximations using small finite differences::
@@ -110,6 +116,8 @@ numerical approximations using small finite differences::
     input = (torch.randn(20,20,dtype=torch.double,requires_grad=True), torch.randn(30,20,dtype=torch.double,requires_grad=True))
     test = gradcheck(linear, input, eps=1e-6, atol=1e-4)
     print(test)
+
+See :ref:`grad-check` for more details on finite-difference gradient comparisons.
 
 Extending :mod:`torch.nn`
 -------------------------

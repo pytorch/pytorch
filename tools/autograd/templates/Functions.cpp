@@ -665,6 +665,18 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
   return result;
 }
 
+// Compute derivatives for targets.
+// Assume targets are given as probabilities (i.e. without taking the logarithm).
+Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce) {
+  if (!reduce) {
+    return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+  }
+  if (size_average) {
+    return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
+  }
+  return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+}
+
 Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
   auto z = input.sigmoid();
   return grad * (z - 1) * z;
@@ -1187,10 +1199,6 @@ Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
   return src_expanded.expand_as(target);
 }
 
-// NB: This currently is PURPOSELY outside of the anonymous namespace, because
-// we are manually calling it from some legacy batchnorm invocation code.  Once
-// that code moves into derivatives.yaml, this can be moved into the anonymous
-// namespace, BUT NOT BEFORE THEN.
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & input,
     const Tensor & gamma,

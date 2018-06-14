@@ -75,6 +75,9 @@ class ProcessGroupMPI : public ProcessGroup {
     // if false, the exception function can be called to get details.
     bool isSuccess() const override;
 
+    // No op for the case of MPI
+    virtual void synchronize() override;
+
     // Waits until request completes. Blocking operation
     // Returns false if the work completed with an exception
     bool wait() override;
