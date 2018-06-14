@@ -72,7 +72,6 @@ namespace {
 
 // hummu hummu
 SparseTensor& zero_sparse_(SparseTensor& self) {
-  AT_ASSERT(!self.is_variable_or_undefined());
   AT_ASSERT(self.is_sparse());
 
   // NB: You must use _get_sparse_impl(self)->indices()
@@ -99,7 +98,6 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // --------------------------------------------------------------------
 
 SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
-  AT_ASSERT(!r.is_variable_or_undefined() && !t.is_variable_or_undefined());
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
 
@@ -134,7 +132,6 @@ SparseTensor& mul_sparse_scalar_(SparseTensor& t, Scalar v) {
 // TODO: add in-place variant
 
 SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, Scalar value) {
-  AT_ASSERT(!r.is_variable_or_undefined() && !t_.is_variable_or_undefined());
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t_.is_sparse());
   AT_CHECK(value.toDouble() != 0, "cannot raise to zeroth power on sparse tensor; it would make the result tensor dense");
@@ -164,7 +161,6 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, Scalar value) {
 // --------------------------------------------------------------------
 
 SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
-  AT_ASSERT(!r.is_variable_or_undefined() && !t.is_variable_or_undefined());
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
 
@@ -198,7 +194,6 @@ SparseTensor& div_sparse_scalar_(SparseTensor& t, Scalar value) {
 
 // Only supports floating point, FYI
 Tensor norm_sparse(const SparseTensor& self, Scalar value) {
-  AT_ASSERT(!self.is_variable_or_undefined());
   AT_ASSERT(self.is_sparse());
 
   return self.coalesce()._values().norm(value);
@@ -209,7 +204,6 @@ Tensor norm_sparse(const SparseTensor& self, Scalar value) {
 // --------------------------------------------------------------------
 
 SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
-  AT_ASSERT(!r.is_variable_or_undefined() && !t.is_variable_or_undefined());
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
 
@@ -339,7 +333,6 @@ void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sp
 }
 
 Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef sparse__, Scalar value) {
-  AT_ASSERT(!r.is_variable_or_undefined() && !dense.is_variable_or_undefined() && !sparse__.tref.is_variable_or_undefined());
   AT_ASSERT(!r.is_sparse());
   AT_ASSERT(!dense.is_sparse());
   AT_ASSERT(sparse__.tref.is_sparse());

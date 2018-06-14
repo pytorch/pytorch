@@ -15,7 +15,7 @@ SparseTensorImpl::SparseTensorImpl(Type * type)
     , dimV_(0)
     , indices_(type->toDense().toScalarType(ScalarType::Long).tensor())
     , values_(type->toDense().tensor()) {
-      AT_ASSERT(type->is_sparse() && !type->is_variable_or_undefined());
+      AT_ASSERT(type->is_sparse());
     }
 
 const char * SparseTensorImpl::toString() const {

@@ -76,7 +76,8 @@ Tensor _values_sparse(const SparseTensor& self) {
 
 /* Empty init */
 SparseTensor new_sparse(const SparseType& dtype) {
-  AT_ASSERT(!dtype.is_variable_or_undefined());
+  AT_ASSERT(!dtype.is_undefined());
+  AT_ASSERT(!dtype.is_variable());
   AT_ASSERT(dtype.is_sparse());
   // TODO: Hmm... this const_cast business seems a bit dodgy
   return SparseTensor(new SparseTensorImpl(const_cast<SparseType*>(&dtype)), /* retain */ false);
@@ -319,7 +320,8 @@ void transpose_sparse_(const SparseTensor& self, int64_t d1, int64_t d2) {
 }
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
-  AT_ASSERT(!self.is_variable_or_undefined());
+  AT_ASSERT(self.defined());
+  AT_ASSERT(!self.is_variable());
   AT_ASSERT(self.is_sparse());
 
   if (self._nnz() < 2) {
