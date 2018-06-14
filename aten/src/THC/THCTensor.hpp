@@ -34,7 +34,22 @@ typedef struct THCTensor
     // NOTE: this returns the "old" TH dimension view where no dimensions represents an empty tensor.
     // There will be a dim() function that gives the new view that supports 0-sized dimensions.
     inline int64_t _dim() const {
+      return is_empty() ? 0: dim_;
+    }
+
+    // NOTE: this is the ATen view of the dimensionality, i.e. 0-sized dimensions are supported.
+    inline int64_t dim() const {
       return dim_;
+    }
+
+    // represents that numel() == 0.
+    inline bool is_empty() const {
+      for (int64_t i = 0; i < dim_; ++i) {
+        if (size[i] == 0) {
+          return true;  
+        }
+      }
+      return false;
     }
 } THCTensor;
 
@@ -45,9 +60,9 @@ THC_API THLongStorage *THCTensor_newSizeOf(THCState *state, THCTensor *self);
 
 THC_API THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type);
 
-THC_API void THCTensor_resize(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
 THC_API void THCTensor_resizeAs(THCState *state, THCTensor *tensor, THCTensor *src);
-THC_API void THCTensor_resizeNd(THCState *state, THCTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
+THC_API void THCTensor_resizeLegacy(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
+THC_API void THCTensor_resizeNdLegacy(THCState *state, THCTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
 
 THC_API void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride);
