@@ -33,9 +33,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   git clone https://github.com/ROCm-Developer-Tools/pyHIPIFY.git
   chmod a+x pyHIPIFY/*.py
   sudo cp -p pyHIPIFY/*.py /opt/rocm/bin
+  sudo chown -R jenkins:jenkins /usr/local
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
-  HIPCC_VERBOSE=1 VERBOSE=1 WITH_ROCM=1 python setup.py install
+  HIPCC_VERBOSE=7 VERBOSE=1 WITH_ROCM=1 python setup.py install
   exit
 fi
 
