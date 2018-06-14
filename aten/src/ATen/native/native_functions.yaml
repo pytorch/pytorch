@@ -875,6 +875,18 @@
 
 - func: relu_(Tensor self) -> Tensor
 
+# TODO: there is a bug in float values of Scalar, after bug fixes, set the default value of lambd=0.5
+# for now, getting around this with default values defined in torch/nn/functional.py
+- func: hardshrink(Tensor self, Scalar lambd) -> Tensor
+  dispatch:
+    CPU: hardshrink_cpu
+    CUDA: hardshrink_cuda
+
+- func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
+  dispatch:
+    CPU: hardshrink_backward_cpu
+    CUDA: hardshrink_backward_cuda
+
 - func: rsqrt(Tensor self) -> Tensor
 
 - func: rsqrt_(Tensor self) -> Tensor
