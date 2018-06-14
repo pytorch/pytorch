@@ -177,6 +177,7 @@ export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root direct
 
 # Install basic dependencies
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
+conda install -c conda-forge tbb-devel
 conda install -c mingfeima mkldnn
 
 # Add LAPACK support for the GPU
@@ -187,11 +188,13 @@ On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
+conda install -c conda-forge tbb-devel
 ```
 
 On Windows
 ```cmd
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
+conda install -c conda-forge tbb-devel
 ```
 #### Get the PyTorch source
 ```bash
