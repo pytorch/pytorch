@@ -2,6 +2,7 @@
 	path = third_party/tbb
 	url = https://github.com/01org/tbb
 	branch = tbb_2018
+	ignore = untracked
 [submodule "third_party/catch"]
 	path = third_party/catch
 	url = https://github.com/catchorg/Catch2.git
