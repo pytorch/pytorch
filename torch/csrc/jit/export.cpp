@@ -388,82 +388,84 @@ std::string nlidt(size_t indent) {
   return std::string("\n") + idt(indent);
 }
 
-void dump(onnx_torch::TensorProto, std::ostream& stream, size_t indent) {
+void dump(onnx_torch::TensorProto tensor, std::ostream& stream) {
   stream << "TensorProto shape: [";
-  for (size_t i = 0; i < dims.size(); ++i) {
-    stream << *dims[i] << (i == dims.size() - 1 ? "" : " ");
+  for (int i = 0; i < tensor.dims_size(); ++i) {
+    stream << tensor.dims(i) << (i == tensor.dims_size() - 1 ? "" : " ");
   }
   stream << "]";
 }
 
-void dump(onnx_torch::TensorShapeProto, std::ostream& stream, size_t indent) {
-  for (size_t i=0; i < dims.size(); ++i) {
-    auto &dim = dims[i];
-    if (dim->has_dim_value) {
-      stream << dim->dim_value;
+void dump(onnx_torch::TensorShapeProto shape, std::ostream& stream) {
+  for (int i = 0; i < shape.dim_size(); ++i) {
+    auto &dim = shape.dim(i);
+    if (dim.has_dim_value()) {
+      stream << dim.dim_value();
     } else {
       stream << "?";
     }
-    stream << (i == dims.size() - 1 ? "" : " ");
+    stream << (i == shape.dim_size() - 1 ? "" : " ");
   }
 }
 
-void dump(onnx_torch::TypeProtoTensor, std::ostream& stream, size_t indent) {
+void dump(onnx_torch::TypeProto_Tensor tensor_type, std::ostream& stream) {
   stream << "Tensor dims: ";
-  shape->dump(stream);
+  dump(tensor_type.shape(), stream);
 }
 
-void dump(onnx_torch::TypeProto, std::ostream& stream, size_t indent) {
-  tensor_type->dump(stream);
+void dump(onnx_torch::TypeProto type, std::ostream& stream) {
+  dump(type.tensor_type(), stream);
 }
 
-void dump(onnx_torch::ValueInfoProto, std::ostream& stream, size_t indent) {
-  stream << "{name: \"" << name
+void dump(onnx_torch::ValueInfoProto value_info, std::ostream& stream) {
+  stream << "{name: \"" << value_info.name()
          << "\", type:";
-  type->dump(stream);
+  dump(value_info.type(), stream);
   stream << "}";
 }
 
-void dump(onnx_torch::AttributeProto, std::ostream& stream, size_t indent) {
-  stream << "{ name: '" << name << "', type: ";
-  if (proto.has_f) {
-    stream << "float, value: " << proto.f;
-  } else if (proto.has_i) {
-    stream << "int, value: " << proto.i;
-  } else if (s.length()) {
-    stream << "string, value: '" << s << "'";
-  } else if (g) {
+void dump(onnx_torch::GraphProto graph, std::ostream& stream, size_t indent);
+
+void dump(onnx_torch::AttributeProto attr, std::ostream& stream, size_t indent) {
+  stream << "{ name: '" << attr.name() << "', type: ";
+  if (attr.has_f()) {
+    stream << "float, value: " << attr.f();
+  } else if (attr.has_i()) {
+    stream << "int, value: " << attr.i();
+  } else if (attr.has_s()) {
+    stream << "string, value: '" << attr.s() << "'";
+  } else if (attr.has_g()) {
     stream << "graph, value:\n";
-    g->dump(stream, indent+1);
+    dump(attr.g(), stream, indent+1);
     stream << nlidt(indent);
-  } else if (t) {
+  } else if (attr.has_t()) {
     stream << "tensor, value:";
-    t->dump(stream, indent+1);
-  } else if (floats.size()) {
+    dump(attr.t(), stream);
+  } else if (attr.floats_size()) {
     stream << "floats, values: [";
-    for (size_t i=0; i < floats.size(); ++i)
-      stream << *floats[i] << (i == floats.size() - 1 ? "" : " ");
+    for (int i = 0; i < attr.floats_size(); ++i)
+      stream << attr.floats(i) << (i == attr.floats_size() - 1 ? "" : " ");
     stream << "]";
-  } else if (ints.size()) {
+  } else if (attr.ints_size()) {
     stream << "ints, values: [";
-    for (size_t i=0; i < ints.size(); ++i)
-      stream << *ints[i] << (i == ints.size() - 1 ? "" : " ");
+    for (int i = 0; i < attr.ints_size(); ++i)
+      stream << attr.ints(i) << (i == attr.ints_size() - 1 ? "" : " ");
     stream << "]";
-  } else if (strings.size()) {
+  } else if (attr.strings_size()) {
     stream << "strings, values: [";
-    for (size_t i=0; i < strings.size(); ++i)
-      stream << "'" << *strings[i] << "'" << (i == strings.size() - 1 ? "" : " ");
+    for (int i = 0; i < attr.strings_size(); ++i)
+      stream << "'" << attr.strings(i) << "'" << (i == attr.strings_size() - 1 ? "" : " ");
     stream << "]";
-  } else if (tensors.size()) {
+  } else if (attr.tensors_size()) {
     stream << "tensors, values: [";
-    for (auto& t : tensors) {
-      t->dump(stream, indent+1);
+    for (auto& t : attr.tensors()) {
+      dump(t, stream);
     }
     stream << "]";
-  } else if (graphs.size()) {
+  } else if (attr.graphs_size()) {
     stream << "graphs, values: [";
-    for (auto& g : graphs) {
-      g->dump(stream, indent+1);
+    for (auto& g : attr.graphs()) {
+      dump(g, stream, indent+1);
     }
     stream << "]";
   } else {
@@ -472,76 +474,82 @@ void dump(onnx_torch::AttributeProto, std::ostream& stream, size_t indent) {
   stream << "}";
 }
 
-void dump(onnx_torch::NodeProto, std::ostream& stream, size_t indent) {
-  stream << "Node {type: \"" << op_type << "\", inputs: [";
-  for (size_t i=0; i < inputs.size(); ++i) {
-    stream << *inputs[i] << (i == inputs.size() - 1 ? "" : ",");
+void dump(onnx_torch::NodeProto node, std::ostream& stream, size_t indent) {
+  stream << "Node {type: \"" << node.op_type() << "\", inputs: [";
+  for (int i = 0; i < node.input_size(); ++i) {
+    stream << node.input(i) << (i == node.input_size() - 1 ? "" : ",");
   }
   stream << "], outputs: [";
-  for (size_t i=0; i < outputs.size(); ++i) {
-    stream << *outputs[i] << (i == outputs.size() - 1 ? "" : ",");
+  for (int i = 0; i < node.output_size(); ++i) {
+    stream << node.output(i) << (i == node.output_size() - 1 ? "" : ",");
   }
   stream << "], attributes: [";
-  for (size_t i=0; i < attributes.size(); ++i) {
-    attributes[i]->dump(stream, indent+1);
-    stream << (i == attributes.size() - 1 ? "" : ",");
+  for (int i = 0; i < node.attribute_size(); ++i) {
+    dump(node.attribute(i), stream, indent+1);
+    stream << (i == node.attribute_size() - 1 ? "" : ",");
   }
   stream << "]}";
 }
 
-void dump(onnx_torch::GraphProto, std::ostream& stream, size_t indent) {
+void dump(onnx_torch::GraphProto graph, std::ostream& stream, size_t indent) {
   stream << idt(indent) << "GraphProto {" << nlidt(indent+1)
-         << "name: \"" << name << "\"" << nlidt(indent+1)
+         << "name: \"" << graph.name() << "\"" << nlidt(indent+1)
          << "inputs: [";
-  for (size_t i=0; i < inputs.size(); ++i) {
-    inputs[i]->dump(stream, indent+2);
-    stream << (i == inputs.size() - 1 ? "" : ",");
+  for (int i = 0; i < graph.input_size(); ++i) {
+    dump(graph.input(i), stream);
+    stream << (i == graph.input_size() - 1 ? "" : ",");
   }
   stream << "]" << nlidt(indent+1)
          << "outputs: [";
-  for (size_t i=0; i < outputs.size(); ++i) {
-    outputs[i]->dump(stream, indent+2);
-    stream << (i == outputs.size() - 1 ? "" : ",");
+  for (int i = 0; i < graph.output_size(); ++i) {
+    dump(graph.output(i), stream);
+    stream << (i == graph.output_size() - 1 ? "" : ",");
   }
   stream << "]" << nlidt(indent+1)
          << "initializers: [";
-  for (size_t i=0; i < initializers.size(); ++i) {
-    initializers[i]->dump(stream, indent+2);
-    stream << (i == initializers.size() - 1 ? "" : ",");
+  for (int i = 0; i < graph.initializer_size(); ++i) {
+    dump(graph.initializer(i), stream);
+    stream << (i == graph.initializer_size() - 1 ? "" : ",");
   }
   stream << "]" << nlidt(indent+1)
          << "nodes: [" << nlidt(indent+2);
-  for (size_t i=0; i < nodes.size(); ++i) {
-    nodes[i]->dump(stream, indent+2);
-    if (i != nodes.size() - 1) stream << "," << nlidt(indent+2);
+  for (int i = 0; i < graph.node_size(); ++i) {
+    dump(graph.node(i), stream, indent+2);
+    if (i != graph.node_size() - 1) stream << "," << nlidt(indent+2);
   }
   stream << nlidt(indent+1) << "]\n" << idt(indent) << "}\n";
 }
 
-void dump(onnx_torch::OperatorSetIdProto, std::ostream& stream, size_t indent) {
-  stream << "OperatorSetIdProto { domain: " << domain << "}";
+void dump(onnx_torch::OperatorSetIdProto operator_set_id, std::ostream& stream) {
+  stream << "OperatorSetIdProto { domain: " << operator_set_id.domain() << "}";
 }
 
-void dump(onnx_torch::ModelProto m_p, std::ostream& stream, size_t indent) {
+void dump(onnx_torch::ModelProto model, std::ostream& stream, size_t indent) {
   stream << idt(indent)
          << "ModelProto {" << nlidt(indent+1)
-         << "producer_name: \"" << producer_name << "\"" << nlidt(indent+1)
-         << "domain: \"" << domain << "\"" << nlidt(indent+1)
-         << "doc_string: \"" << doc_string << "\"";
-  if (m_p) {
+         << "producer_name: \"" << model.producer_name() << "\"" << nlidt(indent+1)
+         << "domain: \"" << model.domain() << "\"" << nlidt(indent+1)
+         << "doc_string: \"" << model.doc_string() << "\"";
+  if (model.has_graph()) {
     stream << nlidt(indent+1) << "graph:\n";
-    graph->dump(graph, stream, indent+2);
+    dump(model.graph(), stream, indent+2);
   }
-  if (opset_import.size()) {
+  if (model.opset_import_size()) {
     stream << idt(indent+1) << "opset_import: [";
-    for (auto &opset_imp : opset_import) {
-      opset_imp->dump(stream, indent+2);
+    for (auto &opset_imp : model.opset_import()) {
+      dump(opset_imp, stream);
     }
     stream << "],\n";
   }
   stream << idt(indent) << "}\n";
 }
 } // namespace
+
+std::string prettyPrint(onnx_torch::ModelProto model) {
+  std::stringstream ss;
+  dump(model, ss, 0);
+  return ss.str();
+}
 
 }
 
@@ -578,7 +586,6 @@ RawDataExportMap ToModelProto(
   return raw_data_export_map;
 }
 
-
 }  // namespace
 
 
@@ -593,7 +600,7 @@ std::string PrettyPrintExportedGraph(
   raw_data_export_map = ToModelProto(
     graph, initializers, onnx_opset_version, defer_weight_export, operator_export_type,
     &model_proto);
-  return model_proto.DebugString();
+  return prettyPrint(model_proto);
 }
 
 // export_raw_ir will export IR ops without turning them into ONNX ops.
