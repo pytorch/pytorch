@@ -15,7 +15,7 @@ class Multinomial(Distribution):
     Note that `total_count` need not be specified if only :meth:`log_prob` is
     called (see example below)
 
-    .. note:: :attr:`probs` must be non-negative, not infinite and have a non-zero sum,
+    .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
     and it will be normalized to sum to 1.
 
     -   :meth:`sample` requires a single shared `total_count` for all

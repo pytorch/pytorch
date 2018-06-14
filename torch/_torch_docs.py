@@ -2725,7 +2725,7 @@ of tensor :attr:`input`.
 
 .. note::
     The rows of :attr:`input` do not need to sum to one (in which case we use
-    the values as weights), but must be non-negative, not infinite and have
+    the values as weights), but must be non-negative, finite and have
     a non-zero sum.
 
 Indices are ordered from left to right according to when each was sampled

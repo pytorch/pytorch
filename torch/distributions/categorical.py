@@ -21,7 +21,7 @@ class Categorical(Distribution):
     If :attr:`probs` is 2D, it is treated as a batch of relative probability
     vectors.
 
-    .. note:: :attr:`probs` must be non-negative, not infinite and have a non-zero sum,
+    .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
     and it will be normalized to sum to 1.
 
     See also: :func:`torch.multinomial`

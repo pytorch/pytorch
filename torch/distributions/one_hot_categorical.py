@@ -11,7 +11,7 @@ class OneHotCategorical(Distribution):
 
     Samples are one-hot coded vectors of size ``probs.size(-1)``.
 
-    .. note:: :attr:`probs` must be non-negative, not infinite and have a non-zero sum,
+    .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
     and it will be normalized to sum to 1.
 
     See also: :func:`torch.distributions.Categorical` for specifications of
