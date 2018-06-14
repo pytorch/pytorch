@@ -25,6 +25,8 @@ pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export HCC_AMDGPU_TARGET=gfx900
+  export LANG=C.UTF-8
+  export LC_ALL=C.UTF-8
 
   # TODO: Install pyHIPIFY in the docker image
   rm -rf pyHIPIFY || true
