@@ -1125,10 +1125,10 @@ class TestNN(NNTestCase):
         modules['conv'] = nn.Conv2d(3, 4, 3)
         module_dict['conv'] = modules['conv']
         check()
-        next_modules = OrderedDict([
+        next_modules = [
             ('fc2', nn.Linear(5, 5)),
             ('act', nn.Sigmoid()),
-        ])
+        ]
         modules.update(next_modules)
         module_dict.update(next_modules)
         check()
@@ -1250,10 +1250,10 @@ class TestNN(NNTestCase):
         parameter_dict['p4'] = parameters['p4']
         check()
 
-        next_parameters = OrderedDict([
+        next_parameters = [
             ('p5', Parameter(torch.randn(10, 10))),
             ('p2', Parameter(torch.randn(10, 10))),
-        ])
+        ]
         parameters.update(next_parameters)
         parameter_dict.update(next_parameters)
         check()

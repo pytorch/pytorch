@@ -270,15 +270,19 @@ class ModuleDict(Module):
         overwriting existing keys.
 
         Arguments:
-            mapping (iterable): iterable of key/value pairs
+            mapping (iterable): dictionary or iterable of key/value pairs
         """
         if not isinstance(mapping, Iterable):
             raise TypeError("ModuleDict.update should be called with an "
                             "iterable of key/value pairs, but got " +
                             type(mapping).__name__)
 
-        for key, module in mapping:
-            self.add_module(str(key), module)
+        if isinstance(mapping, dict):
+            for key, module in mapping.items():
+                self.add_module(str(key), module)
+        else:
+            for key, module in mapping:
+                self.add_module(str(key), module)
 
 
 class ParameterList(Module):
@@ -455,12 +459,16 @@ class ParameterDict(Module):
         overwriting existing keys.
 
         Arguments:
-            mapping (iterable): iterable of key/value pairs
+            mapping (iterable): dictionary or iterable of key/value pairs
         """
         if not isinstance(mapping, Iterable):
             raise TypeError("ParametersDict.update should be called with an "
                             "iterable of key/value pairs, but got " +
                             type(mapping).__name__)
 
-        for key, parameter in mapping:
-            self.register_parameter(str(key), parameter)
+        if isinstance(mapping, dict):
+            for key, parameter in mapping.items():
+                self.register_parameter(str(key), parameter)
+        else:
+            for key, parameter in mapping:
+                self.register_parameter(str(key), parameter)
