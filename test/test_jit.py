@@ -484,7 +484,6 @@ class TestJit(JitTestCase):
         def fn(x, y):
             return x - y
         trace, _ = torch.jit.get_trace_graph(fn, (x, y), nderivs=0)
-        print(trace)
 
     def test_shape_analysis_broadcast(self):
         def broadcast(a, b):
