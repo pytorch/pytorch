@@ -212,8 +212,10 @@
   scalar_check:
     grad_input: 'false'
 
-- name: upsample_nearest3d(Tensor self, int64_t scale_factor)
+- name: upsample_nearest3d(Tensor self, IntList[3] output_size)
   cname: VolumetricUpSamplingNearest
+  scalar_check:
+    grad_input: 'false'
 
 
 # Private functions. These also exist in TH, but we want the backwards functions

@@ -1649,16 +1649,24 @@ THC_API void THNN_(VolumetricReplicationPadding_updateGradInput)(
 
 THC_API void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
                   THCState *state,
-                  THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  int scale_factor);
+		  int nbatch,
+		  int nchannels,
+		  int inputDepth,
+		  int inputHeight,
+		  int inputWidth,
+		  int outputDepth,
+		  int outputHeight,
+		  int outputWidth);
 
 THC_API void THNN_(VolumetricUpSamplingNearest_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  int scale_factor);
+		  int outputDepth,
+		  int outputHeight,
+		  int outputWidth);
 
 THC_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
                   THCState *state,

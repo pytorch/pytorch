@@ -68,9 +68,8 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
 
   for (int w2 = 0; w2 < outputWidth; ++w2) {
     const accreal src_x = nearest_neighbor_compute_source_index(scale, w2, inputWidth);
-    const int in_x = src_x;
-    printf("scale: %d, %d, src_index : %f, %d\n", inputWidth, outputWidth, src_x, in_x);
-    const real* pos1 = &idata[in_x];
+    const int w1 = src_x;
+    const real* pos1 = &idata[w1];
     real* pos2 = &odata[w2];
     for (int c = 0; c < channels; ++c) {
       pos2[0] = pos1[0];
@@ -115,8 +114,8 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   }
 
   for (int w2 = 0; w2 < outputWidth; ++w2) {
-    const int in_x = nearest_neighbor_compute_source_index(scale, w2, inputWidth);
-    real* pos1 = &data1[in_x];
+    const int w1 = nearest_neighbor_compute_source_index(scale, w2, inputWidth);
+    real* pos1 = &data1[w1];
     const real* pos2 = &data2[w2];
     for (int c = 0; c < channels; ++c) {
       pos1[0] += pos2[0];

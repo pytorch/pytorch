@@ -86,7 +86,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
       for (int c = 0; c < channels; ++c) {
         pos2[0] = pos1[0];
         pos1 += inputHeight * inputWidth;
-        pos2 += inputHeight * outputWidth;
+        pos2 += outputHeight * outputWidth;
       }
     }
   }
@@ -140,7 +140,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
       for (int c = 0; c < channels; ++c) {
         pos1[0] += pos2[0];
         pos1 += inputHeight * inputWidth;
-        pos2 += inputHeight * outputWidth;
+        pos2 += outputHeight * outputWidth;
       }
     }
   }
