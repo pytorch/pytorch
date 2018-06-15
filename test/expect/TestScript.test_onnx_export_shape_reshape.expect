@@ -1,19 +1,77 @@
-ModelProto {
-  producer_name: "pytorch"
-  domain: ""
-  doc_string: ""
-  graph:
-    GraphProto {
-      name: "torch-jit-export"
-      inputs: [{name: "0", type:Tensor dims: 1 2 3}]
-      outputs: [{name: "4", type:Tensor dims: 5 2 3}]
-      initializers: []
-      nodes: [
-        Node {type: "Constant", inputs: [], outputs: [1], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: [3]}]},
-        Node {type: "Tile", inputs: [0,1], outputs: [2], attributes: []},
-        Node {type: "Shape", inputs: [2], outputs: [3], attributes: []},
-        Node {type: "Reshape", inputs: [2,3], outputs: [4], attributes: []}
-      ]
+producer_name: "pytorch"
+producer_version: "0.3"
+graph {
+  node {
+    output: "1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 3
+        data_type: INT64
+        raw_data: "\005\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
-  opset_import: [OperatorSetIdProto { domain: }],
+  }
+  node {
+    input: "0"
+    input: "1"
+    output: "2"
+    op_type: "Tile"
+    doc_string: "test/test_jit.py(2748): forward\n/data/users/royboy/pytorch/pytorch/torch/nn/modules/module.py(468): __call__\n/data/users/royboy/pytorch/pytorch/torch/jit/__init__.py(305): wrapper\ntest/test_jit.py(2753): test_onnx_export_shape_reshape\n/home/royboy/local/miniconda/lib/python3.6/unittest/case.py(605): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/case.py(653): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(122): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(84): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(122): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(84): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/runner.py(176): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/main.py(256): runTests\n/home/royboy/local/miniconda/lib/python3.6/unittest/main.py(95): __init__\n/data/users/royboy/pytorch/pytorch/test/common.py(50): run_tests\ntest/test_jit.py(3086): <module>\n"
+  }
+  node {
+    input: "2"
+    output: "3"
+    op_type: "Shape"
+  }
+  node {
+    input: "2"
+    input: "3"
+    output: "4"
+    op_type: "Reshape"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: DOUBLE
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "4"
+    type {
+      tensor_type {
+        elem_type: DOUBLE
+        shape {
+          dim {
+            dim_value: 5
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 6
 }

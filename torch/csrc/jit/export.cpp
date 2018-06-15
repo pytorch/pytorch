@@ -1,6 +1,6 @@
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/autograd/symbolic.h"
-#include "onnx/onnx/onnx.pb.h"
+#include "onnx/onnx.pb.h"
 #include "torch/csrc/onnx/onnx.h"
 
 #include "torch/csrc/utils/functional.h"
@@ -603,7 +603,7 @@ std::string PrettyPrintExportedGraph(
   raw_data_export_map = ToModelProto(
     graph, initializers, onnx_opset_version, defer_weight_export, operator_export_type,
     &model_proto);
-  return prettyPrint(model_proto);
+  return model_proto.DebugString();
 }
 
 // export_raw_ir will export IR ops without turning them into ONNX ops.

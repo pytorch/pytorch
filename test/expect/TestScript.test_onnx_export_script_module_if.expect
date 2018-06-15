@@ -1,41 +1,131 @@
-ModelProto {
-  producer_name: "pytorch"
-  domain: ""
-  doc_string: ""
-  graph:
-    GraphProto {
-      name: "torch-jit-export"
-      inputs: [{name: "x.1", type:Tensor dims: 1 2 3}]
-      outputs: [{name: "4", type:Tensor dims: 1 2 3}]
-      initializers: []
-      nodes: [
-        Node {type: "ReduceSum", inputs: [x.1], outputs: [1], attributes: [{ name: 'keepdims', type: int, value: 0}]},
-        Node {type: "Constant", inputs: [], outputs: [2], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
-        Node {type: "Greater", inputs: [1,2], outputs: [3], attributes: []},
-        Node {type: "If", inputs: [3], outputs: [4], attributes: [{ name: 'then_branch', type: graph, value:
-            GraphProto {
-              name: "torch-jit-export1"
-              inputs: []
-              outputs: [{name: "5", type:Tensor dims: }]
-              initializers: []
-              nodes: [
-                Node {type: "Neg", inputs: [x.1], outputs: [5], attributes: []}
-              ]
-            }
-
-          },{ name: 'else_branch', type: graph, value:
-            GraphProto {
-              name: "torch-jit-export2"
-              inputs: []
-              outputs: [{name: "x.1", type:Tensor dims: 1 2 3}]
-              initializers: []
-              nodes: [
-                
-              ]
-            }
-
-          }]}
-      ]
+producer_name: "pytorch"
+producer_version: "0.3"
+graph {
+  node {
+    input: "x.1"
+    output: "1"
+    op_type: "ReduceSum"
+    attribute {
+      name: "keepdims"
+      i: 0
+      type: INT
     }
-  opset_import: [OperatorSetIdProto { domain: }],
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    if torch.sum(x) > 0:\n       ~~~~~~~~~ <--- HERE\n        x = torch.neg(x)\n    return x\n"
+  }
+  node {
+    output: "2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: INT64
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    if torch.sum(x) > 0:\n                      ~ <--- HERE\n        x = torch.neg(x)\n    return x\n"
+  }
+  node {
+    input: "1"
+    input: "2"
+    output: "3"
+    op_type: "Greater"
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    if torch.sum(x) > 0:\n       ~~~~~~~~~~~~~~~~ <--- HERE\n        x = torch.neg(x)\n    return x\n"
+  }
+  node {
+    input: "3"
+    output: "4"
+    op_type: "If"
+    attribute {
+      name: "then_branch"
+      g {
+        node {
+          input: "x.1"
+          output: "5"
+          op_type: "Neg"
+          doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    if torch.sum(x) > 0:\n        x = torch.neg(x)\n            ~~~~~~~~~ <--- HERE\n    return x\n"
+        }
+        name: "torch-jit-export1"
+        output {
+          name: "5"
+          type {
+            tensor_type {
+              shape {
+              }
+            }
+          }
+        }
+      }
+      type: GRAPH
+    }
+    attribute {
+      name: "else_branch"
+      g {
+        name: "torch-jit-export2"
+        output {
+          name: "x.1"
+          type {
+            tensor_type {
+              elem_type: DOUBLE
+              shape {
+                dim {
+                  dim_value: 1
+                }
+                dim {
+                  dim_value: 2
+                }
+                dim {
+                  dim_value: 3
+                }
+              }
+            }
+          }
+        }
+      }
+      type: GRAPH
+    }
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    if torch.sum(x) > 0:\n    ~~~~~~~~~~~~~~~~~~~~...  <--- HERE\n        x = torch.neg(x)\n    return x\n"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "x.1"
+    type {
+      tensor_type {
+        elem_type: DOUBLE
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "4"
+    type {
+      tensor_type {
+        elem_type: INT64
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 6
 }
