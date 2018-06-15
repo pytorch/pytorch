@@ -11,7 +11,7 @@ THNN_UTILS_PATH = os.path.join(BASE_PATH, 'torch', '_thnn', 'utils.py')
 
 try:
     from torch._thnn import utils as thnn_utils
-except:
+except ImportError:
     from ..shared import import_module
     thnn_utils = import_module('torch._thnn.utils', THNN_UTILS_PATH)
 
