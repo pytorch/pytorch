@@ -219,6 +219,9 @@ ext_modules = [
     setuptools.Extension(
         name=str('caffe2.python.caffe2_pybind11_state_gpu'),
         sources=[]),
+    setuptools.Extension(
+        name=str('caffe2.python.caffe2_pybind11_state_hip'),
+        sources=[]),
 ]
 
 ################################################################################
