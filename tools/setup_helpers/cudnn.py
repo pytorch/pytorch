@@ -1,7 +1,7 @@
 import os
 import glob
 
-from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_env_flag, gather_paths
+from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_negative_env_flag, gather_paths
 from .cuda import USE_CUDA, CUDA_HOME
 
 
@@ -11,7 +11,7 @@ CUDNN_INCLUDE_DIR = None
 CUDNN_LIBRARY = None
 WITH_STATIC_CUDNN = os.getenv("USE_STATIC_CUDNN")
 
-if USE_CUDA and not check_env_flag('NO_CUDNN'):
+if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
     lib_paths = list(filter(bool, [
         os.getenv('CUDNN_LIB_DIR'),
         os.path.join(CUDA_HOME, 'lib/x64'),

@@ -106,7 +106,25 @@ import json
 import glob
 import importlib
 
-from tools.setup_helpers.env import check_env_flag
+from tools.setup_helpers.env import check_env_flag, check_negative_env_flag
+
+# Before we run the setup_helpers, let's look for NO_* and WITH_*
+# variables and hotpatch the environment with the USE_* equivalent
+config_env_vars = ['CUDA', 'CUDNN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED', 'DISTRIBUTED_MW',
+                   'SYSTEM_NCCL', 'GLOO_IBVERBS']
+
+def hotpatch_var(var):
+    if check_env_flag('NO_' + var):
+        os.environ['USE_' + var] = '0'
+    elif check_negative_env_flag('NO_' + var):
+        os.environ['USE_' + var] = '1'
+    elif check_env_flag('WITH_' + var):
+        os.environ['USE_' + var] = '1'
+    elif check_negative_env_flag('WITH_' + var):
+        os.environ['USE_' + var] = '0'
+
+list(map(hotpatch_var, config_env_vars))
+
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
@@ -121,7 +139,6 @@ from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
     USE_DISTRIBUTED_MW, USE_GLOO_IBVERBS, USE_C10D
-
 
 ################################################################################
 # Parameters parsed from environment
