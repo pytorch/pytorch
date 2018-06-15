@@ -17,7 +17,9 @@ namespace torch { namespace autograd {
 // Used when an output has multiple uses (there's only one entry
 // in next_edges per output).
 struct Replicate : public Function {
-  Replicate() : Function(/*num_inputs=*/1) {}
+  Replicate(const at::Type& type, at::IntList shape) : Function() {
+    add_input_metadata(type, shape);
+  }
 
   virtual variable_list apply(const variable_list& inputs) {
 		TORCH_ASSERT(inputs.size() == 1);
@@ -236,6 +238,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
     // This detaches the subgraph from the full backward graph.
     for (auto& begin : subgraph.boundary.begins) {
       const auto& edge = begin.function->next_edge(begin.input_nr);
+
       begin.function->set_next_edge(
           begin.input_nr, Edge(ends_to_outputs.at(edge), 0));
     }
@@ -265,7 +268,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
     // the same Variable has been returned multiple times, and
     // is repeated in this list.
     if (output.grad_fn_unsafe() == this) {
-      auto replicate = std::make_shared<Replicate>();
+      auto replicate = std::make_shared<Replicate>(output.type(), output.sizes());
       replicate->add_next_edge({this_shared, output.output_nr()});
       output.set_gradient_edge({std::move(replicate), 0});
       repeated_outputs.emplace(&output);
@@ -274,7 +277,8 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
     // perform any allocations until we actually see repeated outputs.
     if (repeated_outputs.count(&output) > 0) {
       auto & replicate = output.grad_fn();
-      replicate->add_next_edge({this_shared, num_inputs_++});
+      auto input_nr = add_input_metadata(output.type(), output.sizes());
+      replicate->add_next_edge({this_shared, input_nr});
     } else {
       autograd::create_gradient_edge(output, this_shared);
     }

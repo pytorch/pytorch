@@ -90,7 +90,7 @@ THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
-  TensorUtils<THCTensor>::preserveReduceDimSemantics(
+  THCTensor_preserveReduceDimSemantics(
       state, self_, THCTensor_(nDimension)(state, src), dimension, keepdim);
   THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(dim, dimension, 1);
@@ -119,7 +119,7 @@ THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
-  TensorUtils<THCTensor>::preserveReduceDimSemantics(
+  THCTensor_preserveReduceDimSemantics(
       state, self_, THCTensor_(nDimension)(state, src), dimension, keepdim);
   THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(dim, dimension, 1);
@@ -329,7 +329,7 @@ THC_API accreal
 THCTensor_(meanall)(THCState *state, THCTensor *self)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  THArgCheck(self->nDimension > 0, 1, "empty Tensor");
+  THArgCheck(self->_dim() > 0, 1, "empty Tensor");
   return THCTensor_(sumall)(state, self)/THCTensor_(nElement)(state, self);
 }
 

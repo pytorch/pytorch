@@ -259,7 +259,7 @@ TEST_CASE("serialization") {
     auto param2 = model2->parameters();
     auto param3 = model3->parameters();
     for (auto& p : param1) {
-      auto name = p.first;
+      auto& name = p.key;
       // Model 1 and 3 should be the same
       REQUIRE(param1[name].norm().toCFloat() == param3[name].norm().toCFloat());
       REQUIRE(param1[name].norm().toCFloat() != param2[name].norm().toCFloat());

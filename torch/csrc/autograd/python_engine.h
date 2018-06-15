@@ -4,6 +4,7 @@
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/engine.h"
+#include "torch/csrc/autograd/python_anomaly_mode.h"
 
 bool THPEngine_initModule(PyObject *module);
 
@@ -18,6 +19,7 @@ struct PythonEngine : public Engine {
       bool keep_graph,
       bool create_graph,
       const edge_list& outputs = {}) override;
+  virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;
 };
 
 }}} // namespace torch::autograd::python

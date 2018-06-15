@@ -192,10 +192,10 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   if (numInputs > 1 &&
       !hasEmptyInput &&
       THCTensor_(nDimension)(state, result) <= CAT_ARRAY_MAX_INPUT_DIMS &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, result) &&
-      TensorUtils<THCTensor>::allContiguous(state, inputs, numInputs) &&
-      TensorUtils<THCTensor>::all32BitIndexable(state, inputs, numInputs) &&
-      TensorUtils<THCTensor>::allSameDevice(state, inputs, numInputs)) {
+      THCTensor_canUse32BitIndexMath(state, result) &&
+      THCTensor_allContiguous(state, inputs, numInputs) &&
+      THCTensor_all32BitIndexable(state, inputs, numInputs) &&
+      THCTensor_allSameDevice(state, inputs, numInputs)) {
 
     // First, let's set up our kernel parameters. We start with a raw pointer to the storage
     // for the output Tensor.
@@ -424,7 +424,7 @@ void THCTensor_(eye)(THCState *state, THCTensor *self_, int64_t n, int64_t m)
 
 accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, src_));
-  THArgCheck((src_->nDimension == 2), 1, "expected a matrix");
+  THArgCheck((src_->_dim() == 2), 1, "expected a matrix");
   THCTensor *diag = THCTensor_(new)(state);
   THCTensor_(diag)(state, diag, src_, 0);
   accreal trace = THCTensor_(sumall)(state, diag);

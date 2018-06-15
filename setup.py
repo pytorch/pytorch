@@ -52,6 +52,10 @@
 #     specify which CUDA architectures to build for.
 #     ie `TORCH_CUDA_ARCH_LIST="6.0;7.0"`
 #
+#   ONNX_NAMESPACE
+#     specify a namespace for ONNX built here rather than the hard-coded
+#     one in this file; needed to build with other frameworks that share ONNX.
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -91,6 +95,7 @@ import setuptools.command.build_py
 import distutils.unixccompiler
 import distutils.command.build
 import distutils.command.clean
+import distutils.sysconfig
 import platform
 import subprocess
 import shutil
@@ -103,6 +108,7 @@ import importlib
 
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
+from tools.setup_helpers.rocm import WITH_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (WITH_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
@@ -114,33 +120,65 @@ from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
-    WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS
+    WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS, WITH_C10D
+
+
+################################################################################
+# Parameters parsed from environment
+################################################################################
 
 DEBUG = check_env_flag('DEBUG')
-
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
-# Check if ROCM is enabled
-WITH_ROCM = check_env_flag('WITH_ROCM')
+FULL_CAFFE2 = check_env_flag('FULL_CAFFE2')
+BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
 if max_jobs is not None:
     NUM_JOBS = min(NUM_JOBS, int(max_jobs))
 
+ONNX_NAMESPACE = os.getenv("ONNX_NAMESPACE")
+if not ONNX_NAMESPACE:
+    ONNX_NAMESPACE = "onnx_torch"
+
+# Ninja
 try:
     import ninja
     WITH_NINJA = True
+    ninja_global = NinjaBuilder('global')
 except ImportError:
     WITH_NINJA = False
+    ninja_global = None
 
+# Constant known variables used throughout this file
+cwd = os.path.dirname(os.path.abspath(__file__))
+lib_path = os.path.join(cwd, "torch", "lib")
+third_party_path = os.path.join(cwd, "third_party")
+tmp_install_path = lib_path + "/tmp_install"
+
+
+class PytorchCommand(setuptools.Command):
+    """
+    Base Pytorch command to avoid implementing initialize/finalize_options in
+    every subclass
+    """
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+
+################################################################################
+# Patches and workarounds
+################################################################################
+# Monkey-patch setuptools to compile in parallel
 if not WITH_NINJA:
-    ################################################################################
-    # Monkey-patch setuptools to compile in parallel
-    ################################################################################
-
     def parallelCCompile(self, sources, output_dir=None, macros=None,
                          include_dirs=None, debug=0, extra_preargs=None,
                          extra_postargs=None, depends=None):
@@ -160,6 +198,7 @@ if not WITH_NINJA:
         return objects
     distutils.ccompiler.CCompiler.compile = parallelCCompile
 
+# Patch for linking with ccache
 original_link = distutils.unixccompiler.UnixCCompiler.link
 
 
@@ -170,35 +209,72 @@ def patched_link(self, *args, **kwargs):
     self.compiler_cxx = _cxx
     return result
 
-
 distutils.unixccompiler.UnixCCompiler.link = patched_link
 
-################################################################################
 # Workaround setuptools -Wstrict-prototypes warnings
 # I lifted this code from https://stackoverflow.com/a/29634231/23845
-################################################################################
-import distutils.sysconfig
 cfg_vars = distutils.sysconfig.get_config_vars()
 for key, value in cfg_vars.items():
     if type(value) == str:
         cfg_vars[key] = value.replace("-Wstrict-prototypes", "")
 
+
 ################################################################################
-# Custom build commands
+# Version and create_version_file
+################################################################################
+version = '0.5.0a0'
+if os.getenv('PYTORCH_BUILD_VERSION'):
+    assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
+    build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
+    version = os.getenv('PYTORCH_BUILD_VERSION')
+    if build_number > 1:
+        version += '.post' + str(build_number)
+else:
+    try:
+        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
+        version += '+' + sha[:7]
+    except Exception:
+        pass
+
+
+class create_version_file(PytorchCommand):
+    def run(self):
+        global version, cwd
+        print('-- Building version ' + version)
+        version_path = os.path.join(cwd, 'torch', 'version.py')
+        with open(version_path, 'w') as f:
+            f.write("__version__ = '{}'\n".format(version))
+            # NB: This is not 100% accurate, because you could have built the
+            # library code with DEBUG, but csrc without DEBUG (in which case
+            # this would claim to be a release build when it's not.)
+            f.write("debug = {}\n".format(repr(DEBUG)))
+            f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
+
+
+################################################################################
+# Building dependent libraries
 ################################################################################
 
+# All libraries that torch could depend on
 dep_libs = [
     'nccl', 'caffe2',
-    'libshm', 'libshm_windows', 'gloo', 'THD', 'nanopb',
+    'libshm', 'libshm_windows', 'gloo', 'THD', 'nanopb', 'c10d',
 ]
 
+missing_pydep = '''
+Missing build dependency: Unable to `import {importname}`.
+Please install it via `conda install {module}` or `pip install {module}`
+'''.strip()
 
-# global ninja file for building generated code stuff
-ninja_global = None
-if WITH_NINJA:
-    ninja_global = NinjaBuilder('global')
+
+def check_pydep(importname, module):
+    try:
+        importlib.import_module(importname)
+    except ImportError:
+        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
 
 
+# Calls build_pytorch_libs.sh/bat with the correct env variables
 def build_libs(libs):
     for lib in libs:
         assert lib in dep_libs, 'invalid lib: {}'.format(lib)
@@ -209,6 +285,7 @@ def build_libs(libs):
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
     my_env["NUM_JOBS"] = str(NUM_JOBS)
+    my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
     if not IS_WINDOWS:
         if WITH_NINJA:
             my_env["CMAKE_GENERATOR"] = '-GNinja'
@@ -234,39 +311,21 @@ def build_libs(libs):
         my_env["MKLDNN_LIBRARY"] = MKLDNN_LIBRARY
         my_env["MKLDNN_INCLUDE_DIR"] = MKLDNN_INCLUDE_DIR
         build_libs_cmd += ['--with-mkldnn']
-
     if WITH_GLOO_IBVERBS:
         build_libs_cmd += ['--with-gloo-ibverbs']
-
     if WITH_DISTRIBUTED_MW:
         build_libs_cmd += ['--with-distributed-mw']
+
+    if FULL_CAFFE2:
+        build_libs_cmd += ['--full-caffe2']
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         print("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
         sys.exit(1)
 
-missing_pydep = '''
-Missing build dependency: Unable to `import {importname}`.
-Please install it via `conda install {module}` or `pip install {module}`
-'''.strip()
 
-
-def check_pydep(importname, module):
-    try:
-        importlib.import_module(importname)
-    except ImportError:
-        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
-
-
-class build_deps(Command):
-    user_options = []
-
-    def initialize_options(self):
-        pass
-
-    def finalize_options(self):
-        pass
-
+# Build all dependent libraries
+class build_deps(PytorchCommand):
     def run(self):
         # Check if you remembered to check out submodules
         def check_file(f):
@@ -280,6 +339,7 @@ class build_deps(Command):
         check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
         check_file(os.path.join(third_party_path, 'catch', 'CMakeLists.txt'))
+        check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
 
         check_pydep('yaml', 'pyyaml')
         check_pydep('typing', 'typing')
@@ -296,6 +356,8 @@ class build_deps(Command):
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
             libs += ['THD']
+        if WITH_C10D:
+            libs += ['c10d']
         build_libs(libs)
 
         # Use copies instead of symbolic files.
@@ -334,15 +396,7 @@ for lib in dep_libs:
     build_dep_cmds['build_' + lib.lower()] = build_dep
 
 
-class build_module(Command):
-    user_options = []
-
-    def initialize_options(self):
-        pass
-
-    def finalize_options(self):
-        pass
-
+class build_module(PytorchCommand):
     def run(self):
         self.run_command('build_py')
         self.run_command('build_ext')
@@ -351,27 +405,14 @@ class build_module(Command):
 class build_py(setuptools.command.build_py.build_py):
 
     def run(self):
-        self.create_version_file()
+        self.run_command('create_version_file')
         setuptools.command.build_py.build_py.run(self)
-
-    @staticmethod
-    def create_version_file():
-        global version, cwd
-        print('-- Building version ' + version)
-        version_path = os.path.join(cwd, 'torch', 'version.py')
-        with open(version_path, 'w') as f:
-            f.write("__version__ = '{}'\n".format(version))
-            # NB: This is not 100% accurate, because you could have built the
-            # library code with DEBUG, but csrc without DEBUG (in which case
-            # this would claim to be a release build when it's not.)
-            f.write("debug = {}\n".format(repr(DEBUG)))
-            f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
 
 
 class develop(setuptools.command.develop.develop):
 
     def run(self):
-        build_py.create_version_file()
+        self.run_command('create_version_file')
         setuptools.command.develop.develop.run(self)
         self.create_compile_commands()
 
@@ -474,6 +515,39 @@ class build_ext(build_ext_parent):
 
             self.copy_file(export_lib, target_lib)
 
+    def build_extensions(self):
+        # If also building Caffe2 python, then we need this extra logic copied
+        # from the old setup_caffe2.py
+        if FULL_CAFFE2:
+            pybind_exts = [
+                'caffe2.python.caffe2_pybind11_state',
+                'caffe2.python.caffe2_pybind11_state_gpu',
+            ]
+            # The cmake of Caffe2 puts these in the site-packages rather than
+            # the build directory like the other torch extensions
+            sp_dir = distutils.sysconfig.get_python_lib(prefix='')
+            i = 0
+            while i < len(self.extensions):
+                ext = self.extensions[i]
+                if ext.name not in pybind_exts:
+                    i += 1
+                    continue
+                fullname = self.get_ext_fullname(ext.name)
+                filename = self.get_ext_filename(fullname)
+
+                src = os.path.join(tmp_install_path, sp_dir, filename)
+                if not os.path.exists(src):
+                    print("{} does not exist".format(src))
+                    del self.extensions[i]
+                else:
+                    dst = os.path.join(os.path.realpath(self.build_lib), filename)
+                    dst_dir = os.path.dirname(dst)
+                    if not os.path.exists(dst_dir):
+                        os.makedirs(dst_dir)
+                    self.copy_file(src, dst)
+                    i += 1
+        distutils.command.build_ext.build_ext.build_extensions(self)
+
 
 class build(distutils.command.build.build):
     sub_commands = [
@@ -513,23 +587,29 @@ class clean(distutils.command.clean.clean):
 
 include_dirs = []
 library_dirs = []
-extra_link_args = []
 
 if IS_WINDOWS:
-    extra_compile_args = ['/Z7', '/EHa', '/DNOMINMAX', '/wd4267', '/wd4251', '/wd4522',
-                          '/wd4522', '/wd4838', '/wd4305', '/wd4244', '/wd4190',
-                          '/wd4101', '/wd4996', '/wd4275'
-                          # /Z7 turns on symbolic debugging information in .obj files
-                          # /EHa is about native C++ catch support for asynchronous
-                          # structured exception handling (SEH)
-                          # /DNOMINMAX removes builtin min/max functions
-                          # /wdXXXX disables warning no. XXXX
-                          ]
+    # /NODEFAULTLIB makes sure we only link to DLL runtime
+    # and matches the flags set for protobuf and ONNX
+    extra_link_args = ['/NODEFAULTLIB:LIBCMT.LIB']
+    # /MD links against DLL runtime
+    # and matches the flags set for protobuf and ONNX
+    # /Z7 turns on symbolic debugging information in .obj files
+    # /EHa is about native C++ catch support for asynchronous
+    # structured exception handling (SEH)
+    # /DNOMINMAX removes builtin min/max functions
+    # /wdXXXX disables warning no. XXXX
+    extra_compile_args = ['/MD', '/Z7',
+                          '/EHa', '/DNOMINMAX',
+                          '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
+                          '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
+                          '/wd4275']
     if sys.version_info[0] == 2:
         # /bigobj increases number of sections in .obj file, which is needed to link
         # against libaries in Python 2.7 under Windows
         extra_compile_args.append('/bigobj')
 else:
+    extra_link_args = []
     extra_compile_args = [
         '-std=c++11',
         '-Wall',
@@ -553,52 +633,67 @@ else:
     if check_env_flag('WERROR'):
         extra_compile_args.append('-Werror')
 
-cwd = os.path.dirname(os.path.abspath(__file__))
-lib_path = os.path.join(cwd, "torch", "lib")
-third_party_path = os.path.join(cwd, "third_party")
-
-
-tmp_install_path = lib_path + "/tmp_install"
 include_dirs += [
     cwd,
-    os.path.join(cwd, "torch", "csrc"),
-    third_party_path + "/pybind11/include",
     tmp_install_path + "/include",
     tmp_install_path + "/include/TH",
     tmp_install_path + "/include/THNN",
     tmp_install_path + "/include/ATen",
+    third_party_path + "/pybind11/include",
+    os.path.join(cwd, "torch", "csrc"),
+    "build/third_party",
 ]
 
 library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.so')]
-if WITH_CUDA or WITH_ROCM:
+if WITH_CUDA:
     CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
+if WITH_ROCM:
+    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_hip.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
+C10D_LIB = os.path.join(lib_path, 'libc10d.a')
+C10D_GLOO_LIB = os.path.join(lib_path, 'libc10d_gloo.a')
 
 # static library only
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
+if DEBUG:
+    PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.a')
+else:
+    PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobuf.a')
 
 if IS_DARWIN:
     CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.dylib')]
-    if WITH_CUDA or WITH_ROCM:
+    if WITH_CUDA:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_gpu.dylib'))
+    if WITH_ROCM:
+        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_hip.dylib'))
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
     CAFFE2_LIBS = [os.path.join(lib_path, 'caffe2.lib')]
-    if WITH_CUDA or WITH_ROCM:
+    if WITH_CUDA:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
+    if WITH_ROCM:
+        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
+    # Windows needs direct access to ONNX libraries as well
+    # as through Caffe2 library
+    CAFFE2_LIBS += [
+        os.path.join(lib_path, 'onnx.lib'),
+        os.path.join(lib_path, 'onnx_proto.lib'),
+    ]
     if DEBUG:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
+        PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.lib')
     else:
         NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopb.lib')
+        PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobuf.lib')
 
-main_compile_args = ['-D_THP_CORE']
+main_compile_args = ['-D_THP_CORE', '-DONNX_NAMESPACE=' + ONNX_NAMESPACE]
 main_libraries = ['shm']
-main_link_args = CAFFE2_LIBS + [NANOPB_STATIC_LIB]
+main_link_args = CAFFE2_LIBS + [NANOPB_STATIC_LIB, PROTOBUF_STATIC_LIB]
 main_sources = [
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
@@ -664,6 +759,7 @@ main_sources = [
     "torch/csrc/jit/passes/canonicalize.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/decompose_addmm.cpp",
+    "torch/csrc/jit/passes/loop_unrolling.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
     "torch/csrc/jit/generated/aten_dispatch.cpp",
@@ -676,6 +772,8 @@ main_sources = [
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/aten_variable_hooks.cpp",
     "torch/csrc/autograd/grad_mode.cpp",
+    "torch/csrc/autograd/anomaly_mode.cpp",
+    "torch/csrc/autograd/python_anomaly_mode.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/variable.cpp",
@@ -729,6 +827,11 @@ if WITH_DISTRIBUTED:
         extra_compile_args += ['-DWITH_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
+
+if WITH_C10D:
+    extra_compile_args += ['-DWITH_C10D']
+    main_sources += ['torch/csrc/distributed/c10d/init.cpp']
+    main_link_args += [C10D_GLOO_LIB, C10D_LIB]
 
 if WITH_CUDA:
     nvtoolext_lib_name = None
@@ -878,27 +981,29 @@ if WITH_CUDA:
     THNVRTC = Extension("torch._nvrtc",
                         sources=['torch/csrc/nvrtc.cpp'],
                         language='c++',
+                        extra_compile_args=main_compile_args + extra_compile_args,
                         include_dirs=include_dirs,
                         library_dirs=library_dirs + cuda_stub_path,
                         extra_link_args=thnvrtc_link_flags,
                         )
     extensions.append(THNVRTC)
 
-version = '0.5.0a0'
-if os.getenv('PYTORCH_BUILD_VERSION'):
-    assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
-    build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
-    version = os.getenv('PYTORCH_BUILD_VERSION')
-    if build_number > 1:
-        version += '.post' + str(build_number)
-else:
-    try:
-        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
-        version += '+' + sha[:7]
-    except Exception:
-        pass
+if FULL_CAFFE2:
+    # If building Caffe2 python as well, these extensions are built by cmake
+    # copied manually in build_extensions() inside the build_ext implementaiton
+    extensions.append(
+        setuptools.Extension(
+            name=str('caffe2.python.caffe2_pybind11_state'),
+            sources=[]),
+    )
+    extensions.append(
+        setuptools.Extension(
+            name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+            sources=[]),
+    )
 
 cmdclass = {
+    'create_version_file': create_version_file,
     'build': build,
     'build_py': build_py,
     'build_ext': build_ext,

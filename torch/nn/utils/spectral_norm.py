@@ -17,7 +17,7 @@ class SpectralNorm(object):
         self.eps = eps
 
     def compute_weight(self, module):
-        weight = getattr(module, self.name + '_org')
+        weight = getattr(module, self.name + '_orig')
         u = getattr(module, self.name + '_u')
         height = weight.size(0)
         weight_mat = weight.view(height, -1)
@@ -34,10 +34,10 @@ class SpectralNorm(object):
         return weight, u
 
     def remove(self, module):
-        weight = module._parameters[self.name + '_org']
+        weight = module._parameters[self.name + '_orig']
         delattr(module, self.name)
         delattr(module, self.name + '_u')
-        delattr(module, self.name + '_org')
+        delattr(module, self.name + '_orig')
         module.register_parameter(self.name, weight)
 
     def __call__(self, module, inputs):
@@ -53,8 +53,14 @@ class SpectralNorm(object):
 
         u = normalize(weight.new_empty(height).normal_(0, 1), dim=0, eps=fn.eps)
         delattr(module, fn.name)
-        module.register_parameter(fn.name + "_org", weight)
-        module.register_buffer(fn.name, weight)
+        module.register_parameter(fn.name + "_orig", weight)
+        # We still need to assign weight back as fn.name because all sorts of
+        # things may assume that it exists, e.g., when initializing weights.
+        # However, we can't directly assign as it could be an nn.Parameter and
+        # gets added as a parameter. Instead, we assign weight.data, which will
+        # just be added as plain attribute, and also supports nn.init due to
+        # shared storage.
+        setattr(module, fn.name, weight.data)
         module.register_buffer(fn.name + "_u", u)
 
         module.register_forward_pre_hook(fn)

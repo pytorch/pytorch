@@ -6,6 +6,8 @@
 
 using namespace nom;
 
+namespace {
+
 std::map<std::string, caffe2::Argument>
 getArgumentsFromOperator(caffe2::OperatorDef op) {
   std::map<std::string, caffe2::Argument> argMap;
@@ -82,6 +84,8 @@ std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
   }
   return dilations;
 }
+
+} // namespace
 
 namespace caffe2 {
 

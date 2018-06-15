@@ -17,6 +17,7 @@ WITH_NNPACK=0
 WITH_MKLDNN=0
 WITH_GLOO_IBVERBS=0
 WITH_DISTRIBUTED_MW=0
+FULL_CAFFE2=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
       --with-cuda)
@@ -36,6 +37,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --with-distributed-mw)
           WITH_DISTRIBUTED_MW=1
+          ;;
+      --full-caffe2)
+          FULL_CAFFE2=1
           ;;
       *)
           break
@@ -81,12 +85,10 @@ C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=686926
 C_FLAGS="${C_FLAGS} -DOMPI_SKIP_MPICXX=1"
 LDFLAGS="-L\"$INSTALL_DIR/lib\" "
-LD_POSTFIX=".so.1"
-LD_POSTFIX_UNVERSIONED=".so"
+LD_POSTFIX=".so"
 if [[ $(uname) == 'Darwin' ]]; then
     LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
-    LD_POSTFIX=".1.dylib"
-    LD_POSTFIX_UNVERSIONED=".dylib"
+    LD_POSTFIX=".dylib"
 else
     LDFLAGS="$LDFLAGS -Wl,-rpath,\$ORIGIN"
 fi
@@ -111,17 +113,17 @@ $BASE_DIR/torch/lib/THNN/generic/THNN.h;\
 $BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h;\
 $BASE_DIR/torch/lib/ATen/nn.yaml"
 CUDA_NVCC_FLAGS=$C_FLAGS
-if [[ $CUDA_DEBUG -eq 1 ]]; then
-  CUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS -g -G"
+if [[ -z "$CUDA_DEVICE_DEBUG" ]]; then
+  CUDA_DEVICE_DEBUG=0
 fi
 if [ -z "$NUM_JOBS" ]; then
   NUM_JOBS="$(getconf _NPROCESSORS_ONLN)"
 fi
 
 BUILD_TYPE="Release"
-if [[ "$DEBUG" ]]; then
+if [[ -n "$DEBUG" && $DEBUG -ne 0 ]]; then
   BUILD_TYPE="Debug"
-elif [[ "$REL_WITH_DEB_INFO" ]]; then
+elif [[ -n "$REL_WITH_DEB_INFO" && $REL_WITH_DEB_INFO -ne 0 ]]; then
   BUILD_TYPE="RelWithDebInfo"
 fi
 
@@ -139,6 +141,9 @@ function build() {
       nanopb ) BUILD_C_FLAGS=$C_FLAGS" -fPIC -fexceptions";;
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
+  # TODO: The *_LIBRARIES cmake variables should eventually be
+  # deprecated because we are using .cmake files to handle finding
+  # installed libraries instead
   ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
               ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
@@ -149,6 +154,7 @@ function build() {
               -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
               -DCMAKE_INSTALL_LIBDIR="$INSTALL_DIR/lib" \
               -DCUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS" \
+              -DCUDA_DEVICE_DEBUG=$CUDA_DEVICE_DEBUG \
               -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
               -Dcwrap_files="$CWRAP_FILES" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
@@ -165,7 +171,7 @@ function build() {
               -DTHNN_SO_VERSION=1 \
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
-              -DNO_CUDA=$((1-$WITH_CUDA)) \
+              -DUSE_CUDA=$WITH_CUDA \
               -DNO_NNPACK=$((1-$WITH_NNPACK)) \
               -DNCCL_EXTERNAL=1 \
               -Dnanopb_BUILD_GENERATOR=0 \
@@ -177,9 +183,6 @@ function build() {
   popd
 
   local lib_prefix=$INSTALL_DIR/lib/lib$1
-  if [ -f "$lib_prefix$LD_POSTFIX" ]; then
-    rm -rf -- "$lib_prefix$LD_POSTFIX_UNVERSIONED"
-  fi
 
   if [[ $(uname) == 'Darwin' ]]; then
     pushd "$INSTALL_DIR/lib"
@@ -224,11 +227,12 @@ function build_caffe2() {
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-      -DBUILD_CAFFE2=OFF \
+      -DBUILD_CAFFE2=$FULL_CAFFE2 \
       -DBUILD_ATEN=ON \
-      -DBUILD_PYTHON=OFF \
+      -DBUILD_PYTHON=$FULL_CAFFE2 \
       -DBUILD_BINARY=OFF \
       -DBUILD_SHARED_LIBS=ON \
+      -DONNX_NAMESPACE=$ONNX_NAMESPACE \
       -DUSE_CUDA=$WITH_CUDA \
       -DUSE_ROCM=$WITH_ROCM \
       -DUSE_NNPACK=$WITH_NNPACK \
@@ -249,6 +253,17 @@ function build_caffe2() {
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
+
+  # Install Python proto files
+  if [[ $FULL_CAFFE2 -ne 0 ]]; then
+    find . -name proto
+    for proto_file in ./caffe/proto/*.py; do
+      cp $proto_file "$BASE_DIR/caffe/proto/"
+    done
+    for proto_file in ./caffe2/proto/*.py; do
+      cp $proto_file "$BASE_DIR/caffe2/proto/"
+    done
+  fi
   popd
 }
 
@@ -276,6 +291,10 @@ for arg in "$@"; do
     elif [[ "$arg" == "libshm" ]] || [[ "$arg" == "libshm_windows" ]]; then
         pushd "$TORCH_LIB_DIR"
         build $arg
+        popd
+    elif [[ "$arg" == "c10d" ]]; then
+        pushd "$TORCH_LIB_DIR"
+        build c10d
         popd
     else
         pushd "$THIRD_PARTY_DIR"

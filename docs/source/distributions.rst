@@ -131,6 +131,24 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`HalfCauchy`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.half_cauchy
+.. autoclass:: HalfCauchy
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`HalfNormal`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.half_normal
+.. autoclass:: HalfNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Independent`
 ~~~~~~~~~~~~~~~~~~~~~
 

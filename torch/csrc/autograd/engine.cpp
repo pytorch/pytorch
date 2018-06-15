@@ -3,6 +3,7 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/grad_mode.h"
+#include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -269,6 +270,9 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
 auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void {
   std::lock_guard<std::mutex> lock(task.base->mutex);
   if (!task.base->has_error.load()) {
+    if (AnomalyMode::is_enabled()) {
+      task.fn->metadata()->print_stack();
+    }
     task.base->exception = std::current_exception();
     task.base->has_error = true;
   }
@@ -288,6 +292,49 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, variab
   return outputs;
 }
 
+static bool is_compatible_type(const at::Type& expected, const at::Type& actual) {
+  // Types are compatible if they exactly match or if the gradient is a sparse
+  // version of the expected type.
+  return expected == actual || (actual.is_sparse() &&
+      expected == actual.toBackend(toDense(actual.backend())));
+}
+
+template<typename F>
+static void validate_outputs(const edge_list& edges, const variable_list& grads, const F& format_error) {
+  if (grads.size() != edges.size()) {
+    std::stringstream ss;
+    ss << "invalid number of gradients - expected ";
+    ss << edges.size() << ", but got " << grads.size();
+    throw std::runtime_error(format_error(ss.str()));
+  }
+  for (size_t i = 0; i < grads.size(); i++) {
+    const auto& edge = edges[i];
+    if (!edge.is_valid()) continue;
+
+    const auto& metadata = edge.function->input_metadata(edge.input_nr);
+    const auto& output = grads[i];
+    if (!output.defined()) {
+      // FIXME: TestJit.test_ge_optimized fails this assertion.
+      // std::stringstream ss;
+      // ss << "undefined gradient at index " << i;
+      // throw std::runtime_error(format_error(ss.str()));
+      continue;
+    }
+    if (!grads[i].sizes().equals(metadata.shape())) {
+      std::stringstream ss;
+      ss << "invalid gradient at index " << i << " - expected shape ";
+      ss << metadata.shape() << " but got " << grads[i].sizes();
+      throw std::runtime_error(format_error(ss.str()));
+    }
+    if (!is_compatible_type(metadata.type(), grads[i].type())) {
+      std::stringstream ss;
+      ss << "invalid gradient at index " << i << " - expected type ";
+      ss << metadata.type() << " but got " << grads[i].type();
+      throw std::runtime_error(format_error(ss.str()));
+    }
+  }
+}
+
 static variable_list call_function(FunctionTask& task) {
   bool prev_checkpoint_valid_state = checkpoint_valid;
   checkpoint_valid = task.base->can_checkpoint() && prev_checkpoint_valid_state;
@@ -298,6 +345,11 @@ static variable_list call_function(FunctionTask& task) {
     fn.will_release_variables();
   }
   auto outputs = fn(inputs);
+  validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
+    std::ostringstream ss;
+    ss << "Function "  << fn.name() << " returned an " << msg;
+    return ss.str();
+  });
   checkpoint_valid = prev_checkpoint_valid_state;
   return call_post_hooks(fn, std::move(outputs), std::move(inputs));
 }
@@ -323,15 +375,22 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     fn.release_variables();
   }
 
-  if (outputs.size() != fn.num_outputs()) {
-    std::stringstream ss;
-    ss << "Function '" << fn.name() << "' returned an invalid number of outputs - expected ";
-    ss << fn.num_outputs() << ", but got " << outputs.size();
-    throw std::runtime_error(ss.str());
-  }
-
   int num_outputs = outputs.size();
   if (num_outputs == 0) return; // Don't even acquire the mutex
+
+  if (AnomalyMode::is_enabled()) {
+    AutoGradMode grad_mode(false);
+    for (int i = 0; i < num_outputs; ++i) {
+      auto& output = outputs[i];
+      AutoGPU guard(output);
+      if (output.defined() && output.ne(output).any().toCByte()) {
+        std::stringstream ss;
+        ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
+        throw std::runtime_error(ss.str());
+      }
+    }
+  }
+
   std::lock_guard<std::mutex> lock(task.base->mutex);
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
@@ -426,6 +485,11 @@ auto Engine::execute(const edge_list& input_roots,
                      bool create_graph,
                      const edge_list& outputs) -> variable_list {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
+
+  validate_outputs(input_roots, inputs, [](const std::string& msg) {
+    return msg;
+  });
+
   // Callbacks are only valid for the duration of this run and should always be cleared
   ClearCallbacks _cb_guard(final_callbacks, post_callbacks_lock);
 

@@ -19,6 +19,11 @@ typedef struct THSTensor
     int coalesced;
     std::atomic<int> refcount;
 
+    // NOTE: this returns the "old" TH dimension view where no dimensions represents an empty tensor.
+    // There will be a dim() function that gives the new view that supports 0-sized dimensions.
+    inline int64_t _dim() const {
+      return nDimensionI + nDimensionV;
+    }
 } THSTensor;
 
 #endif

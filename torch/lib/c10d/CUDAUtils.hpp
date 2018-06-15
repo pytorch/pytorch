@@ -34,7 +34,7 @@ class CUDAEvent {
 
   ~CUDAEvent();
 
-  static CUDAEvent create();
+  static CUDAEvent create(unsigned int flags = cudaEventDefault);
 
   // Must not be copyable.
   CUDAEvent& operator=(const CUDAEvent&) = delete;

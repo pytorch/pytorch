@@ -1,7 +1,7 @@
 // included as 'TensorDenseOrSparse' in TensorDerived.cpp
 
 IntList ${Tensor}::strides() const {
-  int64_t d = tensor->nDimension;
+  int64_t d = tensor->_dim();
   if (d != 0) {
     return IntList(reinterpret_cast<int64_t*>(tensor->stride),dim());
   } else {

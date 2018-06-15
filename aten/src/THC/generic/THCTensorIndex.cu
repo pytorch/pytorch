@@ -141,9 +141,9 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   dim3 largeIndexGrid(std::min(THCCeilDiv(srcTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 largeIndexBlock(std::min(srcTotalSize, (ptrdiff_t)128));
 
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, dst) &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, indices)) {
+  if (THCTensor_canUse32BitIndexMath(state, dst) &&
+      THCTensor_canUse32BitIndexMath(state, src) &&
+      THCTensor_canUse32BitIndexMath(state, indices)) {
     TensorInfo<real, unsigned int> dstInfo =
       getTensorInfo<real, THCTensor, unsigned int>(state, dst);
     int dstCopyDim = dstInfo.collapseDims(dim);
@@ -224,10 +224,10 @@ void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLon
   THArgCheck(!(THCTensor_(nDimension)(state, src) == 0 && THCudaLongTensor_nDimension(state, index) != 0), 2,
              "tried to take from an empty tensor");
 
-  THCTensor_(resizeNd)(state, dst, index->nDimension, index->size, NULL);
+  THCTensor_(resizeNd)(state, dst, index->_dim(), index->size, NULL);
 
   // dispatchTakePut only handles non-empty tensors;
-  if (index->nDimension > 0) {
+  if (index->_dim() > 0) {
     dispatchTakePut<real, TensorTakeOp>(state, src, dst, index);
   }
 }
@@ -330,9 +330,9 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   dim3 largeIndexGrid(std::min(THCCeilDiv(srcTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 largeIndexBlock(std::min(srcTotalSize, (ptrdiff_t)128));
 
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, dst) &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, indices)) {
+  if (THCTensor_canUse32BitIndexMath(state, dst) &&
+      THCTensor_canUse32BitIndexMath(state, src) &&
+      THCTensor_canUse32BitIndexMath(state, indices)) {
     TensorInfo<real, unsigned int> dstInfo =
       getTensorInfo<real, THCTensor, unsigned int>(state, dst);
     int dstAddDim = dstInfo.collapseDims(dim);
@@ -447,8 +447,8 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   dim3 largeIndexGrid(std::min(THCCeilDiv(dstTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 largeIndexBlock(std::min(dstTotalSize, (ptrdiff_t)128));
 
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, dst) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, indices)) {
+  if (THCTensor_canUse32BitIndexMath(state, dst) &&
+      THCTensor_canUse32BitIndexMath(state, indices)) {
     TensorInfo<real, unsigned int> dstInfo =
       getTensorInfo<real, THCTensor, unsigned int>(state, dst);
     int dstFillDim = dstInfo.collapseDims(dim);
@@ -579,9 +579,9 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   dim3 largeIndexGrid(std::min(THCCeilDiv(dstTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 largeIndexBlock(std::min(dstTotalSize, (ptrdiff_t)128));
 
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, dst) &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, src) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, indices)) {
+  if (THCTensor_canUse32BitIndexMath(state, dst) &&
+      THCTensor_canUse32BitIndexMath(state, src) &&
+      THCTensor_canUse32BitIndexMath(state, indices)) {
     TensorInfo<real, unsigned int> dstInfo =
       getTensorInfo<real, THCTensor, unsigned int>(state, dst);
     int dstSelectDim = dstInfo.collapseDims(dim);

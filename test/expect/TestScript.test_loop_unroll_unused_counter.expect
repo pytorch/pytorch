@@ -1,0 +1,36 @@
+graph(%x : Dynamic) {
+  %y.1 : Long() = prim::Constant[value={0}]()
+  %2 : Byte() = prim::Constant[value={1}]()
+  %3 : Dynamic = aten::div[other={8}](%x)
+  %4 : Dynamic = aten::mul[other={8}](%3)
+  %5 : Dynamic = aten::sub[alpha={1}](%x, %4)
+  %y.3 : Long() = prim::Loop(%3, %2, %y.1)
+    block0(%i.1 : Dynamic, %8 : Long()) {
+      %9 : Long() = prim::Constant[value={1}]()
+      %y.12 : Dynamic = aten::add[alpha={1}](%8, %9)
+      %11 : Long() = prim::Constant[value={1}]()
+      %y.5 : Dynamic = aten::add[alpha={1}](%y.12, %11)
+      %13 : Long() = prim::Constant[value={1}]()
+      %y.6 : Dynamic = aten::add[alpha={1}](%y.5, %13)
+      %15 : Long() = prim::Constant[value={1}]()
+      %y.7 : Dynamic = aten::add[alpha={1}](%y.6, %15)
+      %17 : Long() = prim::Constant[value={1}]()
+      %y.8 : Dynamic = aten::add[alpha={1}](%y.7, %17)
+      %19 : Long() = prim::Constant[value={1}]()
+      %y.9 : Dynamic = aten::add[alpha={1}](%y.8, %19)
+      %21 : Long() = prim::Constant[value={1}]()
+      %y.10 : Dynamic = aten::add[alpha={1}](%y.9, %21)
+      %23 : Long() = prim::Constant[value={1}]()
+      %y.11 : Dynamic = aten::add[alpha={1}](%y.10, %23)
+      %25 : Byte() = prim::Constant[value={1}]()
+      -> (%25, %y.11)
+    }
+  %y : Long() = prim::Loop(%5, %2, %y.3)
+    block0(%i : Dynamic, %28 : Long()) {
+      %29 : Long() = prim::Constant[value={1}]()
+      %y.4 : Dynamic = aten::add[alpha={1}](%28, %29)
+      %31 : Byte() = prim::Constant[value={1}]()
+      -> (%31, %y.4)
+    }
+  return (%y);
+}
