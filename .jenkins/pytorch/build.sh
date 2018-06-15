@@ -5,7 +5,7 @@ if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
 fi
 
 # Add nccl2 for distributed test.
-apt-get install libnccl-dev libnccl2
+sudo apt-get install libnccl-dev libnccl2
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
