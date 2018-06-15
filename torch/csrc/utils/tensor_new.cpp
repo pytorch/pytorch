@@ -124,7 +124,7 @@ static ScalarType infer_scalar_type(PyObject *obj) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
     return var.type().scalarType();
   }
-#ifdef WITH_NUMPY
+#ifdef USE_NUMPY
   if (PyArray_Check(obj)) {
     auto array = (PyArrayObject*)obj;
     return numpy_dtype_to_aten(PyArray_TYPE(array));
@@ -198,7 +198,7 @@ static Tensor internal_new_from_data(const Type & type, at::optional<Device> dev
                               new_with_type_conversion(type_to_use, var, device);
   }
 
-#ifdef WITH_NUMPY
+#ifdef USE_NUMPY
   if (PyArray_Check(data)) {
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
     const auto& type_to_use = type_inference ? type.toScalarType(tensor.type().scalarType()) : type;

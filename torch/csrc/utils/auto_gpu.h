@@ -7,7 +7,7 @@
 
 #include <ATen/ATen.h>
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda.h>
 #include <cuda_runtime.h>
 #endif
@@ -29,7 +29,7 @@ struct AutoGPU {
   }
 
   ~AutoGPU() {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     if (original_device != -1) {
       cudaSetDevice(original_device);
     }
@@ -37,7 +37,7 @@ struct AutoGPU {
   }
 
   inline void setDevice(int device) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     if (device == -1) {
       return;
     }
@@ -55,7 +55,7 @@ struct AutoGPU {
   int original_device = -1;
 
 private:
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   static void cudaCheck(cudaError_t err) {
     if (err != cudaSuccess) {
       std::string msg = "CUDA error (";

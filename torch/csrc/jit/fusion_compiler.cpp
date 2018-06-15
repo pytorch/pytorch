@@ -7,7 +7,7 @@
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "ATen/ATen.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "THC/THC.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
@@ -39,7 +39,7 @@ std::vector<bool> TensorDesc::findContiguous(
 
 namespace {
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 
 static int ceilDiv(int a, int b) {
   return (a + b - 1) / b;
@@ -492,7 +492,7 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector
   launch_with_tensors(inputs, outputs);
 }
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 
 void checkCUDAVersion(const cudaDeviceProp & prop) {
   if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
@@ -747,7 +747,7 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
     std::string name = "kernel_" + std::to_string(cache.size());
     CompiledFusionFunction * raw_func;
     if(agraph.device != kCPUDevice) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
       raw_func = new CUDAFusionFunction(name, agraph);
 #else
       throw std::runtime_error("cannot compile a CUDA fusion group, CUDA is not enabled.");
@@ -834,7 +834,7 @@ FusionCompiler & sharedFusionCompiler() {
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/utils/disallow_copy.h"
 #include "ATen/ATen.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
 #include <cuda.h>

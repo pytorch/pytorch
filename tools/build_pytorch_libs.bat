@@ -25,10 +25,10 @@ IF "%~1"=="--with-cuda" (
 )
 
 IF "%~1"=="--with-rocm" (
-  set /a WITH_ROCM=1
+  set /a USE_ROCM=1
   shift
 ) ELSE (
-  set /a WITH_ROCM=0
+  set /a USE_ROCM=0
 )
 
 IF "%~1"=="--with-nnpack" (
@@ -48,19 +48,19 @@ IF "%~1"=="--with-mkldnn" (
 )
 
 IF "%~1"=="--with-gloo-ibverbs" (
-  set /a WITH_GLOO_IBVERBS=1
+  set /a USE_GLOO_IBVERBS=1
   echo Warning: gloo iverbs is enabled but build is not yet implemented 1>&2
   shift
 ) ELSE (
-  set /a WITH_GLOO_IBVERBS=0
+  set /a USE_GLOO_IBVERBS=0
 )
 
 IF "%~1"=="--with-distributed-mw" (
-  set /a WITH_DISTRIBUTED_MW=1
+  set /a USE_DISTRIBUTED_MW=1
   echo Warning: distributed mw is enabled but build is not yet implemented 1>&2
   shift
 ) ELSE (
-  set /a WITH_DISTRIBUTED_MW=0
+  set /a USE_DISTRIBUTED_MW=0
 )
 
 set BUILD_TYPE=Release
@@ -195,7 +195,7 @@ goto:eof
                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
-                  -DWITH_ROCM=%WITH_ROCM%
+                  -DUSE_ROCM=%USE_ROCM%
 
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1

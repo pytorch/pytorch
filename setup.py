@@ -40,7 +40,7 @@
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   WITH_GLOO_IBVERBS
+#   USE_GLOO_IBVERBS
 #     toggle features related to distributed support
 #
 #   PYTORCH_BUILD_VERSION
@@ -107,11 +107,11 @@ import glob
 import importlib
 
 from tools.setup_helpers.env import check_env_flag
-from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.rocm import WITH_ROCM, ROCM_HOME, ROCM_VERSION
-from tools.setup_helpers.cudnn import (WITH_CUDNN, CUDNN_LIBRARY,
+from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
+from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
+from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
-from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
+from tools.setup_helpers.nccl import USE_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
 from tools.setup_helpers.mkldnn import (WITH_MKLDNN, MKLDNN_LIBRARY,
                                         MKLDNN_LIB_DIR, MKLDNN_INCLUDE_DIR)
@@ -119,8 +119,8 @@ from tools.setup_helpers.nnpack import WITH_NNPACK
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
-from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
-    WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS, WITH_C10D
+from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
+    USE_DISTRIBUTED_MW, USE_GLOO_IBVERBS, WITH_C10D
 
 
 ################################################################################
@@ -295,14 +295,14 @@ def build_libs(libs):
             my_env['CMAKE_INSTALL'] = 'make install'
     if WITH_SYSTEM_NCCL:
         my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
-    if WITH_CUDA:
+    if USE_CUDA:
         my_env["CUDA_BIN_PATH"] = CUDA_HOME
         build_libs_cmd += ['--with-cuda']
-    if WITH_ROCM:
+    if USE_ROCM:
         build_libs_cmd += ['--with-rocm']
     if WITH_NNPACK:
         build_libs_cmd += ['--with-nnpack']
-    if WITH_CUDNN:
+    if USE_CUDNN:
         my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
         my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY
         my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
@@ -311,9 +311,9 @@ def build_libs(libs):
         my_env["MKLDNN_LIBRARY"] = MKLDNN_LIBRARY
         my_env["MKLDNN_INCLUDE_DIR"] = MKLDNN_INCLUDE_DIR
         build_libs_cmd += ['--with-mkldnn']
-    if WITH_GLOO_IBVERBS:
+    if USE_GLOO_IBVERBS:
         build_libs_cmd += ['--with-gloo-ibverbs']
-    if WITH_DISTRIBUTED_MW:
+    if USE_DISTRIBUTED_MW:
         build_libs_cmd += ['--with-distributed-mw']
 
     if FULL_CAFFE2:
@@ -345,14 +345,14 @@ class build_deps(PytorchCommand):
         check_pydep('typing', 'typing')
 
         libs = []
-        if WITH_NCCL and not WITH_SYSTEM_NCCL:
+        if USE_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
         libs += ['caffe2', 'nanopb']
         if IS_WINDOWS:
             libs += ['libshm_windows']
         else:
             libs += ['libshm']
-        if WITH_DISTRIBUTED:
+        if USE_DISTRIBUTED:
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
             libs += ['THD']
@@ -459,15 +459,15 @@ class build_ext(build_ext_parent):
     def run(self):
 
         # Print build options
-        if WITH_NUMPY:
+        if USE_NUMPY:
             print('-- Building with NumPy bindings')
         else:
             print('-- NumPy not found')
-        if WITH_CUDNN:
+        if USE_CUDNN:
             print('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
         else:
             print('-- Not using cuDNN')
-        if WITH_CUDA:
+        if USE_CUDA:
             print('-- Detected CUDA at ' + CUDA_HOME)
         else:
             print('-- Not using CUDA')
@@ -475,14 +475,14 @@ class build_ext(build_ext_parent):
             print('-- Detected MKLDNN at ' + MKLDNN_LIBRARY + ', ' + MKLDNN_INCLUDE_DIR)
         else:
             print('-- Not using MKLDNN')
-        if WITH_NCCL and WITH_SYSTEM_NCCL:
+        if USE_NCCL and WITH_SYSTEM_NCCL:
             print('-- Using system provided NCCL library at ' +
                   NCCL_SYSTEM_LIB + ', ' + NCCL_INCLUDE_DIR)
-        elif WITH_NCCL:
+        elif USE_NCCL:
             print('-- Building NCCL library')
         else:
             print('-- Not using NCCL')
-        if WITH_DISTRIBUTED:
+        if USE_DISTRIBUTED:
             print('-- Building with distributed package ')
             monkey_patch_THD_link_flags()
         else:
@@ -648,9 +648,9 @@ library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.so')]
-if WITH_CUDA:
+if USE_CUDA:
     CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
-if WITH_ROCM:
+if USE_ROCM:
     CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_hip.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
@@ -666,17 +666,17 @@ else:
 
 if IS_DARWIN:
     CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.dylib')]
-    if WITH_CUDA:
+    if USE_CUDA:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_gpu.dylib'))
-    if WITH_ROCM:
+    if USE_ROCM:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_hip.dylib'))
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
     CAFFE2_LIBS = [os.path.join(lib_path, 'caffe2.lib')]
-    if WITH_CUDA:
+    if USE_CUDA:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
-    if WITH_ROCM:
+    if USE_ROCM:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
     # Windows needs direct access to ONNX libraries as well
     # as through Caffe2 library
@@ -809,22 +809,22 @@ main_sources = [
 try:
     import numpy as np
     include_dirs.append(np.get_include())
-    extra_compile_args.append('-DWITH_NUMPY')
-    WITH_NUMPY = True
+    extra_compile_args.append('-DUSE_NUMPY')
+    USE_NUMPY = True
 except ImportError:
-    WITH_NUMPY = False
+    USE_NUMPY = False
 
-if WITH_DISTRIBUTED:
-    extra_compile_args += ['-DWITH_DISTRIBUTED']
+if USE_DISTRIBUTED:
+    extra_compile_args += ['-DUSE_DISTRIBUTED']
     main_sources += [
         "torch/csrc/distributed/Module.cpp",
     ]
-    if WITH_DISTRIBUTED_MW:
+    if USE_DISTRIBUTED_MW:
         main_sources += [
             "torch/csrc/distributed/Tensor.cpp",
             "torch/csrc/distributed/Storage.cpp",
         ]
-        extra_compile_args += ['-DWITH_DISTRIBUTED_MW']
+        extra_compile_args += ['-DUSE_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
 
@@ -833,7 +833,7 @@ if WITH_C10D:
     main_sources += ['torch/csrc/distributed/c10d/init.cpp']
     main_link_args += [C10D_GLOO_LIB, C10D_LIB]
 
-if WITH_CUDA:
+if USE_CUDA:
     nvtoolext_lib_name = None
     if IS_WINDOWS:
         cuda_lib_path = CUDA_HOME + '/lib/x64/'
@@ -862,7 +862,7 @@ if WITH_CUDA:
     cuda_include_path = os.path.join(CUDA_HOME, 'include')
     include_dirs.append(cuda_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
-    extra_compile_args += ['-DWITH_CUDA']
+    extra_compile_args += ['-DUSE_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
     main_libraries += ['cudart', nvtoolext_lib_name]
     main_sources += [
@@ -876,7 +876,7 @@ if WITH_CUDA:
         "torch/csrc/nn/THCUNN.cpp",
     ]
 
-if WITH_ROCM:
+if USE_ROCM:
     rocm_include_path = '/opt/rocm/include'
     hcc_include_path = '/opt/rocm/hcc/include'
     hipblas_include_path = '/opt/rocm/hipblas/include'
@@ -890,7 +890,7 @@ if WITH_ROCM:
     include_dirs.append(tmp_install_path + "/include/THCUNN")
     extra_link_args.append('-L' + hip_lib_path)
     extra_link_args.append('-Wl,-rpath,' + hip_lib_path)
-    extra_compile_args += ['-DWITH_ROCM']
+    extra_compile_args += ['-DUSE_ROCM']
     extra_compile_args += ['-D__HIP_PLATFORM_HCC__']
 
     main_sources += [
@@ -904,24 +904,24 @@ if WITH_ROCM:
         "torch/csrc/nn/THCUNN.cpp",
     ]
 
-if WITH_NCCL:
+if USE_NCCL:
     if WITH_SYSTEM_NCCL:
         main_link_args += [NCCL_SYSTEM_LIB]
         include_dirs.append(NCCL_INCLUDE_DIR)
     else:
         main_link_args += [NCCL_LIB]
-    extra_compile_args += ['-DWITH_NCCL']
+    extra_compile_args += ['-DUSE_NCCL']
     main_sources += [
         "torch/csrc/cuda/nccl.cpp",
         "torch/csrc/cuda/python_nccl.cpp",
     ]
-if WITH_CUDNN:
+if USE_CUDNN:
     main_libraries += [CUDNN_LIBRARY]
     # NOTE: these are at the front, in case there's another cuDNN in CUDA path
     include_dirs.insert(0, CUDNN_INCLUDE_DIR)
     if not IS_WINDOWS:
         extra_link_args.insert(0, '-Wl,-rpath,' + CUDNN_LIB_DIR)
-    extra_compile_args += ['-DWITH_CUDNN']
+    extra_compile_args += ['-DUSE_CUDNN']
 
 if DEBUG:
     if IS_WINDOWS:
@@ -964,7 +964,7 @@ if not IS_WINDOWS:
     extensions.append(DL)
 
 
-if WITH_CUDA:
+if USE_CUDA:
     thnvrtc_link_flags = extra_link_args + [make_relative_rpath('lib')]
     if IS_LINUX:
         thnvrtc_link_flags = thnvrtc_link_flags + ['-Wl,--no-as-needed']
