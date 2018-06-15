@@ -291,8 +291,12 @@ class ModuleDict(Module):
             for key, module in modules.items():
                 self[key] = module
         else:
-            for key, module in modules:
-                self[key] = module
+            for j, m in enumerate(modules):
+                if not len(m) == 2:
+                    raise ValueError("ModuleDict update sequence element "
+                                    "#" + str(j) + " has length " + len(m) +
+                                    "; 2 is required")
+                self[m[0]] = m[1]
 
 
 class ParameterList(Module):
@@ -487,5 +491,19 @@ class ParameterDict(Module):
             for key, parameter in parameters.items():
                 self[key] = parameter
         else:
-            for key, parameter in parameters:
-                self[key] = parameter
+            for j, p in enumerate(parameters):
+                if not len(p) == 2:
+                    raise ValueError("ParameterDict update sequence element "
+                                    "#" + str(j) + " has length " + len(p) +
+                                    "; 2 is required")
+                self[p[0]] = p[1]
+
+    def extra_repr(self):
+        tmpstr = ''
+        for k, p in self._parameters.items():
+            size_str = 'x'.join(str(size) for size in p.size())
+            device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+            parastr = 'Parameter containing: [{} of size {}{}]'.format(
+                torch.typename(p.data), size_str, device_str)
+            tmpstr = tmpstr + '  (' + k + '): ' + parastr + '\n'
+        return tmpstr
