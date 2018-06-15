@@ -5,6 +5,7 @@ import re
 import unittest
 import sys
 from itertools import repeat
+import os
 
 import torch
 import torch.cuda
@@ -1405,13 +1406,20 @@ class TestCuda(TestCase):
         sample = torch.multinomial(freqs, 1000, True)
         self.assertNotEqual(freqs[sample].min(), 0)
 
+    @staticmethod
+    def mute():
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
+
     def _spawn_method(self, method, arg):
         try:
             mp.set_start_method('spawn')
         except RuntimeError:
             pass
-        with mp.Pool(1) as pool:
-            self.assertTrue(pool.map(method, [arg]))
+        with mp.Pool(1, initializer=self.mute) as pool:
+            errors = pool.map(method, [arg])
+            for e in errors:
+                if 'device-side assert triggered' not in str(e):
+                    self.fail(e)
 
     @staticmethod
     def _test_multinomial_invalid_probs_cuda(probs):
@@ -1421,7 +1429,7 @@ class TestCuda(TestCase):
                 torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:
-            return 'device-side assert triggered' in str(e)
+            return e
 
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @unittest.skipIf(not PY3,
