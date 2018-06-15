@@ -26,15 +26,13 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {
-  Tensor one = self.type().scalarTensor(1);
-  Tensor inv_alpha = at::div(one, alpha);
-  return at::elu(self, Scalar(one), alpha, Scalar(inv_alpha));
+  Tensor inv_alpha = self.type().scalarTensor(alpha).inverse();
+  return at::elu(self, 1.0, alpha, Scalar(inv_alpha));
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
-  Tensor one = self.type().scalarTensor(1);
-  Tensor inv_alpha = at::div(one, alpha);
-  return at::elu_(self, Scalar(one), alpha, Scalar(inv_alpha));
+  Tensor inv_alpha = self.type().scalarTensor(alpha).inverse();
+  return at::elu_(self, 1.0, alpha, Scalar(inv_alpha));
 }
 
 Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
