@@ -11,32 +11,32 @@
 set -ex
 
 # Options for building only a subset of the libraries
-WITH_CUDA=0
-WITH_ROCM=0
-WITH_NNPACK=0
-WITH_MKLDNN=0
-WITH_GLOO_IBVERBS=0
-WITH_DISTRIBUTED_MW=0
+USE_CUDA=0
+USE_ROCM=0
+USE_NNPACK=0
+USE_MKLDNN=0
+USE_GLOO_IBVERBS=0
+USE_DISTRIBUTED_MW=0
 FULL_CAFFE2=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-      --with-cuda)
-          WITH_CUDA=1
+      --use-cuda)
+          USE_CUDA=1
           ;;
-      --with-rocm)
-          WITH_ROCM=1
+      --use-rocm)
+          USE_ROCM=1
           ;;
-      --with-nnpack)
-          WITH_NNPACK=1
+      --use-nnpack)
+          USE_NNPACK=1
           ;;
-      --with-mkldnn)
-          WITH_MKLDNN=1
+      --use-mkldnn)
+          USE_MKLDNN=1
           ;;
-      --with-gloo-ibverbs)
-          WITH_GLOO_IBVERBS=1
+      --use-gloo-ibverbs)
+          USE_GLOO_IBVERBS=1
           ;;
-      --with-distributed-mw)
-          WITH_DISTRIBUTED_MW=1
+      --use-distributed-mw)
+          USE_DISTRIBUTED_MW=1
           ;;
       --full-caffe2)
           FULL_CAFFE2=1
@@ -96,16 +96,16 @@ CPP_FLAGS=" -std=c++11 "
 GLOO_FLAGS=""
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
-if [[ $WITH_CUDA -eq 1 ]]; then
+if [[ $USE_CUDA -eq 1 ]]; then
     GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
 # Gloo infiniband support
-if [[ $WITH_GLOO_IBVERBS -eq 1 ]]; then
+if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
-    THD_FLAGS="-DWITH_GLOO_IBVERBS=1"
+    THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
-if [[ $WITH_DISTRIBUTED_MW -eq 1 ]]; then
-    THD_FLAGS+="-DWITH_DISTRIBUTED_MW=1"
+if [[ $USE_DISTRIBUTED_MW -eq 1 ]]; then
+    THD_FLAGS+="-DUSE_DISTRIBUTED_MW=1"
 fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
@@ -171,8 +171,8 @@ function build() {
               -DTHNN_SO_VERSION=1 \
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
-              -DUSE_CUDA=$WITH_CUDA \
-              -DNO_NNPACK=$((1-$WITH_NNPACK)) \
+              -DUSE_CUDA=$USE_CUDA \
+              -DNO_NNPACK=$((1-$USE_NNPACK)) \
               -DNCCL_EXTERNAL=1 \
               -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_DEBUG_POSTFIX="" \
@@ -233,13 +233,13 @@ function build_caffe2() {
       -DBUILD_BINARY=OFF \
       -DBUILD_SHARED_LIBS=ON \
       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
-      -DUSE_CUDA=$WITH_CUDA \
-      -DUSE_ROCM=$WITH_ROCM \
-      -DUSE_NNPACK=$WITH_NNPACK \
+      -DUSE_CUDA=$USE_CUDA \
+      -DUSE_ROCM=$USE_ROCM \
+      -DUSE_NNPACK=$USE_NNPACK \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
-      -DUSE_MKLDNN=$WITH_MKLDNN \
+      -DUSE_MKLDNN=$USE_MKLDNN \
       -DMKLDNN_INCLUDE_DIR=$MKLDNN_INCLUDE_DIR \
       -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
       -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
