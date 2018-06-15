@@ -25,7 +25,7 @@ using at::Type;
 using at::ScalarType;
 using at::optional;
 
-void register_variable_type_for(Context*, at::Backend, at::ScalarType);
+void register_variable_type_for(at::Type* baseType);
 
 struct VariableType final : public at::Type {
   VariableType(Context* context, at::Type* baseType);
@@ -68,6 +68,7 @@ private:
 
   at::Type* baseType;
   std::string str;
+  size_t id_;
 };
 
 }} // namespace torch::autograd

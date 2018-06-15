@@ -18,8 +18,7 @@ namespace at {
 
 void Type::registerCPU(Context * context) {
   ${cpu_type_registrations}
-  context->type_registry[static_cast<int>(IsVariable::NotVariable)]
-                        [static_cast<int>(Backend::Undefined)]
+  context->type_registry[static_cast<int>(Backend::Undefined)]
                         [static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
 }
 

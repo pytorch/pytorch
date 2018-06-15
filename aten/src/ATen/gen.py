@@ -132,8 +132,7 @@ FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
 
 TYPE_REGISTER = CodeTemplate("""\
-context->type_registry[static_cast<int>(IsVariable::NotVariable)]
-                      [static_cast<int>(Backend::${backend})]
+context->type_registry[static_cast<int>(Backend::${backend})]
                       [static_cast<int>(ScalarType::${scalar_type})]
                       .reset(new ${type_name}(context));
 detail::getVariableHooks().registerVariableTypeFor(context, Backend::${backend}, ScalarType::${scalar_type});
