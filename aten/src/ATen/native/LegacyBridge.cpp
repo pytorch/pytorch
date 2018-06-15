@@ -88,14 +88,32 @@ Tensor& zero_(Tensor& self) {
 
 // Note [Multiple dispatch to sparse]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// In principle, there are some degrees of freedom in how we could gotten to our
-// native CPU sparse implementations.  In particular, the handling of how we are
-// simulating multiple dispatch is asymmetric with how th_add_out handles the
-// multiple dispatch.  We justify this in two ways: (1) knowing when to
-// correctly dispatch to sparse requires us to know how what overloads; so we're
-// less likely to get it "wrong" if we put it all together, and (2) all of this
-// is temporary, because we're aiming to natively support multiple dispatch in
-// our system.
+// In an ideal world, we would use direct support for multiple dispatch to
+// say that add(Dense, Dense) should dispatch to one function, while
+// add(Dense, Sparse) should dispatch to another function.
+//
+// In a world where we only have single dispatch, we can single dispatch on
+// the first function, and then do an is_sparse() test on the second argument
+// to direct ourselves to the correct argument.
+//
+// We are in neither of those worlds.  Instead, we have a th_add function
+// which has legacy implementations in the single dispatch world, BUT our
+// actual add function needs to call s_native_add if the function *would have*
+// utilized a kernel implemented in THS (CPU sparse tensors).
+//
+// th_add is "good old single dispatch" which internally handles the is_sparse()
+// test and also handles broadcasting.  s_native_add works asymmetrically:
+// it doesn't handle broadcasting at all, and it ASSUMES that the relevant
+// argument is a CPU sparse tensor.  Why the asymmetry?  It turns out it is not
+// so easy to figure out if a kernel is implemented in THS; it's not as simple
+// as testing if the first argument is CPU and sparse, because, e.g.,
+// in add(Dense, Sparse), the sparse kernel is in the second argument.  So,
+// the trampoline function is going to know about the overloads *anyway*; it
+// might as well also handle is_sparse() and broadcasting while it's at it.
+//
+// Why not change TH to follow this new scheme?  We could... but since it's
+// all going away when we finish porting the TH functions to ATen, we haven't
+// done it.
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (!self.is_cuda()) {
