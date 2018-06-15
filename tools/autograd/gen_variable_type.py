@@ -44,6 +44,18 @@ DONT_RECORD_TRACE = {
     'conv_transpose2d', 'conv_transpose3d',
 }
 
+# These functions have their names recorded under trace renamed,
+RENAME_TRACE = {
+    'th_add': 'add',
+    's_native_add': 'add',
+    'th_sub': 'sub',
+    's_native_sub': 'sub',
+    'th_mul': 'mul',
+    's_native_mul': 'mul',
+    'th_addmm': 'addmm',
+    's_native_addmm': 'addmm',
+}
+
 # These functions are not worth profiling because they are very cheap and may
 # be called very often.
 DONT_PROFILE = {
@@ -59,7 +71,7 @@ DONT_REQUIRE_DERIVATIVE = {
     # These  only depend on the input Tensor's shape and device, not the data
     'ones_like', 'zeros_like', 'rand_like', 'randn_like',
     # Tensor constructors
-    'sparse_coo_tensor',
+    'sparse_coo_tensor', 'th_sparse_coo_tensor', 'native_sparse_coo_tensor',
     # These are only implemented on integral types
     '__and__', '__iand__', '__ilshift__', '__ior__', '__irshift__', '__ixor__',
     '__lshift__', '__or__', '__rshift__', '__xor__',
@@ -158,6 +170,19 @@ def should_trace(declaration):
     name = declaration['name']
     base_name = name[:-1] if declaration['inplace'] else name[:-4] if name.endswith('_out') else name
     if base_name in DONT_RECORD_TRACE:
+        return False
+    # We need to disable these because their inner implementations implement
+    # broadcasting, and if we trace them top level we will lose the expand nodes.
+    # However, we can't use DONT_RECORD_TRACE, because we must only disable
+    # these for overloads that come from native (the TH overloads still "work")
+    overload = [arg['simple_type'] for arg in declaration['arguments'] if not arg.get('output', False)]
+    if base_name == 'add' and overload == ['Tensor', 'Tensor', 'Scalar']:
+        return False
+    if base_name == 'sub' and overload == ['Tensor', 'Tensor', 'Scalar']:
+        return False
+    if base_name == 'mul' and overload == ['Tensor', 'Tensor', 'Scalar']:
+        return False
+    if base_name == 'addmm' and overload == ['Tensor', 'Tensor', 'Tensor', 'Scalar', 'Scalar']:
         return False
     return True
 
@@ -404,6 +429,8 @@ def emit_body(declaration):
         # TODO: Add a proper concept of side effects to the IR, and
         # properly record inplace operations.
         local['trace_name'] = uninplace_api_name(declaration['api_name'])
+        if local['trace_name'] in RENAME_TRACE:
+            local['trace_name'] = RENAME_TRACE[local['trace_name']]
 
         local['trace_outputs'] = get_trace_outputs(declaration)
 

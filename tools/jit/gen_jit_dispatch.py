@@ -104,7 +104,9 @@ def is_jit_op(decl):
 # TODO: Why are they not supported?
 skip_scalar_overload = {
     'lt-2': [1], 'gt-2': [1], 'le-2': [1], 'ge-2': [1], 'eq-2': [1], 'ne-2': [1],
-    'pow-2': [0, 1], 'add-3': [1], 'sub-3': [1], 'mul-2': [1], 'div-2': [1],
+    'pow-2': [0, 1], 'add-3': [1], 'sub-3': [1],
+    'mul-2': [1], 'th_mul-2': [1], 'native_mul-2': [1],
+    'div-2': [1], 'th_div-2': [1], 'native_div-2': [1],
     'fmod-2': [1], 'remainder-2': [1], '__and__-2': [1], '__or__-2': [1],
     '__iand__-2': [1], '__ior__-2': [1], '__xor__-2': [1], '__ixor__-2': [1],
     '__lshift__-2': [1], '__ilshift__-2': [1], '__rshift__-2': [1], '__irshift__-2': [1],

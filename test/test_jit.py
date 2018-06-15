@@ -476,6 +476,15 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
+    def test_scalar(self):
+        # NB: must not require grad; if it requires grad, it's always a Tensor
+        x = torch.tensor(2.)
+        y = torch.tensor(3.)
+
+        def fn(x, y):
+            return x - y
+        trace, _ = torch.jit.get_trace_graph(fn, (x, y), nderivs=0)
+
     def test_shape_analysis_broadcast(self):
         def broadcast(a, b):
             return a + b
@@ -706,6 +715,8 @@ class TestJit(JitTestCase):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
         trace, _ = torch.jit.get_trace_graph(doit, (x, y))
+        self.run_pass('dce', trace)
+        self.run_pass('canonicalize', trace)
         g = trace.graph()
         g2 = torch._C.Graph()
         g_to_g2 = {}
@@ -3744,6 +3755,11 @@ EXCLUDE_SCRIPT = {
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
+    'test_pow_scalar_constant',
+    'test_pow_constant',
+    'test_mul_constant',
+    'test_div_scalar_constant',
+    'test_div_constant',
 }
 
 
