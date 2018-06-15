@@ -58,9 +58,9 @@ void TypeMeta::_ThrowRuntimeTypeLogicError(const std::string& msg) {
   CAFFE_THROW(msg);
 }
 
-CaffeTypeId TypeMeta::_createTypeId() {
+CaffeTypeId CaffeTypeId::createTypeId() {
   static std::atomic<CaffeTypeId::underlying_type> counter(0);
-  const CaffeTypeId::underlying_type new_value = ++counter; // note: first type id is 1 to avoid confusion of whether 0 means invalid.
+  const CaffeTypeId::underlying_type new_value = ++counter; // note: first type id is 1 because 0 means uninitialized
   if (new_value == std::numeric_limits<CaffeTypeId::underlying_type>::max()) {
     throw std::logic_error("Ran out of available type ids. If you need more than 2^16 CAFFE_KNOWN_TYPEs, we need to increase CaffeTypeId to use more than 16 bit.");
   }
