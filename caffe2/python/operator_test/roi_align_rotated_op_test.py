@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -24,9 +25,9 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
         return boxes
 
     @given(
-        H=st.integers(min_value=100, max_value=200),
-        W=st.integers(min_value=100, max_value=200),
-        C=st.integers(min_value=1, max_value=5),
+        H=st.integers(min_value=50, max_value=100),
+        W=st.integers(min_value=50, max_value=100),
+        C=st.integers(min_value=1, max_value=3),
         num_rois=st.integers(min_value=0, max_value=10),
         pooled_size=st.sampled_from([7, 14]),
         **hu.gcs
@@ -76,11 +77,13 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             device_option=gc, op=op, inputs=[X, R], reference=roialign_ref
         )
+        if gc.device_type == caffe2_pb2.CUDA:
+            self.assertGradientChecks(gc, op, [X, R], 0, [0])
 
     @given(
-        H=st.integers(min_value=100, max_value=200),
-        W=st.integers(min_value=100, max_value=200),
-        C=st.integers(min_value=1, max_value=5),
+        H=st.integers(min_value=50, max_value=100),
+        W=st.integers(min_value=50, max_value=100),
+        C=st.integers(min_value=1, max_value=3),
         num_rois=st.integers(min_value=0, max_value=10),
         pooled_size=st.sampled_from([7, 14]),
         angle=st.sampled_from([-270, -180, -90, 90, 180, 270]),
@@ -152,3 +155,5 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             device_option=gc, op=op, inputs=[X, R], reference=roialign_ref
         )
+        if gc.device_type == caffe2_pb2.CUDA:
+            self.assertGradientChecks(gc, op, [X, R], 0, [0])
