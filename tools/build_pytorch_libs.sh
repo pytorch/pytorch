@@ -13,29 +13,29 @@ set -ex
 # Options for building only a subset of the libraries
 USE_CUDA=0
 USE_ROCM=0
-WITH_NNPACK=0
-WITH_MKLDNN=0
+USE_NNPACK=0
+USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
 USE_DISTRIBUTED_MW=0
 FULL_CAFFE2=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-      --with-cuda)
+      --use-cuda)
           USE_CUDA=1
           ;;
-      --with-rocm)
+      --use-rocm)
           USE_ROCM=1
           ;;
-      --with-nnpack)
-          WITH_NNPACK=1
+      --use-nnpack)
+          USE_NNPACK=1
           ;;
-      --with-mkldnn)
-          WITH_MKLDNN=1
+      --use-mkldnn)
+          USE_MKLDNN=1
           ;;
-      --with-gloo-ibverbs)
+      --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
           ;;
-      --with-distributed-mw)
+      --use-distributed-mw)
           USE_DISTRIBUTED_MW=1
           ;;
       --full-caffe2)
@@ -172,7 +172,7 @@ function build() {
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
               -DUSE_CUDA=$USE_CUDA \
-              -DNO_NNPACK=$((1-$WITH_NNPACK)) \
+              -DNO_NNPACK=$((1-$USE_NNPACK)) \
               -DNCCL_EXTERNAL=1 \
               -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_DEBUG_POSTFIX="" \
@@ -235,11 +235,11 @@ function build_caffe2() {
       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
       -DUSE_CUDA=$USE_CUDA \
       -DUSE_ROCM=$USE_ROCM \
-      -DUSE_NNPACK=$WITH_NNPACK \
+      -DUSE_NNPACK=$USE_NNPACK \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
-      -DUSE_MKLDNN=$WITH_MKLDNN \
+      -DUSE_MKLDNN=$USE_MKLDNN \
       -DMKLDNN_INCLUDE_DIR=$MKLDNN_INCLUDE_DIR \
       -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
       -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \

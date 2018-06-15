@@ -111,16 +111,16 @@ from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
-from tools.setup_helpers.nccl import USE_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
+from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
-from tools.setup_helpers.mkldnn import (WITH_MKLDNN, MKLDNN_LIBRARY,
+from tools.setup_helpers.mkldnn import (USE_MKLDNN, MKLDNN_LIBRARY,
                                         MKLDNN_LIB_DIR, MKLDNN_INCLUDE_DIR)
-from tools.setup_helpers.nnpack import WITH_NNPACK
+from tools.setup_helpers.nnpack import USE_NNPACK
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
-    USE_DISTRIBUTED_MW, USE_GLOO_IBVERBS, WITH_C10D
+    USE_DISTRIBUTED_MW, USE_GLOO_IBVERBS, USE_C10D
 
 
 ################################################################################
@@ -147,10 +147,10 @@ if not ONNX_NAMESPACE:
 # Ninja
 try:
     import ninja
-    WITH_NINJA = True
+    USE_NINJA = True
     ninja_global = NinjaBuilder('global')
 except ImportError:
-    WITH_NINJA = False
+    USE_NINJA = False
     ninja_global = None
 
 # Constant known variables used throughout this file
@@ -178,7 +178,7 @@ class PytorchCommand(setuptools.Command):
 # Patches and workarounds
 ################################################################################
 # Monkey-patch setuptools to compile in parallel
-if not WITH_NINJA:
+if not USE_NINJA:
     def parallelCCompile(self, sources, output_dir=None, macros=None,
                          include_dirs=None, debug=0, extra_preargs=None,
                          extra_postargs=None, depends=None):
@@ -287,34 +287,34 @@ def build_libs(libs):
     my_env["NUM_JOBS"] = str(NUM_JOBS)
     my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
     if not IS_WINDOWS:
-        if WITH_NINJA:
+        if USE_NINJA:
             my_env["CMAKE_GENERATOR"] = '-GNinja'
             my_env["CMAKE_INSTALL"] = 'ninja install'
         else:
             my_env['CMAKE_GENERATOR'] = ''
             my_env['CMAKE_INSTALL'] = 'make install'
-    if WITH_SYSTEM_NCCL:
+    if USE_SYSTEM_NCCL:
         my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
     if USE_CUDA:
         my_env["CUDA_BIN_PATH"] = CUDA_HOME
-        build_libs_cmd += ['--with-cuda']
+        build_libs_cmd += ['--use-cuda']
     if USE_ROCM:
-        build_libs_cmd += ['--with-rocm']
-    if WITH_NNPACK:
-        build_libs_cmd += ['--with-nnpack']
+        build_libs_cmd += ['--use-rocm']
+    if USE_NNPACK:
+        build_libs_cmd += ['--use-nnpack']
     if USE_CUDNN:
         my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
         my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY
         my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
-    if WITH_MKLDNN:
+    if USE_MKLDNN:
         my_env["MKLDNN_LIB_DIR"] = MKLDNN_LIB_DIR
         my_env["MKLDNN_LIBRARY"] = MKLDNN_LIBRARY
         my_env["MKLDNN_INCLUDE_DIR"] = MKLDNN_INCLUDE_DIR
-        build_libs_cmd += ['--with-mkldnn']
+        build_libs_cmd += ['--use-mkldnn']
     if USE_GLOO_IBVERBS:
-        build_libs_cmd += ['--with-gloo-ibverbs']
+        build_libs_cmd += ['--use-gloo-ibverbs']
     if USE_DISTRIBUTED_MW:
-        build_libs_cmd += ['--with-distributed-mw']
+        build_libs_cmd += ['--use-distributed-mw']
 
     if FULL_CAFFE2:
         build_libs_cmd += ['--full-caffe2']
@@ -345,7 +345,7 @@ class build_deps(PytorchCommand):
         check_pydep('typing', 'typing')
 
         libs = []
-        if USE_NCCL and not WITH_SYSTEM_NCCL:
+        if USE_NCCL and not USE_SYSTEM_NCCL:
             libs += ['nccl']
         libs += ['caffe2', 'nanopb']
         if IS_WINDOWS:
@@ -356,7 +356,7 @@ class build_deps(PytorchCommand):
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
             libs += ['THD']
-        if WITH_C10D:
+        if USE_C10D:
             libs += ['c10d']
         build_libs(libs)
 
@@ -427,7 +427,7 @@ class develop(setuptools.command.develop.develop):
                         for entry in load(f)]
         with open('compile_commands.json', 'w') as f:
             json.dump(all_commands, f, indent=2)
-        if not WITH_NINJA:
+        if not USE_NINJA:
             print("WARNING: 'develop' is not building C++ code incrementally")
             print("because ninja is not installed. Run this to enable it:")
             print(" > pip install ninja")
@@ -450,7 +450,7 @@ def monkey_patch_THD_link_flags():
     C.extra_link_args += thd_deps
 
 
-build_ext_parent = ninja_build_ext if WITH_NINJA \
+build_ext_parent = ninja_build_ext if USE_NINJA \
     else setuptools.command.build_ext.build_ext
 
 
@@ -471,11 +471,11 @@ class build_ext(build_ext_parent):
             print('-- Detected CUDA at ' + CUDA_HOME)
         else:
             print('-- Not using CUDA')
-        if WITH_MKLDNN:
+        if USE_MKLDNN:
             print('-- Detected MKLDNN at ' + MKLDNN_LIBRARY + ', ' + MKLDNN_INCLUDE_DIR)
         else:
             print('-- Not using MKLDNN')
-        if USE_NCCL and WITH_SYSTEM_NCCL:
+        if USE_NCCL and USE_SYSTEM_NCCL:
             print('-- Using system provided NCCL library at ' +
                   NCCL_SYSTEM_LIB + ', ' + NCCL_INCLUDE_DIR)
         elif USE_NCCL:
@@ -490,7 +490,7 @@ class build_ext(build_ext_parent):
 
         generate_code(ninja_global)
 
-        if WITH_NINJA:
+        if USE_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
             ninja_global.run()
@@ -828,8 +828,8 @@ if USE_DISTRIBUTED:
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
 
-if WITH_C10D:
-    extra_compile_args += ['-DWITH_C10D']
+if USE_C10D:
+    extra_compile_args += ['-DUSE_C10D']
     main_sources += ['torch/csrc/distributed/c10d/init.cpp']
     main_link_args += [C10D_GLOO_LIB, C10D_LIB]
 
@@ -905,7 +905,7 @@ if USE_ROCM:
     ]
 
 if USE_NCCL:
-    if WITH_SYSTEM_NCCL:
+    if USE_SYSTEM_NCCL:
         main_link_args += [NCCL_SYSTEM_LIB]
         include_dirs.append(NCCL_INCLUDE_DIR)
     else:

@@ -17,21 +17,21 @@ set LINK_FLAGS=/DEBUG:FULL
 
 mkdir torch/lib/tmp_install
 
-IF "%~1"=="--with-cuda" (
+IF "%~1"=="--use-cuda" (
   set /a USE_CUDA=1
   shift
 ) ELSE (
   set /a USE_CUDA=0
 )
 
-IF "%~1"=="--with-rocm" (
+IF "%~1"=="--use-rocm" (
   set /a USE_ROCM=1
   shift
 ) ELSE (
   set /a USE_ROCM=0
 )
 
-IF "%~1"=="--with-nnpack" (
+IF "%~1"=="--use-nnpack" (
   set /a NO_NNPACK=0
   set /a USE_NNPACK=1
   shift
@@ -40,14 +40,14 @@ IF "%~1"=="--with-nnpack" (
   set /a USE_NNPACK=0
 )
 
-IF "%~1"=="--with-mkldnn" (
+IF "%~1"=="--use-mkldnn" (
   set /a NO_MKLDNN=0
   shift
 ) ELSE (
   set /a NO_MKLDNN=1
 )
 
-IF "%~1"=="--with-gloo-ibverbs" (
+IF "%~1"=="--use-gloo-ibverbs" (
   set /a USE_GLOO_IBVERBS=1
   echo Warning: gloo iverbs is enabled but build is not yet implemented 1>&2
   shift
@@ -55,7 +55,7 @@ IF "%~1"=="--with-gloo-ibverbs" (
   set /a USE_GLOO_IBVERBS=0
 )
 
-IF "%~1"=="--with-distributed-mw" (
+IF "%~1"=="--use-distributed-mw" (
   set /a USE_DISTRIBUTED_MW=1
   echo Warning: distributed mw is enabled but build is not yet implemented 1>&2
   shift

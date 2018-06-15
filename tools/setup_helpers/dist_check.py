@@ -9,7 +9,7 @@ from .cuda import USE_CUDA
 USE_DISTRIBUTED = not check_env_flag("NO_DISTRIBUTED") and not IS_WINDOWS and not check_env_flag("USE_ROCM")
 USE_DISTRIBUTED_MW = USE_DISTRIBUTED and check_env_flag("USE_DISTRIBUTED_MW")
 USE_GLOO_IBVERBS = False
-WITH_C10D = USE_DISTRIBUTED and USE_CUDA and IS_LINUX
+USE_C10D = USE_DISTRIBUTED and USE_CUDA and IS_LINUX
 
 IB_DEVINFO_CMD = "ibv_devinfo"
 
