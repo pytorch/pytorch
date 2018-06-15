@@ -39,7 +39,7 @@ class OnnxAttributes {
     return onnx_attrs_.count(key);
   }
 
-  AttributeProto* AddRewrittenAttibute(const std::string& key) {
+  AttributeProto* AddRewrittenAttribute(const std::string& key) {
     auto tmp = rewritten_onnx_attrs_.emplace(key, AttributeProto());
     auto& attr = tmp.first->second;
     attr.set_name(key);

@@ -475,7 +475,7 @@ Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
   const auto& node = onnx_node->node;
   auto& attributes = onnx_node->attributes;
   if (node.op_type().find("Global") == 0) {
-    auto* attr = attributes.AddRewrittenAttibute("global_pooling");
+    auto* attr = attributes.AddRewrittenAttribute("global_pooling");
     attr->set_i(1);
   }
 
@@ -491,7 +491,7 @@ Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
                 "pads");
     if (kernel_shape.size() == pads.size()) {
       // Caffe2 requires pads to be twice the size of kernels.
-      auto* attr = attributes.AddRewrittenAttibute("pads");
+      auto* attr = attributes.AddRewrittenAttribute("pads");
       attr->mutable_ints()->CopyFrom(pads);
       attr->mutable_ints()->MergeFrom(pads);
     }
@@ -652,7 +652,7 @@ Caffe2Ops Caffe2Backend::CreatePad(OnnxNode* onnx_node, int opset_version) {
   }
 
   // rewrite the padding info
-  auto* attr = attributes.AddRewrittenAttibute(pad_name);
+  auto* attr = attributes.AddRewrittenAttribute(pad_name);
   attr->add_ints(pads.Get(2));
   attr->add_ints(pads.Get(3));
   attr->add_ints(pads.Get(6));
@@ -860,7 +860,7 @@ Caffe2Ops Caffe2Backend::CreateSplit(
     int opset_version) {
   auto& attributes = onnx_node->attributes;
   if (!attributes.HasAttribute("axis")) {
-    auto* attr = attributes.AddRewrittenAttibute("axis");
+    auto* attr = attributes.AddRewrittenAttribute("axis");
     attr->set_i(0);
   }
 
