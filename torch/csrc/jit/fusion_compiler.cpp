@@ -174,6 +174,7 @@ std::string encodeRHS(Node * n) {
     // unary
     {aten::abs, "absf(${0})"},
     {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
+    {aten::relu, "${0} < 0 ? 0.f : ${0} "},
     {aten::log, "logf(${0})"},
     {aten::log10, "log10f(${0})"},
     {aten::log1p, "log1pf(${0})"},
