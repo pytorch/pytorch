@@ -34,9 +34,9 @@ struct TensorOptions {
     if (!discard_runtime_type) {
       type_ = &tensor.type();
     }
-    this->dtype(tensor.type().scalarType());
-    this->device(Device(tensor));
-    this->layout(tensor.type().layout());
+    this->dtype(tensor.dtype());
+    this->device(tensor.device());
+    this->layout(tensor.layout());
   }
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.

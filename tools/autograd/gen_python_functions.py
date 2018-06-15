@@ -516,7 +516,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'python_default_init': py_default_layout,
             }
             python_binding_arguments.append(layout_arg)
-            py_default_device = 'Device(self)' if is_like_function_with_options else None
+            py_default_device = 'self.device()' if is_like_function_with_options else None
             device_arg = {
                 'default': 'None',
                 'default_init': 'None',

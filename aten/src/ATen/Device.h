@@ -2,9 +2,6 @@
 
 #include <ATen/Error.h>
 #include <ATen/ScalarType.h>
-#include <ATen/Tensor.h>
-#include <ATen/TensorMethods.h>
-#include <ATen/Type.h>
 
 #include <cstddef>
 #include <iosfwd>
@@ -64,14 +61,6 @@ struct Device {
   /// `Type`, if possible) and an optional device index.
   /* implicit */ Device(Backend backend, int32_t index = -1)
       : Device(backend_to_type(backend), index) {}
-
-  /// Constructs a new `Device` from a `Tensor`'s type and, if it is a CUDA
-  /// tensor, its device index. If it is a CPU tensor, the index will always be
-  /// zero.
-  explicit Device(const Tensor& tensor)
-      : Device(
-            tensor.type().backend(),
-            tensor.is_cuda() ? tensor.get_device() : -1) {}
 
   /// Returns true if the type and index of this `Device` matches that of
   /// `other`.

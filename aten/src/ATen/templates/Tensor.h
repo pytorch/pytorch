@@ -11,6 +11,8 @@
 #include "ATen/TensorBase.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/Utils.h"
+#include "ATen/Device.h"
+#include "ATen/Layout.h"
 
 namespace at {
 struct Type;
@@ -86,6 +88,15 @@ struct Tensor : public detail::TensorBase {
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
   /// Defined in Type.h because of include order issues.
   bool is_variable() const noexcept;
+
+  /// Returns a `Tensor`'s layout. Defined in Type.h
+  Layout layout() const noexcept;
+
+  /// Returns a `Tensor`'s dtype (`ScalarType`). Defined in Type.h
+  ScalarType dtype() const noexcept;
+
+  /// Returns a `Tensor`'s device.
+  Device device() const;
 
   template<typename T>
   T * data() const;
