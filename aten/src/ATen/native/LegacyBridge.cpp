@@ -10,12 +10,12 @@ namespace {
   // friendly, flipping the switch between native and non-native is
   // an all or nothing affair, because the internal representation
   // is different
-  static bool _has_native(const Tensor& self) {
-    return self.is_sparse() && !self.is_cuda();
-  }
-
   static bool _type_has_native(const Type& dtype) {
     return dtype.is_sparse() && !dtype.is_cuda();
+  }
+
+  static bool _has_native(const Tensor& self) {
+    return _type_has_native(self.type());
   }
 }
 
