@@ -189,11 +189,6 @@ class TestOperators(TestCase):
         y = nn.Parameter(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
         self.assertONNX(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, params=(y, ))
 
-    def test_non_float_params(self):
-        x = Variable(torch.LongTensor([[1, 2], [3, 4]]), requires_grad=True)
-        y = nn.Parameter(torch.LongTensor([[1, 2], [3, 4]]), requires_grad=True)
-        self.assertONNX(lambda x, y: x * (x + y), x, params=(y, ))
-
     def test_symbolic_mismatch(self):
         class MyFun(Function):
             @staticmethod
