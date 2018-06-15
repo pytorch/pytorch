@@ -12,45 +12,6 @@
 
 namespace caffe2 {
 
-template <class Context>
-struct Expander {
-  template <typename T>
-  bool Forward(
-      const std::vector<int>& X_dims,
-      const std::vector<int>& Y_dims,
-      const T* X_data,
-      T* Y_data,
-      Context* context) const {
-    math::Broadcast(
-        X_dims.size(),
-        X_dims.data(),
-        Y_dims.size(),
-        Y_dims.data(),
-        X_data,
-        Y_data,
-        context);
-    return true;
-  }
-
-  template <typename T>
-  bool Backward(
-      const std::vector<int>& dims,
-      const std::vector<int>& axes,
-      const T* dY_data,
-      T* dX_data,
-      Context* context) const {
-    math::ReduceSum<T, Context>(
-        dims.size(),
-        dims.data(),
-        axes.size(),
-        axes.data(),
-        dY_data,
-        dX_data,
-        context);
-    return true;
-  }
-};
-
 template <typename InputTypes, class Context>
 class ExpandOp final : public Operator<Context> {
  public:
@@ -88,16 +49,17 @@ class ExpandOp final : public Operator<Context> {
     }
     std::reverse(Y_dims.begin(), Y_dims.end());
     Y->Resize(Y_dims);
-    return expander_.template Forward<T>(
-        X_dims,
-        Y_dims,
+    math::Broadcast<T, Context>(
+        X_dims.size(),
+        X_dims.data(),
+        Y_dims.size(),
+        Y_dims.data(),
         X.template data<T>(),
         Y->template mutable_data<T>(),
         &context_);
+    return true;
   }
 
- private:
-  Expander<Context> expander_{};
 };
 
 template <typename InputTypes, class Context>
@@ -128,16 +90,16 @@ class ExpandGradientOp final : public Operator<Context> {
         axes.push_back(i);
       }
     }
-    return expander_.template Backward<T>(
-        dY_dims,
-        axes,
+    math::ReduceSum<T, Context>(
+        dY_dims.size(),
+        dY_dims.data(),
+        axes.size(),
+        axes.data(),
         dY.template data<T>(),
         dX->template mutable_data<T>(),
         &context_);
+    return true;
   }
-
- private:
-  const Expander<Context> expander_{};
 };
 
 } // namespace caffe2
