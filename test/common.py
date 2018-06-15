@@ -67,6 +67,12 @@ try:
 except ImportError:
     TEST_SCIPY = False
 
+TEST_LIBROSA = True
+try:
+    import librosa
+except ImportError:
+    TEST_LIBROSA = False
+
 TEST_MKL = torch.backends.mkl.is_available()
 
 
