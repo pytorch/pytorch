@@ -1181,3 +1181,48 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
+
+- func: b_add(TensorList self, TensorList other) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_sub(TensorList self, TensorList other) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_mul(TensorList self, TensorList other) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_add(TensorList self, Scalar other) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_sub(TensorList self, Scalar other) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_mul(TensorList self, Scalar other) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_tanh(TensorList self) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_relu(TensorList self) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_sigmoid(TensorList self) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_mm(TensorList self, TensorList other) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_matmul(TensorList self, TensorList other) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_contiguous(TensorList self) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_view(TensorList self, IntList sizes_new) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_update(TensorList self, TensorList other) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: b_synchronize(TensorList self) -> (Tensor, Tensor, Tensor)
+  variants: function
