@@ -102,7 +102,7 @@ if(NOT TORCH_INSTALL_LIB_DIR)
 endif()
 
 if(USE_CUDA)
-  add_definitions(-DWITH_CUDA)
+  add_definitions(-DUSE_CUDA)
 
   set(TORCH_CUDA_LIBRARIES
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libcuda.so

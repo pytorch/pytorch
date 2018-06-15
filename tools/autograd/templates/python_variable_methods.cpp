@@ -10,7 +10,7 @@
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/jit/tracer.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
 #endif
 #include "torch/csrc/utils/cuda_lazy_init.h"
@@ -399,7 +399,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
 static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (!THCPStream_Check(arg)) {
     return PyErr_Format(PyExc_TypeError, "expected Stream object");

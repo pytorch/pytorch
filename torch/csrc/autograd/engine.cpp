@@ -23,7 +23,7 @@
 #include <queue>
 #include <TH/TH.h>
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda.h>
 #include <THC/THC.h>
 #endif
@@ -575,7 +575,7 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 
 auto Engine::start_threads() -> void {
   int num_devices = 0;
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   // check for case of compiled with CUDA but no available devices
   if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
     cudaGetLastError();

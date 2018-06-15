@@ -1,7 +1,7 @@
 #include "Cuda.hpp"
 #include <unordered_map>
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 THCState** _THDCudaState;
 
 void THDSetCudaStatePtr(THCState **state) {

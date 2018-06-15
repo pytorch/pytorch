@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <sstream>
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <THC/THC.h>
 #include <THCS/THCS.h>
 #endif

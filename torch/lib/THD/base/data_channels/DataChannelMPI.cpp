@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <iostream>
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
 #endif
 
@@ -138,7 +138,7 @@ rank_type DataChannelMPI::getNumProcesses() {
 struct AutoGPU {
   AutoGPU(int new_device) {
     if (new_device == -1) return;
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     cudaGetDevice(&device_);
     cudaSetDevice(new_device);
 #endif
@@ -146,7 +146,7 @@ struct AutoGPU {
 
   ~AutoGPU() {
     if (device_ == -1) return;
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     cudaSetDevice(device_);
 #endif
   }
