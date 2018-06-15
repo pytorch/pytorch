@@ -11,6 +11,7 @@ import hypothesis.strategies as st
 import numpy as np
 import itertools as it
 
+
 class TestExpandOp(hu.HypothesisTestCase):
     def run_expand_op_test(
         self, op_name, X, random_flag, gc, dc):
