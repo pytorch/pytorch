@@ -4400,7 +4400,7 @@ Reverse the order of a n-D tensor along given axis in dims.
 
 Args:
     input (Tensor): the input tensor
-    dims: axis to flip on
+    dims (a list or tuple): axis to flip on
 
 Example::
 
